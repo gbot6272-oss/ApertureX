@@ -1,0 +1,50 @@
+# THIRD_PARTY.md — Abhängigkeiten und Lizenzen
+
+Jede Bibliothek, die dem Projekt hinzugefügt wird, wird hier vor bzw. mit dem Commit eingetragen, der sie einführt. Lizenzprüfung erfolgt beim Hinzufügen, nicht nachträglich gesammelt.
+
+**Regel aus `SPEC.md`:** Nichts mit GPL im Kern, außer ausdrücklich darauf hingewiesen. Ausnahmen sind unten als solche markiert und in `DECISIONS.md` mit ADR begründet.
+
+---
+
+## Rust — geplant für Phase 1
+
+| Crate | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `rawler` | **LGPL-2.1** | RAW-Dekodierung, Metadaten | **Ausnahme, siehe ADR-0002** — einzige praktikable Rust-Bibliothek mit breiter Formatabdeckung; alle Alternativen (`rawloader`, `quickraw`, `libraw`-Bindings) sind ebenfalls LGPL-2.1 bzw. LGPL/CDDL |
+| `kamadak-exif` | BSD-2-Clause | EXIF-Metadaten-Fallback | Unkritisch |
+| `image` | MIT OR Apache-2.0 | JPEG/PNG/TIFF-Fallback-Dekodierung | Unkritisch |
+| `rusqlite` (Feature `bundled`) | MIT (SQLite selbst: Public Domain) | SQLite-Zugriff | Siehe ADR-0001 |
+| `thiserror` | MIT OR Apache-2.0 | Fehlertypen | Unkritisch |
+| `directories` | MIT OR Apache-2.0 | Plattform-Pfade | Unkritisch |
+| `serde` / `serde_json` / `toml` | MIT OR Apache-2.0 | Serialisierung, Settings | Unkritisch |
+| `tracing` / `tracing-subscriber` | MIT | Logging | Unkritisch |
+| `uuid` (Feature `v7`) | MIT OR Apache-2.0 | IDs, siehe ADR-0005 | Unkritisch |
+| `walkdir` | MIT OR Unlicense | Ordner-Scan beim Import | Unkritisch |
+| `rayon` | MIT OR Apache-2.0 | Worker-Pool für Thumbnail-Erzeugung | Unkritisch |
+| `tauri` (v2) | MIT OR Apache-2.0 | App-Shell | Unkritisch |
+| `time` | MIT OR Apache-2.0 | Zeitstempel/Zeitzonen | Unkritisch |
+
+## Frontend — geplant für Phase 1
+
+| Paket | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `react` / `react-dom` (19) | MIT | UI-Framework | Unkritisch |
+| `vite` | MIT | Build-Tool | Unkritisch |
+| `typescript` | Apache-2.0 | Typsystem | Unkritisch |
+| `zustand` | MIT | State-Management | Unkritisch |
+| `immer` | MIT | Undo/Redo-Middleware-Basis | Unkritisch |
+| `tailwindcss` (4) | MIT | Styling | Unkritisch |
+| `@tanstack/react-virtual` | MIT | Virtualisierter Filmstreifen | Unkritisch |
+| `@tauri-apps/api` | MIT OR Apache-2.0 | Tauri-Frontend-Bindings | Unkritisch |
+
+## Testdaten (`testdata/`)
+
+Werden beim Beschaffen einzeln mit Quelle und Lizenz eingetragen, sobald sie in Phase 1 hinzukommen (Vorgabe: nur frei lizenzierte RAWs, z. B. von raw.pixls.us, CC0). Aktuell: **noch keine Testdateien vorhanden.**
+
+| Datei | Quelle | Lizenz | Kamera/Format |
+|---|---|---|---|
+| _(noch leer)_ | | | |
+
+---
+
+*Einträge für Phase 2 und später kommen hinzu, sobald die jeweilige Phase startet.*

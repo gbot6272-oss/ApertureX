@@ -1,0 +1,28 @@
+[package]
+name = "apx-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Aperture X — Tauri-Binary. Reine Verdrahtung: Commands, IPC-Events, Protokoll-Handler. Keine Geschäftslogik."
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+apx-core.workspace = true
+apx-raw.workspace = true
+apx-catalog.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+time.workspace = true
+uuid.workspace = true
+walkdir.workspace = true
+rayon.workspace = true
+image.workspace = true
+tauri = { version = "2", features = [] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
+tokio-util = "0.7"

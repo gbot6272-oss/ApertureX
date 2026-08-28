@@ -1,0 +1,41 @@
+# Rust
+/target/
+crates/*/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+node_modules/
+
+# Tauri
+crates/apx-app/target/
+crates/apx-app/gen/schemas/
+
+# Katalog- und Cache-Dateien (nur zur Laufzeit erzeugt, nie versioniert)
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+/cache/
+/previews/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+/logs/
+
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/

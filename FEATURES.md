@@ -8,12 +8,12 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 
 ## 3.1 Modul BIBLIOTHEK
 
-- [x] Import: Ordner scannen, Metadaten lesen, Thumbnails erzeugen (Basisfunktion) — Phase 1 — Status: In Arbeit
+- [ ] Import: Ordner scannen, Metadaten lesen, Thumbnails erzeugen (Basisfunktion) — Phase 1 — Status: Nicht begonnen
 - [ ] Import mit Kopieren/Verschieben/Hinzufügen/DNG-Konvertierung — Phase 3 — Status: Nicht begonnen
 - [ ] Import-Presets — Phase 3 — Status: Nicht begonnen
 - [ ] Automatisches Umbenennen mit Token-System — Phase 3 — Status: Nicht begonnen
 - [ ] Duplikaterkennung per Hash + Perceptual Hash — Phase 3 — Status: Nicht begonnen
-- [x] Ordnerbaum (Basis-Anzeige, Fotoanzahl je Ordner) — Phase 1 — Status: In Arbeit
+- [ ] Ordnerbaum (Basis-Anzeige, Fotoanzahl je Ordner) — Phase 1 — Status: Nicht begonnen
 - [ ] Ordnerbaum-Synchronisation — Phase 3 — Status: Nicht begonnen
 - [ ] Ordner fehlend/wiederfinden — Phase 3 — Status: Nicht begonnen
 - [ ] Sammlungen, Sammlungssätze — Phase 3 — Status: Nicht begonnen
@@ -30,7 +30,7 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [ ] Stapel-Metadatenbearbeitung — Phase 3 — Status: Nicht begonnen
 - [ ] EXIF/IPTC/XMP-Editor (alle Felder) — Phase 3 — Status: Nicht begonnen
 - [ ] Rasteransicht — Phase 3 — Status: Nicht begonnen
-- [x] Lupe/Einzelbildansicht (Basis-Viewer) — Phase 1 — Status: In Arbeit
+- [ ] Lupe/Einzelbildansicht (Basis-Viewer) — Phase 1 — Status: Nicht begonnen
 - [ ] Vergleichsansicht — Phase 3 — Status: Nicht begonnen
 - [ ] Übersichtsansicht — Phase 3 — Status: Nicht begonnen
 - [ ] Personenansicht — Phase 3 — Status: Nicht begonnen
@@ -231,23 +231,24 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 
 ## 4. UI-Anforderungen
 
-- [x] Grundlayout (Kopfzeile, linke Spalte, Mitte-Viewer, unten Filmstreifen) — Phase 1 — Status: In Arbeit
+- [ ] Grundlayout (Kopfzeile, linke Spalte, Mitte-Viewer, unten Filmstreifen) — Phase 1 — Status: Nicht begonnen
 - [ ] Rechte Werkzeug-Palette, Modul-Umschalter oben — Phase 3 — Status: Nicht begonnen
-- [ ] Dark-First-Theme — Phase 1 — Status: In Arbeit
+- [ ] Dark-First-Theme — Phase 1 — Status: Nicht begonnen
 - [ ] Vollständiges helles Theme + benutzerdefinierte Themes (Design-Tokens) — Phase 10 — Status: Nicht begonnen
 - [ ] Paletten ein-/ausklappbar, breitenziehbar, Arbeitsbereich-Preset speicherbar — Phase 3 — Status: Nicht begonnen
 - [ ] Regler-Standardverhalten (Doppelklick=Reset, Direkteingabe, Pfeiltasten, Shift, Alt-Maskenvorschau) — Phase 2 — Status: Nicht begonnen
-- [x] Grundlegende Tastenkürzel (Bildwechsel, Zoom, Vollbild) — Phase 1 — Status: In Arbeit
+- [ ] Grundlegende Tastenkürzel (Bildwechsel, Zoom, Vollbild) — Phase 1 — Status: Nicht begonnen
 - [ ] Vollständig belegbare Tastenkürzel + Cheatsheet-Overlay (`?`) — Phase 10 — Status: Nicht begonnen
-- [x] Befehlspalette `Strg/Cmd+K` — Grundgerüst (Ordner/Befehle) — Phase 1 — Status: In Arbeit
+- [ ] Befehlspalette `Strg/Cmd+K` — Grundgerüst (Ordner/Befehle) — Phase 1 — Status: Nicht begonnen
 - [ ] Befehlspalette — vollständig (jede Funktion/jedes Preset) — Phase 5 — Status: Nicht begonnen
-- [ ] Nicht-blockierende UI für alle langen Operationen (Hintergrund, Fortschritt, Abbruch) — Phase 1 (Import) / laufend erweitert — Status: In Arbeit
+- [ ] Nicht-blockierende UI für alle langen Operationen (Hintergrund, Fortschritt, Abbruch) — Phase 1 (Import) / laufend erweitert — Status: Nicht begonnen
 
 ## Technische Grundlage (Phase 1, keine Endnutzer-Features)
 
-- [x] Rust-Workspace mit Crate-Grenzen (`apx-core`, `apx-raw`, `apx-catalog`, `apx-app`) — Phase 1 — Status: In Arbeit
-- [x] SQLite-Katalog mit versionierten Migrationen — Phase 1 — Status: In Arbeit
-- [x] RAW-Dekodierung (provisorische Kette, Formate CR2/CR3/NEF/ARW/RAF/ORF/RW2/DNG + JPEG/PNG/TIFF) — Phase 1 — Status: In Arbeit
-- [x] Custom-Protokoll-Handler für Bildübertragung — Phase 1 — Status: In Arbeit
-- [x] Viewer mit Zoom/Pan (Canvas 2D, provisorisch) — Phase 1 — Status: In Arbeit
-- [x] CI (Windows/macOS/Linux, fmt/clippy/test/build) — Phase 1 — Status: In Arbeit
+- [x] Rust-Workspace mit Crate-Grenzen (`apx-core`, `apx-raw`, `apx-catalog`, `apx-app`) — Phase 1 — Status: Fertig
+- [x] `apx-core` (IDs, AppError, AppPaths, Settings, Logging) — Phase 1 — Status: Fertig
+- [ ] SQLite-Katalog mit versionierten Migrationen — Phase 1 — Status: Nicht begonnen
+- [ ] RAW-Dekodierung (provisorische Kette, Formate CR2/CR3/NEF/ARW/RAF/ORF/RW2/DNG + JPEG/PNG/TIFF) — Phase 1 — Status: Nicht begonnen
+- [ ] Custom-Protokoll-Handler für Bildübertragung — Phase 1 — Status: Nicht begonnen
+- [ ] Viewer mit Zoom/Pan (Canvas 2D, provisorisch) — Phase 1 — Status: Nicht begonnen
+- [ ] CI (Windows/macOS/Linux, fmt/clippy/test/build) — Phase 1 — Status: Nicht begonnen

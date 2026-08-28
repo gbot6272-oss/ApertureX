@@ -10,19 +10,20 @@ Ziel (siehe `PHASE1_PROMPT.md`): App starten, Ordner mit RAWs importieren, Bilde
 
 ### Reihenfolge (verbindlich laut Prompt)
 
-- [ ] 1. Workspace-Grundgerüst
-  - [ ] `Cargo.toml` (Workspace-Root), `rust-toolchain.toml`
-  - [ ] Verzeichnisse `crates/apx-core`, `crates/apx-raw`, `crates/apx-catalog`, `crates/apx-app`, `frontend/`, `testdata/`
-  - [ ] Abhängigkeitsrichtung erzwingen: `apx-core` ohne Workspace-Abhängigkeiten; `apx-raw` und `apx-catalog` je nur gegen `apx-core`; `apx-app` gegen alle drei
-  - [ ] `.gitignore` (Rust-Target, Node-Modules, DB-Dateien, Cache)
+- [x] 1. Workspace-Grundgerüst
+  - [x] `Cargo.toml` (Workspace-Root), `rust-toolchain.toml`
+  - [x] Verzeichnisse `crates/apx-core`, `crates/apx-raw`, `crates/apx-catalog`, `crates/apx-app`, `frontend/`, `testdata/`
+  - [x] Abhängigkeitsrichtung erzwingen: `apx-core` ohne Workspace-Abhängigkeiten; `apx-raw` und `apx-catalog` je nur gegen `apx-core`; `apx-app` gegen alle drei — verifiziert per `cargo check --workspace` (kompiliert), Grenzen zusätzlich in `ARCHITECTURE.md` §4 dokumentiert
+  - [x] `.gitignore` (Rust-Target, Node-Modules, DB-Dateien, Cache)
+  - [x] `clippy.toml` (erlaubt `unwrap()`/`expect()` in Testcode, siehe ADR-0006)
 
-- [ ] 2. `apx-core`
-  - [ ] `PhotoId` / `FolderId` / `CatalogId` als UUIDv7-Newtypes
-  - [ ] `AppError` (`thiserror`): `Io`, `Decode`, `Database`, `NotFound`, `Unsupported`, `Cancelled`
-  - [ ] `AppPaths` (`directories`-Crate): Katalog-, Cache-, Log-, Settings-Pfade je Plattform
-  - [ ] `Settings` (Serde + TOML), Defaults bei fehlender Datei
-  - [ ] Logging-Setup (`tracing` + `tracing-subscriber`, Datei-Rotation + stdout im Debug-Build)
-  - [ ] Unit-Tests
+- [x] 2. `apx-core`
+  - [x] `PhotoId` / `FolderId` / `CatalogId` als UUIDv7-Newtypes
+  - [x] `AppError` (`thiserror`): `Io`, `Decode`, `Database`, `NotFound`, `Unsupported`, `Cancelled` (+ `InvalidId`, `Settings`)
+  - [x] `AppPaths` (`directories`-Crate): Katalog-, Cache-, Log-, Settings-Pfade je Plattform (`discover()`), plus `rooted_at()` für Tests/portablen Modus
+  - [x] `Settings` (Serde + TOML), Defaults bei fehlender Datei
+  - [x] Logging-Setup (`tracing` + `tracing-subscriber`, Datei-Rotation + stdout im Debug-Build)
+  - [x] Unit-Tests (14 Tests, alle grün; `cargo fmt --check` und `cargo clippy -D warnings -D clippy::unwrap_used` sauber)
 
 - [ ] 3. `apx-raw`
   - [ ] Abhängigkeit auf `rawler` (Lizenz-Flag siehe unten / `DECISIONS.md`)

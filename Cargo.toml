@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/apx-core",
+    "crates/apx-raw",
+    "crates/apx-catalog",
+    "crates/apx-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.94"
+license = "MIT"
+publish = false
+
+# Gemeinsam genutzte Abhängigkeiten mit fester Version über den ganzen
+# Workspace hinweg (verhindert, dass zwei Crates zwei Versionen derselben
+# Bibliothek ziehen). Einzelne Crates aktivieren nur die Features, die sie
+# brauchen (siehe jeweiliges Cargo.toml).
+[workspace.dependencies]
+apx-core = { path = "crates/apx-core" }
+apx-raw = { path = "crates/apx-raw" }
+apx-catalog = { path = "crates/apx-catalog" }
+
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "time"] }
+tracing-appender = "0.2"
+directories = "5"
+uuid = { version = "1", features = ["v7", "serde"] }
+time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
+walkdir = "2"
+rayon = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
+
+[profile.dev]
+# Debug-Builds mit etwas Optimierung: RAW-Dekodierung ist ohne das im
+# Debug-Modus quälend langsam (Demosaicing über Megapixel-Arrays).
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+lto = "thin"

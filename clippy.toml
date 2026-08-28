@@ -1,0 +1,6 @@
+# Erlaubt unwrap()/expect() in Testcode (Module unter #[cfg(test)] sowie
+# Dateien unter tests/), auch wenn clippy::unwrap_used per Lint-Attribut
+# oder per `-D clippy::unwrap_used` in CI erzwungen wird.
+# Siehe DECISIONS.md ADR-0006.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

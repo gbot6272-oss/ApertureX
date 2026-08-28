@@ -6,9 +6,10 @@
 //! Geschäftslogik — siehe `ARCHITECTURE.md` Abschnitt 4.
 
 mod commands;
+mod import;
 mod state;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use apx_catalog::Catalog;
 use apx_core::AppPaths;
@@ -37,11 +38,14 @@ fn main() {
         .manage(AppState {
             paths,
             catalog: Arc::new(catalog),
+            active_import: Arc::new(Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
             commands::select_folder,
             commands::catalog_status,
             commands::list_folders,
+            commands::import_folder,
+            commands::cancel_import,
         ])
         .run(tauri::generate_context!())
         .expect("Fehler beim Starten von Aperture X");

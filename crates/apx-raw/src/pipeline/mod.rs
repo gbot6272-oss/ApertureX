@@ -39,6 +39,24 @@ pub struct DecodedImage {
     pub pixels: Vec<u16>,
 }
 
+impl DecodedImage {
+    /// Wandelt das Ergebnis in ein `image::DynamicImage` um, z. B. um es
+    /// als JPEG zu speichern (Vorschau-Cache) oder über den
+    /// Custom-Protokoll-Handler auszuliefern. Gibt `None` zurück, wenn
+    /// `pixels` nicht zu `width * height * 3` passt — das würde auf einen
+    /// internen Fehler in `decode()` hindeuten, nicht auf einen
+    /// Nutzerfehler, daher hier keine `Result`-Rückgabe, sondern ein
+    /// dokumentierter Optionswert zur Absicherung durch den Aufrufer.
+    pub fn into_dynamic_image(self) -> Option<image::DynamicImage> {
+        image::ImageBuffer::<image::Rgb<u16>, Vec<u16>>::from_raw(
+            self.width,
+            self.height,
+            self.pixels,
+        )
+        .map(image::DynamicImage::ImageRgb16)
+    }
+}
+
 /// Dekodiert eine RAW- oder Fallback-Bilddatei vollständig.
 ///
 /// `max_edge`: `None` liefert die volle Auflösung; `Some(edge)` liefert ein
@@ -217,6 +235,27 @@ fn downsample_if_needed(path: &Path, image: DecodedImage, max_edge: u32) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn into_dynamic_image_succeeds_for_matching_buffer() {
+        let img = DecodedImage {
+            width: 2,
+            height: 1,
+            pixels: vec![1, 2, 3, 4, 5, 6],
+        };
+        let dynamic = img.into_dynamic_image().expect("Puffer passt zu den Maßen");
+        assert_eq!((dynamic.width(), dynamic.height()), (2, 1));
+    }
+
+    #[test]
+    fn into_dynamic_image_rejects_mismatched_buffer() {
+        let img = DecodedImage {
+            width: 2,
+            height: 2,
+            pixels: vec![1, 2, 3], // zu kurz für 2x2x3
+        };
+        assert!(img.into_dynamic_image().is_none());
+    }
 
     #[test]
     fn crop_without_active_area_is_identity() {

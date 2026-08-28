@@ -49,14 +49,14 @@ Ziel (siehe `PHASE1_PROMPT.md`): App starten, Ordner mit RAWs importieren, Bilde
   - [x] Minimales Frontend-Gerüst (Vite + React 19 + TS), das die Commands aufruft — Smoke-Test für die IPC-Verdrahtung; vollständiges Layout folgt in Schritt 8
   - [x] Verifiziert: `cargo build -p apx-app` erfolgreich, Binary unter Xvfb gestartet — loggt korrekten Start, öffnet/migriert den Katalog, läuft stabil (kein Absturz)
 
-- [ ] 6. Import
-  - [ ] `ImportJob`: rekursiver Scan (`walkdir`), Endungsfilter, Duplikat-Skip via `(folder_id, filename, size, mtime)`
-  - [ ] Metadaten-Erfassung pro Datei → `photos`
-  - [ ] Thumbnail-Erzeugung im Worker-Pool (Kerne − 1), bevorzugt eingebettete Vorschau, sonst Half-Size-Decode
-  - [ ] Fortschritts-Events (`import:progress`, `import:finished`, `import:error`)
-  - [ ] Abbruch via `CancellationToken`, Einzeldatei-Fehler sammeln statt Job abzubrechen
-  - [ ] Vorschau-Cache-Layout `<cache>/previews/<xx>/<id>_<level>.jpg`
-  - [ ] Tests: 3 gültige + 1 kaputte Datei → 3 importiert, 1 Fehler, Job „finished"
+- [x] 6. Import
+  - [x] `ImportJob`: rekursiver Scan (`walkdir`), Endungsfilter, Duplikat-Skip via `(folder_id, filename, size, mtime)` (in `Catalog::upsert_photo`, geänderte Dateien aktualisieren statt zu duplizieren)
+  - [x] Metadaten-Erfassung pro Datei → `photos`
+  - [x] Thumbnail-Erzeugung im Worker-Pool (physische Kerne − 1 via `num_cpus`), bevorzugt eingebettete Vorschau, sonst (Half-Size-)Decode
+  - [x] Fortschritts-Events (`import:progress`, `import:finished`, `import:error`) über eine testbare `ImportEvents`-Abstraktion (`TauriEvents` in der App, `RecordingEvents` in Tests)
+  - [x] Abbruch via `CancellationToken`, Einzeldatei-Fehler sammeln statt Job abzubrechen
+  - [x] Vorschau-Cache-Layout `<cache>/previews/<xx>/<id>_0.jpg` (Level 0 = Thumbnail)
+  - [x] Tests: 3 gültige + 1 kaputte Datei → 3 importiert, 1 Fehler, Job „finished" (Akzeptanztest aus Abschnitt 8, mit synthetischen JPEGs statt echten RAWs — siehe ADR-0007), plus Idempotenz-Test für zweiten Import
 
 - [ ] 7. Custom-Protokoll-Handler
   - [ ] `apx://preview/<id>?level=` und `apx://image/<id>?max_edge=`

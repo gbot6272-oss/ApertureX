@@ -27,3 +27,11 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
 tokio-util = "0.7"
+# Physische Kernanzahl für die Worker-Pool-Größe beim Thumbnail-Import,
+# siehe PHASE1_PROMPT.md Abschnitt 5 ("Parallelität = Anzahl physischer
+# Kerne minus 1"). std::thread::available_parallelism() liefert logische
+# Kerne, nicht physische — dafür braucht es num_cpus.
+num_cpus = "1"
+
+[dev-dependencies]
+tempfile = "3"

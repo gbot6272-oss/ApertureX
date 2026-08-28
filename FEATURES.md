@@ -8,7 +8,7 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 
 ## 3.1 Modul BIBLIOTHEK
 
-- [ ] Import: Ordner scannen, Metadaten lesen, Thumbnails erzeugen (Basisfunktion) — Phase 1 — Status: Nicht begonnen
+- [x] Import: Ordner scannen, Metadaten lesen, Thumbnails erzeugen (Basisfunktion) — Phase 1 — Status: Fertig
 - [ ] Import mit Kopieren/Verschieben/Hinzufügen/DNG-Konvertierung — Phase 3 — Status: Nicht begonnen
 - [ ] Import-Presets — Phase 3 — Status: Nicht begonnen
 - [ ] Automatisches Umbenennen mit Token-System — Phase 3 — Status: Nicht begonnen
@@ -241,7 +241,7 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [ ] Vollständig belegbare Tastenkürzel + Cheatsheet-Overlay (`?`) — Phase 10 — Status: Nicht begonnen
 - [ ] Befehlspalette `Strg/Cmd+K` — Grundgerüst (Ordner/Befehle) — Phase 1 — Status: Nicht begonnen
 - [ ] Befehlspalette — vollständig (jede Funktion/jedes Preset) — Phase 5 — Status: Nicht begonnen
-- [ ] Nicht-blockierende UI für alle langen Operationen (Hintergrund, Fortschritt, Abbruch) — Phase 1 (Import) / laufend erweitert — Status: Nicht begonnen
+- [x] Nicht-blockierende UI für alle langen Operationen (Hintergrund, Fortschritt, Abbruch) — Phase 1 (Import) / laufend erweitert — Status: Fertig für Import; wird bei jeder neuen langen Operation (Export, Stapelverarbeitung, …) fortgeführt
 
 ## Technische Grundlage (Phase 1, keine Endnutzer-Features)
 

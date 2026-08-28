@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Basisrechte für das Hauptfenster von Aperture X in Phase 1. Kein direkter Dateisystemzugriff aus dem Frontend (siehe ARCHITECTURE.md Abschnitt 4) — Ordnerauswahl läuft über den systemeigenen Dialog, alles Weitere über Tauri-Commands.",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:default", "dialog:allow-open"]
+}

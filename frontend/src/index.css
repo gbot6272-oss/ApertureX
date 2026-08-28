@@ -1,0 +1,11 @@
+/* Minimales Reset für Phase 1. Tailwind CSS 4 (siehe SPEC.md) kommt in
+   Schritt 8 zusammen mit dem vollständigen Layout dazu. */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}

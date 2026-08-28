@@ -1,11 +1,48 @@
 //! `apx-app` — Tauri-Binary für Aperture X.
 //!
-//! Reine Verdrahtung: Tauri-Commands, IPC-Events, Custom-Protokoll-Handler.
-//! Wird in einem eigenen Schritt des Phase-1-Plans implementiert
-//! (siehe `PLAN.md`, Abschnitt „5. Tauri-Shell"). Dieser Stand ist nur
-//! das Workspace-Skelett, damit der Crate-Graph auflöst, solange
-//! `apx-core`, `apx-raw` und `apx-catalog` zuerst fertiggestellt werden.
+//! Reine Verdrahtung: verbindet `apx-core`, `apx-raw` und `apx-catalog`
+//! über Tauri-Commands, IPC-Events und (ab Schritt 7 des Phase-1-Plans)
+//! einen Custom-Protokoll-Handler mit dem Frontend. Enthält selbst keine
+//! Geschäftslogik — siehe `ARCHITECTURE.md` Abschnitt 4.
+
+mod commands;
+mod state;
+
+use std::sync::Arc;
+
+use apx_catalog::Catalog;
+use apx_core::AppPaths;
+use state::AppState;
 
 fn main() {
-    println!("apx-app: Workspace-Skelett, Tauri-Shell folgt in Schritt 5 des Phase-1-Plans.");
+    // Fehler beim Ermitteln der Systempfade, beim Initialisieren des
+    // Loggings oder beim Öffnen des Katalogs sind an dieser Stelle
+    // unrecoverable — es existiert noch kein Fenster, in dem man dem
+    // Nutzer einen Fehler anzeigen könnte. `expect()` (nicht `unwrap()`,
+    // siehe DECISIONS.md ADR-0006) mit einer klaren Meldung ist hier der
+    // richtige, bewusste Ausnahmefall.
+    let paths = AppPaths::discover()
+        .expect("Systempfade (Katalog/Cache/Logs/Settings) konnten nicht ermittelt werden");
+
+    let _log_guard =
+        apx_core::init_logging(paths.log_dir()).expect("Logging konnte nicht initialisiert werden");
+
+    tracing::info!(catalog = %paths.default_catalog_file().display(), "Aperture X startet");
+
+    let catalog = Catalog::open(&paths.default_catalog_file())
+        .expect("Katalog konnte nicht geöffnet/angelegt werden");
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .manage(AppState {
+            paths,
+            catalog: Arc::new(catalog),
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::select_folder,
+            commands::catalog_status,
+            commands::list_folders,
+        ])
+        .run(tauri::generate_context!())
+        .expect("Fehler beim Starten von Aperture X");
 }

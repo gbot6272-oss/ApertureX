@@ -9,6 +9,11 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 node_modules/
+# TypeScript-Projektreferenzen (composite) legen Build-Cache und, für die
+# reine Config-Datei vite.config.ts, generierte .js/.d.ts direkt daneben ab.
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
 
 # Tauri
 crates/apx-app/target/

@@ -36,12 +36,12 @@ Ziel (siehe `PHASE1_PROMPT.md`): App starten, Ordner mit RAWs importieren, Bilde
   - [ ] ⚠️ **Blockiert:** Echte Testdaten in `testdata/` (CC0, z. B. raw.pixls.us) für Golden-Image-Tests je Format — **Netzwerkzugriff auf raw.pixls.us ist in dieser Sandbox-Umgebung von der Egress-Policy blockiert** (verifiziert per `curl`/`WebFetch`, HTTP-403/EGRESS_BLOCKED). Die Algorithmen selbst sind über synthetische Unit-Tests abgedeckt; echte Kameradateien pro Format fehlen noch. Siehe `DECISIONS.md` ADR-0007 für Optionen.
   - [ ] Golden-Image-Tests gegen echte Testdateien (mittlere Abweichung < 1/255) — wartet auf obigen Punkt
 
-- [ ] 4. `apx-catalog`
-  - [ ] `rusqlite` (bundled), WAL/synchronous/foreign_keys/busy_timeout je Connection
-  - [ ] Migrationssystem über `user_version`, Migration 1 (`folders`, `photos`, `previews` + Indizes)
-  - [ ] Repository-Module pro Tabelle, kein SQL außerhalb von `apx-catalog`
-  - [ ] Mehrzeilige Schreibvorgänge in Transaktionen
-  - [ ] Tests: leere DB → Migration, Round-Trip, doppelter Import, FK-Kaskade
+- [x] 4. `apx-catalog`
+  - [x] `rusqlite` (bundled), WAL/synchronous/foreign_keys/busy_timeout je Connection (siehe ADR-0008: eine `Connection` hinter einem `Mutex` statt Pool)
+  - [x] Migrationssystem über `user_version`, Migration 1 (`folders`, `photos`, `previews` + Indizes)
+  - [x] Repository-Module pro Tabelle, kein SQL außerhalb von `apx-catalog`
+  - [x] Mehrzeilige Schreibvorgänge in Transaktionen (`Catalog::transaction`)
+  - [x] Tests: leere DB → Migration (inkl. Idempotenz, Ablehnung zu neuer Schema-Version), Round-Trip aller Repositories, doppelter Import (kein Duplikat, geänderte Datei aktualisiert statt dupliziert), FK-Kaskade, Neustart-Persistenz (Datei schließen/neu öffnen) — 26 Tests grün
 
 - [ ] 5. Tauri-Shell (`apx-app`)
   - [ ] Tauri-2-Projekt, Verdrahtung von `apx-core`/`apx-raw`/`apx-catalog`, keine Geschäftslogik im Crate selbst

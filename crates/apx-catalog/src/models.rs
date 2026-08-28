@@ -1,0 +1,158 @@
+//! Datenmodelle für die Katalog-Tabellen aus Migration 1, plus kleine
+//! Hilfsfunktionen für die Zeit-Konvertierung (Spalten sind laut Schema
+//! `INTEGER`/Unix-Sekunden, siehe `migrations/0001_initial.sql`).
+
+use std::path::PathBuf;
+
+use apx_core::{AppError, FolderId, PhotoId, Result};
+use time::OffsetDateTime;
+
+pub(crate) fn to_unix(dt: OffsetDateTime) -> i64 {
+    dt.unix_timestamp()
+}
+
+pub(crate) fn from_unix(seconds: i64) -> Result<OffsetDateTime> {
+    OffsetDateTime::from_unix_timestamp(seconds).map_err(|source| AppError::Database {
+        message: format!("Ungültiger Zeitstempel {seconds}: {source}"),
+    })
+}
+
+pub(crate) fn to_unix_opt(dt: Option<OffsetDateTime>) -> Option<i64> {
+    dt.map(to_unix)
+}
+
+pub(crate) fn from_unix_opt(seconds: Option<i64>) -> Result<Option<OffsetDateTime>> {
+    seconds.map(from_unix).transpose()
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Folder {
+    pub id: FolderId,
+    pub path: PathBuf,
+    pub parent_id: Option<FolderId>,
+    pub added_at: OffsetDateTime,
+}
+
+/// Felder, die beim Anlegen eines Fotos bekannt sind. `id` und
+/// `imported_at` werden von [`crate::Catalog::insert_photo`] selbst
+/// erzeugt, deshalb sind sie hier nicht enthalten.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewPhoto {
+    pub folder_id: FolderId,
+    pub filename: String,
+    pub file_size: u64,
+    pub file_mtime: OffsetDateTime,
+    pub content_hash: Option<String>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    /// EXIF-Orientierungscode (1–8), siehe `apx-raw`. Default laut Schema
+    /// ist 1 (Normal).
+    pub orientation: u16,
+    pub camera_make: Option<String>,
+    pub camera_model: Option<String>,
+    pub lens: Option<String>,
+    pub iso: Option<u32>,
+    pub shutter: Option<f32>,
+    pub aperture: Option<f32>,
+    pub focal_length: Option<f32>,
+    pub captured_at: Option<OffsetDateTime>,
+    pub gps_lat: Option<f64>,
+    pub gps_lon: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Photo {
+    pub id: PhotoId,
+    pub folder_id: FolderId,
+    pub filename: String,
+    pub file_size: u64,
+    pub file_mtime: OffsetDateTime,
+    pub content_hash: Option<String>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub orientation: u16,
+    pub camera_make: Option<String>,
+    pub camera_model: Option<String>,
+    pub lens: Option<String>,
+    pub iso: Option<u32>,
+    pub shutter: Option<f32>,
+    pub aperture: Option<f32>,
+    pub focal_length: Option<f32>,
+    pub captured_at: Option<OffsetDateTime>,
+    pub gps_lat: Option<f64>,
+    pub gps_lon: Option<f64>,
+    pub imported_at: OffsetDateTime,
+    pub missing: bool,
+}
+
+/// Auflösungsstufe eines Vorschaubilds, siehe `PHASE1_PROMPT.md` Abschnitt 5.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewLevel {
+    /// 256 px lange Kante.
+    Thumbnail,
+    /// 2048 px lange Kante.
+    Standard,
+    /// 1:1 (volle Auflösung).
+    Full,
+}
+
+impl PreviewLevel {
+    pub(crate) fn as_i64(self) -> i64 {
+        match self {
+            PreviewLevel::Thumbnail => 0,
+            PreviewLevel::Standard => 1,
+            PreviewLevel::Full => 2,
+        }
+    }
+
+    pub(crate) fn from_i64(value: i64) -> Result<Self> {
+        match value {
+            0 => Ok(PreviewLevel::Thumbnail),
+            1 => Ok(PreviewLevel::Standard),
+            2 => Ok(PreviewLevel::Full),
+            other => Err(AppError::Database {
+                message: format!("Unbekannte Preview-Stufe in der Datenbank: {other}"),
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Preview {
+    pub photo_id: PhotoId,
+    pub level: PreviewLevel,
+    pub path: PathBuf,
+    pub generated_at: OffsetDateTime,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unix_roundtrip_preserves_seconds() {
+        let now = OffsetDateTime::now_utc()
+            .replace_nanosecond(0)
+            .expect("gültig");
+        let seconds = to_unix(now);
+        let back = from_unix(seconds).expect("sollte parsen");
+        assert_eq!(back, now);
+    }
+
+    #[test]
+    fn preview_level_roundtrip() {
+        for level in [
+            PreviewLevel::Thumbnail,
+            PreviewLevel::Standard,
+            PreviewLevel::Full,
+        ] {
+            let value = level.as_i64();
+            assert_eq!(PreviewLevel::from_i64(value).expect("gültig"), level);
+        }
+    }
+
+    #[test]
+    fn unknown_preview_level_is_rejected() {
+        assert!(PreviewLevel::from_i64(42).is_err());
+    }
+}

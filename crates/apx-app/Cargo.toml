@@ -32,6 +32,9 @@ tokio-util = "0.7"
 # Kerne minus 1"). std::thread::available_parallelism() liefert logische
 # Kerne, nicht physische — dafür braucht es num_cpus.
 num_cpus = "1"
+# Dekodiert die von `convertFileSrc` prozentkodierten apx://-Pfadsegmente,
+# siehe DECISIONS.md ADR-0009.
+percent-encoding = "2"
 
 [dev-dependencies]
 tempfile = "3"

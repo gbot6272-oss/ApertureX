@@ -249,6 +249,6 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] `apx-core` (IDs, AppError, AppPaths, Settings, Logging) — Phase 1 — Status: Fertig
 - [x] SQLite-Katalog mit versionierten Migrationen — Phase 1 — Status: Fertig
 - [x] RAW-Dekodierung (provisorische Kette, Formate CR2/CR3/NEF/ARW/RAF/ORF/RW2/DNG + JPEG/PNG/TIFF) — Phase 1 — Status: Fertig (abweichend, siehe DECISIONS.md ADR-0007 — Golden-Image-Tests gegen echte Kameradateien fehlen noch, Netzwerkzugriff auf raw.pixls.us blockiert)
-- [ ] Custom-Protokoll-Handler für Bildübertragung — Phase 1 — Status: Nicht begonnen
+- [x] Custom-Protokoll-Handler für Bildübertragung — Phase 1 — Status: Fertig
 - [ ] Viewer mit Zoom/Pan (Canvas 2D, provisorisch) — Phase 1 — Status: Nicht begonnen
 - [ ] CI (Windows/macOS/Linux, fmt/clippy/test/build) — Phase 1 — Status: Nicht begonnen

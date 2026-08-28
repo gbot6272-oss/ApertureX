@@ -7,6 +7,7 @@
 
 mod commands;
 mod import;
+mod protocol;
 mod state;
 
 use std::sync::{Arc, Mutex};
@@ -33,7 +34,9 @@ fn main() {
     let catalog = Catalog::open(&paths.default_catalog_file())
         .expect("Katalog konnte nicht geöffnet/angelegt werden");
 
-    tauri::Builder::default()
+    let builder = protocol::register(tauri::Builder::default());
+
+    builder
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             paths,

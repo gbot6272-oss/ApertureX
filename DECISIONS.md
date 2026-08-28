@@ -95,3 +95,35 @@ Ich habe die Lizenzlage der realistischen Alternativen geprüft:
 **Kontext:** `PHASE1_PROMPT.md` Abschnitt 10 nennt als bekannten Fallstrick: "SQLite-Schreibzugriffe parallel → `database is locked`. Ein einziger Writer, Leser über einen Pool." Ein echter Connection-Pool mit getrennten Lese-Verbindungen (z. B. über `r2d2`) wäre möglich, bringt aber zusätzliche Abhängigkeiten und Komplexität (Pool-Konfiguration, Verbindungs-Recycling), die für Phase 1 (ein Nutzer, ein Prozess) keinen messbaren Vorteil bringt.
 **Entscheidung:** `Catalog` hält eine einzelne `rusqlite::Connection` in einem `std::sync::Mutex`. Alle Zugriffe — lesend wie schreibend — werden dadurch auf Rust-Ebene serialisiert. Das erfüllt die Anforderung "ein einziger Writer" direkt und verhindert `database is locked`-Fehler aus konkurrierenden Zugriffen innerhalb des Prozesses vollständig, nicht nur im statistischen Regelfall. WAL-Modus bleibt aktiviert, damit externe Prozesse (z. B. ein DB-Browser zur Fehlersuche) weiterhin parallel lesend zugreifen können.
 **Konsequenzen:** Innerhalb des Prozesses gibt es keine echte Nebenläufigkeit bei Katalogzugriffen — ein langer Schreibvorgang (z. B. ein Massenimport) blockiert währenddessen andere Katalog-Lesezugriffe. Für Phase 1 unproblematisch (Importe laufen ohnehin sequenziell pro Datei mit kurzen Einzeltransaktionen). Sollte Profiling in einer späteren Phase echte Kontention zeigen (z. B. Bibliotheks-Raster-Scrollen blockiert durch einen laufenden Import), wird das hier nachgerüstet — dokumentiert als möglicher Folge-ADR, nicht vorab spekulativ gebaut.
+
+---
+
+## ADR-0009: `apx://`-URLs als opake, über `convertFileSrc` kodierte Pfade statt echtem Query-String
+
+**Status:** Angenommen
+**Kontext:** `PHASE1_PROMPT.md` Abschnitt 6 illustriert das Protokoll mit
+`apx://preview/<photo_id>?level=0`. Tauris offizieller, plattformneutraler
+Weg, eine Custom-Protocol-URL im Frontend zu bauen, ist
+`convertFileSrc(pfad, "apx")` aus `@tauri-apps/api/core` — nötig, weil sich
+das URL-Schema zwischen Plattformen unterscheidet (macOS/Linux:
+`apx://localhost/<pfad>`; Windows/Android: `http://apx.localhost/<pfad>`,
+weil WebView2 und Android WebView keine beliebigen Custom-Schemes für
+Netzwerk-Requests erlauben). Ein Blick in Tauris `convertFileSrc`-Quelle
+zeigt: die Funktion `encodeURIComponent`-kodiert den **gesamten** `pfad`-
+String als **ein einziges** Pfadsegment. Ein `?level=0` im Eingabestring
+würde also mitkodiert (`%3Flevel%3D0`) und käme auf Rust-Seite nicht als
+echter Query-String an, sondern als Teil eines einzigen, weiterhin
+prozentkodierten Pfadsegments — `http::Uri::query()` bliebe `None`.
+**Entscheidung:** Statt eines echten Query-Strings kodiert das Frontend
+Anfragen als `convertFileSrc("preview/<photo_id>/<level>", "apx")` bzw.
+`convertFileSrc("image/<photo_id>/<max_edge_oder_'full'>", "apx")` — die
+gesamte Information steckt in einem einzigen, von `convertFileSrc` korrekt
+prozentkodierten Pfadsegment. Der Rust-Handler dekodiert dieses Segment
+selbst (`percent-encoding`-Crate) und splittet es an `/`. Das funktioniert
+identisch auf allen drei Plattformen, ohne dass das Frontend das
+Betriebssystem selbst erkennen müsste.
+**Konsequenzen:** Die tatsächliche Pfadstruktur weicht in der Notation
+leicht vom illustrativen Beispiel in `PHASE1_PROMPT.md` ab (Segmente statt
+Query-Parameter) — funktional identisch (dieselben Informationen, dieselbe
+Semantik: Foto-ID, gewünschte Auflösungsstufe/Kantenlänge). Diese
+Abweichung ist hier dokumentiert, wie in `SPEC.md` Abschnitt 6 gefordert.

@@ -58,11 +58,11 @@ Ziel (siehe `PHASE1_PROMPT.md`): App starten, Ordner mit RAWs importieren, Bilde
   - [x] Vorschau-Cache-Layout `<cache>/previews/<xx>/<id>_0.jpg` (Level 0 = Thumbnail)
   - [x] Tests: 3 gültige + 1 kaputte Datei → 3 importiert, 1 Fehler, Job „finished" (Akzeptanztest aus Abschnitt 8, mit synthetischen JPEGs statt echten RAWs — siehe ADR-0007), plus Idempotenz-Test für zweiten Import
 
-- [ ] 7. Custom-Protokoll-Handler
-  - [ ] `apx://preview/<id>?level=` und `apx://image/<id>?max_edge=`
-  - [ ] Korrekte `Content-Type`/`Cache-Control`, Dekodierung in `spawn_blocking`
-  - [ ] Deduplizierung gleichzeitiger Anfragen
-  - [ ] Abbruch laufender Dekodierung bei Bildwechsel
+- [x] 7. Custom-Protokoll-Handler
+  - [x] `apx://preview/<id>/<level>` und `apx://image/<id>/<max_edge|'full'>` — Segment- statt Query-String-Format über `convertFileSrc`, siehe ADR-0009 (funktional identisch, plattformunabhängig)
+  - [x] Korrekte `Content-Type` (JPEG für Preview, PNG für Vollbild — 16-Bit-Präzision erhalten) /`Cache-Control`, Dekodierung in einem eigenen OS-Thread pro Anfrage (`register_asynchronous_uri_scheme_protocol`)
+  - [x] Deduplizierung gleichzeitiger Anfragen (Single-Flight-Cache über `Weak`-Referenzen, mit Nebenläufigkeits-Test)
+  - [x] Abbruch laufender Dekodierung bei Bildwechsel — als Frontend-Verantwortung dokumentiert (`fetch`+`AbortController` statt `<img src>`), da echtes Abbrechen eines laufenden OS-Threads ohne kooperative Abbruchpunkte in `rawler` nicht möglich ist (siehe Modul-Doku in `protocol/mod.rs`)
 
 - [ ] 8. Frontend-Gerüst
   - [ ] Vite + React 19 + TS, Zustand-Store (`catalog`, `selection`, `viewer`, `jobs`)

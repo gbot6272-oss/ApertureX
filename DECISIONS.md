@@ -539,3 +539,109 @@ länger stillschweigend akzeptiert. `ci.yml`s `-D clippy::unwrap_used`
 und `apx-app`s fehlendes `#![deny(clippy::unwrap_used)]` wurden bei
 diesem Durchgang zusätzlich als bestehende, unabhängige CI-Lücken
 gefunden und geschlossen.
+
+---
+
+## ADR-0022: Phase 3 umfasst `SPEC.md` §5s Phase-3-Satz, nicht §3.1s vollen BIBLIOTHEK-Katalog
+
+**Status:** Angenommen
+**Kontext:** Wie schon bei Phase 2 (ADR-0011: 7 statt 12 Regler) hatte
+`FEATURES.md` deutlich mehr Punkte auf Phase 3 getaggt, als `SPEC.md`
+§5s Phasenplan-Satz eigentlich meint — §3.1 zählt den vollständigen
+Lightroom-BIBLIOTHEK-Funktionsumfang auf (Gesichtserkennung, virtuelle
+Kopien, Stapel, Sekundäres Display, Schlagwort-Synonyme/Auto-
+Vervollständigung, Katalog-Backup/-Reparatur/-Zusammenführen,
+vollständiger EXIF/IPTC/XMP-Editor mit Sidecar-Export, intelligente
+Sammlungen mit verschachtelten Regeln, Perceptual-Hash-Duplikaterkennung,
+DNG-Konvertierung), §5s Satz nennt für Phase 3 nur: "Import, Ordner,
+Raster, Filmstreifen, Vorschau-Generierung, Bewertungen/Flaggen/Farben,
+Sammlungen, Filter, Metadaten-Panel, FTS-Suche".
+
+**Entscheidung:** Phase 3 = §5s Satz wörtlich genommen. Alle darüber
+hinausgehenden Punkte sind in `FEATURES.md` auf die Phase umgetaggt, zu
+der sie inhaltlich passen (meist Phase 6 „Sammlungen/Metadaten-Ausbau"
+oder Phase 9 „Politur/fortgeschrittene Werkzeuge" — siehe die einzelnen
+Zeilen in `FEATURES.md` §3.1 für die genaue Zuordnung). Zwei Lücken dabei
+gefunden und ergänzt: `FEATURES.md` hatte weder eine Zeile für
+"Volltextsuche (FTS5)" noch für ein einfaches "Metadaten-Panel" (nur den
+späteren vollständigen EXIF/IPTC/XMP-Editor) — beide sind aber explizit
+Teil von §5s Phase-3-Satz und wurden neu ergänzt.
+
+**Konsequenzen:** Wie bei ADR-0011 eine reine Scope-Verkleinerung, keine
+-Vergrößerung — der Nutzer muss dazu nicht befragt werden (siehe
+`SPEC.md`s Präambel zu Kleinigkeiten, die den Umfang nicht wesentlich
+verändern).
+
+---
+
+## ADR-0023: Bewertung/Flagge/Farbe als Spalten, Schlagworte flach, Sammlungen nur manuell, FTS5 als External-Content-Tabelle
+
+**Status:** Angenommen
+**Kontext:** Phase 3s neues DB-Schema (Migration `0003_library.sql`)
+braucht Entscheidungen zu vier unabhängigen Datenmodell-Fragen.
+
+**Entscheidungen:**
+1. **Bewertung (`rating`), Flagge (`flag`), Farbmarkierung
+   (`color_label`) sind direkte Spalten auf `photos`**, keine eigene
+   Tabelle — konsistent mit dem bestehenden `missing`-Spalten-Muster aus
+   Phase 1, da es sich um einfache Skalarwerte pro Foto handelt.
+2. **Schlagworte sind in Phase 3 eine flache Liste** (`keywords` +
+   `photo_keywords`-Join-Tabelle), keine Hierarchie/Synonyme/Auto-
+   Vervollständigung (siehe ADR-0022 — das ist auf Phase 6 verschoben).
+3. **Sammlungen sind in Phase 3 rein manuell** (`collections` +
+   `collection_photos` mit fester `position`-Reihenfolge), keine
+   Sammlungssätze oder intelligenten Sammlungen mit Regeln (Phase 6).
+4. **`photos_fts` ist eine FTS5-External-Content-Virtualtabelle** über
+   `photos` (referenziert die Originalspalten statt sie zu duplizieren),
+   mit `INSERT`/`UPDATE`/`DELETE`-Triggern auf `photos`, die den Index
+   automatisch synchron halten — das ist SQLite FTS5s empfohlenes
+   Standardmuster für Volltextsuche über bereits vorhandene Tabellen,
+   vermeidet doppelte Datenhaltung und manuelle Sync-Logik in Rust.
+
+**Konsequenzen:** Migration 3 bleibt rein additiv zu den Migrationen 1/2
+(keine bestehende Spalte/Tabelle wird geändert). Die FTS5-Trigger sind
+reines SQL in der Migrationsdatei, keine zusätzliche Rust-Logik zum
+Index-Pflegen nötig.
+
+---
+
+## ADR-0024: Rasteransicht und Filmstreifen teilen sich Fotoliste + Auswahl-State
+
+**Status:** Angenommen
+**Kontext:** Phase 3 bringt eine neue Rasteransicht (`GridView.tsx`)
+neben dem bestehenden Filmstreifen (`Filmstrip.tsx`, Phase 1). Beide
+zeigen dieselbe Fotoliste des aktuell gewählten Ordners/Sammlung/Filters
+und brauchen Mehrfachauswahl (für Bewertung/Flagge/Sammlung-Hinzufügen
+als Stapel-Aktion).
+
+**Entscheidung:** Fotoliste und Auswahl-State (inkl. Mehrfachauswahl per
+Shift/Strg-Klick) leben im gemeinsamen Zustand-Store (`store/index.ts`),
+nicht dupliziert in beiden Komponenten. Beide Ansichten nutzen dieselbe
+Virtualisierungsbibliothek `@tanstack/react-virtual` (schon Abhängigkeit
+seit Phase 1), nur mit unterschiedlichem Layout (1D-Reihe vs. 2D-Raster).
+
+**Konsequenzen:** Ein Foto in einer der beiden Ansichten auszuwählen,
+spiegelt sich sofort in der anderen wider — kein Synchronisationscode
+nötig, weil es nur einen State gibt.
+
+---
+
+## ADR-0025: Import-Kopieren/Verschieben additiv zum bestehenden Hinzufügen, DNG-Konvertierung verschoben
+
+**Status:** Angenommen
+**Kontext:** Phase 1s Import scannt Dateien nur an ihrem bestehenden Ort
+("Hinzufügen", `ImportMode::AddInPlace` implizit). `SPEC.md` §5 nennt für
+Phase 3 zusätzlich Kopieren/Verschieben in einen verwalteten Zielordner.
+DNG-Konvertierung (RAW → DNG beim Import) ist in §3.1 Teil desselben
+Aufzählungspunkts, aber nicht in §5s Phase-3-Satz namentlich erwähnt und
+technisch ein eigenständiges Feature (braucht einen DNG-Writer, den es im
+Projekt noch nicht gibt).
+
+**Entscheidung:** `ImportMode { AddInPlace, Copy(PathBuf), Move(PathBuf) }`
+als neuer, additiver Parameter — der bestehende Scan-/Metadaten-/
+Thumbnail-Ablauf (`import::run`) ändert sich für `AddInPlace` nicht.
+DNG-Konvertierung verschoben auf Phase 5 (Export/Publish), siehe
+ADR-0022.
+
+**Konsequenzen:** Keine Verhaltensänderung für bestehende Aufrufer, die
+weiterhin implizit `AddInPlace` nutzen.

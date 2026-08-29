@@ -218,3 +218,62 @@ Gradationskurve, HSL, Farbmischer, Color Grading, Details/Schärfen/Rauschen, Ob
 ### Bekannte offene Punkte aus Phase 1 (unverändert)
 - ADR-0007: keine echten RAW-Testdateien (Netzwerkzugriff auf raw.pixls.us blockiert) — betrifft auch Phase 2s Shader-Tests, die deshalb weiterhin auf synthetische Testmuster angewiesen sind.
 - ADR-0010: Playwright testet simuliert, nicht die native App.
+
+---
+
+## Aktuelle Phase: Phase 3 — Bibliothek
+
+Ziel (laut `SPEC.md` §5): Import, Ordner, Raster, Filmstreifen, Vorschau-Generierung, Bewertungen/Flaggen/Farben, Sammlungen, Filter, Metadaten-Panel, FTS-Suche.
+
+Wie bei Phase 2 gibt es kein eigenes ausführliches Prompt-Dokument — die Schrittliste ist selbst erarbeitet (kein Explore-/Plan-Subagenten-Einsatz diesmal, auf ausdrücklichen Wunsch des Nutzers mit reduziertem Planungsaufwand — vollständige Herleitung samt Architektur-Entscheidungen in `DECISIONS.md` ADR-0022 bis ADR-0025).
+
+**Wichtige Scope-Korrektur (ADR-0022):** `FEATURES.md` hatte wieder deutlich mehr Punkte (§3.1s vollständiger BIBLIOTHEK-Katalog) auf Phase 3 getaggt, als `SPEC.md` §5s Phase-3-Satz meint — analog zu ADR-0011 bei Phase 2 auf den Satz zurückgeschnitten, siehe `FEATURES.md` §3.1 für die einzelnen Umtaggungen.
+
+### Reihenfolge
+
+- [x] 0. Scope festzurren
+  - [x] `FEATURES.md`: Über-Scope-Punkte auf spätere Phasen umgetaggt, zwei fehlende Zeilen (Volltextsuche, Metadaten-Panel) ergänzt
+  - [x] `DECISIONS.md`: ADR-0022 bis ADR-0025
+  - [x] Dieser Abschnitt in `PLAN.md`
+
+- [ ] 1. DB-Schema-Erweiterung (Migration `0003_library.sql`)
+  - [ ] `rating`/`flag`/`color_label` auf `photos`
+  - [ ] `keywords` + `photo_keywords`
+  - [ ] `collections` + `collection_photos`
+  - [ ] `photos_fts` (FTS5 external-content) + Sync-Trigger
+  - [ ] Tests: Idempotenz, alter Katalog öffnet und zieht Migration 3 nach, FK-Cascade
+
+- [ ] 2. Repository- und `Catalog`-Erweiterungen
+  - [ ] `repository::{ratings, keywords, collections, search}`
+  - [ ] Neue `Catalog`-Methoden (siehe Plan-Datei für die vollständige Liste)
+  - [ ] Tests je Modul
+
+- [ ] 3. Tauri-Commands + DTOs
+  - [ ] `PhotoDto` um `rating`/`flag`/`color_label` erweitert
+  - [ ] Neue Commands als reine Verdrahtung
+
+- [ ] 4. Import-Erweiterung
+  - [ ] `ImportMode { AddInPlace, Copy, Move }`
+  - [ ] Rename-Token-System (reine Funktion)
+  - [ ] Import-Presets (JSON, analog zu `apx_core::Settings`)
+
+- [ ] 5. Ordner-Erweiterung
+  - [ ] Sidebar-Baumdarstellung über `parent_id`
+  - [ ] `relink_folder`-Command
+  - [ ] Ordner-fehlend-Erkennung
+
+- [ ] 6. Frontend: Raster, Bewertung/Flaggen/Farben, Sammlungen, Filterleiste, Metadaten-Panel
+  - [ ] `GridView.tsx` (geteilter Auswahl-State mit Filmstreifen, ADR-0024)
+  - [ ] Bewertungs-/Flaggen-/Farb-Widgets + Tastenkürzel
+  - [ ] Sammlungen-UI
+  - [ ] Filterleiste
+  - [ ] Metadaten-Panel
+  - [ ] Tests: Vitest (reine Funktionen), Playwright-Erweiterung, `tauri-mock.ts` erweitert
+
+- [ ] 7. Tests, Dokumentation, Abnahme (gebündelt)
+  - [ ] Vollständige Verifikation (Rust + Frontend)
+  - [ ] `THIRD_PARTY.md`/`ARCHITECTURE.md`/`FEATURES.md` aktualisiert
+  - [ ] Definition-of-Done je Feature, 100k-Foto-Performance-Check, Abschlussbericht
+
+### Nicht in Phase 3 (bewusst zurückgestellt)
+Siehe `FEATURES.md` §3.1 für die genaue Zuordnung: Gesichtserkennung, virtuelle Kopien, Stapel, Sekundäres Display (→ Phase 9 bzw. eigene spätere Ausbaustufe), Schlagwort-Hierarchie/Synonyme/Auto-Vervollständigung, intelligente Sammlungen mit Regeln, Sammlungssätze, Metadaten-Presets, Stapel-Metadatenbearbeitung, vollständiger EXIF/IPTC/XMP-Editor, Sidecar-Export, Vergleichs-/Übersichtsansicht, Vorschau-Cache-Verwaltung/Smart Previews, Filter-Presets, Schnellentwicklung im Raster (→ Phase 6), Perceptual-Hash-Duplikaterkennung, Katalog-Statistiken-Dashboard (→ Phase 9), DNG-Konvertierung (→ Phase 5).

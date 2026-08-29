@@ -7,45 +7,49 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 ---
 
 ## 3.1 Modul BIBLIOTHEK
+<!-- Phasen-Zuordnung korrigiert (siehe DECISIONS.md ADR-0022, analog zu
+     ADR-0011 bei Phase 2): SPEC.md §5s Phase-3-Satz nennt nur "Import,
+     Ordner, Raster, Filmstreifen, Vorschau-Generierung, Bewertungen/
+     Flaggen/Farben, Sammlungen, Filter, Metadaten-Panel, FTS-Suche" —
+     §3.1s vollständiger Feature-Katalog (der komplette Lightroom-
+     BIBLIOTHEK-Umfang) hatte aber deutlich mehr Punkte auf Phase 3
+     getaggt. Die unten nicht mehr auf Phase 3 stehenden Punkte sind auf
+     die Phase verschoben, zu der sie inhaltlich am besten passen. -->
 
 - [x] Import: Ordner scannen, Metadaten lesen, Thumbnails erzeugen (Basisfunktion) — Phase 1 — Status: Fertig
-- [ ] Import mit Kopieren/Verschieben/Hinzufügen/DNG-Konvertierung — Phase 3 — Status: Nicht begonnen
+- [ ] Import mit Kopieren/Verschieben/Hinzufügen — Phase 3 — Status: Nicht begonnen
+- [ ] Import mit DNG-Konvertierung — Phase 5 — Status: Nicht begonnen
 - [ ] Import-Presets — Phase 3 — Status: Nicht begonnen
 - [ ] Automatisches Umbenennen mit Token-System — Phase 3 — Status: Nicht begonnen
-- [ ] Duplikaterkennung per Hash + Perceptual Hash — Phase 3 — Status: Nicht begonnen
+- [ ] Duplikaterkennung per exaktem Hash — Phase 3 — Status: Nicht begonnen
+- [ ] Duplikaterkennung per Perceptual Hash, Duplikat-Assistent mit Auto-Auswahl bester Version — Phase 9 — Status: Nicht begonnen
 - [x] Ordnerbaum (Basis-Anzeige, Fotoanzahl je Ordner) — Phase 1 — Status: Fertig (flache Liste, kein Baum — echte Hierarchie/Synchronisation ist Phase 3, siehe Zeile darunter)
-- [ ] Ordnerbaum-Synchronisation — Phase 3 — Status: Nicht begonnen
+- [ ] Ordnerbaum-Synchronisation (echte Hierarchie über `parent_id`) — Phase 3 — Status: Nicht begonnen
 - [ ] Ordner fehlend/wiederfinden — Phase 3 — Status: Nicht begonnen
-- [ ] Sammlungen, Sammlungssätze — Phase 3 — Status: Nicht begonnen
-- [ ] Intelligente Sammlungen mit verschachtelten UND/ODER-Regeln — Phase 3 — Status: Nicht begonnen
-- [ ] Zielsammlung — Phase 3 — Status: Nicht begonnen
-- [ ] Stapel (automatisch nach Zeit, manuell) — Phase 3 — Status: Nicht begonnen
-- [ ] Virtuelle Kopien — Phase 3 — Status: Nicht begonnen
+- [ ] Sammlungen (manuell, feste Reihenfolge) — Phase 3 — Status: Nicht begonnen
+- [ ] Sammlungssätze, intelligente Sammlungen mit verschachtelten UND/ODER-Regeln, Zielsammlung — Phase 6 — Status: Nicht begonnen
+- [ ] Stapel (automatisch nach Zeit, manuell) — Phase 6 — Status: Nicht begonnen
+- [ ] Virtuelle Kopien — Phase 6 — Status: Nicht begonnen
 - [ ] Bewertung 0–5 — Phase 3 — Status: Nicht begonnen
-- [ ] Farbmarkierungen (erweiterbar) — Phase 3 — Status: Nicht begonnen
+- [ ] Farbmarkierungen (fester Grundsatz) — Phase 3 — Status: Nicht begonnen
+- [ ] Farbmarkierungen erweiterbar auf beliebig viele, benannt — Phase 6 — Status: Nicht begonnen
 - [ ] Flaggen — Phase 3 — Status: Nicht begonnen
-- [ ] Schlagworthierarchie (Synonyme, Export-Steuerung, Auto-Vervollständigung) — Phase 3 — Status: Nicht begonnen
-- [ ] Schlagwortvorschläge — Phase 3 — Status: Nicht begonnen
-- [ ] Metadaten-Presets — Phase 3 — Status: Nicht begonnen
-- [ ] Stapel-Metadatenbearbeitung — Phase 3 — Status: Nicht begonnen
-- [ ] EXIF/IPTC/XMP-Editor (alle Felder) — Phase 3 — Status: Nicht begonnen
+- [ ] Schlagworte (flache Liste, ohne Hierarchie) — Phase 3 — Status: Nicht begonnen
+- [ ] Schlagworthierarchie (Synonyme, Export-Steuerung, Auto-Vervollständigung), Schlagwortvorschläge, Tag-Regeln (bedingte Auto-Tags) — Phase 6 — Status: Nicht begonnen
+- [ ] Metadaten-Panel (Basisfelder lesen, Bewertung/Flagge/Farbe/Schlagworte editieren) — Phase 3 — Status: Nicht begonnen
+- [ ] Metadaten-Presets, Stapel-Metadatenbearbeitung, EXIF/IPTC/XMP-Editor (alle Felder), frei definierbare Metadaten-Felder, Sidecar-Export (.xmp) — Phase 6 — Status: Nicht begonnen
+- [ ] Volltextsuche (FTS5) über Dateiname, Kamera, Objektiv — Phase 3 — Status: Nicht begonnen
 - [ ] Rasteransicht — Phase 3 — Status: Nicht begonnen
 - [x] Lupe/Einzelbildansicht (Basis-Viewer) — Phase 1 — Status: Fertig
-- [ ] Vergleichsansicht — Phase 3 — Status: Nicht begonnen
-- [ ] Übersichtsansicht — Phase 3 — Status: Nicht begonnen
-- [ ] Personenansicht — Phase 3 — Status: Nicht begonnen
+- [ ] Vergleichsansicht, Übersichtsansicht — Phase 6 — Status: Nicht begonnen
+- [ ] Personenansicht (Gesichtserkennung) — Phase 9 — Status: Nicht begonnen
 - [ ] Filterleiste (Text, Attribut, Metadaten, kombiniert) — Phase 3 — Status: Nicht begonnen
-- [ ] Filter-Presets — Phase 3 — Status: Nicht begonnen
+- [ ] Filter-Presets — Phase 6 — Status: Nicht begonnen
 - [ ] Sortierung nach beliebigem Feld — Phase 3 — Status: Nicht begonnen
-- [ ] Schnellentwicklung im Raster — Phase 3 — Status: Nicht begonnen
-- [ ] Vorschau-Cache-Verwaltung (Standard, 1:1, Smart Previews) — Phase 3 — Status: Nicht begonnen
-- [ ] Offline-Bearbeitung über Smart Previews — Phase 3 — Status: Nicht begonnen
-- [ ] Sekundäres Display mit unabhängiger Ansicht — Phase 3 — Status: Nicht begonnen
-- [ ] Frei definierbare Metadaten-Felder — Phase 3 — Status: Nicht begonnen
-- [ ] Beliebig viele benannte Farbmarkierungen — Phase 3 — Status: Nicht begonnen
-- [ ] Tag-Regeln (bedingte Auto-Tags) — Phase 3 — Status: Nicht begonnen
-- [ ] Katalog-Statistiken-Dashboard — Phase 3 — Status: Nicht begonnen
-- [ ] Duplikat-Assistent mit Auto-Auswahl bester Version — Phase 3 — Status: Nicht begonnen
+- [ ] Schnellentwicklung im Raster — Phase 6 — Status: Nicht begonnen
+- [ ] Vorschau-Cache-Verwaltung (Standard, 1:1), Smart Previews, Offline-Bearbeitung über Smart Previews — Phase 6 — Status: Nicht begonnen
+- [ ] Sekundäres Display mit unabhängiger Ansicht — Phase 9 — Status: Nicht begonnen
+- [ ] Katalog-Statistiken-Dashboard — Phase 9 — Status: Nicht begonnen
 
 ## 3.2 Modul ENTWICKELN — Globale Werkzeuge
 

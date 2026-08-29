@@ -45,9 +45,25 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: `pnpm build && pnpm preview -- --port ${PORT} --strictPort`,
+    // WICHTIG: `vite` hier direkt aufrufen (`pnpm exec vite preview ...`),
+    // nicht über `pnpm preview -- ...` — pnpm streicht das `--` beim
+    // Weiterreichen an das Skript NICHT, es landet also wörtlich im argv
+    // von vite. Vites CLI (cac) interpretiert ein führendes `--` als
+    // "Ende der Optionen", wodurch `--host`/`--port`/`--strictPort`
+    // NICHT als Flags erkannt werden, sondern als reine Positions-
+    // argumente verworfen werden — vite startet dann lautlos mit seinen
+    // Standardwerten. Das erklärt den CI-Fehlschlag ("Timed out waiting
+    // ... from config.webServer"): der Server lief, aber ggf. auf einem
+    // anderen Host/Port als dem unten abgefragten (lokal fiel es nicht
+    // auf, weil der Vite-Standardport zufällig auch 4173 ist).
+    command: `pnpm build && pnpm exec vite preview --host 127.0.0.1 --port ${PORT} --strictPort`,
     url: `http://127.0.0.1:${PORT}`,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 180_000,
+    // Bei einem erneuten Fehlschlag sofort sichtbar, statt wieder blind
+    // zu raten (Standard ist "ignore" — dann verschwindet jede
+    // Fehlermeldung von `vite build`/`vite preview` spurlos).
+    stdout: "pipe",
+    stderr: "pipe",
   },
 });

@@ -95,6 +95,24 @@ pub(crate) fn list_all(conn: &Connection) -> Result<Vec<Folder>> {
     Ok(result)
 }
 
+/// Aktualisiert den gespeicherten Pfad eines Ordners — z. B. nachdem der
+/// Nutzer ihn im Dateisystem verschoben/umbenannt hat und ihn über den
+/// Ordnerbaum neu verknüpft (siehe `PLAN.md` Phase 3, Schritt 5). Ändert
+/// nur `folders.path`; welche Fotos darunter (nicht mehr) existieren,
+/// gleicht der bestehende `reconcile`-Mechanismus (`apx-app`) danach ab.
+pub(crate) fn update_path(conn: &Connection, id: FolderId, new_path: &Path) -> Result<()> {
+    let changed = conn
+        .execute(
+            "UPDATE folders SET path = ?2 WHERE id = ?1",
+            params![id.to_string(), new_path.to_string_lossy()],
+        )
+        .map_err(map_sqlite_err)?;
+    if changed == 0 {
+        return Err(apx_core::AppError::not_found("Ordner", id.to_string()));
+    }
+    Ok(())
+}
+
 /// Findet einen vorhandenen Ordner anhand des Pfads oder legt ihn neu an.
 /// Wird vom Import verwendet, damit derselbe Ordner nie doppelt entsteht.
 pub(crate) fn find_or_create(
@@ -160,6 +178,24 @@ mod tests {
         let conn = setup();
         let result = get(&conn, FolderId::new());
         assert!(matches!(result, Err(apx_core::AppError::NotFound { .. })));
+    }
+
+    #[test]
+    fn update_path_changes_the_stored_path() {
+        let conn = setup();
+        let now = OffsetDateTime::now_utc();
+        let id = insert(&conn, Path::new("/alt"), None, now).expect("ok");
+
+        update_path(&conn, id, Path::new("/neu")).expect("ok");
+
+        let found = get(&conn, id).expect("ok");
+        assert_eq!(found.path, PathBuf::from("/neu"));
+    }
+
+    #[test]
+    fn update_path_of_unknown_folder_fails() {
+        let conn = setup();
+        assert!(update_path(&conn, FolderId::new(), Path::new("/neu")).is_err());
     }
 
     #[test]

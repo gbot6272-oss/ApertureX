@@ -17,6 +17,16 @@ pub struct FolderDto {
     pub id: String,
     pub path: String,
     pub photo_count: u64,
+    /// `None` bei einem Wurzelordner — sonst die `FolderId` des
+    /// übergeordneten Ordners, Grundlage für die Baumdarstellung im
+    /// Sidebar (siehe `PLAN.md` Phase 3, Schritt 5).
+    pub parent_id: Option<String>,
+    /// `true`, wenn `path` im Dateisystem nicht mehr existiert (Ordner
+    /// wurde außerhalb der App verschoben/gelöscht) — analog zu
+    /// `PhotoDto::missing`, aber pro Aufruf live geprüft statt in der
+    /// Datenbank persistiert (kein extra Reconcile-Schritt beim
+    /// App-Start nötig).
+    pub missing: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -193,11 +203,46 @@ pub fn list_folders(state: State<'_, AppState>) -> Result<Vec<FolderDto>, String
                 .map_err(|err| err.to_string())?;
             Ok(FolderDto {
                 id: folder.id.to_string(),
+                missing: !folder.path.exists(),
                 path: folder.path.to_string_lossy().to_string(),
                 photo_count,
+                parent_id: folder.parent_id.map(|id| id.to_string()),
             })
         })
         .collect()
+}
+
+/// Verknüpft einen als fehlend erkannten Ordner mit seinem neuen
+/// Speicherort (z. B. nach Verschieben/Umbenennen im Dateisystem) und
+/// gleicht danach die zugehörigen Fotos gegen den neuen Pfad ab (siehe
+/// `crate::reconcile`) — derselbe Mechanismus, der auch beim regulären
+/// Öffnen eines Ordners läuft (`list_photos_in_folder`).
+#[tauri::command]
+pub fn relink_folder(
+    state: State<'_, AppState>,
+    folder_id: String,
+    new_path: String,
+) -> Result<(), String> {
+    let folder_id: apx_core::FolderId = folder_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    let new_path = PathBuf::from(new_path);
+    if !new_path.is_dir() {
+        return Err(format!("'{}' ist kein Verzeichnis", new_path.display()));
+    }
+
+    state
+        .catalog
+        .relink_folder(folder_id, &new_path)
+        .map_err(|err| err.to_string())?;
+
+    let photos = state
+        .catalog
+        .list_photos_by_folder(folder_id)
+        .map_err(|err| err.to_string())?;
+    crate::reconcile::reconcile_missing(&state.catalog, &new_path, photos)
+        .map_err(|err| err.to_string())?;
+    Ok(())
 }
 
 /// Startet den Import-Job für `path` im Hintergrund und kehrt sofort

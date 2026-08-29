@@ -119,6 +119,15 @@ impl Catalog {
         repository::folders::list_all(&conn)
     }
 
+    /// Verknüpft einen Ordner neu mit `new_path` (z. B. nach Verschieben/
+    /// Umbenennen im Dateisystem) — der Aufrufer (`apx-app`) lässt danach
+    /// den bestehenden Reconcile-Mechanismus erneut laufen, um die
+    /// zugehörigen Fotos gegen den neuen Pfad abzugleichen.
+    pub fn relink_folder(&self, id: FolderId, new_path: &Path) -> Result<()> {
+        let conn = self.lock()?;
+        repository::folders::update_path(&conn, id, new_path)
+    }
+
     // ---- Fotos ---------------------------------------------------------
 
     /// Legt ein Foto an oder aktualisiert es, siehe

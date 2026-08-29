@@ -61,6 +61,7 @@ fn main() {
             commands::select_folder,
             commands::catalog_status,
             commands::list_folders,
+            commands::relink_folder,
             commands::import_folder,
             commands::import_folder_with_mode,
             commands::cancel_import,

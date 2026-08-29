@@ -43,6 +43,10 @@ interface CatalogSlice {
   refreshFolders: () => Promise<void>;
   refreshCatalogStatus: () => Promise<void>;
   loadPhotosForFolder: (folderId: string) => Promise<void>;
+  /** Verknüpft einen als fehlend markierten Ordner mit `newPath` neu und
+   * lädt Ordnerliste sowie (falls gerade geöffnet) dessen Fotos danach
+   * neu — siehe `FolderDto.missing`. */
+  relinkFolder: (folderId: string, newPath: string) => Promise<void>;
 }
 
 // ---- Selection-Slice ---------------------------------------------------
@@ -175,6 +179,20 @@ export const useAppStore = create<AppStore>()(
         set((state) => {
           state.photosByFolder[folderId] = photos;
         });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    relinkFolder: async (folderId, newPath) => {
+      try {
+        await api.relinkFolder(folderId, newPath);
+        await get().refreshFolders();
+        if (get().photosByFolder[folderId]) {
+          await get().loadPhotosForFolder(folderId);
+        }
       } catch (err) {
         set((state) => {
           state.catalogError = String(err);

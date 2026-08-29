@@ -263,10 +263,11 @@ Wie bei Phase 2 gibt es kein eigenes ausführliches Prompt-Dokument — die Schr
   - [x] Neuer Tauri-Command `import_folder_with_mode` additiv zum bestehenden `import_folder` (bleibt Add-in-Place, unverändert für das aktuelle Frontend); `list_import_presets`/`save_import_preset`/`delete_import_preset`
   - Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` — alles grün (inkl. neuem End-to-End-Test: Copy-Modus mit Umbenennungsmuster kopiert in Zielordner, Quelldatei bleibt erhalten, Katalogeintrag zeigt auf neuen Ort/Namen)
 
-- [ ] 5. Ordner-Erweiterung
-  - [ ] Sidebar-Baumdarstellung über `parent_id`
-  - [ ] `relink_folder`-Command
-  - [ ] Ordner-fehlend-Erkennung
+- [x] 5. Ordner-Erweiterung
+  - [x] Sidebar-Baumdarstellung über `parent_id` (`lib/folderTree.ts`s reine `buildChildrenByParent`, rekursive `FolderNode`-Komponente; verwaiste `parent_id`-Referenzen werden defensiv als Wurzel behandelt statt den Ordner zu verlieren)
+  - [x] `relink_folder`-Command (`repository::folders::update_path` → `Catalog::relink_folder`), ruft danach `reconcile_missing` für den neuen Pfad auf, analog zum bestehenden Öffnen-Ablauf
+  - [x] Ordner-fehlend-Erkennung: `FolderDto.missing` live per `path.exists()` berechnet (keine neue DB-Spalte/Migration nötig, keine Reconcile-Kaskade beim Start), Sidebar zeigt "fehlt"-Badge + "verknüpfen"-Link (öffnet den bestehenden Ordner-Dialog, ruft `relink_folder`)
+  - Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace`, `tsc -b`, `vitest run` (37 Tests), `playwright test` (8/8) — alles grün
 
 - [ ] 6. Frontend: Raster, Bewertung/Flaggen/Farben, Sammlungen, Filterleiste, Metadaten-Panel
   - [ ] `GridView.tsx` (geteilter Auswahl-State mit Filmstreifen, ADR-0024)

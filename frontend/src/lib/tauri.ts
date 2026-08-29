@@ -10,6 +10,10 @@ export interface FolderDto {
   id: string;
   path: string;
   photo_count: number;
+  /** `null` bei einem Wurzelordner. */
+  parent_id: string | null;
+  /** `true`, wenn der Ordnerpfad im Dateisystem nicht mehr existiert. */
+  missing: boolean;
 }
 
 export interface CatalogStatusDto {
@@ -56,6 +60,12 @@ export function importFolder(path: string): Promise<void> {
 
 export function cancelImport(): Promise<void> {
   return invoke<void>("cancel_import");
+}
+
+/** Verknüpft einen fehlenden Ordner mit einem neuen Speicherort — siehe
+ * `FolderDto.missing` und `crates/apx-app/src/commands.rs::relink_folder`. */
+export function relinkFolder(folderId: string, newPath: string): Promise<void> {
+  return invoke<void>("relink_folder", { folderId, newPath });
 }
 
 // ---- Entwickeln-Verlauf (ab Phase 2, siehe crates/apx-app/src/commands.rs) ----

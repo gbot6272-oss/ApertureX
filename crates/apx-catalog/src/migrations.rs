@@ -9,7 +9,10 @@ use crate::error::map_sqlite_err;
 
 /// Migrationen in Anwendungsreihenfolge. Index 0 = Version 1, Index 1 =
 /// Version 2, usw. — `user_version` zählt ab 1, nicht ab 0.
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_initial.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_initial.sql"),
+    include_str!("../migrations/0002_edits.sql"),
+];
 
 /// Wendet alle noch fehlenden Migrationen auf `conn` an.
 pub(crate) fn apply(conn: &Connection) -> Result<()> {
@@ -60,12 +63,46 @@ mod tests {
 
         let table_count: i64 = conn
             .query_row(
-                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('folders','photos','previews')",
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN \
+                 ('folders','photos','previews','edit_history','edit_current')",
                 [],
                 |row| row.get(0),
             )
             .expect("lesbar");
-        assert_eq!(table_count, 3);
+        assert_eq!(table_count, 5);
+    }
+
+    #[test]
+    fn upgrades_a_catalog_that_only_has_migration_one() {
+        // Simuliert einen mit einer älteren Aperture-X-Version angelegten
+        // Katalog (nur Migration 1 angewendet) — muss beim erneuten
+        // `apply()` sauber auf Migration 2 nachziehen, ohne die
+        // Phase-1-Tabellen anzutasten (SPEC.md §2.1: "Schema-Migration
+        // muss alte Kataloge öffnen können").
+        let conn = Connection::open_in_memory().expect("In-Memory-DB");
+        conn.execute_batch(MIGRATIONS[0])
+            .expect("Migration 1 anwendbar");
+        conn.execute_batch("PRAGMA user_version = 1")
+            .expect("setzbar");
+
+        apply(&conn).expect("sollte auf Migration 2 nachziehen");
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("lesbar");
+        assert_eq!(version as usize, MIGRATIONS.len());
+
+        let table_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('edit_history','edit_current')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("lesbar");
+        assert_eq!(
+            table_count, 2,
+            "Migration 2 sollte nachträglich angewendet worden sein"
+        );
     }
 
     #[test]

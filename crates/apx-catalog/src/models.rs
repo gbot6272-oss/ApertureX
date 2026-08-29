@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use apx_core::{AppError, FolderId, PhotoId, Result};
+use apx_core::{AppError, EditHistoryId, EdlEnvelope, FolderId, PhotoId, Result};
 use time::OffsetDateTime;
 
 pub(crate) fn to_unix(dt: OffsetDateTime) -> i64 {
@@ -123,6 +123,31 @@ pub struct Preview {
     pub level: PreviewLevel,
     pub path: PathBuf,
     pub generated_at: OffsetDateTime,
+}
+
+/// Ein Bearbeitungsschritt im Verlauf eines Fotos (siehe
+/// `migrations/0002_edits.sql`, `DECISIONS.md` ADR-0014). `edl` ist für
+/// `apx-catalog` undurchsichtig — nur `apx-pipeline` weiß, wie
+/// `edl.payload` zu interpretieren ist.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditHistoryEntry {
+    pub id: EditHistoryId,
+    pub photo_id: PhotoId,
+    pub sequence: i64,
+    pub label: Option<String>,
+    pub edl: EdlEnvelope,
+    pub created_at: OffsetDateTime,
+}
+
+/// Wo im Bearbeitungsverlauf ein Foto gerade steht — siehe
+/// [`crate::Catalog::current_edit`]/[`crate::Catalog::undo_edit`]/
+/// [`crate::Catalog::redo_edit`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum HistoryPosition {
+    /// Kein Bearbeitungsschritt aktiv — Ausgangszustand "wie aufgenommen".
+    Neutral,
+    /// Ein konkreter, gespeicherter Bearbeitungsschritt ist aktiv.
+    At(EditHistoryEntry),
 }
 
 #[cfg(test)]

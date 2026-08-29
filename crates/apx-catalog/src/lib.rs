@@ -28,11 +28,13 @@ mod repository;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
-use apx_core::{AppError, FolderId, PhotoId, Result};
+use apx_core::{AppError, EditHistoryId, EdlEnvelope, FolderId, PhotoId, Result};
 use rusqlite::Connection;
 use time::OffsetDateTime;
 
-pub use models::{Folder, NewPhoto, Photo, Preview, PreviewLevel};
+pub use models::{
+    EditHistoryEntry, Folder, HistoryPosition, NewPhoto, Photo, Preview, PreviewLevel,
+};
 
 pub struct Catalog {
     conn: Mutex<Connection>,
@@ -165,6 +167,49 @@ impl Catalog {
     pub fn list_previews_for_photo(&self, photo_id: PhotoId) -> Result<Vec<Preview>> {
         let conn = self.lock()?;
         repository::previews::list_for_photo(&conn, photo_id)
+    }
+
+    // ---- Bearbeitungsverlauf (ab Phase 2) --------------------------------
+
+    /// Speichert `edl` als neuen, aktiven Bearbeitungsschritt für `photo_id`
+    /// — siehe [`repository::edits::commit`] für die genaue Semantik
+    /// (verwirft eine zuvor per [`Catalog::undo_edit`] erreichte
+    /// „Zukunft").
+    pub fn commit_edit(
+        &self,
+        photo_id: PhotoId,
+        edl: &EdlEnvelope,
+        label: Option<&str>,
+    ) -> Result<EditHistoryId> {
+        let conn = self.lock()?;
+        repository::edits::commit(&conn, photo_id, edl, label, OffsetDateTime::now_utc())
+    }
+
+    /// Der aktuell aktive Bearbeitungsstand für `photo_id`.
+    pub fn current_edit(&self, photo_id: PhotoId) -> Result<HistoryPosition> {
+        let conn = self.lock()?;
+        repository::edits::current(&conn, photo_id)
+    }
+
+    /// Geht einen Bearbeitungsschritt zurück. `None`, wenn schon am
+    /// Ausgangszustand (kein Rückgängig möglich).
+    pub fn undo_edit(&self, photo_id: PhotoId) -> Result<Option<HistoryPosition>> {
+        let conn = self.lock()?;
+        repository::edits::undo(&conn, photo_id)
+    }
+
+    /// Geht einen Bearbeitungsschritt vor. `None`, wenn nichts zu
+    /// wiederholen ist.
+    pub fn redo_edit(&self, photo_id: PhotoId) -> Result<Option<HistoryPosition>> {
+        let conn = self.lock()?;
+        repository::edits::redo(&conn, photo_id)
+    }
+
+    /// Der vollständige Bearbeitungsverlauf eines Fotos, älteste Sequenz
+    /// zuerst.
+    pub fn list_edit_history(&self, photo_id: PhotoId) -> Result<Vec<EditHistoryEntry>> {
+        let conn = self.lock()?;
+        repository::edits::list_history(&conn, photo_id)
     }
 }
 

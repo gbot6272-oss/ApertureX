@@ -7,14 +7,16 @@
 
 #![deny(clippy::unwrap_used)]
 
+mod edl;
 mod error;
 mod ids;
 mod logging;
 mod paths;
 mod settings;
 
+pub use edl::EdlEnvelope;
 pub use error::{AppError, Result};
-pub use ids::{CatalogId, FolderId, PhotoId};
+pub use ids::{CatalogId, EditHistoryId, FolderId, PhotoId};
 pub use logging::init_logging;
 pub use paths::AppPaths;
 pub use settings::{CatalogSettings, Settings, Theme, UiSettings};

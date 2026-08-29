@@ -23,4 +23,5 @@ pub mod gpu;
 pub mod stages;
 pub mod tile_cache;
 
+pub use edl::{EdlV1, EDL_SCHEMA_VERSION};
 pub use error::{PipelineError, Result};

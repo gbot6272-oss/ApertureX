@@ -128,10 +128,14 @@ Anders als Phase 1 gibt es kein eigenes, ausführliches Prompt-Dokument für Pha
   - [x] `THIRD_PARTY.md`: Lizenzen für `wgpu`/`bytemuck`/`pollster`/`lcms2` per `cargo metadata` verifiziert (alle MIT/Apache-2.0/Zlib, keine GPL-Ausnahme nötig) und eingetragen
   - [x] Verifiziert: `cargo check --workspace`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo fmt --all -- --check`, `cargo test --workspace` (101 Tests) — alles grün
 
-- [ ] 2. EDL-Datenmodell + Katalog-Migration
-  - [ ] `EdlV1` in `apx-pipeline::edl`, `EdlEnvelope` in `apx-core`
-  - [ ] `migrations/0002_edits.sql` (`edit_history`, `edit_current`), `repository::edits`
-  - [ ] Tests: Roundtrip, Schema-Version-Ablehnung, FK-Cascade, Migrations-Idempotenz, alter Katalog öffnet noch
+- [x] 2. EDL-Datenmodell + Katalog-Migration
+  - [x] `EdlEnvelope` in `apx-core` (schema_version + `serde_json::Value`-Payload, `from_json_str`/`to_json_string`)
+  - [x] `EdlV1`/`BasicAdjustments`/`WhiteBalanceAdjustment` in `apx-pipeline::edl::v1` — Weißabgleich als Verschiebung relativ zum As-shot-Wert (nicht absolut), damit `NEUTRAL` kamera-unabhängig eindeutig ist; `edl::migrate::{to_envelope, from_envelope}` als einziger Umwandlungspunkt (Upgrade-Kette für künftige Schema-Versionen kommt dort rein, Aufrufer ändert sich nicht)
+  - [x] `EditHistoryId` in `apx-core::ids` (gleiche `define_id_type!`-Konvention wie `PhotoId`/`FolderId`)
+  - [x] `migrations/0002_edits.sql`: `edit_history` (vollständige EDL-Schnappschüsse, `UNIQUE(photo_id, sequence)`) + `edit_current` (1 Zeiger pro Foto) — additiv, `photos`/`folders`/`previews` unverändert
+  - [x] `repository::edits`: `commit` (verwirft „Zukunft" bei neuer Bearbeitung nach Undo), `current`/`undo`/`redo` (linearer Verlauf, `HistoryPosition::Neutral` für „noch nie bearbeitet"/„bis zum Anfang zurück"), `list_history` — neue `Catalog`-Methoden `commit_edit`/`current_edit`/`undo_edit`/`redo_edit`/`list_edit_history`
+  - [x] Tests: EDL-Roundtrip (Umschlag und `EdlV1` einzeln), unbekannte/fehlerhafte Schema-Version abgelehnt, Undo/Redo-Zustandsmaschine (inkl. „Redo nach neuer Bearbeitung verwirft verworfene Zukunft"), FK-Cascade (Foto löschen → Verlauf + Zeiger weg), Migrations-Idempotenz, alter (nur-Migration-1-)Katalog öffnet noch und zieht Migration 2 nach
+  - [x] Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (116 Tests) — alles grün
 
 - [ ] 3. wgpu-Gerätekontext (`apx-pipeline::gpu`)
   - [ ] `GpuContext`, `Backends::all()` + `force_fallback_adapter`-Fallback

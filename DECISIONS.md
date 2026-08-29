@@ -127,3 +127,50 @@ leicht vom illustrativen Beispiel in `PHASE1_PROMPT.md` ab (Segmente statt
 Query-Parameter) — funktional identisch (dieselben Informationen, dieselbe
 Semantik: Foto-ID, gewünschte Auflösungsstufe/Kantenlänge). Diese
 Abweichung ist hier dokumentiert, wie in `SPEC.md` Abschnitt 6 gefordert.
+
+---
+
+## ADR-0010: Playwright testet das Frontend gegen einen simulierten Tauri-Bridge, nicht die kompilierte native App
+
+**Status:** Angenommen, mit klar benanntem Rest-Risiko
+**Kontext:** `SPEC.md`s Tech-Stack-Tabelle nennt Playwright für E2E-Tests,
+und `PHASE1_PROMPT.md` Abschnitt 8 verlangt ein E2E-Szenario, das die
+komplette App abdeckt: „App starten → Ordner importieren → Thumbnails
+erscheinen → Bild anklicken → Viewer zeigt es → Zoom 1:1 → Neustart →
+Katalog ist noch da." Das ist ein Test der **kompilierten nativen
+Tauri-App**, nicht nur der Web-Inhalte.
+
+Playwright steuert Browser über das Chrome DevTools Protocol (CDP) an.
+Tauris WebView ist plattformabhängig: WebView2 unter Windows basiert auf
+Chromium und unterstützt CDP (`--remote-debugging-port`), WKWebView unter
+macOS und WebKitGTK unter Linux tun das **nicht**. Ein CDP-basierter
+Playwright-Test gegen die echte App liefe also nur auf Windows —
+inakzeptabel für eine Anforderung, die alle drei Plattformen abdecken
+muss. Der von Tauri selbst empfohlene, plattformunabhängige Weg für
+echte native E2E-Tests ist `tauri-driver` (WebDriver-Protokoll, nutzt je
+Plattform den nativen WebView-Treiber) zusammen mit WebdriverIO oder
+Selenium — nicht Playwright.
+
+**Entscheidung:** Für Phase 1 wird Playwright wie im Tech-Stack
+vorgesehen eingesetzt, aber gegen den **Vite-Dev-/Preview-Server mit
+einem simulierten `window.__TAURI_INTERNALS__`** (`invoke`/`convertFileSrc`
+geben kontrollierte Testdaten zurück, siehe `frontend/e2e/`) statt gegen
+die kompilierte App. Das deckt zuverlässig und plattformunabhängig ab:
+Layout, Dark-Theme, Zustand-Store-Verhalten, Tastenkürzel, Filmstreifen-
+Virtualisierung, Viewer-Interaktion — alles, was sich rein im Frontend
+abspielt. Die **Backend-Anteile** des E2E-Szenarios (echter Import,
+echte Dekodierung, echte Katalog-Persistenz über einen Neustart hinweg)
+sind stattdessen durch Rust-Integrationstests abgedeckt, die exakt
+dieselbe Logik über dieselben Schnittstellen ausführen wie die App selbst
+(`apx-app`s `import_run_handles_three_valid_and_one_broken_file`,
+`apx-catalog`s `open_on_disk_persists_across_reopen`) — nur eben nicht
+durch Klicks in einem echten Fenster ausgelöst.
+**Konsequenzen:** Es fehlt ein Test, der wirklich **Klick für Klick durch
+die kompilierte App** geht und dabei Frontend und Backend gemeinsam über
+die tatsächliche Tauri-IPC-Bridge prüft (z. B. ein Regressionsfehler
+ausschließlich in der Verdrahtung zwischen echtem Command und echtem
+Frontend-Aufruf, der weder im Rust-Test noch im simulierten
+Playwright-Test auffiele). Das ist eine bewusste, dokumentierte Lücke
+für Phase 1, keine stillschweigend schwächere Umsetzung. Empfehlung für
+eine spätere Phase: `tauri-driver` + WebdriverIO als zusätzliche,
+eigene Test-Stufe ergänzen, sobald der Funktionsumfang das rechtfertigt.

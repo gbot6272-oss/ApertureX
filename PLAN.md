@@ -84,9 +84,11 @@ Ziel (siehe `PHASE1_PROMPT.md`): App starten, Ordner mit RAWs importieren, Bilde
 - [x] 10. Filmstreifen
   - [x] `@tanstack/react-virtual`, flüssig bei 50.000 Einträgen — verifiziert per Playwright: 50.000 synthetische Fotos in den Store injiziert, DOM bleibt bei 22 gerenderten Zellen (vorher wie nach Scroll ans Ende), unabhängig von der Gesamtanzahl
 
-- [ ] 11. Tests
-  - [ ] `apx-raw`, `apx-catalog`, Import-Job (siehe oben)
-  - [ ] Playwright-E2E: Start → Import → Thumbnails → Auswahl → Viewer → Zoom 1:1 → Neustart → Katalog persistent
+- [x] 11. Tests
+  - [x] Rust: `apx-raw` (29 Tests), `apx-catalog` (26 Tests, inkl. `open_on_disk_persists_across_reopen` für „Neustart → Katalog persistent"), `apx-core` (14 Tests), `apx-app`/Import-Job (26 Tests, inkl. `import_run_handles_three_valid_and_one_broken_file` und `import_run_is_idempotent_on_second_pass`) — zusammen 95 Tests, alle grün (`cargo test --workspace`)
+  - [x] Vitest (`pnpm test`): 18 Tests für die reinen Geometrie-/Format-Module `viewerMath.ts` und `format.ts` (`jsdom`-Umgebung, kein DOM-Rendering nötig)
+  - [x] Playwright-E2E (`pnpm test:e2e`, `frontend/e2e/`): Start → Ordner importieren (simulierte `import:progress`/`import:finished`-Events) → Thumbnails im Filmstreifen → Foto anklicken → Viewer zeigt Metadaten → Taste „1" → Zoom exakt 100 % — plus ein Test für `import:error` in der Fehlerleiste und ein Regressionstest für die Filmstreifen-Virtualisierung (5.000 synthetische Fotos, DOM-Knotenanzahl bleibt vor/nach Scroll klein; die 50.000er-Zahl aus Schritt 10 wurde dort bereits manuell verifiziert, hier bewusst kleiner für schnelle CI-Läufe). „Neustart → Katalog persistent" ist laut ADR-0010 kein Playwright-Fall (kein echter App-Neustart ohne `tauri-driver`), sondern durch die Rust-Persistenz-Tests oben abgedeckt.
+  - [x] Eigene, wiederverwendbare `window.__TAURI_INTERNALS__`-Simulation (`frontend/e2e/tauri-mock.ts`) statt der echten nativen App — siehe ADR-0010 für die Begründung und die bewusst offen gelassene Lücke (echtes natives Klick-E2E bräuchte `tauri-driver` + WebdriverIO)
 
 - [ ] 12. CI
   - [ ] GitHub Actions Matrix Windows/macOS/Linux

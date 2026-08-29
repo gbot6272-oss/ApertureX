@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -25,5 +26,12 @@ export default defineConfig({
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
     minify: !process.env.TAURI_ENV_DEBUG ? "esbuild" : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+  },
+  test: {
+    environment: "jsdom",
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    // E2E-Tests (Playwright, siehe frontend/e2e/) laufen über ein
+    // eigenes Kommando, nicht über Vitest.
+    exclude: ["e2e/**", "node_modules/**"],
   },
 });

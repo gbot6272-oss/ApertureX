@@ -120,11 +120,13 @@ Anders als Phase 1 gibt es kein eigenes, ausführliches Prompt-Dokument für Pha
   - [x] `ARCHITECTURE.md`: §5-Platzhalter durch echte Modulbeschreibung ersetzt, Grobstruktur-Diagramm und Modulgrenzen-Regeln um `apx-pipeline` ergänzt
   - [x] Nebenbei behoben: `DECISIONS.md` ADR-0002s Status war noch als "wartet auf Bestätigung" markiert, obwohl der Nutzer die LGPL-2.1-Ausnahme längst bestätigt hatte — korrigiert
 
-- [ ] 1. `apx-pipeline` Crate-Grundgerüst
-  - [ ] `Cargo.toml`, Workspace-Einbindung, `#![deny(clippy::unwrap_used)]`
-  - [ ] Modul-Skelett (`edl/`, `color/`, `gpu/`, `stages/`, `tile_cache.rs`), `PipelineError`
-  - [ ] Additive `AppError::Pipeline`-Variante in `apx-core`
-  - [ ] `THIRD_PARTY.md`: vorläufige Zeilen für `wgpu`/`bytemuck`/`lcms2`/`pollster`
+- [x] 1. `apx-pipeline` Crate-Grundgerüst
+  - [x] `Cargo.toml` (wgpu 22, bytemuck, pollster, lcms2 + Workspace-Deps), Workspace-Einbindung (`members`, `workspace.dependencies`), `#![deny(clippy::unwrap_used)]`
+  - [x] Modul-Skelett (`edl/`, `color/`, `gpu/`, `stages/`, `tile_cache.rs`) — je mit Doku-Kommentar, der auf den füllenden Schritt verweist, noch ohne Inhalt
+  - [x] `PipelineError` (thiserror, gleiche Form wie `apx_core::AppError`) mit `From<PipelineError> for AppError`
+  - [x] Additive `AppError::Pipeline`-Variante in `apx-core` + Konstruktor `AppError::pipeline()` + Test
+  - [x] `THIRD_PARTY.md`: Lizenzen für `wgpu`/`bytemuck`/`pollster`/`lcms2` per `cargo metadata` verifiziert (alle MIT/Apache-2.0/Zlib, keine GPL-Ausnahme nötig) und eingetragen
+  - [x] Verifiziert: `cargo check --workspace`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo fmt --all -- --check`, `cargo test --workspace` (101 Tests) — alles grün
 
 - [ ] 2. EDL-Datenmodell + Katalog-Migration
   - [ ] `EdlV1` in `apx-pipeline::edl`, `EdlEnvelope` in `apx-core`

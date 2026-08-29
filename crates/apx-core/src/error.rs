@@ -53,6 +53,13 @@ pub enum AppError {
     /// Fehler beim Laden/Speichern der Einstellungen (TOML).
     #[error("Einstellungen konnten nicht verarbeitet werden: {message}")]
     Settings { message: String },
+
+    /// Fehler in der GPU-Bearbeitungs-Pipeline (`apx-pipeline`, ab Phase 2)
+    /// — GPU nicht verfügbar, Shader-Fehler, ungültiges EDL. `apx-app`
+    /// wandelt das wie alle anderen Varianten per `.to_string()` in eine
+    /// Fehlermeldung fürs Frontend um (siehe `crates/apx-app/src/commands.rs`).
+    #[error("Pipeline-Fehler: {message}")]
+    Pipeline { message: String },
 }
 
 impl AppError {
@@ -77,6 +84,12 @@ impl AppError {
         Self::NotFound {
             kind,
             id: id.into(),
+        }
+    }
+
+    pub fn pipeline(message: impl Into<String>) -> Self {
+        Self::Pipeline {
+            message: message.into(),
         }
     }
 }
@@ -104,5 +117,14 @@ mod tests {
         let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "verweigert");
         let err = AppError::io("/tmp/x", io_err);
         assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn pipeline_error_includes_message() {
+        let err = AppError::pipeline("GPU-Adapter nicht gefunden");
+        assert_eq!(
+            err.to_string(),
+            "Pipeline-Fehler: GPU-Adapter nicht gefunden"
+        );
     }
 }

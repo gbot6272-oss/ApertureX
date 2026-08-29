@@ -24,6 +24,15 @@ Jede Bibliothek, die dem Projekt hinzugefügt wird, wird hier vor bzw. mit dem C
 | `tauri` (v2) | MIT OR Apache-2.0 | App-Shell | Unkritisch |
 | `time` | MIT OR Apache-2.0 | Zeitstempel/Zeitzonen | Unkritisch |
 
+## Rust — Phase 2
+
+| Crate | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `wgpu` | MIT OR Apache-2.0 | GPU-Zugriff (Vulkan/Metal/DX12/GL) für die Entwickeln-Pipeline | Unkritisch, siehe ADR-0012 |
+| `bytemuck` | Zlib OR Apache-2.0 OR MIT | Sicheres Byte-Layout für GPU-Uniform-Puffer | Unkritisch |
+| `pollster` | Apache-2.0 OR MIT | Blockierendes Warten auf wgpus async-API ohne eigene Runtime-Abhängigkeit | Unkritisch |
+| `lcms2` (Rust-Binding, bindet `lcms2-sys`) | MIT (Binding und `lcms2-sys` beide MIT) | Farbmanagement (Anzeige-Transformation ProPhoto → sRGB) | Unkritisch — Lizenz beim Hinzufügen per `cargo metadata` verifiziert, nicht vermutet |
+
 ## Frontend — geplant für Phase 1
 
 | Paket | Lizenz | Zweck | Hinweis |

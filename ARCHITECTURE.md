@@ -85,18 +85,18 @@ Jeder Import-Schritt schreibt sofort in SQLite (WAL), nicht erst am Job-Ende —
 
 ## 5. Architektur Phase 2 — `apx-pipeline`
 
-Ersetzt den bisherigen Platzhalter-Einzeiler jetzt, wo die Entscheidungen getroffen sind (siehe `DECISIONS.md` ADR-0011 bis ADR-0018 für die Begründungen).
+Beschreibt den tatsächlich gebauten Stand (nicht mehr die Vorab-Planung aus Schritt 0 — siehe `DECISIONS.md` ADR-0011 bis ADR-0021 für die einzelnen Entscheidungen samt der Korrekturen, die sich beim tatsächlichen Bauen ergaben).
 
 **Modulaufbau von `apx-pipeline`:**
 ```
 apx-pipeline/
-  lib.rs            // öffentliche API: GpuContext, EdlV1, render_proxy()
+  lib.rs            // öffentliche API: GpuContext, EdlV1, develop::render_rgba8()
   error.rs          // PipelineError (thiserror, wie apx_core::AppError)
   edl/
     mod.rs          // öffentliche Re-Exports, EDL_SCHEMA_VERSION
-    v1.rs           // EdlV1-Struct (7 Regler-Felder, typisiert)
-    migrate.rs       // Upgrade-Kette für künftige Schema-Versionen
-  color/            // ProPhoto-Matrizen, lcms2-Anbindung (Anzeige-Transform)
+    v1.rs           // EdlV1/BasicAdjustments/WhiteBalanceAdjustment (7 Regler-Felder, typisiert)
+    migrate.rs       // Umwandlung EdlEnvelope <-> EdlV1, Upgrade-Kette für künftige Schema-Versionen
+  color/            // feste Kamera->sRGB-Matrix + Gammakurve, RGBA8-Quantisierung (kein lcms2, siehe ADR-0019)
   gpu/
     mod.rs          // GpuContext (Instance/Adapter/Device/Queue)
     dispatch.rs     // gemeinsamer Puffer-hoch/Shader-ausführen/-runter-Helfer
@@ -107,16 +107,28 @@ apx-pipeline/
     highlights_shadows.rs
     whites_blacks.rs
     basic_fused.rs
-  tile_cache.rs
+  develop.rs        // Orchestrierung: Weißabgleich-Gains -> basic_fused -> color -> RGBA8 (der einzige Einstiegspunkt, den apx-app aufruft)
+  tile_cache.rs     // kleiner handgerollter LRU-Cache für das teure decode_linear-Ergebnis pro Foto+Auflösung
+  test_support.rs   // #[cfg(test)]-only: gemeinsame synthetische Testmuster (ramp/gray_gradient/saturated_channels)
 ```
 
 **Abhängigkeitsrichtung:** `apx-pipeline` → `apx-core` + `apx-raw`. Nicht `apx-catalog` (siehe Diagramm/Regel oben). `apx-app` hängt zusätzlich von `apx-pipeline` ab und verdrahtet es wie die anderen drei Crates, ohne eigene Bildverarbeitungslogik.
 
-**EDL-Speicherung:** `apx-core` bekommt einen minimalen, versionsmarkierten Umschlagtyp `EdlEnvelope { schema_version: u32, payload: serde_json::Value }`. `apx-catalog` speichert nur diesen Umschlag (als `TEXT`/JSON in einer neuen `edit_history`-Tabelle, siehe `migrations/0002_edits.sql`) und muss den `payload`-Inhalt nie verstehen. Nur `apx-pipeline` kennt die konkrete `EdlV1`-Struct und entpackt `payload` in sie. Das hält die Abhängigkeitsrichtung sauber (kein `apx-catalog` → `apx-pipeline`).
+**EDL-Speicherung:** `apx-core` bekommt einen minimalen, versionsmarkierten Umschlagtyp `EdlEnvelope { schema_version: u32, payload: serde_json::Value }`. `apx-catalog` speichert nur diesen Umschlag (als `TEXT`/JSON in einer `edit_history`-Tabelle, siehe `migrations/0002_edits.sql`) und muss den `payload`-Inhalt nie verstehen. Nur `apx-pipeline` kennt die konkrete `EdlV1`-Struct und entpackt `payload` in sie (`edl::migrate::from_envelope`/`to_envelope`). Das hält die Abhängigkeitsrichtung sauber (kein `apx-catalog` → `apx-pipeline`).
 
-**`apx-raw`-Grenze:** Ein neuer, additiver Einstiegspunkt `apx_raw::decode_linear()` deckt die Schritte RAW-Dekodierung/Demosaicing/Normalisierung ab und hört **vor** dem bisher fest einprogrammierten Weißabgleich/Gamma auf (die bestehende `decode()`/`DecodedImage`-API für Phase-1-Aufrufer wie Vorschaubilder bleibt unverändert). `apx-pipeline` übernimmt ab dort: Weißabgleich, Belichtung/Ton, Ausgabe-Transform.
+**`apx-raw`-Grenze:** Ein additiver Einstiegspunkt `apx_raw::decode_linear()` deckt die Schritte RAW-Dekodierung/Demosaicing/Normalisierung ab und hört **vor** dem bisher fest einprogrammierten Weißabgleich/Gamma auf (die bestehende `decode()`/`DecodedImage`-API für Phase-1-Aufrufer wie Vorschaubilder bleibt unverändert). Er liefert ein `LinearImage` mit den As-shot-Weißabgleich-Koeffizienten **und** der festen Kamera→sRGB-Matrix (`cam_to_srgb`) — Letztere wird zwar erst von `apx-pipeline::color` angewendet, aber von `apx-raw` berechnet, weil dort bereits die Kamera-Kalibrierungsdaten vorliegen (siehe ADR-0019).
 
-**Interaktiver Rendering-Pfad:** Ein Regler-Wechsel im Frontend löst (gebündelt/entprellt) eine Anfrage über eine neue `apx://develop/<id>/<edl_hash>/<max_edge>`-Route aus (Erweiterung des bestehenden Protokoll-Handler-Musters), die `apx-pipeline`s fusionierten Shader auf den von `apx-raw::decode_linear()` gelieferten linearen Puffer anwendet und rohe RGBA8-Bytes zurückgibt (nicht PNG — Begründung in ADR-0016). Das Frontend lädt diese Bytes direkt als WebGL2-Textur, statt sie zu dekodieren.
+### Datenfluss Phase 2: Regler → Pixel
+
+Analog zu §2s Phase-1-Datenfluss, hier für den neuen interaktiven Entwickeln-Pfad:
+
+**Regler-Tick (Ziehen, noch nicht committet):**
+Frontend `DevelopSlider.onChange` → Store `setBasicField` (nur In-Memory, kein IPC) → `Viewer` berechnet `edlJson` aus dem aktuellen `developBasic` (`lib/edl.ts::buildEdlEnvelopeJson`) → `useDevelopRender` schickt frühestens im nächsten `requestAnimationFrame` einen `fetch()` an `apx://develop/<id>/<max_edge>/<edl_json>` → `apx-app::protocol::compute_develop`: `apx_core::EdlEnvelope::from_json_str` + `apx_pipeline::edl::from_envelope` (Validierung) → `TileCache::get_or_decode` (Cache-Treffer bei jedem Tick nach dem ersten desselben Fotos — `apx_raw::decode_linear()` läuft nur einmal) → `apx_pipeline::develop::render_rgba8`: `white_balance::compute_gains` → `basic_fused::apply_gpu` (mit automatischem CPU-Fallback) → `color::linear_camera_rgb_to_srgb_rgba8` (feste Matrix + Gammakurve) → 8-Byte-Breite/Höhe-Header + rohes RGBA8 zurück → Frontend lädt die Bytes direkt als WebGL2-Textur (`lib/webgl.ts::QuadRenderer`), kein Dekodierschritt nötig.
+
+**Commit (Loslassen/Blur/Doppelklick-Reset):**
+`DevelopSlider.onCommit` → Store `commitDevelopEdit` → Tauri-Command `apply_develop_edit` → `apx-catalog::Catalog::commit_edit` schreibt einen neuen `edit_history`-Schnappschuss und rückt `edit_current` nach (verwirft dabei eine zuvor per Undo erreichte „Zukunft", siehe ADR-0014).
+
+**Undo/Redo:** Store `undoDevelop`/`redoDevelop` → Tauri-Commands `undo_develop_edit`/`redo_develop_edit` → bewegen nur den `edit_current`-Zeiger (keine neue Zeile, keine gelöschte Zeile) → Antwort (`HistoryPosition`) wird zu `BasicAdjustments` entpackt und ersetzt `developBasic` direkt — kein separates Frontend-Verlaufssystem (siehe ADR-0018s Korrektur-Notiz).
 
 ## 6. Platzhalter für spätere Phasen
 

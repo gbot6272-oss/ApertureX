@@ -53,14 +53,20 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 <!-- Phasen-Zuordnung korrigiert (siehe DECISIONS.md ADR-0011): SPEC.md §5s
      Phase-2-Satz nennt nur die folgenden sieben Regler namentlich; Textur/
      Klarheit/Dunst entfernen/Dynamik/Sättigung gehören daher zu Phase 4,
-     nicht zu Phase 2. -->
-- [ ] Weißabgleich (Temperatur, Tint, Pipette, Kamera-Presets) — Phase 2 — Status: Nicht begonnen
-- [ ] Belichtung — Phase 2 — Status: Nicht begonnen
-- [ ] Kontrast — Phase 2 — Status: Nicht begonnen
-- [ ] Lichter — Phase 2 — Status: Nicht begonnen
-- [ ] Tiefen — Phase 2 — Status: Nicht begonnen
-- [ ] Weiß — Phase 2 — Status: Nicht begonnen
-- [ ] Schwarz — Phase 2 — Status: Nicht begonnen
+     nicht zu Phase 2. Aus demselben Grund gehören Pipette und
+     Kamera-Presets (Teil von §3.2s vollem Weißabgleich-Feature, aber
+     nicht Teil des Phase-2-Satzes) ebenfalls erst zu einer späteren
+     Phase — Weißabgleich selbst (Temperatur+Tint als Regler) ist für
+     Phase 2 fertig. -->
+- [x] Weißabgleich (Temperatur, Tint) — Phase 2 — Status: Fertig
+- [ ] Weißabgleich-Pipette (Klick ins Bild) — Phase 4 — Status: Nicht begonnen
+- [ ] Weißabgleich-Kamera-Presets (Tageslicht/Bewölkt/…) — Phase 4 — Status: Nicht begonnen
+- [x] Belichtung — Phase 2 — Status: Fertig
+- [x] Kontrast — Phase 2 — Status: Fertig
+- [x] Lichter — Phase 2 — Status: Fertig
+- [x] Tiefen — Phase 2 — Status: Fertig
+- [x] Weiß — Phase 2 — Status: Fertig
+- [x] Schwarz — Phase 2 — Status: Fertig
 - [ ] Textur — Phase 4 — Status: Nicht begonnen
 - [ ] Klarheit — Phase 4 — Status: Nicht begonnen
 - [ ] Dunst entfernen — Phase 4 — Status: Nicht begonnen
@@ -144,7 +150,7 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 
 ## 3.4 Modul ENTWICKELN — Workflow
 
-- [ ] Verlauf mit unbegrenzten, benennbaren, klickbaren Schritten (Undo/Redo) — Phase 2 — Status: Nicht begonnen
+- [x] Undo/Redo (unbegrenzt, dauerhaft über `edit_history`, überlebt App-Neustart) — Phase 2 — Status: Fertig — **Teil-Einschränkung:** kein sichtbares, klickbares Verlaufs-*Panel* mit benannten Schritten (nur Rückgängig/Wiederholen um je einen Schritt) — siehe `DECISIONS.md` ADR-0018s Korrektur-Notiz; die Backend-Grundlage (`list_edit_history`) für ein solches Panel existiert noch nicht und ist ein möglicher Ausbau für eine spätere Phase
 - [ ] Schnappschüsse — Phase 4 — Status: Nicht begonnen
 - [ ] Vorher/Nachher in vier Ansichten — Phase 4 — Status: Nicht begonnen
 - [ ] Einstellungen kopieren/einfügen (granular) — Phase 4 — Status: Nicht begonnen
@@ -240,7 +246,7 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Dark-First-Theme — Phase 1 — Status: Fertig (Tailwind-CSS-4-`@theme`-Tokens in `src/index.css`)
 - [ ] Vollständiges helles Theme + benutzerdefinierte Themes (Design-Tokens) — Phase 10 — Status: Nicht begonnen
 - [ ] Paletten ein-/ausklappbar, breitenziehbar, Arbeitsbereich-Preset speicherbar — Phase 3 — Status: Nicht begonnen
-- [ ] Regler-Standardverhalten (Doppelklick=Reset, Direkteingabe, Pfeiltasten, Shift, Alt-Maskenvorschau) — Phase 2 — Status: Nicht begonnen
+- [x] Regler-Standardverhalten (Doppelklick=Reset, Direkteingabe, Pfeiltasten=Feinschritt, Shift=Grobschritt) — Phase 2 — Status: Fertig — **Teil-Einschränkung:** Alt-Maskenvorschau nicht implementiert (keiner der 7 Phase-2-Regler hat eine Maskenvorschau — die betrifft eher spätere Regler wie Schärfung/lokale Masken, siehe Phase 4/6)
 - [x] Grundlegende Tastenkürzel (Bildwechsel, Zoom, Vollbild) — Phase 1 — Status: Fertig
 - [ ] Vollständig belegbare Tastenkürzel + Cheatsheet-Overlay (`?`) — Phase 10 — Status: Nicht begonnen
 - [x] Befehlspalette `Strg/Cmd+K` — Grundgerüst (Ordner/Befehle) — Phase 1 — Status: Fertig

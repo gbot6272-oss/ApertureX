@@ -31,7 +31,18 @@ Jede Bibliothek, die dem Projekt hinzugefügt wird, wird hier vor bzw. mit dem C
 | `wgpu` | MIT OR Apache-2.0 | GPU-Zugriff (Vulkan/Metal/DX12/GL) für die Entwickeln-Pipeline | Unkritisch, siehe ADR-0012 |
 | `bytemuck` | Zlib OR Apache-2.0 OR MIT | Sicheres Byte-Layout für GPU-Uniform-Puffer | Unkritisch |
 | `pollster` | Apache-2.0 OR MIT | Blockierendes Warten auf wgpus async-API ohne eigene Runtime-Abhängigkeit | Unkritisch |
-| `lcms2` (Rust-Binding, bindet `lcms2-sys`) | MIT (Binding und `lcms2-sys` beide MIT) | Farbmanagement (Anzeige-Transformation ProPhoto → sRGB) | Unkritisch — Lizenz beim Hinzufügen per `cargo metadata` verifiziert, nicht vermutet |
+
+**Nachträglich entfernt (Schritt 9):** `lcms2` war seit Schritt 1
+in `Cargo.toml` eingetragen, wurde aber nie tatsächlich im Code verwendet
+— die Kamera→sRGB-Farbtransformation kam am Ende ohne echtes
+ICC-Farbmanagement aus (feste Matrix + `srgb_gamma`, siehe ADR-0019),
+das ursprünglich für `lcms2` vorgesehene ProPhoto-Arbeitsraum-/
+Ausgabeprofil-Feature blieb zurückgestellt (siehe `color/mod.rs`s
+Moduldoku). Eine unbenutzte Abhängigkeit baut unnötig eine native
+C-Bibliothek mit ein — beim Dokumentations-Check in Schritt 9 aufgefallen
+und entfernt, statt sie bis zu einem tatsächlichen Verwendungszeitpunkt
+mitzuschleppen. Kommt zurück, sobald ein konkreter Aufrufer für echtes
+ICC-Farbmanagement existiert.
 
 ## Frontend — geplant für Phase 1
 

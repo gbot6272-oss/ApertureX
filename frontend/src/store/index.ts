@@ -123,6 +123,12 @@ interface DevelopSlice {
   commitDevelopEdit: (label?: string) => Promise<void>;
   undoDevelop: () => Promise<void>;
   redoDevelop: () => Promise<void>;
+  /** Zuletzt gemessene Ende-zu-Ende-Antwortzeit der `develop/...`-Route
+   * in Millisekunden (siehe `hooks/useDevelopRender`) — nur zur
+   * Beobachtung/ehrlichen Dokumentation des 16-ms-Ziels (`PLAN.md` Phase
+   * 2 Schritt 7), keine Business-Logik hängt daran. */
+  developLastLatencyMs: number | null;
+  setDevelopLatencyMs: (ms: number) => void;
 }
 
 type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice;
@@ -377,6 +383,14 @@ export const useAppStore = create<AppStore>()(
       if (!position) return;
       set((state) => {
         state.developBasic = basicFromHistoryPosition(position);
+      });
+    },
+
+    developLastLatencyMs: null,
+
+    setDevelopLatencyMs: (ms) => {
+      set((state) => {
+        state.developLastLatencyMs = ms;
       });
     },
   })),

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { developUrl } from "../lib/media";
+import { useAppStore } from "../store";
 
 export interface DevelopFrame {
   width: number;
@@ -28,9 +29,26 @@ function parseFrame(buffer: ArrayBuffer): DevelopFrame {
  * eine neuere für denselben Aufruf unterwegs ist (siehe `useImageBitmap`s
  * Moduldoku für die Begründung — dieselbe Backend-Einschränkung gilt
  * hier).
+ *
+ * **Entprellung (`PLAN.md` Phase 2 Schritt 7):** eine neue Anfrage wird
+ * nicht sofort bei jeder `edlJson`-Änderung losgeschickt, sondern erst im
+ * nächsten `requestAnimationFrame` — das koppelt die Anfragerate an den
+ * tatsächlichen Bild-Rhythmus des Geräts (typischerweise 60 Hz) statt an
+ * eine feste Millisekundenzahl, die auf sehr schnellen oder sehr
+ * langsamen Bildschirmen falsch wäre. Mehrere `edlJson`-Änderungen
+ * innerhalb desselben Frames lösen dadurch nur eine Anfrage aus (die
+ * letzte gewinnt).
+ *
+ * Misst außerdem die Ende-zu-Ende-Antwortzeit (`performance.now()` vor
+ * `fetch()` bis zur fertig geparsten Antwort) und schreibt sie in
+ * `developLastLatencyMs` — sichtbar in `DevelopPanel`, siehe
+ * `DECISIONS.md`/`PLAN.md` Phase 2 Schritt 7 zur ehrlichen
+ * Performance-Dokumentation (diese Zahl misst IPC + Dekodierung/Rendern,
+ * nicht das Neuzeichnen im Browser selbst).
  */
 export function useDevelopRender(photoId: string | null, edlJson: string | null, maxEdge: number | undefined): DevelopFrame | null {
   const [frame, setFrame] = useState<DevelopFrame | null>(null);
+  const setDevelopLatencyMs = useAppStore((s) => s.setDevelopLatencyMs);
 
   useEffect(() => {
     if (!photoId || !edlJson) {
@@ -41,26 +59,31 @@ export function useDevelopRender(photoId: string | null, edlJson: string | null,
     const controller = new AbortController();
     const url = developUrl(photoId, edlJson, maxEdge);
 
-    void (async () => {
-      try {
-        const response = await fetch(url, { signal: controller.signal });
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status} für ${url}`);
+    const rafId = requestAnimationFrame(() => {
+      const startedAt = performance.now();
+      void (async () => {
+        try {
+          const response = await fetch(url, { signal: controller.signal });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status} für ${url}`);
+          }
+          const buffer = await response.arrayBuffer();
+          if (controller.signal.aborted) return;
+          setFrame(parseFrame(buffer));
+          setDevelopLatencyMs(performance.now() - startedAt);
+        } catch (err) {
+          if ((err as DOMException).name !== "AbortError") {
+            console.error("Entwickeln-Rendering fehlgeschlagen:", url, err);
+          }
         }
-        const buffer = await response.arrayBuffer();
-        if (controller.signal.aborted) return;
-        setFrame(parseFrame(buffer));
-      } catch (err) {
-        if ((err as DOMException).name !== "AbortError") {
-          console.error("Entwickeln-Rendering fehlgeschlagen:", url, err);
-        }
-      }
-    })();
+      })();
+    });
 
     return () => {
+      cancelAnimationFrame(rafId);
       controller.abort();
     };
-  }, [photoId, edlJson, maxEdge]);
+  }, [photoId, edlJson, maxEdge, setDevelopLatencyMs]);
 
   return frame;
 }

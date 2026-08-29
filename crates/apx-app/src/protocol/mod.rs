@@ -264,12 +264,32 @@ fn compute_develop(
     let edl = apx_pipeline::edl::from_envelope(&envelope).map_err(apx_core::AppError::from)?;
 
     let source_path = resolve_source_path(catalog, photo_id)?;
+
+    // Zwei getrennte Zeitmessungen statt einer gemeinsamen: der teure
+    // Dekodier-Schritt läuft (Cache-Treffer vorausgesetzt) nur beim
+    // allerersten Regler-Tick eines Fotos, das Rendern dagegen bei jedem
+    // Tick — für das 16-ms-Ziel (SPEC.md §2.4) zählt fast ausschließlich
+    // Letzteres. Siehe PLAN.md Phase 2 Schritt 7 zur ehrlichen
+    // Performance-Dokumentation.
+    let decode_started = std::time::Instant::now();
     let linear = tile_cache.get_or_decode(photo_id, max_edge, || {
         apx_raw::decode_linear(&source_path, max_edge)
     })?;
+    let decode_elapsed = decode_started.elapsed();
 
+    let render_started = std::time::Instant::now();
     let pixels = apx_pipeline::develop::render_rgba8(Some(pipeline), &linear, &edl)
         .map_err(apx_core::AppError::from)?;
+    let render_elapsed = render_started.elapsed();
+
+    tracing::debug!(
+        photo_id = %photo_id,
+        width = linear.width,
+        height = linear.height,
+        decode_ms = decode_elapsed.as_secs_f64() * 1000.0,
+        render_ms = render_elapsed.as_secs_f64() * 1000.0,
+        "compute_develop abgeschlossen"
+    );
 
     let mut framed = Vec::with_capacity(8 + pixels.len());
     framed.extend_from_slice(&linear.width.to_le_bytes());

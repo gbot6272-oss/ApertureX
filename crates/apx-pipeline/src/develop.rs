@@ -49,7 +49,7 @@ pub fn render_rgba8(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::edl::BasicAdjustments;
+    use crate::edl::{BasicAdjustments, WhiteBalanceAdjustment};
 
     const IDENTITY: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
@@ -116,5 +116,82 @@ mod tests {
             // hier auf u8 quantisiert wird.
             assert!((*c as i16 - *g as i16).abs() <= 1, "CPU={c} GPU={g}");
         }
+    }
+
+    /// Ehrliche Performance-Messung für das 16-ms-Ziel (`SPEC.md` §2.4,
+    /// `PLAN.md` Phase 2 Schritt 7): misst nur `render_rgba8` selbst (der
+    /// Teil, der bei *jedem* Regler-Tick läuft — der teure Dekodier-Schritt
+    /// läuft dank `TileCache` nur einmal pro Foto, siehe `tile_cache.rs`
+    /// und `crates/apx-app/src/protocol/mod.rs`s `compute_develop`), auf
+    /// einem synthetischen Bild bei `STANDARD_EDGE`-ähnlicher Auflösung
+    /// (2048×1365, 3:2-Seitenverhältnis). Ausgabe nur mit `--nocapture`
+    /// sichtbar; die generöse Zeitschranke unten ist ein
+    /// Regressionswächter gegen eine grobe Verlangsamung, keine scharfe
+    /// Behauptung über das 16-ms-Ziel selbst — dafür fehlt in dieser
+    /// Sandbox eine echte Fenster-/IPC-/Compositing-Umgebung (siehe
+    /// `DECISIONS.md`, Ehrlichkeits-Hinweis unten).
+    #[test]
+    fn render_rgba8_timing_on_synthetic_standard_edge_image() {
+        let ctx = GpuContext::new_blocking().ok();
+        if ctx.is_none() {
+            eprintln!("übersprungen: kein GPU-Adapter in dieser Umgebung verfügbar");
+        }
+
+        let width = 2048;
+        let height = 1365;
+        let pixels: Vec<f32> = (0..(width * height * 3))
+            .map(|i| ((i % 997) as f32) / 997.0)
+            .collect();
+        let linear = LinearImage {
+            width,
+            height,
+            pixels,
+            as_shot_wb_coeffs: [1.05, 1.0, 0.9, 1.0],
+            cam_to_srgb: IDENTITY,
+        };
+        let edl = EdlV1 {
+            basic: BasicAdjustments {
+                exposure_ev: 0.4,
+                contrast: 15.0,
+                highlights: -10.0,
+                shadows: 10.0,
+                whites: 5.0,
+                blacks: -5.0,
+                white_balance: WhiteBalanceAdjustment {
+                    temp_shift_kelvin: 200.0,
+                    tint_shift: -5.0,
+                },
+            },
+        };
+
+        if let Some(ctx) = &ctx {
+            let started = std::time::Instant::now();
+            let _ = render_rgba8(Some(ctx), &linear, &edl).expect("GPU-Rendering");
+            let elapsed = started.elapsed();
+            eprintln!(
+                "render_rgba8 (GPU, {width}x{height}, Adapter '{}'): {:.2} ms",
+                ctx.adapter_info.name,
+                elapsed.as_secs_f64() * 1000.0
+            );
+            // Sehr großzügige Schranke (kein hartes 16-ms-Versprechen,
+            // siehe Doku oben) — soll nur eine eklatante Regression
+            // fangen, nicht auf dieser Sandbox-Hardware kalibriert sein.
+            assert!(
+                elapsed.as_millis() < 2000,
+                "GPU-Rendering ungewöhnlich langsam: {elapsed:?}"
+            );
+        }
+
+        let started = std::time::Instant::now();
+        let _ = render_rgba8(None, &linear, &edl);
+        let elapsed = started.elapsed();
+        eprintln!(
+            "render_rgba8 (CPU-Fallback, {width}x{height}): {:.2} ms",
+            elapsed.as_secs_f64() * 1000.0
+        );
+        assert!(
+            elapsed.as_millis() < 2000,
+            "CPU-Fallback ungewöhnlich langsam: {elapsed:?}"
+        );
     }
 }

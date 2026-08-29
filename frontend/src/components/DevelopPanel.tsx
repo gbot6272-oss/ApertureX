@@ -30,6 +30,7 @@ export function DevelopPanel() {
   const undoDevelop = useAppStore((s) => s.undoDevelop);
   const redoDevelop = useAppStore((s) => s.redoDevelop);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
+  const lastLatencyMs = useAppStore((s) => s.developLastLatencyMs);
 
   useEffect(() => {
     if (!open) return;
@@ -85,6 +86,12 @@ export function DevelopPanel() {
       </div>
 
       {!selectedPhotoId && <p className="text-xs text-text-muted">Kein Foto ausgewählt.</p>}
+
+      {selectedPhotoId && lastLatencyMs !== null && (
+        <p className="text-xs text-text-muted" title="Ende-zu-Ende-Antwortzeit der letzten Regler-Vorschau (IPC + Dekodierung/Rendern, ohne Neuzeichnen im Browser) — siehe PLAN.md Phase 2 Schritt 7">
+          Letztes Rendering: {Math.round(lastLatencyMs)} ms
+        </p>
+      )}
 
       {selectedPhotoId && (
         <>

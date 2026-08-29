@@ -30,7 +30,7 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [ ] Stapel-Metadatenbearbeitung — Phase 3 — Status: Nicht begonnen
 - [ ] EXIF/IPTC/XMP-Editor (alle Felder) — Phase 3 — Status: Nicht begonnen
 - [ ] Rasteransicht — Phase 3 — Status: Nicht begonnen
-- [ ] Lupe/Einzelbildansicht (Basis-Viewer) — Phase 1 — Status: Nicht begonnen
+- [x] Lupe/Einzelbildansicht (Basis-Viewer) — Phase 1 — Status: Fertig
 - [ ] Vergleichsansicht — Phase 3 — Status: Nicht begonnen
 - [ ] Übersichtsansicht — Phase 3 — Status: Nicht begonnen
 - [ ] Personenansicht — Phase 3 — Status: Nicht begonnen
@@ -237,7 +237,7 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [ ] Vollständiges helles Theme + benutzerdefinierte Themes (Design-Tokens) — Phase 10 — Status: Nicht begonnen
 - [ ] Paletten ein-/ausklappbar, breitenziehbar, Arbeitsbereich-Preset speicherbar — Phase 3 — Status: Nicht begonnen
 - [ ] Regler-Standardverhalten (Doppelklick=Reset, Direkteingabe, Pfeiltasten, Shift, Alt-Maskenvorschau) — Phase 2 — Status: Nicht begonnen
-- [ ] Grundlegende Tastenkürzel (Bildwechsel, Zoom, Vollbild) — Phase 1 — Status: Teilweise (Bildwechsel ←/→ fertig; Zoom/Vollbild folgen mit dem Viewer in Schritt 9)
+- [x] Grundlegende Tastenkürzel (Bildwechsel, Zoom, Vollbild) — Phase 1 — Status: Fertig
 - [ ] Vollständig belegbare Tastenkürzel + Cheatsheet-Overlay (`?`) — Phase 10 — Status: Nicht begonnen
 - [x] Befehlspalette `Strg/Cmd+K` — Grundgerüst (Ordner/Befehle) — Phase 1 — Status: Fertig
 - [ ] Befehlspalette — vollständig (jede Funktion/jedes Preset) — Phase 5 — Status: Nicht begonnen
@@ -250,5 +250,5 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] SQLite-Katalog mit versionierten Migrationen — Phase 1 — Status: Fertig
 - [x] RAW-Dekodierung (provisorische Kette, Formate CR2/CR3/NEF/ARW/RAF/ORF/RW2/DNG + JPEG/PNG/TIFF) — Phase 1 — Status: Fertig (abweichend, siehe DECISIONS.md ADR-0007 — Golden-Image-Tests gegen echte Kameradateien fehlen noch, Netzwerkzugriff auf raw.pixls.us blockiert)
 - [x] Custom-Protokoll-Handler für Bildübertragung — Phase 1 — Status: Fertig
-- [ ] Viewer mit Zoom/Pan (Canvas 2D, provisorisch) — Phase 1 — Status: Nicht begonnen
+- [x] Viewer mit Zoom/Pan (Canvas 2D, provisorisch) — Phase 1 — Status: Fertig
 - [ ] CI (Windows/macOS/Linux, fmt/clippy/test/build) — Phase 1 — Status: Nicht begonnen

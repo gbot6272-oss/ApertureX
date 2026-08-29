@@ -86,6 +86,20 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     return allPhotos().find((p) => p.id === photoId);
   }
 
+  /** Gemeinsame Kriterien-Prüfung für `filter_photos`/`search_and_filter_photos`
+   * (Schritt 8.4) — spiegelt `crates/apx-catalog/src/repository/search.rs`s
+   * `build_filter_clause`. */
+  function matchesFilterCriteria(
+    photo: MockPhoto,
+    criteria: { rating_at_least?: number; flag?: number; color_label?: string; camera_model?: string },
+  ): boolean {
+    if (criteria.rating_at_least !== undefined && photo.rating < criteria.rating_at_least) return false;
+    if (criteria.flag !== undefined && photo.flag !== criteria.flag) return false;
+    if (criteria.color_label !== undefined && photo.color_label !== criteria.color_label) return false;
+    if (criteria.camera_model !== undefined && photo.camera_model !== criteria.camera_model) return false;
+    return true;
+  }
+
   /** Flache Kopie statt der intern weiterverwendeten Foto-Referenz —
    * genau wie bei `list_photo_keywords`/`list_collections` oben: echtes
    * Tauri-IPC serialisiert bei jedem Aufruf frisch, hier ist es sonst
@@ -303,14 +317,34 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           camera_model?: string;
         };
         return allPhotos()
-          .filter((p) => {
-            if (criteria.rating_at_least !== undefined && p.rating < criteria.rating_at_least) return false;
-            if (criteria.flag !== undefined && p.flag !== criteria.flag) return false;
-            if (criteria.color_label !== undefined && p.color_label !== criteria.color_label) return false;
-            if (criteria.camera_model !== undefined && p.camera_model !== criteria.camera_model) return false;
-            return true;
-          })
+          .filter((p) => matchesFilterCriteria(p, criteria))
           .map(clonePhoto);
+      }
+      case "search_and_filter_photos": {
+        const query = (args.query as string | null)?.trim().toLowerCase();
+        const criteria = args.criteria as {
+          rating_at_least?: number;
+          flag?: number;
+          color_label?: string;
+          camera_model?: string;
+        };
+        return allPhotos()
+          .filter((p) => (!query ? true : p.filename.toLowerCase().includes(query)))
+          .filter((p) => matchesFilterCriteria(p, criteria))
+          .map(clonePhoto);
+      }
+
+      // ---- Bibliothek: Duplikaterkennung (ab Phase 3, Schritt 8.2) ---------
+      case "list_duplicate_photo_groups": {
+        const byHash = new Map<string, MockPhoto[]>();
+        for (const p of allPhotos()) {
+          const hash = p.content_hash as string | null | undefined;
+          if (!hash) continue;
+          const group = byHash.get(hash) ?? [];
+          group.push(p);
+          byHash.set(hash, group);
+        }
+        return [...byHash.values()].filter((group) => group.length > 1).map((group) => group.map(clonePhoto));
       }
 
       default:

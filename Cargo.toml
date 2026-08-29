@@ -38,6 +38,7 @@ time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
 walkdir = "2"
 rayon = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
+sha2 = "0.10"
 
 [profile.dev]
 # Debug-Builds mit etwas Optimierung: RAW-Dekodierung ist ohne das im

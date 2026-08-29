@@ -36,6 +36,10 @@ num_cpus = "1"
 # Dekodiert die von `convertFileSrc` prozentkodierten apx://-Pfadsegmente,
 # siehe DECISIONS.md ADR-0009.
 percent-encoding = "2"
+# Duplikaterkennung per exaktem Hash (Phase 3, Schritt 8.2, ADR-0027):
+# SHA-256-Streaming-Hash jeder importierten Datei. Bereits transitiv im
+# Cargo.lock vorhanden (MIT OR Apache-2.0) — kein neues Lizenzrisiko.
+sha2.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

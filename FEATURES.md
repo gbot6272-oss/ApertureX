@@ -18,17 +18,19 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
      Zwei Punkte (Duplikaterkennung per Hash, Sortierung) waren bei
      dieser ersten Korrektur übersehen worden und sind erst bei der
      Phase-3-Abnahme (Schritt 7) nachträglich umgetaggt worden, siehe
-     DECISIONS.md ADR-0026. -->
+     DECISIONS.md ADR-0026 — auf ausdrücklichen Nutzerwunsch aber noch
+     in Phase 3 nachgezogen worden (zusammen mit drei weiteren im
+     Abschlussbericht ehrlich benannten Lücken), siehe ADR-0027. -->
 
 - [x] Import: Ordner scannen, Metadaten lesen, Thumbnails erzeugen (Basisfunktion) — Phase 1 — Status: Fertig
 - [x] Import mit Kopieren/Verschieben/Hinzufügen — Phase 3 — Status: Fertig
 - [ ] Import mit DNG-Konvertierung — Phase 5 — Status: Nicht begonnen
 - [x] Import-Presets — Phase 3 — Status: Fertig
 - [x] Automatisches Umbenennen mit Token-System — Phase 3 — Status: Fertig
-- [ ] Duplikaterkennung per exaktem Hash — Phase 6 — Status: Nicht begonnen (siehe ADR-0026: bei Phase 3 Schritt 0 übersehene Über-Scope-Korrektur, `content_hash`-Spalte existiert bereits seit Phase 1, wird aber nie befüllt)
+- [x] Duplikaterkennung per exaktem Hash — Phase 3 — Status: Fertig (siehe ADR-0027: `content_hash`-Spalte existierte bereits seit Phase 1, wird jetzt per Streaming-SHA-256 beim Import befüllt; reine Anzeige, blockiert den Import nicht)
 - [ ] Duplikaterkennung per Perceptual Hash, Duplikat-Assistent mit Auto-Auswahl bester Version — Phase 9 — Status: Nicht begonnen
 - [x] Ordnerbaum (Basis-Anzeige, Fotoanzahl je Ordner) — Phase 1 — Status: Fertig (flache Liste, kein Baum — echte Hierarchie/Synchronisation ist Phase 3, siehe Zeile darunter)
-- [x] Ordnerbaum-Synchronisation (echte Hierarchie über `parent_id`) — Phase 3 — Status: Fertig (abweichend, siehe DECISIONS.md ADR-0026: Baumdarstellung/Relink/Fehlend-Erkennung fertig, Import legt aber weiterhin nur den unmittelbaren Elternordner an, keine automatische Mehrebenen-Verknüpfung beim Import)
+- [x] Ordnerbaum-Synchronisation (echte Hierarchie über `parent_id`) — Phase 3 — Status: Fertig (siehe DECISIONS.md ADR-0027: Import legt jetzt die volle Verzeichniskette bis zum gewählten Import-Ordner bzw. bei Copy/Move bis zum Zielordner an, statt nur den unmittelbaren Elternordner)
 - [x] Ordner fehlend/wiederfinden — Phase 3 — Status: Fertig
 - [x] Sammlungen (manuell, feste Reihenfolge) — Phase 3 — Status: Fertig
 - [ ] Sammlungssätze, intelligente Sammlungen mit verschachtelten UND/ODER-Regeln, Zielsammlung — Phase 6 — Status: Nicht begonnen
@@ -41,15 +43,16 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Schlagworte (flache Liste, ohne Hierarchie) — Phase 3 — Status: Fertig
 - [ ] Schlagworthierarchie (Synonyme, Export-Steuerung, Auto-Vervollständigung), Schlagwortvorschläge, Tag-Regeln (bedingte Auto-Tags) — Phase 6 — Status: Nicht begonnen
 - [x] Metadaten-Panel (Basisfelder lesen, Bewertung/Flagge/Farbe/Schlagworte editieren) — Phase 3 — Status: Fertig
+- [x] Undo/Redo für Bibliotheks-Metadaten (Bewertung/Flagge/Farbe/Schlagworte/Sammlungsmitgliedschaft) — Phase 3 — Status: Fertig (siehe DECISIONS.md ADR-0027; deckt bewusst nicht Sammlung anlegen/umbenennen/löschen ab)
 - [ ] Metadaten-Presets, Stapel-Metadatenbearbeitung, EXIF/IPTC/XMP-Editor (alle Felder), frei definierbare Metadaten-Felder, Sidecar-Export (.xmp) — Phase 6 — Status: Nicht begonnen
 - [x] Volltextsuche (FTS5) über Dateiname, Kamera, Objektiv — Phase 3 — Status: Fertig
 - [x] Rasteransicht — Phase 3 — Status: Fertig
 - [x] Lupe/Einzelbildansicht (Basis-Viewer) — Phase 1 — Status: Fertig
 - [ ] Vergleichsansicht, Übersichtsansicht — Phase 6 — Status: Nicht begonnen
 - [ ] Personenansicht (Gesichtserkennung) — Phase 9 — Status: Nicht begonnen
-- [x] Filterleiste (Text, Attribut, Metadaten, kombiniert) — Phase 3 — Status: Fertig (abweichend, siehe DECISIONS.md ADR-0026: Text- und Attributfilter [inkl. Kameramodell] sind alternativ statt kombinierbar)
+- [x] Filterleiste (Text, Attribut, Metadaten, kombiniert) — Phase 3 — Status: Fertig (siehe DECISIONS.md ADR-0027: Text- und Attributfilter [inkl. Kameramodell] sind jetzt per UND kombinierbar, nicht mehr alternativ wie in ADR-0026)
 - [ ] Filter-Presets — Phase 6 — Status: Nicht begonnen
-- [ ] Sortierung nach beliebigem Feld — Phase 6 — Status: Nicht begonnen (siehe ADR-0026: bei Phase 3 Schritt 0 übersehene Über-Scope-Korrektur; Raster/Filmstreifen sortieren fest nach Dateiname)
+- [x] Sortierung nach beliebigem Feld — Phase 3 — Status: Fertig (siehe ADR-0027: client-seitig, Dateiname/Aufnahmedatum/Bewertung/Dateigröße/Kameramodell, fehlende Werte immer ans Ende)
 - [ ] Schnellentwicklung im Raster — Phase 6 — Status: Nicht begonnen
 - [ ] Vorschau-Cache-Verwaltung (Standard, 1:1), Smart Previews, Offline-Bearbeitung über Smart Previews — Phase 6 — Status: Nicht begonnen
 - [ ] Sekundäres Display mit unabhängiger Ansicht — Phase 9 — Status: Nicht begonnen

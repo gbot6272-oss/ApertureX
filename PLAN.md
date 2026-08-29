@@ -290,3 +290,40 @@ Wie bei Phase 2 gibt es kein eigenes ausführliches Prompt-Dokument — die Schr
 
 ### Nicht in Phase 3 (bewusst zurückgestellt)
 Siehe `FEATURES.md` §3.1 für die genaue Zuordnung: Gesichtserkennung, virtuelle Kopien, Stapel, Sekundäres Display (→ Phase 9 bzw. eigene spätere Ausbaustufe), Schlagwort-Hierarchie/Synonyme/Auto-Vervollständigung, intelligente Sammlungen mit Regeln, Sammlungssätze, Metadaten-Presets, Stapel-Metadatenbearbeitung, vollständiger EXIF/IPTC/XMP-Editor, Sidecar-Export, Vergleichs-/Übersichtsansicht, Vorschau-Cache-Verwaltung/Smart Previews, Filter-Presets, Schnellentwicklung im Raster (→ Phase 6), Perceptual-Hash-Duplikaterkennung, Katalog-Statistiken-Dashboard (→ Phase 9), DNG-Konvertierung (→ Phase 5).
+
+## Schritt 8 — Nachtrag: fünf zurückgestellte Punkte nachgezogen
+
+Nach dem Abschlussbericht zu Schritt 7 hat der Nutzer entschieden, genau
+die fünf dort ehrlich benannten Lücken jetzt noch in Phase 3 zu
+schließen — nicht den kompletten restlichen BIBLIOTHEK-Katalog (siehe
+`DECISIONS.md` ADR-0027 für die vollständige Begründung je Punkt).
+
+- [x] 8.1 Undo/Redo für Bibliotheks-Metadaten
+  - [x] `frontend/src/lib/undoStack.ts`: reine, getestete Stack-Logik (`pushUndo`/`undo`/`redo`)
+  - [x] `store/index.ts`: `libraryUndoStack`/`libraryRedoStack`, `undoLibraryAction`/`redoLibraryAction`; `setPhotoRating`/`setPhotoFlag`/`setPhotoColorLabel`/`addKeywordToPhoto`/`removeKeywordFromPhoto`/`addSelectionToCollection` erfassen den alten Zustand und pushen einen Undo-Eintrag
+  - [x] `App.tsx`: Strg/Cmd+Z / Strg/Cmd+Umschalt+Z, gated auf `!developPanelOpen`
+  - [x] Bewusst nicht abgedeckt: Sammlung anlegen/umbenennen/löschen
+
+- [x] 8.2 Duplikaterkennung per exaktem Hash
+  - [x] Neue direkte Abhängigkeit `sha2` (0.10.9, bereits transitiv vorhanden)
+  - [x] `import_single_file` berechnet einen SHA-256-Streaming-Hash und schreibt ihn in `NewPhoto.content_hash`
+  - [x] `Catalog::list_duplicate_photo_groups()`, neuer Tauri-Command, `ImportFinishedPayload.duplicate_count`
+  - [x] Frontend: „Duplikate anzeigen"-Knopf in `FilterBar.tsx`, Duplikatzahl im Import-Abschlusstext
+
+- [x] 8.3 Sortierung nach beliebigem Feld
+  - [x] `frontend/src/lib/sortPhotos.ts` (client-seitig, reine Funktion, fehlende Werte immer ans Ende)
+  - [x] `PhotoDto`/`store/index.ts`: neues `file_size`-Feld, `librarySortField`/`librarySortDirection`, `selectActivePhotos` sortiert als letzten Schritt
+  - [x] `FilterBar.tsx`: Feld-Auswahl + Richtungs-Umschalter
+
+- [x] 8.4 Kombinierte Suche + Filter
+  - [x] `repository/search.rs`: gemeinsamer `build_filter_clause`-Baukasten, neue `search_and_filter_photos` (additiv zu `search_photos`/`filter_photos`)
+  - [x] Neuer Tauri-Command `search_and_filter_photos`; `store/index.ts`s `runLibrarySearchAndFilter` kombiniert Suchtext und Filter-Chips statt sie sich gegenseitig löschen zu lassen
+
+- [x] 8.5 Volle Ordnerbaum-Hierarchie beim Import
+  - [x] `run_with_mode` berechnet eine Hierarchie-Wurzel (gewählter Ordner bei `AddInPlace`, Zielordner bei `Copy`/`Move`)
+  - [x] `ensure_folder` legt rekursiv alle Elternordner bis zur Hierarchie-Wurzel an, mit defensivem Fallback
+
+- [x] Dokumentation + Verifikation
+  - [x] `DECISIONS.md` ADR-0027, `FEATURES.md` (zwei Punkte zurück auf Phase 3/Fertig, Filterleisten- und Ordnerbaum-Zeile aktualisiert, neue Undo/Redo-Zeile), `THIRD_PARTY.md` (`sha2`-Eintrag), dieser Abschnitt
+  - [x] Neue Tests: Rust (`import::tests::duplicate_photos_are_detected_by_content_hash`, `nested_subfolders_form_a_multi_level_parent_chain`, `repository::photos::list_duplicate_groups_finds_matching_hashes_and_ignores_the_rest`, vier neue `repository::search`-Tests für die kombinierte Suche), Vitest (`undoStack.test.ts`, `sortPhotos.test.ts`), Playwright (`library-flow.spec.ts`: Undo/Redo-Erweiterung des ersten Tests, kombinierte Suche+Filter, Duplikatanzeige, Sortierung)
+  - Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace`, `tsc -b`, `vitest run`, `playwright test`, `vite build` — alles lokal grün

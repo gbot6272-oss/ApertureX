@@ -39,6 +39,9 @@ export default function App() {
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
   const setPhotoRating = useAppStore((s) => s.setPhotoRating);
   const setPhotoFlag = useAppStore((s) => s.setPhotoFlag);
+  const developPanelOpen = useAppStore((s) => s.developPanelOpen);
+  const undoLibraryAction = useAppStore((s) => s.undoLibraryAction);
+  const redoLibraryAction = useAppStore((s) => s.redoLibraryAction);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => {
@@ -57,6 +60,21 @@ export default function App() {
       const target = event.target as HTMLElement | null;
       const isEditable = target !== null && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
       if (isEditable) return;
+
+      // Rückgängig/Wiederholen für Bibliotheks-Metadaten (Schritt 8.1,
+      // `DECISIONS.md` ADR-0027) — nur, wenn das Entwickeln-Panel nicht
+      // offen ist: das hat schon seinen eigenen lokalen Ctrl/Cmd+Z-Handler
+      // (siehe `DevelopPanel.tsx`), sonst würden beide Aktionen auf
+      // denselben Tastendruck reagieren.
+      if (!developPanelOpen && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) {
+          void redoLibraryAction();
+        } else {
+          void undoLibraryAction();
+        }
+        return;
+      }
 
       if (event.key === "ArrowLeft") {
         stepSelection(-1);
@@ -79,7 +97,7 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [stepSelection, selectedPhotoId, setPhotoRating, setPhotoFlag]);
+  }, [stepSelection, selectedPhotoId, setPhotoRating, setPhotoFlag, developPanelOpen, undoLibraryAction, redoLibraryAction]);
 
   return (
     <div className="flex h-screen flex-col bg-bg-base text-text-primary">

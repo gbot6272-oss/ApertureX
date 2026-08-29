@@ -102,7 +102,7 @@ test.describe("Start -> Import -> Auswahl -> Viewer", () => {
       photosByFolder: { [FOLDER_ID]: PHOTOS },
       catalogStatus: { catalog_path: "mock-catalog.sqlite3", folder_count: 1, photo_count: PHOTOS.length },
     });
-    await emitMockEvent(page, "import:finished", { imported: 3, skipped: 0, error_count: 0, cancelled: false });
+    await emitMockEvent(page, "import:finished", { imported: 3, skipped: 0, error_count: 0, cancelled: false, duplicate_count: 0 });
 
     await expect(page.getByText("Import abgeschlossen: 3 importiert · 0 übersprungen")).toBeVisible();
 

@@ -706,3 +706,98 @@ einem (flachen) Ordner zugeordnet werden.
 Definition-of-Done in `PLAN.md` Schritt 7 bewertet diese drei Punkte
 entsprechend ehrlich statt sie stillschweigend als erledigt
 auszuweisen.
+
+## ADR-0027: Fünf im Abschlussbericht ehrlich benannte Lücken nachträglich in Phase 3 geschlossen
+
+**Status:** Angenommen
+**Kontext:** Im Abschlussbericht zu Phase 3 (Schritt 7) wurden fünf Lücken
+offen benannt statt stillschweigend übergangen — DoD-Kriterium 5 aus
+`SPEC.md` §7 (Undo/Redo) sowie die beiden ADR-0026-Umtaggungen
+(Duplikaterkennung, Sortierung), die bewusst alternative statt
+kombinierte Suche/Filter, und die teilweise Ordnerbaum-Population beim
+Import. Auf ausdrücklichen Nutzerwunsch werden **genau diese fünf
+Punkte** jetzt nachgezogen — nicht der komplette restliche
+BIBLIOTHEK-Katalog aus `SPEC.md` §3.1 (Gesichtserkennung, Stapel,
+Schlagwort-Hierarchie, intelligente Sammlungen, Metadaten-Presets/
+Batch-Editing, voller EXIF/IPTC/XMP-Editor + Sidecar-Export,
+Katalog-Backup/-Reparatur/-Merge, Perceptual-Hash-Duplikate,
+DNG-Konvertierung, Cheatsheet-Overlay bleiben wie in ADR-0022 auf ihre
+jeweils spätere Phase verteilt).
+
+**Entscheidung, je Punkt:**
+
+1. **Undo/Redo für Bibliotheks-Metadaten** (Bewertung/Flagge/Farbe/
+   Schlagworte/Sammlungsmitgliedschaft): reines Frontend-Feature, keine
+   neue Backend-Verlaufstabelle — anders als beim Entwickeln-Verlauf
+   (`edit_history`, ADR-0014) gibt es hier keinen natürlichen Ort für
+   einen Verlauf im Katalog; die Wahrheit bleibt der zuletzt bekannte
+   Frontend-Zustand. Neu `frontend/src/lib/undoStack.ts` (reine,
+   getestete Stack-Logik: `pushUndo`/`undo`/`redo`, neuer Push verwirft
+   die Redo-„Zukunft", gleiches Prinzip wie ADR-0014), `store/index.ts`
+   bekommt `libraryUndoStack`/`libraryRedoStack` plus
+   `undoLibraryAction`/`redoLibraryAction`; `App.tsx`s globaler
+   Tastatur-Handler behandelt Strg/Cmd+Z / Strg/Cmd+Umschalt+Z, aber nur
+   wenn das Entwickeln-Panel nicht offen ist (das hat schon seinen
+   eigenen lokalen Handler in `DevelopPanel.tsx`). Bewusst **nicht**
+   abgedeckt: Sammlung anlegen/umbenennen/löschen (strukturelle
+   Aktionen mit unklarer Undo-Semantik bei Neuvergabe der ID). Bekannter
+   Grenzfall bei „Zu Sammlung hinzufügen": Rückgängig entfernt alle
+   Fotos, die diese eine Aktion hinzugefügt hat — war eines davon schon
+   vorher Mitglied, entfernt Rückgängig es trotzdem (keine
+   Mitgliedschafts-Historie pro Foto).
+2. **Duplikaterkennung per exaktem Hash**: neue direkte Abhängigkeit
+   `sha2` (schon transitiv im `Cargo.lock` vorhanden, Version 0.10.9,
+   `MIT OR Apache-2.0`, damit kein neues Lizenzrisiko). Jede beim Import
+   gestagte Datei bekommt einen per Streaming berechneten
+   SHA-256-Hex-Digest (`BufReader` + `std::io::copy` direkt in den
+   Hasher, kein Volleinlesen) in `photos.content_hash` — die Spalte
+   existierte seit Phase 1, war aber immer `NULL` (ihr Migrations-
+   Kommentar nennt noch ein ursprünglich angedachtes xxHash-Teilhash-
+   Schema aus der Phase-1-Planung; das wird hier bewusst nicht
+   nachgebaut, Migrationen werden nie nachträglich geändert). Neue
+   `Catalog::list_duplicate_photo_groups()` gruppiert nach `content_hash`
+   (nur Fotos mit gesetztem Hash, `HAVING COUNT(*) > 1`); `run_with_mode`
+   ruft sie am Ende auf und meldet die Gesamtzahl betroffener Fotos über
+   ein neues `ImportFinishedPayload.duplicate_count`-Feld. Duplikate
+   werden nur angezeigt (Header-Text nach Import, "Duplikate
+   anzeigen"-Knopf in der Filterleiste) — der Import selbst wird dadurch
+   nicht blockiert oder verändert.
+3. **Sortierung nach beliebigem Feld**: bewusst client-seitig
+   (`frontend/src/lib/sortPhotos.ts`) statt als weiterer
+   SQL-`ORDER BY`-Parameter durch mehrere Backend-Abfragen
+   durchgereicht — die komplette Fotoliste ist wegen der Virtualisierung
+   (Raster/Filmstreifen) ohnehin schon im Speicher, serverseitiges
+   Sortieren brächte keinen Zusatznutzen. `PhotoDto` bekommt dafür ein
+   neues `file_size`-Feld (bisher nur intern im Katalog vorhanden).
+   Felder: Dateiname (Default, entspricht dem bisherigen impliziten
+   Verhalten), Aufnahmedatum, Bewertung, Dateigröße, Kameramodell;
+   fehlende Werte sortieren immer ans Ende, unabhängig von der Richtung.
+4. **Kombinierte Suche + Filter**: `repository/search.rs` bekommt einen
+   gemeinsamen Klausel-Baukasten `build_filter_clause` (aus
+   `filter_photos` herausgezogen, das unverändert bestehen bleibt) und
+   eine neue `search_and_filter_photos` — mit Suchtext ein FTS5-`MATCH`
+   plus die Kriterien-Klauseln per UND, ohne Suchtext identisch zu
+   `filter_photos`. Additiv: `search_photos`/`filter_photos` (Commands
+   und `Catalog`-Methoden) bleiben zusätzlich bestehen. Die frühere
+   ADR-0026-Entscheidung "bewusst alternativ" ist damit zurückgenommen.
+5. **Volle Ordnerbaum-Hierarchie beim Import**: begrenzt auf den
+   gewählten Import-Ordner (bzw. bei Copy/Move auf den *Zielordner* —
+   dort leben die Dateien danach, nicht mehr im Quellordner) — nicht bis
+   zum Dateisystem-Wurzelverzeichnis. `ensure_folder` legt jetzt
+   rekursiv alle Elternordner zwischen dieser Hierarchie-Wurzel
+   (inklusive, `parent_id = NULL`) und dem unmittelbaren Elternverzeichnis
+   der Datei an; liegt ein Verzeichnis unerwartet nicht unter der
+   Hierarchie-Wurzel (z. B. ein aus dem Baum herausführender Symlink),
+   bekommt es defensiv `parent_id = NULL` statt weiter zu rekursieren.
+   Da Copy/Move-Zielordner aktuell immer flach bleiben (keine
+   Unterordner-Struktur wird beim Kopieren/Verschieben nachgebildet),
+   wirkt sich das in der Praxis nur auf `AddInPlace`-Importe mit
+   verschachtelten Unterordnern aus.
+
+**Konsequenzen:** `FEATURES.md` markiert "Duplikaterkennung per exaktem
+Hash" und "Sortierung nach beliebigem Feld" wieder als Phase 3/Fertig,
+die Filterleisten-Zeile von "abweichend, alternativ" auf "Fertig
+(kombiniert)"; `PLAN.md` bekommt einen neuen Abschnitt "Schritt 8 —
+Nachtrag"; `THIRD_PARTY.md` bekommt einen neuen `sha2`-Eintrag. Alle
+übrigen, größeren zurückgestellten Punkte aus ADR-0022 bleiben
+ausdrücklich auf ihrer jeweils späteren Phase.

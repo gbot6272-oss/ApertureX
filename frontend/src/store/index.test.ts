@@ -8,6 +8,7 @@ function photo(id: string): PhotoDto {
   return {
     id,
     filename: `${id}.cr2`,
+    file_size: 0,
     width: null,
     height: null,
     camera_make: null,

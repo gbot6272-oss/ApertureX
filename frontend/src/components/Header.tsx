@@ -62,6 +62,7 @@ export function Header() {
           {importResult.cancelled ? "Import abgebrochen: " : "Import abgeschlossen: "}
           {importResult.imported} importiert · {importResult.skipped} übersprungen
           {importResult.errorCount > 0 ? ` · ${importResult.errorCount} Fehler` : ""}
+          {importResult.duplicateCount > 0 ? ` · ${importResult.duplicateCount} Duplikate` : ""}
         </span>
       )}
 

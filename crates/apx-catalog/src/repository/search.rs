@@ -32,38 +32,51 @@ pub(crate) fn search_photos(conn: &Connection, query: &str) -> Result<Vec<Photo>
     Ok(result)
 }
 
-/// Kombiniert alle gesetzten Felder von `criteria` per UND. Ein komplett
-/// leeres `criteria` (alle Felder `None`) liefert alle Fotos, sortiert nach
-/// Dateiname — konsistent mit [`crate::repository::photos::list_by_folder`].
-pub(crate) fn filter_photos(conn: &Connection, criteria: &FilterCriteria) -> Result<Vec<Photo>> {
+/// Baut WHERE-Klauseln und gebundene Werte aus `criteria` — gemeinsam
+/// genutzt von [`filter_photos`] und [`search_and_filter_photos`] (siehe
+/// `DECISIONS.md` ADR-0027), damit Attributfilter in beiden Fällen
+/// identisch funktionieren. `start_index` ist die Anzahl bereits vergebener
+/// `?N`-Platzhalter vor dieser Klausel (0, wenn keiner vorangeht — z. B.
+/// `?1` für einen vorangestellten FTS5-Match-Ausdruck).
+fn build_filter_clause(
+    criteria: &FilterCriteria,
+    start_index: usize,
+) -> (Vec<String>, Vec<Box<dyn ToSql>>) {
     let mut clauses: Vec<String> = Vec::new();
     let mut values: Vec<Box<dyn ToSql>> = Vec::new();
 
     if let Some(min) = criteria.rating_at_least {
         values.push(Box::new(min as i64));
-        clauses.push(format!("photos.rating >= ?{}", values.len()));
+        clauses.push(format!("photos.rating >= ?{}", start_index + values.len()));
     }
     if let Some(flag) = criteria.flag {
         values.push(Box::new(flag as i64));
-        clauses.push(format!("photos.flag = ?{}", values.len()));
+        clauses.push(format!("photos.flag = ?{}", start_index + values.len()));
     }
     if let Some(color) = &criteria.color_label {
         values.push(Box::new(color.clone()));
-        clauses.push(format!("photos.color_label = ?{}", values.len()));
+        clauses.push(format!(
+            "photos.color_label = ?{}",
+            start_index + values.len()
+        ));
     }
     if let Some(model) = &criteria.camera_model {
         values.push(Box::new(model.clone()));
-        clauses.push(format!("photos.camera_model = ?{}", values.len()));
+        clauses.push(format!(
+            "photos.camera_model = ?{}",
+            start_index + values.len()
+        ));
     }
 
-    let where_clause = if clauses.is_empty() {
-        "1 = 1".to_string()
-    } else {
-        clauses.join(" AND ")
-    };
-    let sql = format!("SELECT {SELECT_COLUMNS} FROM photos WHERE {where_clause} ORDER BY filename");
+    (clauses, values)
+}
 
-    let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
+fn run_filtered_query(
+    conn: &Connection,
+    sql: &str,
+    values: &[Box<dyn ToSql>],
+) -> Result<Vec<Photo>> {
+    let mut stmt = conn.prepare(sql).map_err(map_sqlite_err)?;
     let param_refs: Vec<&dyn ToSql> = values.iter().map(|v| v.as_ref()).collect();
     let rows = stmt
         .query_map(param_refs.as_slice(), row_to_raw)
@@ -73,6 +86,50 @@ pub(crate) fn filter_photos(conn: &Connection, criteria: &FilterCriteria) -> Res
         result.push(raw_to_photo(row.map_err(map_sqlite_err)?)?);
     }
     Ok(result)
+}
+
+/// Kombiniert alle gesetzten Felder von `criteria` per UND. Ein komplett
+/// leeres `criteria` (alle Felder `None`) liefert alle Fotos, sortiert nach
+/// Dateiname — konsistent mit [`crate::repository::photos::list_by_folder`].
+pub(crate) fn filter_photos(conn: &Connection, criteria: &FilterCriteria) -> Result<Vec<Photo>> {
+    let (clauses, values) = build_filter_clause(criteria, 0);
+    let where_clause = if clauses.is_empty() {
+        "1 = 1".to_string()
+    } else {
+        clauses.join(" AND ")
+    };
+    let sql = format!("SELECT {SELECT_COLUMNS} FROM photos WHERE {where_clause} ORDER BY filename");
+    run_filtered_query(conn, &sql, &values)
+}
+
+/// Kombiniert Volltextsuche (optional) mit Attributfiltern (UND-verknüpft)
+/// — additiv zu [`search_photos`]/[`filter_photos`], die unverändert
+/// weiter bestehen (siehe `DECISIONS.md` ADR-0027). Ein leerer/`None`-`query`
+/// verhält sich identisch zu [`filter_photos`]; mit `query` werden die
+/// FTS5-Treffer nach Relevanz sortiert (`rank`), die Kriterien schränken die
+/// Trefferliste zusätzlich per UND ein.
+pub(crate) fn search_and_filter_photos(
+    conn: &Connection,
+    query: Option<&str>,
+    criteria: &FilterCriteria,
+) -> Result<Vec<Photo>> {
+    let Some(query) = query.filter(|q| !q.trim().is_empty()) else {
+        return filter_photos(conn, criteria);
+    };
+
+    let (filter_clauses, filter_values) = build_filter_clause(criteria, 1);
+    let mut clauses = vec!["photos_fts MATCH ?1".to_string()];
+    clauses.extend(filter_clauses);
+    let where_clause = clauses.join(" AND ");
+    let sql = format!(
+        "SELECT {SELECT_COLUMNS} FROM photos_fts \
+         JOIN photos ON photos.rowid = photos_fts.rowid \
+         WHERE {where_clause} ORDER BY rank"
+    );
+
+    let mut values: Vec<Box<dyn ToSql>> = vec![Box::new(query.to_string())];
+    values.extend(filter_values);
+    run_filtered_query(conn, &sql, &values)
 }
 
 #[cfg(test)]
@@ -195,5 +252,67 @@ mod tests {
         let results = filter_photos(&conn, &criteria).expect("ok");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, matching);
+    }
+
+    #[test]
+    fn search_and_filter_combines_query_and_criteria_with_and() {
+        let conn = setup();
+        let matching = insert_photo(&conn, "Sonnenuntergang_Strand.CR2", Some("EOS R5"));
+        let wrong_rating = insert_photo(&conn, "Sonnenuntergang_Berg.CR2", Some("EOS R5"));
+        insert_photo(&conn, "Bergwanderung.CR2", Some("EOS R5"));
+        photos::set_rating(&conn, matching, 4).expect("ok");
+        photos::set_rating(&conn, wrong_rating, 1).expect("ok");
+
+        let criteria = FilterCriteria {
+            rating_at_least: Some(3),
+            ..Default::default()
+        };
+        let results =
+            search_and_filter_photos(&conn, Some("Sonnenuntergang*"), &criteria).expect("ok");
+        assert_eq!(
+            results.len(),
+            1,
+            "nur der Treffer, der sowohl den Suchtext als auch die Bewertung erfüllt"
+        );
+        assert_eq!(results[0].id, matching);
+    }
+
+    #[test]
+    fn search_and_filter_without_query_behaves_like_filter_photos() {
+        let conn = setup();
+        let matching = insert_photo(&conn, "a.cr2", Some("EOS R5"));
+        insert_photo(&conn, "b.cr2", Some("Z9"));
+
+        let criteria = FilterCriteria {
+            camera_model: Some("EOS R5".to_string()),
+            ..Default::default()
+        };
+        let results = search_and_filter_photos(&conn, None, &criteria).expect("ok");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, matching);
+    }
+
+    #[test]
+    fn search_and_filter_without_criteria_behaves_like_search_photos() {
+        let conn = setup();
+        let matching = insert_photo(&conn, "Sonnenuntergang.CR2", None);
+        insert_photo(&conn, "Bergwanderung.CR2", None);
+
+        let results =
+            search_and_filter_photos(&conn, Some("Sonnenuntergang*"), &FilterCriteria::default())
+                .expect("ok");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, matching);
+    }
+
+    #[test]
+    fn search_and_filter_treats_blank_query_as_no_query() {
+        let conn = setup();
+        insert_photo(&conn, "a.cr2", Some("EOS R5"));
+        insert_photo(&conn, "b.cr2", Some("Z9"));
+
+        let results =
+            search_and_filter_photos(&conn, Some("   "), &FilterCriteria::default()).expect("ok");
+        assert_eq!(results.len(), 2, "leerer Suchtext zählt wie kein Suchtext");
     }
 }

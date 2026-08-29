@@ -44,6 +44,12 @@ und entfernt, statt sie bis zu einem tatsächlichen Verwendungszeitpunkt
 mitzuschleppen. Kommt zurück, sobald ein konkreter Aufrufer für echtes
 ICC-Farbmanagement existiert.
 
+## Rust — Phase 3 (Nachtrag Schritt 8)
+
+| Crate | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `sha2` | MIT OR Apache-2.0 | Streaming-SHA-256-Hash für exakte Duplikaterkennung beim Import | Unkritisch — war schon transitiv im `Cargo.lock` vorhanden (Version 0.10.9), jetzt direkte Abhängigkeit, siehe `DECISIONS.md` ADR-0027 |
+
 ## Frontend — geplant für Phase 1
 
 | Paket | Lizenz | Zweck | Hinweis |

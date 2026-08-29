@@ -151,6 +151,43 @@ pub(crate) fn count_by_folder(conn: &Connection, folder_id: FolderId) -> Result<
     Ok(count as u64)
 }
 
+/// Gruppen von Fotos mit identischem `content_hash` (exakte
+/// Duplikaterkennung, siehe `DECISIONS.md` ADR-0027) — Fotos ohne Hash
+/// (z. B. vor Schritt 8.2 importiert) werden ignoriert statt als eine
+/// gemeinsame Gruppe zusammengefasst. Jede Gruppe ist nach Dateiname
+/// sortiert; die Gruppen selbst haben keine definierte Reihenfolge.
+pub(crate) fn list_duplicate_groups(conn: &Connection) -> Result<Vec<Vec<Photo>>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT content_hash FROM photos \
+             WHERE content_hash IS NOT NULL \
+             GROUP BY content_hash HAVING COUNT(*) > 1",
+        )
+        .map_err(map_sqlite_err)?;
+    let hashes: Vec<String> = stmt
+        .query_map([], |row| row.get(0))
+        .map_err(map_sqlite_err)?
+        .collect::<rusqlite::Result<Vec<String>>>()
+        .map_err(map_sqlite_err)?;
+    drop(stmt);
+
+    let sql =
+        format!("SELECT {SELECT_COLUMNS} FROM photos WHERE content_hash = ?1 ORDER BY filename");
+    let mut groups = Vec::with_capacity(hashes.len());
+    for hash in hashes {
+        let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
+        let rows = stmt
+            .query_map(params![hash], row_to_raw)
+            .map_err(map_sqlite_err)?;
+        let mut group = Vec::new();
+        for row in rows {
+            group.push(raw_to_photo(row.map_err(map_sqlite_err)?)?);
+        }
+        groups.push(group);
+    }
+    Ok(groups)
+}
+
 pub(crate) fn set_missing(conn: &Connection, id: PhotoId, missing: bool) -> Result<()> {
     let changed = conn
         .execute(
@@ -542,6 +579,44 @@ mod tests {
         assert!(
             set_color_label(&conn, id, Some("orange")).is_err(),
             "unbekannte Farbe muss abgelehnt werden"
+        );
+    }
+
+    #[test]
+    fn list_duplicate_groups_finds_matching_hashes_and_ignores_the_rest() {
+        let (conn, folder_id) = setup();
+        let mtime = OffsetDateTime::now_utc()
+            .replace_nanosecond(0)
+            .expect("gültig");
+
+        let mut original = sample_photo(folder_id, 1000, mtime);
+        original.content_hash = Some("gleicherhash".to_string());
+        original.filename = "original.cr2".to_string();
+        upsert(&conn, &original, OffsetDateTime::now_utc()).expect("ok");
+
+        let mut kopie = sample_photo(folder_id, 1000, mtime);
+        kopie.content_hash = Some("gleicherhash".to_string());
+        kopie.filename = "kopie.cr2".to_string();
+        upsert(&conn, &kopie, OffsetDateTime::now_utc()).expect("ok");
+
+        let mut einzelstueck = sample_photo(folder_id, 1000, mtime);
+        einzelstueck.content_hash = Some("anderer-hash".to_string());
+        einzelstueck.filename = "einzelstueck.cr2".to_string();
+        upsert(&conn, &einzelstueck, OffsetDateTime::now_utc()).expect("ok");
+
+        let mut ohne_hash = sample_photo(folder_id, 1000, mtime);
+        ohne_hash.content_hash = None;
+        ohne_hash.filename = "ohne_hash.cr2".to_string();
+        upsert(&conn, &ohne_hash, OffsetDateTime::now_utc()).expect("ok");
+
+        let groups = list_duplicate_groups(&conn).expect("ok");
+        assert_eq!(groups.len(), 1, "genau eine Duplikatgruppe");
+        assert_eq!(groups[0].len(), 2);
+        let filenames: Vec<&str> = groups[0].iter().map(|p| p.filename.as_str()).collect();
+        assert_eq!(
+            filenames,
+            vec!["kopie.cr2", "original.cr2"],
+            "Gruppe ist nach Dateiname sortiert"
         );
     }
 

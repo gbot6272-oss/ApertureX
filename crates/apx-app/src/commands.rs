@@ -40,6 +40,9 @@ pub struct CatalogStatusDto {
 pub struct PhotoDto {
     pub id: String,
     pub filename: String,
+    /// Dateigröße in Byte — Grundlage für die Sortierung nach Dateigröße
+    /// im Frontend (Schritt 8.3, `DECISIONS.md` ADR-0027).
+    pub file_size: u64,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub camera_make: Option<String>,
@@ -66,6 +69,7 @@ impl From<apx_catalog::Photo> for PhotoDto {
         Self {
             id: photo.id.to_string(),
             filename: photo.filename,
+            file_size: photo.file_size,
             width: photo.width,
             height: photo.height,
             camera_make: photo.camera_make,
@@ -754,6 +758,42 @@ pub fn filter_photos(
         .filter_photos(&criteria.into())
         .map_err(|err| err.to_string())?;
     Ok(photos.into_iter().map(PhotoDto::from).collect())
+}
+
+/// Kombiniert Volltextsuche (optional) und Attributfilter per UND — additiv
+/// zu [`search_photos`]/[`filter_photos`], die unverändert bestehen bleiben
+/// (siehe `DECISIONS.md` ADR-0027). `query` als leerer String oder `None`
+/// wirkt wie kein Suchtext.
+#[tauri::command]
+pub fn search_and_filter_photos(
+    state: State<'_, AppState>,
+    query: Option<String>,
+    criteria: FilterCriteriaDto,
+) -> Result<Vec<PhotoDto>, String> {
+    let photos = state
+        .catalog
+        .search_and_filter_photos(query.as_deref(), &criteria.into())
+        .map_err(|err| err.to_string())?;
+    Ok(photos.into_iter().map(PhotoDto::from).collect())
+}
+
+// ---- Bibliothek: Duplikaterkennung (ab Phase 3, Schritt 8.2) --------------
+
+/// Gruppen von Fotos mit identischem Inhalt (exakter Hash-Vergleich), siehe
+/// `DECISIONS.md` ADR-0027 — reine Anzeige, verhindert den Import selbst
+/// nicht.
+#[tauri::command]
+pub fn list_duplicate_photo_groups(
+    state: State<'_, AppState>,
+) -> Result<Vec<Vec<PhotoDto>>, String> {
+    let groups = state
+        .catalog
+        .list_duplicate_photo_groups()
+        .map_err(|err| err.to_string())?;
+    Ok(groups
+        .into_iter()
+        .map(|group| group.into_iter().map(PhotoDto::from).collect())
+        .collect())
 }
 
 #[cfg(test)]

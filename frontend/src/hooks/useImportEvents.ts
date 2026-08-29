@@ -19,6 +19,7 @@ interface ImportFinishedEvent {
   skipped: number;
   error_count: number;
   cancelled: boolean;
+  duplicate_count: number;
 }
 
 /** Verbindet die Tauri-IPC-Events des Import-Jobs (siehe
@@ -45,6 +46,7 @@ export function useImportEvents(): void {
         skipped: event.payload.skipped,
         errorCount: event.payload.error_count,
         cancelled: event.payload.cancelled,
+        duplicateCount: event.payload.duplicate_count,
       });
     });
 

@@ -333,6 +333,29 @@ impl Catalog {
         let conn = self.lock()?;
         repository::search::filter_photos(&conn, criteria)
     }
+
+    /// Kombiniert Volltextsuche (optional) und Attributfilter per UND —
+    /// additiv zu [`Catalog::search_photos`]/[`Catalog::filter_photos`], die
+    /// unverändert bestehen bleiben. Siehe `DECISIONS.md` ADR-0027 und
+    /// [`repository::search::search_and_filter_photos`].
+    pub fn search_and_filter_photos(
+        &self,
+        query: Option<&str>,
+        criteria: &FilterCriteria,
+    ) -> Result<Vec<Photo>> {
+        let conn = self.lock()?;
+        repository::search::search_and_filter_photos(&conn, query, criteria)
+    }
+
+    // ---- Duplikaterkennung (ab Phase 3, Schritt 8.2) -----------------------
+
+    /// Gruppen von Fotos mit identischem Inhalt (exakter Hash-Vergleich),
+    /// siehe `DECISIONS.md` ADR-0027 — reine Anzeige, verhindert den Import
+    /// selbst nicht.
+    pub fn list_duplicate_photo_groups(&self) -> Result<Vec<Vec<Photo>>> {
+        let conn = self.lock()?;
+        repository::photos::list_duplicate_groups(&conn)
+    }
 }
 
 fn configure(conn: &Connection) -> Result<()> {

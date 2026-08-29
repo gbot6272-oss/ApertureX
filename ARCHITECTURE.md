@@ -142,13 +142,44 @@ Beschreibt den tatsächlich gebauten Stand (siehe `DECISIONS.md` ADR-0022 bis AD
 
 ### Datenfluss Phase 3: Suche/Filter → Ergebnisliste
 
-Analog zu §2/§5s Datenfluss-Abschnitten, hier für den neuen Such-/Filter-Pfad:
+Analog zu §2/§5s Datenfluss-Abschnitten, hier für den Such-/Filter-Pfad
+(seit Schritt 8, `DECISIONS.md` ADR-0027, kombinierbar statt alternativ):
 
-**Freitextsuche:** Frontend `FilterBar`-Suchfeld → Store `runLibrarySearch` → Tauri-Command `search_photos` → `apx-catalog::Catalog::search_photos`: `SELECT … FROM photos_fts JOIN photos ON photos.rowid = photos_fts.rowid WHERE photos_fts MATCH ?1 ORDER BY rank` (FTS5-Relevanzsortierung) → Ergebnis ersetzt `libraryResults` im Store → `selectActivePhotos` liefert es statt des ausgewählten Ordners/der Sammlung an Raster und Filmstreifen.
+Frontend `FilterBar`-Suchfeld/-Chips (Bewertung/Flagge/Farbe/Kameramodell)
+→ Store `runLibrarySearchAndFilter` (liest den aktuellen Suchtext *und*
+alle gesetzten Filter-Chips gemeinsam, keiner leert mehr den anderen) →
+Tauri-Command `search_and_filter_photos` → `apx-catalog::Catalog::search_and_filter_photos`:
+ohne Suchtext identisch zu `filter_photos` (dynamisch UND-verknüpfte
+`WHERE`-Klausel aus den gesetzten Kriterien, leeres `FilterCriteria`
+liefert alle Fotos); mit Suchtext zusätzlich `photos_fts MATCH ?1`
+UND-verknüpft mit denselben Kriterien-Klauseln, sortiert nach FTS5-
+Relevanz (`rank`) statt nach Dateiname → Ergebnis ersetzt `libraryResults`
+im Store → `selectActivePhotos` liefert es (sortiert nach dem aktuell
+gewählten Sortierfeld, siehe unten) statt des ausgewählten Ordners/der
+Sammlung an Raster und Filmstreifen. Die separaten `search_photos`/
+`filter_photos`-Commands bleiben additiv bestehen, werden vom Frontend
+aber nicht mehr direkt aufgerufen.
 
-**Attributfilter:** Frontend `FilterBar`-Chip (Bewertung/Flagge/Farbe) → Store `setLibraryFilterChip` (kombiniert alle gesetzten Chips im Store, leert dabei die Freitextsuche — beide sind laut `PLAN.md` Phase 3 Schritt 6 bewusst alternativ) → Tauri-Command `filter_photos` → `apx-catalog::Catalog::filter_photos`: baut dynamisch eine UND-verknüpfte `WHERE`-Klausel aus den gesetzten Kriterien (leeres `FilterCriteria` liefert alle Fotos) → Ergebnis ersetzt `libraryResults` wie bei der Suche.
+**Duplikaterkennung (Schritt 8.2):** jede beim Import gestagte Datei
+bekommt einen per Streaming berechneten SHA-256-Hash in
+`photos.content_hash` (`import::compute_content_hash`). Am Ende von
+`run_with_mode` gruppiert `Catalog::list_duplicate_photo_groups()` alle
+Fotos mit identischem Hash; die Gesamtzahl betroffener Fotos geht als
+`ImportFinishedPayload.duplicate_count` ans Frontend. Der „Duplikate
+anzeigen"-Knopf in `FilterBar.tsx` ruft denselben Command direkt auf und
+setzt die abgeflachten Gruppen als `libraryResults` — reine Anzeige über
+denselben `selectActivePhotos`-Lesepfad, kein separater Anzeigemodus.
 
-Beide Pfade laufen über dieselbe `libraryResults`-Zustandsvariable und denselben `selectActivePhotos`-Lesepfad — kein separater „Suchergebnis-Modus" in Raster/Filmstreifen nötig.
+**Sortierung (Schritt 8.3):** bewusst client-seitig statt eines weiteren
+`ORDER BY`-Parameters im Backend — `selectActivePhotos` wendet
+`lib/sortPhotos.ts`s reine `sortPhotos`-Funktion als letzten Schritt auf
+das Ergebnis von Ordner/Sammlung/Suche-Filter/Duplikatanzeige an, gesteuert
+über `librarySortField`/`librarySortDirection` im Store.
+
+Alle vier Pfade (Ordner, Sammlung, Suche/Filter, Duplikatanzeige) laufen
+über dieselbe `libraryResults`-Zustandsvariable und denselben
+`selectActivePhotos`-Lesepfad — kein separater „Suchergebnis-Modus" in
+Raster/Filmstreifen nötig.
 
 ## 7. Platzhalter für spätere Phasen
 

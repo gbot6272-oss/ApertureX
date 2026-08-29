@@ -89,6 +89,8 @@ fn main() {
             commands::list_photos_in_collection,
             commands::search_photos,
             commands::filter_photos,
+            commands::search_and_filter_photos,
+            commands::list_duplicate_photo_groups,
         ])
         .run(tauri::generate_context!())
         .expect("Fehler beim Starten von Aperture X");

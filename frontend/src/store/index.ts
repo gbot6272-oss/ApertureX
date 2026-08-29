@@ -3,6 +3,8 @@ import { immer } from "zustand/middleware/immer";
 
 import { buildEdlEnvelopeJson, NEUTRAL_BASIC_ADJUSTMENTS, parseEdlEnvelopeJson, writeBasicField } from "../lib/edl";
 import type { BasicAdjustments } from "../lib/edl";
+import { sortPhotos } from "../lib/sortPhotos";
+import type { SortDirection, SortField } from "../lib/sortPhotos";
 import * as api from "../lib/tauri";
 import type {
   CatalogStatusDto,
@@ -13,6 +15,8 @@ import type {
   KeywordDto,
   PhotoDto,
 } from "../lib/tauri";
+import * as undoStackLib from "../lib/undoStack";
+import type { UndoEntry } from "../lib/undoStack";
 
 /** Wandelt eine `HistoryPositionDto` (siehe `lib/tauri.ts`) in
  * `BasicAdjustments` um — `Neutral` bedeutet "wie aufgenommen", ein
@@ -62,16 +66,42 @@ function patchPhotoEverywhere(state: AppStore, photoId: string, patch: Partial<P
   }
 }
 
+/** Liest eine Kopie des aktuell bekannten Zustands eines Fotos, egal in
+ * welchem Zwischenspeicher es gerade liegt (Ordner-Cache, Sammlungs-Cache,
+ * Such-/Filter-Ergebnis) — Grundlage dafür, vor einer Bewertungs-/Flaggen-/
+ * Farb-Änderung den *alten* Wert für einen Undo-Eintrag festzuhalten (siehe
+ * `lib/undoStack.ts`, `DECISIONS.md` ADR-0027). Anders als
+ * [`patchPhotoEverywhere`] (das *alle* Fundstellen patcht) genügt hier die
+ * erste Fundstelle — der Wert ist an jeder Stelle identisch. */
+function findPhotoAnywhere(state: AppStore, photoId: string): PhotoDto | undefined {
+  for (const list of Object.values(state.photosByFolder)) {
+    const found = list.find((p) => p.id === photoId);
+    if (found) return found;
+  }
+  for (const list of Object.values(state.collectionPhotos)) {
+    const found = list.find((p) => p.id === photoId);
+    if (found) return found;
+  }
+  return state.libraryResults?.find((p) => p.id === photoId);
+}
+
 /** Die aktuell anzuzeigende Fotoliste — Suchergebnisse (falls eine Suche/
  * ein Filter aktiv ist) haben Vorrang vor einer ausgewählten Sammlung, die
  * wiederum Vorrang vor einem ausgewählten Ordner hat. Raster und
  * Filmstreifen lesen beide über diese eine Funktion (siehe `DECISIONS.md`
  * ADR-0024: geteilter Fotoliste-Zustand statt eigener Parallel-Logik). */
-export function selectActivePhotos(state: AppStore): PhotoDto[] {
+function rawActivePhotos(state: AppStore): PhotoDto[] {
   if (state.libraryResults !== null) return state.libraryResults;
   if (state.selectedCollectionId) return state.collectionPhotos[state.selectedCollectionId] ?? [];
   if (state.selectedFolderId) return state.photosByFolder[state.selectedFolderId] ?? [];
   return [];
+}
+
+export function selectActivePhotos(state: AppStore): PhotoDto[] {
+  // `??`-Fallbacks: Store-Tests bauen oft nur einen Teilzustand (siehe
+  // `store/index.test.ts`s `makeState`) ohne die Sortierfelder — Default
+  // entspricht dem bisherigen impliziten Verhalten (siehe `lib/sortPhotos.ts`).
+  return sortPhotos(rawActivePhotos(state), state.librarySortField ?? "filename", state.librarySortDirection ?? "asc");
 }
 
 /**
@@ -141,6 +171,10 @@ interface ImportResultState {
   skipped: number;
   errorCount: number;
   cancelled: boolean;
+  /** Anzahl Fotos, die laut exaktem Inhalts-Hash ein Duplikat eines
+   * anderen Katalogeintrags sind (Schritt 8.2, `DECISIONS.md` ADR-0027) —
+   * reine Anzeige, verhindert den Import nicht. */
+  duplicateCount: number;
 }
 
 interface JobsSlice {
@@ -230,9 +264,9 @@ interface LibrarySlice {
    * Foto) zu `collectionId` hinzu. */
   addSelectionToCollection: (collectionId: string) => Promise<void>;
 
-  /** Freitextsuche (FTS5 über Dateiname/Kamera/Objektiv) und
-   * Attributfilter sind laut `PLAN.md` Phase 3 Schritt 6 bewusst
-   * alternativ statt kombiniert — das Setzen des einen leert das andere. */
+  /** Freitextsuche (FTS5 über Dateiname/Kamera/Objektiv) und Attributfilter
+   * sind kombinierbar (per UND, Schritt 8.4, `DECISIONS.md` ADR-0027) —
+   * beide wirken gemeinsam über [`runLibrarySearchAndFilter`]. */
   libraryQuery: string;
   libraryFilter: FilterCriteriaDto;
   /** `null` = keine Suche/kein Filter aktiv, Raster/Filmstreifen zeigen
@@ -240,17 +274,54 @@ interface LibrarySlice {
    * [`selectActivePhotos`]). */
   libraryResults: PhotoDto[] | null;
   setLibraryQuery: (query: string) => void;
-  runLibrarySearch: () => Promise<void>;
+  /** Führt Suche und Attributfilter kombiniert aus (siehe
+   * `crates/apx-catalog/src/repository/search.rs::search_and_filter_photos`)
+   * — leeres Suchfeld und leerer Filter zusammen setzen `libraryResults`
+   * wieder auf `null`. */
+  runLibrarySearchAndFilter: () => Promise<void>;
   /** Setzt oder entfernt (bei `undefined`) einen Filter-Chip und wendet
-   * das Ergebnis sofort an. */
+   * das Ergebnis (kombiniert mit einer evtl. aktiven Suche) sofort an. */
   setLibraryFilterChip: (patch: FilterCriteriaDto) => Promise<void>;
   clearLibraryFilters: () => void;
+
+  /** Duplikaterkennung per exaktem Hash (Schritt 8.2, `DECISIONS.md`
+   * ADR-0027) — lädt alle Duplikatgruppen vom Backend, flacht sie ab und
+   * zeigt sie wie ein Suchergebnis über `libraryResults` an. */
+  showDuplicatePhotos: () => Promise<void>;
+
+  /** Sortierung nach beliebigem Feld (Schritt 8.3, `DECISIONS.md`
+   * ADR-0027) — angewendet als letzter Schritt in [`selectActivePhotos`]. */
+  librarySortField: SortField;
+  librarySortDirection: SortDirection;
+  setLibrarySort: (field: SortField, direction: SortDirection) => void;
+
+  /** Undo/Redo für Bibliotheks-Metadaten (Schritt 8.1, `DECISIONS.md`
+   * ADR-0027) — reiner Frontend-Zustand, siehe `lib/undoStack.ts`. Deckt
+   * bewusst *nicht* Sammlung anlegen/umbenennen/löschen ab. */
+  libraryUndoStack: UndoEntry[];
+  libraryRedoStack: UndoEntry[];
+  undoLibraryAction: () => Promise<void>;
+  redoLibraryAction: () => Promise<void>;
 }
 
 export type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice & LibrarySlice;
 
 export const useAppStore = create<AppStore>()(
-  immer((set, get) => ({
+  immer((set, get) => {
+    /** Pusht einen Undo-Eintrag auf den Bibliotheks-Undo-Stack und leert
+     * den Redo-Stack (siehe `lib/undoStack.ts`) — gemeinsam genutzt von
+     * allen Bibliotheks-Metadaten-Aktionen (Bewertung/Flagge/Farbe/
+     * Schlagworte/Sammlungsmitgliedschaft, Schritt 8.1, `DECISIONS.md`
+     * ADR-0027). */
+    function pushLibraryUndo(entry: UndoEntry) {
+      set((state) => {
+        const stacks = undoStackLib.pushUndo({ undoStack: state.libraryUndoStack, redoStack: state.libraryRedoStack }, entry);
+        state.libraryUndoStack = stacks.undoStack;
+        state.libraryRedoStack = stacks.redoStack;
+      });
+    }
+
+    return {
     // Catalog
     folders: [],
     photosByFolder: {},
@@ -607,8 +678,23 @@ export const useAppStore = create<AppStore>()(
       const trimmed = name.trim();
       if (!trimmed) return;
       try {
-        await api.addPhotoKeyword(photoId, trimmed);
+        const keywordId = await api.addPhotoKeyword(photoId, trimmed);
         await get().loadKeywordsForPhoto(photoId);
+        pushLibraryUndo({
+          label: "Schlagwort hinzufügen",
+          undo: async () => {
+            await api.removePhotoKeyword(photoId, keywordId);
+            await get().loadKeywordsForPhoto(photoId);
+          },
+          redo: async () => {
+            // `add_photo_keyword` legt das Schlagwort bei Bedarf per Name
+            // an (`find_or_create`) — dieselbe ID wie beim ersten Mal, da
+            // das Schlagwort selbst beim Entfernen nie gelöscht wird (nur
+            // die Verknüpfung), siehe `repository::keywords::add`.
+            await api.addPhotoKeyword(photoId, trimmed);
+            await get().loadKeywordsForPhoto(photoId);
+          },
+        });
       } catch (err) {
         set((state) => {
           state.catalogError = String(err);
@@ -617,9 +703,23 @@ export const useAppStore = create<AppStore>()(
     },
 
     removeKeywordFromPhoto: async (photoId, keywordId) => {
+      const keyword = get().photoKeywords[photoId]?.find((k) => k.id === keywordId);
       try {
         await api.removePhotoKeyword(photoId, keywordId);
         await get().loadKeywordsForPhoto(photoId);
+        if (keyword) {
+          pushLibraryUndo({
+            label: "Schlagwort entfernen",
+            undo: async () => {
+              await api.addPhotoKeyword(photoId, keyword.name);
+              await get().loadKeywordsForPhoto(photoId);
+            },
+            redo: async () => {
+              await api.removePhotoKeyword(photoId, keywordId);
+              await get().loadKeywordsForPhoto(photoId);
+            },
+          });
+        }
       } catch (err) {
         set((state) => {
           state.catalogError = String(err);
@@ -630,10 +730,26 @@ export const useAppStore = create<AppStore>()(
     setPhotoRating: async (photoId, rating) => {
       const { multiSelectedIds } = get();
       const targets = multiSelectedIds.includes(photoId) && multiSelectedIds.length > 1 ? multiSelectedIds : [photoId];
+      const previous = new Map(targets.map((id) => [id, findPhotoAnywhere(get(), id)?.rating ?? 0]));
       try {
         await Promise.all(targets.map((id) => api.setPhotoRating(id, rating)));
         set((state) => {
           for (const id of targets) patchPhotoEverywhere(state, id, { rating });
+        });
+        pushLibraryUndo({
+          label: "Bewertung",
+          undo: async () => {
+            await Promise.all(targets.map((id) => api.setPhotoRating(id, previous.get(id) ?? 0)));
+            set((state) => {
+              for (const id of targets) patchPhotoEverywhere(state, id, { rating: previous.get(id) ?? 0 });
+            });
+          },
+          redo: async () => {
+            await Promise.all(targets.map((id) => api.setPhotoRating(id, rating)));
+            set((state) => {
+              for (const id of targets) patchPhotoEverywhere(state, id, { rating });
+            });
+          },
         });
       } catch (err) {
         set((state) => {
@@ -645,10 +761,26 @@ export const useAppStore = create<AppStore>()(
     setPhotoFlag: async (photoId, flag) => {
       const { multiSelectedIds } = get();
       const targets = multiSelectedIds.includes(photoId) && multiSelectedIds.length > 1 ? multiSelectedIds : [photoId];
+      const previous = new Map(targets.map((id) => [id, findPhotoAnywhere(get(), id)?.flag ?? 0]));
       try {
         await Promise.all(targets.map((id) => api.setPhotoFlag(id, flag)));
         set((state) => {
           for (const id of targets) patchPhotoEverywhere(state, id, { flag });
+        });
+        pushLibraryUndo({
+          label: "Flagge",
+          undo: async () => {
+            await Promise.all(targets.map((id) => api.setPhotoFlag(id, previous.get(id) ?? 0)));
+            set((state) => {
+              for (const id of targets) patchPhotoEverywhere(state, id, { flag: previous.get(id) ?? 0 });
+            });
+          },
+          redo: async () => {
+            await Promise.all(targets.map((id) => api.setPhotoFlag(id, flag)));
+            set((state) => {
+              for (const id of targets) patchPhotoEverywhere(state, id, { flag });
+            });
+          },
         });
       } catch (err) {
         set((state) => {
@@ -660,10 +792,26 @@ export const useAppStore = create<AppStore>()(
     setPhotoColorLabel: async (photoId, colorLabel) => {
       const { multiSelectedIds } = get();
       const targets = multiSelectedIds.includes(photoId) && multiSelectedIds.length > 1 ? multiSelectedIds : [photoId];
+      const previous = new Map(targets.map((id) => [id, findPhotoAnywhere(get(), id)?.color_label ?? null]));
       try {
         await Promise.all(targets.map((id) => api.setPhotoColorLabel(id, colorLabel)));
         set((state) => {
           for (const id of targets) patchPhotoEverywhere(state, id, { color_label: colorLabel });
+        });
+        pushLibraryUndo({
+          label: "Farbmarkierung",
+          undo: async () => {
+            await Promise.all(targets.map((id) => api.setPhotoColorLabel(id, previous.get(id) ?? null)));
+            set((state) => {
+              for (const id of targets) patchPhotoEverywhere(state, id, { color_label: previous.get(id) ?? null });
+            });
+          },
+          redo: async () => {
+            await Promise.all(targets.map((id) => api.setPhotoColorLabel(id, colorLabel)));
+            set((state) => {
+              for (const id of targets) patchPhotoEverywhere(state, id, { color_label: colorLabel });
+            });
+          },
         });
       } catch (err) {
         set((state) => {
@@ -738,6 +886,26 @@ export const useAppStore = create<AppStore>()(
         if (get().collectionPhotos[collectionId]) {
           await get().loadPhotosForCollection(collectionId);
         }
+        pushLibraryUndo({
+          label: "Zu Sammlung hinzufügen",
+          // Entfernt beim Rückgängig-Machen genau die Fotos, die diese
+          // Aktion hinzugefügt hat — war eines davon schon vorher Mitglied
+          // (Grenzfall, siehe `DECISIONS.md` ADR-0027), entfernt "Rückgängig"
+          // es trotzdem; bewusst in Kauf genommene Vereinfachung, keine
+          // Undo-Historie pro Mitgliedschaft.
+          undo: async () => {
+            await Promise.all(targets.map((id) => api.removeFromCollection(collectionId, id)));
+            if (get().collectionPhotos[collectionId]) {
+              await get().loadPhotosForCollection(collectionId);
+            }
+          },
+          redo: async () => {
+            await Promise.all(targets.map((id) => api.addToCollection(collectionId, id)));
+            if (get().collectionPhotos[collectionId]) {
+              await get().loadPhotosForCollection(collectionId);
+            }
+          },
+        });
       } catch (err) {
         set((state) => {
           state.catalogError = String(err);
@@ -755,18 +923,19 @@ export const useAppStore = create<AppStore>()(
       });
     },
 
-    runLibrarySearch: async () => {
-      const trimmed = get().libraryQuery.trim();
-      if (!trimmed) {
+    runLibrarySearchAndFilter: async () => {
+      const { libraryQuery, libraryFilter } = get();
+      const trimmed = libraryQuery.trim();
+      const hasFilter = Object.keys(libraryFilter).length > 0;
+      if (!trimmed && !hasFilter) {
         set((state) => {
           state.libraryResults = null;
         });
         return;
       }
       try {
-        const results = await api.searchPhotos(trimmed);
+        const results = await api.searchAndFilterPhotos(trimmed || null, libraryFilter);
         set((state) => {
-          state.libraryFilter = {};
           state.libraryResults = results;
         });
       } catch (err) {
@@ -783,27 +952,10 @@ export const useAppStore = create<AppStore>()(
       for (const key of Object.keys(patch) as (keyof FilterCriteriaDto)[]) {
         if (patch[key] === undefined) delete nextFilter[key];
       }
-      const hasAnyFilter = Object.keys(nextFilter).length > 0;
       set((state) => {
         state.libraryFilter = nextFilter;
-        state.libraryQuery = "";
       });
-      if (!hasAnyFilter) {
-        set((state) => {
-          state.libraryResults = null;
-        });
-        return;
-      }
-      try {
-        const results = await api.filterPhotos(nextFilter);
-        set((state) => {
-          state.libraryResults = results;
-        });
-      } catch (err) {
-        set((state) => {
-          state.catalogError = String(err);
-        });
-      }
+      await get().runLibrarySearchAndFilter();
     },
 
     clearLibraryFilters: () => {
@@ -813,7 +965,52 @@ export const useAppStore = create<AppStore>()(
         state.libraryResults = null;
       });
     },
-  })),
+
+    showDuplicatePhotos: async () => {
+      try {
+        const groups = await api.listDuplicatePhotoGroups();
+        set((state) => {
+          state.libraryResults = groups.flat();
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    librarySortField: "filename",
+    librarySortDirection: "asc",
+
+    setLibrarySort: (field, direction) => {
+      set((state) => {
+        state.librarySortField = field;
+        state.librarySortDirection = direction;
+      });
+    },
+
+    libraryUndoStack: [],
+    libraryRedoStack: [],
+
+    undoLibraryAction: async () => {
+      const { libraryUndoStack, libraryRedoStack } = get();
+      const next = await undoStackLib.undo({ undoStack: libraryUndoStack, redoStack: libraryRedoStack });
+      set((state) => {
+        state.libraryUndoStack = next.undoStack;
+        state.libraryRedoStack = next.redoStack;
+      });
+    },
+
+    redoLibraryAction: async () => {
+      const { libraryUndoStack, libraryRedoStack } = get();
+      const next = await undoStackLib.redo({ undoStack: libraryUndoStack, redoStack: libraryRedoStack });
+      set((state) => {
+        state.libraryUndoStack = next.undoStack;
+        state.libraryRedoStack = next.redoStack;
+      });
+    },
+    };
+  }),
 );
 
 // Store im Debug-Build am `window` verfügbar machen — üblich für

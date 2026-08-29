@@ -25,6 +25,9 @@ export interface CatalogStatusDto {
 export interface PhotoDto {
   id: string;
   filename: string;
+  /** Dateigröße in Byte — Grundlage für die Sortierung nach Dateigröße,
+   * siehe `lib/sortPhotos.ts`. */
+  file_size: number;
   width: number | null;
   height: number | null;
   camera_make: string | null;
@@ -170,4 +173,18 @@ export function searchPhotos(query: string): Promise<PhotoDto[]> {
 
 export function filterPhotos(criteria: FilterCriteriaDto): Promise<PhotoDto[]> {
   return invoke<PhotoDto[]>("filter_photos", { criteria });
+}
+
+/** Kombiniert Volltextsuche (optional) und Attributfilter per UND — additiv
+ * zu {@link searchPhotos}/{@link filterPhotos}, siehe `DECISIONS.md` ADR-0027. */
+export function searchAndFilterPhotos(query: string | null, criteria: FilterCriteriaDto): Promise<PhotoDto[]> {
+  return invoke<PhotoDto[]>("search_and_filter_photos", { query, criteria });
+}
+
+// ---- Bibliothek: Duplikaterkennung (ab Phase 3, Schritt 8.2) ---------------
+
+/** Gruppen von Fotos mit identischem Inhalt (exakter Hash-Vergleich), siehe
+ * `DECISIONS.md` ADR-0027 — reine Anzeige, verhindert den Import selbst nicht. */
+export function listDuplicatePhotoGroups(): Promise<PhotoDto[][]> {
+  return invoke<PhotoDto[][]>("list_duplicate_photo_groups");
 }

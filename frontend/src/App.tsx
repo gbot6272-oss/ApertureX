@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { CommandPalette } from "./components/CommandPalette";
+import { DevelopPanel } from "./components/DevelopPanel";
 import { ErrorBanner } from "./components/ErrorBanner";
 import { Filmstrip } from "./components/Filmstrip";
 import { Header } from "./components/Header";
@@ -71,6 +72,7 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <Viewer />
+        <DevelopPanel />
       </div>
       <Filmstrip />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />

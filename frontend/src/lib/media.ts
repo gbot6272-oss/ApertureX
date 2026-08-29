@@ -22,3 +22,17 @@ export function imageUrl(photoId: string, maxEdge?: number): string {
   const param = maxEdge === undefined ? "full" : String(maxEdge);
   return convertFileSrc(`image/${photoId}/${param}`, "apx");
 }
+
+/**
+ * Baut die URL für die interaktive Entwickeln-Route (ab Phase 2, siehe
+ * `crates/apx-app/src/protocol/route.rs`, `DECISIONS.md` ADR-0016).
+ * `edlJson` ist die vollständige `EdlEnvelope`-JSON-Serialisierung (siehe
+ * `lib/edl.ts`), nicht bloß ein Hash — die Route muss auch während des
+ * Ziehens eines Reglers (noch nicht committet) live rendern können.
+ * Antwort ist kein Bildformat, sondern ein 8-Byte-Breite/Höhe-Header +
+ * rohes RGBA8 (siehe `hooks/useDevelopRender`).
+ */
+export function developUrl(photoId: string, edlJson: string, maxEdge?: number): string {
+  const param = maxEdge === undefined ? "full" : String(maxEdge);
+  return convertFileSrc(`develop/${photoId}/${param}/${edlJson}`, "apx");
+}

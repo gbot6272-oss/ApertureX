@@ -54,6 +54,23 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   const callbacks: Record<number, CallbackEntry> = {};
   const listenersByEvent: Record<string, number[]> = {};
 
+  // Simuliertes `edit_history`/`edit_current` fürs Entwickeln-Panel (ab
+  // Phase 2, siehe `crates/apx-catalog`s `repository::edits` und
+  // `crates/apx-app/src/commands.rs`) — dieselbe lineare
+  // Verlaufs-Semantik (neue Bearbeitung nach Rückgängig verwirft die
+  // "Zukunft"), nur im Browser statt in SQLite.
+  interface EditHistoryState {
+    entries: Array<{ edl_json: string }>;
+    currentIndex: number; // -1 = neutral (noch nie bearbeitet / bis zum Anfang zurück)
+  }
+  const editHistories: Record<string, EditHistoryState> = {};
+
+  function historyPositionAt(history: EditHistoryState): unknown {
+    if (history.currentIndex < 0) return { kind: "Neutral" };
+    const entry = history.entries[history.currentIndex];
+    return entry ? { kind: "At", edl_json: entry.edl_json } : { kind: "Neutral" };
+  }
+
   w.__mockEmit = (eventName: string, payload: unknown) => {
     const ids = listenersByEvent[eventName] ?? [];
     for (const id of [...ids]) {
@@ -109,6 +126,33 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return null;
       case "cancel_import":
         return null;
+      case "apply_develop_edit": {
+        const photoId = args.photoId as string;
+        const edlJson = args.edlJson as string;
+        const history = (editHistories[photoId] ??= { entries: [], currentIndex: -1 });
+        // Verwirft eine zuvor per Rückgängig erreichte "Zukunft" — siehe
+        // `DECISIONS.md` ADR-0014, exakt wie das echte Backend.
+        history.entries = history.entries.slice(0, history.currentIndex + 1);
+        history.entries.push({ edl_json: edlJson });
+        history.currentIndex = history.entries.length - 1;
+        return null;
+      }
+      case "current_develop_edit": {
+        const history = editHistories[args.photoId as string];
+        return history ? historyPositionAt(history) : { kind: "Neutral" };
+      }
+      case "undo_develop_edit": {
+        const history = editHistories[args.photoId as string];
+        if (!history || history.currentIndex < 0) return null;
+        history.currentIndex -= 1;
+        return historyPositionAt(history);
+      }
+      case "redo_develop_edit": {
+        const history = editHistories[args.photoId as string];
+        if (!history || history.currentIndex + 1 >= history.entries.length) return null;
+        history.currentIndex += 1;
+        return historyPositionAt(history);
+      }
       default:
         throw new Error(`Test-Stub: unbekannter invoke-Befehl "${cmd}"`);
     }
@@ -147,6 +191,32 @@ const TINY_PNG_BASE64 =
  */
 export async function installTauriMock(page: Page, initialFixtures: Record<string, unknown> = {}): Promise<void> {
   await page.route("**/__apx_mock_image__*", async (route) => {
+    const src = new URL(route.request().url()).searchParams.get("src") ?? "";
+    if (src.startsWith("apx:develop/")) {
+      // Entwickeln-Route (ab Phase 2): kein Bildformat, sondern ein
+      // 8-Byte-Breite/Höhe-Header + rohes RGBA8 (siehe
+      // `crates/apx-app/src/protocol/mod.rs`, `DECISIONS.md` ADR-0016) —
+      // hier ein einheitlich mittelgraues, undurchsichtiges 2×2-Bild.
+      const width = 2;
+      const height = 2;
+      const header = Buffer.alloc(8);
+      header.writeUInt32LE(width, 0);
+      header.writeUInt32LE(height, 4);
+      const pixels = Buffer.alloc(width * height * 4);
+      for (let i = 0; i < pixels.length; i += 4) {
+        pixels[i] = 128;
+        pixels[i + 1] = 128;
+        pixels[i + 2] = 128;
+        pixels[i + 3] = 255;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/x-apx-develop-rgba8",
+        body: Buffer.concat([header, pixels]),
+      });
+      return;
+    }
+
     await route.fulfill({
       status: 200,
       contentType: "image/png",

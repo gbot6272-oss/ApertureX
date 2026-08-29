@@ -9,6 +9,9 @@ export function Header() {
   const importResult = useAppStore((s) => s.importResult);
   const startImport = useAppStore((s) => s.startImport);
   const cancelImport = useAppStore((s) => s.cancelImport);
+  const developPanelOpen = useAppStore((s) => s.developPanelOpen);
+  const toggleDevelopPanel = useAppStore((s) => s.toggleDevelopPanel);
+  const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
 
   const handleImportClick = useCallback(async () => {
     const path = await selectFolderDialog();
@@ -58,7 +61,19 @@ export function Header() {
         </span>
       )}
 
-      <span className="ml-auto text-xs text-text-muted">Strg/Cmd+K — Befehlspalette</span>
+      <button
+        type="button"
+        onClick={toggleDevelopPanel}
+        disabled={!selectedPhotoId && !developPanelOpen}
+        aria-pressed={developPanelOpen}
+        className={`ml-auto rounded border px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50 ${
+          developPanelOpen ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
+        }`}
+      >
+        Entwickeln
+      </button>
+
+      <span className="text-xs text-text-muted">Strg/Cmd+K — Befehlspalette</span>
     </header>
   );
 }

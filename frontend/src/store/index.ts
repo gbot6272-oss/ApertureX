@@ -1,8 +1,24 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
+import { buildEdlEnvelopeJson, NEUTRAL_BASIC_ADJUSTMENTS, parseEdlEnvelopeJson, writeBasicField } from "../lib/edl";
+import type { BasicAdjustments } from "../lib/edl";
 import * as api from "../lib/tauri";
-import type { CatalogStatusDto, FolderDto, PhotoDto } from "../lib/tauri";
+import type { CatalogStatusDto, FolderDto, HistoryPositionDto, PhotoDto } from "../lib/tauri";
+
+/** Wandelt eine `HistoryPositionDto` (siehe `lib/tauri.ts`) in
+ * `BasicAdjustments` um — `Neutral` bedeutet "wie aufgenommen", ein
+ * unlesbares `edl_json` fällt (mit einer Konsolen-Warnung) ebenfalls auf
+ * neutral zurück statt abzustürzen. */
+function basicFromHistoryPosition(position: HistoryPositionDto): BasicAdjustments {
+  if (position.kind === "Neutral") return NEUTRAL_BASIC_ADJUSTMENTS;
+  const parsed = parseEdlEnvelopeJson(position.edl_json);
+  if (!parsed) {
+    console.error("Unlesbares EDL vom Backend erhalten, falle auf neutral zurück:", position.edl_json);
+    return NEUTRAL_BASIC_ADJUSTMENTS;
+  }
+  return parsed;
+}
 
 /**
  * Zustand-Store mit den in `PHASE1_PROMPT.md` Abschnitt 7 geforderten
@@ -81,7 +97,35 @@ interface JobsSlice {
   finishImport: (result: ImportResultState) => void;
 }
 
-type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice;
+// ---- Develop-Slice (ab Phase 2) ---------------------------------------
+
+interface DevelopSlice {
+  developPanelOpen: boolean;
+  /** Der aktuell im Panel gezeigte (u. U. noch nicht committete)
+   * Bearbeitungszustand — laufend über `setBasicField` verändert,
+   * während gezogen wird; nur `commitDevelopEdit()` schreibt ihn dauerhaft
+   * in den Katalog (siehe `crates/apx-catalog`s `edit_history`, ADR-0014). */
+  developBasic: BasicAdjustments;
+  /** Zu welchem Foto `developBasic` gehört — verhindert, dass beim
+   * schnellen Fotowechsel ein veralteter Zustand kurz sichtbar bleibt. */
+  developPhotoId: string | null;
+  toggleDevelopPanel: () => void;
+  /** Lädt den zuletzt gespeicherten Bearbeitungszustand für `photoId`
+   * (oder neutral, falls noch nie bearbeitet) — aufgerufen beim Öffnen
+   * des Panels und bei jedem Fotowechsel, während es offen ist. */
+  loadDevelopStateForPhoto: (photoId: string) => Promise<void>;
+  /** Setzt ein einzelnes Feld (Regler-Zwischenwert beim Ziehen) — siehe
+   * `lib/edl.ts`s `SliderSpec.key` für gültige Schlüssel. */
+  setBasicField: (key: string, value: number) => void;
+  /** Schreibt `developBasic` als neuen Verlaufs-Schritt (siehe
+   * `PLAN.md` Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines
+   * Reglers, nicht bei jedem Zwischenwert). */
+  commitDevelopEdit: (label?: string) => Promise<void>;
+  undoDevelop: () => Promise<void>;
+  redoDevelop: () => Promise<void>;
+}
+
+type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => ({
@@ -151,6 +195,19 @@ export const useAppStore = create<AppStore>()(
         state.selectedPhotoId = photoId;
       });
       get().resetView();
+      // Läuft das Entwickeln-Panel bereits, muss es beim Fotowechsel den
+      // Bearbeitungszustand des *neuen* Fotos laden statt den alten kurz
+      // weiter anzuzeigen.
+      if (get().developPanelOpen) {
+        if (photoId) {
+          void get().loadDevelopStateForPhoto(photoId);
+        } else {
+          set((state) => {
+            state.developBasic = NEUTRAL_BASIC_ADJUSTMENTS;
+            state.developPhotoId = null;
+          });
+        }
+      }
     },
 
     stepSelection: (direction) => {
@@ -247,6 +304,80 @@ export const useAppStore = create<AppStore>()(
       if (selectedFolderId) {
         void get().loadPhotosForFolder(selectedFolderId);
       }
+    },
+
+    // Develop
+    developPanelOpen: false,
+    developBasic: NEUTRAL_BASIC_ADJUSTMENTS,
+    developPhotoId: null,
+
+    toggleDevelopPanel: () => {
+      const willOpen = !get().developPanelOpen;
+      set((state) => {
+        state.developPanelOpen = willOpen;
+      });
+      const { selectedPhotoId } = get();
+      if (willOpen && selectedPhotoId) {
+        void get().loadDevelopStateForPhoto(selectedPhotoId);
+      }
+    },
+
+    loadDevelopStateForPhoto: async (photoId) => {
+      try {
+        const position = await api.currentDevelopEdit(photoId);
+        set((state) => {
+          state.developBasic = basicFromHistoryPosition(position);
+          state.developPhotoId = photoId;
+        });
+      } catch (err) {
+        console.error("Bearbeitungszustand konnte nicht geladen werden:", err);
+        set((state) => {
+          state.developBasic = NEUTRAL_BASIC_ADJUSTMENTS;
+          state.developPhotoId = photoId;
+        });
+      }
+    },
+
+    setBasicField: (key, value) => {
+      set((state) => {
+        writeBasicField(state.developBasic, key, value);
+      });
+    },
+
+    commitDevelopEdit: async (label) => {
+      const { developPhotoId, developBasic } = get();
+      if (!developPhotoId) return;
+      try {
+        await api.applyDevelopEdit(developPhotoId, buildEdlEnvelopeJson(developBasic), label);
+      } catch (err) {
+        console.error("Bearbeitung konnte nicht gespeichert werden:", err);
+      }
+    },
+
+    undoDevelop: async () => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      const position = await api.undoDevelopEdit(developPhotoId).catch((err: unknown) => {
+        console.error("Rückgängig fehlgeschlagen:", err);
+        return null;
+      });
+      if (!position) return;
+      set((state) => {
+        state.developBasic = basicFromHistoryPosition(position);
+      });
+    },
+
+    redoDevelop: async () => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      const position = await api.redoDevelopEdit(developPhotoId).catch((err: unknown) => {
+        console.error("Wiederholen fehlgeschlagen:", err);
+        return null;
+      });
+      if (!position) return;
+      set((state) => {
+        state.developBasic = basicFromHistoryPosition(position);
+      });
     },
   })),
 );

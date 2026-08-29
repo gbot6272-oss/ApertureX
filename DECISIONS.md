@@ -379,25 +379,46 @@ Kompromisses, der keines von beidem vollständig erfüllt.
 
 ---
 
-## ADR-0018: `zundo` für Undo/Redo im Frontend
+## ADR-0018: Undo/Redo im Frontend direkt über `edit_history`, kein `zundo` (revidiert in Schritt 6)
 
-**Status:** Angenommen
+**Status:** Angenommen (ursprüngliche Fassung revidiert bei der tatsächlichen
+Implementierung in Phase 2 Schritt 6 — siehe „Revisions-Begründung" unten)
 **Kontext:** Der Zustand-Store nutzt bereits `immer`; `FEATURES.md`
 verlangt für Phase 2 „Verlauf mit unbegrenzten, benennbaren, klickbaren
-Schritten (Undo/Redo)" im Frontend (zusätzlich zur dauerhaften
-`edit_history`-Tabelle aus ADR-0014, die den App-Neustart überlebt — die
-Frontend-Historie ist die *aktive Sitzung*, nicht dasselbe System).
+Schritten (Undo/Redo)" im Frontend, zusätzlich zur dauerhaften
+`edit_history`-Tabelle aus ADR-0014, die den App-Neustart überlebt.
 
-**Entscheidung:** `zundo`, eine kleine, MIT-lizenzierte Bibliothek, die
-gezielt bestehende Zustand-Stores (auch mit `immer`) um Verlauf
-erweitert und Einträge bündelt/entprellt, statt bei jeder Mausbewegung
-einen Schritt anzulegen. Eine selbstgebaute Lösung müsste dieselbe
-Entprellungs-Logik ohne erkennbaren Vorteil neu erfinden.
+**Ursprüngliche Entscheidung (Schritt 0):** `zundo`, eine kleine
+Bibliothek, die bestehende Zustand-Stores um eine eigene, zusätzliche
+Verlaufs-Ebene erweitert — mit der Begründung, sie bündle/entprelle
+Einträge, statt bei jeder Mausbewegung einen Schritt anzulegen.
 
-**Konsequenzen:** Eine weitere kleine Frontend-Abhängigkeit, in
-`THIRD_PARTY.md` einzutragen. Die `zundo`-Historie lebt nur im
-Arbeitsspeicher der laufenden Sitzung; das Überleben eines Neustarts
-läuft ausschließlich über `edit_history` (ADR-0014).
+**Revisions-Begründung (Schritt 6):** Bei der tatsächlichen Umsetzung
+stellte sich heraus, dass die Entprellung viel einfacher auf
+UI-Ereignis-Ebene lösbar ist, ganz ohne State-Management-Bibliothek:
+`DevelopSlider` ruft `onChange` (Live-Vorschau, kein Commit) bei jedem
+Zwischenwert, aber `onCommit` (schreibt über `apply_develop_edit` in
+`edit_history`) erst bei Loslassen/Blur/Doppelklick-Reset. Eine
+zusätzliche, separate Frontend-Verlaufs-Ebene (`zundo`) hätte dann *zwei*
+lose synchronisierte Historien bedeutet (die lokale und die in
+`edit_history`) — mit dem Risiko, dass sie nach einem Fehler oder einer
+Race Condition auseinanderlaufen. Stattdessen rufen die Undo-/Redo-Knöpfe
+und Strg/Cmd+Z direkt `undo_develop_edit`/`redo_develop_edit` auf (siehe
+`crates/apx-app/src/commands.rs`, Phase 2 Schritt 5) — Tauris IPC ist
+lokal (kein Netzwerk) schnell genug, um pro Klick einen Roundtrip zu
+rechtfertigen, und es gibt dadurch nur *eine* Quelle der Wahrheit für den
+Verlauf statt zwei.
+
+**Konsequenzen:** Keine zusätzliche Frontend-Abhängigkeit nötig (`zundo`
+wurde nie zu `package.json` hinzugefügt, `THIRD_PARTY.md` bleibt
+unverändert). Ein Undo/Redo-Klick löst einen Tauri-Command-Aufruf aus
+(unmerklich schnell bei lokalem IPC); eine visuelle, benennbare,
+klickbare Liste *aller* Verlaufsschritte (statt nur Rückgängig/
+Wiederholen um jeweils einen Schritt) ist mit dieser Entscheidung
+weiterhin möglich (über `list_edit_history`, noch nicht implementiert),
+aber bewusst über Schritt 6s Mindestumfang hinaus zurückgestellt — der
+kritische Pfad („interaktives Entwickeln" überhaupt vorführbar) hatte
+Vorrang.
 
 ---
 
@@ -445,3 +466,39 @@ wird.
 eine vollständige `ColorPipeline` (die zusätzlich Weißabgleich/Gamma
 anwenden würde) zu instanziieren. Kein neues externes Crate, keine
 `lcms2`-Abhängigkeit in diesem Schritt.
+
+---
+
+## ADR-0020: Entwickeln-Modul als zuschaltbares Overlay im bestehenden Viewer, WebGL2 für beide Pixelquellen
+
+**Status:** Angenommen
+**Kontext:** `PLAN.md` Phase 2 Schritt 6 verlangt „Viewer.tsx wechselt von
+2D-Canvas auf WebGL2". Offen war dabei, ob das Entwickeln-Rendering die
+bestehende Vorschau/Vollbild-Anzeige (schnelle, gecachte JPEG/PNG-Pfade
+aus Phase 1) vollständig ersetzt, oder als zusätzlicher, zuschaltbarer
+Modus daneben existiert.
+
+**Entscheidung:** Ein neuer „Entwickeln"-Knopf (`Header.tsx`) schaltet
+`developPanelOpen` um; nur währenddessen fragt der Viewer zusätzlich die
+`develop/...`-Route ab (`hooks/useDevelopRender`) und zeigt deren
+Ergebnis anstelle des bisherigen Vollbilds — ohne offenes Panel verhält
+sich der Viewer exakt wie in Phase 1. Der Canvas selbst nutzt jetzt immer
+WebGL2 (`lib/webgl.ts`, `QuadRenderer`) statt Canvas-2D, für beide Fälle:
+ein dekodiertes `ImageBitmap` (bestehender Pfad) und ein rohes RGBA8
+(neue Entwickeln-Route) werden über denselben Texturmechanismus
+hochgeladen — Canvas-2D hätte für RGBA8-Rohdaten einen Umweg über
+`ImageData` gebraucht. Die bestehende Zoom-/Pan-Geometrie
+(`lib/viewerMath.ts`) bleibt unverändert wiederverwendet, nur der
+Zeichenaufruf selbst wechselt von `ctx.drawImage` auf einen texturierten
+Quad-Shader.
+
+**Konsequenzen:** Geringes Regressionsrisiko für Phase 1s bestehende
+Funktionalität (Standardzustand = Panel geschlossen = unverändertes
+Verhalten, durch die bestehenden Playwright-Tests in `viewer-flow.spec.ts`
+weiterhin abgedeckt, die nach diesem Umbau unverändert grün bleiben). Der
+WebGL2-Rendercode selbst (`lib/webgl.ts`) ist mangels WebGL-Unterstützung
+in `jsdom` nicht per Vitest testbar — wie schon die vorherige
+Canvas-2D-Zeichenlogik nur indirekt über Playwright abgesichert
+(„Canvas ist sichtbar", jetzt zusätzlich über die Entwickeln-Flow-Tests
+in `develop-flow.spec.ts`, die echte Zustandsänderungen statt nur
+Sichtbarkeit prüfen).

@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useDevelopRender } from "../hooks/useDevelopRender";
 import { useElementSize } from "../hooks/useElementSize";
 import { useImageBitmap } from "../hooks/useImageBitmap";
+import { buildEdlEnvelopeJson } from "../lib/edl";
 import { formatShutter } from "../lib/format";
 import { imageUrl, previewUrl } from "../lib/media";
 import { clampZoom, computeBaseScale, imageOrigin, nextZoomStep, panForZoomAtCursor } from "../lib/viewerMath";
+import { QuadRenderer } from "../lib/webgl";
 import { useAppStore } from "../store";
 
 // Zielkante für die hochauflösende Anzeige: an der Container-Größe
@@ -27,9 +30,12 @@ export function Viewer() {
   const setZoom = useAppStore((s) => s.setZoom);
   const setPan = useAppStore((s) => s.setPan);
   const resetView = useAppStore((s) => s.resetView);
+  const developPanelOpen = useAppStore((s) => s.developPanelOpen);
+  const developBasic = useAppStore((s) => s.developBasic);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rendererRef = useRef<QuadRenderer | null>(null);
   const containerSize = useElementSize(containerRef);
 
   const dpr = window.devicePixelRatio || 1;
@@ -45,42 +51,73 @@ export function Viewer() {
   // (siehe PHASE1_PROMPT.md Abschnitt 7).
   const activeBitmap = fullBitmap ?? thumbBitmap;
 
+  // Läuft das Entwickeln-Panel, wird zusätzlich live über die neue
+  // `develop/...`-Route gerendert (siehe `hooks/useDevelopRender`,
+  // `PLAN.md` Phase 2 Schritt 6) — bis die erste Antwort da ist, bleibt
+  // `activeBitmap` als Platzhalter sichtbar (kein Weißblitz beim Öffnen
+  // des Panels, analog zum Vorschau/Vollbild-Übergang oben).
+  const developEdlJson = developPanelOpen && photo ? buildEdlEnvelopeJson(developBasic) : null;
+  const developPhotoId = developPanelOpen ? (photo?.id ?? null) : null;
+  const developFrame = useDevelopRender(developPhotoId, developEdlJson, photo && containerSize.width > 0 ? targetFullEdge : undefined);
+
+  const drawSource = developFrame ?? activeBitmap ?? null;
+
   // Bildmaße für die Geometrie kommen aus den Katalog-Metadaten (stabil
-  // über Vorschau/Vollbild hinweg) — nur als Fallback die Maße des
-  // gerade verfügbaren Bitmaps, falls die Metadaten fehlen.
-  const imgW = photo?.width ?? activeBitmap?.width ?? 0;
-  const imgH = photo?.height ?? activeBitmap?.height ?? 0;
+  // über Vorschau/Vollbild/Entwickeln hinweg) — nur als Fallback die Maße
+  // der gerade verfügbaren Pixelquelle, falls die Metadaten fehlen.
+  const imgW = photo?.width ?? drawSource?.width ?? 0;
+  const imgH = photo?.height ?? drawSource?.height ?? 0;
 
   const fitScale = useMemo(() => computeBaseScale("fit", containerSize.width, containerSize.height, imgW, imgH), [containerSize.width, containerSize.height, imgW, imgH]);
 
   const effectiveScale = fitMode === "manual" ? zoom : computeBaseScale(fitMode, containerSize.width, containerSize.height, imgW, imgH);
 
-  // ---- Zeichnen ------------------------------------------------------
-
+  // ---- Zeichnen (WebGL2, siehe lib/webgl.ts) --------------------------
+  //
+  // Ein `QuadRenderer` pro `<canvas>`-Element, über dessen gesamte
+  // Lebenszeit wiederverwendet — WebGL2 kann sowohl ein dekodiertes
+  // `ImageBitmap` (Vorschau/Vollbild) als auch einen rohen RGBA8-Puffer
+  // (Entwickeln-Route) als Textur hochladen, Canvas-2D könnte Letzteres
+  // nicht ohne Umweg über `ImageData` (PLAN.md Phase 2 Schritt 6).
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    try {
+      rendererRef.current = new QuadRenderer(canvas);
+    } catch (err) {
+      console.error("WebGL2-Renderer konnte nicht erstellt werden:", err);
+      rendererRef.current = null;
+    }
+    return () => {
+      rendererRef.current?.dispose();
+      rendererRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
 
     const cssWidth = containerSize.width;
     const cssHeight = containerSize.height;
-    canvas.width = Math.max(1, Math.round(cssWidth * dpr));
-    canvas.height = Math.max(1, Math.round(cssHeight * dpr));
-    canvas.style.width = `${cssWidth}px`;
-    canvas.style.height = `${cssHeight}px`;
 
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, cssWidth, cssHeight);
+    if (!drawSource || imgW <= 0 || imgH <= 0) {
+      renderer.draw(cssWidth, cssHeight, dpr, { x: 0, y: 0 }, 0, 0);
+      return;
+    }
 
-    if (!activeBitmap || imgW <= 0 || imgH <= 0) return;
+    if (developFrame && drawSource === developFrame) {
+      renderer.uploadRgba8(developFrame.width, developFrame.height, developFrame.pixels);
+    } else if (activeBitmap && drawSource === activeBitmap) {
+      renderer.uploadImageBitmap(activeBitmap);
+    }
 
     const origin = imageOrigin(cssWidth, cssHeight, imgW, imgH, effectiveScale, { x: panX, y: panY });
     // Über 100 % Zoom scharfe Pixelkanten statt weichgezeichneter
     // Vergrößerung (PHASE1_PROMPT.md Abschnitt 7).
-    ctx.imageSmoothingEnabled = effectiveScale <= 1;
-    ctx.drawImage(activeBitmap, origin.x, origin.y, imgW * effectiveScale, imgH * effectiveScale);
-  }, [activeBitmap, containerSize.width, containerSize.height, dpr, effectiveScale, imgW, imgH, panX, panY]);
+    renderer.setSmoothing(effectiveScale <= 1);
+    renderer.draw(cssWidth, cssHeight, dpr, origin, imgW * effectiveScale, imgH * effectiveScale);
+  }, [drawSource, developFrame, activeBitmap, containerSize.width, containerSize.height, dpr, effectiveScale, imgW, imgH, panX, panY]);
 
   // ---- Maus: Zoom zum Cursor, Pan per Ziehen ---------------------------
 

@@ -57,3 +57,23 @@ export function importFolder(path: string): Promise<void> {
 export function cancelImport(): Promise<void> {
   return invoke<void>("cancel_import");
 }
+
+// ---- Entwickeln-Verlauf (ab Phase 2, siehe crates/apx-app/src/commands.rs) ----
+
+export type HistoryPositionDto = { kind: "Neutral" } | { kind: "At"; edl_json: string };
+
+export function applyDevelopEdit(photoId: string, edlJson: string, label?: string): Promise<void> {
+  return invoke<void>("apply_develop_edit", { photoId, edlJson, label: label ?? null });
+}
+
+export function currentDevelopEdit(photoId: string): Promise<HistoryPositionDto> {
+  return invoke<HistoryPositionDto>("current_develop_edit", { photoId });
+}
+
+export function undoDevelopEdit(photoId: string): Promise<HistoryPositionDto | null> {
+  return invoke<HistoryPositionDto | null>("undo_develop_edit", { photoId });
+}
+
+export function redoDevelopEdit(photoId: string): Promise<HistoryPositionDto | null> {
+  return invoke<HistoryPositionDto | null>("redo_develop_edit", { photoId });
+}

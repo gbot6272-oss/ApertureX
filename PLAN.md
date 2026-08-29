@@ -137,9 +137,11 @@ Anders als Phase 1 gibt es kein eigenes, ausführliches Prompt-Dokument für Pha
   - [x] Tests: EDL-Roundtrip (Umschlag und `EdlV1` einzeln), unbekannte/fehlerhafte Schema-Version abgelehnt, Undo/Redo-Zustandsmaschine (inkl. „Redo nach neuer Bearbeitung verwirft verworfene Zukunft"), FK-Cascade (Foto löschen → Verlauf + Zeiger weg), Migrations-Idempotenz, alter (nur-Migration-1-)Katalog öffnet noch und zieht Migration 2 nach
   - [x] Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (116 Tests) — alles grün
 
-- [ ] 3. wgpu-Gerätekontext (`apx-pipeline::gpu`)
-  - [ ] `GpuContext`, `Backends::all()` + `force_fallback_adapter`-Fallback
-  - [ ] Gemeinsamer Dispatch-Helfer, Kopier-Shader-Roundtrip-Test
+- [x] 3. wgpu-Gerätekontext (`apx-pipeline::gpu`)
+  - [x] `GpuContext` (`Instance`/`Adapter`/`Device`/`Queue`), `Backends::all()` mit explizitem Fallback: erst bevorzugter Hardware-Adapter, dann `force_fallback_adapter: true`, erst danach `PipelineError::GpuUnavailable` — Konstruktion darf laut Test nie abstürzen (`Ok` oder `Err(GpuUnavailable)`, beides gültig)
+  - [x] Gemeinsamer Dispatch-Helfer `gpu::dispatch::run_compute_f32` (Bind-Group-Layout `binding(0)`=Uniform-Parameter, `(1)`=Storage-Read-Eingabe, `(2)`=Storage-Read-Write-Ausgabe; alle Phase-2-Regler 1:1) — Shader-Kompilierfehler über `push_error_scope`/`pop_error_scope` abgefangen statt sie zu ignorieren
+  - [x] Test: trivialer "Addiere Konstante"-Compute-Shader — **lief in dieser Sandbox tatsächlich auf einem echten GPU-Adapter durch** (nicht nur kompiliert), Ergebnis bit-genau gegen die CPU-Erwartung geprüft; überspringt sich selbst mit Diagnosemeldung, falls in einer Umgebung ganz ohne Adapter ausgeführt (z. B. manche CI-Runner vor Schritt 8s Verifikation)
+  - [x] Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (118 Tests, inkl. echtem GPU-Dispatch) — alles grün
 
 - [ ] 4. Die 7 Regler: WGSL-Shader + CPU-Fallback
   - [ ] 5 Regler-Module + fusionierter Shader

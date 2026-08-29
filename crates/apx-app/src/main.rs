@@ -35,6 +35,15 @@ fn main() {
     let catalog = Catalog::open(&paths.default_catalog_file())
         .expect("Katalog konnte nicht geöffnet/angelegt werden");
 
+    // Siehe DECISIONS.md ADR-0012: schlägt sowohl der bevorzugte
+    // Hardware- als auch der Software-Fallback-Adapter fehl, gibt es
+    // buchstäblich keine wgpu-Ausführungsumgebung — an dieser Stelle (vor
+    // dem ersten Fenster) genauso unrecoverable wie ein fehlender
+    // Katalog, daher derselbe bewusste `expect()`-Ausnahmefall wie oben.
+    let pipeline = apx_pipeline::GpuContext::new_blocking()
+        .expect("wgpu-Gerätekontext konnte nicht aufgebaut werden (weder Hardware- noch Software-Adapter verfügbar)");
+    tracing::info!(adapter = %pipeline.adapter_info.name, backend = ?pipeline.adapter_info.backend, "wgpu-Gerätekontext bereit");
+
     let builder = protocol::register(tauri::Builder::default());
 
     builder
@@ -43,6 +52,8 @@ fn main() {
             paths,
             catalog: Arc::new(catalog),
             active_import: Arc::new(Mutex::new(None)),
+            pipeline: Arc::new(pipeline),
+            tile_cache: Arc::new(apx_pipeline::tile_cache::TileCache::new()),
         })
         .invoke_handler(tauri::generate_handler![
             commands::select_folder,
@@ -51,6 +62,10 @@ fn main() {
             commands::import_folder,
             commands::cancel_import,
             commands::list_photos_in_folder,
+            commands::apply_develop_edit,
+            commands::current_develop_edit,
+            commands::undo_develop_edit,
+            commands::redo_develop_edit,
         ])
         .run(tauri::generate_context!())
         .expect("Fehler beim Starten von Aperture X");

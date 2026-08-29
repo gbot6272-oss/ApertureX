@@ -66,7 +66,7 @@ impl ColorPipeline {
 /// 3. Nur die ersten drei Spalten (R/G/B) werden übernommen — der vierte
 ///    Kanal (E/Smaragd) entfällt, weil das Demosaicing bereits auf reines
 ///    RGB reduziert.
-fn cam_to_srgb_matrix(xyz_to_cam: &[[f32; 3]; 4]) -> [[f32; 3]; 3] {
+pub(crate) fn cam_to_srgb_matrix(xyz_to_cam: &[[f32; 3]; 4]) -> [[f32; 3]; 3] {
     let cam_to_xyz = pseudo_inverse::<4>(*xyz_to_cam); // [[f32; 4]; 3]
     let cam_to_srgb_4 = multiply::<3, 3, 4>(&XYZ_TO_SRGB_D65, &cam_to_xyz); // [[f32; 4]; 3]
 

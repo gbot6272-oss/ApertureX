@@ -95,6 +95,7 @@ version = "0.1.0"
 dependencies = [
  "apx-catalog",
  "apx-core",
+ "apx-pipeline",
  "apx-raw",
  "image",
  "num_cpus",

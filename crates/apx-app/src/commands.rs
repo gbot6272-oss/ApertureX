@@ -238,3 +238,170 @@ pub fn list_photos_in_folder(
         .map_err(|err| err.to_string())?;
     Ok(photos.into_iter().map(PhotoDto::from).collect())
 }
+
+// ---- Entwickeln-Verlauf (ab Phase 2) --------------------------------
+
+/// Der aktuelle Bearbeitungsstand eines Fotos fürs Frontend — entweder
+/// noch nie bearbeitet (`Neutral`) oder mit dem zuletzt aktiven EDL als
+/// JSON (dasselbe Format, das auch die `develop/...`-Protokoll-Route
+/// erwartet, siehe `crate::protocol`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind")]
+pub enum HistoryPositionDto {
+    Neutral,
+    At { edl_json: String },
+}
+
+fn history_position_to_dto(
+    position: apx_catalog::HistoryPosition,
+) -> Result<HistoryPositionDto, String> {
+    match position {
+        apx_catalog::HistoryPosition::Neutral => Ok(HistoryPositionDto::Neutral),
+        apx_catalog::HistoryPosition::At(entry) => Ok(HistoryPositionDto::At {
+            edl_json: entry.edl.to_json_string().map_err(|err| err.to_string())?,
+        }),
+    }
+}
+
+fn parse_photo_id(photo_id: String) -> Result<apx_core::PhotoId, String> {
+    photo_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())
+}
+
+/// Committet `edl_json` als neuen, aktiven Bearbeitungsschritt für
+/// `photo_id` — ausgelöst beim Loslassen eines Reglers, nicht bei jedem
+/// Zwischenwert (siehe `PLAN.md` Phase 2 Schritt 5). Validiert die
+/// Nutzlast vor dem Schreiben (lehnt kaputtes JSON und unbekannte
+/// EDL-Schema-Versionen ab), damit der Katalog nie einen unlesbaren
+/// Verlaufs-Eintrag bekommt.
+#[tauri::command]
+pub fn apply_develop_edit(
+    state: State<'_, AppState>,
+    photo_id: String,
+    edl_json: String,
+    label: Option<String>,
+) -> Result<(), String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let envelope =
+        apx_core::EdlEnvelope::from_json_str(&edl_json).map_err(|err| err.to_string())?;
+    apx_pipeline::edl::from_envelope(&envelope).map_err(|err| err.to_string())?;
+
+    state
+        .catalog
+        .commit_edit(photo_id, &envelope, label.as_deref())
+        .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+/// Der aktuell aktive Bearbeitungsstand — wird beim Öffnen eines Fotos im
+/// Entwickeln-Modul geladen, damit die Regler den zuletzt gespeicherten
+/// Zustand zeigen (siehe `SPEC.md` §7: „EDL nach Neustart identisch
+/// reproduzierbar").
+#[tauri::command]
+pub fn current_develop_edit(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<HistoryPositionDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let position = state
+        .catalog
+        .current_edit(photo_id)
+        .map_err(|err| err.to_string())?;
+    history_position_to_dto(position)
+}
+
+/// Geht einen Bearbeitungsschritt zurück. `None`, wenn schon am
+/// Ausgangszustand (kein Rückgängig möglich) — kein Fehler, siehe
+/// `apx_catalog::Catalog::undo_edit`.
+#[tauri::command]
+pub fn undo_develop_edit(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<Option<HistoryPositionDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let result = state
+        .catalog
+        .undo_edit(photo_id)
+        .map_err(|err| err.to_string())?;
+    result.map(history_position_to_dto).transpose()
+}
+
+/// Geht einen Bearbeitungsschritt vor. `None`, wenn nichts zu wiederholen
+/// ist, siehe `apx_catalog::Catalog::redo_edit`.
+#[tauri::command]
+pub fn redo_develop_edit(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<Option<HistoryPositionDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let result = state
+        .catalog
+        .redo_edit(photo_id)
+        .map_err(|err| err.to_string())?;
+    result.map(history_position_to_dto).transpose()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // `#[tauri::command]`-Funktionen selbst werden hier nicht unit-getestet
+    // (wie auch die übrigen Commands in dieser Datei nicht — sie sind
+    // reine Verdrahtung, siehe Modul-Doku oben; `tauri::State` lässt sich
+    // in einem reinen Unit-Test ohne echte Tauri-Laufzeit auch nicht
+    // sinnvoll konstruieren). Die eigentliche Logik — `commit_edit`/
+    // `current_edit`/`undo_edit`/`redo_edit` — ist bereits vollständig in
+    // `apx-catalog`s `repository::edits`-Tests abgedeckt; hier wird nur
+    // die private Umwandlungsfunktion getestet, die diese Datei selbst
+    // beisteuert.
+
+    fn sample_envelope(marker: f32) -> apx_core::EdlEnvelope {
+        let edl = apx_pipeline::EdlV1 {
+            basic: apx_pipeline::edl::BasicAdjustments {
+                exposure_ev: marker,
+                ..apx_pipeline::edl::BasicAdjustments::NEUTRAL
+            },
+        };
+        apx_core::EdlEnvelope::new(
+            apx_pipeline::EDL_SCHEMA_VERSION,
+            serde_json::to_value(edl).expect("EDL sollte serialisierbar sein"),
+        )
+    }
+
+    #[test]
+    fn neutral_position_maps_to_neutral_dto() {
+        let dto = history_position_to_dto(apx_catalog::HistoryPosition::Neutral)
+            .expect("sollte gelingen");
+        assert!(matches!(dto, HistoryPositionDto::Neutral));
+    }
+
+    #[test]
+    fn at_position_maps_to_edl_json_roundtripping_through_envelope() {
+        let entry = apx_catalog::EditHistoryEntry {
+            id: apx_core::EditHistoryId::new(),
+            photo_id: apx_core::PhotoId::new(),
+            sequence: 0,
+            label: None,
+            edl: sample_envelope(0.7),
+            created_at: time::OffsetDateTime::now_utc(),
+        };
+        let dto = history_position_to_dto(apx_catalog::HistoryPosition::At(entry))
+            .expect("sollte gelingen");
+        match dto {
+            HistoryPositionDto::At { edl_json } => {
+                let roundtripped =
+                    apx_core::EdlEnvelope::from_json_str(&edl_json).expect("sollte wieder parsen");
+                let parsed = apx_pipeline::edl::from_envelope(&roundtripped)
+                    .expect("sollte gültiges EdlV1 ergeben");
+                assert_eq!(parsed.basic.exposure_ev, 0.7);
+            }
+            HistoryPositionDto::Neutral => panic!("sollte nicht neutral sein"),
+        }
+    }
+
+    #[test]
+    fn parse_photo_id_rejects_invalid_string() {
+        assert!(parse_photo_id("nicht-valide".to_string()).is_err());
+    }
+}

@@ -155,10 +155,18 @@ Anders als Phase 1 gibt es kein eigenes, ausführliches Prompt-Dokument für Pha
   - [x] `color/mod.rs` bewusst weiterhin Platzhalter — Schritt 4s Umfang war explizit „die 7 Regler"; `lcms2`/ProPhoto-Farbmanagement ist an keiner Reglerformel beteiligt und bleibt einem eigenen Schritt vorbehalten, sobald ein konkreter Aufrufer (z. B. Bildschirmprofil-Anzeige) es braucht
   - [x] Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (150 Tests, inkl. aller `gpu_matches_cpu`-Tests tatsächlich auf echter GPU-Hardware) — alles grün
 
-- [ ] 5. Tauri-Anbindung: Command + Protokoll-Route
-  - [ ] `AppState.pipeline`, `ImageRequest::Develop`, `apply_develop_edit`-Command
-  - [ ] RGBA8-Rohbytes-Transport (ADR-0016)
-  - [ ] Tests: Routen-Parsing, `compute_develop`-Integrationstest, Cache-Schlüssel
+- [x] 5. Tauri-Anbindung: Command + Protokoll-Route
+  - [x] `AppState` um `pipeline: Arc<apx_pipeline::GpuContext>` (einmal beim App-Start via `GpuContext::new_blocking()` aufgebaut, `expect()`-Ausnahmefall wie beim Katalog) und `tile_cache: Arc<apx_pipeline::tile_cache::TileCache>` erweitert
+  - [x] Neue `ImageRequest::Develop { photo_id, max_edge, edl_json }`, geparst aus `develop/<id>/<max_edge_oder_'full'>/<edl_json>` — Feld/Reihenfolge gegenüber der ursprünglichen Plan-Notiz („edl_hash") bewusst korrigiert: `edl_json` trägt die volle EDL-JSON-Serialisierung, nicht nur eine Prüfsumme, weil die Route auch während des Ziehens (noch nicht committet) live rendern muss (siehe ADR-0016-Korrektur, `route.rs`-Moduldoku)
+  - [x] `route::parse` auf variable Segmentanzahl umgebaut (`preview`/`image`: 3 Segmente, `develop`: 4), gemeinsame `parse_photo_id`/`parse_max_edge`-Helfer statt Duplizierung
+  - [x] Neues `apx-pipeline`-Modul `develop` (`render_rgba8`): Weißabgleich-Gains → `basic_fused` (GPU mit automatischem CPU-Fallback bei Laufzeitfehler) → `color::linear_camera_rgb_to_srgb_rgba8` (feste Kamera→sRGB-Matrix + `apx_raw::srgb_gamma`) — der einzige Einstiegspunkt, den `apx-app` aufruft (reine Verdrahtung bleibt reine Verdrahtung)
+  - [x] `color/mod.rs` jetzt real gefüllt (Matrix+Gamma+RGBA8-Quantisierung) statt Platzhalter — `lcms2`/ProPhoto bleiben bewusst zurückgestellt, siehe ADR-0019
+  - [x] `apx_raw::LinearImage` um `cam_to_srgb: [[f32; 3]; 3]` erweitert (Einheitsmatrix für Fallback-Formate), `cam_to_srgb_matrix` von privat auf `pub(crate)` angehoben, `srgb_gamma` zusätzlich öffentlich re-exportiert (siehe ADR-0019) — additiv, bestehende `decode()`-Aufrufer unverändert
+  - [x] `tile_cache.rs` jetzt real implementiert (die in Schritt 4 bewusst hierher verschobene Implementierung): kleiner, hand-gerollter LRU-Cache (Kapazität 4) für `LinearImage` pro `(photo_id, max_edge)` — ohne EDL im Schlüssel, da `decode_linear` nicht vom EDL abhängt; anders als `apx-app`s `ImageCache` hält er Einträge stark (Wiederverwendung über aufeinanderfolgende Regler-Ticks, nicht nur gleichzeitige Anfragen)
+  - [x] Antwortformat: 8-Byte-Header (Breite/Höhe als `u32` little-endian) + rohes RGBA8, `Content-Type: application/x-apx-develop-rgba8` (ADR-0016)
+  - [x] Neue Commands `apply_develop_edit`/`current_develop_edit`/`undo_develop_edit`/`redo_develop_edit` (validieren EDL-JSON vor dem Schreiben, delegieren an `apx-catalog`s bereits getestete `commit_edit`/`current_edit`/`undo_edit`/`redo_edit`)
+  - [x] Tests: `route::parse` für das neue 4-Segment-Format (inkl. Ablehnung falscher Segmentanzahl/ungültiger Kantenlänge/leerem EDL-JSON), `compute_develop`-Integrationstest (Antwortgröße = 8 + width×height×4, Ablehnung kaputten JSONs), Cache-Schlüssel-Unterscheidungstest um `Develop` erweitert (zwei EDL-Zustände desselben Fotos → zwei Schlüssel), `TileCache`-Tests (Wiederverwendung, Schlüssel-Trennung nach Foto/Auflösung, LRU-Verdrängung), `apx-pipeline::develop`-Tests (Größe/Alpha, dunklere Ausgabe bei negativer Belichtung, GPU≈CPU), `apx-pipeline::color`-Tests (Kanaltausch durch die Matrix, Alpha immer 255)
+  - [x] Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (172 Tests) — alles grün
 
 - [ ] 6. Frontend: Entwickeln-Regler, Undo/Redo, WebGL2-Viewer
   - [ ] `DevelopSlice` + `zundo`, `DevelopPanel.tsx` mit 7 Reglern

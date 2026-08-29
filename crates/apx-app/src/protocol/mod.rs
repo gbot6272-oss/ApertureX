@@ -1,8 +1,9 @@
-//! Custom-Protokoll-Handler `apx://` — liefert Vorschauen und Vollbilder
-//! ans Frontend, ohne den Umweg über Base64-kodierte Tauri-Commands (siehe
-//! `PHASE1_PROMPT.md` Abschnitt 6 und "Bekannte Fallstricke").
+//! Custom-Protokoll-Handler `apx://` — liefert Vorschauen, Vollbilder und
+//! (ab Phase 2) live entwickelte Bilder ans Frontend, ohne den Umweg über
+//! Base64-kodierte Tauri-Commands (siehe `PHASE1_PROMPT.md` Abschnitt 6
+//! und "Bekannte Fallstricke").
 //!
-//! Zwei Anfragearten (URL-Format siehe `route`-Modul und `DECISIONS.md`
+//! Drei Anfragearten (URL-Format siehe `route`-Modul und `DECISIONS.md`
 //! ADR-0009):
 //! - `preview/<id>/<level>`: liest, falls vorhanden, den von `apx-app`s
 //!   Import-Job erzeugten Thumbnail-Cache direkt von der Platte
@@ -11,6 +12,16 @@
 //!   Auflösung (PNG-Antwort, 16-Bit-Präzision erhalten — anders als JPEG
 //!   verlustfrei, wichtig für die Vollbild-Ansicht im Entwickeln-Modul ab
 //!   Phase 2).
+//! - `develop/<id>/<max_edge|'full'>/<edl_json>` (ab Phase 2, siehe
+//!   `DECISIONS.md` ADR-0016): rendert live über `apx-pipeline`
+//!   (Weißabgleich + die sieben Regler + feste Kamera→sRGB-Matrix).
+//!   Antwort ist bewusst kein PNG/JPEG, sondern rohe Bytes — eine
+//!   Kompression bei jedem Regler-Tick würde unnötig Zeit im
+//!   16-ms-Budget kosten: die ersten 8 Bytes sind Breite und Höhe als
+//!   `u32` little-endian, danach folgt interleaved RGBA8 (Alpha immer
+//!   `255`). Der teure Dekodier-Schritt (`apx_raw::decode_linear`) läuft
+//!   über `apx-pipeline`s `TileCache` (siehe `state`-Modul), damit ein
+//!   Regler-Tick nicht jedes Mal neu demosaicen muss.
 //!
 //! Anfragen für denselben Schlüssel werden dedupliziert (`cache`-Modul).
 //! Echtes Abbrechen einer bereits laufenden Dekodierung ist mit den hier
@@ -112,12 +123,15 @@ fn handle_inner<R: Runtime>(
 ) -> Result<Response<Vec<u8>>, HandlerError> {
     let parsed =
         route::parse(request.uri().path()).map_err(|err| HandlerError::bad_request(err.0))?;
-    let catalog = app.state::<AppState>().catalog.clone();
+    let state = app.state::<AppState>();
+    let catalog = state.catalog.clone();
+    let pipeline = state.pipeline.clone();
+    let tile_cache = state.tile_cache.clone();
 
     let (content_type, cache_key) = response_meta(&parsed);
     let bytes = cache
         .get_or_compute(cache_key, move || {
-            compute(&catalog, &parsed).map_err(|err| err.message)
+            compute(&catalog, &pipeline, &tile_cache, &parsed).map_err(|err| err.message)
         })
         .map_err(HandlerError::internal)?;
 
@@ -141,22 +155,51 @@ fn response_meta(request: &ImageRequest) -> (&'static str, String) {
         }
         ImageRequest::Image { photo_id, max_edge } => (
             "image/png",
+            format!("image:{photo_id}:{}", format_max_edge(*max_edge)),
+        ),
+        ImageRequest::Develop {
+            photo_id,
+            max_edge,
+            edl_json,
+        } => (
+            // Kein Standard-Bildformat, siehe Modul-Doku: die ersten 8
+            // Bytes sind Breite/Höhe (u32 little-endian), danach rohes
+            // RGBA8. `edl_json` steckt bewusst im Cache-Schlüssel, nicht
+            // nur photo_id/max_edge — zwei verschiedene Bearbeitungs-
+            // zustände desselben Fotos sind zwei verschiedene Anfragen.
+            "application/x-apx-develop-rgba8",
             format!(
-                "image:{photo_id}:{}",
-                max_edge
-                    .map(|e| e.to_string())
-                    .unwrap_or_else(|| "full".to_string())
+                "develop:{photo_id}:{}:{edl_json}",
+                format_max_edge(*max_edge)
             ),
         ),
     }
 }
 
-fn compute(catalog: &Catalog, request: &ImageRequest) -> Result<Vec<u8>, HandlerError> {
-    match *request {
-        ImageRequest::Preview { photo_id, level } => compute_preview(catalog, photo_id, level),
+fn format_max_edge(max_edge: Option<u32>) -> String {
+    max_edge
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "full".to_string())
+}
+
+fn compute(
+    catalog: &Catalog,
+    pipeline: &apx_pipeline::GpuContext,
+    tile_cache: &apx_pipeline::tile_cache::TileCache,
+    request: &ImageRequest,
+) -> Result<Vec<u8>, HandlerError> {
+    match request {
+        ImageRequest::Preview { photo_id, level } => compute_preview(catalog, *photo_id, *level),
         ImageRequest::Image { photo_id, max_edge } => {
-            compute_full_image(catalog, photo_id, max_edge)
+            compute_full_image(catalog, *photo_id, *max_edge)
         }
+        ImageRequest::Develop {
+            photo_id,
+            max_edge,
+            edl_json,
+        } => compute_develop(
+            catalog, pipeline, tile_cache, *photo_id, *max_edge, edl_json,
+        ),
     }
 }
 
@@ -204,6 +247,35 @@ fn compute_full_image(
     let source_path = resolve_source_path(catalog, photo_id)?;
     let image = decode_to_dynamic_image(&source_path, max_edge)?;
     encode(image, image::ImageFormat::Png)
+}
+
+/// Rendert `photo_id` live über `apx-pipeline` mit dem in `edl_json`
+/// beschriebenen Bearbeitungszustand — siehe Modul-Doku für das
+/// Antwortformat (8-Byte-Breite/Höhe-Header + rohes RGBA8).
+fn compute_develop(
+    catalog: &Catalog,
+    pipeline: &apx_pipeline::GpuContext,
+    tile_cache: &apx_pipeline::tile_cache::TileCache,
+    photo_id: PhotoId,
+    max_edge: Option<u32>,
+    edl_json: &str,
+) -> Result<Vec<u8>, HandlerError> {
+    let envelope = apx_core::EdlEnvelope::from_json_str(edl_json)?;
+    let edl = apx_pipeline::edl::from_envelope(&envelope).map_err(apx_core::AppError::from)?;
+
+    let source_path = resolve_source_path(catalog, photo_id)?;
+    let linear = tile_cache.get_or_decode(photo_id, max_edge, || {
+        apx_raw::decode_linear(&source_path, max_edge)
+    })?;
+
+    let pixels = apx_pipeline::develop::render_rgba8(Some(pipeline), &linear, &edl)
+        .map_err(apx_core::AppError::from)?;
+
+    let mut framed = Vec::with_capacity(8 + pixels.len());
+    framed.extend_from_slice(&linear.width.to_le_bytes());
+    framed.extend_from_slice(&linear.height.to_le_bytes());
+    framed.extend_from_slice(&pixels);
+    Ok(framed)
 }
 
 fn resolve_source_path(catalog: &Catalog, photo_id: PhotoId) -> Result<PathBuf, HandlerError> {
@@ -358,8 +430,92 @@ mod tests {
             photo_id: id,
             max_edge: Some(2560),
         });
+        let (_, key_develop_neutral) = response_meta(&ImageRequest::Develop {
+            photo_id: id,
+            max_edge: Some(2560),
+            edl_json: "{}".to_string(),
+        });
+        let (_, key_develop_other_edl) = response_meta(&ImageRequest::Develop {
+            photo_id: id,
+            max_edge: Some(2560),
+            edl_json: "{\"exposure_ev\":1.0}".to_string(),
+        });
 
         assert_ne!(key_preview, key_image_full);
         assert_ne!(key_image_full, key_image_2560);
+        assert_ne!(key_image_2560, key_develop_neutral);
+        assert_ne!(
+            key_develop_neutral, key_develop_other_edl,
+            "zwei verschiedene EDL-Zustände desselben Fotos müssen unterschiedliche Cache-Schlüssel ergeben"
+        );
+    }
+
+    fn neutral_edl_json() -> String {
+        apx_core::EdlEnvelope::new(
+            apx_pipeline::EDL_SCHEMA_VERSION,
+            serde_json::to_value(apx_pipeline::EdlV1::NEUTRAL).expect("EDL serialisierbar"),
+        )
+        .to_json_string()
+        .expect("Umschlag serialisierbar")
+    }
+
+    #[test]
+    fn compute_develop_produces_framed_rgba8_matching_photo_dimensions() {
+        let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
+        let catalog = Catalog::open_in_memory().expect("Katalog");
+        let photo_id = setup_photo(tmp.path(), &catalog);
+        let pipeline = apx_pipeline::GpuContext::new_blocking();
+        let pipeline = match pipeline {
+            Ok(ctx) => ctx,
+            Err(_) => {
+                eprintln!("übersprungen: kein GPU-Adapter in dieser Umgebung verfügbar");
+                return;
+            }
+        };
+        let tile_cache = apx_pipeline::tile_cache::TileCache::new();
+
+        let bytes = compute_develop(
+            &catalog,
+            &pipeline,
+            &tile_cache,
+            photo_id,
+            Some(32),
+            &neutral_edl_json(),
+        )
+        .expect("sollte rendern");
+
+        assert!(bytes.len() > 8, "Antwort muss mindestens den Header tragen");
+        let width = u32::from_le_bytes(bytes[0..4].try_into().expect("4 Bytes"));
+        let height = u32::from_le_bytes(bytes[4..8].try_into().expect("4 Bytes"));
+        assert_eq!(
+            bytes.len() - 8,
+            (width * height * 4) as usize,
+            "Rest der Antwort muss genau width*height*4 RGBA8-Bytes sein"
+        );
+    }
+
+    #[test]
+    fn compute_develop_rejects_malformed_edl_json() {
+        let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
+        let catalog = Catalog::open_in_memory().expect("Katalog");
+        let photo_id = setup_photo(tmp.path(), &catalog);
+        let pipeline = match apx_pipeline::GpuContext::new_blocking() {
+            Ok(ctx) => ctx,
+            Err(_) => {
+                eprintln!("übersprungen: kein GPU-Adapter in dieser Umgebung verfügbar");
+                return;
+            }
+        };
+        let tile_cache = apx_pipeline::tile_cache::TileCache::new();
+
+        let result = compute_develop(
+            &catalog,
+            &pipeline,
+            &tile_cache,
+            photo_id,
+            Some(32),
+            "nicht-valides-json",
+        );
+        assert!(result.is_err());
     }
 }

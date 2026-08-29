@@ -25,7 +25,13 @@ use rawler::{RawImage, RawImageData};
 use crate::format::{classify, FileKind};
 use crate::orientation::Orientation;
 
-use color::{srgb_gamma, to_u16, ColorPipeline};
+use color::{cam_to_srgb_matrix, to_u16, ColorPipeline};
+// `srgb_gamma` wird zusätzlich als Teil der öffentlichen `apx-raw`-API
+// re-exportiert (siehe `lib.rs`), damit `apx-pipeline` denselben
+// Gamma-Encoder verwendet wie die bestehende `decode()`-Kette — statt die
+// Formel für den neuen Entwickeln-Renderpfad ein zweites Mal
+// abzuschreiben (siehe `DECISIONS.md` ADR-0019).
+pub use color::srgb_gamma;
 use demosaic::{demosaic_full, demosaic_half};
 
 /// Ergebnis von [`decode`]: interleaved 16-Bit-RGB, Zeile für Zeile,
@@ -60,7 +66,19 @@ pub struct LinearImage {
     /// Fallback-Formate (JPEG/PNG/TIFF, siehe [`decode_linear`]) neutral
     /// `[1.0, 1.0, 1.0, 1.0]`, da dort kein Sensor-Weißabgleich existiert.
     pub as_shot_wb_coeffs: [f32; 4],
+    /// Feste 3×3-Matrix Kamera-RGB → linear-sRGB (D65), dieselbe Berechnung
+    /// wie [`ColorPipeline::from_raw_image`] für [`decode`] nutzt — anders
+    /// als der Weißabgleich ist diese Transformation nicht nutzerseitig
+    /// verstellbar, `apx-pipeline` wendet sie unverändert an (siehe
+    /// `DECISIONS.md` ADR-0019). Für Fallback-Formate (bereits sRGB-nah)
+    /// die Einheitsmatrix.
+    pub cam_to_srgb: [[f32; 3]; 3],
 }
+
+/// Einheitsmatrix — Kamera-RGB-Farbmatrix-Ersatz für Fallback-Formate
+/// (JPEG/PNG/TIFF), die keine `xyz_to_cam`-Kameradaten mitbringen und
+/// bereits näherungsweise sRGB-kodiert sind (siehe [`decode_linear`]).
+const IDENTITY_RGB_MATRIX: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
 impl DecodedImage {
     /// Wandelt das Ergebnis in ein `image::DynamicImage` um, z. B. um es
@@ -113,6 +131,7 @@ pub fn decode_linear(path: &Path, max_edge: Option<u32>) -> Result<LinearImage> 
                 height: decoded.height,
                 pixels,
                 as_shot_wb_coeffs: [1.0, 1.0, 1.0, 1.0],
+                cam_to_srgb: IDENTITY_RGB_MATRIX,
             })
         }
     }
@@ -164,6 +183,7 @@ fn decode_raw_linear(path: &Path, max_edge: Option<u32>) -> Result<LinearImage> 
         height: oh,
         pixels: oriented,
         as_shot_wb_coeffs: image.wb_coeffs,
+        cam_to_srgb: cam_to_srgb_matrix(&image.xyz_to_cam),
     };
 
     match max_edge {
@@ -202,6 +222,7 @@ fn downsample_linear_if_needed(
         height: new_h,
         pixels: resized.into_raw(),
         as_shot_wb_coeffs: image.as_shot_wb_coeffs,
+        cam_to_srgb: image.cam_to_srgb,
     })
 }
 
@@ -488,6 +509,7 @@ mod tests {
             height: 4,
             pixels: vec![0.5f32; 4 * 4 * 3],
             as_shot_wb_coeffs: [1.0, 1.0, 1.0, 1.0],
+            cam_to_srgb: IDENTITY_RGB_MATRIX,
         };
         let result = downsample_linear_if_needed(Path::new("test.raw"), img, 8)
             .expect("darf nicht fehlschlagen");
@@ -501,6 +523,7 @@ mod tests {
             height: 50,
             pixels: vec![0.3f32; 100 * 50 * 3],
             as_shot_wb_coeffs: [1.2, 1.0, 0.8, 1.0],
+            cam_to_srgb: IDENTITY_RGB_MATRIX,
         };
         let result = downsample_linear_if_needed(Path::new("test.raw"), img, 20)
             .expect("darf nicht fehlschlagen");
@@ -508,5 +531,20 @@ mod tests {
         assert_eq!(result.height, 10);
         assert_eq!(result.pixels.len(), 20 * 10 * 3);
         assert_eq!(result.as_shot_wb_coeffs, [1.2, 1.0, 0.8, 1.0]);
+    }
+
+    #[test]
+    fn downsample_linear_keeps_cam_to_srgb_matrix() {
+        let matrix = [[1.1, 0.0, -0.1], [0.0, 1.0, 0.0], [-0.05, 0.0, 1.05]];
+        let img = LinearImage {
+            width: 8,
+            height: 4,
+            pixels: vec![0.4f32; 8 * 4 * 3],
+            as_shot_wb_coeffs: [1.0, 1.0, 1.0, 1.0],
+            cam_to_srgb: matrix,
+        };
+        let result = downsample_linear_if_needed(Path::new("test.raw"), img, 4)
+            .expect("darf nicht fehlschlagen");
+        assert_eq!(result.cam_to_srgb, matrix);
     }
 }

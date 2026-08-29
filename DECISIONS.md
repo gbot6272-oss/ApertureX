@@ -323,12 +323,27 @@ Kompression) bei jedem Regler-Tick würde spürbar Zeit aus diesem engen
 Budget verbrauchen, nur um die Bytes im Frontend gleich wieder zu
 dekodieren, bevor sie als WebGL2-Textur hochgeladen werden.
 
-**Entscheidung:** Die neue `apx://develop/<id>/<edl_hash>/<max_edge>`-
+**Entscheidung:** Die neue `apx://develop/<id>/<max_edge_oder_'full'>/<edl_json>`-
 Route liefert rohe, unkomprimierte RGBA8-Bytes (`Content-Type:
-application/octet-stream`, mit Breite/Höhe in einem kleinen Header)
-statt PNG. Die bestehenden `preview`-/`image`-Routen bleiben unverändert
-bei JPEG/PNG — diese Abweichung gilt ausschließlich für die neue,
-performance-kritische Route.
+application/x-apx-develop-rgba8`, mit Breite/Höhe als `u32`
+little-endian in einem 8-Byte-Header vor den Pixeldaten) statt PNG. Die
+bestehenden `preview`-/`image`-Routen bleiben unverändert bei JPEG/PNG —
+diese Abweichung gilt ausschließlich für die neue, performance-kritische
+Route.
+
+**Umsetzungs-Korrektur gegenüber der ursprünglichen Plan-Notiz (Schritt
+5):** Statt eines separaten `edl_hash`-Segments trägt die Route die
+**vollständige JSON-Serialisierung des `EdlEnvelope`** direkt im
+Pfad (`edl_json`) — ein reiner Hash hätte bedeutet, dass die Route den
+zugehörigen EDL-Wert irgendwoher nachschlagen müsste, was während des
+*Ziehens* eines Reglers (noch nicht committet, siehe ADR-0014) gar nicht
+möglich ist. Derselbe String dient nebenbei unverändert als
+Unterscheidungsmerkmal für den bestehenden Single-Flight-`ImageCache`
+(zwei EDL-Zustände desselben Fotos erzeugen zwei Cache-Schlüssel) — ein
+separater Hash-Mechanismus ist damit unnötig. `EdlV1`s Felder sind
+ausschließlich Zahlen und enthalten daher nie ein `/`-Zeichen, das die
+bestehende "erst dekodieren, dann an `/` aufteilen"-Pfadlogik stören
+könnte.
 
 **Konsequenzen:** Größere Rohdatenmenge pro Anfrage als bei komprimierten
 Formaten — bei lokaler IPC über `localhost`/den Tauri-Protokoll-Handler
@@ -383,3 +398,50 @@ Entprellungs-Logik ohne erkennbaren Vorteil neu erfinden.
 `THIRD_PARTY.md` einzutragen. Die `zundo`-Historie lebt nur im
 Arbeitsspeicher der laufenden Sitzung; das Überleben eines Neustarts
 läuft ausschließlich über `edit_history` (ADR-0014).
+
+---
+
+## ADR-0019: Feste Kamera→sRGB-Matrix + Gammakurve im Entwickeln-Renderpfad, wiederverwendet statt dupliziert
+
+**Status:** Angenommen
+**Kontext:** `apx_raw::decode_linear()` (ADR-0015) liefert absichtlich
+unbalanciertes, noch nicht farbtransformiertes Kamera-RGB — die
+Weißabgleich-Gains sind nutzerseitig verstellbar (siehe
+`WhiteBalanceAdjustment`) und gehören deshalb in `apx-pipeline`, nicht in
+`apx-raw`. Die anschließende Kamera-RGB→sRGB-Transformation (eine feste
+3×3-Matrix aus den Kamera-Kalibrierungsdaten, siehe
+`apx-raw/src/pipeline/color.rs`) ist dagegen **nicht** nutzerseitig
+verstellbar — sie ist trotzdem nötig, sonst zeigt der Entwickeln-Viewer
+falsche Farben (Kamera-RGB-Primärvalenzen unterscheiden sich spürbar von
+sRGB). Ohne sie wäre die neue `develop`-Route zwar lauffähig, aber
+farblich falsch — kein tragbarer Zustand für ein Bildbearbeitungswerkzeug.
+
+**Entscheidung:** `apx_raw::LinearImage` bekommt ein zusätzliches Feld
+`cam_to_srgb: [[f32; 3]; 3]` (Einheitsmatrix für Fallback-Formate ohne
+Kamerakalibrierung). `apx-pipeline::color` wendet diese feste Matrix plus
+dieselbe sRGB-Gammakurve an, die `apx_raw::decode()` für Phase-1-
+Vorschauen bereits nutzt (`apx_raw::srgb_gamma`, zusätzlich als Teil von
+`apx-raw`s öffentlicher API re-exportiert, statt die Formel ein zweites
+Mal abzuschreiben) — Reihenfolge im Renderpfad ist damit: As-shot-
+Weißabgleich + Nutzer-Shift → die sieben Regler (auf Kamera-RGB) → feste
+Kamera→sRGB-Matrix → Gammakurve → RGBA8-Quantisierung.
+
+**Bewusste Vereinfachung:** Die sieben Regler (insbesondere Kontrast/
+Lichter/Tiefen/Weiß/Schwarz) wirken damit auf Kamera-RGB-Werten, nicht
+auf einem farbmanagement-korrekten Arbeitsraum nach der Matrix — anders
+als z. B. Lightroom/Capture One, die Tonwert-Werkzeuge meist nach der
+Farbmatrix anwenden. Das kann bei starken Kamera-Matrizen zu leicht
+abweichenden Farbverschiebungen zwischen den Kanälen führen. Für Phase 2s
+Ziel „interaktives Entwickeln" ist das akzeptabel (die Regler bewegen
+sich intuitiv in die richtige Richtung); eine Neuordnung (Matrix vor den
+Reglern) ist ein möglicher Ausbau für eine spätere Phase, sobald echtes
+ICC-Farbmanagement (`lcms2`, ursprünglich für `apx-pipeline::color`
+vorgesehen, siehe `PLAN.md` Phase 2 Schritt 4) tatsächlich eingebaut
+wird.
+
+**Konsequenzen:** `apx-raw`s `pipeline`-Modul exponiert
+`cam_to_srgb_matrix` zusätzlich als `pub(crate)` (vorher rein privat in
+`pipeline::color`), damit `decode_raw_linear` sie berechnen kann, ohne
+eine vollständige `ColorPipeline` (die zusätzlich Weißabgleich/Gamma
+anwenden würde) zu instanziieren. Kein neues externes Crate, keine
+`lcms2`-Abhängigkeit in diesem Schritt.

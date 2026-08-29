@@ -1,18 +1,37 @@
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { useRef } from "react";
+
 import { previewUrl } from "../lib/media";
 import { useAppStore } from "../store";
 
+// Feste Zellbreite statt individueller Seitenverhältnisse — hält die
+// Virtualisierung einfach und schnell auch bei sehr vielen Fotos (Ziel:
+// 50.000, siehe PHASE1_PROMPT.md Abschnitt 9) und entspricht dem üblichen
+// Filmstreifen-Look (gleich große Zellen, Vorschau per `object-cover`
+// zugeschnitten).
+const CELL_WIDTH = 96;
+const CELL_GAP = 4;
+
 /**
- * Horizontaler Filmstreifen. Noch **nicht** virtualisiert — bei sehr
- * vielen Fotos (Ziel: 50.000, siehe `PHASE1_PROMPT.md` Abschnitt 7) würde
- * das ruckeln. Die Virtualisierung mit `@tanstack/react-virtual` ist
- * Schritt 10 im Plan; Schritt 8 liefert erst das Layout und die
- * Grundfunktion (Anzeige, Auswahl per Klick).
+ * Virtualisierter Filmstreifen (`@tanstack/react-virtual`): unabhängig
+ * von der Gesamtanzahl der Fotos werden nur die im Container sichtbaren
+ * Zellen plus ein kleiner Überhang (`overscan`) tatsächlich ins DOM
+ * gerendert — das hält das Scrollen auch bei 50.000 Einträgen flüssig.
  */
 export function Filmstrip() {
   const selectedFolderId = useAppStore((s) => s.selectedFolderId);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
   const photos = useAppStore((s) => (selectedFolderId ? s.photosByFolder[selectedFolderId] : undefined)) ?? [];
   const selectPhoto = useAppStore((s) => s.selectPhoto);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: photos.length,
+    getScrollElement: () => scrollRef.current,
+    horizontal: true,
+    estimateSize: () => CELL_WIDTH + CELL_GAP,
+    overscan: 8,
+  });
 
   if (photos.length === 0) {
     return (
@@ -23,18 +42,31 @@ export function Filmstrip() {
   }
 
   return (
-    <footer className="flex h-24 shrink-0 gap-1 overflow-x-auto border-t border-border bg-bg-raised p-1">
-      {photos.map((photo) => (
-        <button
-          key={photo.id}
-          type="button"
-          onClick={() => selectPhoto(photo.id)}
-          title={photo.filename}
-          className={`h-full shrink-0 overflow-hidden rounded border-2 ${photo.id === selectedPhotoId ? "border-accent" : "border-transparent hover:border-border"}`}
-        >
-          <img src={previewUrl(photo.id, 0)} alt={photo.filename} className="h-full w-auto object-cover" loading="lazy" />
-        </button>
-      ))}
+    <footer ref={scrollRef} className="h-24 shrink-0 overflow-x-auto overflow-y-hidden border-t border-border bg-bg-raised">
+      <div style={{ width: virtualizer.getTotalSize(), height: "100%", position: "relative" }}>
+        {virtualizer.getVirtualItems().map((item) => {
+          const photo = photos[item.index];
+          if (!photo) return null;
+          return (
+            <button
+              key={photo.id}
+              type="button"
+              onClick={() => selectPhoto(photo.id)}
+              title={photo.filename}
+              style={{
+                position: "absolute",
+                left: item.start,
+                top: 4,
+                width: CELL_WIDTH,
+                height: "calc(100% - 8px)",
+              }}
+              className={`overflow-hidden rounded border-2 ${photo.id === selectedPhotoId ? "border-accent" : "border-transparent hover:border-border"}`}
+            >
+              <img src={previewUrl(photo.id, 0)} alt={photo.filename} className="h-full w-full object-cover" loading="lazy" />
+            </button>
+          );
+        })}
+      </div>
     </footer>
   );
 }

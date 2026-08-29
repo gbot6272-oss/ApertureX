@@ -250,3 +250,14 @@ export const useAppStore = create<AppStore>()(
     },
   })),
 );
+
+// Store im Debug-Build am `window` verfügbar machen — üblich für
+// Zustand-Projekte, praktisch zum manuellen Nachstellen von Zuständen in
+// der Browser-Konsole (z. B. große Foto-Listen zum Testen der
+// Filmstreifen-Virtualisierung). `import.meta.env.DEV` wird von Vite zur
+// Build-Zeit ausgewertet — im Produktions-Build entfällt der Codepfad
+// komplett (Dead-Code-Elimination), landet also nicht im ausgelieferten
+// Bundle.
+if (import.meta.env.DEV) {
+  (window as unknown as { __appStore: typeof useAppStore }).__appStore = useAppStore;
+}

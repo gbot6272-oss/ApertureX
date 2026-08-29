@@ -13,7 +13,9 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  reporter: "list",
+  // HTML-Report immer erzeugen (nicht nur bei Fehlschlag) — die CI lädt
+  // `playwright-report/` als Artefakt hoch, wenn der Job fehlschlägt.
+  reporter: [["list"], ["html", { open: "never" }]],
 
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,

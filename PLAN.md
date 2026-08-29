@@ -4,7 +4,7 @@ Dieser Plan wird vor jeder Phase aktualisiert. Abgeschlossene Punkte bleiben ang
 
 ---
 
-## Aktuelle Phase: Phase 1 — Fundament
+## Abgeschlossene Phase: Phase 1 — Fundament
 
 Ziel (siehe `PHASE1_PROMPT.md`): App starten, Ordner mit RAWs importieren, Bilder in einer Liste sehen, eines auswählen, flüssig mit Zoom/Pan betrachten, nach Neustart ist alles noch da. Keine GPU-Pipeline, keine Regler, keine Bearbeitung, keine Presets, kein Export.
 
@@ -97,8 +97,75 @@ Ziel (siehe `PHASE1_PROMPT.md`): App starten, Ordner mit RAWs importieren, Bilde
   - [x] `cargo fmt --all -- --check` (einmal, Linux), `cargo clippy --workspace --all-targets --all-features -- -D warnings` (alle drei Plattformen — lokal auf Linux verifiziert: keine Warnungen), `cargo test --workspace` (95 Tests), `cargo build --workspace` — Frontend wird vorher über `pnpm build` erzeugt, da `apx-app`s `build.rs` `frontend/dist` einbettet (`tauri.conf.json`s `frontendDist`), unabhängig vom `tauri build`-CLI-Hook
   - [x] Bewusst kein volles `tauri build` mit Installer-Paketen/Signierung — das ist Phase 10 (Distribution), nicht Phase 1
 
-### Offene Entscheidung vor „go" (siehe `DECISIONS.md` ADR-0002)
-`rawler` (und jede realistische Alternative für vollständige RAW-Formatunterstützung in Rust) ist **LGPL-2.1** lizenziert. Das kollidiert wörtlich mit der Regel „nichts mit GPL im Kern, außer du weist mich ausdrücklich darauf hin" aus `SPEC.md` Abschnitt 6. Hiermit ausdrücklich darauf hingewiesen — Entscheidung und Kompromiss stehen in `DECISIONS.md`, ich warte auf explizite Bestätigung.
-
 ### Nicht in Phase 1 (bewusst zurückgestellt)
 Alles aus Phase 2–10 der `SPEC.md`: GPU-Pipeline, Regler/Entwickeln-Modul, Presets/Templates, Masken, KI-Funktionen, Export, Druck/Buch/Web/Karte, Node-Editor, Stacking, Tethering, Skript-API, Politur. Keine Vorarbeiten dafür in Phase 1, auch keine „vorbereitenden" Abstraktionen darüber hinaus, was Phase 1 selbst braucht.
+
+**Lizenzentscheidung `rawler`/LGPL-2.1 (ADR-0002) ist vom Nutzer bestätigt** — kein offener Punkt mehr.
+
+---
+
+## Aktuelle Phase: Phase 2 — Pipeline-Kern
+
+Ziel (laut `SPEC.md` §5): wgpu-Setup, Shader-Framework, Farbmanagement, EDL-Datenmodell, die sieben Grundeinstellungs-Regler (Weißabgleich, Belichtung, Kontrast, Lichter, Tiefen, Weiß, Schwarz), Tile-Cache, Verlauf mit Undo/Redo. Ergebnis: interaktives Entwickeln.
+
+Anders als Phase 1 gibt es kein eigenes, ausführliches Prompt-Dokument für Phase 2 — `SPEC.md` §5 fasst den Umfang in einem Satz zusammen. Die folgende Schrittliste ist deshalb selbst erarbeitet (vollständige Herleitung samt Architektur-Entscheidungen in `DECISIONS.md` ADR-0011 bis ADR-0018, Zusammenfassung in `ARCHITECTURE.md` §5).
+
+**Wichtige Scope-Korrektur (ADR-0011):** `FEATURES.md` hatte fälschlich zwölf Regler als Phase 2 markiert; `SPEC.md`s Phasenplan nennt nur sieben. Textur/Klarheit/Dunst entfernen/Dynamik/Sättigung sind jetzt korrekt als Phase 4 markiert.
+
+### Reihenfolge
+
+- [x] 0. Scope festzurren, Dokumente vorbereiten
+  - [x] `FEATURES.md`: fünf Regler-Zeilen von Phase 2 auf Phase 4 korrigiert (ADR-0011)
+  - [x] `DECISIONS.md`: ADR-0011 bis ADR-0018 (Scope, Ein-Crate-Entscheidung, EDL-Format, Verlauf-Modell, apx-raw-Grenze, Transportformat, Shader-Strategie, Undo/Redo-Bibliothek)
+  - [x] `ARCHITECTURE.md`: §5-Platzhalter durch echte Modulbeschreibung ersetzt, Grobstruktur-Diagramm und Modulgrenzen-Regeln um `apx-pipeline` ergänzt
+  - [x] Nebenbei behoben: `DECISIONS.md` ADR-0002s Status war noch als "wartet auf Bestätigung" markiert, obwohl der Nutzer die LGPL-2.1-Ausnahme längst bestätigt hatte — korrigiert
+
+- [ ] 1. `apx-pipeline` Crate-Grundgerüst
+  - [ ] `Cargo.toml`, Workspace-Einbindung, `#![deny(clippy::unwrap_used)]`
+  - [ ] Modul-Skelett (`edl/`, `color/`, `gpu/`, `stages/`, `tile_cache.rs`), `PipelineError`
+  - [ ] Additive `AppError::Pipeline`-Variante in `apx-core`
+  - [ ] `THIRD_PARTY.md`: vorläufige Zeilen für `wgpu`/`bytemuck`/`lcms2`/`pollster`
+
+- [ ] 2. EDL-Datenmodell + Katalog-Migration
+  - [ ] `EdlV1` in `apx-pipeline::edl`, `EdlEnvelope` in `apx-core`
+  - [ ] `migrations/0002_edits.sql` (`edit_history`, `edit_current`), `repository::edits`
+  - [ ] Tests: Roundtrip, Schema-Version-Ablehnung, FK-Cascade, Migrations-Idempotenz, alter Katalog öffnet noch
+
+- [ ] 3. wgpu-Gerätekontext (`apx-pipeline::gpu`)
+  - [ ] `GpuContext`, `Backends::all()` + `force_fallback_adapter`-Fallback
+  - [ ] Gemeinsamer Dispatch-Helfer, Kopier-Shader-Roundtrip-Test
+
+- [ ] 4. Die 7 Regler: WGSL-Shader + CPU-Fallback
+  - [ ] 5 Regler-Module + fusionierter Shader
+  - [ ] `apx_raw::decode_linear()` additiver Einstiegspunkt
+  - [ ] Tests pro Modul (Hand-Erwartungswert, CPU/GPU-Abgleich, Identität, Fallback, Fusion-Abgleich)
+
+- [ ] 5. Tauri-Anbindung: Command + Protokoll-Route
+  - [ ] `AppState.pipeline`, `ImageRequest::Develop`, `apply_develop_edit`-Command
+  - [ ] RGBA8-Rohbytes-Transport (ADR-0016)
+  - [ ] Tests: Routen-Parsing, `compute_develop`-Integrationstest, Cache-Schlüssel
+
+- [ ] 6. Frontend: Entwickeln-Regler, Undo/Redo, WebGL2-Viewer
+  - [ ] `DevelopSlice` + `zundo`, `DevelopPanel.tsx` mit 7 Reglern
+  - [ ] `Viewer.tsx` auf WebGL2, `useDevelopRender`-Hook
+  - [ ] Tests: Vitest (Regler-Logik), Store (Undo/Redo), Playwright-E2E-Erweiterung
+
+- [ ] 7. Performance-Feinschliff fürs 16-ms-Ziel
+  - [ ] Entprellung, Latenzmessung (`tracing`-Spans + Frontend-Zeitstempel), ehrliche Dokumentation der Zahlen
+
+- [ ] 8. Testinfrastruktur: synthetische Daten + wgpu in CI
+  - [ ] Gemeinsamer Fixture-Helfer
+  - [ ] CI: Mesa `llvmpipe`/`lavapipe` (Linux), WARP (Windows), Metal-Zugriff (macOS) empirisch verifizieren
+
+- [ ] 9. Dokumentation fertigstellen
+  - [ ] `THIRD_PARTY.md`, `ARCHITECTURE.md`-Datenfluss-Abschnitt, `FEATURES.md` abhaken
+
+- [ ] 10. Abnahme gegen Phase-2-Kriterien
+  - [ ] Definition-of-Done je Feature, EDL-Neustart-Persistenz-Test, Performance-Zahlen, Abschlussbericht
+
+### Nicht in Phase 2 (bewusst zurückgestellt)
+Gradationskurve, HSL, Farbmischer, Color Grading, Details/Schärfen/Rauschen, Objektivkorrekturen, Effekte, Kalibrierung, Geometrie/Crop, Reparatur (alle → Phase 4), Presets (→ Phase 5), Masken (→ Phase 6), sowie die fünf per ADR-0011 nach Phase 4 verschobenen Regler (Textur, Klarheit, Dunst entfernen, Dynamik, Sättigung).
+
+### Bekannte offene Punkte aus Phase 1 (unverändert)
+- ADR-0007: keine echten RAW-Testdateien (Netzwerkzugriff auf raw.pixls.us blockiert) — betrifft auch Phase 2s Shader-Tests, die deshalb weiterhin auf synthetische Testmuster angewiesen sind.
+- ADR-0010: Playwright testet simuliert, nicht die native App.

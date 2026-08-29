@@ -50,6 +50,10 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 ## 3.2 Modul ENTWICKELN — Globale Werkzeuge
 
 ### Grundeinstellungen
+<!-- Phasen-Zuordnung korrigiert (siehe DECISIONS.md ADR-0011): SPEC.md §5s
+     Phase-2-Satz nennt nur die folgenden sieben Regler namentlich; Textur/
+     Klarheit/Dunst entfernen/Dynamik/Sättigung gehören daher zu Phase 4,
+     nicht zu Phase 2. -->
 - [ ] Weißabgleich (Temperatur, Tint, Pipette, Kamera-Presets) — Phase 2 — Status: Nicht begonnen
 - [ ] Belichtung — Phase 2 — Status: Nicht begonnen
 - [ ] Kontrast — Phase 2 — Status: Nicht begonnen
@@ -57,11 +61,11 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [ ] Tiefen — Phase 2 — Status: Nicht begonnen
 - [ ] Weiß — Phase 2 — Status: Nicht begonnen
 - [ ] Schwarz — Phase 2 — Status: Nicht begonnen
-- [ ] Textur — Phase 2 — Status: Nicht begonnen
-- [ ] Klarheit — Phase 2 — Status: Nicht begonnen
-- [ ] Dunst entfernen — Phase 2 — Status: Nicht begonnen
-- [ ] Dynamik — Phase 2 — Status: Nicht begonnen
-- [ ] Sättigung — Phase 2 — Status: Nicht begonnen
+- [ ] Textur — Phase 4 — Status: Nicht begonnen
+- [ ] Klarheit — Phase 4 — Status: Nicht begonnen
+- [ ] Dunst entfernen — Phase 4 — Status: Nicht begonnen
+- [ ] Dynamik — Phase 4 — Status: Nicht begonnen
+- [ ] Sättigung — Phase 4 — Status: Nicht begonnen
 
 ### Gradationskurve
 - [ ] Punktkurve — Phase 4 — Status: Nicht begonnen

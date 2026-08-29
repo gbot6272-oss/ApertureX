@@ -16,7 +16,8 @@ Ein Eintrag pro Architekturentscheidung, im ADR-Format. Einträge werden nicht r
 
 ## ADR-0002: RAW-Dekodierung über `rawler` — LGPL-2.1-Hinweis
 
-**Status:** Angenommen, **explizit lizenzrechtlich zu bestätigen**
+**Status:** Angenommen, vom Nutzer ausdrücklich bestätigt ("Ja, LGPL-2.1
+für rawler akzeptieren")
 **Kontext:** `SPEC.md` Abschnitt 6 verlangt: „Nichts mit GPL im Kern, außer du weist mich ausdrücklich darauf hin." Der Phase-1-Prompt schreibt `rawler` als Bibliothek vor und verbietet eigenes RAW-Parsing.
 
 Ich habe die Lizenzlage der realistischen Alternativen geprüft:
@@ -32,7 +33,7 @@ Ich habe die Lizenzlage der realistischen Alternativen geprüft:
 
 **Damit hiermit ausdrücklich darauf hingewiesen** (wie von `SPEC.md` gefordert), bevor Code geschrieben wird.
 
-**Entscheidung (vorgeschlagen, wartet auf Bestätigung):** `rawler` verwenden, LGPL-2.1 als bewusste Ausnahme akzeptieren, und die Ausnahme durch technische Maßnahmen entschärfen:
+**Entscheidung (vom Nutzer bestätigt):** `rawler` verwenden, LGPL-2.1 als bewusste Ausnahme akzeptieren, und die Ausnahme durch technische Maßnahmen entschärfen:
 1. `apx-raw` bleibt ein eigener, klar abgegrenzter Crate (bereits durch Workspace-Struktur erzwungen) — die LGPL-Komponente ist isoliert, nicht mit Geschäftslogik vermischt.
 2. Sobald Distribution ansteht (ab Phase 10 / Installer), `apx-raw` als dynamisch nachladbare Komponente bauen (`cdylib` oder Plugin-Grenze), damit Nutzer sie gemäß LGPL §6 durch eine modifizierte Version ersetzen können, statt sich auf eine für Rust unklare statische Verlinkung zu verlassen. Diese Maßnahme wird in Phase 10 konkret umgesetzt und hier nur vorgemerkt.
 3. Vollständiger Lizenztext und Quellverweis in `THIRD_PARTY.md`.
@@ -174,3 +175,211 @@ Playwright-Test auffiele). Das ist eine bewusste, dokumentierte Lücke
 für Phase 1, keine stillschweigend schwächere Umsetzung. Empfehlung für
 eine spätere Phase: `tauri-driver` + WebdriverIO als zusätzliche,
 eigene Test-Stufe ergänzen, sobald der Funktionsumfang das rechtfertigt.
+
+---
+
+## ADR-0011: Phase 2 umfasst genau sieben Grundeinstellungs-Regler, nicht zwölf
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §5s Phasenplan-Satz für Phase 2 nennt namentlich
+sieben Regler: „die Grundeinstellungs-Regler (WB, Belichtung, Kontrast,
+Lichter, Tiefen, Weiß, Schwarz)". `FEATURES.md` hatte davon abweichend
+alle zwölf „Grundeinstellungen"-Regler aus `SPEC.md` §3.2 (zusätzlich
+Textur, Klarheit, Dunst entfernen, Dynamik, Sättigung) als Phase 2
+markiert — eine Diskrepanz zwischen der maßgeblichen Phasenplan-Zeile
+und `FEATURES.md`s eigener, weiter gefasster Interpretation.
+
+**Entscheidung:** `SPEC.md` §5 ist die maßgebliche Quelle für den
+Phasen-Umfang. Phase 2 umfasst genau die sieben genannten Regler.
+Textur/Klarheit/Dunst entfernen/Dynamik/Sättigung wandern in
+`FEATURES.md` zu Phase 4, wo sie fachlich ohnehin neben Gradationskurve/
+HSL/Farbmischer/Details stehen — Werkzeuge, die eher „gestalterische
+Nachbearbeitung" als „grundlegende Tonwertkorrektur" sind.
+
+**Konsequenzen:** Phase 2 bleibt beim in `SPEC.md` beschriebenen,
+kleineren Umfang. `FEATURES.md`s eigene Präambel erlaubt genau diese Art
+von Verfeinerung ausdrücklich ("wird beim Start der jeweiligen Phase in
+PLAN.md verfeinert... Änderungen gehören dann in DECISIONS.md"). Diese
+Entscheidung wurde stellvertretend getroffen, ohne Rückfrage beim
+Nutzer, da sie den Umfang verkleinert (nicht wesentlich vergrößert) und
+rein fachlich-technischer Natur ist.
+
+---
+
+## ADR-0012: Ein Crate `apx-pipeline`, nicht zwei (`apx-pipeline` + `apx-gpu`)
+
+**Status:** Angenommen
+**Kontext:** `ARCHITECTURE.md`s bisheriger Phase-2-Platzhalter nannte
+zwei mögliche Crate-Namen nebeneinander, ohne zu entscheiden, ob es ein
+oder zwei Crates werden.
+
+**Entscheidung:** Ein einziges neues Crate, `apx-pipeline`, enthält das
+EDL-Datenmodell, die wgpu-Anbindung, den Tile-Cache und das
+Farbmanagement (`lcms2`). Begründung: Phase 1 hält den Workspace bewusst
+bei vier Crates mit klaren Grenzen; eine Aufspaltung „GPU-Kontext" vs.
+„EDL/Pipeline-Logik" in zwei Crates würde nur künstliche Grenzen
+zwischen eng zusammenhängendem Code ziehen (der EDL-Interpreter *ist*
+der wgpu-Aufrufer) ohne einen erkennbaren Vorteil für Testbarkeit oder
+Wiederverwendbarkeit — anders als z. B. die `apx-raw`/`apx-catalog`-
+Trennung, die zwei fachlich unabhängige Verantwortlichkeiten trennt.
+
+**Konsequenzen:** `apx-pipeline` hängt von `apx-core` und `apx-raw` ab,
+nicht von `apx-catalog` (siehe ADR-0013). `apx-app` hängt zusätzlich von
+`apx-pipeline` ab, wie von den anderen drei Crates auch.
+
+---
+
+## ADR-0013: EDL wird als JSON in einem `apx-core`-Umschlagtyp gespeichert, nicht als CBOR, nicht direkt von `apx-catalog` interpretiert
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §2.1 lässt das Serialisierungsformat offen
+("als JSON/CBOR"). Zusätzlich stellt sich die Frage, wo der konkrete
+EDL-Rust-Typ leben soll, ohne die Abhängigkeitsrichtung
+`apx-catalog` ↛ `apx-pipeline` zu verletzen (siehe ADR-0012).
+
+**Entscheidung:** JSON, nicht CBOR — menschenlesbar/diffbar (wichtig für
+Debugging und die später geplante „Verlaufs-Vergleich"-Funktion),
+`serde_json` ist bereits Workspace-Abhängigkeit, und die Nutzlast ist für
+Phase 2 klein (7 Zahlen), sodass CBORs Kompaktheitsvorteil nicht ins
+Gewicht fällt. `apx-core` bekommt einen minimalen, versionsmarkierten
+Umschlagtyp `EdlEnvelope { schema_version: u32, payload:
+serde_json::Value }`. `apx-catalog` speichert nur diesen Umschlag (als
+`TEXT`-Spalte) und muss `payload` nie verstehen — nur `apx-pipeline`
+kennt die konkrete `EdlV1`-Struct und entpackt `payload` hinein.
+
+**Konsequenzen:** `apx-catalog` bleibt unabhängig von `apx-pipeline`.
+Sollten spätere Phasen große Kurven-/Masken-Daten ins EDL bringen und
+JSON-Größe/Parse-Geschwindigkeit zum echten Problem werden, ist ein
+Wechsel zu CBOR eine lokale Änderung in `apx-pipeline` (Serialisierung)
+plus einer neuen Schema-Version — kein Architekturbruch.
+
+---
+
+## ADR-0014: Verlauf/Undo-Redo als eigene SQLite-Tabelle vollständiger EDL-Schnappschüsse
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §3.4/§5 verlangt „Verlauf mit unbegrenzten,
+benennbaren, klickbaren Schritten (Undo/Redo)". Zwei Modellierungen
+kämen infrage: ein Operations-Log (jede Regler-Änderung als ein Eintrag,
+EDL wird durch Abspielen aller Einträge rekonstruiert) oder eine Tabelle
+vollständiger EDL-Schnappschüsse pro Schritt.
+
+**Entscheidung:** Eigene Tabelle `edit_history` mit vollständigen
+EDL-Schnappschüssen pro Zeile (`photo_id`, `sequence`, `label`,
+`edl_json`, `created_at`), plus ein 1-Zeile-pro-Foto-Zeiger
+`edit_current`. Begründung: „Springe zu einem beliebigen früheren
+Schritt", „benenne einen Schritt" und „vergleiche zwei beliebige
+Schritte" (spätere Phasen) sind mit vollständigen Schnappschüssen
+triviale SQL-Abfragen, während ein Operations-Log für dieselben
+Anfragen erst wieder abgespielt werden müsste. Für Phase 2 gilt zudem:
+Wiederholen (Redo) nach einer neuen Bearbeitung wird **nicht**
+aufbewahrt (keine Verzweigung) — neue Bearbeitung nach einem Rückgängig
+verwirft die „Zukunft", wie in den meisten Bildbearbeitungsprogrammen
+üblich. Verzweigende Historie ist von `SPEC.md` nicht für Phase 2
+gefordert.
+
+**Konsequenzen:** Migration `migrations/0002_edits.sql` ist rein additiv
+(ändert `photos` nicht), `edit_current` ist eine eigene Tabelle statt
+einer neuen Spalte auf `photos`, um die Phase-1-Tabelle unangetastet zu
+lassen.
+
+---
+
+## ADR-0015: `apx-raw` bekommt einen additiven `decode_linear()`-Einstiegspunkt statt den bestehenden Vertrag zu ändern
+
+**Status:** Angenommen
+**Kontext:** Der heutige `apx_raw::decode()`/`DecodedImage`-Pfad
+bäckt einen festen (nicht einstellbaren) Weißabgleich und eine feste
+sRGB-Gammakurve fest ein — genau das, was Phase 2 einstellbar machen
+muss (Weißabgleich-Regler, Belichtung/Ton). Eine Änderung an `decode()`
+selbst würde die Verträge der bestehenden Phase-1-Aufrufer (Vorschau-
+Erzeugung im Import-Job, Vorschau-/Vollbild-Routen im Protokoll-Handler)
+brechen.
+
+**Entscheidung:** Neuer, rein additiver Einstiegspunkt
+`apx_raw::decode_linear()`, der die Kette nach CFA-Laden/Demosaicing/
+Schwarz-Weiß-Normalisierung stoppt — vor dem bisherigen festen
+Weißabgleich-Multiplikator und vor der Gammakurve. `apx-pipeline`
+übernimmt ab diesem linearen Zwischenergebnis. `decode()`/`DecodedImage`
+bleiben für alle bestehenden Phase-1-Aufrufer unverändert.
+
+**Konsequenzen:** Es gibt vorübergehend zwei Ausstiegspunkte aus der
+RAW-Dekodierkette in `apx-raw` (der alte, feste `decode()`-Pfad für
+Vorschauen/Thumbnails; der neue `decode_linear()`-Pfad für die
+Entwickeln-Ansicht) — bewusst in Kauf genommen, statt Phase 1s
+funktionierenden Code für eine Anforderung umzubauen, die er nicht
+erfüllen muss (Thumbnails brauchen keinen einstellbaren Weißabgleich).
+
+---
+
+## ADR-0016: Die interaktive Entwickeln-Route liefert rohe RGBA8-Bytes statt PNG/JPEG
+
+**Status:** Angenommen
+**Kontext:** Die bestehenden `apx://preview/…`- und `apx://image/…`-
+Routen liefern JPEG bzw. PNG. `SPEC.md` §2.4 verlangt für die neue
+interaktive Entwickeln-Ansicht „Regler-Bewegung → sichtbares Update:
+< 16 ms bei 24-MP-Proxy" — eine erneute PNG-Kodierung (DEFLATE-
+Kompression) bei jedem Regler-Tick würde spürbar Zeit aus diesem engen
+Budget verbrauchen, nur um die Bytes im Frontend gleich wieder zu
+dekodieren, bevor sie als WebGL2-Textur hochgeladen werden.
+
+**Entscheidung:** Die neue `apx://develop/<id>/<edl_hash>/<max_edge>`-
+Route liefert rohe, unkomprimierte RGBA8-Bytes (`Content-Type:
+application/octet-stream`, mit Breite/Höhe in einem kleinen Header)
+statt PNG. Die bestehenden `preview`-/`image`-Routen bleiben unverändert
+bei JPEG/PNG — diese Abweichung gilt ausschließlich für die neue,
+performance-kritische Route.
+
+**Konsequenzen:** Größere Rohdatenmenge pro Anfrage als bei komprimierten
+Formaten — bei lokaler IPC über `localhost`/den Tauri-Protokoll-Handler
+ist das akzeptabel (kein Netzwerk, keine Bandbreitenbegrenzung), der
+Kompressions-Zeitgewinn wiegt hier schwerer als die Byte-Ersparnis.
+
+---
+
+## ADR-0017: Fusionierter Compute-Shader für den interaktiven Pfad, separate Shader pro Regler für Spec-Konformität und Tests
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §6 verlangt „jedes Modul mit eigenem Shader,
+eigenem Test". Ein einzelner GPU-Dispatch pro Regler-Änderung würde bei
+sieben Reglern potenziell sieben aufeinanderfolgende Dispatch+Rücklese-
+Zyklen bedeuten — jeder mit eigenem Overhead, der zusammen das 16-ms-
+Budget gefährdet.
+
+**Entscheidung:** Jeder der fünf Regler-Module (Weißabgleich, Belichtung,
+Kontrast, Lichter+Tiefen, Weiß+Schwarz) bekommt trotzdem seinen eigenen
+WGSL-Shader und eigene Tests (erfüllt SPEC.md wörtlich). Zusätzlich gibt
+es einen fusionierten Shader (`basic_fused.rs`), der dieselbe Mathematik
+aller fünf Module in einem einzigen GPU-Aufruf kombiniert. Der
+interaktive Vorschau-Pfad (bei jedem Regler-Tick) nutzt ausschließlich
+den fusionierten Shader — ein Dispatch statt fünf. Ein Abgleichstest
+stellt sicher, dass fusionierter und einzelne Shader auf identischem
+Input dasselbe Ergebnis liefern (innerhalb der üblichen Gleitkomma-
+Toleranz).
+
+**Konsequenzen:** Etwas Code-Duplikation zwischen Einzel- und fusioniertem
+Shader (dieselbe Mathematik zweimal ausgedrückt) — bewusst in Kauf
+genommen zugunsten von Performance UND Spec-Konformität statt eines
+Kompromisses, der keines von beidem vollständig erfüllt.
+
+---
+
+## ADR-0018: `zundo` für Undo/Redo im Frontend
+
+**Status:** Angenommen
+**Kontext:** Der Zustand-Store nutzt bereits `immer`; `FEATURES.md`
+verlangt für Phase 2 „Verlauf mit unbegrenzten, benennbaren, klickbaren
+Schritten (Undo/Redo)" im Frontend (zusätzlich zur dauerhaften
+`edit_history`-Tabelle aus ADR-0014, die den App-Neustart überlebt — die
+Frontend-Historie ist die *aktive Sitzung*, nicht dasselbe System).
+
+**Entscheidung:** `zundo`, eine kleine, MIT-lizenzierte Bibliothek, die
+gezielt bestehende Zustand-Stores (auch mit `immer`) um Verlauf
+erweitert und Einträge bündelt/entprellt, statt bei jeder Mausbewegung
+einen Schritt anzulegen. Eine selbstgebaute Lösung müsste dieselbe
+Entprellungs-Logik ohne erkennbaren Vorteil neu erfinden.
+
+**Konsequenzen:** Eine weitere kleine Frontend-Abhängigkeit, in
+`THIRD_PARTY.md` einzutragen. Die `zundo`-Historie lebt nur im
+Arbeitsspeicher der laufenden Sitzung; das Überleben eines Neustarts
+läuft ausschließlich über `edit_history` (ADR-0014).

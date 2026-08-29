@@ -163,7 +163,7 @@ mod tests {
                 return;
             }
         };
-        let pixels: Vec<f32> = (0..300).map(|i| (i as f32) / 300.0).collect();
+        let pixels = crate::test_support::ramp(300);
         let gains = compute_gains(
             [1.1, 1.0, 0.9, 1.0],
             WhiteBalanceAdjustment {

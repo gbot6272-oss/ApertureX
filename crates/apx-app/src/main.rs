@@ -5,6 +5,8 @@
 //! einen Custom-Protokoll-Handler mit dem Frontend. Enthält selbst keine
 //! Geschäftslogik — siehe `ARCHITECTURE.md` Abschnitt 4.
 
+#![deny(clippy::unwrap_used)]
+
 mod commands;
 mod import;
 mod protocol;

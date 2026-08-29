@@ -25,6 +25,8 @@ pub mod edl;
 pub mod error;
 pub mod gpu;
 pub mod stages;
+#[cfg(test)]
+mod test_support;
 pub mod tile_cache;
 
 pub use edl::{EdlV1, EDL_SCHEMA_VERSION};

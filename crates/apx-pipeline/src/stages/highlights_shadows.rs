@@ -113,7 +113,7 @@ mod tests {
                 return;
             }
         };
-        let pixels: Vec<f32> = (0..300).map(|i| (i as f32) / 300.0).collect();
+        let pixels = crate::test_support::ramp(300);
         let cpu = apply_cpu(&pixels, 40.0, -30.0);
         let gpu = apply_gpu(&ctx, &pixels, 40.0, -30.0).expect("GPU-Ausführung sollte gelingen");
         for (c, g) in cpu.iter().zip(gpu.iter()) {

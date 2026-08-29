@@ -133,10 +133,20 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: cargo clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used
 
+      # `--nocapture` ist hier bewusst gesetzt (nicht nur bei Fehlschlag
+      # aktiv): `apx-pipeline`s `gpu_matches_cpu`-artige Tests drucken bei
+      # fehlendem GPU-Adapter ein "übersprungen: ..." über `eprintln!`,
+      # bevor sie früh zurückkehren — ohne `--nocapture` sieht ein grüner
+      # Testlauf identisch aus, egal ob der Adapter tatsächlich gefunden
+      # wurde oder der Test sich nur weich übersprungen hat. Erst mit
+      # sichtbarer Ausgabe lässt sich pro Plattform empirisch prüfen, ob
+      # der jeweilige CI-Runner tatsächlich einen Software-/Hardware-
+      # Adapter hat (siehe `PLAN.md` Phase 2 Schritt 8, `DECISIONS.md`
+      # zur wgpu-in-CI-Verifikation).
       - name: cargo test
-        run: cargo test --workspace
+        run: cargo test --workspace -- --nocapture
 
       - name: cargo build
         run: cargo build --workspace

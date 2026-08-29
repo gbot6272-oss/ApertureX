@@ -188,8 +188,10 @@ Anders als Phase 1 gibt es kein eigenes, ausführliches Prompt-Dokument für Pha
   - [x] Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (173 Tests), `tsc -b`, `vitest run` (33 Tests), `vite build`, `playwright test` (8/8, alle Vorher-Tests weiterhin grün) — alles grün
 
 - [ ] 8. Testinfrastruktur: synthetische Daten + wgpu in CI
-  - [ ] Gemeinsamer Fixture-Helfer
-  - [ ] CI: Mesa `llvmpipe`/`lavapipe` (Linux), WARP (Windows), Metal-Zugriff (macOS) empirisch verifizieren
+  - [x] Gemeinsamer Fixture-Helfer `apx-pipeline::test_support` (`#[cfg(test)]`-only): `ramp`/`gray_gradient`/`saturated_channels` — ersetzt die zuvor sieben wortgleichen `(0..300).map(|i| (i as f32) / 300.0).collect()`-Zeilen in den Regler-Testmodulen
+  - [x] CI-Lücke geschlossen: `cargo clippy` in `ci.yml` prüfte bisher **ohne** `-D clippy::unwrap_used` (nur lokal verwendet) — jetzt angeglichen; `apx-app` bekam dafür zusätzlich `#![deny(clippy::unwrap_used)]` (fehlte bisher als einziges Crate, hatte aber ohnehin keine `.unwrap()`-Aufrufe außerhalb von Tests)
+  - [x] `cargo test --workspace -- --nocapture` in CI (vorher ohne `--nocapture`): ein grüner Testlauf sah bisher identisch aus, egal ob `gpu_matches_cpu`-artige Tests einen echten Adapter fanden oder sich nur weich (`eprintln!` + früher Rückgabewert) übersprungen haben — ohne sichtbare Ausgabe ließ sich das nicht unterscheiden
+  - [ ] **Empirische Verifikation noch ausstehend:** ob die Linux/Windows/macOS-CI-Runner tatsächlich einen Software-/Hardware-GPU-Adapter finden (Mesa `llvmpipe`/`lavapipe`, WARP, Metal), wird nach dem CI-Lauf dieses Commits anhand der jetzt sichtbaren `--nocapture`-Ausgabe geprüft und hier mit dem tatsächlichen Ergebnis ergänzt — nicht vorab angenommen (siehe `PLAN.md`-Leitprinzip „nicht vorab annehmen")
 
 - [ ] 9. Dokumentation fertigstellen
   - [ ] `THIRD_PARTY.md`, `ARCHITECTURE.md`-Datenfluss-Abschnitt, `FEATURES.md` abhaken

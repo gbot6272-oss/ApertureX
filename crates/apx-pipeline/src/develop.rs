@@ -139,9 +139,7 @@ mod tests {
 
         let width = 2048;
         let height = 1365;
-        let pixels: Vec<f32> = (0..(width * height * 3))
-            .map(|i| ((i % 997) as f32) / 997.0)
-            .collect();
+        let pixels = crate::test_support::gray_gradient((width * height) as usize);
         let linear = LinearImage {
             width,
             height,

@@ -236,12 +236,12 @@ Wie bei Phase 2 gibt es kein eigenes ausführliches Prompt-Dokument — die Schr
   - [x] `DECISIONS.md`: ADR-0022 bis ADR-0025
   - [x] Dieser Abschnitt in `PLAN.md`
 
-- [ ] 1. DB-Schema-Erweiterung (Migration `0003_library.sql`)
-  - [ ] `rating`/`flag`/`color_label` auf `photos`
-  - [ ] `keywords` + `photo_keywords`
-  - [ ] `collections` + `collection_photos`
-  - [ ] `photos_fts` (FTS5 external-content) + Sync-Trigger
-  - [ ] Tests: Idempotenz, alter Katalog öffnet und zieht Migration 3 nach, FK-Cascade
+- [x] 1. DB-Schema-Erweiterung (Migration `0003_library.sql`)
+  - [x] `rating`/`flag`/`color_label` auf `photos`
+  - [x] `keywords` + `photo_keywords`
+  - [x] `collections` + `collection_photos`
+  - [x] `photos_fts` (FTS5 external-content) + Sync-Trigger
+  - [x] Tests: Idempotenz, alter Katalog (nur Migration 1, bzw. 1+2 mit Bestandsdaten) öffnet und zieht Migration 3 nach inkl. FTS5-Backfill-Verifikation; FK-Cascade-Tests für `keywords`/`collections` bewusst auf Schritt 2 verschoben (dort existieren echte `Catalog`-Methoden zum Einfügen von Testdaten, konsistent mit dem bestehenden `repository::edits`-Testmuster statt Rohdaten in `migrations.rs`)
 
 - [ ] 2. Repository- und `Catalog`-Erweiterungen
   - [ ] `repository::{ratings, keywords, collections, search}`

@@ -104,7 +104,7 @@ Alles aus Phase 2–10 der `SPEC.md`: GPU-Pipeline, Regler/Entwickeln-Modul, Pre
 
 ---
 
-## Aktuelle Phase: Phase 2 — Pipeline-Kern
+## Abgeschlossene Phase: Phase 2 — Pipeline-Kern
 
 Ziel (laut `SPEC.md` §5): wgpu-Setup, Shader-Framework, Farbmanagement, EDL-Datenmodell, die sieben Grundeinstellungs-Regler (Weißabgleich, Belichtung, Kontrast, Lichter, Tiefen, Weiß, Schwarz), Tile-Cache, Verlauf mit Undo/Redo. Ergebnis: interaktives Entwickeln.
 
@@ -199,8 +199,18 @@ Anders als Phase 1 gibt es kein eigenes, ausführliches Prompt-Dokument für Pha
   - [x] `FEATURES.md`: alle 7 Regler-Zeilen sowie Undo/Redo und Regler-Standardverhalten abgehakt — bei zwei Zeilen ehrlich mit Teil-Einschränkung markiert statt pauschal "Fertig": Weißabgleich fertig, aber Pipette/Kamera-Presets fehlen (zu Phase 4 verschoben, waren nie Teil von `SPEC.md` §5s Phase-2-Satz); Undo/Redo funktioniert, aber kein klickbares Verlaufs-Panel mit benannten Schritten (nur Rückgängig/Wiederholen um je einen Schritt); Regler-Standardverhalten fertig bis auf Alt-Maskenvorschau (betrifft ohnehin keinen der 7 Regler)
   - [x] Verifiziert nach der `lcms2`-Entfernung: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (176 Tests) — alles grün
 
-- [ ] 10. Abnahme gegen Phase-2-Kriterien
-  - [ ] Definition-of-Done je Feature, EDL-Neustart-Persistenz-Test, Performance-Zahlen, Abschlussbericht
+- [x] 10. Abnahme gegen Phase-2-Kriterien
+  - [x] Neuer Test `apx-catalog::tests::edit_history_persists_across_reopen` (analog zu `open_on_disk_persists_across_reopen`): Katalog auf Platte anlegen, Foto + EDL committen, schließen, neu öffnen, `current_edit()` liefert dieselbe EDL — SPEC.md §7 Punkt 6 ("in der EDL serialisierbar und nach Neustart identisch reproduzierbar") jetzt mit eigenem Test statt nur durch die (rein speicherresidenten) Undo/Redo-Tests indirekt abgedeckt
+  - [x] **Definition-of-Done aus `SPEC.md` §7, Punkt für Punkt, ehrlich geprüft:**
+    1. *Funktioniert auf Windows/macOS/Linux* — ⚠️ **teilweise**: alle drei Plattformen sind in CI grün (`cargo test`/`cargo build`, siehe Schritt 8) und haben empirisch einen echten wgpu-Adapter (ADR-0021); die tatsächliche App als laufendes Fenster wurde auf keiner der drei Plattformen manuell gestartet/bedient — dieselbe, bereits aus Phase 1 bekannte und dort dokumentierte Einschränkung (ADR-0010: Playwright läuft gegen den Produktions-Build im Browser mit simulierter Tauri-Brücke, nicht gegen die kompilierte native App; kein `tauri-driver` in dieser Sandbox)
+    2. *Test vorhanden und grün* — ✅ 177 Rust-Tests + 33 Vitest-Tests + 8 Playwright-Tests, lokal und in CI grün
+    3. *Tastenkürzel vergeben und im Cheatsheet* — ⚠️ **teilweise**: Strg/Cmd+Z (Rückgängig) und Strg/Cmd+Umschalt+Z (Wiederholen) sind vergeben (mit Tooltip-Hinweis an den Panel-Knöpfen); ein Cheatsheet-Overlay existiert nicht — das ist laut `FEATURES.md` Zeile 251 explizit erst Phase-10-Scope und war auch am Ende von Phase 1 schon nicht vorhanden, also keine neue Lücke, sondern eine von Anfang an bekannte spätere Phase
+    4. *In `FEATURES.md` abgehakt* — ✅ siehe Schritt 9 (zwei Zeilen ehrlich mit Teil-Einschränkung markiert)
+    5. *Rückgängig/Wiederholen funktioniert* — ✅ Backend vollständig getestet (`apx-catalog::repository::edits`), Frontend-Integration über `develop-flow.spec.ts` mit echtem Zustandsabgleich verifiziert
+    6. *In der EDL serialisierbar und nach Neustart identisch reproduzierbar* — ✅ neuer Test oben
+    7. *Performance-Budget aus 2.4 eingehalten* — ❌ **nicht eingehalten** (ehrlich gemessen, Schritt 7): ≈181 ms (GPU-Pfad, Software-Adapter `llvmpipe`) bzw. ≈102 ms (CPU-Fallback) statt der geforderten <16 ms für ein 2048×1365-Bild, in dieser Sandbox ohne echte GPU-Hardware gemessen — auf echter GPU-Hardware unverifiziert, siehe Schritt 7s Detailanalyse (Software-Vulkan-Dispatch-Overhead als vermuteter Haupt-Engpass, nicht die Auflösung)
+  - [x] Verifiziert (finaler Stand nach Schritt 10): `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (177 Tests), `tsc -b`, `vitest run` (33 Tests), `vite build`, `playwright test` (8/8) — alles grün
+  - [x] Abschlussbericht an den Nutzer (siehe Chat-Antwort dieser Sitzung) — inklusive der oben gelisteten, tatsächlich gemessenen/geprüften Zahlen statt Annahmen
 
 ### Nicht in Phase 2 (bewusst zurückgestellt)
 Gradationskurve, HSL, Farbmischer, Color Grading, Details/Schärfen/Rauschen, Objektivkorrekturen, Effekte, Kalibrierung, Geometrie/Crop, Reparatur (alle → Phase 4), Presets (→ Phase 5), Masken (→ Phase 6), sowie die fünf per ADR-0011 nach Phase 4 verschobenen Regler (Textur, Klarheit, Dunst entfernen, Dynamik, Sättigung).

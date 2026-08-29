@@ -289,6 +289,50 @@ mod tests {
         }
     }
 
+    /// SPEC.md §7 Definition-of-Done, Punkt 6: "In der EDL serialisierbar
+    /// und nach Neustart identisch reproduzierbar" — siehe `PLAN.md` Phase
+    /// 2 Schritt 10. Analog zu [`open_on_disk_persists_across_reopen`],
+    /// aber für `edit_history`/`edit_current` statt `photos`/`folders`.
+    #[test]
+    fn edit_history_persists_across_reopen() {
+        let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
+        let db_path = tmp.path().join("catalog.sqlite");
+
+        let photo_id;
+        let edl = EdlEnvelope::new(
+            1,
+            serde_json::json!({ "exposure_ev": 0.75, "marker": "reopen-test" }),
+        );
+        {
+            let catalog = Catalog::open(&db_path).expect("sollte öffnen");
+            let folder_id = catalog
+                .insert_folder(Path::new("/fotos"), None)
+                .expect("ok");
+            let (id, _) = catalog.upsert_photo(&sample_photo(folder_id)).expect("ok");
+            photo_id = id;
+            catalog
+                .commit_edit(photo_id, &edl, Some("Testbearbeitung"))
+                .expect("sollte committen");
+        }
+        // Katalog wird hier geschlossen (Drop) und danach neu geöffnet —
+        // simuliert einen App-Neustart.
+        {
+            let catalog = Catalog::open(&db_path).expect("sollte erneut öffnen");
+            match catalog.current_edit(photo_id).expect("sollte lesbar sein") {
+                HistoryPosition::At(entry) => {
+                    assert_eq!(entry.label.as_deref(), Some("Testbearbeitung"));
+                    assert_eq!(
+                        entry.edl, edl,
+                        "EDL muss nach Neustart identisch reproduzierbar sein"
+                    );
+                }
+                HistoryPosition::Neutral => {
+                    panic!("Bearbeitungsstand sollte den Neustart überleben")
+                }
+            }
+        }
+    }
+
     #[test]
     fn transaction_rolls_back_on_error() {
         let catalog = Catalog::open_in_memory().expect("sollte öffnen");

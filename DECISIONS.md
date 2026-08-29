@@ -801,3 +801,81 @@ die Filterleisten-Zeile von "abweichend, alternativ" auf "Fertig
 Nachtrag"; `THIRD_PARTY.md` bekommt einen neuen `sha2`-Eintrag. Alle
 übrigen, größeren zurückgestellten Punkte aus ADR-0022 bleiben
 ausdrücklich auf ihrer jeweils späteren Phase.
+
+## ADR-0028: Phase-4-Scope präzisiert — Workflow-Punkte verschoben, Objektivprofile und Reparatur bewusst vereinfacht
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §5s Phasenplan-Satz für Phase 4 nennt namentlich
+zehn Werkzeugkategorien: „Kurven, HSL, Farbmischer, Color Grading,
+Details, Objektivkorrekturen, Effekte, Kalibrierung, Crop/Geometrie,
+Reparatur." `FEATURES.md` §3.4 („Modul ENTWICKELN — Workflow") taggt
+zusätzlich acht Punkte (Schnappschüsse, Vorher/Nachher, Einstellungen
+kopieren/einfügen, Vorherige übernehmen, Synchronisieren, Auto-Sync,
+Referenzansicht, Soft-Proof) als Phase 4 — dieselbe Art Diskrepanz
+zwischen dem maßgeblichen §5-Satz und `FEATURES.md`s eigener, weiter
+gefasster Interpretation, die schon ADR-0011 und ADR-0022 für frühere
+Phasen korrigiert haben.
+
+Zusätzlich verlangen zwei der zehn §5-Kategorien laut `SPEC.md` §3.2
+Funktionalität, die ohne mehrwöchige Vorarbeit bzw. externe Testdaten
+nicht seriös umsetzbar ist: eine echte, Adobe-LCP-kompatible
+Objektivprofil-Datenbank („Datenbank mit Profilen, eigene Profile
+importierbar") und echte Computer-Vision-Algorithmen für die
+Reparatur-Funktion („Auto-Quellenfindung", „Inhaltsbasiertes Füllen für
+größere Bereiche", vergleichbar mit Photoshops Content-Aware
+Fill/PatchMatch). Diese Entscheidung wurde dem Nutzer explizit zur Wahl
+vorgelegt (nicht stellvertretend getroffen wie bei ADR-0011), da sie den
+Umfang stärker einschränkt als eine reine Nachschlage-Korrektur.
+
+**Entscheidung (vom Nutzer bestätigt):**
+
+1. **Workflow-Punkte verschoben:** alle acht `FEATURES.md`-§3.4-Zeilen
+   wandern auf Phase 6, wo laut `ARCHITECTURE.md` §7 bereits das
+   Maskensystem als fortgeschrittenes Entwickeln-Feature geplant ist.
+   Phase 4 umfasst ausschließlich die zehn im §5-Satz genannten
+   Werkzeugkategorien plus die per ADR-0011 bereits zugewiesenen
+   Grundeinstellungs-Ergänzungen (WB-Pipette, WB-Kamera-Presets, Textur,
+   Klarheit, Dunst entfernen, Dynamik, Sättigung).
+2. **Objektivkorrekturen:** eigenes, minimales Profilformat
+   (handgepflegtes JSON, wenige Beispielprofile, Zuordnung per
+   EXIF-Objektiv-/Kamerastring) statt einer echten Adobe-kompatiblen
+   Profildatenbank. Die vollen manuellen Regler (chromatische
+   Aberration automatisch und manuell, Vignettierung, Verzeichnung,
+   Perspektive/Upright, manuelle Transformation) werden trotzdem
+   komplett gebaut — nur der *Import fremder Profile* (Adobe LCP/DNG
+   Lens Profile) entfällt und wird auf eine spätere Phase verschoben.
+   Aus demselben Grund entfällt in der Kalibrierung der DCP-Import für
+   Kameraprofile; eine kleine eingebaute Profilliste bleibt.
+3. **Reparatur:** manuelles Klonen/Reparieren (Pinsel mit Quellpunkt,
+   Radius, Deckkraft, weicher Kante; Reparieren per vereinfachtem
+   nahtlosen Überblenden, nicht echtem Poisson-Blending) ist die
+   Phase-4-Basis. Auto-Quellenfindung und echtes inhaltsbasiertes Füllen
+   für größere Bereiche werden auf Phase 6 verschoben (analog zur
+   Perceptual-Hash-Duplikaterkennung, die in ADR-0022 aus demselben
+   Grund — fortgeschrittener Algorithmus ohne unmittelbaren
+   Minimal-Nutzen — zurückgestellt wurde).
+4. **Weitere bewusste Vereinfachungen, die aus denselben Gründen
+   zusammen mit den obigen drei Punkten entschieden wurden:** der
+   „Guided"-Upright-Modus bekommt 2 statt bis zu 4 Linienpaare;
+   „Auto-Ausrichtung am Horizont" nutzt nur die EXIF-Orientierung statt
+   eines echten Kantenerkennungs-Verfahrens. Beide sind CV-artige
+   Detailfragen derselben Kategorie wie Punkt 2/3, keine eigenständige
+   Entscheidung.
+5. **Struktur:** Phase 4 bleibt eine durchgehende Phase mit
+   feingranularen Schritten (0–13, siehe `PLAN.md`) statt in Unterphasen
+   4a/4b gesplittet — die architektonische Zweiteilung (per-Pixel-Modell
+   vs. Nachbarschafts-/größenverändernde Operationen) spiegelt sich in
+   der Schrittfolge (Schritt 2 legt die Infrastruktur für beide Modelle
+   an, spätere Schritte nutzen sie je nach Werkzeug), nicht in getrennten
+   Phasen mit eigener Abnahme.
+
+**Konsequenzen:** `FEATURES.md` §3.4 komplett auf Phase 6 umgetaggt;
+§3.2s Objektivkorrekturen-/Kalibrierung-/Reparatur-/Geometrie-Abschnitte
+bekommen erklärende Kommentare zu den vier Vereinfachungen aus Punkt
+2–4, die einzelnen Zeilen bleiben bis zur tatsächlichen Umsetzung auf
+„Nicht begonnen" (Auto-Quellenfindung/Inhaltsbasiertes Füllen direkt auf
+Phase 6 umgetaggt, da sie in Phase 4 überhaupt nicht gebaut werden).
+`PLAN.md` bekommt den neuen Abschnitt „Aktuelle Phase: Phase 4" mit der
+Schrittfolge 0–13. Ein echter Adobe-Profil-/DCP-Import sowie
+Auto-Quellenfindung/Content-Aware-Fill bleiben in `FEATURES.md` als
+offene Phase-6-Punkte sichtbar, nicht stillschweigend fallen gelassen.

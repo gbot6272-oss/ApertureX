@@ -221,7 +221,7 @@ Gradationskurve, HSL, Farbmischer, Color Grading, Details/Schärfen/Rauschen, Ob
 
 ---
 
-## Aktuelle Phase: Phase 3 — Bibliothek
+## Abgeschlossene Phase: Phase 3 — Bibliothek
 
 Ziel (laut `SPEC.md` §5): Import, Ordner, Raster, Filmstreifen, Vorschau-Generierung, Bewertungen/Flaggen/Farben, Sammlungen, Filter, Metadaten-Panel, FTS-Suche.
 
@@ -327,3 +327,86 @@ schließen — nicht den kompletten restlichen BIBLIOTHEK-Katalog (siehe
   - [x] `DECISIONS.md` ADR-0027, `FEATURES.md` (zwei Punkte zurück auf Phase 3/Fertig, Filterleisten- und Ordnerbaum-Zeile aktualisiert, neue Undo/Redo-Zeile), `THIRD_PARTY.md` (`sha2`-Eintrag), dieser Abschnitt
   - [x] Neue Tests: Rust (`import::tests::duplicate_photos_are_detected_by_content_hash`, `nested_subfolders_form_a_multi_level_parent_chain`, `repository::photos::list_duplicate_groups_finds_matching_hashes_and_ignores_the_rest`, vier neue `repository::search`-Tests für die kombinierte Suche), Vitest (`undoStack.test.ts`, `sortPhotos.test.ts`), Playwright (`library-flow.spec.ts`: Undo/Redo-Erweiterung des ersten Tests, kombinierte Suche+Filter, Duplikatanzeige, Sortierung)
   - Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace`, `tsc -b`, `vitest run`, `playwright test`, `vite build` — alles lokal grün
+
+---
+
+## Aktuelle Phase: Phase 4 — Entwickeln vollständig
+
+Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Objektivkorrekturen, Effekte, Kalibrierung, Crop/Geometrie, Reparatur. Mit Abstand die größte Phase bisher — 10 Werkzeugkategorien, ~35 Einzelpunkte in `FEATURES.md` §3.2, mehrere echte Architektur-Neuerungen (EDL-Schema-Erweiterung, neue GPU-Dispatch-Formen, komplett neue Frontend-Widgets).
+
+**Scope-Präzisierung (ADR-0028):** Workflow-Punkte aus `FEATURES.md` §3.4 (Schnappschüsse, Vorher/Nachher, Sync, Soft-Proof etc.) stehen nicht im §5-Satz und wandern auf Phase 6. Objektivkorrekturen bekommen ein eigenes Mini-Profilformat statt echtem Adobe-Profil-Import; Reparatur bekommt manuelles Klonen/Reparieren ohne Auto-Quellenfindung/Content-Aware-Fill (beides auf Phase 6 verschoben). Details zu allen vier Entscheidungen in ADR-0028.
+
+**Architektur-Grundsatzentscheidungen** (Details in ADR-0028 und den jeweiligen Schritten):
+- **EDL-Schema v2** statt Erweiterung von `EdlV1` — `apx-pipeline/src/edl/migrate.rs` lehnt unbekannte Schema-Versionen bewusst hart ab (kein `#[serde(default)]`), neue Felder kommen als `EdlV2` mit explizitem `v1_to_v2`-Aufwärtspfad. Keine DB-Migration nötig (`edit_history.edl_json` ist eine opake TEXT-Spalte).
+- **Drei GPU-Dispatch-Formen** statt einer: (1) positions-bewusst aber 1:1 (Vignette, Körnung — brauchen Breite/Höhe), (2) Nachbarschafts-Zugriff (Textur/Klarheit, Details, Reparatur-Klonen), (3) größenverändernd (Objektivkorrekturen-Warp, Crop/Geometrie — Ausgabe ≠ Eingabe). Crop/Geometrie wird als CPU-seitiger letzter Schritt in `render_rgba8` umgesetzt (nach der RGBA8-Quantisierung), nicht als GPU-Pass.
+- **16-ms-Budget (ADR-0017-Präzedenzfall):** alle Werkzeuge im 1:1-/positions-bewussten Modell (Grundeinstellungs-Ergänzung, Kurven-LUT, HSL, Farbmischer, Color Grading, Kalibrierung, Vignette, Körnung) werden zu einem erweiterten Fused-Pass zusammengefasst statt N einzelner Dispatch-Rundtripps.
+- **Kurven-Sequenzierung:** laufen laut bestehendem Code-Kommentar (`stages/contrast.rs`) nach der Farbraum-Konvertierung, auf Luminanz statt pro Kanal — Schritt 2 entscheidet anhand eines Benchmarks, ob die Farbraum-Konvertierung ins WGSL wandert oder Kurven ein schneller CPU-LUT-Nachschritt bleiben.
+- **Frontend:** fast alle nötigen UI-Widgets sind komplett neu (Kurven-Editor, Farbrad, HSL-Bänder, Crop-Overlay, Checkbox, Accordion) — einzige wiederverwendbare Primitive sind Regler+Zahlenfeld, gedrückte Buttons, feste Paletten-Swatches, ein natives `<select>`.
+
+### Reihenfolge
+
+- [x] 0. Scope festzurren
+  - [x] `DECISIONS.md` ADR-0028
+  - [x] `FEATURES.md`: §3.4-Workflow-Zeilen auf Phase 6 umgetaggt, erklärende Kommentare bei Objektivkorrekturen/Kalibrierung/Reparatur/Geometrie ergänzt
+  - [x] Dieser Abschnitt in `PLAN.md`
+
+- [ ] 1. EDL-Schema v2 + Migration
+  - [ ] `crates/apx-pipeline/src/edl/v2.rs`: alle neuen Structs (`CurvesAdjustment`, `HslAdjustment`, `ColorMixerAdjustment`, `ColorGradingAdjustment`, `DetailsAdjustment`, `LensCorrectionAdjustment`, `EffectsAdjustment`, `CalibrationAdjustment`, `GeometryAdjustment`, `Vec<RepairStroke>`), `EDL_SCHEMA_VERSION = 2`
+  - [ ] `migrate.rs`: `v1_to_v2`-Aufwärtspfad, `from_envelope` probiert v2 zuerst
+  - [ ] Tests: v1→v2-Upgrade-Rundreise, alte `edit_history`-Zeilen (v1-JSON) laden weiterhin korrekt
+  - [ ] `frontend/src/lib/edl.ts`: gespiegelte TS-Typen + Neutral-Konstanten + Builder je Sektion; `store/index.ts`s `developBasic`-Zustand entsprechend erweitert
+
+- [ ] 2. GPU-Dispatch-Erweiterung + erweiterter Fused-Pass
+  - [ ] `gpu/dispatch.rs`: neue Varianten (positions-bewusst mit Breite/Höhe-Uniform; nachbarschafts-fähig mit 2D-Workgroups)
+  - [ ] `stages/basic_fused.wgsl`/`.rs` erweitert um: Dynamik/Sättigung, Kurven (LUT), HSL, Farbmischer, Color Grading, Kalibrierung, Vignette, Körnung
+  - [ ] GPU/CPU-Paritätstests je neuem Teil-Feature (Muster: `gpu_matches_cpu`)
+
+- [ ] 3. Grundeinstellungen-Erweiterung (Frontend + Shader)
+  - [ ] WB-Pipette, WB-Kamera-Presets, Textur/Klarheit/Dunst entfernen/Dynamik/Sättigung-Regler in `DevelopPanel.tsx`
+  - [ ] Textur/Klarheit/Dunst entfernen ggf. als eigener Nachbarschafts-Vorschritt, falls Schritt 2s Benchmark zeigt, dass sie nicht ins 1:1-Modell passen
+
+- [ ] 4. Kurven
+  - [ ] Punktkurve (monotone kubische Spline) + parametrische Kurve, RGB-Verbundkurve + R/G/B einzeln + Luminanz-Kurve, numerische Punkteingabe, Presets
+  - [ ] Neues `frontend/src/components/CurveEditor.tsx`
+
+- [ ] 5. HSL + Farbmischer erweitert
+  - [ ] 8-Band-HSL-UI, Farbmischer mit Bild-Klick-Farbaufnahme (teilt Sampling-Code mit WB-Pipette)
+  - [ ] GPU/CPU: RGB→HSL-Konvertierung, bandgewichtete Verschiebung
+
+- [ ] 6. Color Grading (Farbräder)
+  - [ ] Neues `frontend/src/components/ColorWheel.tsx`, 4× instanziiert (Schatten/Mitteltöne/Lichter/Global)
+  - [ ] GPU/CPU: tonwertzonen-gewichtete Farbverschiebung
+
+- [ ] 7. Kalibrierung
+  - [ ] Prozessversion, Schattentönung, Primärfarben R/G/B, Kameraprofil-Auswahl (kleine eingebaute Liste, kein DCP-Import)
+
+- [ ] 8. Details (Schärfung + Rauschreduzierung)
+  - [ ] Schärfung, Luminanz-/Farbrauschen, Deconvolution-Alternativmodus
+  - [ ] Erster Schritt, der Schritt 2s Nachbarschafts-Dispatch tatsächlich braucht
+
+- [ ] 9. Objektivkorrekturen
+  - [ ] Mini-Profilformat (`crates/apx-pipeline/lens_profiles/*.json` + Lade-/Zuordnungsmodul per EXIF-Objektiv-/Kamerastring)
+  - [ ] Manuelle Regler: CA, Vignette, Verzeichnung, Perspektive/Upright (Guided mit 2 Linienpaaren), manuelle Transformation
+  - [ ] Geometrischer Warp als eine inverse Abbildung mit bilinearem Sampling
+
+- [ ] 10. Effekte
+  - [ ] Nachträgliche Vignettierung, Körnung mit stabilem Pro-Pixel-Seed
+
+- [ ] 11. Geometrie (Crop/Rotation)
+  - [ ] Freistellen (Presets, Rasterüberlagerungen), Winkel-Werkzeug, vereinfachte Auto-Ausrichtung (nur EXIF-Orientierung)
+  - [ ] CPU-seitiger Crop+Rotate+Resample als letzter Schritt in `render_rgba8`
+  - [ ] Neues `frontend/src/components/CropOverlay.tsx`
+
+- [ ] 12. Reparatur (Klonen/Reparieren)
+  - [ ] Pinsel-Interaktion (Quellpunkt, Zielpfad, Radius/Deckkraft/weiche Kante)
+  - [ ] Klonen (versetzter Lesezugriff + radiale Weichzeichnung), Reparieren (vereinfachtes nahtloses Überblenden, kein echtes Poisson-Blending)
+  - [ ] `repair: Vec<RepairStroke>`, je Strich einzeln entfernbar
+
+- [ ] 13. Dokumentation, Tests, Abnahme
+  - [ ] `ARCHITECTURE.md`: Phase-4-Platzhalter durch echte Architekturbeschreibung ersetzen
+  - [ ] `FEATURES.md`: alle Phase-4-Zeilen auf Fertig (mit „Fertig (abweichend, siehe ADR-0028)" für die vier bewussten Vereinfachungen)
+  - [ ] Volle Verifikation + 16-ms-Performance-Nachmessung
+  - [ ] Commit+Push, CI-Check auf allen drei Plattformen, ehrlicher Abschlussbericht
+
+### Nicht in Phase 4 (bewusst zurückgestellt)
+Siehe ADR-0028: Workflow-Punkte (Schnappschüsse, Vorher/Nachher, Copy/Paste-Einstellungen, Sync, Auto-Sync, Referenzansicht, Soft-Proof), echter Adobe-Profil-Import (Objektivprofile + DCP-Kameraprofile), Auto-Quellenfindung und inhaltsbasiertes Füllen für die Reparatur-Funktion — alle auf Phase 6 verschoben.

@@ -110,11 +110,18 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [ ] Deconvolution-Schärfung — Phase 4 — Status: Nicht begonnen
 
 ### Objektivkorrekturen
+<!-- Scope-Präzisierung siehe DECISIONS.md ADR-0028: eine echte
+     Adobe-LCP-kompatible Profildatenbank ist ohne die nötigen Testdaten
+     ein eigenständiges Mammutprojekt. Phase 4 liefert ein eigenes,
+     minimales Profilformat (handgepflegtes JSON, wenige Beispielprofile,
+     Zuordnung per EXIF-Objektiv-/Kamerastring) plus die vollen manuellen
+     Regler; echter Adobe-Profil-Import wird auf eine spätere Phase
+     verschoben. -->
 - [ ] Profilbasierte Korrektur (Datenbank + Import) — Phase 4 — Status: Nicht begonnen
 - [ ] Chromatische Aberration (auto + manuell) — Phase 4 — Status: Nicht begonnen
 - [ ] Vignettierung — Phase 4 — Status: Nicht begonnen
 - [ ] Verzeichnung — Phase 4 — Status: Nicht begonnen
-- [ ] Perspektive/Upright (Auto, Level, Vertical, Full, Guided) — Phase 4 — Status: Nicht begonnen
+- [ ] Perspektive/Upright (Auto, Level, Vertical, Full, Guided) — Phase 4 — Status: Nicht begonnen (Guided-Modus vereinfacht auf 2 statt bis zu 4 Linienpaare, siehe ADR-0028)
 - [ ] Manuelle Transformation (V/H, Drehen, Seitenverhältnis, Skalieren, Versatz) — Phase 4 — Status: Nicht begonnen
 
 ### Effekte
@@ -125,18 +132,24 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [ ] Prozessversion — Phase 4 — Status: Nicht begonnen
 - [ ] Schattentönung — Phase 4 — Status: Nicht begonnen
 - [ ] Primärfarben-Regler R/G/B (Farbton, Sättigung) — Phase 4 — Status: Nicht begonnen
-- [ ] Kamera-Profile inkl. DCP-Import — Phase 4 — Status: Nicht begonnen
+- [ ] Kamera-Profile (kleine eingebaute Liste) inkl. DCP-Import — Phase 4 — Status: Nicht begonnen (DCP-Import selbst auf spätere Phase verschoben, siehe ADR-0028 — dasselbe Adobe-Format-Problem wie bei Objektivprofilen)
 
 ### Geometrie
 - [ ] Freistellen (Presets, eigene Verhältnisse, Rasterüberlagerungen) — Phase 4 — Status: Nicht begonnen
 - [ ] Winkel-Werkzeug — Phase 4 — Status: Nicht begonnen
-- [ ] Auto-Ausrichtung am Horizont — Phase 4 — Status: Nicht begonnen
+- [ ] Auto-Ausrichtung am Horizont — Phase 4 — Status: Nicht begonnen (vereinfacht: kein echtes Kantenerkennungs-Verfahren, siehe ADR-0028)
 
 ### Reparatur
+<!-- Scope-Präzisierung siehe DECISIONS.md ADR-0028: Auto-Quellenfindung
+     und inhaltsbasiertes Füllen für größere Bereiche sind fortgeschrittene
+     Computer-Vision-Algorithmen (vergleichbar mit PatchMatch/Content-Aware
+     Fill) und werden auf eine spätere Phase verschoben. Phase 4 liefert
+     manuelles Klonen/Reparieren (Pinsel mit Quellpunkt, Radius, Deckkraft,
+     weicher Kante). -->
 - [ ] Bereichsreparatur klonen/reparieren — Phase 4 — Status: Nicht begonnen
-- [ ] Auto-Quellenfindung — Phase 4 — Status: Nicht begonnen
+- [ ] Auto-Quellenfindung — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
 - [ ] Sensorflecken-Visualisierung — Phase 4 — Status: Nicht begonnen
-- [ ] Inhaltsbasiertes Füllen — Phase 4 — Status: Nicht begonnen
+- [ ] Inhaltsbasiertes Füllen — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
 
 ## 3.3 Modul ENTWICKELN — Lokale Anpassungen
 
@@ -162,14 +175,14 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 ## 3.4 Modul ENTWICKELN — Workflow
 
 - [x] Undo/Redo (unbegrenzt, dauerhaft über `edit_history`, überlebt App-Neustart) — Phase 2 — Status: Fertig — **Teil-Einschränkung:** kein sichtbares, klickbares Verlaufs-*Panel* mit benannten Schritten (nur Rückgängig/Wiederholen um je einen Schritt) — siehe `DECISIONS.md` ADR-0018s Korrektur-Notiz; die Backend-Grundlage (`list_edit_history`) für ein solches Panel existiert noch nicht und ist ein möglicher Ausbau für eine spätere Phase
-- [ ] Schnappschüsse — Phase 4 — Status: Nicht begonnen
-- [ ] Vorher/Nachher in vier Ansichten — Phase 4 — Status: Nicht begonnen
-- [ ] Einstellungen kopieren/einfügen (granular) — Phase 4 — Status: Nicht begonnen
-- [ ] Vorherige übernehmen — Phase 4 — Status: Nicht begonnen
-- [ ] Synchronisieren über beliebig viele Bilder — Phase 4 — Status: Nicht begonnen
-- [ ] Auto-Sync-Modus — Phase 4 — Status: Nicht begonnen
-- [ ] Referenzansicht — Phase 4 — Status: Nicht begonnen
-- [ ] Soft-Proof (Zielprofil, Renderpriorität, Farbumfangswarnung, Papierweiß) — Phase 4 — Status: Nicht begonnen
+- [ ] Schnappschüsse — Phase 6 — Status: Nicht begonnen (siehe ADR-0028: `SPEC.md` §5s Phase-4-Satz nennt nur die 10 Werkzeugkategorien, nicht die Workflow-Punkte aus §3.4)
+- [ ] Vorher/Nachher in vier Ansichten — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
+- [ ] Einstellungen kopieren/einfügen (granular) — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
+- [ ] Vorherige übernehmen — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
+- [ ] Synchronisieren über beliebig viele Bilder — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
+- [ ] Auto-Sync-Modus — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
+- [ ] Referenzansicht — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
+- [ ] Soft-Proof (Zielprofil, Renderpriorität, Farbumfangswarnung, Papierweiß) — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
 
 ## 3.5 PRESET- UND TEMPLATE-SYSTEM
 

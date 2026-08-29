@@ -502,3 +502,40 @@ Canvas-2D-Zeichenlogik nur indirekt über Playwright abgesichert
 („Canvas ist sichtbar", jetzt zusätzlich über die Entwickeln-Flow-Tests
 in `develop-flow.spec.ts`, die echte Zustandsänderungen statt nur
 Sichtbarkeit prüfen).
+
+---
+
+## ADR-0021: wgpu-GPU-Ausführungstests in CI empirisch bestätigt (Schritt 8) — kein "weich" mehr auf Dauer
+
+**Status:** Angenommen (empirisch verifiziert)
+**Kontext:** ADR-0012 und `PLAN.md`s Risikoliste ließen offen, ob die
+GitHub-Actions-Runner (Linux/macOS/Windows) tatsächlich einen wgpu-Adapter
+finden — die `gpu_matches_cpu`-artigen Tests waren bewusst so gebaut, dass
+ein fehlender Adapter zu einem klar begründeten, sichtbaren "übersprungen"
+statt einem stillen Erfolg oder Hartabbruch führt. Ohne `--nocapture`
+sah ein grüner CI-Lauf aber identisch aus, egal ob der Adapter gefunden
+oder der Test nur übersprungen wurde — die Frage blieb unbeantwortet.
+
+**Entscheidung/Befund:** `cargo test --workspace -- --nocapture` in
+`ci.yml` aktiviert; im CI-Lauf für Commit `ca2e39f` (Run-ID 33236428223)
+enthält **keines** der drei Rust-Job-Logs (`ubuntu-latest`,
+`macos-latest`, `windows-latest`) die Zeichenkette "übersprungen: kein
+GPU-Adapter" oder `GpuUnavailable` — alle sechs
+`stages::*::tests::gpu_matches_cpu`-Tests liefen auf allen drei
+Plattformen als echte GPU-Dispatches durch. Damit ist empirisch bestätigt
+(nicht mehr nur angenommen): GitHub-Actions-`ubuntu-latest`-Runner bringen
+von Haus aus einen nutzbaren Software-Vulkan-Adapter mit (kein
+zusätzliches Mesa-`apt-get`-Paket war nötig); `macos-latest` und
+`windows-latest` finden ebenfalls einen Adapter (vermutlich Metal bzw.
+WARP/DX12 — welches Backend genau, ist ohne gesetztes `RUST_LOG` aus den
+Logs nicht ablesbar, war für die Kernfrage aber nicht nötig).
+
+**Konsequenzen:** GPU-Ausführungstests gelten ab sofort wieder als echte
+Pflicht (nicht dauerhaft "weich" belassen, wie ADR-0012 es für den Fall
+vorsah, dass ein Runner keinen Adapter hat) — ein zukünftiges
+"übersprungen" auf einem dieser drei Runner wäre eine echte Regression
+(z. B. ein Runner-Image-Wechsel), die untersucht werden müsste, nicht
+länger stillschweigend akzeptiert. `ci.yml`s `-D clippy::unwrap_used`
+und `apx-app`s fehlendes `#![deny(clippy::unwrap_used)]` wurden bei
+diesem Durchgang zusätzlich als bestehende, unabhängige CI-Lücken
+gefunden und geschlossen.

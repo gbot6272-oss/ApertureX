@@ -3,12 +3,12 @@ import { COLOR_LABELS, COLOR_SWATCH } from "./RatingFlagColor";
 
 /**
  * Filterleiste (Phase 3, Schritt 6): Suchfeld (`search_photos`, FTS5 über
- * Dateiname/Kamera/Objektiv) plus Attribut-Chips (Bewertung/Flagge/Farbe,
- * `filter_photos`, per UND kombiniert). Suche und Attributfilter sind
- * bewusst alternativ statt kombiniert (siehe `store/index.ts`s
- * `setLibraryFilterChip`/`runLibrarySearch`) — beide wirken über
- * `libraryResults` auf `selectActivePhotos`, das Raster und Filmstreifen
- * gemeinsam lesen.
+ * Dateiname/Kamera/Objektiv) plus Attribut-Chips (Bewertung/Flagge/Farbe/
+ * Kameramodell, `filter_photos`, per UND kombiniert). Suche und
+ * Attributfilter sind bewusst alternativ statt kombiniert (siehe
+ * `store/index.ts`s `setLibraryFilterChip`/`runLibrarySearch` sowie
+ * `DECISIONS.md` ADR-0026) — beide wirken über `libraryResults` auf
+ * `selectActivePhotos`, das Raster und Filmstreifen gemeinsam lesen.
  */
 export function FilterBar() {
   const libraryQuery = useAppStore((s) => s.libraryQuery);
@@ -87,6 +87,20 @@ export function FilterBar() {
           />
         ))}
       </div>
+
+      <input
+        type="text"
+        defaultValue={libraryFilter.camera_model ?? ""}
+        key={libraryFilter.camera_model ?? ""}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter") return;
+          const value = event.currentTarget.value.trim();
+          void setLibraryFilterChip({ camera_model: value || undefined });
+        }}
+        placeholder="Kameramodell…"
+        aria-label="Nach Kameramodell filtern"
+        className="w-40 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+      />
 
       {hasActiveFilter && (
         <button type="button" onClick={clearLibraryFilters} className="ml-auto rounded border border-border px-2 py-1 text-xs hover:border-accent">

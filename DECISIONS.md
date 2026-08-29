@@ -645,3 +645,64 @@ ADR-0022.
 
 **Konsequenzen:** Keine Verhaltensänderung für bestehende Aufrufer, die
 weiterhin implizit `AddInPlace` nutzen.
+
+## ADR-0026: Suche/Filter alternativ statt kombiniert; zwei Über-Scope-Punkte, die ADR-0022 übersehen hatte, nachträglich korrigiert
+
+**Status:** Angenommen
+**Kontext:** Bei der Abnahme von Phase 3 (Schritt 7) fielen zwei Lücken
+auf, die bei der Scope-Korrektur in Schritt 0 (ADR-0022) hätten
+mitkorrigiert werden müssen, es aber nicht wurden:
+
+1. `FEATURES.md` §3.1 hatte "Filterleiste (Text, Attribut, Metadaten,
+   **kombiniert**)" auf Phase 3 getaggt — `SPEC.md` §5s Phase-3-Satz
+   nennt nur "Filter", ohne das Kombinieren von Text- und
+   Attributsuche zu verlangen. Das tatsächlich gebaute
+   `FilterBar.tsx`/`store/index.ts` implementiert Freitextsuche
+   (`search_photos`, FTS5) und Attributfilter (`filter_photos`,
+   inklusive eines nachträglich ergänzten Kameramodell-Chips) als
+   **Alternative** statt als kombinierbare UND-Verknüpfung: Setzen des
+   einen leert das andere. Eine echte Kombination bräuchte entweder
+   eine dritte Backend-Route, die FTS5-`MATCH` und die
+   Attribut-`WHERE`-Klausel in derselben Abfrage verknüpft, oder eine
+   clientseitige Nachfilterung der Suchergebnisse — beides war im
+   verbleibenden Schritt-6-Budget nicht mehr sauber umsetzbar.
+2. "Duplikaterkennung per exaktem Hash" und "Sortierung nach beliebigem
+   Feld" standen in `FEATURES.md` §3.1 ebenfalls auf Phase 3, kommen
+   aber in `SPEC.md` §5s Phase-3-Satz nicht vor — nach genau derselben
+   Regel wie ADR-0022 (Phase-3-Satz ist maßgeblich, nicht §3.1s voller
+   Katalog) hätten sie schon in Schritt 0 auf eine spätere Phase
+   umgetaggt werden müssen. Keins von beiden wurde in Phase 3 gebaut
+   (`content_hash` wird beim Import weiterhin nicht berechnet; Raster/
+   Filmstreifen sortieren fest nach Dateiname).
+
+**Entscheidung:**
+- Suche/Filter bleiben bewusst alternativ (siehe oben) — als
+  "Fertig (abweichend, siehe DECISIONS.md)" in `FEATURES.md` markiert,
+  nicht als unerledigt liegen gelassen.
+- "Duplikaterkennung per exaktem Hash" auf Phase 6 umgetaggt (neben der
+  dort bereits stehenden Perceptual-Hash-Duplikaterkennung — beide
+  Ausbaustufen derselben Fähigkeit gehören zusammen).
+- "Sortierung nach beliebigem Feld" auf Phase 6 umgetaggt (neben
+  Filter-Presets/Schnellentwicklung im Raster, mit denen es inhaltlich
+  zusammenhängt).
+
+**Weiterer bekannter Stand (kein Umtaggen nötig, aber hier
+dokumentiert):** "Ordnerbaum-Synchronisation" ist nur teilweise
+gebaut — die Sidebar-Baumdarstellung, `relink_folder` und die
+Fehlend-Erkennung (Schritt 5) funktionieren korrekt für jede
+`parent_id`, die in der Datenbank steht, aber der Import selbst legt
+weiterhin nur den unmittelbaren Elternordner jeder Datei an
+(`ensure_folder` in `apx-app/src/import/mod.rs`), ohne die volle
+Verzeichniskette bis zum gewählten Import-Ordner als `parent_id`-Kette
+nachzubilden — das war so bereits in `PLAN.md` Phase 3 Schritt 5s
+Beschreibung angelegt ("Sidebar bekommt eine echte Baumdarstellung"),
+nicht in ADR-0022s Scope-Fehler. Eine echte Mehrebenen-Population beim
+Import (begrenzt auf den gewählten Import-Ordner, nicht bis zum
+Dateisystem-Wurzelverzeichnis) wäre ein sinnvoller kleiner Folgeschritt,
+ist aber kein Phase-3-Blocker, da die Fotos unabhängig davon korrekt
+einem (flachen) Ordner zugeordnet werden.
+
+**Konsequenzen:** `FEATURES.md` korrigiert (siehe dortige Zeilen);
+Definition-of-Done in `PLAN.md` Schritt 7 bewertet diese drei Punkte
+entsprechend ehrlich statt sie stillschweigend als erledigt
+auszuweisen.

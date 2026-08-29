@@ -109,3 +109,41 @@ test.describe("Bibliothek: Raster, Bewertung, Sammlungen, Filter", () => {
     await expect(grid.getByRole("img", { name: PHOTO_B.filename })).toBeVisible();
   });
 });
+
+test.describe("Raster-Virtualisierung", () => {
+  /** Regressionstest für `SPEC.md` §2.4 ("Bibliotheks-Raster mit 100.000
+   * Bildern: flüssiges Scrollen, virtualisiert") und `PLAN.md` Phase 3
+   * Schritt 7 — Muster wie der bestehende Filmstreifen-Virtualisierungs-
+   * test in `viewer-flow.spec.ts`: 5.000 statt 100.000 synthetische Fotos,
+   * damit der CI-Lauf schnell bleibt, ohne die eigentliche Aussage
+   * (DOM-Knotenanzahl bleibt unabhängig von der Gesamtanzahl beschränkt)
+   * zu verlieren — 100.000 wurden bei der Abnahme manuell verifiziert
+   * (siehe Abschlussbericht im Chat).
+   */
+  test("rendert bei sehr vielen Fotos nur eine begrenzte Anzahl DOM-Knoten", async ({ page }) => {
+    const total = 5000;
+    const manyPhotos = Array.from({ length: total }, (_, i) => samplePhoto(`01977f4a-0000-7000-9000-${String(i).padStart(12, "0")}`, `IMG_${String(i).padStart(5, "0")}.CR3`));
+
+    await installTauriMock(page, {
+      folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: total, parent_id: null, missing: false }],
+      photosByFolder: { [FOLDER_ID]: manyPhotos },
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Bibliothek/ }).click();
+    await page.getByRole("button", { name: "Raster" }).click();
+
+    const grid = page.locator("main");
+    const countBefore = await grid.locator('[role="button"]').count();
+    expect(countBefore).toBeGreaterThan(0);
+    expect(countBefore).toBeLessThan(200);
+
+    // Ans Ende scrollen — die Anzahl gerenderter Zellen darf sich nicht an
+    // die Gesamtanzahl annähern.
+    await grid.locator("div.overflow-y-auto").evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await expect
+      .poll(async () => grid.locator('[role="button"]').count())
+      .toBeLessThan(200);
+  });
+});

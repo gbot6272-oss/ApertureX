@@ -130,11 +130,31 @@ Frontend `DevelopSlider.onChange` → Store `setBasicField` (nur In-Memory, kein
 
 **Undo/Redo:** Store `undoDevelop`/`redoDevelop` → Tauri-Commands `undo_develop_edit`/`redo_develop_edit` → bewegen nur den `edit_current`-Zeiger (keine neue Zeile, keine gelöschte Zeile) → Antwort (`HistoryPosition`) wird zu `BasicAdjustments` entpackt und ersetzt `developBasic` direkt — kein separates Frontend-Verlaufssystem (siehe ADR-0018s Korrektur-Notiz).
 
-## 6. Platzhalter für spätere Phasen
+## 6. Architektur Phase 3 — Bibliothek
+
+Beschreibt den tatsächlich gebauten Stand (siehe `DECISIONS.md` ADR-0022 bis ADR-0025 für die einzelnen Entscheidungen). Phase 3 fügt keine neuen Crates hinzu — sie erweitert `apx-catalog` (Schema/Repositories), `apx-app` (Commands/Import) und `frontend/` (Raster/Sammlungen/Filter/Metadaten) innerhalb der bestehenden Modulgrenzen aus §4.
+
+**`apx-catalog`-Erweiterung** (additive Migration `0003_library.sql`): `photos` bekommt `rating`/`flag`/`color_label` als direkte Skalarspalten (konsistent mit dem bestehenden `missing`-Muster); neue Tabellen `keywords`/`photo_keywords` (flache Schlagwort-Liste), `collections`/`collection_photos` (rein manuelle Sammlungen mit `position`-Reihenfolge); `photos_fts` als FTS5-**External-Content**-Virtualtabelle über `photos` (referenziert Originalspalten statt sie zu duplizieren) mit `INSERT`/`UPDATE`/`DELETE`-Sync-Triggern. Repository-Module folgen weiter „ein Modul pro Tabelle" (`repository::{keywords, collections, search}` neu; Bewertung/Flagge/Farbe bewusst in `repository::photos` statt eigenem Modul, da dieselbe Tabelle).
+
+**Import-Erweiterung**: `apx-app::import::mode::ImportMode { AddInPlace, Copy, Move }` — bei Copy/Move wird die Datei vor dem unveränderten Scan-/Metadaten-/Thumbnail-Ablauf in einen Zielordner kopiert/verschoben, optional per Tokensystem (`import::rename`) umbenannt. Additiv zum bestehenden `import_folder`-Command (der weiterhin Add-in-Place-only bleibt) über einen neuen `import_folder_with_mode`-Command.
+
+**Frontend-Erweiterung**: Raster (`GridView.tsx`) und Filmstreifen (`Filmstrip.tsx`) teilen sich Fotoliste und Mehrfachauswahl über eine gemeinsame Store-Funktion `selectActivePhotos` statt eigener Parallel-Logik (siehe ADR-0024) — diese priorisiert ein aktives Such-/Filterergebnis vor einer ausgewählten Sammlung vor einem ausgewählten Ordner. Bewertung/Flagge/Farbe wirken bei aktiver Mehrfachauswahl auf alle ausgewählten Fotos zugleich (Stapel-Bearbeitung).
+
+### Datenfluss Phase 3: Suche/Filter → Ergebnisliste
+
+Analog zu §2/§5s Datenfluss-Abschnitten, hier für den neuen Such-/Filter-Pfad:
+
+**Freitextsuche:** Frontend `FilterBar`-Suchfeld → Store `runLibrarySearch` → Tauri-Command `search_photos` → `apx-catalog::Catalog::search_photos`: `SELECT … FROM photos_fts JOIN photos ON photos.rowid = photos_fts.rowid WHERE photos_fts MATCH ?1 ORDER BY rank` (FTS5-Relevanzsortierung) → Ergebnis ersetzt `libraryResults` im Store → `selectActivePhotos` liefert es statt des ausgewählten Ordners/der Sammlung an Raster und Filmstreifen.
+
+**Attributfilter:** Frontend `FilterBar`-Chip (Bewertung/Flagge/Farbe) → Store `setLibraryFilterChip` (kombiniert alle gesetzten Chips im Store, leert dabei die Freitextsuche — beide sind laut `PLAN.md` Phase 3 Schritt 6 bewusst alternativ) → Tauri-Command `filter_photos` → `apx-catalog::Catalog::filter_photos`: baut dynamisch eine UND-verknüpfte `WHERE`-Klausel aus den gesetzten Kriterien (leeres `FilterCriteria` liefert alle Fotos) → Ergebnis ersetzt `libraryResults` wie bei der Suche.
+
+Beide Pfade laufen über dieselbe `libraryResults`-Zustandsvariable und denselben `selectActivePhotos`-Lesepfad — kein separater „Suchergebnis-Modus" in Raster/Filmstreifen nötig.
+
+## 7. Platzhalter für spätere Phasen
 
 Diese Abschnitte werden erst gefüllt, wenn die jeweilige Phase beginnt — hier nur benannt, damit die Zielarchitektur nicht aus dem Blick gerät:
 
-- **Phase 3–4:** Erweiterung von `apx-catalog` um Sammlungen/Keywords/FTS5, volles Entwickeln-Modul als weitere Pipeline-Stufen.
+- **Phase 4:** Volles Entwickeln-Modul als weitere Pipeline-Stufen (über die 7 Grundregler aus Phase 2 hinaus).
 - **Phase 5:** `apx-presets` — Preset-/Template-Engine, Adobe-Interop.
 - **Phase 6:** Maskensystem als eigene Pipeline-Stufe(n).
 - **Phase 7:** `apx-ai` — ONNX-Runtime-Integration, LLM-Client für Preset-Generator.

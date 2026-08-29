@@ -280,10 +280,13 @@ Wie bei Phase 2 gibt es kein eigenes ausführliches Prompt-Dokument — die Schr
   - **Zustand-Erkenntnis:** `selectActivePhotos` lieferte bei leerer Auswahl bei jedem Aufruf ein neues `[]`-Literal — `useAppStore(selector)`s `Object.is`-Vergleich hielt das für eine sich ständig ändernde Snapshot und löste über `useSyncExternalStore` endlose Neu-Renderings aus ("Maximum update depth exceeded"). Behoben mit `useShallow` aus `zustand/react/shallow` an allen drei Verwendungsstellen (`Filmstrip`/`GridView`/`MetadataPanel`)
   - Verifiziert: `tsc -b`, `vitest run` (45 Tests), `playwright test` (9/9, inkl. neuer Bibliotheks-Spezifikation) — alles grün. Keine Rust-Änderungen in diesem Schritt.
 
-- [ ] 7. Tests, Dokumentation, Abnahme (gebündelt)
-  - [ ] Vollständige Verifikation (Rust + Frontend)
-  - [ ] `THIRD_PARTY.md`/`ARCHITECTURE.md`/`FEATURES.md` aktualisiert
-  - [ ] Definition-of-Done je Feature, 100k-Foto-Performance-Check, Abschlussbericht
+- [x] 7. Tests, Dokumentation, Abnahme (gebündelt)
+  - [x] Vollständige Verifikation: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (196 Testzeilen, alle grün), `tsc -b`, `vitest run` (45 Tests), `playwright test` (10/10), `vite build` — alles grün
+  - [x] `ARCHITECTURE.md` (neuer Abschnitt „6. Architektur Phase 3 — Bibliothek" inkl. Datenfluss „Suche/Filter → Ergebnisliste")/`FEATURES.md` aktualisiert; `THIRD_PARTY.md` unverändert (keine neuen Abhängigkeiten in Phase 3 — geprüft per `git log` auf `Cargo.toml`/`package.json` seit Phase 2 Schritt 1)
+  - [x] Bei der Abnahme zwei von ADR-0022 übersehene Über-Scope-Punkte gefunden und korrigiert (ADR-0026): „Duplikaterkennung per exaktem Hash" und „Sortierung nach beliebigem Feld" waren fälschlich auf Phase 3 getaggt, obwohl sie in `SPEC.md` §5s Phase-3-Satz nicht vorkommen — auf Phase 6 umgetaggt, nicht gebaut vorgetäuscht
+  - [x] Kleine Lücke geschlossen: `FilterBar.tsx` bekam einen Kameramodell-Filter-Chip (Backend unterstützte `camera_model` in `filter_photos` bereits, es fehlte nur die UI)
+  - [x] 100.000-Foto-Raster-Performance-Check (`SPEC.md` §2.4): manuell mit einem Einweg-Playwright-Test verifiziert — DOM-Zellenzahl bleibt bei Ruhe/Scroll-Mitte/Scroll-Ende zwischen 35 und 60 (nie nahe 100.000), Ersteinbindung+Wechsel ins Raster ~2,2 s in dieser Sandbox (keine echte GPU/reales Hardware-Profil), JS-Heap ~119 MB — automatisiertes CI-Regressionsäquivalent mit 5.000 Fotos in `library-flow.spec.ts` (analog zum bestehenden 50.000/5.000-Muster des Filmstreifens aus Phase 1)
+  - [x] Definition-of-Done je Feature gegen `SPEC.md` §7 geprüft, ehrlicher Abschlussbericht (siehe Chat)
 
 ### Nicht in Phase 3 (bewusst zurückgestellt)
 Siehe `FEATURES.md` §3.1 für die genaue Zuordnung: Gesichtserkennung, virtuelle Kopien, Stapel, Sekundäres Display (→ Phase 9 bzw. eigene spätere Ausbaustufe), Schlagwort-Hierarchie/Synonyme/Auto-Vervollständigung, intelligente Sammlungen mit Regeln, Sammlungssätze, Metadaten-Presets, Stapel-Metadatenbearbeitung, vollständiger EXIF/IPTC/XMP-Editor, Sidecar-Export, Vergleichs-/Übersichtsansicht, Vorschau-Cache-Verwaltung/Smart Previews, Filter-Presets, Schnellentwicklung im Raster (→ Phase 6), Perceptual-Hash-Duplikaterkennung, Katalog-Statistiken-Dashboard (→ Phase 9), DNG-Konvertierung (→ Phase 5).

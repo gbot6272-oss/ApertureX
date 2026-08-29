@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
-import { buildEdlEnvelopeJson, NEUTRAL_BASIC_ADJUSTMENTS, parseEdlEnvelopeJson, writeBasicField } from "../lib/edl";
-import type { BasicAdjustments } from "../lib/edl";
+import { buildEdlEnvelopeJson, neutralEdlPayload, parseEdlEnvelopeJson, writeBasicField } from "../lib/edl";
+import type { EdlPayload } from "../lib/edl";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
 import * as api from "../lib/tauri";
@@ -18,16 +18,16 @@ import type {
 import * as undoStackLib from "../lib/undoStack";
 import type { UndoEntry } from "../lib/undoStack";
 
-/** Wandelt eine `HistoryPositionDto` (siehe `lib/tauri.ts`) in
- * `BasicAdjustments` um — `Neutral` bedeutet "wie aufgenommen", ein
- * unlesbares `edl_json` fällt (mit einer Konsolen-Warnung) ebenfalls auf
- * neutral zurück statt abzustürzen. */
-function basicFromHistoryPosition(position: HistoryPositionDto): BasicAdjustments {
-  if (position.kind === "Neutral") return NEUTRAL_BASIC_ADJUSTMENTS;
+/** Wandelt eine `HistoryPositionDto` (siehe `lib/tauri.ts`) in ein volles
+ * `EdlPayload` um — `Neutral` bedeutet "wie aufgenommen", ein unlesbares
+ * `edl_json` fällt (mit einer Konsolen-Warnung) ebenfalls auf neutral
+ * zurück statt abzustürzen. */
+function edlFromHistoryPosition(position: HistoryPositionDto): EdlPayload {
+  if (position.kind === "Neutral") return neutralEdlPayload();
   const parsed = parseEdlEnvelopeJson(position.edl_json);
   if (!parsed) {
     console.error("Unlesbares EDL vom Backend erhalten, falle auf neutral zurück:", position.edl_json);
-    return NEUTRAL_BASIC_ADJUSTMENTS;
+    return neutralEdlPayload();
   }
   return parsed;
 }
@@ -194,11 +194,14 @@ interface JobsSlice {
 interface DevelopSlice {
   developPanelOpen: boolean;
   /** Der aktuell im Panel gezeigte (u. U. noch nicht committete)
-   * Bearbeitungszustand — laufend über `setBasicField` verändert,
-   * während gezogen wird; nur `commitDevelopEdit()` schreibt ihn dauerhaft
-   * in den Katalog (siehe `crates/apx-catalog`s `edit_history`, ADR-0014). */
-  developBasic: BasicAdjustments;
-  /** Zu welchem Foto `developBasic` gehört — verhindert, dass beim
+   * Bearbeitungszustand — das volle EDL (alle zehn Phase-4-Kategorien,
+   * siehe `lib/edl.ts`s `EdlPayload`), laufend über `setBasicField`
+   * (und ab den jeweiligen späteren Schritten weitere Setter je
+   * Werkzeugkategorie) verändert, während gezogen wird; nur
+   * `commitDevelopEdit()` schreibt ihn dauerhaft in den Katalog (siehe
+   * `crates/apx-catalog`s `edit_history`, ADR-0014). */
+  developEdl: EdlPayload;
+  /** Zu welchem Foto `developEdl` gehört — verhindert, dass beim
    * schnellen Fotowechsel ein veralteter Zustand kurz sichtbar bleibt. */
   developPhotoId: string | null;
   toggleDevelopPanel: () => void;
@@ -206,12 +209,12 @@ interface DevelopSlice {
    * (oder neutral, falls noch nie bearbeitet) — aufgerufen beim Öffnen
    * des Panels und bei jedem Fotowechsel, während es offen ist. */
   loadDevelopStateForPhoto: (photoId: string) => Promise<void>;
-  /** Setzt ein einzelnes Feld (Regler-Zwischenwert beim Ziehen) — siehe
-   * `lib/edl.ts`s `SliderSpec.key` für gültige Schlüssel. */
+  /** Setzt ein einzelnes Grundeinstellungs-Feld (Regler-Zwischenwert beim
+   * Ziehen) — siehe `lib/edl.ts`s `SliderSpec.key` für gültige Schlüssel. */
   setBasicField: (key: string, value: number) => void;
-  /** Schreibt `developBasic` als neuen Verlaufs-Schritt (siehe
-   * `PLAN.md` Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines
-   * Reglers, nicht bei jedem Zwischenwert). */
+  /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
+   * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
+   * bei jedem Zwischenwert). */
   commitDevelopEdit: (label?: string) => Promise<void>;
   undoDevelop: () => Promise<void>;
   redoDevelop: () => Promise<void>;
@@ -415,7 +418,7 @@ export const useAppStore = create<AppStore>()(
           void get().loadDevelopStateForPhoto(photoId);
         } else {
           set((state) => {
-            state.developBasic = NEUTRAL_BASIC_ADJUSTMENTS;
+            state.developEdl = neutralEdlPayload();
             state.developPhotoId = null;
           });
         }
@@ -522,7 +525,7 @@ export const useAppStore = create<AppStore>()(
 
     // Develop
     developPanelOpen: false,
-    developBasic: NEUTRAL_BASIC_ADJUSTMENTS,
+    developEdl: neutralEdlPayload(),
     developPhotoId: null,
 
     toggleDevelopPanel: () => {
@@ -540,13 +543,13 @@ export const useAppStore = create<AppStore>()(
       try {
         const position = await api.currentDevelopEdit(photoId);
         set((state) => {
-          state.developBasic = basicFromHistoryPosition(position);
+          state.developEdl = edlFromHistoryPosition(position);
           state.developPhotoId = photoId;
         });
       } catch (err) {
         console.error("Bearbeitungszustand konnte nicht geladen werden:", err);
         set((state) => {
-          state.developBasic = NEUTRAL_BASIC_ADJUSTMENTS;
+          state.developEdl = neutralEdlPayload();
           state.developPhotoId = photoId;
         });
       }
@@ -554,15 +557,15 @@ export const useAppStore = create<AppStore>()(
 
     setBasicField: (key, value) => {
       set((state) => {
-        writeBasicField(state.developBasic, key, value);
+        writeBasicField(state.developEdl.basic, key, value);
       });
     },
 
     commitDevelopEdit: async (label) => {
-      const { developPhotoId, developBasic } = get();
+      const { developPhotoId, developEdl } = get();
       if (!developPhotoId) return;
       try {
-        await api.applyDevelopEdit(developPhotoId, buildEdlEnvelopeJson(developBasic), label);
+        await api.applyDevelopEdit(developPhotoId, buildEdlEnvelopeJson(developEdl), label);
       } catch (err) {
         console.error("Bearbeitung konnte nicht gespeichert werden:", err);
       }
@@ -577,7 +580,7 @@ export const useAppStore = create<AppStore>()(
       });
       if (!position) return;
       set((state) => {
-        state.developBasic = basicFromHistoryPosition(position);
+        state.developEdl = edlFromHistoryPosition(position);
       });
     },
 
@@ -590,7 +593,7 @@ export const useAppStore = create<AppStore>()(
       });
       if (!position) return;
       set((state) => {
-        state.developBasic = basicFromHistoryPosition(position);
+        state.developEdl = edlFromHistoryPosition(position);
       });
     },
 

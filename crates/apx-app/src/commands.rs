@@ -811,11 +811,12 @@ mod tests {
     // beisteuert.
 
     fn sample_envelope(marker: f32) -> apx_core::EdlEnvelope {
-        let edl = apx_pipeline::EdlV1 {
+        let edl = apx_pipeline::edl::EdlV2 {
             basic: apx_pipeline::edl::BasicAdjustments {
                 exposure_ev: marker,
                 ..apx_pipeline::edl::BasicAdjustments::NEUTRAL
             },
+            ..apx_pipeline::edl::EdlV2::neutral()
         };
         apx_core::EdlEnvelope::new(
             apx_pipeline::EDL_SCHEMA_VERSION,
@@ -847,7 +848,7 @@ mod tests {
                 let roundtripped =
                     apx_core::EdlEnvelope::from_json_str(&edl_json).expect("sollte wieder parsen");
                 let parsed = apx_pipeline::edl::from_envelope(&roundtripped)
-                    .expect("sollte gültiges EdlV1 ergeben");
+                    .expect("sollte gültiges EdlV2 ergeben");
                 assert_eq!(parsed.basic.exposure_ev, 0.7);
             }
             HistoryPositionDto::Neutral => panic!("sollte nicht neutral sein"),

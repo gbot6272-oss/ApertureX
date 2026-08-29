@@ -6,7 +6,11 @@ use bytemuck::{Pod, Zeroable};
 use rayon::prelude::*;
 
 use super::white_balance::WhiteBalanceParams;
-use crate::edl::BasicAdjustments;
+// Bewusst v1s sieben-Feld-Struktur, nicht die (per Re-Export gleichnamige)
+// zwölf-Feld-Struktur aus `edl::v2` — dieser Fused-Pass verarbeitet bis
+// Phase 4 Schritt 2 weiterhin nur die sieben Grundregler; `develop.rs`
+// projiziert `EdlV2::basic` extra dafür herunter (`to_v1_subset`).
+use crate::edl::v1::BasicAdjustments;
 use crate::error::Result;
 use crate::gpu::{dispatch, GpuContext};
 

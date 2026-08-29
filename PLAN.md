@@ -350,11 +350,12 @@ Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Obj
   - [x] `FEATURES.md`: §3.4-Workflow-Zeilen auf Phase 6 umgetaggt, erklärende Kommentare bei Objektivkorrekturen/Kalibrierung/Reparatur/Geometrie ergänzt
   - [x] Dieser Abschnitt in `PLAN.md`
 
-- [ ] 1. EDL-Schema v2 + Migration
-  - [ ] `crates/apx-pipeline/src/edl/v2.rs`: alle neuen Structs (`CurvesAdjustment`, `HslAdjustment`, `ColorMixerAdjustment`, `ColorGradingAdjustment`, `DetailsAdjustment`, `LensCorrectionAdjustment`, `EffectsAdjustment`, `CalibrationAdjustment`, `GeometryAdjustment`, `Vec<RepairStroke>`), `EDL_SCHEMA_VERSION = 2`
-  - [ ] `migrate.rs`: `v1_to_v2`-Aufwärtspfad, `from_envelope` probiert v2 zuerst
-  - [ ] Tests: v1→v2-Upgrade-Rundreise, alte `edit_history`-Zeilen (v1-JSON) laden weiterhin korrekt
-  - [ ] `frontend/src/lib/edl.ts`: gespiegelte TS-Typen + Neutral-Konstanten + Builder je Sektion; `store/index.ts`s `developBasic`-Zustand entsprechend erweitert
+- [x] 1. EDL-Schema v2 + Migration
+  - [x] `crates/apx-pipeline/src/edl/v2.rs`: alle neuen Structs (`CurvesAdjustment`, `HslAdjustment`, `ColorMixerAdjustment`, `ColorGradingAdjustment`, `DetailsAdjustment`, `LensCorrectionAdjustment`, `EffectsAdjustment`, `CalibrationAdjustment`, `GeometryAdjustment`, `Vec<RepairStroke>`), `EDL_SCHEMA_VERSION = 2`
+  - [x] `migrate.rs`: `v1_to_v2`-Aufwärtspfad, `from_envelope` probiert v2 zuerst
+  - [x] Tests: v1→v2-Upgrade-Rundreise, alte `edit_history`-Zeilen (v1-JSON) laden weiterhin korrekt
+  - [x] `frontend/src/lib/edl.ts`: gespiegelte TS-Typen (`EdlPayload` mit allen zehn Sektionen) + Neutral-Konstanten/-Funktionen je Sektion; `store/index.ts`s `developBasic`-Zustand zu `developEdl: EdlPayload` erweitert/umbenannt
+  - Übergangsstand: `render_rgba8` verarbeitet bislang nur `basic` (über `to_v1_subset`) — die neuen Felder sind bis Schritt 2 inert. Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (228 Tests), `tsc -b`, `vitest run` (67 Tests), `playwright test` (13/13), `vite build` — alles lokal grün
 
 - [ ] 2. GPU-Dispatch-Erweiterung + erweiterter Fused-Pass
   - [ ] `gpu/dispatch.rs`: neue Varianten (positions-bewusst mit Breite/Höhe-Uniform; nachbarschafts-fähig mit 2D-Workgroups)

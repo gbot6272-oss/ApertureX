@@ -24,7 +24,7 @@ const WHITE_BALANCE_KEYS = new Set(["temp_shift_kelvin", "tint_shift"]);
  */
 export function DevelopPanel() {
   const open = useAppStore((s) => s.developPanelOpen);
-  const basic = useAppStore((s) => s.developBasic);
+  const basic = useAppStore((s) => s.developEdl.basic);
   const setBasicField = useAppStore((s) => s.setBasicField);
   const commitDevelopEdit = useAppStore((s) => s.commitDevelopEdit);
   const undoDevelop = useAppStore((s) => s.undoDevelop);

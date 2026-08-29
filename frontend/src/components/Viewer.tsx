@@ -31,7 +31,7 @@ export function Viewer() {
   const setPan = useAppStore((s) => s.setPan);
   const resetView = useAppStore((s) => s.resetView);
   const developPanelOpen = useAppStore((s) => s.developPanelOpen);
-  const developBasic = useAppStore((s) => s.developBasic);
+  const developEdl = useAppStore((s) => s.developEdl);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -56,7 +56,7 @@ export function Viewer() {
   // `PLAN.md` Phase 2 Schritt 6) — bis die erste Antwort da ist, bleibt
   // `activeBitmap` als Platzhalter sichtbar (kein Weißblitz beim Öffnen
   // des Panels, analog zum Vorschau/Vollbild-Übergang oben).
-  const developEdlJson = developPanelOpen && photo ? buildEdlEnvelopeJson(developBasic) : null;
+  const developEdlJson = developPanelOpen && photo ? buildEdlEnvelopeJson(developEdl) : null;
   const developPhotoId = developPanelOpen ? (photo?.id ?? null) : null;
   const developFrame = useDevelopRender(developPhotoId, developEdlJson, photo && containerSize.width > 0 ? targetFullEdge : undefined);
 

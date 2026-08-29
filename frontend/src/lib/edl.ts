@@ -1,17 +1,20 @@
 /**
- * TypeScript-Gegenstück zu `crates/apx-pipeline/src/edl/v1.rs` und
- * `crates/apx-core/src/edl.rs` — von Hand synchron gehalten (vertretbar
- * bei sieben Feldern, siehe `PLAN.md` Phase 2, Abschnitt "Risiken":
- * dieser Punkt sollte bei einem deutlich größeren EDL in Phase 4 neu
- * bewertet werden).
+ * TypeScript-Gegenstück zu `crates/apx-pipeline/src/edl/v2.rs` und
+ * `crates/apx-core/src/edl.rs` — von Hand synchron gehalten. Seit Phase 4
+ * (Schritt 1, `DECISIONS.md` ADR-0028) ist das EDL deutlich größer als
+ * die ursprünglichen sieben Phase-2-Regler; die hier gespiegelten Typen
+ * folgen exakt `apx_pipeline::edl::v2`s Struktur- und Feldnamen (`serde`s
+ * Standard-Serialisierung, keine Umbenennungen).
  *
  * Die JSON-Form muss exakt der `serde`-Serialisierung von
- * `apx_pipeline::EdlV1` entsprechen (Feldnamen, Verschachtelung), da
+ * `apx_pipeline::EdlV2` entsprechen (Feldnamen, Verschachtelung), da
  * `crate::edl::migrate::from_envelope` sie strikt gegen die Struktur
  * validiert statt fehlende Felder mit Defaults aufzufüllen.
  */
 
-export const EDL_SCHEMA_VERSION = 1;
+export const EDL_SCHEMA_VERSION = 2;
+
+// ---- Grundeinstellungen (12 Regler: 7 aus Phase 2 + 5 aus Phase 4) --------
 
 export interface WhiteBalanceAdjustment {
   temp_shift_kelvin: number;
@@ -31,6 +34,11 @@ export interface BasicAdjustments {
   shadows: number;
   whites: number;
   blacks: number;
+  texture: number;
+  clarity: number;
+  dehaze: number;
+  vibrance: number;
+  saturation: number;
 }
 
 export const NEUTRAL_BASIC_ADJUSTMENTS: BasicAdjustments = {
@@ -41,37 +49,393 @@ export const NEUTRAL_BASIC_ADJUSTMENTS: BasicAdjustments = {
   shadows: 0,
   whites: 0,
   blacks: 0,
+  texture: 0,
+  clarity: 0,
+  dehaze: 0,
+  vibrance: 0,
+  saturation: 0,
 };
+
+// ---- Kurven ----------------------------------------------------------------
+
+export interface CurvePoint {
+  input: number;
+  output: number;
+}
+
+/** Spiegelt Rusts intern getaggtes `#[serde(tag = "kind")]`-Enum. */
+export type CurveChannel =
+  | { kind: "Points"; points: CurvePoint[] }
+  | { kind: "Parametric"; shadows: number; darks: number; lights: number; highlights: number };
+
+export function identityCurve(): CurveChannel {
+  return {
+    kind: "Points",
+    points: [
+      { input: 0, output: 0 },
+      { input: 1, output: 1 },
+    ],
+  };
+}
+
+export interface CurvesAdjustment {
+  rgb: CurveChannel;
+  red: CurveChannel;
+  green: CurveChannel;
+  blue: CurveChannel;
+  luminance: CurveChannel;
+}
+
+export function neutralCurves(): CurvesAdjustment {
+  return {
+    rgb: identityCurve(),
+    red: identityCurve(),
+    green: identityCurve(),
+    blue: identityCurve(),
+    luminance: identityCurve(),
+  };
+}
+
+// ---- HSL --------------------------------------------------------------------
+
+export interface HslBand {
+  hue: number;
+  saturation: number;
+  luminance: number;
+}
+
+export const NEUTRAL_HSL_BAND: HslBand = { hue: 0, saturation: 0, luminance: 0 };
+
+export interface HslAdjustment {
+  red: HslBand;
+  orange: HslBand;
+  yellow: HslBand;
+  green: HslBand;
+  aqua: HslBand;
+  blue: HslBand;
+  purple: HslBand;
+  magenta: HslBand;
+}
+
+export const NEUTRAL_HSL: HslAdjustment = {
+  red: NEUTRAL_HSL_BAND,
+  orange: NEUTRAL_HSL_BAND,
+  yellow: NEUTRAL_HSL_BAND,
+  green: NEUTRAL_HSL_BAND,
+  aqua: NEUTRAL_HSL_BAND,
+  blue: NEUTRAL_HSL_BAND,
+  purple: NEUTRAL_HSL_BAND,
+  magenta: NEUTRAL_HSL_BAND,
+};
+
+// ---- Farbmischer erweitert --------------------------------------------------
+
+export interface ColorMixerRegion {
+  target_hue_degrees: number;
+  bandwidth_degrees: number;
+  feather: number;
+  hue_shift: number;
+  saturation_shift: number;
+  luminance_shift: number;
+}
+
+export interface ColorMixerAdjustment {
+  regions: ColorMixerRegion[];
+}
+
+export function neutralColorMixer(): ColorMixerAdjustment {
+  return { regions: [] };
+}
+
+// ---- Color Grading (Farbräder) ---------------------------------------------
+
+export interface ColorGradingWheel {
+  hue_degrees: number;
+  saturation: number;
+  luminance: number;
+}
+
+export const NEUTRAL_COLOR_GRADING_WHEEL: ColorGradingWheel = { hue_degrees: 0, saturation: 0, luminance: 0 };
+
+export interface ColorGradingAdjustment {
+  shadows: ColorGradingWheel;
+  midtones: ColorGradingWheel;
+  highlights: ColorGradingWheel;
+  global: ColorGradingWheel;
+  balance: number;
+  blending: number;
+}
+
+export const NEUTRAL_COLOR_GRADING: ColorGradingAdjustment = {
+  shadows: NEUTRAL_COLOR_GRADING_WHEEL,
+  midtones: NEUTRAL_COLOR_GRADING_WHEEL,
+  highlights: NEUTRAL_COLOR_GRADING_WHEEL,
+  global: NEUTRAL_COLOR_GRADING_WHEEL,
+  balance: 0,
+  blending: 50,
+};
+
+// ---- Details (Schärfung + Rauschreduzierung) -------------------------------
+
+export interface DetailsAdjustment {
+  sharpen_amount: number;
+  sharpen_radius: number;
+  sharpen_detail: number;
+  sharpen_masking: number;
+  use_deconvolution_sharpen: boolean;
+  luminance_nr_amount: number;
+  luminance_nr_detail: number;
+  luminance_nr_contrast: number;
+  color_nr_amount: number;
+  color_nr_detail: number;
+  color_nr_smoothness: number;
+}
+
+export const NEUTRAL_DETAILS: DetailsAdjustment = {
+  sharpen_amount: 0,
+  sharpen_radius: 1,
+  sharpen_detail: 25,
+  sharpen_masking: 0,
+  use_deconvolution_sharpen: false,
+  luminance_nr_amount: 0,
+  luminance_nr_detail: 50,
+  luminance_nr_contrast: 0,
+  color_nr_amount: 0,
+  color_nr_detail: 50,
+  color_nr_smoothness: 50,
+};
+
+// ---- Objektivkorrekturen ----------------------------------------------------
+
+/** Die fünf `SPEC.md`-Modi plus `"Off"` als neutraler Standard. */
+export type UprightMode = "Off" | "Auto" | "Level" | "Vertical" | "Full" | "Guided";
+
+export interface GuidedLine {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+export interface ManualTransform {
+  vertical: number;
+  horizontal: number;
+  rotate_degrees: number;
+  aspect: number;
+  scale: number;
+  offset_x: number;
+  offset_y: number;
+}
+
+export const NEUTRAL_MANUAL_TRANSFORM: ManualTransform = {
+  vertical: 0,
+  horizontal: 0,
+  rotate_degrees: 0,
+  aspect: 0,
+  scale: 100,
+  offset_x: 0,
+  offset_y: 0,
+};
+
+export interface LensCorrectionAdjustment {
+  /** Referenz auf ein Profil in der eingebauten Mini-Profildatenbank
+   * (siehe `DECISIONS.md` ADR-0028), `null` = kein Profil zugeordnet. */
+  profile_id: string | null;
+  ca_red_cyan: number;
+  ca_blue_yellow: number;
+  auto_ca: boolean;
+  vignette_amount: number;
+  distortion_amount: number;
+  upright_mode: UprightMode;
+  guided_lines: GuidedLine[];
+  manual_transform: ManualTransform;
+}
+
+export function neutralLensCorrections(): LensCorrectionAdjustment {
+  return {
+    profile_id: null,
+    ca_red_cyan: 0,
+    ca_blue_yellow: 0,
+    auto_ca: false,
+    vignette_amount: 0,
+    distortion_amount: 0,
+    upright_mode: "Off",
+    guided_lines: [],
+    manual_transform: NEUTRAL_MANUAL_TRANSFORM,
+  };
+}
+
+// ---- Effekte ----------------------------------------------------------------
+
+export interface EffectsAdjustment {
+  post_vignette_amount: number;
+  post_vignette_midpoint: number;
+  post_vignette_roundness: number;
+  post_vignette_feather: number;
+  post_vignette_highlights: number;
+  grain_amount: number;
+  grain_size: number;
+  grain_roughness: number;
+}
+
+export const NEUTRAL_EFFECTS: EffectsAdjustment = {
+  post_vignette_amount: 0,
+  post_vignette_midpoint: 50,
+  post_vignette_roundness: 0,
+  post_vignette_feather: 50,
+  post_vignette_highlights: 0,
+  grain_amount: 0,
+  grain_size: 25,
+  grain_roughness: 50,
+};
+
+// ---- Kalibrierung -----------------------------------------------------------
+
+export type ProcessVersion = "V1";
+
+export interface PrimaryColorAdjustment {
+  hue: number;
+  saturation: number;
+}
+
+export const NEUTRAL_PRIMARY_COLOR: PrimaryColorAdjustment = { hue: 0, saturation: 0 };
+
+export interface CalibrationAdjustment {
+  process_version: ProcessVersion;
+  shadow_tint: number;
+  red_primary: PrimaryColorAdjustment;
+  green_primary: PrimaryColorAdjustment;
+  blue_primary: PrimaryColorAdjustment;
+  /** Name eines eingebauten Kameraprofils (kein DCP-Import, siehe
+   * ADR-0028), `null` = Standardprofil. */
+  camera_profile: string | null;
+}
+
+export function neutralCalibration(): CalibrationAdjustment {
+  return {
+    process_version: "V1",
+    shadow_tint: 0,
+    red_primary: NEUTRAL_PRIMARY_COLOR,
+    green_primary: NEUTRAL_PRIMARY_COLOR,
+    blue_primary: NEUTRAL_PRIMARY_COLOR,
+    camera_profile: null,
+  };
+}
+
+// ---- Geometrie (Crop/Rotation) ----------------------------------------------
+
+export type GridOverlay = "None" | "Thirds" | "GoldenRatio" | "Diagonals" | "Spiral" | "Triangles";
+
+export interface CropRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Das ganze Bild, kein Beschnitt. */
+export const FULL_CROP_RECT: CropRect = { x: 0, y: 0, width: 1, height: 1 };
+
+export interface GeometryAdjustment {
+  crop: CropRect;
+  /** `null` = freie Seitenverhältniswahl, sonst Breite/Höhe-Verhältnis. */
+  aspect_ratio: number | null;
+  angle_degrees: number;
+  overlay: GridOverlay;
+  /** Vereinfachte Auto-Ausrichtung: nur EXIF-Orientierung, siehe ADR-0028. */
+  auto_horizon: boolean;
+}
+
+export const NEUTRAL_GEOMETRY: GeometryAdjustment = {
+  crop: FULL_CROP_RECT,
+  aspect_ratio: null,
+  angle_degrees: 0,
+  overlay: "None",
+  auto_horizon: false,
+};
+
+// ---- Reparatur (Klonen/Reparieren) ------------------------------------------
+
+export type RepairMode = "Clone" | "Heal";
+
+export interface RepairPoint {
+  x: number;
+  y: number;
+}
+
+/** Ein einzelner Klon-/Reparatur-Pinselzug. Bewusst **nicht** Teil von
+ * Phase 4: Auto-Quellenfindung, inhaltsbasiertes Füllen (siehe ADR-0028). */
+export interface RepairStroke {
+  mode: RepairMode;
+  source: RepairPoint;
+  target_path: RepairPoint[];
+  radius: number;
+  feather: number;
+  opacity: number;
+}
+
+// ---- Der vollständige EDL-Payload -------------------------------------------
+
+/** Spiegelt `apx_pipeline::edl::v2::EdlV2` — der komplette Inhalt eines
+ * `EdlEnvelope.payload`. */
+export interface EdlPayload {
+  basic: BasicAdjustments;
+  curves: CurvesAdjustment;
+  hsl: HslAdjustment;
+  color_mixer: ColorMixerAdjustment;
+  color_grading: ColorGradingAdjustment;
+  details: DetailsAdjustment;
+  lens_corrections: LensCorrectionAdjustment;
+  effects: EffectsAdjustment;
+  calibration: CalibrationAdjustment;
+  geometry: GeometryAdjustment;
+  repair: RepairStroke[];
+}
+
+export function neutralEdlPayload(): EdlPayload {
+  return {
+    basic: NEUTRAL_BASIC_ADJUSTMENTS,
+    curves: neutralCurves(),
+    hsl: NEUTRAL_HSL,
+    color_mixer: neutralColorMixer(),
+    color_grading: NEUTRAL_COLOR_GRADING,
+    details: NEUTRAL_DETAILS,
+    lens_corrections: neutralLensCorrections(),
+    effects: NEUTRAL_EFFECTS,
+    calibration: neutralCalibration(),
+    geometry: NEUTRAL_GEOMETRY,
+    repair: [],
+  };
+}
 
 /** Baut die JSON-Serialisierung eines `EdlEnvelope` (siehe
  * `apx_core::EdlEnvelope`), wie sie sowohl die `develop/...`-Protokoll-
  * Route als auch `apply_develop_edit` erwarten. */
-export function buildEdlEnvelopeJson(basic: BasicAdjustments): string {
+export function buildEdlEnvelopeJson(payload: EdlPayload): string {
   return JSON.stringify({
     schema_version: EDL_SCHEMA_VERSION,
-    payload: { basic },
+    payload,
   });
 }
 
-/** Liest `BasicAdjustments` aus einem `EdlEnvelope`-JSON-String (z. B. aus
+/** Liest ein `EdlPayload` aus einem `EdlEnvelope`-JSON-String (z. B. aus
  * `current_develop_edit`/`undo_develop_edit`/`redo_develop_edit`). Gibt
  * bei unbekannter Schema-Version oder unlesbarer Nutzlast `null` zurück,
  * statt einen Absturz zu riskieren — der Aufrufer entscheidet dann, ob er
- * auf `NEUTRAL_BASIC_ADJUSTMENTS` zurückfällt. */
-export function parseEdlEnvelopeJson(json: string): BasicAdjustments | null {
+ * auf `neutralEdlPayload()` zurückfällt. */
+export function parseEdlEnvelopeJson(json: string): EdlPayload | null {
   try {
     const parsed: unknown = JSON.parse(json);
     if (typeof parsed !== "object" || parsed === null) return null;
     const envelope = parsed as { schema_version?: unknown; payload?: unknown };
     if (envelope.schema_version !== EDL_SCHEMA_VERSION) return null;
-    const payload = envelope.payload as { basic?: unknown } | undefined;
-    const basic = payload?.basic;
-    if (typeof basic !== "object" || basic === null) return null;
+    const payload = envelope.payload;
+    if (typeof payload !== "object" || payload === null) return null;
     // Keine tiefe Struktur-Validierung (Feld für Feld) — anders als die
     // Rust-Seite (die `serde` strukturell prüfen lässt) reicht hier ein
     // grober Plausibilitätscheck, da diese Funktion nur auf Antworten
     // angewendet wird, die dasselbe Backend gerade erst geschrieben hat.
-    return basic as BasicAdjustments;
+    return payload as EdlPayload;
   } catch {
     return null;
   }

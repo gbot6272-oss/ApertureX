@@ -10,7 +10,7 @@
 use apx_raw::LinearImage;
 
 use crate::color::linear_camera_rgb_to_srgb_rgba8;
-use crate::edl::EdlV1;
+use crate::edl::EdlV2;
 use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{basic_fused, white_balance};
@@ -25,22 +25,30 @@ use crate::stages::{basic_fused, white_balance};
 /// lassen (siehe `SPEC.md` §2.2 „GPU→CPU-Fallback muss existieren",
 /// `DECISIONS.md` ADR-0012) — der Aufrufer muss diese Entscheidung nicht
 /// selbst treffen.
+///
+/// **Phase-4-Übergangsstand (siehe `PLAN.md` Phase 4 Schritt 1/2):** `edl`
+/// ist bereits der volle `EdlV2` mit allen zehn Werkzeugkategorien, aber
+/// der Fused-Pass hier verarbeitet bislang nur die sieben v1-Grundregler
+/// (`BasicAdjustments::to_v1_subset`) — alle neuen Felder sind noch
+/// inert. Schritt 2 erweitert `basic_fused` schrittweise um die
+/// restlichen Kategorien.
 pub fn render_rgba8(
     ctx: Option<&GpuContext>,
     linear: &LinearImage,
-    edl: &EdlV1,
+    edl: &EdlV2,
 ) -> Result<Vec<u8>> {
-    let wb_gains = white_balance::compute_gains(linear.as_shot_wb_coeffs, edl.basic.white_balance);
+    let basic = edl.basic.to_v1_subset();
+    let wb_gains = white_balance::compute_gains(linear.as_shot_wb_coeffs, basic.white_balance);
 
     let tonal = match ctx {
-        Some(ctx) => match basic_fused::apply_gpu(ctx, &linear.pixels, wb_gains, &edl.basic) {
+        Some(ctx) => match basic_fused::apply_gpu(ctx, &linear.pixels, wb_gains, &basic) {
             Ok(pixels) => pixels,
             Err(err) => {
                 tracing::warn!(error = %err, "GPU-Rendering fehlgeschlagen, nutze CPU-Fallback");
-                basic_fused::apply_cpu(&linear.pixels, wb_gains, &edl.basic)
+                basic_fused::apply_cpu(&linear.pixels, wb_gains, &basic)
             }
         },
-        None => basic_fused::apply_cpu(&linear.pixels, wb_gains, &edl.basic),
+        None => basic_fused::apply_cpu(&linear.pixels, wb_gains, &basic),
     };
 
     Ok(linear_camera_rgb_to_srgb_rgba8(&tonal, linear.cam_to_srgb))
@@ -49,7 +57,7 @@ pub fn render_rgba8(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::edl::{BasicAdjustments, WhiteBalanceAdjustment};
+    use crate::edl::{BasicAdjustments, EdlV2, WhiteBalanceAdjustment};
 
     const IDENTITY: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
@@ -66,7 +74,7 @@ mod tests {
     #[test]
     fn neutral_edl_produces_correctly_sized_opaque_output() {
         let linear = flat_gray_linear_image(0.5);
-        let rgba = render_rgba8(None, &linear, &EdlV1::NEUTRAL).expect("sollte rendern");
+        let rgba = render_rgba8(None, &linear, &EdlV2::neutral()).expect("sollte rendern");
         assert_eq!(rgba.len(), 2 * 2 * 4);
         for pixel in rgba.chunks_exact(4) {
             assert_eq!(pixel[3], 255, "Alpha muss immer undurchsichtig sein");
@@ -76,12 +84,13 @@ mod tests {
     #[test]
     fn negative_exposure_darkens_output() {
         let linear = flat_gray_linear_image(0.5);
-        let neutral = render_rgba8(None, &linear, &EdlV1::NEUTRAL).expect("rendern");
-        let darker_edl = EdlV1 {
+        let neutral = render_rgba8(None, &linear, &EdlV2::neutral()).expect("rendern");
+        let darker_edl = EdlV2 {
             basic: BasicAdjustments {
                 exposure_ev: -2.0,
                 ..BasicAdjustments::NEUTRAL
             },
+            ..EdlV2::neutral()
         };
         let darker = render_rgba8(None, &linear, &darker_edl).expect("rendern");
         assert!(
@@ -102,12 +111,13 @@ mod tests {
             }
         };
         let linear = flat_gray_linear_image(0.4);
-        let edl = EdlV1 {
+        let edl = EdlV2 {
             basic: BasicAdjustments {
                 exposure_ev: 0.3,
                 contrast: 15.0,
                 ..BasicAdjustments::NEUTRAL
             },
+            ..EdlV2::neutral()
         };
         let cpu = render_rgba8(None, &linear, &edl).expect("CPU-Rendering");
         let gpu = render_rgba8(Some(&ctx), &linear, &edl).expect("GPU-Rendering");
@@ -147,7 +157,7 @@ mod tests {
             as_shot_wb_coeffs: [1.05, 1.0, 0.9, 1.0],
             cam_to_srgb: IDENTITY,
         };
-        let edl = EdlV1 {
+        let edl = EdlV2 {
             basic: BasicAdjustments {
                 exposure_ev: 0.4,
                 contrast: 15.0,
@@ -159,7 +169,9 @@ mod tests {
                     temp_shift_kelvin: 200.0,
                     tint_shift: -5.0,
                 },
+                ..BasicAdjustments::NEUTRAL
             },
+            ..EdlV2::neutral()
         };
 
         if let Some(ctx) = &ctx {

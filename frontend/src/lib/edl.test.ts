@@ -7,6 +7,7 @@ import {
   clampSliderValue,
   EDL_SCHEMA_VERSION,
   NEUTRAL_BASIC_ADJUSTMENTS,
+  neutralEdlPayload,
   parseEdlEnvelopeJson,
   readBasicField,
   writeBasicField,
@@ -14,31 +15,35 @@ import {
 } from "./edl";
 
 describe("buildEdlEnvelopeJson / parseEdlEnvelopeJson", () => {
-  it("roundtrips neutral adjustments", () => {
-    const json = buildEdlEnvelopeJson(NEUTRAL_BASIC_ADJUSTMENTS);
+  it("roundtrips the neutral payload", () => {
+    const payload = neutralEdlPayload();
+    const json = buildEdlEnvelopeJson(payload);
     const parsed = parseEdlEnvelopeJson(json);
-    expect(parsed).toEqual(NEUTRAL_BASIC_ADJUSTMENTS);
+    expect(parsed).toEqual(payload);
   });
 
   it("roundtrips a non-neutral value", () => {
-    const basic: BasicAdjustments = {
-      ...NEUTRAL_BASIC_ADJUSTMENTS,
-      exposure_ev: 0.7,
-      contrast: -15,
-      white_balance: { temp_shift_kelvin: 300, tint_shift: -10 },
+    const payload = {
+      ...neutralEdlPayload(),
+      basic: {
+        ...NEUTRAL_BASIC_ADJUSTMENTS,
+        exposure_ev: 0.7,
+        contrast: -15,
+        white_balance: { temp_shift_kelvin: 300, tint_shift: -10 },
+      },
     };
-    const parsed = parseEdlEnvelopeJson(buildEdlEnvelopeJson(basic));
-    expect(parsed).toEqual(basic);
+    const parsed = parseEdlEnvelopeJson(buildEdlEnvelopeJson(payload));
+    expect(parsed).toEqual(payload);
   });
 
   it("embeds the current schema version", () => {
-    const json = buildEdlEnvelopeJson(NEUTRAL_BASIC_ADJUSTMENTS);
+    const json = buildEdlEnvelopeJson(neutralEdlPayload());
     const raw = JSON.parse(json) as { schema_version: number };
     expect(raw.schema_version).toBe(EDL_SCHEMA_VERSION);
   });
 
   it("rejects an unknown schema version", () => {
-    const json = JSON.stringify({ schema_version: 9999, payload: { basic: NEUTRAL_BASIC_ADJUSTMENTS } });
+    const json = JSON.stringify({ schema_version: 9999, payload: neutralEdlPayload() });
     expect(parseEdlEnvelopeJson(json)).toBeNull();
   });
 
@@ -110,6 +115,9 @@ describe("writeBasicField", () => {
 describe("BASIC_SLIDER_SPECS", () => {
   it("has one entry per BasicAdjustments field (temp/tint counted separately)", () => {
     // white_balance{temp_shift_kelvin,tint_shift} + 6 direkte Felder = 8.
+    // Die fünf per ADR-0011/ADR-0028 nach Phase 4 verschobenen Felder
+    // (Textur/Klarheit/Dunst entfernen/Dynamik/Sättigung) bekommen ihre
+    // Regler erst in Phase 4 Schritt 3, siehe `PLAN.md`.
     expect(BASIC_SLIDER_SPECS).toHaveLength(8);
   });
 
@@ -118,5 +126,47 @@ describe("BASIC_SLIDER_SPECS", () => {
       expect(spec.neutral).toBeGreaterThanOrEqual(spec.min);
       expect(spec.neutral).toBeLessThanOrEqual(spec.max);
     }
+  });
+});
+
+describe("neutralEdlPayload (Phase 4, Schritt 1)", () => {
+  it("round-trips through JSON unchanged", () => {
+    const payload = neutralEdlPayload();
+    const json = buildEdlEnvelopeJson(payload);
+    expect(parseEdlEnvelopeJson(json)).toEqual(payload);
+  });
+
+  it("has all twelve Grundeinstellungen neutral, including the five Phase-4 fields", () => {
+    const { basic } = neutralEdlPayload();
+    expect(basic.texture).toBe(0);
+    expect(basic.clarity).toBe(0);
+    expect(basic.dehaze).toBe(0);
+    expect(basic.vibrance).toBe(0);
+    expect(basic.saturation).toBe(0);
+  });
+
+  it("gives every curve channel the identity (0,0)-(1,1) point curve", () => {
+    const { curves } = neutralEdlPayload();
+    for (const channel of [curves.rgb, curves.red, curves.green, curves.blue, curves.luminance]) {
+      expect(channel).toEqual({
+        kind: "Points",
+        points: [
+          { input: 0, output: 0 },
+          { input: 1, output: 1 },
+        ],
+      });
+    }
+  });
+
+  it("starts with no color-mixer regions and no repair strokes", () => {
+    const payload = neutralEdlPayload();
+    expect(payload.color_mixer.regions).toEqual([]);
+    expect(payload.repair).toEqual([]);
+  });
+
+  it("defaults lens corrections to no profile and upright mode Off", () => {
+    const { lens_corrections } = neutralEdlPayload();
+    expect(lens_corrections.profile_id).toBeNull();
+    expect(lens_corrections.upright_mode).toBe("Off");
   });
 });

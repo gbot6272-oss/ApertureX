@@ -203,12 +203,73 @@ pub fn list_folders(state: State<'_, AppState>) -> Result<Vec<FolderDto>, String
 /// Startet den Import-Job für `path` im Hintergrund und kehrt sofort
 /// zurück — Fortschritt läuft über die Events `import:progress`,
 /// `import:error`, `import:finished` (siehe `import`-Modul). Es kann
-/// jeweils nur ein Import gleichzeitig laufen.
+/// jeweils nur ein Import gleichzeitig laufen. Immer im
+/// Add-in-Place-Modus — siehe [`import_folder_with_mode`] für Copy/Move.
 #[tauri::command]
 pub async fn import_folder(
     app: AppHandle,
     state: State<'_, AppState>,
     path: String,
+) -> Result<(), String> {
+    start_import(
+        app,
+        state,
+        path,
+        crate::import::ImportMode::AddInPlace,
+        None,
+    )
+    .await
+}
+
+/// Eingabe für [`import_folder_with_mode`] — spiegelt
+/// `crate::import::ImportMode`, aber mit `String`-Pfaden (Tauri-IPC kennt
+/// kein `PathBuf` direkt) und getaggt nach `kind`, analog zu
+/// `HistoryPositionDto`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind")]
+pub enum ImportModeDto {
+    AddInPlace,
+    Copy { target_dir: String },
+    Move { target_dir: String },
+}
+
+impl From<ImportModeDto> for crate::import::ImportMode {
+    fn from(dto: ImportModeDto) -> Self {
+        match dto {
+            ImportModeDto::AddInPlace => crate::import::ImportMode::AddInPlace,
+            ImportModeDto::Copy { target_dir } => {
+                crate::import::ImportMode::Copy(PathBuf::from(target_dir))
+            }
+            ImportModeDto::Move { target_dir } => {
+                crate::import::ImportMode::Move(PathBuf::from(target_dir))
+            }
+        }
+    }
+}
+
+/// Wie [`import_folder`], aber mit wählbarem Import-Modus (Kopieren/
+/// Verschieben in einen Zielordner, optional mit Umbenennungsmuster) —
+/// siehe `DECISIONS.md` ADR-0025. Additiv zu `import_folder`, das
+/// unverändert den bisherigen Add-in-Place-Ablauf ohne die neuen
+/// Parameter anbietet (Rückwärtskompatibilität zum bestehenden
+/// Frontend-Aufruf, siehe `PLAN.md` Phase 3, Schritt 4).
+#[tauri::command]
+pub async fn import_folder_with_mode(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    mode: ImportModeDto,
+    rename_pattern: Option<String>,
+) -> Result<(), String> {
+    start_import(app, state, path, mode.into(), rename_pattern).await
+}
+
+async fn start_import(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    mode: crate::import::ImportMode,
+    rename_pattern: Option<String>,
 ) -> Result<(), String> {
     let folder = PathBuf::from(&path);
     if !folder.is_dir() {
@@ -237,12 +298,14 @@ pub async fn import_folder(
     tauri::async_runtime::spawn(async move {
         let join_result = tokio::task::spawn_blocking(move || {
             let events = crate::import::TauriEvents(&app_for_blocking);
-            crate::import::run(
+            crate::import::run_with_mode(
                 &events,
                 &catalog,
                 &cache_root,
                 &folder,
                 &cancel_for_blocking,
+                &mode,
+                rename_pattern.as_deref(),
             );
         })
         .await;
@@ -416,6 +479,37 @@ pub fn redo_develop_edit(
         .redo_edit(photo_id)
         .map_err(|err| err.to_string())?;
     result.map(history_position_to_dto).transpose()
+}
+
+// ---- Bibliothek: Import-Presets (ab Phase 3) -------------------------------
+//
+// Presets werden bewusst direkt als `import::presets::ImportPreset`
+// durchgereicht statt über eine eigene Dto zu laufen — anders als
+// `Photo`/`Folder` ist das kein Katalog-Datenmodell mit eigener Historie,
+// sondern eine reine Import-Werkzeug-Konfiguration, die 1:1 dem Frontend
+// entspricht (siehe `PLAN.md` Phase 3, Schritt 4).
+
+#[tauri::command]
+pub fn list_import_presets(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::import::presets::ImportPreset>, String> {
+    crate::import::presets::load_presets(&state.paths.import_presets_file())
+}
+
+#[tauri::command]
+pub fn save_import_preset(
+    state: State<'_, AppState>,
+    preset: crate::import::presets::ImportPreset,
+) -> Result<Vec<crate::import::presets::ImportPreset>, String> {
+    crate::import::presets::upsert_preset(&state.paths.import_presets_file(), preset)
+}
+
+#[tauri::command]
+pub fn delete_import_preset(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<Vec<crate::import::presets::ImportPreset>, String> {
+    crate::import::presets::delete_preset(&state.paths.import_presets_file(), &name)
 }
 
 // ---- Bibliothek: Bewertung/Flagge/Farbe (ab Phase 3) -----------------------

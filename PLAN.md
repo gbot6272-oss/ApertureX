@@ -256,10 +256,12 @@ Wie bei Phase 2 gibt es kein eigenes ausführliches Prompt-Dokument — die Schr
   - [x] 16 neue Commands als reine Verdrahtung auf Schritt 2 (`set_photo_rating`/`set_photo_flag`/`set_photo_color_label`, `add_photo_keyword`/`remove_photo_keyword`/`list_photo_keywords`/`list_all_keywords`, `create_collection`/`rename_collection`/`delete_collection`/`list_collections`/`add_to_collection`/`remove_from_collection`/`list_photos_in_collection`, `search_photos`, `filter_photos`), in `main.rs`s `generate_handler!` registriert
   - Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` — alles grün
 
-- [ ] 4. Import-Erweiterung
-  - [ ] `ImportMode { AddInPlace, Copy, Move }`
-  - [ ] Rename-Token-System (reine Funktion)
-  - [ ] Import-Presets (JSON, analog zu `apx_core::Settings`)
+- [x] 4. Import-Erweiterung
+  - [x] `ImportMode { AddInPlace, Copy, Move }` (`import::mode`) — `stage_file_for_mode` kopiert/verschiebt vor dem bestehenden Scan-/Metadaten-/Thumbnail-Ablauf, der danach unverändert weiterläuft; Metadaten werden immer vom Ursprungspfad gelesen (bei `Move` existiert die Quelle danach nicht mehr)
+  - [x] Rename-Token-System (`import::rename`, reine Funktion ohne Dateisystemzugriff): `{date}`/`{seq}`/`{camera}`/`{original}`, unbekannte Kamera → Platzhalter, Dateiendung bleibt vom Original erhalten, verbotene Dateinamenzeichen werden bereinigt
+  - [x] Import-Presets (`import::presets`, JSON via neuem `AppPaths::import_presets_file()`, analog zu `apx_core::Settings`s Lade-/Speicherschema, aber Liste statt Einzelstruktur)
+  - [x] Neuer Tauri-Command `import_folder_with_mode` additiv zum bestehenden `import_folder` (bleibt Add-in-Place, unverändert für das aktuelle Frontend); `list_import_presets`/`save_import_preset`/`delete_import_preset`
+  - Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` — alles grün (inkl. neuem End-to-End-Test: Copy-Modus mit Umbenennungsmuster kopiert in Zielordner, Quelldatei bleibt erhalten, Katalogeintrag zeigt auf neuen Ort/Namen)
 
 - [ ] 5. Ordner-Erweiterung
   - [ ] Sidebar-Baumdarstellung über `parent_id`

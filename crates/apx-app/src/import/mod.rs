@@ -13,6 +13,9 @@
 //! `tests`-Modul unten, insbesondere den Akzeptanztest "3 gültige + 1
 //! kaputte Datei" aus `PHASE1_PROMPT.md` Abschnitt 8).
 
+pub(crate) mod mode;
+pub(crate) mod presets;
+mod rename;
 mod thumbnails;
 
 use std::collections::HashMap;
@@ -24,6 +27,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use time::OffsetDateTime;
 use tokio_util::sync::CancellationToken;
+
+pub(crate) use mode::ImportMode;
 
 pub(super) const THUMBNAIL_EDGE: u32 = 256;
 
@@ -105,12 +110,21 @@ impl ImportEvents for TauriEvents<'_> {
 /// außen gereicht (das Frontend sammelt sie dort) — hier im Job selbst
 /// wird nur die Anzahl mitgezählt, für das Abschlussereignis und die
 /// Entscheidung, wie viele Schritte die Fortschrittsanzeige insgesamt hat.
-pub(super) fn run(
+///
+/// `mode` wählt den Import-Modus (ab Phase 3, siehe `import::mode`):
+/// bei [`ImportMode::AddInPlace`] bleibt jede Datei, wo sie ist
+/// (unveränderte Semantik seit Phase 1); bei [`ImportMode::Copy`]/
+/// [`ImportMode::Move`] wird sie vor dem Katalogisieren in den Zielordner
+/// kopiert/verschoben, optional nach `rename_pattern` umbenannt (siehe
+/// `import::rename`).
+pub(super) fn run_with_mode(
     events: &impl ImportEvents,
     catalog: &Catalog,
     cache_root: &Path,
     folder: &Path,
     cancel: &CancellationToken,
+    mode: &ImportMode,
+    rename_pattern: Option<&str>,
 ) {
     let entries = scan_supported_files(folder);
     let total_files = entries.len();
@@ -129,10 +143,17 @@ pub(super) fn run(
         }
         events.progress(index, total_files, Some(file_path));
 
-        match import_single_file(catalog, &mut folder_cache, file_path) {
-            Ok(SingleFileOutcome::Imported(photo_id)) => {
+        match import_single_file(
+            catalog,
+            &mut folder_cache,
+            file_path,
+            mode,
+            rename_pattern,
+            index + 1,
+        ) {
+            Ok(SingleFileOutcome::Imported(photo_id, staged_path)) => {
                 imported += 1;
-                thumbnail_targets.push((photo_id, file_path.clone()));
+                thumbnail_targets.push((photo_id, staged_path));
             }
             Ok(SingleFileOutcome::Unchanged) => skipped += 1,
             Err(message) => {
@@ -171,7 +192,10 @@ pub(super) fn run(
 }
 
 enum SingleFileOutcome {
-    Imported(PhotoId),
+    /// Enthält zusätzlich den tatsächlichen Speicherort — bei Copy/Move
+    /// unterscheidet sich der vom ursprünglich gescannten `file_path`, und
+    /// die Thumbnail-Erzeugung muss vom neuen Ort lesen.
+    Imported(PhotoId, PathBuf),
     Unchanged,
 }
 
@@ -215,27 +239,45 @@ fn import_single_file(
     catalog: &Catalog,
     folder_cache: &mut HashMap<PathBuf, FolderId>,
     path: &Path,
+    mode: &ImportMode,
+    rename_pattern: Option<&str>,
+    seq: usize,
 ) -> Result<SingleFileOutcome, String> {
-    let parent = path
+    // Metadaten werden immer vom *ursprünglichen* Pfad gelesen: bei
+    // ImportMode::Move existiert die Quelldatei nach dem Staging unten
+    // nicht mehr, ein zweiter Lesezugriff wäre also ohnehin unmöglich —
+    // und für Copy/AddInPlace liefert das identische Bytes wie ein
+    // Lesen von der Kopie.
+    let raw_meta = apx_raw::read_metadata(path).map_err(|err| err.to_string())?;
+
+    let staged_path = mode::stage_file_for_mode(
+        mode,
+        path,
+        rename_pattern,
+        seq,
+        non_empty_ref(&raw_meta.camera_model),
+        raw_meta.captured_at,
+        OffsetDateTime::now_utc(),
+    )?;
+
+    let parent = staged_path
         .parent()
         .ok_or_else(|| "Datei hat kein Elternverzeichnis".to_string())?;
     let folder_id = ensure_folder(catalog, parent, folder_cache)?;
 
-    let filename = path
+    let filename = staged_path
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| "Dateiname ist kein gültiges UTF-8".to_string())?
         .to_string();
 
-    let fs_meta =
-        std::fs::metadata(path).map_err(|err| format!("Dateiinformationen nicht lesbar: {err}"))?;
+    let fs_meta = std::fs::metadata(&staged_path)
+        .map_err(|err| format!("Dateiinformationen nicht lesbar: {err}"))?;
     let file_size = fs_meta.len();
     let file_mtime: OffsetDateTime = fs_meta
         .modified()
         .map_err(|err| format!("Änderungszeit nicht lesbar: {err}"))?
         .into();
-
-    let raw_meta = apx_raw::read_metadata(path).map_err(|err| err.to_string())?;
 
     let new_photo = NewPhoto {
         folder_id,
@@ -262,13 +304,24 @@ fn import_single_file(
         .upsert_photo(&new_photo)
         .map_err(|err| err.to_string())?;
     Ok(if changed {
-        SingleFileOutcome::Imported(photo_id)
+        SingleFileOutcome::Imported(photo_id, staged_path)
     } else {
         SingleFileOutcome::Unchanged
     })
 }
 
 fn non_empty(value: String) -> Option<String> {
+    if value.trim().is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+/// Wie [`non_empty`], aber ohne den `String` zu konsumieren — für
+/// [`mode::stage_file_for_mode`]s `camera`-Token-Parameter, das nur einen
+/// `&str` braucht.
+fn non_empty_ref(value: &str) -> Option<&str> {
     if value.trim().is_empty() {
         None
     } else {
@@ -349,7 +402,14 @@ mod tests {
         std::fs::write(&broken, b"das ist kein gueltiges CR2").expect("Datei schreibbar");
 
         let mut cache = HashMap::new();
-        let result = import_single_file(&catalog, &mut cache, &broken);
+        let result = import_single_file(
+            &catalog,
+            &mut cache,
+            &broken,
+            &ImportMode::AddInPlace,
+            None,
+            1,
+        );
         assert!(
             result.is_err(),
             "kaputte Datei muss einen Fehler liefern, nicht panicken"
@@ -413,7 +473,15 @@ mod tests {
         let events = RecordingEvents::default();
         let cancel = CancellationToken::new();
 
-        run(&events, &catalog, &cache_root, tmp.path(), &cancel);
+        run_with_mode(
+            &events,
+            &catalog,
+            &cache_root,
+            tmp.path(),
+            &cancel,
+            &ImportMode::AddInPlace,
+            None,
+        );
 
         let finished = events
             .finished
@@ -454,19 +522,23 @@ mod tests {
         let cache_root = tmp.path().join("cache");
         let cancel = CancellationToken::new();
 
-        run(
+        run_with_mode(
             &RecordingEvents::default(),
             &catalog,
             &cache_root,
             tmp.path(),
             &cancel,
+            &ImportMode::AddInPlace,
+            None,
         );
-        run(
+        run_with_mode(
             &RecordingEvents::default(),
             &catalog,
             &cache_root,
             tmp.path(),
             &cancel,
+            &ImportMode::AddInPlace,
+            None,
         );
 
         let folders = catalog.list_folders().expect("Ordner lesbar");
@@ -477,5 +549,50 @@ mod tests {
             1,
             "zweiter Import derselben unveränderten Datei darf kein Duplikat anlegen"
         );
+    }
+
+    /// Belegt Schritt 4 der Phase-3-Bibliothek End-to-End: `Copy`-Modus mit
+    /// Umbenennungsmuster kopiert die Quelldatei (die im Quellordner
+    /// erhalten bleibt) unter neuem Namen in den Zielordner, und der
+    /// Katalogeintrag zeigt auf den neuen Ort samt neuem Dateinamen.
+    #[test]
+    fn copy_mode_with_rename_pattern_relocates_and_renames_while_keeping_source() {
+        let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
+        let source_dir = tmp.path().join("quelle");
+        std::fs::create_dir(&source_dir).expect("Quellordner anlegbar");
+        write_valid_jpeg(&source_dir.join("IMG_0001.jpg"));
+        let target_dir = tmp.path().join("ziel");
+
+        let catalog = Catalog::open_in_memory().expect("Katalog öffnen");
+        let cache_root = tmp.path().join("cache");
+        let cancel = CancellationToken::new();
+
+        run_with_mode(
+            &RecordingEvents::default(),
+            &catalog,
+            &cache_root,
+            &source_dir,
+            &cancel,
+            &ImportMode::Copy(target_dir.clone()),
+            Some("bild_{seq}"),
+        );
+
+        assert!(
+            source_dir.join("IMG_0001.jpg").exists(),
+            "Copy darf die Quelldatei nicht entfernen"
+        );
+        assert!(
+            target_dir.join("bild_0001.jpg").exists(),
+            "Zieldatei mit umbenanntem Namen muss existieren"
+        );
+
+        let folders = catalog.list_folders().expect("Ordner lesbar");
+        assert_eq!(folders.len(), 1, "Foto gehört zum Zielordner");
+        assert_eq!(folders[0].path, target_dir);
+        let photos = catalog
+            .list_photos_by_folder(folders[0].id)
+            .expect("Fotos lesbar");
+        assert_eq!(photos.len(), 1);
+        assert_eq!(photos[0].filename, "bild_0001.jpg");
     }
 }

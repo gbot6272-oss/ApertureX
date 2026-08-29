@@ -118,6 +118,14 @@ impl AppPaths {
     pub fn settings_file(&self) -> PathBuf {
         self.config_dir.join("settings.toml")
     }
+
+    /// Pfad der Import-Presets-Datei (`import_presets.json`) — siehe
+    /// `apx-app`s `import::presets`-Modul, `PLAN.md` Phase 3, Schritt 4.
+    /// JSON statt TOML wie `settings_file`, weil Presets eine Liste
+    /// benannter Einträge sind statt einer einzelnen Konfigurationsstruktur.
+    pub fn import_presets_file(&self) -> PathBuf {
+        self.config_dir.join("import_presets.json")
+    }
 }
 
 fn create_dir_all(dir: &Path) -> Result<()> {
@@ -142,6 +150,7 @@ mod tests {
         assert!(paths.catalog_dir().starts_with(tmp.path()));
         assert!(paths.default_catalog_file().ends_with("catalog.sqlite"));
         assert!(paths.settings_file().ends_with("settings.toml"));
+        assert!(paths.import_presets_file().ends_with("import_presets.json"));
     }
 
     #[test]

@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -44,6 +44,11 @@ pub struct PhotoDto {
     /// Zeitzonen-Annahme, wenn EXIF keinen Offset trug.
     pub captured_at: Option<String>,
     pub missing: bool,
+    /// Sternebewertung 0–5, siehe `apx_catalog::Photo::rating`.
+    pub rating: u8,
+    /// Pick/Reject-Flagge: 1 = Pick, -1 = Reject, 0 = keine.
+    pub flag: i8,
+    pub color_label: Option<String>,
 }
 
 impl From<apx_catalog::Photo> for PhotoDto {
@@ -65,6 +70,65 @@ impl From<apx_catalog::Photo> for PhotoDto {
                     .ok()
             }),
             missing: photo.missing,
+            rating: photo.rating,
+            flag: photo.flag,
+            color_label: photo.color_label,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct KeywordDto {
+    pub id: String,
+    pub name: String,
+}
+
+impl From<apx_catalog::Keyword> for KeywordDto {
+    fn from(keyword: apx_catalog::Keyword) -> Self {
+        Self {
+            id: keyword.id.to_string(),
+            name: keyword.name,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CollectionDto {
+    pub id: String,
+    pub name: String,
+}
+
+impl From<apx_catalog::Collection> for CollectionDto {
+    fn from(collection: apx_catalog::Collection) -> Self {
+        Self {
+            id: collection.id.to_string(),
+            name: collection.name,
+        }
+    }
+}
+
+/// Eingabe für [`filter_photos`] — spiegelt `apx_catalog::FilterCriteria`,
+/// aber mit `#[serde(default)]`-Feldern, damit das Frontend nur die
+/// tatsächlich gesetzten Filter mitschicken muss.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct FilterCriteriaDto {
+    #[serde(default)]
+    pub rating_at_least: Option<u8>,
+    #[serde(default)]
+    pub flag: Option<i8>,
+    #[serde(default)]
+    pub color_label: Option<String>,
+    #[serde(default)]
+    pub camera_model: Option<String>,
+}
+
+impl From<FilterCriteriaDto> for apx_catalog::FilterCriteria {
+    fn from(dto: FilterCriteriaDto) -> Self {
+        Self {
+            rating_at_least: dto.rating_at_least,
+            flag: dto.flag,
+            color_label: dto.color_label,
+            camera_model: dto.camera_model,
         }
     }
 }
@@ -269,6 +333,18 @@ fn parse_photo_id(photo_id: String) -> Result<apx_core::PhotoId, String> {
         .map_err(|err: apx_core::AppError| err.to_string())
 }
 
+fn parse_keyword_id(keyword_id: String) -> Result<apx_core::KeywordId, String> {
+    keyword_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())
+}
+
+fn parse_collection_id(collection_id: String) -> Result<apx_core::CollectionId, String> {
+    collection_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())
+}
+
 /// Committet `edl_json` als neuen, aktiven Bearbeitungsschritt für
 /// `photo_id` — ausgelöst beim Loslassen eines Reglers, nicht bei jedem
 /// Zwischenwert (siehe `PLAN.md` Phase 2 Schritt 5). Validiert die
@@ -340,6 +416,205 @@ pub fn redo_develop_edit(
         .redo_edit(photo_id)
         .map_err(|err| err.to_string())?;
     result.map(history_position_to_dto).transpose()
+}
+
+// ---- Bibliothek: Bewertung/Flagge/Farbe (ab Phase 3) -----------------------
+
+#[tauri::command]
+pub fn set_photo_rating(
+    state: State<'_, AppState>,
+    photo_id: String,
+    rating: u8,
+) -> Result<(), String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    state
+        .catalog
+        .set_photo_rating(photo_id, rating)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn set_photo_flag(
+    state: State<'_, AppState>,
+    photo_id: String,
+    flag: i8,
+) -> Result<(), String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    state
+        .catalog
+        .set_photo_flag(photo_id, flag)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn set_photo_color_label(
+    state: State<'_, AppState>,
+    photo_id: String,
+    color_label: Option<String>,
+) -> Result<(), String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    state
+        .catalog
+        .set_photo_color_label(photo_id, color_label.as_deref())
+        .map_err(|err| err.to_string())
+}
+
+// ---- Bibliothek: Schlagworte (ab Phase 3) ----------------------------------
+
+#[tauri::command]
+pub fn add_photo_keyword(
+    state: State<'_, AppState>,
+    photo_id: String,
+    name: String,
+) -> Result<String, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let keyword_id = state
+        .catalog
+        .add_keyword(photo_id, &name)
+        .map_err(|err| err.to_string())?;
+    Ok(keyword_id.to_string())
+}
+
+#[tauri::command]
+pub fn remove_photo_keyword(
+    state: State<'_, AppState>,
+    photo_id: String,
+    keyword_id: String,
+) -> Result<(), String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let keyword_id = parse_keyword_id(keyword_id)?;
+    state
+        .catalog
+        .remove_keyword(photo_id, keyword_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn list_photo_keywords(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<Vec<KeywordDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let keywords = state
+        .catalog
+        .list_keywords_for_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    Ok(keywords.into_iter().map(KeywordDto::from).collect())
+}
+
+#[tauri::command]
+pub fn list_all_keywords(state: State<'_, AppState>) -> Result<Vec<KeywordDto>, String> {
+    let keywords = state
+        .catalog
+        .list_all_keywords()
+        .map_err(|err| err.to_string())?;
+    Ok(keywords.into_iter().map(KeywordDto::from).collect())
+}
+
+// ---- Bibliothek: Sammlungen (ab Phase 3) -----------------------------------
+
+#[tauri::command]
+pub fn create_collection(state: State<'_, AppState>, name: String) -> Result<String, String> {
+    let id = state
+        .catalog
+        .create_collection(&name)
+        .map_err(|err| err.to_string())?;
+    Ok(id.to_string())
+}
+
+#[tauri::command]
+pub fn rename_collection(
+    state: State<'_, AppState>,
+    collection_id: String,
+    name: String,
+) -> Result<(), String> {
+    let collection_id = parse_collection_id(collection_id)?;
+    state
+        .catalog
+        .rename_collection(collection_id, &name)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn delete_collection(state: State<'_, AppState>, collection_id: String) -> Result<(), String> {
+    let collection_id = parse_collection_id(collection_id)?;
+    state
+        .catalog
+        .delete_collection(collection_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn list_collections(state: State<'_, AppState>) -> Result<Vec<CollectionDto>, String> {
+    let collections = state
+        .catalog
+        .list_collections()
+        .map_err(|err| err.to_string())?;
+    Ok(collections.into_iter().map(CollectionDto::from).collect())
+}
+
+#[tauri::command]
+pub fn add_to_collection(
+    state: State<'_, AppState>,
+    collection_id: String,
+    photo_id: String,
+) -> Result<(), String> {
+    let collection_id = parse_collection_id(collection_id)?;
+    let photo_id = parse_photo_id(photo_id)?;
+    state
+        .catalog
+        .add_photo_to_collection(collection_id, photo_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn remove_from_collection(
+    state: State<'_, AppState>,
+    collection_id: String,
+    photo_id: String,
+) -> Result<(), String> {
+    let collection_id = parse_collection_id(collection_id)?;
+    let photo_id = parse_photo_id(photo_id)?;
+    state
+        .catalog
+        .remove_photo_from_collection(collection_id, photo_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn list_photos_in_collection(
+    state: State<'_, AppState>,
+    collection_id: String,
+) -> Result<Vec<PhotoDto>, String> {
+    let collection_id = parse_collection_id(collection_id)?;
+    let photos = state
+        .catalog
+        .list_photos_in_collection(collection_id)
+        .map_err(|err| err.to_string())?;
+    Ok(photos.into_iter().map(PhotoDto::from).collect())
+}
+
+// ---- Bibliothek: Suche/Filter (ab Phase 3) ---------------------------------
+
+#[tauri::command]
+pub fn search_photos(state: State<'_, AppState>, query: String) -> Result<Vec<PhotoDto>, String> {
+    let photos = state
+        .catalog
+        .search_photos(&query)
+        .map_err(|err| err.to_string())?;
+    Ok(photos.into_iter().map(PhotoDto::from).collect())
+}
+
+#[tauri::command]
+pub fn filter_photos(
+    state: State<'_, AppState>,
+    criteria: FilterCriteriaDto,
+) -> Result<Vec<PhotoDto>, String> {
+    let photos = state
+        .catalog
+        .filter_photos(&criteria.into())
+        .map_err(|err| err.to_string())?;
+    Ok(photos.into_iter().map(PhotoDto::from).collect())
 }
 
 #[cfg(test)]

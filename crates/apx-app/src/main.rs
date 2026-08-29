@@ -68,6 +68,22 @@ fn main() {
             commands::current_develop_edit,
             commands::undo_develop_edit,
             commands::redo_develop_edit,
+            commands::set_photo_rating,
+            commands::set_photo_flag,
+            commands::set_photo_color_label,
+            commands::add_photo_keyword,
+            commands::remove_photo_keyword,
+            commands::list_photo_keywords,
+            commands::list_all_keywords,
+            commands::create_collection,
+            commands::rename_collection,
+            commands::delete_collection,
+            commands::list_collections,
+            commands::add_to_collection,
+            commands::remove_from_collection,
+            commands::list_photos_in_collection,
+            commands::search_photos,
+            commands::filter_photos,
         ])
         .run(tauri::generate_context!())
         .expect("Fehler beim Starten von Aperture X");

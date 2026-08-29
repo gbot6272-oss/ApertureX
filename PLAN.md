@@ -251,9 +251,10 @@ Wie bei Phase 2 gibt es kein eigenes ausführliches Prompt-Dokument — die Schr
   - [x] Tests je Modul (u. a. FK-Cascade für `photo_keywords`/`collection_photos`, FTS5-Sync-Trigger-Verifikation nach `UPDATE`, Positions-Reihenfolge in Sammlungen) plus ein Catalog-Integrationstest, der alle neuen Features durch die öffentliche API kombiniert
   - Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` — alles grün
 
-- [ ] 3. Tauri-Commands + DTOs
-  - [ ] `PhotoDto` um `rating`/`flag`/`color_label` erweitert
-  - [ ] Neue Commands als reine Verdrahtung
+- [x] 3. Tauri-Commands + DTOs
+  - [x] `PhotoDto` um `rating`/`flag`/`color_label` erweitert; neue `KeywordDto`/`CollectionDto`/`FilterCriteriaDto`
+  - [x] 16 neue Commands als reine Verdrahtung auf Schritt 2 (`set_photo_rating`/`set_photo_flag`/`set_photo_color_label`, `add_photo_keyword`/`remove_photo_keyword`/`list_photo_keywords`/`list_all_keywords`, `create_collection`/`rename_collection`/`delete_collection`/`list_collections`/`add_to_collection`/`remove_from_collection`/`list_photos_in_collection`, `search_photos`, `filter_photos`), in `main.rs`s `generate_handler!` registriert
+  - Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` — alles grün
 
 - [ ] 4. Import-Erweiterung
   - [ ] `ImportMode { AddInPlace, Copy, Move }`

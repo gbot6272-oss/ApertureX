@@ -52,7 +52,12 @@ export function Filmstrip() {
               key={photo.id}
               type="button"
               onClick={() => selectPhoto(photo.id)}
-              title={photo.filename}
+              // Siehe PHASE1_PROMPT.md Abschnitt 9, Akzeptanzkriterium 8:
+              // eine außerhalb der App gelöschte Datei wird beim nächsten
+              // Öffnen des Ordners als `missing` markiert (Backend:
+              // `crate::reconcile`) — hier sichtbar gemacht, statt eine
+              // stillschweigend tote DTO-Eigenschaft zu bleiben.
+              title={photo.missing ? `${photo.filename} (Datei fehlt)` : photo.filename}
               style={{
                 position: "absolute",
                 left: item.start,
@@ -60,9 +65,12 @@ export function Filmstrip() {
                 width: CELL_WIDTH,
                 height: "calc(100% - 8px)",
               }}
-              className={`overflow-hidden rounded border-2 ${photo.id === selectedPhotoId ? "border-accent" : "border-transparent hover:border-border"}`}
+              className={`relative overflow-hidden rounded border-2 ${photo.id === selectedPhotoId ? "border-accent" : "border-transparent hover:border-border"} ${photo.missing ? "opacity-40" : ""}`}
             >
               <img src={previewUrl(photo.id, 0)} alt={photo.filename} className="h-full w-full object-cover" loading="lazy" />
+              {photo.missing && (
+                <span className="absolute right-1 bottom-1 rounded bg-bg-base/80 px-1 text-[10px] leading-tight text-danger">fehlt</span>
+              )}
             </button>
           );
         })}

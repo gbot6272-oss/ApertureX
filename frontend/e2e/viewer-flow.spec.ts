@@ -153,6 +153,29 @@ test.describe("Start -> Import -> Auswahl -> Viewer", () => {
 
     await expect(page.getByText("defekt.CR3: RAW-Header ungültig")).toBeVisible();
   });
+
+  test("markiert ein als missing gemeldetes Foto sichtbar im Filmstreifen und im Viewer", async ({ page }) => {
+    // Akzeptanzkriterium 8 aus PHASE1_PROMPT.md Abschnitt 9: eine
+    // außerhalb der App gelöschte Datei wird als `missing` markiert —
+    // das Backend gleicht das in `crate::reconcile` ab; hier wird nur
+    // geprüft, dass ein bereits als `missing` gemeldetes Foto auch
+    // sichtbar so dargestellt wird, statt die DTO-Eigenschaft
+    // stillschweigend zu ignorieren.
+    const missingPhoto = { ...PHOTOS[0], missing: true };
+    await installTauriMock(page, {
+      folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }],
+      photosByFolder: { [FOLDER_ID]: [missingPhoto] },
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Urlaub/ }).click();
+
+    const thumbnailButton = page.getByRole("img", { name: missingPhoto.filename }).locator("..");
+    await expect(thumbnailButton).toHaveAttribute("title", `${missingPhoto.filename} (Datei fehlt)`);
+    await expect(thumbnailButton.getByText("fehlt")).toBeVisible();
+
+    await page.getByRole("img", { name: missingPhoto.filename }).click();
+    await expect(page.locator("main").getByText("Datei fehlt")).toBeVisible();
+  });
 });
 
 test.describe("Filmstreifen-Virtualisierung", () => {

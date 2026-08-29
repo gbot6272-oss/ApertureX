@@ -187,7 +187,10 @@ export function Viewer() {
 
       {photo && (
         <div className="pointer-events-none absolute right-3 bottom-3 rounded bg-bg-raised/90 px-3 py-2 text-xs text-text-secondary backdrop-blur">
-          <div className="font-medium text-text-primary">{photo.filename}</div>
+          <div className="font-medium text-text-primary">
+            {photo.filename}
+            {photo.missing && <span className="ml-2 text-danger">Datei fehlt</span>}
+          </div>
           <div>
             {[photo.camera_make, photo.camera_model].filter(Boolean).join(" ")}
             {photo.lens ? ` · ${photo.lens}` : ""}

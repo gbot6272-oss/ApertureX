@@ -212,6 +212,12 @@ pub fn cancel_import(state: State<'_, AppState>) -> Result<(), String> {
 
 /// Listet alle Fotos eines Ordners — Grundlage für Filmstreifen und
 /// Viewer.
+///
+/// Gleicht dabei den `missing`-Status jedes Fotos mit der tatsächlichen
+/// Dateisystem-Existenz ab (siehe `crate::reconcile` und
+/// `PHASE1_PROMPT.md` Abschnitt 9, Akzeptanzkriterium 8): Wurde eine
+/// Datei außerhalb der App gelöscht, wird sie beim nächsten Öffnen dieses
+/// Ordners als `missing` markiert, ohne dass die App abstürzt.
 #[tauri::command]
 pub fn list_photos_in_folder(
     state: State<'_, AppState>,
@@ -220,9 +226,15 @@ pub fn list_photos_in_folder(
     let folder_id: apx_core::FolderId = folder_id
         .parse()
         .map_err(|err: apx_core::AppError| err.to_string())?;
+    let folder = state
+        .catalog
+        .get_folder(folder_id)
+        .map_err(|err| err.to_string())?;
     let photos = state
         .catalog
         .list_photos_by_folder(folder_id)
+        .map_err(|err| err.to_string())?;
+    let photos = crate::reconcile::reconcile_missing(&state.catalog, &folder.path, photos)
         .map_err(|err| err.to_string())?;
     Ok(photos.into_iter().map(PhotoDto::from).collect())
 }

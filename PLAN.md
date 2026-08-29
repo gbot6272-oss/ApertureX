@@ -57,6 +57,7 @@ Ziel (siehe `PHASE1_PROMPT.md`): App starten, Ordner mit RAWs importieren, Bilde
   - [x] Abbruch via `CancellationToken`, Einzeldatei-Fehler sammeln statt Job abzubrechen
   - [x] Vorschau-Cache-Layout `<cache>/previews/<xx>/<id>_0.jpg` (Level 0 = Thumbnail)
   - [x] Tests: 3 gültige + 1 kaputte Datei → 3 importiert, 1 Fehler, Job „finished" (Akzeptanztest aus Abschnitt 8, mit synthetischen JPEGs statt echten RAWs — siehe ADR-0007), plus Idempotenz-Test für zweiten Import
+  - [x] Nachträglich ergänzt (bei der Abnahme gegen Abschnitt-9-Akzeptanzkriterium 8 aufgefallen): `Catalog::set_photo_missing` existierte bereits, wurde aber nirgends aufgerufen — `crate::reconcile::reconcile_missing` gleicht jetzt beim Öffnen eines Ordners (`list_photos_in_folder`) den `missing`-Status jedes Fotos mit der tatsächlichen Dateisystem-Existenz ab (3 Tests: wird als missing markiert, Markierung verschwindet bei Wiederauftauchen, kein Absturz bei fehlendem Ordner) und wird im Filmstreifen (abgedunkelt + „fehlt"-Badge) und in der Viewer-Metadatenleiste („Datei fehlt") sichtbar gemacht — sonst wäre die DTO-Eigenschaft eine stillschweigend tote Fläche gewesen
 
 - [x] 7. Custom-Protokoll-Handler
   - [x] `apx://preview/<id>/<level>` und `apx://image/<id>/<max_edge|'full'>` — Segment- statt Query-String-Format über `convertFileSrc`, siehe ADR-0009 (funktional identisch, plattformunabhängig)

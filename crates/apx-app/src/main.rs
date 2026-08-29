@@ -8,6 +8,7 @@
 mod commands;
 mod import;
 mod protocol;
+mod reconcile;
 mod state;
 
 use std::sync::{Arc, Mutex};

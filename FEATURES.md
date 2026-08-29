@@ -13,7 +13,7 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [ ] Import-Presets — Phase 3 — Status: Nicht begonnen
 - [ ] Automatisches Umbenennen mit Token-System — Phase 3 — Status: Nicht begonnen
 - [ ] Duplikaterkennung per Hash + Perceptual Hash — Phase 3 — Status: Nicht begonnen
-- [ ] Ordnerbaum (Basis-Anzeige, Fotoanzahl je Ordner) — Phase 1 — Status: Nicht begonnen
+- [x] Ordnerbaum (Basis-Anzeige, Fotoanzahl je Ordner) — Phase 1 — Status: Fertig (flache Liste, kein Baum — echte Hierarchie/Synchronisation ist Phase 3, siehe Zeile darunter)
 - [ ] Ordnerbaum-Synchronisation — Phase 3 — Status: Nicht begonnen
 - [ ] Ordner fehlend/wiederfinden — Phase 3 — Status: Nicht begonnen
 - [ ] Sammlungen, Sammlungssätze — Phase 3 — Status: Nicht begonnen
@@ -233,7 +233,7 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 
 - [x] Grundlayout (Kopfzeile, linke Spalte, Mitte-Viewer, unten Filmstreifen) — Phase 1 — Status: Fertig
 - [ ] Rechte Werkzeug-Palette, Modul-Umschalter oben — Phase 3 — Status: Nicht begonnen
-- [ ] Dark-First-Theme — Phase 1 — Status: Nicht begonnen
+- [x] Dark-First-Theme — Phase 1 — Status: Fertig (Tailwind-CSS-4-`@theme`-Tokens in `src/index.css`)
 - [ ] Vollständiges helles Theme + benutzerdefinierte Themes (Design-Tokens) — Phase 10 — Status: Nicht begonnen
 - [ ] Paletten ein-/ausklappbar, breitenziehbar, Arbeitsbereich-Preset speicherbar — Phase 3 — Status: Nicht begonnen
 - [ ] Regler-Standardverhalten (Doppelklick=Reset, Direkteingabe, Pfeiltasten, Shift, Alt-Maskenvorschau) — Phase 2 — Status: Nicht begonnen

@@ -64,10 +64,13 @@ Ziel (siehe `PHASE1_PROMPT.md`): App starten, Ordner mit RAWs importieren, Bilde
   - [x] Deduplizierung gleichzeitiger Anfragen (Single-Flight-Cache über `Weak`-Referenzen, mit Nebenläufigkeits-Test)
   - [x] Abbruch laufender Dekodierung bei Bildwechsel — als Frontend-Verantwortung dokumentiert (`fetch`+`AbortController` statt `<img src>`), da echtes Abbrechen eines laufenden OS-Threads ohne kooperative Abbruchpunkte in `rawler` nicht möglich ist (siehe Modul-Doku in `protocol/mod.rs`)
 
-- [ ] 8. Frontend-Gerüst
-  - [ ] Vite + React 19 + TS, Zustand-Store (`catalog`, `selection`, `viewer`, `jobs`)
-  - [ ] Layout: Kopfzeile (Import-Button, Fortschritt), linke Spalte (Ordnerbaum), Mitte (Viewer), unten (Filmstreifen)
-  - [ ] Dark-Theme (`#1a1a1a`–`#242424`, keine Akzentfarben am Bildrand)
+- [x] 8. Frontend-Gerüst
+  - [x] Vite + React 19 + TS, Zustand-Store (`catalog`, `selection`, `viewer`, `jobs`) mit Immer-Middleware
+  - [x] Layout: Kopfzeile (Import-Button, Fortschritt, Abbrechen), linke Spalte (Ordnerbaum mit Fotoanzahl), Mitte (Viewer — zeigt bereits echte Vorschauen über den `apx://`-Handler), unten (Filmstreifen, noch nicht virtualisiert)
+  - [x] Dark-Theme über Tailwind CSS 4 (`@theme`-Tokens `#1a1a1a`–`#242424`, keine Akzentfarben am Bildrand)
+  - [x] Neuer Command `list_photos_in_folder` (Grundlage für Filmstreifen/Viewer)
+  - [x] Grundlegende Tastenkürzel (←/→ Fotowechsel, Strg/Cmd+K Befehlspalette mit Ordnersuche + Kontext-Befehlen)
+  - [x] Visuell verifiziert (Playwright-Screenshot gegen den Produktions-Build) und Tauri-Binary mit eingebettetem Frontend unter Xvfb stabil
 
 - [ ] 9. Viewer
   - [ ] Canvas 2D + `ImageBitmap`, `.close()` beim Verdrängen aus dem Cache

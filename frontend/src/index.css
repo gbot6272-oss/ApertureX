@@ -1,11 +1,54 @@
-/* Minimales Reset für Phase 1. Tailwind CSS 4 (siehe SPEC.md) kommt in
-   Schritt 8 zusammen mit dem vollständigen Layout dazu. */
+@import "tailwindcss";
+
+/* Design-Tokens — Dark-First (siehe SPEC.md Abschnitt 4). Ein
+   vollständiges helles Theme kommt in Phase 10; die Tokens sind hier
+   bereits so benannt (semantisch, nicht "gray-800"), dass ein zweites
+   Theme später nur die Werte austauschen muss, nicht die Klassennamen. */
+@theme {
+  --color-bg-base: #1a1a1a;
+  --color-bg-raised: #202020;
+  --color-bg-panel: #242424;
+  --color-border: #333333;
+  --color-text-primary: #e8e4dc;
+  --color-text-secondary: #9a9a9a;
+  --color-text-muted: #6a6a6a;
+  --color-accent: #5b9bd5;
+  --color-danger: #e07a5f;
+  --color-success: #7fb069;
+
+  --font-sans:
+    system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
 * {
   box-sizing: border-box;
 }
 
 html,
-body {
+body,
+#root {
   margin: 0;
   padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+}
+
+/* Scrollbalken dezent halten — ein greller System-Scrollbalken stört die
+   Bildbeurteilung genauso wie eine Akzentfarbe am Bildrand (SPEC.md
+   Abschnitt 4: "keine Farbstiche im Bereich rund um den Viewer"). */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-bg-base);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 5px;
 }

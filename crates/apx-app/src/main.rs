@@ -49,6 +49,7 @@ fn main() {
             commands::list_folders,
             commands::import_folder,
             commands::cancel_import,
+            commands::list_photos_in_folder,
         ])
         .run(tauri::generate_context!())
         .expect("Fehler beim Starten von Aperture X");

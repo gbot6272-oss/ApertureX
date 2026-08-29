@@ -26,6 +26,49 @@ pub struct CatalogStatusDto {
     pub photo_count: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PhotoDto {
+    pub id: String,
+    pub filename: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub camera_make: Option<String>,
+    pub camera_model: Option<String>,
+    pub lens: Option<String>,
+    pub iso: Option<u32>,
+    pub aperture: Option<f32>,
+    pub shutter: Option<f32>,
+    pub focal_length: Option<f32>,
+    /// RFC-3339-Zeitstempel, falls bekannt — das Frontend parst ihn mit
+    /// `new Date(...)`. Siehe `apx_raw::RawMetadata::captured_at` für die
+    /// Zeitzonen-Annahme, wenn EXIF keinen Offset trug.
+    pub captured_at: Option<String>,
+    pub missing: bool,
+}
+
+impl From<apx_catalog::Photo> for PhotoDto {
+    fn from(photo: apx_catalog::Photo) -> Self {
+        Self {
+            id: photo.id.to_string(),
+            filename: photo.filename,
+            width: photo.width,
+            height: photo.height,
+            camera_make: photo.camera_make,
+            camera_model: photo.camera_model,
+            lens: photo.lens,
+            iso: photo.iso,
+            aperture: photo.aperture,
+            shutter: photo.shutter,
+            focal_length: photo.focal_length,
+            captured_at: photo.captured_at.and_then(|dt| {
+                dt.format(&time::format_description::well_known::Rfc3339)
+                    .ok()
+            }),
+            missing: photo.missing,
+        }
+    }
+}
+
 /// Öffnet den nativen Ordner-Auswahldialog. Gibt `None` zurück, wenn der
 /// Nutzer den Dialog ohne Auswahl schließt (kein Fehler).
 #[tauri::command]
@@ -165,4 +208,21 @@ pub fn cancel_import(state: State<'_, AppState>) -> Result<(), String> {
         token.cancel();
     }
     Ok(())
+}
+
+/// Listet alle Fotos eines Ordners — Grundlage für Filmstreifen und
+/// Viewer.
+#[tauri::command]
+pub fn list_photos_in_folder(
+    state: State<'_, AppState>,
+    folder_id: String,
+) -> Result<Vec<PhotoDto>, String> {
+    let folder_id: apx_core::FolderId = folder_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    let photos = state
+        .catalog
+        .list_photos_by_folder(folder_id)
+        .map_err(|err| err.to_string())?;
+    Ok(photos.into_iter().map(PhotoDto::from).collect())
 }

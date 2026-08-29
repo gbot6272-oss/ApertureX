@@ -1,12 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 // Siehe https://v2.tauri.app/start/frontend/vite/ — diese Einstellungen
 // sind von Tauri vorgeschrieben, damit `pnpm tauri dev` zuverlässig
 // funktioniert (fester Port, damit das Rust-Backend das Frontend findet;
 // clearScreen: false, damit Rust-Fehler in der Konsole sichtbar bleiben).
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
 
   clearScreen: false,
   server: {

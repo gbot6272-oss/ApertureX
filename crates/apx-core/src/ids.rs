@@ -80,6 +80,8 @@ define_id_type!(PhotoId);
 define_id_type!(FolderId);
 define_id_type!(CatalogId);
 define_id_type!(EditHistoryId);
+define_id_type!(KeywordId);
+define_id_type!(CollectionId);
 
 #[cfg(test)]
 mod tests {

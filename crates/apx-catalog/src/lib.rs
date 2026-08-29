@@ -28,12 +28,15 @@ mod repository;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
-use apx_core::{AppError, EditHistoryId, EdlEnvelope, FolderId, PhotoId, Result};
+use apx_core::{
+    AppError, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId, PhotoId, Result,
+};
 use rusqlite::Connection;
 use time::OffsetDateTime;
 
 pub use models::{
-    EditHistoryEntry, Folder, HistoryPosition, NewPhoto, Photo, Preview, PreviewLevel,
+    Collection, EditHistoryEntry, FilterCriteria, Folder, HistoryPosition, Keyword, NewPhoto,
+    Photo, Preview, PreviewLevel,
 };
 
 pub struct Catalog {
@@ -210,6 +213,116 @@ impl Catalog {
     pub fn list_edit_history(&self, photo_id: PhotoId) -> Result<Vec<EditHistoryEntry>> {
         let conn = self.lock()?;
         repository::edits::list_history(&conn, photo_id)
+    }
+
+    // ---- Bewertung/Flagge/Farbe (ab Phase 3) -----------------------------
+
+    /// Setzt die Sternebewertung (0–5) eines Fotos.
+    pub fn set_photo_rating(&self, id: PhotoId, rating: u8) -> Result<()> {
+        let conn = self.lock()?;
+        repository::photos::set_rating(&conn, id, rating)
+    }
+
+    /// Setzt die Pick/Reject-Flagge (-1/0/1) eines Fotos.
+    pub fn set_photo_flag(&self, id: PhotoId, flag: i8) -> Result<()> {
+        let conn = self.lock()?;
+        repository::photos::set_flag(&conn, id, flag)
+    }
+
+    /// Setzt oder löscht (`None`) die Farbmarkierung eines Fotos.
+    pub fn set_photo_color_label(&self, id: PhotoId, color_label: Option<&str>) -> Result<()> {
+        let conn = self.lock()?;
+        repository::photos::set_color_label(&conn, id, color_label)
+    }
+
+    // ---- Schlagworte (ab Phase 3) -----------------------------------------
+
+    /// Verknüpft `photo_id` mit dem Schlagwort `name` — legt es bei Bedarf an.
+    pub fn add_keyword(&self, photo_id: PhotoId, name: &str) -> Result<KeywordId> {
+        let conn = self.lock()?;
+        repository::keywords::add(&conn, photo_id, name)
+    }
+
+    /// Löst die Verknüpfung zwischen Foto und Schlagwort (das Schlagwort
+    /// selbst bleibt im Katalog bestehen).
+    pub fn remove_keyword(&self, photo_id: PhotoId, keyword_id: KeywordId) -> Result<()> {
+        let conn = self.lock()?;
+        repository::keywords::remove(&conn, photo_id, keyword_id)
+    }
+
+    pub fn list_keywords_for_photo(&self, photo_id: PhotoId) -> Result<Vec<Keyword>> {
+        let conn = self.lock()?;
+        repository::keywords::list_for_photo(&conn, photo_id)
+    }
+
+    pub fn list_all_keywords(&self) -> Result<Vec<Keyword>> {
+        let conn = self.lock()?;
+        repository::keywords::list_all(&conn)
+    }
+
+    // ---- Sammlungen (ab Phase 3) -------------------------------------------
+
+    pub fn create_collection(&self, name: &str) -> Result<CollectionId> {
+        let conn = self.lock()?;
+        repository::collections::create(&conn, name, OffsetDateTime::now_utc())
+    }
+
+    pub fn rename_collection(&self, id: CollectionId, name: &str) -> Result<()> {
+        let conn = self.lock()?;
+        repository::collections::rename(&conn, id, name)
+    }
+
+    pub fn delete_collection(&self, id: CollectionId) -> Result<()> {
+        let conn = self.lock()?;
+        repository::collections::delete(&conn, id)
+    }
+
+    pub fn list_collections(&self) -> Result<Vec<Collection>> {
+        let conn = self.lock()?;
+        repository::collections::list_all(&conn)
+    }
+
+    /// Fügt ein Foto ans Ende einer Sammlung an — erneutes Hinzufügen
+    /// desselben Fotos ist ein No-Op (siehe
+    /// [`repository::collections::add_photo`]).
+    pub fn add_photo_to_collection(
+        &self,
+        collection_id: CollectionId,
+        photo_id: PhotoId,
+    ) -> Result<()> {
+        let conn = self.lock()?;
+        repository::collections::add_photo(&conn, collection_id, photo_id)
+    }
+
+    pub fn remove_photo_from_collection(
+        &self,
+        collection_id: CollectionId,
+        photo_id: PhotoId,
+    ) -> Result<()> {
+        let conn = self.lock()?;
+        repository::collections::remove_photo(&conn, collection_id, photo_id)
+    }
+
+    /// Die Fotos einer Sammlung in ihrer festgelegten Reihenfolge.
+    pub fn list_photos_in_collection(&self, collection_id: CollectionId) -> Result<Vec<Photo>> {
+        let conn = self.lock()?;
+        repository::collections::list_photos(&conn, collection_id)
+    }
+
+    // ---- Suche/Filter (ab Phase 3) -----------------------------------------
+
+    /// Volltextsuche über Dateiname, Kamera und Objektiv (FTS5), siehe
+    /// [`repository::search::search_photos`].
+    pub fn search_photos(&self, query: &str) -> Result<Vec<Photo>> {
+        let conn = self.lock()?;
+        repository::search::search_photos(&conn, query)
+    }
+
+    /// Kombinierbarer Attributfilter (Bewertung/Flagge/Farbe/Kamera), siehe
+    /// [`repository::search::filter_photos`].
+    pub fn filter_photos(&self, criteria: &FilterCriteria) -> Result<Vec<Photo>> {
+        let conn = self.lock()?;
+        repository::search::filter_photos(&conn, criteria)
     }
 }
 
@@ -418,5 +531,57 @@ mod tests {
                 .is_empty(),
             "Preview sollte per Kaskade gelöscht sein"
         );
+    }
+
+    /// Deckt Bewertung, Schlagworte und Sammlungen im Zusammenspiel über die
+    /// öffentliche `Catalog`-API ab (Schritt 2 der Phase-3-Bibliothek).
+    #[test]
+    fn library_features_work_together_through_the_public_api() {
+        let catalog = Catalog::open_in_memory().expect("sollte öffnen");
+        let folder_id = catalog
+            .insert_folder(Path::new("/fotos"), None)
+            .expect("ok");
+        let (photo_id, _) = catalog.upsert_photo(&sample_photo(folder_id)).expect("ok");
+
+        catalog.set_photo_rating(photo_id, 4).expect("ok");
+        catalog.set_photo_flag(photo_id, 1).expect("ok");
+        catalog
+            .set_photo_color_label(photo_id, Some("green"))
+            .expect("ok");
+        let photo = catalog.get_photo(photo_id).expect("ok");
+        assert_eq!(photo.rating, 4);
+        assert_eq!(photo.flag, 1);
+        assert_eq!(photo.color_label.as_deref(), Some("green"));
+
+        catalog.add_keyword(photo_id, "Testflug").expect("ok");
+        assert_eq!(
+            catalog.list_keywords_for_photo(photo_id).expect("ok").len(),
+            1
+        );
+
+        let collection_id = catalog.create_collection("Favoriten").expect("ok");
+        catalog
+            .add_photo_to_collection(collection_id, photo_id)
+            .expect("ok");
+        assert_eq!(
+            catalog
+                .list_photos_in_collection(collection_id)
+                .expect("ok")
+                .len(),
+            1
+        );
+
+        let found = catalog.search_photos("IMG_0001").expect("ok");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, photo_id);
+
+        let filtered = catalog
+            .filter_photos(&FilterCriteria {
+                rating_at_least: Some(4),
+                ..Default::default()
+            })
+            .expect("ok");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, photo_id);
     }
 }

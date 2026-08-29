@@ -7,13 +7,18 @@ use time::OffsetDateTime;
 use crate::error::map_sqlite_err;
 use crate::models::{from_unix, from_unix_opt, to_unix, to_unix_opt, NewPhoto, Photo};
 
-const SELECT_COLUMNS: &str =
-    "id, folder_id, filename, file_size, file_mtime, content_hash, width, \
-     height, orientation, camera_make, camera_model, lens, iso, shutter, aperture, focal_length, \
-     captured_at, gps_lat, gps_lon, imported_at, missing";
+/// Qualifiziert mit `photos.`, damit dieselbe Spaltenliste auch in
+/// `repository::search`s Joins mit `photos_fts` verwendbar ist, ohne dass
+/// gleichnamige Spalten (z. B. `filename`) mehrdeutig werden.
+pub(crate) const SELECT_COLUMNS: &str =
+    "photos.id, photos.folder_id, photos.filename, photos.file_size, photos.file_mtime, \
+     photos.content_hash, photos.width, photos.height, photos.orientation, photos.camera_make, \
+     photos.camera_model, photos.lens, photos.iso, photos.shutter, photos.aperture, \
+     photos.focal_length, photos.captured_at, photos.gps_lat, photos.gps_lon, \
+     photos.imported_at, photos.missing, photos.rating, photos.flag, photos.color_label";
 
 #[allow(clippy::type_complexity)]
-struct PhotoRow {
+pub(crate) struct PhotoRow {
     id: String,
     folder_id: String,
     filename: String,
@@ -35,9 +40,12 @@ struct PhotoRow {
     gps_lon: Option<f64>,
     imported_at: i64,
     missing: i64,
+    rating: i64,
+    flag: i64,
+    color_label: Option<String>,
 }
 
-fn row_to_raw(row: &rusqlite::Row) -> rusqlite::Result<PhotoRow> {
+pub(crate) fn row_to_raw(row: &rusqlite::Row) -> rusqlite::Result<PhotoRow> {
     Ok(PhotoRow {
         id: row.get(0)?,
         folder_id: row.get(1)?,
@@ -60,10 +68,13 @@ fn row_to_raw(row: &rusqlite::Row) -> rusqlite::Result<PhotoRow> {
         gps_lon: row.get(18)?,
         imported_at: row.get(19)?,
         missing: row.get(20)?,
+        rating: row.get(21)?,
+        flag: row.get(22)?,
+        color_label: row.get(23)?,
     })
 }
 
-fn raw_to_photo(raw: PhotoRow) -> Result<Photo> {
+pub(crate) fn raw_to_photo(raw: PhotoRow) -> Result<Photo> {
     Ok(Photo {
         id: raw.id.parse()?,
         folder_id: raw.folder_id.parse()?,
@@ -86,6 +97,9 @@ fn raw_to_photo(raw: PhotoRow) -> Result<Photo> {
         gps_lon: raw.gps_lon,
         imported_at: from_unix(raw.imported_at)?,
         missing: raw.missing != 0,
+        rating: raw.rating as u8,
+        flag: raw.flag as i8,
+        color_label: raw.color_label,
     })
 }
 
@@ -142,6 +156,73 @@ pub(crate) fn set_missing(conn: &Connection, id: PhotoId, missing: bool) -> Resu
         .execute(
             "UPDATE photos SET missing = ?2 WHERE id = ?1",
             params![id.to_string(), missing as i64],
+        )
+        .map_err(map_sqlite_err)?;
+    if changed == 0 {
+        return Err(AppError::not_found("Foto", id.to_string()));
+    }
+    Ok(())
+}
+
+/// Erlaubte Farbmarkierungen (Lightroom-übliche Palette, siehe
+/// `DECISIONS.md` ADR-0023) — begrenzt bewusst auf eine feste Menge statt
+/// beliebiger Zeichenketten zuzulassen, damit das Frontend keine
+/// unbekannten Farben rendern muss.
+const ALLOWED_COLOR_LABELS: &[&str] = &["red", "yellow", "green", "blue", "purple"];
+
+pub(crate) fn set_rating(conn: &Connection, id: PhotoId, rating: u8) -> Result<()> {
+    if rating > 5 {
+        return Err(AppError::validation(format!(
+            "Bewertung muss zwischen 0 und 5 liegen, war {rating}"
+        )));
+    }
+    let changed = conn
+        .execute(
+            "UPDATE photos SET rating = ?2 WHERE id = ?1",
+            params![id.to_string(), rating as i64],
+        )
+        .map_err(map_sqlite_err)?;
+    if changed == 0 {
+        return Err(AppError::not_found("Foto", id.to_string()));
+    }
+    Ok(())
+}
+
+pub(crate) fn set_flag(conn: &Connection, id: PhotoId, flag: i8) -> Result<()> {
+    if !(-1..=1).contains(&flag) {
+        return Err(AppError::validation(format!(
+            "Flagge muss -1 (Reject), 0 (keine) oder 1 (Pick) sein, war {flag}"
+        )));
+    }
+    let changed = conn
+        .execute(
+            "UPDATE photos SET flag = ?2 WHERE id = ?1",
+            params![id.to_string(), flag as i64],
+        )
+        .map_err(map_sqlite_err)?;
+    if changed == 0 {
+        return Err(AppError::not_found("Foto", id.to_string()));
+    }
+    Ok(())
+}
+
+pub(crate) fn set_color_label(
+    conn: &Connection,
+    id: PhotoId,
+    color_label: Option<&str>,
+) -> Result<()> {
+    if let Some(color) = color_label {
+        if !ALLOWED_COLOR_LABELS.contains(&color) {
+            return Err(AppError::validation(format!(
+                "Unbekannte Farbmarkierung '{color}', erlaubt sind: {}",
+                ALLOWED_COLOR_LABELS.join(", ")
+            )));
+        }
+    }
+    let changed = conn
+        .execute(
+            "UPDATE photos SET color_label = ?2 WHERE id = ?1",
+            params![id.to_string(), color_label],
         )
         .map_err(map_sqlite_err)?;
     if changed == 0 {
@@ -386,6 +467,82 @@ mod tests {
         assert!(get(&conn, id).expect("ok").missing);
 
         assert!(set_missing(&conn, PhotoId::new(), true).is_err());
+    }
+
+    #[test]
+    fn set_rating_updates_and_rejects_out_of_range() {
+        let (conn, folder_id) = setup();
+        let mtime = OffsetDateTime::now_utc()
+            .replace_nanosecond(0)
+            .expect("gültig");
+        let (id, _) = upsert(
+            &conn,
+            &sample_photo(folder_id, 1000, mtime),
+            OffsetDateTime::now_utc(),
+        )
+        .expect("ok");
+
+        assert_eq!(get(&conn, id).expect("ok").rating, 0, "Default ist 0");
+        set_rating(&conn, id, 5).expect("ok");
+        assert_eq!(get(&conn, id).expect("ok").rating, 5);
+
+        assert!(
+            set_rating(&conn, id, 6).is_err(),
+            "Bewertung über 5 muss abgelehnt werden"
+        );
+        assert!(set_rating(&conn, PhotoId::new(), 3).is_err());
+    }
+
+    #[test]
+    fn set_flag_updates_and_rejects_out_of_range() {
+        let (conn, folder_id) = setup();
+        let mtime = OffsetDateTime::now_utc()
+            .replace_nanosecond(0)
+            .expect("gültig");
+        let (id, _) = upsert(
+            &conn,
+            &sample_photo(folder_id, 1000, mtime),
+            OffsetDateTime::now_utc(),
+        )
+        .expect("ok");
+
+        set_flag(&conn, id, 1).expect("Pick sollte akzeptiert werden");
+        assert_eq!(get(&conn, id).expect("ok").flag, 1);
+        set_flag(&conn, id, -1).expect("Reject sollte akzeptiert werden");
+        assert_eq!(get(&conn, id).expect("ok").flag, -1);
+
+        assert!(
+            set_flag(&conn, id, 2).is_err(),
+            "Flagge außerhalb von -1..=1 muss abgelehnt werden"
+        );
+    }
+
+    #[test]
+    fn set_color_label_updates_clears_and_rejects_unknown_color() {
+        let (conn, folder_id) = setup();
+        let mtime = OffsetDateTime::now_utc()
+            .replace_nanosecond(0)
+            .expect("gültig");
+        let (id, _) = upsert(
+            &conn,
+            &sample_photo(folder_id, 1000, mtime),
+            OffsetDateTime::now_utc(),
+        )
+        .expect("ok");
+
+        set_color_label(&conn, id, Some("red")).expect("ok");
+        assert_eq!(
+            get(&conn, id).expect("ok").color_label.as_deref(),
+            Some("red")
+        );
+
+        set_color_label(&conn, id, None).expect("Zurücksetzen sollte funktionieren");
+        assert_eq!(get(&conn, id).expect("ok").color_label, None);
+
+        assert!(
+            set_color_label(&conn, id, Some("orange")).is_err(),
+            "unbekannte Farbe muss abgelehnt werden"
+        );
     }
 
     #[test]

@@ -243,10 +243,13 @@ Wie bei Phase 2 gibt es kein eigenes ausführliches Prompt-Dokument — die Schr
   - [x] `photos_fts` (FTS5 external-content) + Sync-Trigger
   - [x] Tests: Idempotenz, alter Katalog (nur Migration 1, bzw. 1+2 mit Bestandsdaten) öffnet und zieht Migration 3 nach inkl. FTS5-Backfill-Verifikation; FK-Cascade-Tests für `keywords`/`collections` bewusst auf Schritt 2 verschoben (dort existieren echte `Catalog`-Methoden zum Einfügen von Testdaten, konsistent mit dem bestehenden `repository::edits`-Testmuster statt Rohdaten in `migrations.rs`)
 
-- [ ] 2. Repository- und `Catalog`-Erweiterungen
-  - [ ] `repository::{ratings, keywords, collections, search}`
-  - [ ] Neue `Catalog`-Methoden (siehe Plan-Datei für die vollständige Liste)
-  - [ ] Tests je Modul
+- [x] 2. Repository- und `Catalog`-Erweiterungen
+  - [x] `repository::{keywords, collections, search}` als neue Module; Bewertung/Flagge/Farbe bewusst in `repository::photos` belassen statt eigenem `ratings`-Modul (gleiche Tabelle, gleiches Muster wie das bestehende `set_missing` — konsistenter mit der im Datei-Kopf von `repository/mod.rs` dokumentierten Regel "ein Modul pro Tabelle" als ein eigenes Modul für drei Spalten derselben Tabelle)
+  - [x] Neue `Catalog`-Methoden: `set_photo_rating`/`set_photo_flag`/`set_photo_color_label` (mit Validierung: Bewertung 0–5, Flagge -1/0/1, Farbe aus fester Palette — neue `AppError::Validation`-Variante in `apx-core`), `add_keyword`/`remove_keyword`/`list_keywords_for_photo`/`list_all_keywords`, `create_collection`/`rename_collection`/`delete_collection`/`add_photo_to_collection`/`remove_photo_from_collection`/`list_collections`/`list_photos_in_collection`, `search_photos` (FTS5 `MATCH`, nach `rank` sortiert), `filter_photos` (kombinierbarer Attributfilter, UND-verknüpft)
+  - [x] `apx-core`: neue IDs `KeywordId`/`CollectionId`
+  - [x] `Photo` um `rating`/`flag`/`color_label` erweitert; neue Modelle `Keyword`, `Collection`, `FilterCriteria`
+  - [x] Tests je Modul (u. a. FK-Cascade für `photo_keywords`/`collection_photos`, FTS5-Sync-Trigger-Verifikation nach `UPDATE`, Positions-Reihenfolge in Sammlungen) plus ein Catalog-Integrationstest, der alle neuen Features durch die öffentliche API kombiniert
+  - Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` — alles grün
 
 - [ ] 3. Tauri-Commands + DTOs
   - [ ] `PhotoDto` um `rating`/`flag`/`color_label` erweitert

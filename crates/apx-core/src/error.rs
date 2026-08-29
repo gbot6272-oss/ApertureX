@@ -38,6 +38,12 @@ pub enum AppError {
     #[error("Nicht unterstützt: {0}")]
     Unsupported(String),
 
+    /// Ein Eingabewert verletzt eine fachliche Regel (z. B. Bewertung
+    /// außerhalb von 0–5, unbekannte Farbmarkierung) — im Unterschied zu
+    /// [`AppError::Database`], das SQL-/Schema-Fehler abbildet.
+    #[error("Ungültiger Wert: {message}")]
+    Validation { message: String },
+
     /// Eine Operation wurde vom Nutzer oder durch ein Timeout abgebrochen.
     #[error("Abgebrochen: {0}")]
     Cancelled(String),
@@ -92,6 +98,12 @@ impl AppError {
             message: message.into(),
         }
     }
+
+    pub fn validation(message: impl Into<String>) -> Self {
+        Self::Validation {
+            message: message.into(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -125,6 +137,15 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "Pipeline-Fehler: GPU-Adapter nicht gefunden"
+        );
+    }
+
+    #[test]
+    fn validation_error_includes_message() {
+        let err = AppError::validation("Bewertung muss zwischen 0 und 5 liegen");
+        assert_eq!(
+            err.to_string(),
+            "Ungültiger Wert: Bewertung muss zwischen 0 und 5 liegen"
         );
     }
 }

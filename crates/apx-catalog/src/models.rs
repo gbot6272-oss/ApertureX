@@ -4,7 +4,9 @@
 
 use std::path::PathBuf;
 
-use apx_core::{AppError, EditHistoryId, EdlEnvelope, FolderId, PhotoId, Result};
+use apx_core::{
+    AppError, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId, PhotoId, Result,
+};
 use time::OffsetDateTime;
 
 pub(crate) fn to_unix(dt: OffsetDateTime) -> i64 {
@@ -83,6 +85,14 @@ pub struct Photo {
     pub gps_lon: Option<f64>,
     pub imported_at: OffsetDateTime,
     pub missing: bool,
+    /// Bewertung in Sternen, 0 (unbewertet) bis 5 — siehe
+    /// `migrations/0003_library.sql`, `DECISIONS.md` ADR-0023.
+    pub rating: u8,
+    /// Pick/Reject-Flagge: 1 = Pick, -1 = Reject, 0 = keine.
+    pub flag: i8,
+    /// Farbmarkierung (`"red"`/`"yellow"`/`"green"`/`"blue"`/`"purple"`),
+    /// `None` = keine.
+    pub color_label: Option<String>,
 }
 
 /// Auflösungsstufe eines Vorschaubilds, siehe `PHASE1_PROMPT.md` Abschnitt 5.
@@ -148,6 +158,35 @@ pub enum HistoryPosition {
     Neutral,
     /// Ein konkreter, gespeicherter Bearbeitungsschritt ist aktiv.
     At(EditHistoryEntry),
+}
+
+/// Ein Schlagwort — flache Liste ohne Hierarchie/Synonyme, siehe
+/// `DECISIONS.md` ADR-0022.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Keyword {
+    pub id: KeywordId,
+    pub name: String,
+}
+
+/// Eine manuell zusammengestellte Sammlung, siehe `DECISIONS.md` ADR-0023
+/// (keine intelligenten/verschachtelten Sammlungen in Phase 3).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Collection {
+    pub id: CollectionId,
+    pub name: String,
+    pub created_at: OffsetDateTime,
+}
+
+/// Kombinierbare Filterkriterien für [`crate::Catalog::filter_photos`] —
+/// jedes `None`-Feld wird ignoriert, alle gesetzten Felder werden per UND
+/// verknüpft (siehe `PLAN.md` Phase 3, Schritt 2).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FilterCriteria {
+    /// Nur Fotos mit Bewertung >= diesem Wert.
+    pub rating_at_least: Option<u8>,
+    pub flag: Option<i8>,
+    pub color_label: Option<String>,
+    pub camera_model: Option<String>,
 }
 
 #[cfg(test)]

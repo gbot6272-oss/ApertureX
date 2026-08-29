@@ -4,7 +4,15 @@ import { immer } from "zustand/middleware/immer";
 import { buildEdlEnvelopeJson, NEUTRAL_BASIC_ADJUSTMENTS, parseEdlEnvelopeJson, writeBasicField } from "../lib/edl";
 import type { BasicAdjustments } from "../lib/edl";
 import * as api from "../lib/tauri";
-import type { CatalogStatusDto, FolderDto, HistoryPositionDto, PhotoDto } from "../lib/tauri";
+import type {
+  CatalogStatusDto,
+  CollectionDto,
+  FilterCriteriaDto,
+  FolderDto,
+  HistoryPositionDto,
+  KeywordDto,
+  PhotoDto,
+} from "../lib/tauri";
 
 /** Wandelt eine `HistoryPositionDto` (siehe `lib/tauri.ts`) in
  * `BasicAdjustments` um — `Neutral` bedeutet "wie aufgenommen", ein
@@ -18,6 +26,52 @@ function basicFromHistoryPosition(position: HistoryPositionDto): BasicAdjustment
     return NEUTRAL_BASIC_ADJUSTMENTS;
   }
   return parsed;
+}
+
+/** In welcher Reihenfolge Foto-ID `photoId` in der aktuell angezeigten
+ * Liste gemeint ist, wenn ein Bereich per Umschalt-Klick markiert wird —
+ * siehe [`selectActivePhotos`]. */
+export type SelectionMode = "replace" | "toggle" | "range";
+
+/** Liest aus einem Klick-Event, welcher Auswahlmodus gemeint ist (Strg/Cmd
+ * = einzelnes Umschalten, Umschalt = Bereich, sonst Ersetzen) — von Raster
+ * und Filmstreifen gemeinsam genutzt (siehe `DECISIONS.md` ADR-0024). */
+export function resolveSelectionMode(event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): SelectionMode {
+  if (event.shiftKey) return "range";
+  if (event.ctrlKey || event.metaKey) return "toggle";
+  return "replace";
+}
+
+/** Patcht ein Foto an jeder Stelle, wo es aktuell im Zustand zwischen-
+ * gespeichert sein könnte (Ordner-Cache, Sammlungs-Cache, Such-/Filter-
+ * Ergebnis) — hält Raster/Filmstreifen nach einer Bewertungs-/Flaggen-/
+ * Farb-Änderung sofort konsistent, ohne jedes Mal neu vom Backend zu
+ * laden. Muss innerhalb eines Immer-`set()`-Producers aufgerufen werden. */
+function patchPhotoEverywhere(state: AppStore, photoId: string, patch: Partial<PhotoDto>) {
+  for (const list of Object.values(state.photosByFolder)) {
+    const target = list.find((p) => p.id === photoId);
+    if (target) Object.assign(target, patch);
+  }
+  for (const list of Object.values(state.collectionPhotos)) {
+    const target = list.find((p) => p.id === photoId);
+    if (target) Object.assign(target, patch);
+  }
+  if (state.libraryResults) {
+    const target = state.libraryResults.find((p) => p.id === photoId);
+    if (target) Object.assign(target, patch);
+  }
+}
+
+/** Die aktuell anzuzeigende Fotoliste — Suchergebnisse (falls eine Suche/
+ * ein Filter aktiv ist) haben Vorrang vor einer ausgewählten Sammlung, die
+ * wiederum Vorrang vor einem ausgewählten Ordner hat. Raster und
+ * Filmstreifen lesen beide über diese eine Funktion (siehe `DECISIONS.md`
+ * ADR-0024: geteilter Fotoliste-Zustand statt eigener Parallel-Logik). */
+export function selectActivePhotos(state: AppStore): PhotoDto[] {
+  if (state.libraryResults !== null) return state.libraryResults;
+  if (state.selectedCollectionId) return state.collectionPhotos[state.selectedCollectionId] ?? [];
+  if (state.selectedFolderId) return state.photosByFolder[state.selectedFolderId] ?? [];
+  return [];
 }
 
 /**
@@ -135,7 +189,65 @@ interface DevelopSlice {
   setDevelopLatencyMs: (ms: number) => void;
 }
 
-type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice;
+// ---- Library-Slice (ab Phase 3: Raster, Bewertung/Flagge/Farbe,
+// Sammlungen, Suche/Filter, Metadaten-Panel) --------------------------------
+
+interface LibrarySlice {
+  /** Was in der Mitte statt des Viewers gezeigt wird — `"grid"` ist das
+   * neue Raster (Schritt 6), `"viewer"` der bisherige Einzelbild-Viewer. */
+  centerView: "viewer" | "grid";
+  toggleCenterView: () => void;
+
+  /** Mehrfachauswahl fürs Stapel-Bearbeiten (Bewertung/Flagge/Sammlung-
+   * Hinzufügen) — geteilt zwischen Raster und Filmstreifen. Enthält
+   * `selectedPhotoId`, sobald eines gesetzt ist. */
+  multiSelectedIds: string[];
+  togglePhotoSelection: (photoId: string, mode: SelectionMode) => void;
+
+  metadataPanelOpen: boolean;
+  toggleMetadataPanel: () => void;
+
+  photoKeywords: Record<string, KeywordDto[]>;
+  loadKeywordsForPhoto: (photoId: string) => Promise<void>;
+  addKeywordToPhoto: (photoId: string, name: string) => Promise<void>;
+  removeKeywordFromPhoto: (photoId: string, keywordId: string) => Promise<void>;
+
+  /** Setzt Bewertung/Flagge/Farbe. Ist `photoId` Teil einer Mehrfach-
+   * auswahl mit mehr als einem Eintrag, wirkt die Änderung auf die
+   * gesamte Auswahl (Stapel-Bearbeitung) — sonst nur auf `photoId`. */
+  setPhotoRating: (photoId: string, rating: number) => Promise<void>;
+  setPhotoFlag: (photoId: string, flag: number) => Promise<void>;
+  setPhotoColorLabel: (photoId: string, colorLabel: string | null) => Promise<void>;
+
+  collections: CollectionDto[];
+  selectedCollectionId: string | null;
+  collectionPhotos: Record<string, PhotoDto[]>;
+  refreshCollections: () => Promise<void>;
+  createCollection: (name: string) => Promise<void>;
+  selectCollection: (collectionId: string | null) => void;
+  loadPhotosForCollection: (collectionId: string) => Promise<void>;
+  /** Fügt die aktuelle Mehrfachauswahl (oder, falls leer, das fokussierte
+   * Foto) zu `collectionId` hinzu. */
+  addSelectionToCollection: (collectionId: string) => Promise<void>;
+
+  /** Freitextsuche (FTS5 über Dateiname/Kamera/Objektiv) und
+   * Attributfilter sind laut `PLAN.md` Phase 3 Schritt 6 bewusst
+   * alternativ statt kombiniert — das Setzen des einen leert das andere. */
+  libraryQuery: string;
+  libraryFilter: FilterCriteriaDto;
+  /** `null` = keine Suche/kein Filter aktiv, Raster/Filmstreifen zeigen
+   * den ausgewählten Ordner/die Sammlung normal (siehe
+   * [`selectActivePhotos`]). */
+  libraryResults: PhotoDto[] | null;
+  setLibraryQuery: (query: string) => void;
+  runLibrarySearch: () => Promise<void>;
+  /** Setzt oder entfernt (bei `undefined`) einen Filter-Chip und wendet
+   * das Ergebnis sofort an. */
+  setLibraryFilterChip: (patch: FilterCriteriaDto) => Promise<void>;
+  clearLibraryFilters: () => void;
+}
+
+export type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice & LibrarySlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => ({
@@ -207,7 +319,11 @@ export const useAppStore = create<AppStore>()(
     selectFolder: (folderId) => {
       set((state) => {
         state.selectedFolderId = folderId;
+        state.selectedCollectionId = null;
         state.selectedPhotoId = null;
+        state.multiSelectedIds = [];
+        state.libraryQuery = "";
+        state.libraryResults = null;
       });
       if (folderId) {
         void get().loadPhotosForFolder(folderId);
@@ -217,6 +333,7 @@ export const useAppStore = create<AppStore>()(
     selectPhoto: (photoId) => {
       set((state) => {
         state.selectedPhotoId = photoId;
+        state.multiSelectedIds = photoId ? [photoId] : [];
       });
       get().resetView();
       // Läuft das Entwickeln-Panel bereits, muss es beim Fotowechsel den
@@ -232,15 +349,17 @@ export const useAppStore = create<AppStore>()(
           });
         }
       }
+      if (get().metadataPanelOpen && photoId) {
+        void get().loadKeywordsForPhoto(photoId);
+      }
     },
 
     stepSelection: (direction) => {
-      const { selectedFolderId, selectedPhotoId, photosByFolder } = get();
-      if (!selectedFolderId) return;
-      const photos = photosByFolder[selectedFolderId];
-      if (!photos || photos.length === 0) return;
+      const state = get();
+      const photos = selectActivePhotos(state);
+      if (photos.length === 0) return;
 
-      const currentIndex = photos.findIndex((p) => p.id === selectedPhotoId);
+      const currentIndex = photos.findIndex((p) => p.id === state.selectedPhotoId);
       const nextIndex = currentIndex === -1 ? 0 : (currentIndex + direction + photos.length) % photos.length;
       const next = photos[nextIndex];
       if (next) {
@@ -409,6 +528,289 @@ export const useAppStore = create<AppStore>()(
     setDevelopLatencyMs: (ms) => {
       set((state) => {
         state.developLastLatencyMs = ms;
+      });
+    },
+
+    // Library (ab Phase 3)
+    centerView: "viewer",
+
+    toggleCenterView: () => {
+      set((state) => {
+        state.centerView = state.centerView === "viewer" ? "grid" : "viewer";
+      });
+    },
+
+    multiSelectedIds: [],
+
+    togglePhotoSelection: (photoId, mode) => {
+      if (mode === "toggle") {
+        const wasSelected = get().multiSelectedIds.includes(photoId);
+        set((state) => {
+          state.multiSelectedIds = wasSelected
+            ? state.multiSelectedIds.filter((id) => id !== photoId)
+            : [...state.multiSelectedIds, photoId];
+          state.selectedPhotoId = photoId;
+        });
+        get().resetView();
+        if (get().developPanelOpen) void get().loadDevelopStateForPhoto(photoId);
+        if (get().metadataPanelOpen) void get().loadKeywordsForPhoto(photoId);
+        return;
+      }
+      if (mode === "range") {
+        const photos = selectActivePhotos(get());
+        const anchorId = get().selectedPhotoId;
+        const anchorIndex = photos.findIndex((p) => p.id === anchorId);
+        const targetIndex = photos.findIndex((p) => p.id === photoId);
+        if (anchorIndex === -1 || targetIndex === -1) {
+          get().selectPhoto(photoId);
+          return;
+        }
+        const [start, end] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+        const range = photos.slice(start, end + 1).map((p) => p.id);
+        set((state) => {
+          state.multiSelectedIds = range;
+        });
+        return;
+      }
+      get().selectPhoto(photoId);
+    },
+
+    metadataPanelOpen: false,
+
+    toggleMetadataPanel: () => {
+      const willOpen = !get().metadataPanelOpen;
+      set((state) => {
+        state.metadataPanelOpen = willOpen;
+      });
+      const { selectedPhotoId } = get();
+      if (willOpen && selectedPhotoId) {
+        void get().loadKeywordsForPhoto(selectedPhotoId);
+      }
+    },
+
+    photoKeywords: {},
+
+    loadKeywordsForPhoto: async (photoId) => {
+      try {
+        const keywords = await api.listPhotoKeywords(photoId);
+        set((state) => {
+          state.photoKeywords[photoId] = keywords;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    addKeywordToPhoto: async (photoId, name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      try {
+        await api.addPhotoKeyword(photoId, trimmed);
+        await get().loadKeywordsForPhoto(photoId);
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    removeKeywordFromPhoto: async (photoId, keywordId) => {
+      try {
+        await api.removePhotoKeyword(photoId, keywordId);
+        await get().loadKeywordsForPhoto(photoId);
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    setPhotoRating: async (photoId, rating) => {
+      const { multiSelectedIds } = get();
+      const targets = multiSelectedIds.includes(photoId) && multiSelectedIds.length > 1 ? multiSelectedIds : [photoId];
+      try {
+        await Promise.all(targets.map((id) => api.setPhotoRating(id, rating)));
+        set((state) => {
+          for (const id of targets) patchPhotoEverywhere(state, id, { rating });
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    setPhotoFlag: async (photoId, flag) => {
+      const { multiSelectedIds } = get();
+      const targets = multiSelectedIds.includes(photoId) && multiSelectedIds.length > 1 ? multiSelectedIds : [photoId];
+      try {
+        await Promise.all(targets.map((id) => api.setPhotoFlag(id, flag)));
+        set((state) => {
+          for (const id of targets) patchPhotoEverywhere(state, id, { flag });
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    setPhotoColorLabel: async (photoId, colorLabel) => {
+      const { multiSelectedIds } = get();
+      const targets = multiSelectedIds.includes(photoId) && multiSelectedIds.length > 1 ? multiSelectedIds : [photoId];
+      try {
+        await Promise.all(targets.map((id) => api.setPhotoColorLabel(id, colorLabel)));
+        set((state) => {
+          for (const id of targets) patchPhotoEverywhere(state, id, { color_label: colorLabel });
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    collections: [],
+    selectedCollectionId: null,
+    collectionPhotos: {},
+
+    refreshCollections: async () => {
+      try {
+        const collections = await api.listCollections();
+        set((state) => {
+          state.collections = collections;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    createCollection: async (name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      try {
+        await api.createCollection(trimmed);
+        await get().refreshCollections();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    selectCollection: (collectionId) => {
+      set((state) => {
+        state.selectedCollectionId = collectionId;
+        if (collectionId) state.selectedFolderId = null;
+        state.selectedPhotoId = null;
+        state.multiSelectedIds = [];
+        state.libraryQuery = "";
+        state.libraryResults = null;
+      });
+      if (collectionId) {
+        void get().loadPhotosForCollection(collectionId);
+      }
+    },
+
+    loadPhotosForCollection: async (collectionId) => {
+      try {
+        const photos = await api.listPhotosInCollection(collectionId);
+        set((state) => {
+          state.collectionPhotos[collectionId] = photos;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    addSelectionToCollection: async (collectionId) => {
+      const { multiSelectedIds, selectedPhotoId } = get();
+      const targets = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
+      if (targets.length === 0) return;
+      try {
+        await Promise.all(targets.map((id) => api.addToCollection(collectionId, id)));
+        if (get().collectionPhotos[collectionId]) {
+          await get().loadPhotosForCollection(collectionId);
+        }
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    libraryQuery: "",
+    libraryFilter: {},
+    libraryResults: null,
+
+    setLibraryQuery: (query) => {
+      set((state) => {
+        state.libraryQuery = query;
+      });
+    },
+
+    runLibrarySearch: async () => {
+      const trimmed = get().libraryQuery.trim();
+      if (!trimmed) {
+        set((state) => {
+          state.libraryResults = null;
+        });
+        return;
+      }
+      try {
+        const results = await api.searchPhotos(trimmed);
+        set((state) => {
+          state.libraryFilter = {};
+          state.libraryResults = results;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    setLibraryFilterChip: async (patch) => {
+      const nextFilter: FilterCriteriaDto = { ...get().libraryFilter, ...patch };
+      // Ein `undefined`-Wert im Patch soll das Attribut wieder entfernen
+      // (Chip abwählen), nicht das Feld auf `undefined` überschreiben.
+      for (const key of Object.keys(patch) as (keyof FilterCriteriaDto)[]) {
+        if (patch[key] === undefined) delete nextFilter[key];
+      }
+      const hasAnyFilter = Object.keys(nextFilter).length > 0;
+      set((state) => {
+        state.libraryFilter = nextFilter;
+        state.libraryQuery = "";
+      });
+      if (!hasAnyFilter) {
+        set((state) => {
+          state.libraryResults = null;
+        });
+        return;
+      }
+      try {
+        const results = await api.filterPhotos(nextFilter);
+        set((state) => {
+          state.libraryResults = results;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    clearLibraryFilters: () => {
+      set((state) => {
+        state.libraryQuery = "";
+        state.libraryFilter = {};
+        state.libraryResults = null;
       });
     },
   })),

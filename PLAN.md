@@ -269,13 +269,16 @@ Wie bei Phase 2 gibt es kein eigenes ausführliches Prompt-Dokument — die Schr
   - [x] Ordner-fehlend-Erkennung: `FolderDto.missing` live per `path.exists()` berechnet (keine neue DB-Spalte/Migration nötig, keine Reconcile-Kaskade beim Start), Sidebar zeigt "fehlt"-Badge + "verknüpfen"-Link (öffnet den bestehenden Ordner-Dialog, ruft `relink_folder`)
   - Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace`, `tsc -b`, `vitest run` (37 Tests), `playwright test` (8/8) — alles grün
 
-- [ ] 6. Frontend: Raster, Bewertung/Flaggen/Farben, Sammlungen, Filterleiste, Metadaten-Panel
-  - [ ] `GridView.tsx` (geteilter Auswahl-State mit Filmstreifen, ADR-0024)
-  - [ ] Bewertungs-/Flaggen-/Farb-Widgets + Tastenkürzel
-  - [ ] Sammlungen-UI
-  - [ ] Filterleiste
-  - [ ] Metadaten-Panel
-  - [ ] Tests: Vitest (reine Funktionen), Playwright-Erweiterung, `tauri-mock.ts` erweitert
+- [x] 6. Frontend: Raster, Bewertung/Flaggen/Farben, Sammlungen, Filterleiste, Metadaten-Panel
+  - [x] `GridView.tsx`: zeilenvirtualisiert (`@tanstack/react-virtual`, Spaltenzahl per `ResizeObserver`), geteilter Auswahl-/Fotoliste-Zustand mit Filmstreifen über neue `selectActivePhotos`/`togglePhotoSelection`/`resolveSelectionMode` im Store (ADR-0024) — Klick/Strg-Klick/Umschalt-Klick für Ersetzen/Umschalten/Bereichsauswahl, geteilt zwischen Raster und Filmstreifen. Zellen sind `role="button"`-`div`s statt verschachtelter `<button>`s (HTML erlaubt kein interaktives Element in einem anderen — die Bewertungs-/Flaggen-/Farb-Widgets pro Zelle sind selbst Buttons)
+  - [x] Bewertungs-/Flaggen-/Farb-Widgets (`RatingFlagColor.tsx`, in Raster-Zelle kompakt und im Metadaten-Panel ausführlich) + Tastenkürzel `0`–`5` (Bewertung, erneutes Klicken auf den aktuellen Wert löscht ihn), `P`/`X` (Pick/Reject) im bestehenden globalen Tastatur-Handler in `App.tsx`
+  - [x] Sammlungen-UI: neuer Abschnitt in `Sidebar.tsx` unterhalb des Ordnerbaums, Inline-Eingabe zum Anlegen, "+"-Knopf pro Sammlung fügt die aktuelle Auswahl hinzu (erscheint nur bei aktiver Auswahl)
+  - [x] Filterleiste (`FilterBar.tsx`, nur im Raster sichtbar): Suchfeld (`search_photos`) und Attribut-Chips (Bewertung/Flagge/Farbe, `filter_photos`) — bewusst alternativ statt kombiniert (Setzen des einen leert das andere), beide wirken über ein gemeinsames `libraryResults`, das `selectActivePhotos` gegenüber Ordner/Sammlung priorisiert
+  - [x] Metadaten-Panel (`MetadataPanel.tsx`, strukturell wie `DevelopPanel.tsx`): read-only EXIF-Felder plus editierbare Bewertung/Flagge/Farbe/Schlagworte
+  - [x] Tests: Vitest für `resolveSelectionMode`/`selectActivePhotos` (`store/index.test.ts`) und `buildChildrenByParent` (bereits Schritt 5); neue Playwright-Spezifikation `library-flow.spec.ts` (Raster anzeigen, Foto bewerten, Sammlung anlegen und befüllen, nach Bewertung filtern, Filter zurücksetzen); `tauri-mock.ts` um alle neuen Commands erweitert
+  - **Mock-Erkenntnis (kein App-Bug):** `tauri-mock.ts` gab Fotos/Sammlungen/Schlagworte anfangs als dieselbe Objektreferenz zurück, die es intern weiterverwendet — echtes Tauri-IPC serialisiert dagegen bei jedem Aufruf frisch. Sobald Zustand/Immer so ein Objekt in den Store einlagert, friert Immer es ein; eine spätere direkte Eigenschaftszuweisung im Mock (`photo.rating = …`) blieb dadurch in der nicht-strikten `addInitScript`-Umgebung lautlos wirkungslos (kein Fehler, aber auch keine Änderung), und `collections.push(...)` auf einem eingefrorenen Array warf sogar einen echten Fehler. Behoben, indem der Mock bei jeder Foto-/Sammlungs-/Schlagwort-Liste eine Kopie statt der Live-Referenz zurückgibt — entspricht dem tatsächlichen IPC-Verhalten und ist kein Hinweis auf einen Fehler im Produktivcode
+  - **Zustand-Erkenntnis:** `selectActivePhotos` lieferte bei leerer Auswahl bei jedem Aufruf ein neues `[]`-Literal — `useAppStore(selector)`s `Object.is`-Vergleich hielt das für eine sich ständig ändernde Snapshot und löste über `useSyncExternalStore` endlose Neu-Renderings aus ("Maximum update depth exceeded"). Behoben mit `useShallow` aus `zustand/react/shallow` an allen drei Verwendungsstellen (`Filmstrip`/`GridView`/`MetadataPanel`)
+  - Verifiziert: `tsc -b`, `vitest run` (45 Tests), `playwright test` (9/9, inkl. neuer Bibliotheks-Spezifikation) — alles grün. Keine Rust-Änderungen in diesem Schritt.
 
 - [ ] 7. Tests, Dokumentation, Abnahme (gebündelt)
   - [ ] Vollständige Verifikation (Rust + Frontend)

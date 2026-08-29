@@ -54,6 +54,53 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   const callbacks: Record<number, CallbackEntry> = {};
   const listenersByEvent: Record<string, number[]> = {};
 
+  // Bibliothek (ab Phase 3, siehe `crates/apx-app/src/commands.rs`s
+  // gleichnamige Commands): einfache In-Memory-Nachbildung, kein SQL —
+  // reicht aus, um die Frontend-Logik (Store, Komponenten) ohne echtes
+  // Backend zu prüfen.
+  interface MockPhoto {
+    id: string;
+    filename: string;
+    camera_model?: string | null;
+    rating: number;
+    flag: number;
+    color_label: string | null;
+    [key: string]: unknown;
+  }
+  interface MockCollection {
+    id: string;
+    name: string;
+  }
+  const collections: MockCollection[] = [];
+  const collectionPhotoIds: Record<string, string[]> = {};
+  const photoKeywords: Record<string, { id: string; name: string }[]> = {};
+  let nextCollectionId = 1;
+  let nextKeywordId = 1;
+
+  function allPhotos(): MockPhoto[] {
+    const fixtures = w.__mockFixtures as { photosByFolder: Record<string, MockPhoto[]> };
+    return Object.values(fixtures.photosByFolder).flat();
+  }
+
+  function findPhoto(photoId: string): MockPhoto | undefined {
+    return allPhotos().find((p) => p.id === photoId);
+  }
+
+  /** Flache Kopie statt der intern weiterverwendeten Foto-Referenz —
+   * genau wie bei `list_photo_keywords`/`list_collections` oben: echtes
+   * Tauri-IPC serialisiert bei jedem Aufruf frisch, hier ist es sonst
+   * dieselbe Objektreferenz, die Zustand/Immer beim Einlagern in den
+   * Store einfriert. Ohne diese Kopie würde `set_photo_rating`/
+   * `set_photo_flag`/`set_photo_color_label`s direkte Eigenschafts-
+   * zuweisung auf dem eingefrorenen Original in der (nicht strikten)
+   * `addInitScript`-Umgebung *lautlos* wirkungslos bleiben (kein Fehler,
+   * aber auch keine Änderung) — ein reines Mock-Artefakt, das reale
+   * Tauri-IPC nicht hat.
+   */
+  function clonePhoto(photo: MockPhoto): MockPhoto {
+    return { ...photo };
+  }
+
   // Simuliertes `edit_history`/`edit_current` fürs Entwickeln-Panel (ab
   // Phase 2, siehe `crates/apx-catalog`s `repository::edits` und
   // `crates/apx-app/src/commands.rs`) — dieselbe lineare
@@ -121,11 +168,18 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "list_folders":
         return fixtures.folders;
       case "list_photos_in_folder":
-        return fixtures.photosByFolder[args.folderId as string] ?? [];
+        return (fixtures.photosByFolder[args.folderId as string] ?? []).map((p) => clonePhoto(p as MockPhoto));
       case "import_folder":
         return null;
       case "cancel_import":
         return null;
+      case "relink_folder": {
+        // Nur ein No-Op-Stub — kein Playwright-Test übt Schritt 5s
+        // Ordner-Relink-Fluss aus (reine Backend-/Vitest-Abdeckung dort),
+        // aber der Command muss bekannt sein, damit ein versehentlicher
+        // Aufruf nicht mit "unbekannter invoke-Befehl" abbricht.
+        return null;
+      }
       case "apply_develop_edit": {
         const photoId = args.photoId as string;
         const edlJson = args.edlJson as string;
@@ -153,6 +207,112 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         history.currentIndex += 1;
         return historyPositionAt(history);
       }
+
+      // ---- Bibliothek: Bewertung/Flagge/Farbe (ab Phase 3) -----------------
+      case "set_photo_rating": {
+        const photo = findPhoto(args.photoId as string);
+        if (photo) photo.rating = args.rating as number;
+        return null;
+      }
+      case "set_photo_flag": {
+        const photo = findPhoto(args.photoId as string);
+        if (photo) photo.flag = args.flag as number;
+        return null;
+      }
+      case "set_photo_color_label": {
+        const photo = findPhoto(args.photoId as string);
+        if (photo) photo.color_label = args.colorLabel as string | null;
+        return null;
+      }
+
+      // ---- Bibliothek: Schlagworte (ab Phase 3) ----------------------------
+      case "add_photo_keyword": {
+        const photoId = args.photoId as string;
+        const name = args.name as string;
+        const list = (photoKeywords[photoId] ??= []);
+        const existing = list.find((k) => k.name === name);
+        if (existing) return existing.id;
+        const id = `kw-${nextKeywordId++}`;
+        list.push({ id, name });
+        return id;
+      }
+      case "remove_photo_keyword": {
+        const photoId = args.photoId as string;
+        const keywordId = args.keywordId as string;
+        photoKeywords[photoId] = (photoKeywords[photoId] ?? []).filter((k) => k.id !== keywordId);
+        return null;
+      }
+      case "list_photo_keywords":
+        // Kopie zurückgeben, nicht die intern weiterverwendete Liste
+        // selbst — sonst friert das Frontend (Zustand/Immer) sie beim
+        // Einlagern in den Store ein, und ein späteres `.push()` hier im
+        // Mock schlägt fehl (echtes Tauri-IPC serialisiert ohnehin immer
+        // frisch, diese Referenz-Teilung ist ein reines Mock-Artefakt).
+        return [...(photoKeywords[args.photoId as string] ?? [])];
+      case "list_all_keywords": {
+        const seen = new Map<string, { id: string; name: string }>();
+        for (const list of Object.values(photoKeywords)) {
+          for (const keyword of list) seen.set(keyword.id, keyword);
+        }
+        return [...seen.values()];
+      }
+
+      // ---- Bibliothek: Sammlungen (ab Phase 3) -----------------------------
+      case "create_collection": {
+        const id = `col-${nextCollectionId++}`;
+        collections.push({ id, name: args.name as string });
+        collectionPhotoIds[id] = [];
+        return id;
+      }
+      case "list_collections":
+        // Kopie, aus demselben Grund wie bei `list_photo_keywords` oben.
+        return [...collections];
+      case "add_to_collection": {
+        const collectionId = args.collectionId as string;
+        const photoId = args.photoId as string;
+        const ids = (collectionPhotoIds[collectionId] ??= []);
+        if (!ids.includes(photoId)) ids.push(photoId);
+        return null;
+      }
+      case "remove_from_collection": {
+        const collectionId = args.collectionId as string;
+        const photoId = args.photoId as string;
+        collectionPhotoIds[collectionId] = (collectionPhotoIds[collectionId] ?? []).filter((id) => id !== photoId);
+        return null;
+      }
+      case "list_photos_in_collection": {
+        const ids = collectionPhotoIds[args.collectionId as string] ?? [];
+        return ids
+          .map((id) => findPhoto(id))
+          .filter((p): p is MockPhoto => p !== undefined)
+          .map(clonePhoto);
+      }
+
+      // ---- Bibliothek: Suche/Filter (ab Phase 3) ---------------------------
+      case "search_photos": {
+        const query = (args.query as string).toLowerCase();
+        return allPhotos()
+          .filter((p) => p.filename.toLowerCase().includes(query))
+          .map(clonePhoto);
+      }
+      case "filter_photos": {
+        const criteria = args.criteria as {
+          rating_at_least?: number;
+          flag?: number;
+          color_label?: string;
+          camera_model?: string;
+        };
+        return allPhotos()
+          .filter((p) => {
+            if (criteria.rating_at_least !== undefined && p.rating < criteria.rating_at_least) return false;
+            if (criteria.flag !== undefined && p.flag !== criteria.flag) return false;
+            if (criteria.color_label !== undefined && p.color_label !== criteria.color_label) return false;
+            if (criteria.camera_model !== undefined && p.camera_model !== criteria.camera_model) return false;
+            return true;
+          })
+          .map(clonePhoto);
+      }
+
       default:
         throw new Error(`Test-Stub: unbekannter invoke-Befehl "${cmd}"`);
     }

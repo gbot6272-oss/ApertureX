@@ -36,6 +36,30 @@ export interface PhotoDto {
   focal_length: number | null;
   captured_at: string | null;
   missing: boolean;
+  /** Sternebewertung 0–5. */
+  rating: number;
+  /** Pick/Reject-Flagge: 1 = Pick, -1 = Reject, 0 = keine. */
+  flag: number;
+  color_label: string | null;
+}
+
+export interface KeywordDto {
+  id: string;
+  name: string;
+}
+
+export interface CollectionDto {
+  id: string;
+  name: string;
+}
+
+/** Alle Felder optional — ein leeres Objekt liefert alle Fotos (siehe
+ * `apx_catalog::FilterCriteria`). */
+export interface FilterCriteriaDto {
+  rating_at_least?: number;
+  flag?: number;
+  color_label?: string;
+  camera_model?: string;
 }
 
 export function selectFolderDialog(): Promise<string | null> {
@@ -86,4 +110,64 @@ export function undoDevelopEdit(photoId: string): Promise<HistoryPositionDto | n
 
 export function redoDevelopEdit(photoId: string): Promise<HistoryPositionDto | null> {
   return invoke<HistoryPositionDto | null>("redo_develop_edit", { photoId });
+}
+
+// ---- Bibliothek: Bewertung/Flagge/Farbe (ab Phase 3) -----------------------
+
+export function setPhotoRating(photoId: string, rating: number): Promise<void> {
+  return invoke<void>("set_photo_rating", { photoId, rating });
+}
+
+export function setPhotoFlag(photoId: string, flag: number): Promise<void> {
+  return invoke<void>("set_photo_flag", { photoId, flag });
+}
+
+export function setPhotoColorLabel(photoId: string, colorLabel: string | null): Promise<void> {
+  return invoke<void>("set_photo_color_label", { photoId, colorLabel });
+}
+
+// ---- Bibliothek: Schlagworte (ab Phase 3) ----------------------------------
+
+export function addPhotoKeyword(photoId: string, name: string): Promise<string> {
+  return invoke<string>("add_photo_keyword", { photoId, name });
+}
+
+export function removePhotoKeyword(photoId: string, keywordId: string): Promise<void> {
+  return invoke<void>("remove_photo_keyword", { photoId, keywordId });
+}
+
+export function listPhotoKeywords(photoId: string): Promise<KeywordDto[]> {
+  return invoke<KeywordDto[]>("list_photo_keywords", { photoId });
+}
+
+// ---- Bibliothek: Sammlungen (ab Phase 3) -----------------------------------
+
+export function createCollection(name: string): Promise<string> {
+  return invoke<string>("create_collection", { name });
+}
+
+export function listCollections(): Promise<CollectionDto[]> {
+  return invoke<CollectionDto[]>("list_collections");
+}
+
+export function addToCollection(collectionId: string, photoId: string): Promise<void> {
+  return invoke<void>("add_to_collection", { collectionId, photoId });
+}
+
+export function removeFromCollection(collectionId: string, photoId: string): Promise<void> {
+  return invoke<void>("remove_from_collection", { collectionId, photoId });
+}
+
+export function listPhotosInCollection(collectionId: string): Promise<PhotoDto[]> {
+  return invoke<PhotoDto[]>("list_photos_in_collection", { collectionId });
+}
+
+// ---- Bibliothek: Suche/Filter (ab Phase 3) ---------------------------------
+
+export function searchPhotos(query: string): Promise<PhotoDto[]> {
+  return invoke<PhotoDto[]>("search_photos", { query });
+}
+
+export function filterPhotos(criteria: FilterCriteriaDto): Promise<PhotoDto[]> {
+  return invoke<PhotoDto[]>("filter_photos", { criteria });
 }

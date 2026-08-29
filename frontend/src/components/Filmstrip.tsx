@@ -1,8 +1,9 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useRef } from "react";
+import { useShallow } from "zustand/react/shallow";
 
 import { previewUrl } from "../lib/media";
-import { useAppStore } from "../store";
+import { resolveSelectionMode, selectActivePhotos, useAppStore } from "../store";
 
 // Feste Zellbreite statt individueller Seitenverhältnisse — hält die
 // Virtualisierung einfach und schnell auch bei sehr vielen Fotos (Ziel:
@@ -19,10 +20,18 @@ const CELL_GAP = 4;
  * gerendert — das hält das Scrollen auch bei 50.000 Einträgen flüssig.
  */
 export function Filmstrip() {
-  const selectedFolderId = useAppStore((s) => s.selectedFolderId);
+  const hasActiveContext = useAppStore(
+    (s) => s.selectedFolderId !== null || s.selectedCollectionId !== null || s.libraryResults !== null,
+  );
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
-  const photos = useAppStore((s) => (selectedFolderId ? s.photosByFolder[selectedFolderId] : undefined)) ?? [];
-  const selectPhoto = useAppStore((s) => s.selectPhoto);
+  const multiSelectedIds = useAppStore((s) => s.multiSelectedIds);
+  // Geteilter Fotoliste-Zustand mit `GridView` (siehe `DECISIONS.md`
+  // ADR-0024) — zeigt je nach aktivem Kontext den Ordner, die Sammlung
+  // oder ein Such-/Filterergebnis, nicht mehr nur `photosByFolder` direkt.
+  // `useShallow` statt einer bloßen Referenzprüfung — siehe `GridView.tsx`
+  // für die Begründung (sonst Endlos-Rerender bei leerer Auswahl).
+  const photos = useAppStore(useShallow(selectActivePhotos));
+  const togglePhotoSelection = useAppStore((s) => s.togglePhotoSelection);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -36,7 +45,7 @@ export function Filmstrip() {
   if (photos.length === 0) {
     return (
       <footer className="flex h-24 shrink-0 items-center justify-center border-t border-border bg-bg-raised text-sm text-text-muted">
-        {selectedFolderId ? "Keine Fotos in diesem Ordner." : "Wähle links einen Ordner."}
+        {hasActiveContext ? "Keine Fotos zum Anzeigen." : "Wähle links einen Ordner."}
       </footer>
     );
   }
@@ -51,7 +60,7 @@ export function Filmstrip() {
             <button
               key={photo.id}
               type="button"
-              onClick={() => selectPhoto(photo.id)}
+              onClick={(event) => togglePhotoSelection(photo.id, resolveSelectionMode(event))}
               // Siehe PHASE1_PROMPT.md Abschnitt 9, Akzeptanzkriterium 8:
               // eine außerhalb der App gelöschte Datei wird beim nächsten
               // Öffnen des Ordners als `missing` markiert (Backend:
@@ -65,7 +74,9 @@ export function Filmstrip() {
                 width: CELL_WIDTH,
                 height: "calc(100% - 8px)",
               }}
-              className={`relative overflow-hidden rounded border-2 ${photo.id === selectedPhotoId ? "border-accent" : "border-transparent hover:border-border"} ${photo.missing ? "opacity-40" : ""}`}
+              className={`relative overflow-hidden rounded border-2 ${
+                photo.id === selectedPhotoId ? "border-accent" : multiSelectedIds.includes(photo.id) ? "border-accent/50" : "border-transparent hover:border-border"
+              } ${photo.missing ? "opacity-40" : ""}`}
             >
               <img src={previewUrl(photo.id, 0)} alt={photo.filename} className="h-full w-full object-cover" loading="lazy" />
               {photo.missing && (

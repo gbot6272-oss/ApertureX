@@ -12,6 +12,10 @@ export function Header() {
   const developPanelOpen = useAppStore((s) => s.developPanelOpen);
   const toggleDevelopPanel = useAppStore((s) => s.toggleDevelopPanel);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
+  const centerView = useAppStore((s) => s.centerView);
+  const toggleCenterView = useAppStore((s) => s.toggleCenterView);
+  const metadataPanelOpen = useAppStore((s) => s.metadataPanelOpen);
+  const toggleMetadataPanel = useAppStore((s) => s.toggleMetadataPanel);
 
   const handleImportClick = useCallback(async () => {
     const path = await selectFolderDialog();
@@ -63,10 +67,33 @@ export function Header() {
 
       <button
         type="button"
+        onClick={toggleCenterView}
+        aria-pressed={centerView === "grid"}
+        className={`ml-auto rounded border px-3 py-1 text-sm ${
+          centerView === "grid" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
+        }`}
+      >
+        Raster
+      </button>
+
+      <button
+        type="button"
+        onClick={toggleMetadataPanel}
+        disabled={!selectedPhotoId && !metadataPanelOpen}
+        aria-pressed={metadataPanelOpen}
+        className={`rounded border px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50 ${
+          metadataPanelOpen ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
+        }`}
+      >
+        Info
+      </button>
+
+      <button
+        type="button"
         onClick={toggleDevelopPanel}
         disabled={!selectedPhotoId && !developPanelOpen}
         aria-pressed={developPanelOpen}
-        className={`ml-auto rounded border px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50 ${
+        className={`rounded border px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50 ${
           developPanelOpen ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
         }`}
       >

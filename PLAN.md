@@ -143,10 +143,17 @@ Anders als Phase 1 gibt es kein eigenes, ausführliches Prompt-Dokument für Pha
   - [x] Test: trivialer "Addiere Konstante"-Compute-Shader — **lief in dieser Sandbox tatsächlich auf einem echten GPU-Adapter durch** (nicht nur kompiliert), Ergebnis bit-genau gegen die CPU-Erwartung geprüft; überspringt sich selbst mit Diagnosemeldung, falls in einer Umgebung ganz ohne Adapter ausgeführt (z. B. manche CI-Runner vor Schritt 8s Verifikation)
   - [x] Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (118 Tests, inkl. echtem GPU-Dispatch) — alles grün
 
-- [ ] 4. Die 7 Regler: WGSL-Shader + CPU-Fallback
-  - [ ] 5 Regler-Module + fusionierter Shader
-  - [ ] `apx_raw::decode_linear()` additiver Einstiegspunkt
-  - [ ] Tests pro Modul (Hand-Erwartungswert, CPU/GPU-Abgleich, Identität, Fallback, Fusion-Abgleich)
+- [x] 4. Die 7 Regler: WGSL-Shader + CPU-Fallback
+  - [x] 5 Regler-Module (`white_balance`, `exposure`, `contrast`, `highlights_shadows`, `whites_blacks` — Lichter+Tiefen bzw. Weiß+Schwarz je ein Modul mit zwei Parametern, da mathematisch dieselbe tonwertzonen-gewichtete Operation), je mit eigenem `.wgsl`-Shader (`include_str!`), `#[repr(C)] #[derive(Pod, Zeroable)]`-Parameter-Struct, rayon-parallelisiertem CPU-Fallback mit identischer Mathematik und GPU-Dispatch über `gpu::dispatch::run_compute_f32`
+  - [x] Fusionierter Shader `basic_fused` (alle 5 Module in einem GPU-Aufruf, für den interaktiven Vorschau-Pfad) — Abgleichstest `fused_matches_sequential_application_of_individual_stages` beweist identisches Ergebnis zu den Einzel-Shadern
+  - [x] Weißabgleich als Verschiebung relativ zu `apx_raw::LinearImage::as_shot_wb_coeffs` (`[R, G, B, E]`-Konvention, viertes/Emerald-Koeffizient ignoriert wie bei der bestehenden `ColorPipeline`) statt absoluter Kelvin/Tint-Werte, `compute_gains` rechnet Kamera-Rohdaten + Nutzer-Verschiebung in die drei Kanal-Gains um
+  - [x] `apx_raw::decode_linear()` additiver Einstiegspunkt (neue `LinearImage { width, height, pixels: Vec<f32>, as_shot_wb_coeffs }`) — mirrort `decode_raw()` bis vor `ColorPipeline` für RAW, normalisiert `decode()`s u16-Ausgabe mit neutralen Koeffizienten für Fallback-Formate (JPEG/PNG/TIFF); bestehender `decode()`/`DecodedImage`-Vertrag für Phase-1-Aufrufer unverändert
+  - [x] Dafür genericisiert (zero-risk, bestehende Tests unverändert grün): `Orientation::apply_rgb<T>` (privat, `apply_rgb16`/`apply_rgb_f32` als Wrapper), `crop_to_active_area<T>`; neu `downsample_linear_if_needed` (f32-Pendant zu `downsample_if_needed`)
+  - [x] Tests pro Modul: Hand-Erwartungswert (z. B. Belichtung +1 EV ⇒ Ausgabe = Eingabe × 2), Identität bei neutralem EDL, CPU/GPU-Abgleich (Toleranz `1e-4`, GPU-Tests laufen in dieser Sandbox tatsächlich auf echter Hardware statt sich zu überspringen), Fusion-Abgleich; `apx-raw`: 6 neue Tests für `decode_linear`s Bausteine (Orientierung/Crop/Downsample für f32)
+  - [x] Bewusste Vereinfachungen dokumentiert (Modul-Doku-Kommentare): Lichter/Tiefen/Weiß/Schwarz wirken kanalweise statt luminanzbasiert (echte Tonwertzonen-Maskierung kommt mit Phase 4); Weißabgleich-Umrechnung ist eine lineare Näherung, keine physikalische Planckscher-Strahler-Rechnung (käme mit `lcms2`-Integration später)
+  - [x] `tile_cache.rs` bewusst weiterhin Platzhalter — die reale Implementierung gehört an den Tauri-Aufrufort (Schritt 5), wo Cache-Schlüssel und Lebensdauer konkret feststehen, statt spekulativ vorab zu entwerfen
+  - [x] `color/mod.rs` bewusst weiterhin Platzhalter — Schritt 4s Umfang war explizit „die 7 Regler"; `lcms2`/ProPhoto-Farbmanagement ist an keiner Reglerformel beteiligt und bleibt einem eigenen Schritt vorbehalten, sobald ein konkreter Aufrufer (z. B. Bildschirmprofil-Anzeige) es braucht
+  - [x] Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (150 Tests, inkl. aller `gpu_matches_cpu`-Tests tatsächlich auf echter GPU-Hardware) — alles grün
 
 - [ ] 5. Tauri-Anbindung: Command + Protokoll-Route
   - [ ] `AppState.pipeline`, `ImageRequest::Develop`, `apply_develop_edit`-Command

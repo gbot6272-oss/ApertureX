@@ -27,7 +27,7 @@ mod preview;
 pub use format::is_supported_extension;
 pub use metadata::{read_metadata, RawMetadata};
 pub use orientation::Orientation;
-pub use pipeline::{decode, DecodedImage};
+pub use pipeline::{decode, decode_linear, DecodedImage, LinearImage};
 pub use preview::extract_embedded_preview;
 
 // Re-Export, damit Aufrufer Vorschaubilder direkt weiterverarbeiten können,

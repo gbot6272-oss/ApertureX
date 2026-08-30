@@ -185,10 +185,61 @@ Raster/Filmstreifen nötig.
 
 Diese Abschnitte werden erst gefüllt, wenn die jeweilige Phase beginnt — hier nur benannt, damit die Zielarchitektur nicht aus dem Blick gerät:
 
-- **Phase 5:** Preset-Grundlagen (siehe `DECISIONS.md` ADR-0031) — kein eigenes `apx-presets`-Crate, stattdessen `apx-catalog`-Erweiterung (Preset-Tabellen, opakes EDL-Teilmengen-JSON, analog zu `edit_history.edl_json`) + neue `apx-app`-Commands + Frontend-Merge-/Skalierungslogik. Adobe-Interop und der „Templates"-Unterabschnitt (bis auf Import-/Umbenennungs-Templates, vorgezogen) bleiben auf spätere Phasen verschoben.
 - **Phase 6:** Maskensystem als eigene Pipeline-Stufe(n), plus die in `DECISIONS.md` ADR-0028 auf diese Phase verschobenen Workflow-Punkte (Schnappschüsse, Vorher/Nachher, Copy/Paste-Einstellungen, Sync, Referenzansicht, Soft-Proof) und Reparatur-Erweiterungen (Auto-Quellenfindung, Content-Aware-Fill, Sensorflecken-Visualisierung).
-- **Phase 7:** `apx-ai` — ONNX-Runtime-Integration, LLM-Client für Preset-Generator.
-- **Phase 8–9:** Export-Engine, Ausgabe-Module, Node-Editor, Stacking, Tethering, Skript-API/Plugins.
+- **Phase 7:** `apx-ai` — ONNX-Runtime-Integration, LLM-Client für Preset-Generator (siehe `DECISIONS.md` ADR-0031 Punkt 1: Referenzbild-Modus/Variationen-Generator/Preset-aus-Bearbeitung-Lernen sind dieselbe CV-/Optimierungs-Kategorie wie die ADR-0028-zurückgestellten Punkte und wandern deshalb ebenfalls hierher).
+- **Phase 8–9:** Export-Engine, Ausgabe-Module, Node-Editor, Stacking, Tethering, Skript-API/Plugins — auch Grundlage für die auf diese Phasen verschobenen Export-/Wasserzeichen-/Metadaten-/Layout-/Workflow-Templates und den Template-Marktplatz (ADR-0031 Punkt 5) sowie Adobe-`.xmp`/`.lrtemplate`-Interop (ADR-0031 Punkt 3).
+
+## 9. Architektur Phase 5 — Preset- und Template-System
+
+Beschreibt den tatsächlich gebauten Stand (siehe `DECISIONS.md` ADR-0031 für die Scope-Entscheidungen). Phase 5 fügt bewusst **kein** neues `apx-presets`-Crate hinzu (ADR-0031 Punkt 6): ein Preset ist reine Katalogdaten — eine benannte, versionierte EDL-*Teilmenge* — ohne neue Pixel-Verarbeitungslogik, analog zu `edit_history.edl_json`. Die gesamte Merge-/Skalierungs-/Bedingungslogik lebt im Frontend (`frontend/src/lib/presets.ts`); `apx-catalog`/`apx-app` reichen die EDL-Teilmenge nur als opaken JSON-String durch, exakt wie schon `edit_history` seit Phase 2.
+
+**`apx-catalog`-Erweiterung** (additive Migration `0004_presets.sql`): `preset_folders` (Baum über `parent_id`, analog zu `folders`), `presets` (Metadaten: Name/Ordner/Favorit/Tags/`conditions_json`), `preset_versions` (1:n zu `presets`, `sequence` + `edl_subset_json` + `created_at`, keine Version wird je überschrieben — jede erneute Speicherung eines bestehenden Presets legt eine neue Zeile an, „aktuellste Version" ist eine Abfrage nach `MAX(sequence)`). Drei neue ID-Typen (`PresetFolderId`/`PresetId`/`PresetVersionId`) über das bestehende `define_id_type!`-Makro. `repository::presets`-Modul (neu) folgt dem „ein Modul pro Tabellen-Gruppe"-Muster; `Catalog`-Fassade bekommt ~13 neue Methoden, alle auf einfachen sequenziellen `Connection::execute`-Aufrufen ohne explizite Transaktion (Präzedenzfall: `repository::edits::commit`).
+
+**`apx-app`-Commands** (`commands.rs`, ~14 neue `#[tauri::command]`-Funktionen): `PresetFolderDto`/`PresetDto`/`PresetVersionDto` als dünne DTO-Schicht über die Katalog-Structs; `ApxPresetFile { schema_version, name, tags, conditions, edl_subset }` fürs eigene `.apx`-Exportformat — bewusst mit *eingebetteten* `serde_json::Value`-Feldern für `conditions`/`edl_subset` (menschenlesbar beim Öffnen der Datei) statt der intern genutzten, nochmals als String verschachtelten `conditions_json`/`edl_subset_json`-Repräsentation; die Umwandlung zwischen beiden Formen passiert genau an der Export-/Import-Commandgrenze.
+
+**Frontend-Datenmodell** (`lib/presets.ts`): `PresetSectionKey = Exclude<keyof EdlPayload, "repair">` (Reparatur ist nie Teil eines Presets — bildspezifische Klon-/Reparatur-Striche sind kein übertragbarer „Look"). `PresetEdlSubset = Partial<Pick<EdlPayload, PresetSectionKey>>`.
+
+### Datenfluss Phase 5: Speichern → Anwenden → Stärke → Stapel
+
+```
+SavePresetDialog: ausgewählte Sektionen + Bedingungsregeln
+  -> buildPresetEdlSubset(developEdl, sections)   (extrahiert nur die angehakten Sektionen)
+  -> create_preset(folder, name, tags, conditions_json, edl_subset_json)
+       -> preset_versions-Zeile #1 (erste Version)
+
+PresetsPanel: Klick auf einen Preset-Namen
+  -> applyPreset(presetId)
+       -> latest_preset_version(presetId)                     (aktuellste EDL-Teilmenge)
+       -> applyConditionsToSubset(subset, conditions, photoMeta)   (siehe unten)
+       -> mergeEdlSubset(developEdl, subset)    (jede Sektion wird als Ganzes ersetzt, nie feldweise gemischt)
+       -> commitDevelopEdit(..., { preservePresetStrengthContext: true })
+       -> presetStrengthContext = { baseEdl, subset, strength: 100 }   (für den nachträglichen Stärke-Regler)
+
+Stärke-Regler (0-200 %, solange kein anderer Edit dazwischenliegt):
+  setPresetStrength(prozent)
+       -> scalePresetEdlSubset(context.subset, prozent)   (skaliert numerische Blattwerte relativ zur
+                                                             jeweiligen Neutralstellung; Arrays/Enums/Strings
+                                                             unskaliert — dieselbe Einschränkung wie bei
+                                                             Lightroom, siehe presets.ts-Moduldoku)
+       -> mergeEdlSubset(context.baseEdl, scaled)          (immer NEU aus dem unveränderten baseEdl-Snapshot
+                                                             berechnet, nie inkrementell — reproduzierbar bei
+                                                             wiederholtem Hin-und-her-Schieben)
+       -> nur developEdl aktualisiert (Live-Vorschau via useDevelopRender), commitPresetStrength() persistiert
+          erst beim Loslassen
+
+Preset-Stapel: applyPresetStack() wendet jedes Preset im Stapel sequenziell an (jedes bei 100 %, spätere
+  Einträge überschreiben gemeinsame Sektionen früherer), committet einmal am Ende.
+```
+
+`commitDevelopEdit`s Signatur bekam dafür einen einzigen neuen optionalen Parameter (`{ preservePresetStrengthContext?: boolean }`) statt jeden der ~40 bestehenden Aufrufer anzufassen oder eine Generation-Zähler-Infrastruktur einzuführen — jeder *andere* Aufruf (Standardwert) löscht `presetStrengthContext` automatisch, was „Stärke bleibt änderbar, bis ein anderer Edit dazwischenkommt" (`SPEC.md` §3.5) genau abbildet.
+
+**Bedingte Presets (vereinfacht, ADR-0031 Punkt 4):** `PresetCondition { field, op, value, section }` — feste Feldliste (ISO/Blende/Brennweite/Kameramodell/Objektiv, alle bereits in `photos`), Operatoren `>`/`<`/`=`/„enthält", UND-verknüpft, kein UI-Builder für ODER/Verschachtelung. `section: null` bedeutet „gilt fürs ganze Preset" (ein Fehlschlag verhindert das Anwenden komplett); eine gesetzte Sektion grenzt einen Fehlschlag auf genau diese Sektion ein. `evaluateCondition`/`applyConditionsToSubset` laufen sowohl in `applyPreset`/`applyPresetStack` als auch in der Hover-Vorschau und dem `PresetThumbnail` — dieselbe Auswertung überall, damit die Vorschau nie etwas zeigt, was `applyPreset` tatsächlich nicht anwenden würde. Ein fehlendes Metadatum am aktuellen Foto gilt konservativ als nicht erfüllt.
+
+**Live-Vorschau** (Hover + Thumbnail, `SPEC.md` §3.5): rein visuell, ändert `developEdl` nie. `Viewer.tsx` berechnet `renderedEdl = hoverPresetSubset ? mergeEdlSubset(developEdl, hoverPresetSubset) : developEdl` nur für den ans Rendering übergebenen EDL-JSON. `PresetThumbnail.tsx` rendert bei niedriger Auflösung über einen eigenen Hook `useDevelopPreviewThumbnail`, der sich mit dem Haupt-Viewer-Hook `useDevelopRender` die rAF-debounced Fetch-/Parse-/Abort-Logik über `useDevelopFrameInternal` teilt, aber bewusst den globalen Latenz-Indikator (`developLastLatencyMs`) nicht berührt.
+
+**Versionierung + Diff** (`PresetVersionsDialog.tsx`): „Aktuellen Stand als neue Version speichern" übernimmt dieselben Sektionen wie die bisher aktuellste Version (keine implizite Sektions-Erweiterung) und ruft `add_preset_version` auf. `diffEdlSubsets` vergleicht zwei EDL-Teilmengen feldweise (rekursiv in verschachtelte Objekte, Arrays als atomarer Wert — dieselbe Konvention wie `interpolateValue`s Umgang mit nicht-skalaren Preset-Bestandteilen) und listet jeden abweichenden Blattwert mit Pfad.
+
+**Import-/Umbenennungs-Templates (vorgezogen aus Phase 3, ADR-0031 Punkt 7):** `import_folder_with_mode`/`list_import_presets`/`save_import_preset`/`delete_import_preset` existierten seit Phase 3 im Backend, hatten aber bis Phase 5 Schritt 9 keine Frontend-Anbindung. Neuer `ImportDialog.tsx`, additiv über einen zweiten „Import mit Vorlage…"-Knopf neben dem unveränderten einfachen „Ordner importieren" erreichbar. `lib/renamePattern.ts` bildet `crates/apx-app/src/import/rename.rs`s Token-Ersetzung (`{date}`/`{seq}`/`{camera}`/`{original}`) rein clientseitig für die Live-Vorschau nach — der eigentliche Import läuft weiterhin ausschließlich im Backend.
 
 ## 8. Architektur Phase 4 — Entwickeln vollständig
 

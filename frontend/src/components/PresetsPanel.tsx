@@ -79,6 +79,7 @@ function PresetRow({ preset, folders, onOpenVersions }: PresetRowProps) {
   const previewPresetHover = useAppStore((s) => s.previewPresetHover);
   const clearPresetHoverPreview = useAppStore((s) => s.clearPresetHoverPreview);
   const photoMeta = useAppStore(selectPresetConditionMeta);
+  const exportPresetAsApxFile = useAppStore((s) => s.exportPresetAsApxFile);
 
   function handleRename(event: React.MouseEvent) {
     event.stopPropagation();
@@ -142,6 +143,15 @@ function PresetRow({ preset, folders, onOpenVersions }: PresetRowProps) {
           aria-label={`${preset.name}: Versionen`}
         >
           🕐
+        </button>
+        <button
+          type="button"
+          onClick={() => void exportPresetAsApxFile(preset.id)}
+          className="shrink-0 text-text-muted hover:text-accent"
+          title="Als .apx exportieren"
+          aria-label={`${preset.name} als .apx exportieren`}
+        >
+          ⬇
         </button>
         <select
           aria-label={`${preset.name}: Ordner`}
@@ -248,6 +258,7 @@ export function PresetsPanel() {
   const refreshPresetFolders = useAppStore((s) => s.refreshPresetFolders);
   const refreshPresets = useAppStore((s) => s.refreshPresets);
   const createPresetFolder = useAppStore((s) => s.createPresetFolder);
+  const importPresetFromApxFile = useAppStore((s) => s.importPresetFromApxFile);
   const [newFolderName, setNewFolderName] = useState("");
   const [versionsDialog, setVersionsDialog] = useState<{ presetId: string; presetName: string } | null>(null);
 
@@ -308,6 +319,14 @@ export function PresetsPanel() {
           +
         </button>
       </form>
+
+      <button
+        type="button"
+        onClick={() => void importPresetFromApxFile(selectedPresetFolderId)}
+        className="rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel"
+      >
+        .apx importieren…
+      </button>
 
       <ul className="flex flex-col gap-1">
         {visiblePresets.map((preset) => (

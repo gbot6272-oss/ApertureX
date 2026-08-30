@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { getMockInvokeLog, installTauriMock } from "./tauri-mock";
+import { getMockInvokeLog, installTauriMock, setMockFixtures } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000401";
 const FOLDER_PATH = "/home/user/Fotos/Presets-Test";
@@ -305,6 +305,29 @@ test.describe("Presets-Panel", () => {
     await expect(dialog.getByLabel("Version B").locator("option")).toHaveCount(2);
     await dialog.getByLabel("Version B").selectOption({ index: 1 });
     await expect(dialog.getByText("basic.exposure_ev")).toBeVisible();
+  });
+
+  test("exportiert ein Preset als .apx und importiert eine .apx-Datei als neues Preset", async ({ page }) => {
+    await setUp(page);
+    await page.getByRole("button", { name: PRESET_FOLDER.name }).click();
+
+    await page.getByRole("button", { name: `${PRESET.name} als .apx exportieren` }).click();
+    const log = await getMockInvokeLog(page);
+    expect(log.some((entry) => entry.cmd === "export_preset_to_apx_file" && (entry.args as { presetId: string }).presetId === PRESET.id)).toBe(
+      true,
+    );
+
+    await page.getByRole("button", { name: "Wurzel" }).click();
+    await setMockFixtures(page, {
+      importApxFile: {
+        name: "Importiertes Preset",
+        tags: ["import"],
+        conditions_json: "[]",
+        edl_subset_json: '{"basic":{"exposure_ev":0.4}}',
+      },
+    });
+    await page.getByRole("button", { name: ".apx importieren…" }).click();
+    await expect(page.getByText("Importiertes Preset")).toBeVisible();
   });
 
   test("benennt einen Preset-Ordner über den Dialog um", async ({ page }) => {

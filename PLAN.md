@@ -448,7 +448,7 @@ Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Obj
 ### Nicht in Phase 4 (bewusst zurückgestellt)
 Siehe ADR-0028 (plus Nachtrag): Workflow-Punkte (Schnappschüsse, Vorher/Nachher, Copy/Paste-Einstellungen, Sync, Auto-Sync, Referenzansicht, Soft-Proof), echter Adobe-Profil-Import (Objektivprofile + DCP-Kameraprofile), Auto-Quellenfindung, inhaltsbasiertes Füllen und Sensorflecken-Visualisierung für die Reparatur-Funktion — alle auf Phase 6 verschoben. Phase 5 ist laut `SPEC.md` §5 das Preset-/Template-System (§3.5), nicht die oben genannten Workflow-Punkte — siehe `ARCHITECTURE.md` §7.
 
-## Aktuelle Phase: Phase 5 — Preset- und Template-System
+## Abgeschlossene Phase: Phase 5 — Preset- und Template-System
 
 `SPEC.md` §5 nennt wörtlich nur „Preset- und Template-System"; §3.5 (der volle Feature-Katalog) reicht deutlich weiter als in dieser Phase sinnvoll baubar — siehe `DECISIONS.md` ADR-0031 für die Scope-Präzisierung (Preset-Grundlagen + vereinfachte bedingte Presets + vorgezogene Import-/Umbenennungs-Templates jetzt; KI-Generator auf Phase 7, Adobe-Interop und der übrige Templates-Unterabschnitt auf spätere Phasen verschoben; kein eigenes `apx-presets`-Crate, siehe ADR-0031 Punkt 6).
 
@@ -504,10 +504,11 @@ Siehe ADR-0028 (plus Nachtrag): Workflow-Punkte (Schnappschüsse, Vorher/Nachher
   - [x] Neuer `ImportDialog.tsx` (geöffnet über einen zusätzlichen „Import mit Vorlage…"-Knopf, additiv zum unveränderten einfachen „Ordner importieren"-Knopf) bindet `import_folder_with_mode` sowie `list_import_presets`/`save_import_preset`/`delete_import_preset` ans Frontend an — diese Commands existierten seit Phase 3 im Backend, hatten aber bis jetzt **keine** Frontend-Anbindung (die `FEATURES.md`-Zeilen „Import mit Kopieren/Verschieben/Hinzufügen" und „Import-Presets" waren entsprechend vorschnell auf Fertig markiert; korrigiert in Schritt 10)
   - [x] Token-Editor für `rename_pattern` (Knöpfe für `{date}`/`{seq}`/`{camera}`/`{original}`, Live-Vorschau eines Beispieldateinamens über `lib/renamePattern.ts`, das dieselbe Ersetzungslogik wie `crates/apx-app/src/import/rename.rs` rein clientseitig für die Anzeige nachbildet)
 
-- [ ] 10. Dokumentation, Tests, Abnahme
-  - [ ] `ARCHITECTURE.md`: neues Kapitel „Architektur Phase 5" (Datenfluss Speichern/Anwenden/Stapel, analog zu §5/§6/§8)
-  - [ ] `FEATURES.md`: alle jetzt gebauten §3.5-Zeilen auf Fertig
-  - [ ] Volle Verifikation, Commit+Push, CI-Check, ehrlicher Abschlussbericht
+- [x] 10. Dokumentation, Tests, Abnahme
+  - [x] `ARCHITECTURE.md`: neues §9 „Architektur Phase 5" (Datenfluss Speichern/Anwenden/Stärke/Stapel/Bedingungen/Versionierung/Import-Templates, analog zu §5/§6/§8); §7s Phase-5-Platzhalter entfernt, Phase-7/8–9-Zeilen um die dorthin verschobenen ADR-0031-Punkte ergänzt
+  - [x] `FEATURES.md`: alle jetzt gebauten §3.5-Zeilen auf Fertig; zusätzlich drei vorschnell aus Phase 3 auf Fertig markierte Zeilen korrigiert („Import mit Kopieren/Verschieben/Hinzufügen", „Import-Presets", „Automatisches Umbenennen mit Token-System" — Backend existierte seit Phase 3, Frontend fehlte bis Schritt 9 komplett) sowie eine falsch getaggte Zeile („Import mit DNG-Konvertierung": Phase 5 → Phase 8, ADR-0025 tippte noch auf „Phase 5 (Export/Publish)", bevor `SPEC.md` §5 Phase 5 als Preset-System festlegte)
+  - [x] **Nachgezogene Lücke:** `.apx`-Export/-Import hatte seit Schritt 2 fertige Backend-Commands (`export_preset_to_apx_file`/`import_preset_from_apx_file`) und sogar bereits Wrapper-Funktionen in `lib/tauri.ts`, aber **keine** UI — in keinem Schritt 3–9 verdrahtet (Lücke, kein bewusster Scope-Schnitt). In Schritt 10 nachgeholt: Export-Knopf je Preset-Zeile, Import-Knopf im Panel-Kopf (`store/index.ts`s `exportPresetAsApxFile`/`importPresetFromApxFile`)
+  - [x] Volle Verifikation (`cargo fmt/clippy/test`, `tsc -b`, `vitest`, `playwright`, `vite build`), Commit+Push, CI-Check, ehrlicher Abschlussbericht
 
 ### Nicht in Phase 5 (bewusst zurückgestellt)
 Siehe ADR-0031: Preset-Generator (KI: LLM-Anfrage, Referenzbild-Modus, Variationen-Generator, Preset-aus-Bearbeitung-Lernen) → Phase 7; Adobe-`.xmp`/`.lrtemplate`-Import/-Export → spätere Phase; Export-/Wasserzeichen-/Metadaten-/Layout-/Workflow-Templates + Template-Marktplatz → Phase 8–9 (setzen die dort erst gebaute Export-Engine voraus).

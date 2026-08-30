@@ -500,6 +500,13 @@ interface PresetsSlice {
   renamePreset: (presetId: string, name: string) => Promise<void>;
   movePresetToFolder: (presetId: string, folderId: string | null) => Promise<void>;
   deletePreset: (presetId: string) => Promise<void>;
+  /** Öffnet den nativen Speichern-Dialog und schreibt das eigene `.apx`-
+   * Format (`SPEC.md` §3.5: „Import/Export .apx") — no-op (kein Fehler),
+   * wenn der Dialog abgebrochen wird. */
+  exportPresetAsApxFile: (presetId: string) => Promise<void>;
+  /** Öffnet den nativen Öffnen-Dialog, liest eine `.apx`-Datei und legt
+   * daraus ein neues Preset in `folderId` an. */
+  importPresetFromApxFile: (folderId: string | null) => Promise<void>;
   /** Legt ein neues Preset aus dem aktuellen `developEdl` an — nur die
    * ausgewählten Sektionen wandern in die EDL-Teilmenge (siehe
    * `lib/presets.ts`s `buildPresetEdlSubset`). No-op ohne Namen oder ohne
@@ -1732,6 +1739,27 @@ export const useAppStore = create<AppStore>()(
       try {
         await api.deletePreset(presetId);
         await get().refreshPresets();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    exportPresetAsApxFile: async (presetId) => {
+      try {
+        await api.exportPresetToApxFile(presetId);
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    importPresetFromApxFile: async (folderId) => {
+      try {
+        const imported = await api.importPresetFromApxFile(folderId);
+        if (imported) await get().refreshPresets();
       } catch (err) {
         set((state) => {
           state.catalogError = String(err);

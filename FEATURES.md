@@ -23,10 +23,10 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
      Abschlussbericht ehrlich benannten Lücken), siehe ADR-0027. -->
 
 - [x] Import: Ordner scannen, Metadaten lesen, Thumbnails erzeugen (Basisfunktion) — Phase 1 — Status: Fertig
-- [x] Import mit Kopieren/Verschieben/Hinzufügen — Phase 3 — Status: Fertig
-- [ ] Import mit DNG-Konvertierung — Phase 5 — Status: Nicht begonnen
-- [x] Import-Presets — Phase 3 — Status: Fertig
-- [x] Automatisches Umbenennen mit Token-System — Phase 3 — Status: Fertig
+- [x] Import mit Kopieren/Verschieben/Hinzufügen — Phase 3 — Status: Fertig (Backend seit Phase 3; die damalige Fertig-Markierung war vorschnell — es gab bis Phase 5 Schritt 9 **kein** Frontend dafür, siehe `ARCHITECTURE.md` §9 und `DECISIONS.md` ADR-0031 Punkt 7. Jetzt über `ImportDialog.tsx` erreichbar)
+- [ ] Import mit DNG-Konvertierung — Phase 8 — Status: Nicht begonnen (ADR-0025 taggte diese Zeile ursprünglich „Phase 5 (Export/Publish)", noch bevor `SPEC.md` §5 festlegte, dass Phase 5 tatsächlich das Preset-/Template-System ist, siehe ADR-0031 — Retag auf Phase 8, wo laut `ARCHITECTURE.md` §7 die Export-Engine inkl. DNG-Ausgabeformat tatsächlich gebaut wird)
+- [x] Import-Presets — Phase 3 — Status: Fertig (dieselbe Korrektur wie die Zeile darüber: Backend seit Phase 3, Frontend erst Phase 5 Schritt 9)
+- [x] Automatisches Umbenennen mit Token-System — Phase 3 — Status: Fertig (dieselbe Korrektur: der Token-Editor mit Live-Vorschau kam erst mit `ImportDialog.tsx` in Phase 5 Schritt 9 hinzu)
 - [x] Duplikaterkennung per exaktem Hash — Phase 3 — Status: Fertig (siehe ADR-0027: `content_hash`-Spalte existierte bereits seit Phase 1, wird jetzt per Streaming-SHA-256 beim Import befüllt; reine Anzeige, blockiert den Import nicht)
 - [ ] Duplikaterkennung per Perceptual Hash, Duplikat-Assistent mit Auto-Auswahl bester Version — Phase 9 — Status: Nicht begonnen
 - [x] Ordnerbaum (Basis-Anzeige, Fotoanzahl je Ordner) — Phase 1 — Status: Fertig (flache Liste, kein Baum — echte Hierarchie/Synchronisation ist Phase 3, siehe Zeile darunter)
@@ -198,15 +198,15 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
      anderen bleiben auf der Phase ihres zugehörigen Subsystems (Export-
      Engine: Phase 8–9). -->
 
-- [ ] Presets: wählbare EDL-Teilmenge, Checkbox-Dialog beim Speichern — Phase 5 — Status: Nicht begonnen
-- [ ] Preset-Ordnerhierarchie, Drag & Drop, Favoriten, Suche, Tags — Phase 5 — Status: Nicht begonnen
-- [ ] Preset-Stärke 0–200 %, nachträglich änderbar — Phase 5 — Status: Nicht begonnen
-- [ ] Live-Vorschau (Hover im Bild + Thumbnail in der Liste) — Phase 5 — Status: Nicht begonnen
-- [ ] Preset-Stapel mit editierbarer Reihenfolge — Phase 5 — Status: Nicht begonnen
-- [ ] Bedingte Presets (Bedingungssprache im UI-Builder) — Phase 5 — Status: Nicht begonnen (wird abweichend vereinfacht umgesetzt, siehe ADR-0031)
-- [ ] Import/Export `.apx` — Phase 5 — Status: Nicht begonnen
+- [x] Presets: wählbare EDL-Teilmenge, Checkbox-Dialog beim Speichern — Phase 5 — Status: Fertig
+- [x] Preset-Ordnerhierarchie, Drag & Drop, Favoriten, Suche, Tags — Phase 5 — Status: Fertig (abweichend, siehe ADR-0031: Verschieben zwischen Ordnern per Dropdown-Auswahl statt Drag & Drop — dieselbe funktionale Fähigkeit, andere Interaktion; kein separates Suchfeld, Presets werden nach Ordner gefiltert angezeigt)
+- [x] Preset-Stärke 0–200 %, nachträglich änderbar — Phase 5 — Status: Fertig
+- [x] Live-Vorschau (Hover im Bild + Thumbnail in der Liste) — Phase 5 — Status: Fertig
+- [x] Preset-Stapel mit editierbarer Reihenfolge — Phase 5 — Status: Fertig
+- [x] Bedingte Presets (Bedingungssprache im UI-Builder) — Phase 5 — Status: Fertig (abweichend vereinfacht umgesetzt, siehe ADR-0031: feste Feldliste + UND-verknüpfte Regeln statt freiem UI-Builder mit ODER/Verschachtelung)
+- [x] Import/Export `.apx` — Phase 5 — Status: Fertig
 - [ ] Import/Export Adobe `.xmp` / `.lrtemplate` (beide Richtungen) — Phase 6 — Status: Nicht begonnen (siehe ADR-0031)
-- [ ] Preset-Versionierung mit Diff-Ansicht — Phase 5 — Status: Nicht begonnen
+- [x] Preset-Versionierung mit Diff-Ansicht — Phase 5 — Status: Fertig
 - [ ] Preset-Generator per LLM (natürlichsprachliche Beschreibung) — Phase 7 — Status: Nicht begonnen
 - [ ] Referenzbild-Modus (numerische Optimierung, kein LLM) — Phase 7 — Status: Nicht begonnen
 - [ ] Variationen-Generator (Kontaktbogen) — Phase 7 — Status: Nicht begonnen
@@ -214,8 +214,8 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [ ] Export-Templates (Ziel, Format, Qualität, Farbraum, Größe, Schärfung, Metadaten, Wasserzeichen, Mehrfachziel) — Phase 8 — Status: Nicht begonnen
 - [ ] Wasserzeichen-Templates — Phase 8 — Status: Nicht begonnen
 - [ ] Metadaten-Templates (Copyright/Ersteller/Kontakt/IPTC) — Phase 8 — Status: Nicht begonnen
-- [ ] Import-Templates — Phase 5 — Status: Nicht begonnen (vorgezogen aus Phase 3, siehe ADR-0031 Punkt 7 — Rust-Unterbau existiert bereits seit Phase 3 unbenutzt)
-- [ ] Umbenennungs-Templates mit Token-Editor — Phase 5 — Status: Nicht begonnen (vorgezogen aus Phase 3, siehe ADR-0031 Punkt 7)
+- [x] Import-Templates — Phase 5 — Status: Fertig (vorgezogen aus Phase 3, siehe ADR-0031 Punkt 7 — Rust-Unterbau existierte bereits seit Phase 3 unbenutzt, Frontend-Anbindung jetzt in Schritt 9 nachgezogen)
+- [x] Umbenennungs-Templates mit Token-Editor — Phase 5 — Status: Fertig (vorgezogen aus Phase 3, siehe ADR-0031 Punkt 7)
 - [ ] Layout-Templates (Druck/Buch/Diashow/Web) — Phase 8 — Status: Nicht begonnen
 - [ ] Workflow-Templates (Import→Filter→Preset→Export als ein Klick) — Phase 8 — Status: Nicht begonnen
 - [ ] Template-Marktplatz-Struktur (lokales Repo-Format, Manifest, Installation) — Phase 8 — Status: Nicht begonnen (siehe ADR-0031: setzt die anderen Template-Bausteine voraus)

@@ -45,6 +45,12 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     catalogStatus: { catalog_path: "mock-catalog.sqlite3", folder_count: 0, photo_count: 0 },
     folders: [] as unknown[],
     photosByFolder: {} as Record<string, unknown[]>,
+    // `.apx`-Import/-Export (Phase 5 Schritt 10) — die echten Commands
+    // öffnen einen nativen Datei-Dialog im Backend; hier stattdessen fest
+    // hinterlegte Ergebnisse, per Fixture steuerbar (siehe
+    // `exportPresetToApxFile`/`importPresetFromApxFile`-Tests).
+    exportApxPathResult: "/mock/export.apx" as string | null,
+    importApxFile: null as { name: string; tags: string[]; conditions_json: string; edl_subset_json: string } | null,
     ...initialFixtures,
   };
   w.__mockInvokeLog = [] as Array<{ cmd: string; args: unknown }>;
@@ -208,6 +214,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       catalogStatus: unknown;
       folders: unknown[];
       photosByFolder: Record<string, unknown[]>;
+      exportApxPathResult: string | null;
+      importApxFile: { name: string; tags: string[]; conditions_json: string; edl_subset_json: string } | null;
     };
 
     switch (cmd) {
@@ -519,12 +527,34 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return { ...latest };
       }
       // `.apx`-Dateidialoge lassen sich ohne echtes Betriebssystemfenster
-      // nicht sinnvoll nachbilden — beide Commands simulieren einen
-      // abgebrochenen Dialog (`null`), die eigentliche Im-/Export-Logik
-      // ist bereits in `apx-app`s `commands.rs`-Tests abgedeckt.
+      // nicht sinnvoll nachbilden — beide Commands liefern stattdessen ein
+      // per Fixture steuerbares Ergebnis (Default: `exportApxPathResult`
+      // ein fester Mock-Pfad, `importApxFile` `null` = abgebrochener
+      // Dialog). Die eigentliche Serialisierungs-/Parsing-Logik ist
+      // bereits in `apx-app`s `commands.rs`-Tests abgedeckt — hier geht es
+      // nur um die Frontend-Anbindung (Preset-Liste aktualisiert sich nach
+      // einem erfolgreichen Import).
       case "export_preset_to_apx_file":
-      case "import_preset_from_apx_file":
-        return null;
+        return fixtures.exportApxPathResult;
+      case "import_preset_from_apx_file": {
+        const file = fixtures.importApxFile;
+        if (!file) return null;
+        const presetId = `preset-${nextPresetId++}`;
+        const versionId = `preset-version-${nextPresetVersionId++}`;
+        const now = new Date().toISOString();
+        const preset = {
+          id: presetId,
+          folder_id: (args.folderId as string | null) ?? null,
+          name: file.name,
+          is_favorite: false,
+          tags: [...file.tags],
+          conditions_json: file.conditions_json,
+          created_at: now,
+        };
+        presets.push(preset);
+        presetVersions[presetId] = [{ id: versionId, preset_id: presetId, sequence: 1, edl_subset_json: file.edl_subset_json, created_at: now }];
+        return { ...preset, tags: [...preset.tags] };
+      }
 
       default:
         throw new Error(`Test-Stub: unbekannter invoke-Befehl "${cmd}"`);

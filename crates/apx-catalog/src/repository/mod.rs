@@ -7,5 +7,6 @@ pub(crate) mod edits;
 pub(crate) mod folders;
 pub(crate) mod keywords;
 pub(crate) mod photos;
+pub(crate) mod presets;
 pub(crate) mod previews;
 pub(crate) mod search;

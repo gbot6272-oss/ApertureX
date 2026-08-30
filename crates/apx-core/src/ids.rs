@@ -82,6 +82,9 @@ define_id_type!(CatalogId);
 define_id_type!(EditHistoryId);
 define_id_type!(KeywordId);
 define_id_type!(CollectionId);
+define_id_type!(PresetFolderId);
+define_id_type!(PresetId);
+define_id_type!(PresetVersionId);
 
 #[cfg(test)]
 mod tests {

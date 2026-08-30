@@ -17,9 +17,12 @@ uuid.workspace = true
 # rusqlites eingebaute OffsetDateTime-Konvertierung würde stattdessen TEXT
 # (RFC 3339) erwarten. Die Umwandlung passiert daher manuell in models.rs.
 rusqlite = { version = "0.32", features = ["bundled"] }
+# Ab Phase 5 auch zur Laufzeit gebraucht: `presets.tags_json` wird als
+# `Vec<String>` (de-)serialisiert (siehe repository/presets.rs) — anders
+# als `edit_history.edl_json`/`presets.conditions_json`/
+# `preset_versions.edl_subset_json`, die für apx-catalog opake Strings
+# bleiben (siehe deren Moduldoku).
+serde_json.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
-# Nur zum Bauen von Test-EDL-Werten (EdlEnvelope.payload ist für
-# apx-catalog selbst undurchsichtig, siehe repository/edits.rs).
-serde_json.workspace = true

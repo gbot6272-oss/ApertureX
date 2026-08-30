@@ -13,6 +13,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_initial.sql"),
     include_str!("../migrations/0002_edits.sql"),
     include_str!("../migrations/0003_library.sql"),
+    include_str!("../migrations/0004_presets.sql"),
 ];
 
 /// Wendet alle noch fehlenden Migrationen auf `conn` an.
@@ -66,12 +67,13 @@ mod tests {
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN \
                  ('folders','photos','previews','edit_history','edit_current', \
-                 'keywords','photo_keywords','collections','collection_photos')",
+                 'keywords','photo_keywords','collections','collection_photos', \
+                 'preset_folders','presets','preset_versions')",
                 [],
                 |row| row.get(0),
             )
             .expect("lesbar");
-        assert_eq!(table_count, 9);
+        assert_eq!(table_count, 12);
 
         let fts_count: i64 = conn
             .query_row(

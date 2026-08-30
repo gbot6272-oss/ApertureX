@@ -29,14 +29,15 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use apx_core::{
-    AppError, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId, PhotoId, Result,
+    AppError, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId, PhotoId,
+    PresetFolderId, PresetId, PresetVersionId, Result,
 };
 use rusqlite::Connection;
 use time::OffsetDateTime;
 
 pub use models::{
     Collection, EditHistoryEntry, FilterCriteria, Folder, HistoryPosition, Keyword, NewPhoto,
-    Photo, Preview, PreviewLevel,
+    Photo, Preset, PresetFolder, PresetVersion, Preview, PreviewLevel,
 };
 
 pub struct Catalog {
@@ -316,6 +317,115 @@ impl Catalog {
     pub fn list_photos_in_collection(&self, collection_id: CollectionId) -> Result<Vec<Photo>> {
         let conn = self.lock()?;
         repository::collections::list_photos(&conn, collection_id)
+    }
+
+    // ---- Presets (ab Phase 5, siehe DECISIONS.md ADR-0031) -----------------
+
+    pub fn create_preset_folder(
+        &self,
+        name: &str,
+        parent_id: Option<PresetFolderId>,
+    ) -> Result<PresetFolderId> {
+        let conn = self.lock()?;
+        repository::presets::create_folder(&conn, name, parent_id, OffsetDateTime::now_utc())
+    }
+
+    pub fn rename_preset_folder(&self, id: PresetFolderId, name: &str) -> Result<()> {
+        let conn = self.lock()?;
+        repository::presets::rename_folder(&conn, id, name)
+    }
+
+    /// Löscht einen Preset-Ordner — verschachtelte Unterordner fallen per
+    /// Kaskade mit, enthaltene Presets bleiben erhalten und rutschen an
+    /// die Wurzel (siehe [`repository::presets::delete_folder`]).
+    pub fn delete_preset_folder(&self, id: PresetFolderId) -> Result<()> {
+        let conn = self.lock()?;
+        repository::presets::delete_folder(&conn, id)
+    }
+
+    pub fn list_preset_folders(&self) -> Result<Vec<PresetFolder>> {
+        let conn = self.lock()?;
+        repository::presets::list_folders(&conn)
+    }
+
+    /// Legt ein neues Preset samt seiner ersten Version an.
+    /// `edl_subset_json`/`conditions_json` sind für `apx-catalog` opake
+    /// JSON-Strings (siehe `repository::presets`s Moduldoku).
+    pub fn create_preset(
+        &self,
+        folder_id: Option<PresetFolderId>,
+        name: &str,
+        tags: &[String],
+        conditions_json: &str,
+        edl_subset_json: &str,
+    ) -> Result<(PresetId, PresetVersionId)> {
+        let conn = self.lock()?;
+        repository::presets::create(
+            &conn,
+            folder_id,
+            name,
+            tags,
+            conditions_json,
+            edl_subset_json,
+            OffsetDateTime::now_utc(),
+        )
+    }
+
+    /// Ändert Name/Ordner/Tags/Bedingungen eines Presets, ohne eine neue
+    /// Version anzulegen — siehe [`Catalog::add_preset_version`] dafür.
+    pub fn update_preset_metadata(
+        &self,
+        id: PresetId,
+        folder_id: Option<PresetFolderId>,
+        name: &str,
+        tags: &[String],
+        conditions_json: &str,
+    ) -> Result<()> {
+        let conn = self.lock()?;
+        repository::presets::update_metadata(&conn, id, folder_id, name, tags, conditions_json)
+    }
+
+    pub fn set_preset_favorite(&self, id: PresetId, is_favorite: bool) -> Result<()> {
+        let conn = self.lock()?;
+        repository::presets::set_favorite(&conn, id, is_favorite)
+    }
+
+    pub fn delete_preset(&self, id: PresetId) -> Result<()> {
+        let conn = self.lock()?;
+        repository::presets::delete(&conn, id)
+    }
+
+    pub fn list_presets(&self) -> Result<Vec<Preset>> {
+        let conn = self.lock()?;
+        repository::presets::list_all(&conn)
+    }
+
+    /// Legt eine neue Version an (überschreibt die EDL-Teilmenge, ohne
+    /// ältere Versionen zu löschen — siehe `repository::presets`s
+    /// Moduldoku zur Versionierung ohne Undo/Redo-Zeiger).
+    pub fn add_preset_version(
+        &self,
+        preset_id: PresetId,
+        edl_subset_json: &str,
+    ) -> Result<PresetVersionId> {
+        let conn = self.lock()?;
+        repository::presets::create_version(
+            &conn,
+            preset_id,
+            edl_subset_json,
+            OffsetDateTime::now_utc(),
+        )
+    }
+
+    pub fn list_preset_versions(&self, preset_id: PresetId) -> Result<Vec<PresetVersion>> {
+        let conn = self.lock()?;
+        repository::presets::list_versions(&conn, preset_id)
+    }
+
+    /// Die aktuell gültige (zuletzt angelegte) Version eines Presets.
+    pub fn latest_preset_version(&self, preset_id: PresetId) -> Result<PresetVersion> {
+        let conn = self.lock()?;
+        repository::presets::latest_version(&conn, preset_id)
     }
 
     // ---- Suche/Filter (ab Phase 3) -----------------------------------------

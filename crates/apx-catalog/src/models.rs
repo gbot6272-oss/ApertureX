@@ -5,7 +5,8 @@
 use std::path::PathBuf;
 
 use apx_core::{
-    AppError, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId, PhotoId, Result,
+    AppError, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId, PhotoId,
+    PresetFolderId, PresetId, PresetVersionId, Result,
 };
 use time::OffsetDateTime;
 
@@ -174,6 +175,47 @@ pub struct Keyword {
 pub struct Collection {
     pub id: CollectionId,
     pub name: String,
+    pub created_at: OffsetDateTime,
+}
+
+// ---- Presets (ab Phase 5, siehe DECISIONS.md ADR-0031) --------------------
+
+/// Ein Ordner in der Preset-Baumhierarchie (siehe `migrations/0004_presets.sql`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PresetFolder {
+    pub id: PresetFolderId,
+    pub name: String,
+    pub parent_id: Option<PresetFolderId>,
+    pub position: i64,
+    pub created_at: OffsetDateTime,
+}
+
+/// Ein Preset — die eigentliche EDL-Teilmenge lebt in seiner jeweils
+/// aktuellen [`PresetVersion`], nicht hier (siehe Moduldoku der Migration).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Preset {
+    pub id: PresetId,
+    pub folder_id: Option<PresetFolderId>,
+    pub name: String,
+    pub is_favorite: bool,
+    pub tags: Vec<String>,
+    /// Bedingungsregeln (Feld/Operator/Wert, UND-verknüpft, siehe
+    /// `DECISIONS.md` ADR-0031 Punkt 4) als opakes JSON — `apx-catalog`
+    /// muss ihre Struktur nie verstehen, nur speichern/zurückgeben.
+    pub conditions_json: String,
+    pub created_at: OffsetDateTime,
+}
+
+/// Eine gespeicherte Version eines Presets — `edl_subset_json` ist ein
+/// opakes JSON-Objekt mit genau den EDL-Sektionen, die beim Speichern
+/// ausgewählt wurden (kein vollständiges `EdlPayload`, siehe
+/// `ARCHITECTURE.md` §5s Analogie zu `edit_history.edl_json`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PresetVersion {
+    pub id: PresetVersionId,
+    pub preset_id: PresetId,
+    pub sequence: i64,
+    pub edl_subset_json: String,
     pub created_at: OffsetDateTime,
 }
 

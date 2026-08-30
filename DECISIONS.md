@@ -922,3 +922,50 @@ mehr auf die acht später gebauten Kategorien. Die
 Kurven-Sequenzierungsfrage (Farbraum-Konvertierung ins WGSL verlagern
 oder Kurven als CPU-LUT-Nachschritt) verschiebt sich entsprechend auf
 Schritt 4, wenn Kurven tatsächlich gebaut werden.
+
+## ADR-0030: Objektivkorrekturen (Schritt 9) — Ausgabegröße bleibt unverändert, Perspektive/Upright „Auto"/„Level"/„Vertical"/„Full" bleiben No-op-Platzhalter
+
+**Status:** Angenommen
+**Kontext:** `PLAN.md`s Architektur-Grundsatz sah für Objektivkorrekturen
+eine „größenverändernde" GPU-Dispatch-Form vor (Ausgabepuffer ≠
+Eingabepuffer). Beim tatsächlichen Bau von
+`stages/lens_corrections.{rs,wgsl}` zeigte sich: Verzeichnung, CA,
+Vignette-Korrektur und manuelle Transformation lassen sich vollständig
+als inverse Abbildung mit bilinearer Abtastung ausdrücken, bei der
+Ausgabe- und Eingabegröße identisch bleiben (Randpixel werden
+geklemmt statt schwarz gefüllt oder automatisch zugeschnitten) — echtes
+Zuschneiden auf den gültigen Bildbereich ist ohnehin Aufgabe von
+Schritt 11s separatem Geometrie-Werkzeug (das laut Plan bereits als
+eigener „CPU-seitiger Crop+Rotate+Resample als letzter Schritt in
+`render_rgba8`" vorgesehen ist). Eine echte größenverändernde
+Dispatch-Form für Schritt 9 zu bauen wäre doppelte Arbeit gewesen, die
+Schritt 11 ohnehin leisten muss.
+
+Zweitens: Die SPEC.md-Perspektive/Upright-Modi „Auto", „Level",
+„Vertical" und „Full" setzen in echten Bildbearbeitungsprogrammen eine
+automatische Kantenerkennung zur Fluchtpunkt-Bestimmung voraus — eine
+CV-Aufgabe vergleichbar mit der in ADR-0028 bereits für Schritt 11s
+Auto-Ausrichtung zurückgestellten Kantenerkennung, ohne die dafür
+nötigen Bildverarbeitungsbausteine (Kantendetektion, Linienerkennung,
+Homografie-Schätzung) im bisherigen Stack.
+
+**Entscheidung:**
+1. Objektivkorrekturen liefern die geometrische Abbildung als
+   Ein-/Ausgabepuffer-gleich-großen inversen Warp mit bilinearer
+   Abtastung (keine größenverändernde Dispatch-Form in Schritt 9 —
+   die bleibt für Schritt 11 reserviert).
+2. Die Upright-Modi „Auto"/„Level"/„Vertical"/„Full" sind im EDL/UI
+   wählbar, tragen aber aktuell keine Wirkung (dokumentierter
+   No-op-Platzhalter). „Guided" (die einzige Nutzer-gesteuerte Variante)
+   nutzt die ersten zwei markierten Hilfslinien und errechnet daraus
+   eine einfache gemittelte Dreh-Korrektur — keine echte
+   Mehrlinien-Fluchtpunkt-Homografie.
+
+**Konsequenzen:** `FEATURES.md` markiert die vier automatischen
+Upright-Modi als „Fertig (abweichend, siehe ADR-0030)" statt als volle
+Automatik. Eine echte Kantenerkennungs-/Homografie-basierte
+Upright-Automatik sowie ein echtes Zuschneiden auf den gültigen
+Bildbereich nach der geometrischen Korrektur bleiben auf eine spätere
+Phase verschoben (zusammen mit den bereits in ADR-0028 zurückgestellten
+Punkten: echter Adobe-Profil-Import, Auto-Quellenfindung/
+Content-Aware-Fill, echte Auto-Horizont-Kantenerkennung).

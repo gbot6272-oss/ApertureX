@@ -413,18 +413,20 @@ pub struct LensCorrectionAdjustment {
 }
 
 impl LensCorrectionAdjustment {
+    pub const NEUTRAL: Self = Self {
+        profile_id: None,
+        ca_red_cyan: 0.0,
+        ca_blue_yellow: 0.0,
+        auto_ca: false,
+        vignette_amount: 0.0,
+        distortion_amount: 0.0,
+        upright_mode: UprightMode::Off,
+        guided_lines: Vec::new(),
+        manual_transform: ManualTransform::NEUTRAL,
+    };
+
     pub fn neutral() -> Self {
-        Self {
-            profile_id: None,
-            ca_red_cyan: 0.0,
-            ca_blue_yellow: 0.0,
-            auto_ca: false,
-            vignette_amount: 0.0,
-            distortion_amount: 0.0,
-            upright_mode: UprightMode::Off,
-            guided_lines: Vec::new(),
-            manual_transform: ManualTransform::NEUTRAL,
-        }
+        Self::NEUTRAL
     }
 }
 

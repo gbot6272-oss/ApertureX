@@ -397,6 +397,45 @@ export function neutralLensCorrections(): LensCorrectionAdjustment {
   };
 }
 
+/** Spiegelt `crates/apx-pipeline/lens_profiles/*.json` für das Dropdown
+ * — nur Name/ID, die eigentliche Korrekturberechnung passiert
+ * ausschließlich serverseitig (siehe `lens_profiles.rs`). */
+export const LENS_PROFILE_OPTIONS: ReadonlyArray<{ value: string | null; label: string }> = [
+  { value: null, label: "Kein Profil" },
+  { value: "generic-wide", label: "Generisches Weitwinkel" },
+  { value: "generic-standard", label: "Generisches Standardzoom" },
+  { value: "generic-tele", label: "Generisches Teleobjektiv" },
+];
+
+export const UPRIGHT_MODE_OPTIONS: ReadonlyArray<{ value: UprightMode; label: string }> = [
+  { value: "Off", label: "Aus" },
+  { value: "Auto", label: "Automatisch" },
+  { value: "Level", label: "Waagerecht" },
+  { value: "Vertical", label: "Senkrecht" },
+  { value: "Full", label: "Vollständig" },
+  { value: "Guided", label: "Geführt (2 Hilfslinien)" },
+];
+
+export const LENS_CA_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "ca_red_cyan", label: "CA: Rot/Cyan", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "ca_blue_yellow", label: "CA: Blau/Gelb", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+];
+
+export const LENS_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "vignette_amount", label: "Vignettierung", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "distortion_amount", label: "Verzeichnung", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+];
+
+export const MANUAL_TRANSFORM_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "vertical", label: "Transformation: Vertikal", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "horizontal", label: "Transformation: Horizontal", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "rotate_degrees", label: "Transformation: Drehen", min: -45, max: 45, fineStep: 0.1, coarseStep: 1, neutral: 0 },
+  { key: "aspect", label: "Transformation: Seitenverhältnis", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "scale", label: "Transformation: Skalieren", min: 50, max: 150, fineStep: 1, coarseStep: 10, neutral: 100 },
+  { key: "offset_x", label: "Transformation: Versatz X", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "offset_y", label: "Transformation: Versatz Y", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+];
+
 // ---- Effekte ----------------------------------------------------------------
 
 export interface EffectsAdjustment {

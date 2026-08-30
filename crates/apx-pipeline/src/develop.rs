@@ -19,8 +19,8 @@ use crate::edl::{
 use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
-    basic_fused, calibration, color_grading, curves, details, hsl_color_mixer, local_contrast,
-    white_balance,
+    basic_fused, calibration, color_grading, curves, details, hsl_color_mixer, lens_corrections,
+    local_contrast, white_balance,
 };
 
 /// Rendert `linear` mit den in `edl` beschriebenen Anpassungen zu einem
@@ -34,21 +34,23 @@ use crate::stages::{
 /// `DECISIONS.md` ADR-0012) — der Aufrufer muss diese Entscheidung nicht
 /// selbst treffen.
 ///
-/// **Phase-4-Übergangsstand (siehe `PLAN.md` Phase 4 Schritt 8):**
+/// **Phase-4-Übergangsstand (siehe `PLAN.md` Phase 4 Schritt 9):**
 /// Kalibrierung (`stages::calibration`, läuft *vor* Weißabgleich/den
 /// Grundeinstellungen — siehe `calibration.rs`s Moduldoku), alle zwölf
 /// Grundeinstellungs-Regler (`stages::basic_fused` /
 /// `stages::local_contrast`), Details/Schärfung+Rauschreduzierung
 /// (`stages::details`, läuft direkt nach Textur/Klarheit — siehe
 /// `details.rs`s Moduldoku), HSL + Farbmischer erweitert
-/// (`stages::hsl_color_mixer`) und Color Grading
-/// (`stages::color_grading`, alle im linearen Arbeitsraum wie
-/// `basic_fused`) sowie die Gradationskurven (`stages::curves`, laufen
-/// bewusst *nach* der Farbraum-Konvertierung auf dem fertigen
-/// RGBA8-Puffer, siehe `curves.rs`s Moduldoku) sind verdrahtet. Alle
-/// übrigen Werkzeugkategorien (Objektivkorrekturen, Effekte, Geometrie,
-/// Reparatur) sind noch inert — die folgenden Schritte verdrahten sie
-/// schrittweise.
+/// (`stages::hsl_color_mixer`), Color Grading (`stages::color_grading`,
+/// alle im linearen Arbeitsraum wie `basic_fused`) und
+/// Objektivkorrekturen (`stages::lens_corrections`, läuft nach Color
+/// Grading, ebenfalls noch vor der Farbraum-Konvertierung — siehe
+/// `lens_corrections.rs`s Moduldoku für die geometrische Abbildung) sowie
+/// die Gradationskurven (`stages::curves`, laufen bewusst *nach* der
+/// Farbraum-Konvertierung auf dem fertigen RGBA8-Puffer, siehe
+/// `curves.rs`s Moduldoku) sind verdrahtet. Alle übrigen
+/// Werkzeugkategorien (Effekte, Geometrie, Reparatur) sind noch inert —
+/// die folgenden Schritte verdrahten sie schrittweise.
 pub fn render_rgba8(
     ctx: Option<&GpuContext>,
     linear: &LinearImage,
@@ -177,7 +179,48 @@ pub fn render_rgba8(
         }
     };
 
-    let rgba = linear_camera_rgb_to_srgb_rgba8(&graded, linear.cam_to_srgb);
+    let lens_corrected = {
+        let params = lens_corrections::LensCorrectionParams::new(
+            linear.width,
+            linear.height,
+            &edl.lens_corrections,
+        );
+        if params.is_identity() {
+            // Kein zusätzlicher Durchlauf, wenn Objektivkorrekturen (nach
+            // Auflösung von Profil/Guided-Linien) keine Wirkung hätten
+            // (Regelfall).
+            graded
+        } else {
+            match ctx {
+                Some(ctx) => match lens_corrections::apply_gpu(
+                    ctx,
+                    &graded,
+                    linear.width,
+                    linear.height,
+                    &edl.lens_corrections,
+                ) {
+                    Ok(pixels) => pixels,
+                    Err(err) => {
+                        tracing::warn!(error = %err, "GPU-Rendering (Objektivkorrekturen) fehlgeschlagen, nutze CPU-Fallback");
+                        lens_corrections::apply_cpu(
+                            &graded,
+                            linear.width,
+                            linear.height,
+                            &edl.lens_corrections,
+                        )
+                    }
+                },
+                None => lens_corrections::apply_cpu(
+                    &graded,
+                    linear.width,
+                    linear.height,
+                    &edl.lens_corrections,
+                ),
+            }
+        }
+    };
+
+    let rgba = linear_camera_rgb_to_srgb_rgba8(&lens_corrected, linear.cam_to_srgb);
 
     Ok(if edl.curves == CurvesAdjustment::neutral() {
         // Kein zusätzlicher Durchlauf über den ganzen Puffer, wenn alle

@@ -1,0 +1,9 @@
+{
+  "id": "generic-tele",
+  "display_name": "Generisches Teleobjektiv (typische Kissenverzeichnung)",
+  "matches": ["70-200", "100-400", "135mm", "200mm", "tele"],
+  "distortion_k1": 0.03,
+  "vignette_amount": 20.0,
+  "ca_red_cyan": 0.3,
+  "ca_blue_yellow": 0.25
+}

@@ -443,4 +443,62 @@ test.describe("Entwickeln-Panel", () => {
     expect(details.sharpen_amount).toBeCloseTo(80);
     expect(details.use_deconvolution_sharpen).toBe(true);
   });
+
+  test("Objektivkorrekturen: ein Profil, die CA-Regler und die manuelle Transformation committen", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    await page.getByRole("combobox", { name: "Objektivprofil" }).selectOption("generic-wide");
+
+    const vignetteInput = page.getByRole("spinbutton", { name: "Vignettierung (Zahlenwert)" });
+    await vignetteInput.fill("30");
+    await vignetteInput.blur();
+
+    const rotateInput = page.getByRole("spinbutton", { name: "Transformation: Drehen (Zahlenwert)" });
+    await rotateInput.fill("5");
+    await rotateInput.blur();
+
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.filter((entry) => entry.cmd === "apply_develop_edit").length >= 3;
+    }).toBe(true);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const lensCorrections = JSON.parse(edlJson).payload.lens_corrections as {
+      profile_id: string | null;
+      vignette_amount: number;
+      manual_transform: { rotate_degrees: number };
+    };
+    expect(lensCorrections.profile_id).toBe("generic-wide");
+    expect(lensCorrections.vignette_amount).toBeCloseTo(30);
+    expect(lensCorrections.manual_transform.rotate_degrees).toBeCloseTo(5);
+  });
+
+  test("Objektivkorrekturen: Guided-Modus zeigt Hilfslinien-Zahlenfelder und committet sie", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    await page.getByRole("combobox", { name: "Perspektive/Upright" }).selectOption("Guided");
+
+    const line1X2 = page.getByRole("spinbutton", { name: "Linie 1: x2" });
+    await line1X2.fill("0.8");
+    await line1X2.blur();
+
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.some((entry) => entry.cmd === "apply_develop_edit");
+    }).toBe(true);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const lensCorrections = JSON.parse(edlJson).payload.lens_corrections as {
+      upright_mode: string;
+      guided_lines: Array<{ x2: number }>;
+    };
+    expect(lensCorrections.upright_mode).toBe("Guided");
+    expect(lensCorrections.guided_lines[0]?.x2).toBeCloseTo(0.8);
+  });
 });

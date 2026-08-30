@@ -24,6 +24,7 @@ pub mod develop;
 pub mod edl;
 pub mod error;
 pub mod gpu;
+pub mod lens_profiles;
 pub mod stages;
 #[cfg(test)]
 mod test_support;

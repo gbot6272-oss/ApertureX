@@ -407,10 +407,13 @@ Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Obj
   - [x] Frontend: 3 Regler-Gruppen (Schärfung/Luminanzrauschen/Farbrauschen) + eine native Checkbox für den Deconvolution-Modus (erste Checkbox im Projekt — kein eigenständiges `Checkbox.tsx` gebaut, da bislang nur ein einziger Bool-Regler existiert)
   - Verifiziert: `cargo fmt/clippy/test --workspace` (275 Rust-Tests), `tsc -b`, `vitest run` (100 Tests), `playwright test` (26/26), `vite build` — alles lokal grün
 
-- [ ] 9. Objektivkorrekturen
-  - [ ] Mini-Profilformat (`crates/apx-pipeline/lens_profiles/*.json` + Lade-/Zuordnungsmodul per EXIF-Objektiv-/Kamerastring)
-  - [ ] Manuelle Regler: CA, Vignette, Verzeichnung, Perspektive/Upright (Guided mit 2 Linienpaaren), manuelle Transformation
-  - [ ] Geometrischer Warp als eine inverse Abbildung mit bilinearem Sampling
+- [x] 9. Objektivkorrekturen
+  - [x] Mini-Profilformat: `crates/apx-pipeline/lens_profiles/*.json` (3 Beispielprofile, per `include_str!` zur Kompilierzeit eingebettet) + neues `crates/apx-pipeline/src/lens_profiles.rs` (`find_profile` per ID, `match_profile_for_lens_string` per Case-insensitive-Substring-Abgleich gegen EXIF-Objektiv-/Kamerastrings)
+  - [x] Neues `crates/apx-pipeline/src/stages/lens_corrections.rs`/`.wgsl`: CA (radiale Kanalverschiebung), Vignette-Korrektur (radiale Aufhellung), Verzeichnung (Ein-Koeffizienten-Radialmodell), manuelle Transformation (Versatz/Skalierung/Seitenverhältnis/Rotation/Scherung als Perspektive-Näherung) — alle zu einer inversen Abbildung mit bilinearer Abtastung kombiniert, läuft nach Color Grading, noch vor der Farbraum-Konvertierung
+  - [x] Scope-Präzisierung nachträglich als ADR-0030 dokumentiert (siehe `DECISIONS.md`): Ausgabegröße bleibt unverändert (Randpixel geklemmt, kein Zuschneiden — Schritt 2s größenverändernde Dispatch-Form damit für Schritt 9 nicht nötig, bleibt für Schritt 11 reserviert), Perspektive/Upright „Auto"/„Level"/„Vertical"/„Full" bleiben wirkungslose Platzhalter (echte Kantenerkennung ist eine CV-Aufgabe außerhalb des Stacks), „Guided" mittelt die ersten zwei Hilfslinien zu einer einfachen Dreh-Korrektur
+  - [x] `CalibrationAdjustment`/`LensCorrectionAdjustment` bekommen ein `pub const NEUTRAL` (vorher nur `neutral()`-Fns) für die „kein zusätzlicher Durchlauf"-Optimierung in `develop.rs`
+  - [x] Frontend: Objektivprofil-Dropdown, Auto-CA-Checkbox + 2 CA-Regler, Vignette-/Verzeichnungs-Regler, Perspektive/Upright-Dropdown, Hilfslinien-Zahlenfelder (statt Viewer-Klick-Interaktion, siehe ADR-0030) im Guided-Modus, 7 Regler für die manuelle Transformation
+  - Verifiziert: `cargo fmt/clippy/test --workspace` (292 Rust-Tests), `tsc -b`, `vitest run` (100 Tests), `playwright test` (28/28), `vite build` — alles lokal grün
 
 - [ ] 10. Effekte
   - [ ] Nachträgliche Vignettierung, Körnung mit stabilem Pro-Pixel-Seed

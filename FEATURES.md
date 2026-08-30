@@ -117,12 +117,12 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
      Zuordnung per EXIF-Objektiv-/Kamerastring) plus die vollen manuellen
      Regler; echter Adobe-Profil-Import wird auf eine spätere Phase
      verschoben. -->
-- [ ] Profilbasierte Korrektur (Datenbank + Import) — Phase 4 — Status: Nicht begonnen
-- [ ] Chromatische Aberration (auto + manuell) — Phase 4 — Status: Nicht begonnen
-- [ ] Vignettierung — Phase 4 — Status: Nicht begonnen
-- [ ] Verzeichnung — Phase 4 — Status: Nicht begonnen
-- [ ] Perspektive/Upright (Auto, Level, Vertical, Full, Guided) — Phase 4 — Status: Nicht begonnen (Guided-Modus vereinfacht auf 2 statt bis zu 4 Linienpaare, siehe ADR-0028)
-- [ ] Manuelle Transformation (V/H, Drehen, Seitenverhältnis, Skalieren, Versatz) — Phase 4 — Status: Nicht begonnen
+- [x] Profilbasierte Korrektur (Datenbank + Import) — Phase 4 — Status: Fertig (abweichend, siehe ADR-0028: `crates/apx-pipeline/lens_profiles/*.json`, 3 handgepflegte Beispielprofile statt eines echten Adobe-LCP-Imports, Zuordnungsfunktion per EXIF-Objektiv-/Kamerastring implementiert und getestet, aber im Frontend noch manuell per Dropdown statt automatisch beim Fotowechsel angewendet)
+- [x] Chromatische Aberration (auto + manuell) — Phase 4 — Status: Fertig (radiale Kanalverschiebung um den Bildmittelpunkt, `auto_ca` nutzt Profilwerte statt echter Kantenerkennung)
+- [x] Vignettierung — Phase 4 — Status: Fertig (radiale Aufhellung zum Bildrand, additiv mit dem Profilwert kombiniert)
+- [x] Verzeichnung — Phase 4 — Status: Fertig (abweichend, siehe ADR-0030: Ein-Koeffizienten-Radialmodell statt eines mehrparametrigen Brown-Conrady-Modells)
+- [x] Perspektive/Upright (Auto, Level, Vertical, Full, Guided) — Phase 4 — Status: Fertig (abweichend, siehe ADR-0030: „Auto"/„Level"/„Vertical"/„Full" sind wählbare, aber wirkungslose Platzhalter — echte Kantenerkennung ist eine CV-Aufgabe außerhalb des Stacks; „Guided" mittelt die ersten zwei Hilfslinien zu einer einfachen Dreh-Korrektur statt einer echten Mehrlinien-Homografie, Hilfslinien per Zahlenfeld statt Viewer-Klick-Interaktion eingegeben)
+- [x] Manuelle Transformation (V/H, Drehen, Seitenverhältnis, Skalieren, Versatz) — Phase 4 — Status: Fertig (V/H als Scherung statt echter Homografie, Ausgabegröße bleibt unverändert — Randpixel geklemmt, echtes Zuschneiden folgt in Schritt 11, siehe ADR-0030)
 
 ### Effekte
 - [ ] Nachträgliche Vignettierung — Phase 4 — Status: Nicht begonnen

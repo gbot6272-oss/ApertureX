@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
 import { buildEdlEnvelopeJson, MAX_COLOR_MIXER_REGIONS, neutralEdlPayload, newColorMixerRegion, parseEdlEnvelopeJson, WHITE_BALANCE_PRESETS, writeBasicField } from "../lib/edl";
-import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, HslAdjustment, HslBand, PrimaryColorAdjustment } from "../lib/edl";
+import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, PrimaryColorAdjustment, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
@@ -273,6 +273,27 @@ interface DevelopSlice {
    * committet sofort — eine Checkbox ist wie ein Dropdown-Wechsel eine
    * abgeschlossene Aktion. */
   setDetailsUseDeconvolutionSharpen: (value: boolean) => void;
+  /** Setzt eines der vier numerischen Objektivkorrektur-Felder (Phase 4
+   * Schritt 9, ohne `manual_transform`) — Zwischenstand beim Ziehen. */
+  setLensCorrectionField: (
+    key: keyof Pick<LensCorrectionAdjustment, "ca_red_cyan" | "ca_blue_yellow" | "vignette_amount" | "distortion_amount">,
+    value: number,
+  ) => void;
+  /** Setzt eines der sieben `manual_transform`-Felder — Zwischenstand
+   * beim Ziehen. */
+  setLensCorrectionManualTransformField: (key: keyof ManualTransform, value: number) => void;
+  /** Setzt das Objektivprofil absolut und committet sofort (wie ein
+   * WB-/Kameraprofil-Dropdown-Wechsel). */
+  setLensCorrectionProfile: (value: string | null) => void;
+  /** Schaltet die automatische CA-Korrektur um und committet sofort. */
+  setLensCorrectionAutoCa: (value: boolean) => void;
+  /** Setzt den Perspektive/Upright-Modus absolut und committet sofort. */
+  setLensCorrectionUprightMode: (value: UprightMode) => void;
+  /** Setzt ein Feld einer der zwei Guided-Hilfslinien (Phase 4 Schritt 9
+   * — siehe `DECISIONS.md` ADR-0030: Zahlenfelder statt einer
+   * Klick-Interaktion im Viewer) — legt die Linie mit Nullkoordinaten an,
+   * falls sie noch nicht existiert. Zwischenstand beim Ziehen/Tippen. */
+  setLensCorrectionGuidedLineField: (lineIndex: 0 | 1, field: keyof GuidedLine, value: number) => void;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
    * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
    * bei jedem Zwischenwert). */
@@ -707,6 +728,50 @@ export const useAppStore = create<AppStore>()(
         state.developEdl.details.use_deconvolution_sharpen = value;
       });
       void get().commitDevelopEdit();
+    },
+
+    setLensCorrectionField: (key, value) => {
+      set((state) => {
+        state.developEdl.lens_corrections[key] = value;
+      });
+    },
+
+    setLensCorrectionManualTransformField: (key, value) => {
+      set((state) => {
+        state.developEdl.lens_corrections.manual_transform[key] = value;
+      });
+    },
+
+    setLensCorrectionProfile: (value) => {
+      set((state) => {
+        state.developEdl.lens_corrections.profile_id = value;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    setLensCorrectionAutoCa: (value) => {
+      set((state) => {
+        state.developEdl.lens_corrections.auto_ca = value;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    setLensCorrectionUprightMode: (value) => {
+      set((state) => {
+        state.developEdl.lens_corrections.upright_mode = value;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    setLensCorrectionGuidedLineField: (lineIndex, field, value) => {
+      set((state) => {
+        const lines = state.developEdl.lens_corrections.guided_lines;
+        while (lines.length <= lineIndex) {
+          lines.push({ x1: 0, y1: 0, x2: 0, y2: 0 });
+        }
+        const line = lines[lineIndex];
+        if (line) line[field] = value;
+      });
     },
 
     colorMixerPickerActive: false,

@@ -8,16 +8,24 @@ import {
   COLOR_NR_SLIDER_SPECS,
   HSL_BAND_SLIDER_SPECS,
   HSL_BAND_TABS,
+  LENS_CA_SLIDER_SPECS,
+  LENS_PROFILE_OPTIONS,
+  LENS_SLIDER_SPECS,
   LUMINANCE_NR_SLIDER_SPECS,
+  MANUAL_TRANSFORM_SLIDER_SPECS,
   MAX_COLOR_MIXER_REGIONS,
   readBasicField,
   SHARPEN_SLIDER_SPECS,
+  UPRIGHT_MODE_OPTIONS,
   WHITE_BALANCE_PRESETS,
   type ColorGradingAdjustment,
   type ColorMixerRegion,
   type CurvesAdjustment,
   type DetailsAdjustment,
+  type GuidedLine,
   type HslAdjustment,
+  type LensCorrectionAdjustment,
+  type ManualTransform,
 } from "../lib/edl";
 import { useAppStore } from "../store";
 import { ColorWheel } from "./ColorWheel";
@@ -47,6 +55,17 @@ const COLOR_GRADING_WHEEL_TABS: ReadonlyArray<{ key: keyof Pick<ColorGradingAdju
 /** Die zehn numerischen Details-Regler (Phase 4 Schritt 8) — der elfte
  * Feld (`use_deconvolution_sharpen`) ist eine Checkbox, kein Regler. */
 type DetailsSliderKey = keyof Omit<DetailsAdjustment, "use_deconvolution_sharpen">;
+
+/** Die vier numerischen Objektivkorrektur-Regler (Phase 4 Schritt 9,
+ * ohne `manual_transform`, `profile_id`, `auto_ca`, `upright_mode`,
+ * `guided_lines`). */
+type LensNumericKey = keyof Pick<
+  LensCorrectionAdjustment,
+  "ca_red_cyan" | "ca_blue_yellow" | "vignette_amount" | "distortion_amount"
+>;
+
+/** Die vier Zahlenfelder einer Guided-Hilfslinie. */
+const GUIDED_LINE_FIELDS: ReadonlyArray<keyof GuidedLine> = ["x1", "y1", "x2", "y2"];
 
 /**
  * Das Entwickeln-Panel: die sieben Grundeinstellungs-Regler (Weißabgleich
@@ -100,6 +119,13 @@ export function DevelopPanel() {
   const details = useAppStore((s) => s.developEdl.details);
   const setDetailsField = useAppStore((s) => s.setDetailsField);
   const setDetailsUseDeconvolutionSharpen = useAppStore((s) => s.setDetailsUseDeconvolutionSharpen);
+  const lensCorrections = useAppStore((s) => s.developEdl.lens_corrections);
+  const setLensCorrectionField = useAppStore((s) => s.setLensCorrectionField);
+  const setLensCorrectionManualTransformField = useAppStore((s) => s.setLensCorrectionManualTransformField);
+  const setLensCorrectionProfile = useAppStore((s) => s.setLensCorrectionProfile);
+  const setLensCorrectionAutoCa = useAppStore((s) => s.setLensCorrectionAutoCa);
+  const setLensCorrectionUprightMode = useAppStore((s) => s.setLensCorrectionUprightMode);
+  const setLensCorrectionGuidedLineField = useAppStore((s) => s.setLensCorrectionGuidedLineField);
 
   // Eine per Bildklick neu angelegte Region wird sofort zur Bearbeitung
   // ausgewählt statt dass der Nutzer sie erst in der Liste anklicken muss.
@@ -476,6 +502,123 @@ export function DevelopPanel() {
                   spec={spec}
                   value={details[spec.key as DetailsSliderKey]}
                   onChange={(value) => setDetailsField(spec.key as DetailsSliderKey, value)}
+                  onCommit={() => void commitDevelopEdit()}
+                />
+              ))}
+            </div>
+          </fieldset>
+
+          <fieldset className="flex flex-col gap-3">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Objektivkorrekturen</legend>
+
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              Objektivprofil
+              <select
+                aria-label="Objektivprofil"
+                value={lensCorrections.profile_id ?? ""}
+                onChange={(event) => setLensCorrectionProfile(event.target.value || null)}
+                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+              >
+                {LENS_PROFILE_OPTIONS.map((option) => (
+                  <option key={option.label} value={option.value ?? ""}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              <input
+                type="checkbox"
+                checked={lensCorrections.auto_ca}
+                onChange={(event) => setLensCorrectionAutoCa(event.target.checked)}
+              />
+              Automatische CA-Korrektur (nutzt Profilwerte)
+            </label>
+
+            {!lensCorrections.auto_ca &&
+              LENS_CA_SLIDER_SPECS.map((spec) => (
+                <DevelopSlider
+                  key={spec.key}
+                  spec={spec}
+                  value={lensCorrections[spec.key as LensNumericKey]}
+                  onChange={(value) => setLensCorrectionField(spec.key as LensNumericKey, value)}
+                  onCommit={() => void commitDevelopEdit()}
+                />
+              ))}
+
+            {LENS_SLIDER_SPECS.map((spec) => (
+              <DevelopSlider
+                key={spec.key}
+                spec={spec}
+                value={lensCorrections[spec.key as LensNumericKey]}
+                onChange={(value) => setLensCorrectionField(spec.key as LensNumericKey, value)}
+                onCommit={() => void commitDevelopEdit()}
+              />
+            ))}
+
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              Perspektive/Upright
+              <select
+                aria-label="Perspektive/Upright"
+                value={lensCorrections.upright_mode}
+                onChange={(event) => setLensCorrectionUprightMode(event.target.value as LensCorrectionAdjustment["upright_mode"])}
+                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+              >
+                {UPRIGHT_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {lensCorrections.upright_mode === "Guided" && (
+              <div className="flex flex-col gap-2">
+                {/* Bewusste Vereinfachung (siehe DECISIONS.md ADR-0030):
+                    Zahlenfelder statt einer Klick-Interaktion im Viewer —
+                    eine echte Linienauswahl per Klick wäre eine eigene,
+                    größere UI-Aufgabe (SVG-Overlay, Ziehgriffe). */}
+                <p className="text-xs text-text-secondary">Hilfslinien (normierte Bildkoordinaten 0–1)</p>
+                {[0, 1].map((lineIndex) => {
+                  const line: GuidedLine = lensCorrections.guided_lines[lineIndex] ?? {
+                    x1: 0,
+                    y1: 0,
+                    x2: 0,
+                    y2: 0,
+                  };
+                  return (
+                    <div key={lineIndex} className="grid grid-cols-4 gap-1">
+                      {GUIDED_LINE_FIELDS.map((field) => (
+                        <label key={field} className="flex flex-col text-[10px] text-text-secondary">
+                          {`L${lineIndex + 1}.${field}`}
+                          <input
+                            type="number"
+                            step={0.01}
+                            aria-label={`Linie ${lineIndex + 1}: ${field}`}
+                            value={line[field]}
+                            onChange={(event) =>
+                              setLensCorrectionGuidedLineField(lineIndex as 0 | 1, field, Number(event.target.value))
+                            }
+                            onBlur={() => void commitDevelopEdit()}
+                            className="w-full rounded border border-border bg-bg-base px-1 py-0.5 text-right text-text-primary"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-text-secondary">Manuelle Transformation</p>
+              {MANUAL_TRANSFORM_SLIDER_SPECS.map((spec) => (
+                <DevelopSlider
+                  key={spec.key}
+                  spec={spec}
+                  value={lensCorrections.manual_transform[spec.key as keyof ManualTransform]}
+                  onChange={(value) => setLensCorrectionManualTransformField(spec.key as keyof ManualTransform, value)}
                   onCommit={() => void commitDevelopEdit()}
                 />
               ))}

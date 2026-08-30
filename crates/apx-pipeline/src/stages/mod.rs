@@ -18,6 +18,7 @@ pub mod curves;
 pub mod details;
 pub mod effects;
 pub mod exposure;
+pub mod geometry;
 pub mod highlights_shadows;
 pub mod hsl_color_mixer;
 pub mod lens_corrections;

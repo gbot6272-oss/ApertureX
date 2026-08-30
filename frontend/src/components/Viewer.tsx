@@ -9,6 +9,7 @@ import { imageUrl, previewUrl } from "../lib/media";
 import { clampZoom, computeBaseScale, imageOrigin, nextZoomStep, panForZoomAtCursor } from "../lib/viewerMath";
 import { QuadRenderer } from "../lib/webgl";
 import { useAppStore } from "../store";
+import { CropOverlay } from "./CropOverlay";
 
 // Zielkante für die hochauflösende Anzeige: an der Container-Größe
 // orientiert (siehe PHASE1_PROMPT.md Abschnitt 6, das Beispiel
@@ -37,6 +38,9 @@ export function Viewer() {
   const colorMixerPickerActive = useAppStore((s) => s.colorMixerPickerActive);
   const addColorMixerRegionAt = useAppStore((s) => s.addColorMixerRegionAt);
   const pickerActive = wbPickerActive || colorMixerPickerActive;
+  const geometryCropActive = useAppStore((s) => s.geometryCropActive);
+  const setGeometryCrop = useAppStore((s) => s.setGeometryCrop);
+  const commitDevelopEdit = useAppStore((s) => s.commitDevelopEdit);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -277,6 +281,20 @@ export function Viewer() {
       {!photo && <p className="pointer-events-none text-sm text-text-muted">Kein Foto ausgewählt.</p>}
 
       <canvas ref={canvasRef} className="pointer-events-none absolute inset-0" />
+
+      {photo && geometryCropActive && imgW > 0 && imgH > 0 && (
+        <CropOverlay
+          imageLeft={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).x}
+          imageTop={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).y}
+          imageWidth={imgW * effectiveScale}
+          imageHeight={imgH * effectiveScale}
+          crop={developEdl.geometry.crop}
+          overlay={developEdl.geometry.overlay}
+          aspectRatio={developEdl.geometry.aspect_ratio}
+          onChange={setGeometryCrop}
+          onCommit={() => void commitDevelopEdit()}
+        />
+      )}
 
       {photo && (
         <div className="pointer-events-none absolute right-3 bottom-3 rounded bg-bg-raised/90 px-3 py-2 text-xs text-text-secondary backdrop-blur">

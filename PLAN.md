@@ -422,10 +422,14 @@ Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Obj
   - [x] Frontend: 5 Vignettierung-Regler + 3 Körnung-Regler
   - Verifiziert: `cargo fmt/clippy/test --workspace` (302 Rust-Tests), `tsc -b`, `vitest run` (100 Tests), `playwright test` (29/29), `vite build` — alles lokal grün
 
-- [ ] 11. Geometrie (Crop/Rotation)
-  - [ ] Freistellen (Presets, Rasterüberlagerungen), Winkel-Werkzeug, vereinfachte Auto-Ausrichtung (nur EXIF-Orientierung)
-  - [ ] CPU-seitiger Crop+Rotate+Resample als letzter Schritt in `render_rgba8`
-  - [ ] Neues `frontend/src/components/CropOverlay.tsx`
+- [x] 11. Geometrie (Crop/Rotation)
+  - [x] Neues `crates/apx-pipeline/src/stages/geometry.rs` — bewusst CPU-only (kein GPU-Dispatch, analog zu `curves.rs`), als allerletzter Schritt in `develop::render_rgba8` verdrahtet: bilinear abgetastete Drehung um den Bildmittelpunkt (Randpixel geklemmt) gefolgt von pixel-genauer Zuschnitt-Rechteck-Extraktion (kein Resampling)
+  - [x] `render_rgba8` liefert jetzt ein `RenderedImage { width, height, pixels }` statt eines nackten `Vec<u8>` — der einzige Schritt, der die Ausgabegröße ändert; `apx-app`s `compute_develop` rahmt entsprechend `rendered.width`/`.height` statt `linear.width`/`.height` (Wire-Format selbst unverändert, war schon immer breiten-/höhen-präfixiert)
+  - [x] Scope-Präzisierung nachträglich als ADR-0030 ergänzt: Auto-Ausrichtung bleibt dokumentierter No-op-Platzhalter in dieser Stufe (EXIF-Ausrichtung läuft bereits in `apx-raw` vor der EDL-Pipeline)
+  - [x] Neues `frontend/src/components/CropOverlay.tsx`: vier Ecken-Ziehgriffe (Zeigen+Tastatur, seitenverhältnis-gebunden wenn gesetzt) + Verschieben durch Ziehen im Inneren, 5 Rasterüberlagerungen als SVG-Linien (Drittel/Goldener Schnitt exakt, Diagonalen/Dreiecke/Spirale vereinfacht, siehe Moduldoku) — in `Viewer.tsx` über der angezeigten Bildfläche positioniert (`imageOrigin`/`effectiveScale`, dieselbe Zoom/Pan-Geometrie wie die WB-Pipette)
+  - [x] Echter Bug gefunden und behoben: ein Tastendruck auf einem Ecken-Ziehgriff blubberte zum umschließenden Rechteck-Div hoch (beide `role="slider"` mit eigenem `onKeyDown`) — dessen "move"-Handler überschrieb mit veraltetem `crop`-Stand die gerade vorgenommene Größenänderung; behoben mit `stopPropagation()`
+  - [x] Frontend: Winkel-Regler, Seitenverhältnis-/Raster-Dropdowns, Auto-Ausrichtung-Checkbox, "Freistellen"-Umschaltknopf
+  - Verifiziert: `cargo fmt/clippy/test --workspace` (308 Rust-Tests), `tsc -b`, `vitest run` (100 Tests), `playwright test` (31/31), `vite build` — alles lokal grün
 
 - [ ] 12. Reparatur (Klonen/Reparieren)
   - [ ] Pinsel-Interaktion (Quellpunkt, Zielpfad, Radius/Deckkraft/weiche Kante)

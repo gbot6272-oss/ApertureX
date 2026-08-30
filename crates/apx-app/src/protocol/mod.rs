@@ -278,23 +278,27 @@ fn compute_develop(
     let decode_elapsed = decode_started.elapsed();
 
     let render_started = std::time::Instant::now();
-    let pixels = apx_pipeline::develop::render_rgba8(Some(pipeline), &linear, &edl)
+    let rendered = apx_pipeline::develop::render_rgba8(Some(pipeline), &linear, &edl)
         .map_err(apx_core::AppError::from)?;
     let render_elapsed = render_started.elapsed();
 
     tracing::debug!(
         photo_id = %photo_id,
-        width = linear.width,
-        height = linear.height,
+        width = rendered.width,
+        height = rendered.height,
         decode_ms = decode_elapsed.as_secs_f64() * 1000.0,
         render_ms = render_elapsed.as_secs_f64() * 1000.0,
         "compute_develop abgeschlossen"
     );
 
-    let mut framed = Vec::with_capacity(8 + pixels.len());
-    framed.extend_from_slice(&linear.width.to_le_bytes());
-    framed.extend_from_slice(&linear.height.to_le_bytes());
-    framed.extend_from_slice(&pixels);
+    // `rendered.width`/`.height` beschreiben die tatsächliche Puffergröße
+    // (nicht `linear.width`/`.height`) — Geometrie/Zuschnitt (Phase 4
+    // Schritt 11) kann sie gegenüber dem dekodierten Bild verkleinern,
+    // siehe `apx_pipeline::develop::RenderedImage`s Moduldoku.
+    let mut framed = Vec::with_capacity(8 + rendered.pixels.len());
+    framed.extend_from_slice(&rendered.width.to_le_bytes());
+    framed.extend_from_slice(&rendered.height.to_le_bytes());
+    framed.extend_from_slice(&rendered.pixels);
     Ok(framed)
 }
 

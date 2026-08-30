@@ -529,4 +529,67 @@ test.describe("Entwickeln-Panel", () => {
     expect(effects.post_vignette_amount).toBeCloseTo(-40);
     expect(effects.grain_amount).toBeCloseTo(60);
   });
+
+  test("Geometrie: Winkel, Seitenverhältnis, Raster und Auto-Ausrichtung committen", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    const angleInput = page.getByRole("spinbutton", { name: "Winkel (Zahlenwert)" });
+    await angleInput.fill("8");
+    await angleInput.blur();
+
+    await page.getByRole("combobox", { name: "Seitenverhältnis" }).selectOption({ label: "16:9" });
+    await page.getByRole("combobox", { name: "Rasterüberlagerung" }).selectOption("GoldenRatio");
+    await page.getByRole("checkbox", { name: "Automatische Ausrichtung (nur EXIF-Ausrichtung, siehe ADR-0028)" }).check();
+
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.filter((entry) => entry.cmd === "apply_develop_edit").length >= 4;
+    }).toBe(true);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const geometry = JSON.parse(edlJson).payload.geometry as {
+      angle_degrees: number;
+      aspect_ratio: number;
+      overlay: string;
+      auto_horizon: boolean;
+    };
+    expect(geometry.angle_degrees).toBeCloseTo(8);
+    expect(geometry.aspect_ratio).toBeCloseTo(16 / 9);
+    expect(geometry.overlay).toBe("GoldenRatio");
+    expect(geometry.auto_horizon).toBe(true);
+  });
+
+  test("Geometrie: Freistellen-Werkzeug zeigt das Rechteck und committet eine Tastatur-Größenänderung", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    await page.getByRole("button", { name: "Freistellen" }).click();
+
+    const cropRect = page.getByRole("slider", { name: "Freistellen-Rechteck" });
+    await expect(cropRect).toBeVisible();
+
+    // Das Rechteck deckt anfangs das ganze Bild ab (`FULL_CROP_RECT`) —
+    // ein Verschieben ist dort unmöglich (nirgendwo hin), deshalb wird
+    // hier stattdessen über den Ziehgriff der Ecke unten rechts
+    // verkleinert (zieht die rechte/untere Kante nach innen).
+    const seHandle = page.getByRole("slider", { name: "Freistellen-Ziehgriff se" });
+    await seHandle.focus();
+    await seHandle.press("ArrowLeft");
+    await seHandle.press("ArrowUp");
+
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.some((entry) => entry.cmd === "apply_develop_edit");
+    }).toBe(true);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const geometry = JSON.parse(edlJson).payload.geometry as { crop: { width: number; height: number } };
+    expect(geometry.crop.width).toBeLessThan(1);
+    expect(geometry.crop.height).toBeLessThan(1);
+  });
 });

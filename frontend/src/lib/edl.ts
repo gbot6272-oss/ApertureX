@@ -563,6 +563,23 @@ export const NEUTRAL_GEOMETRY: GeometryAdjustment = {
   auto_horizon: false,
 };
 
+export const ASPECT_RATIO_PRESETS: ReadonlyArray<{ value: number | null; label: string }> = [
+  { value: null, label: "Frei" },
+  { value: 1, label: "1:1" },
+  { value: 4 / 3, label: "4:3" },
+  { value: 3 / 2, label: "3:2" },
+  { value: 16 / 9, label: "16:9" },
+];
+
+export const GRID_OVERLAY_OPTIONS: ReadonlyArray<{ value: GridOverlay; label: string }> = [
+  { value: "None", label: "Kein Raster" },
+  { value: "Thirds", label: "Drittel" },
+  { value: "GoldenRatio", label: "Goldener Schnitt" },
+  { value: "Diagonals", label: "Diagonalen" },
+  { value: "Spiral", label: "Spirale" },
+  { value: "Triangles", label: "Dreiecke" },
+];
+
 // ---- Reparatur (Klonen/Reparieren) ------------------------------------------
 
 export type RepairMode = "Clone" | "Heal";

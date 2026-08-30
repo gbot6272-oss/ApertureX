@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
+  ASPECT_RATIO_PRESETS,
   BASIC_SLIDER_SPECS,
   CALIBRATION_PRIMARY_ROWS,
   CAMERA_PROFILE_OPTIONS,
   COLOR_MIXER_REGION_SLIDER_SPECS,
   COLOR_NR_SLIDER_SPECS,
   GRAIN_SLIDER_SPECS,
+  GRID_OVERLAY_OPTIONS,
   HSL_BAND_SLIDER_SPECS,
   HSL_BAND_TABS,
   LENS_CA_SLIDER_SPECS,
@@ -25,6 +27,7 @@ import {
   type CurvesAdjustment,
   type DetailsAdjustment,
   type EffectsAdjustment,
+  type GridOverlay,
   type GuidedLine,
   type HslAdjustment,
   type LensCorrectionAdjustment,
@@ -131,6 +134,13 @@ export function DevelopPanel() {
   const setLensCorrectionGuidedLineField = useAppStore((s) => s.setLensCorrectionGuidedLineField);
   const effects = useAppStore((s) => s.developEdl.effects);
   const setEffectsField = useAppStore((s) => s.setEffectsField);
+  const geometry = useAppStore((s) => s.developEdl.geometry);
+  const geometryCropActive = useAppStore((s) => s.geometryCropActive);
+  const toggleGeometryCropActive = useAppStore((s) => s.toggleGeometryCropActive);
+  const setGeometryAngle = useAppStore((s) => s.setGeometryAngle);
+  const setGeometryAspectRatio = useAppStore((s) => s.setGeometryAspectRatio);
+  const setGeometryOverlay = useAppStore((s) => s.setGeometryOverlay);
+  const setGeometryAutoHorizon = useAppStore((s) => s.setGeometryAutoHorizon);
 
   // Eine per Bildklick neu angelegte Region wird sofort zur Bearbeitung
   // ausgewählt statt dass der Nutzer sie erst in der Liste anklicken muss.
@@ -654,6 +664,66 @@ export function DevelopPanel() {
                 />
               ))}
             </div>
+          </fieldset>
+
+          <fieldset className="flex flex-col gap-3">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Geometrie</legend>
+            <button
+              type="button"
+              aria-pressed={geometryCropActive}
+              onClick={toggleGeometryCropActive}
+              className={`rounded border px-2 py-1 text-xs ${geometryCropActive ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
+            >
+              Freistellen {geometryCropActive ? "(aktiv)" : ""}
+            </button>
+
+            <DevelopSlider
+              spec={{ key: "angle_degrees", label: "Winkel", min: -45, max: 45, fineStep: 0.1, coarseStep: 1, neutral: 0 }}
+              value={geometry.angle_degrees}
+              onChange={setGeometryAngle}
+              onCommit={() => void commitDevelopEdit()}
+            />
+
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              Seitenverhältnis
+              <select
+                aria-label="Seitenverhältnis"
+                value={geometry.aspect_ratio ?? ""}
+                onChange={(event) => setGeometryAspectRatio(event.target.value ? Number(event.target.value) : null)}
+                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+              >
+                {ASPECT_RATIO_PRESETS.map((option) => (
+                  <option key={option.label} value={option.value ?? ""}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              Raster
+              <select
+                aria-label="Rasterüberlagerung"
+                value={geometry.overlay}
+                onChange={(event) => setGeometryOverlay(event.target.value as GridOverlay)}
+                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+              >
+                {GRID_OVERLAY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              <input
+                type="checkbox"
+                checked={geometry.auto_horizon}
+                onChange={(event) => setGeometryAutoHorizon(event.target.checked)}
+              />
+              Automatische Ausrichtung (nur EXIF-Ausrichtung, siehe ADR-0028)
+            </label>
           </fieldset>
         </>
       )}

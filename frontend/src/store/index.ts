@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
 import { buildEdlEnvelopeJson, MAX_COLOR_MIXER_REGIONS, neutralEdlPayload, newColorMixerRegion, parseEdlEnvelopeJson, WHITE_BALANCE_PRESETS, writeBasicField } from "../lib/edl";
-import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, PrimaryColorAdjustment, UprightMode } from "../lib/edl";
+import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, PrimaryColorAdjustment, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
@@ -297,6 +297,18 @@ interface DevelopSlice {
   /** Setzt eines der acht numerischen Effekte-Felder (Phase 4 Schritt
    * 10, Vignettierung + Körnung) — Zwischenstand beim Ziehen. */
   setEffectsField: (key: keyof EffectsAdjustment, value: number) => void;
+  /** Ob das Freistellen-Werkzeug gerade aktiv ist (Phase 4 Schritt 11)
+   * — blendet `CropOverlay` im Viewer ein. */
+  geometryCropActive: boolean;
+  toggleGeometryCropActive: () => void;
+  /** Ersetzt das Freistellungsrechteck — Zwischenstand beim Ziehen. */
+  setGeometryCrop: (crop: CropRect) => void;
+  setGeometryAngle: (value: number) => void;
+  /** Setzt das Seitenverhältnis-Preset absolut und committet sofort. */
+  setGeometryAspectRatio: (value: number | null) => void;
+  /** Setzt die Rasterüberlagerung absolut und committet sofort. */
+  setGeometryOverlay: (value: GridOverlay) => void;
+  setGeometryAutoHorizon: (value: boolean) => void;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
    * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
    * bei jedem Zwischenwert). */
@@ -781,6 +793,47 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.developEdl.effects[key] = value;
       });
+    },
+
+    geometryCropActive: false,
+
+    toggleGeometryCropActive: () => {
+      set((state) => {
+        state.geometryCropActive = !state.geometryCropActive;
+      });
+    },
+
+    setGeometryCrop: (crop) => {
+      set((state) => {
+        state.developEdl.geometry.crop = crop;
+      });
+    },
+
+    setGeometryAngle: (value) => {
+      set((state) => {
+        state.developEdl.geometry.angle_degrees = value;
+      });
+    },
+
+    setGeometryAspectRatio: (value) => {
+      set((state) => {
+        state.developEdl.geometry.aspect_ratio = value;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    setGeometryOverlay: (value) => {
+      set((state) => {
+        state.developEdl.geometry.overlay = value;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    setGeometryAutoHorizon: (value) => {
+      set((state) => {
+        state.developEdl.geometry.auto_horizon = value;
+      });
+      void get().commitDevelopEdit();
     },
 
     colorMixerPickerActive: false,

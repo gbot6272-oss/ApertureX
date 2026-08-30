@@ -135,9 +135,9 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Kamera-Profile (kleine eingebaute Liste) inkl. DCP-Import — Phase 4 — Status: Fertig (abweichend, siehe ADR-0028: `CAMERA_PROFILES` ist eine kleine handgepflegte Liste mit festem Sättigungs-/Kontrast-Bias je Profil, kein echter DCP-/ICC-Profilwechsel; DCP-Import selbst auf spätere Phase verschoben — dasselbe Adobe-Format-Problem wie bei Objektivprofilen)
 
 ### Geometrie
-- [ ] Freistellen (Presets, eigene Verhältnisse, Rasterüberlagerungen) — Phase 4 — Status: Nicht begonnen
-- [ ] Winkel-Werkzeug — Phase 4 — Status: Nicht begonnen
-- [ ] Auto-Ausrichtung am Horizont — Phase 4 — Status: Nicht begonnen (vereinfacht: kein echtes Kantenerkennungs-Verfahren, siehe ADR-0028)
+- [x] Freistellen (Presets, eigene Verhältnisse, Rasterüberlagerungen) — Phase 4 — Status: Fertig (abweichend, siehe ADR-0030: „Spirale" als verschachtelte Goldener-Schnitt-Rechtecke statt echter logarithmischer Spirale, „Diagonalen" mit zwei statt vier Linien; `stages/geometry.rs` extrahiert das Zuschnitt-Rechteck pixel-genau ohne Resampling)
+- [x] Winkel-Werkzeug — Phase 4 — Status: Fertig (bilinear abgetastete Drehung um den Bildmittelpunkt, Randpixel geklemmt statt schwarz gefüllt)
+- [x] Auto-Ausrichtung am Horizont — Phase 4 — Status: Fertig (abweichend, siehe ADR-0028/ADR-0030: dokumentierter No-op-Platzhalter in dieser Stufe — die EXIF-Ausrichtung läuft bereits vor der EDL-Pipeline in `apx-raw`, ein weiteres automatisches Ausrichten bräuchte echte Kantenerkennung außerhalb des Stacks)
 
 ### Reparatur
 <!-- Scope-Präzisierung siehe DECISIONS.md ADR-0028: Auto-Quellenfindung

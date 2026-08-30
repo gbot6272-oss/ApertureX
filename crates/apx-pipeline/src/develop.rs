@@ -14,18 +14,30 @@ use apx_raw::LinearImage;
 use crate::color::linear_camera_rgb_to_srgb_rgba8;
 use crate::edl::{
     CalibrationAdjustment, ColorGradingAdjustment, CurvesAdjustment, DetailsAdjustment, EdlV2,
-    EffectsAdjustment, HslAdjustment,
+    EffectsAdjustment, GeometryAdjustment, HslAdjustment,
 };
 use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
-    basic_fused, calibration, color_grading, curves, details, effects, hsl_color_mixer,
+    basic_fused, calibration, color_grading, curves, details, effects, geometry, hsl_color_mixer,
     lens_corrections, local_contrast, white_balance,
 };
 
+/// Das Ergebnis von [`render_rgba8`] — `width`/`height` beschreiben
+/// `pixels`s tatsächliche Größe, die durch Geometrie/Zuschnitt
+/// (`stages::geometry`) von `linear.width`/`linear.height` abweichen
+/// kann (der einzige Schritt in Phase 4, der die Ausgabegröße ändert,
+/// siehe `geometry.rs`s Moduldoku) — Aufrufer dürfen sich NICHT mehr auf
+/// `linear.width`/`linear.height` für die Puffergröße verlassen.
+pub struct RenderedImage {
+    pub width: u32,
+    pub height: u32,
+    /// Interleaved RGBA8, `4 * width * height` Bytes, Alpha immer `255`.
+    pub pixels: Vec<u8>,
+}
+
 /// Rendert `linear` mit den in `edl` beschriebenen Anpassungen zu einem
-/// interleaved RGBA8-Puffer (`4 * linear.width * linear.height` Bytes,
-/// Alpha immer `255`).
+/// [`RenderedImage`].
 ///
 /// Nutzt `ctx`, falls vorhanden — schlägt die GPU-Ausführung dennoch fehl
 /// (z. B. Treiberfehler zur Laufzeit), fällt diese Funktion automatisch
@@ -34,7 +46,7 @@ use crate::stages::{
 /// `DECISIONS.md` ADR-0012) — der Aufrufer muss diese Entscheidung nicht
 /// selbst treffen.
 ///
-/// **Phase-4-Übergangsstand (siehe `PLAN.md` Phase 4 Schritt 10):**
+/// **Phase-4-Übergangsstand (siehe `PLAN.md` Phase 4 Schritt 11):**
 /// Kalibrierung (`stages::calibration`, läuft *vor* Weißabgleich/den
 /// Grundeinstellungen — siehe `calibration.rs`s Moduldoku), alle zwölf
 /// Grundeinstellungs-Regler (`stages::basic_fused` /
@@ -48,15 +60,16 @@ use crate::stages::{
 /// Effekte (`stages::effects`, Vignettierung + Körnung, läuft direkt
 /// danach, ebenfalls noch vor der Farbraum-Konvertierung) sowie die
 /// Gradationskurven (`stages::curves`, laufen bewusst *nach* der
-/// Farbraum-Konvertierung auf dem fertigen RGBA8-Puffer, siehe
-/// `curves.rs`s Moduldoku) sind verdrahtet. Alle übrigen
-/// Werkzeugkategorien (Geometrie, Reparatur) sind noch inert — die
-/// folgenden Schritte verdrahten sie schrittweise.
+/// Farbraum-Konvertierung auf dem fertigen RGBA8-Puffer) und Geometrie
+/// (`stages::geometry`, Drehung + Zuschnitt — der einzige Schritt, der
+/// die Ausgabegröße ändert, siehe `geometry.rs`s Moduldoku und
+/// [`RenderedImage`] — läuft als allerletzter Schritt) sind verdrahtet.
+/// Reparatur ist noch inert — der letzte Schritt verdrahtet es.
 pub fn render_rgba8(
     ctx: Option<&GpuContext>,
     linear: &LinearImage,
     edl: &EdlV2,
-) -> Result<Vec<u8>> {
+) -> Result<RenderedImage> {
     let basic = &edl.basic;
     let wb_gains = white_balance::compute_gains(linear.as_shot_wb_coeffs, basic.white_balance);
 
@@ -246,12 +259,26 @@ pub fn render_rgba8(
 
     let rgba = linear_camera_rgb_to_srgb_rgba8(&effected, linear.cam_to_srgb);
 
-    Ok(if edl.curves == CurvesAdjustment::neutral() {
+    let curved = if edl.curves == CurvesAdjustment::neutral() {
         // Kein zusätzlicher Durchlauf über den ganzen Puffer, wenn alle
         // fünf Kurven neutral stehen (Regelfall).
         rgba
     } else {
         curves::apply_rgba8(&rgba, &edl.curves)
+    };
+
+    let (width, height, pixels) = if edl.geometry == GeometryAdjustment::NEUTRAL {
+        // Kein zusätzlicher Durchlauf, wenn weder Drehung noch Zuschnitt
+        // etwas zu tun haben (Regelfall).
+        (linear.width, linear.height, curved)
+    } else {
+        geometry::apply(&curved, linear.width, linear.height, &edl.geometry)
+    };
+
+    Ok(RenderedImage {
+        width,
+        height,
+        pixels,
     })
 }
 
@@ -275,9 +302,11 @@ mod tests {
     #[test]
     fn neutral_edl_produces_correctly_sized_opaque_output() {
         let linear = flat_gray_linear_image(0.5);
-        let rgba = render_rgba8(None, &linear, &EdlV2::neutral()).expect("sollte rendern");
-        assert_eq!(rgba.len(), 2 * 2 * 4);
-        for pixel in rgba.chunks_exact(4) {
+        let rendered = render_rgba8(None, &linear, &EdlV2::neutral()).expect("sollte rendern");
+        assert_eq!(rendered.width, 2);
+        assert_eq!(rendered.height, 2);
+        assert_eq!(rendered.pixels.len(), 2 * 2 * 4);
+        for pixel in rendered.pixels.chunks_exact(4) {
             assert_eq!(pixel[3], 255, "Alpha muss immer undurchsichtig sein");
         }
     }
@@ -295,10 +324,10 @@ mod tests {
         };
         let darker = render_rgba8(None, &linear, &darker_edl).expect("rendern");
         assert!(
-            darker[0] < neutral[0],
+            darker.pixels[0] < neutral.pixels[0],
             "negative Belichtung sollte den Rot-Kanal absenken (neutral={}, darker={})",
-            neutral[0],
-            darker[0]
+            neutral.pixels[0],
+            darker.pixels[0]
         );
     }
 
@@ -322,7 +351,8 @@ mod tests {
         };
         let cpu = render_rgba8(None, &linear, &edl).expect("CPU-Rendering");
         let gpu = render_rgba8(Some(&ctx), &linear, &edl).expect("GPU-Rendering");
-        for (c, g) in cpu.iter().zip(gpu.iter()) {
+        assert_eq!((cpu.width, cpu.height), (gpu.width, gpu.height));
+        for (c, g) in cpu.pixels.iter().zip(gpu.pixels.iter()) {
             // Toleranz von 1, da CPU/GPU getrennt auf f32 runden, bevor
             // hier auf u8 quantisiert wird.
             assert!((*c as i16 - *g as i16).abs() <= 1, "CPU={c} GPU={g}");

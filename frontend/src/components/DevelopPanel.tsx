@@ -57,6 +57,9 @@ const REPAIR_MODE_OPTIONS: ReadonlyArray<{ value: RepairMode; label: string }> =
   { value: "Heal", label: "Reparieren" },
 ];
 
+// ---- Preset-Stärke (Phase 5 Schritt 5, siehe SPEC.md §3.5) -----------------
+const PRESET_STRENGTH_SPEC: SliderSpec = { key: "strength", label: "Stärke (%)", min: 0, max: 200, fineStep: 1, coarseStep: 10, neutral: 100 };
+
 const WHITE_BALANCE_KEYS = new Set(["temp_shift_kelvin", "tint_shift"]);
 
 /** Die fünf Kurven-Kanäle (Phase 4 Schritt 4) — Anzeigereihenfolge wie in
@@ -134,6 +137,10 @@ export function DevelopPanel() {
   const [selectedRegionIndex, setSelectedRegionIndex] = useState<number | null>(null);
   const previousRegionCount = useRef(colorMixer.regions.length);
   const [savePresetOpen, setSavePresetOpen] = useState(false);
+  const presetStrengthContext = useAppStore((s) => s.presetStrengthContext);
+  const setPresetStrength = useAppStore((s) => s.setPresetStrength);
+  const commitPresetStrength = useAppStore((s) => s.commitPresetStrength);
+  const dismissPresetStrengthContext = useAppStore((s) => s.dismissPresetStrengthContext);
   const colorGrading = useAppStore((s) => s.developEdl.color_grading);
   const setColorGradingWheel = useAppStore((s) => s.setColorGradingWheel);
   const setColorGradingBalance = useAppStore((s) => s.setColorGradingBalance);
@@ -253,6 +260,21 @@ export function DevelopPanel() {
         <p className="text-xs text-text-muted" title="Ende-zu-Ende-Antwortzeit der letzten Regler-Vorschau (IPC + Dekodierung/Rendern, ohne Neuzeichnen im Browser) — siehe PLAN.md Phase 2 Schritt 7">
           Letztes Rendering: {Math.round(lastLatencyMs)} ms
         </p>
+      )}
+
+      {presetStrengthContext && (
+        <fieldset className="flex flex-col gap-2 rounded border border-accent/40 bg-accent/5 p-2">
+          <legend className="px-1 text-xs font-medium text-text-secondary">Preset „{presetStrengthContext.presetName}"</legend>
+          <DevelopSlider
+            spec={PRESET_STRENGTH_SPEC}
+            value={presetStrengthContext.strength}
+            onChange={setPresetStrength}
+            onCommit={commitPresetStrength}
+          />
+          <button type="button" onClick={dismissPresetStrengthContext} className="self-end text-xs text-text-muted underline">
+            Stärke-Regler schließen
+          </button>
+        </fieldset>
       )}
 
       {selectedPhotoId && (

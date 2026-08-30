@@ -4,8 +4,8 @@ import { immer } from "zustand/middleware/immer";
 import { buildEdlEnvelopeJson, MAX_COLOR_MIXER_REGIONS, neutralEdlPayload, newColorMixerRegion, parseEdlEnvelopeJson, WHITE_BALANCE_PRESETS, writeBasicField } from "../lib/edl";
 import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, PrimaryColorAdjustment, RepairMode, RepairPoint, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
-import { buildPresetEdlSubset, serializeEdlSubset } from "../lib/presets";
-import type { PresetSectionKey } from "../lib/presets";
+import { buildPresetEdlSubset, mergeEdlSubset, parseEdlSubset, scalePresetEdlSubset, serializeEdlSubset } from "../lib/presets";
+import type { PresetEdlSubset, PresetSectionKey } from "../lib/presets";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
 import * as api from "../lib/tauri";
@@ -343,7 +343,12 @@ interface DevelopSlice {
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
    * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
    * bei jedem Zwischenwert). */
-  commitDevelopEdit: (label?: string) => Promise<void>;
+  /** `preservePresetStrengthContext`: siehe `presetStrengthContext` unten
+   * — nur `applyPreset`/`setPresetStrength` setzen dieses Flag, jeder
+   * andere Aufrufer (der weit überwiegende Regelfall) lässt es weg und
+   * löscht damit automatisch einen laufenden Stärke-Anpassungskontext,
+   * sobald „ein anderer Edit dazwischen liegt" (`SPEC.md` §3.5). */
+  commitDevelopEdit: (label?: string, options?: { preservePresetStrengthContext?: boolean }) => Promise<void>;
   undoDevelop: () => Promise<void>;
   redoDevelop: () => Promise<void>;
   /** Zuletzt gemessene Ende-zu-Ende-Antwortzeit der `develop/...`-Route
@@ -467,6 +472,46 @@ interface PresetsSlice {
     tags: string[],
     sections: PresetSectionKey[],
   ) => Promise<void>;
+
+  /** Zustand für den nachträglich änderbaren Preset-Stärke-Regler
+   * (`SPEC.md` §3.5: „auch nachträglich änderbar, solange kein anderer
+   * Edit dazwischen liegt") — `baseEdl` ist der `developEdl`-Stand
+   * *vor* dem Anwenden, `subset` die ungeskalierte EDL-Teilmenge des
+   * Presets. `setPresetStrength` leitet den aktuellen `developEdl`-Stand
+   * bei jeder Änderung neu aus `baseEdl` + skaliertem `subset` ab, statt
+   * auf dem zuletzt angewendeten Zustand aufzubauen — nur so bleibt eine
+   * Stärke-Änderung wiederholbar (z. B. erst 150 %, dann zurück auf
+   * 80 %), statt sich mit jeder Reglerbewegung zu verselbständigen.
+   * Wird von jedem *anderen* `commitDevelopEdit`-Aufruf automatisch
+   * gelöscht (siehe dort). */
+  presetStrengthContext: { presetId: string; presetName: string; baseEdl: EdlPayload; subset: PresetEdlSubset; strength: number } | null;
+  /** Wendet die aktuellste Version von `presetId` bei 100 % Stärke auf
+   * `developEdl` an und committet sofort (wie ein Dropdown-Wechsel — ein
+   * Klick auf ein Preset ist eine abgeschlossene Aktion). */
+  applyPreset: (presetId: string) => Promise<void>;
+  /** Skaliert das zuletzt angewendete Preset auf `strengthPercent`
+   * (0–200) neu — no-op ohne aktiven `presetStrengthContext`. */
+  setPresetStrength: (strengthPercent: number) => void;
+  /** Committet den zuletzt per `setPresetStrength` gesetzten Zwischenwert
+   * dauerhaft (Loslassen des Reglers) — Zwischenwerte während des Ziehens
+   * werden nicht einzeln committet, analog zu jedem `DevelopSlider`. */
+  commitPresetStrength: () => void;
+  dismissPresetStrengthContext: () => void;
+
+  /** Preset-Stapel (`SPEC.md` §3.5: „mehrere Presets nacheinander
+   * anwenden, Reihenfolge editierbar") — eine vom Nutzer zusammengestellte
+   * Liste von Preset-IDs, angewendet in dieser Reihenfolge. Jedes Preset
+   * im Stapel wirkt bei 100 % (keine Einzel-Stärke je Stapel-Eintrag,
+   * siehe `DECISIONS.md` ADR-0031-Folgenotiz in `PLAN.md` Schritt 5). */
+  presetStack: string[];
+  addPresetToStack: (presetId: string) => void;
+  removePresetFromStack: (index: number) => void;
+  movePresetInStack: (index: number, direction: -1 | 1) => void;
+  clearPresetStack: () => void;
+  /** Wendet alle Presets im Stapel sequenziell auf `developEdl` an
+   * (spätere Einträge überschreiben gemeinsame Sektionen früherer) und
+   * committet einmal am Ende. */
+  applyPresetStack: () => Promise<void>;
 }
 
 export type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice & LibrarySlice & PresetsSlice;
@@ -1004,9 +1049,14 @@ export const useAppStore = create<AppStore>()(
       });
     },
 
-    commitDevelopEdit: async (label) => {
+    commitDevelopEdit: async (label, options) => {
       const { developPhotoId, developEdl } = get();
       if (!developPhotoId) return;
+      if (!options?.preservePresetStrengthContext) {
+        set((state) => {
+          state.presetStrengthContext = null;
+        });
+      }
       try {
         await api.applyDevelopEdit(developPhotoId, buildEdlEnvelopeJson(developEdl), label);
       } catch (err) {
@@ -1591,6 +1641,105 @@ export const useAppStore = create<AppStore>()(
         const subset = buildPresetEdlSubset(get().developEdl, sections);
         await api.createPreset(folderId, trimmed, tags, "[]", serializeEdlSubset(subset));
         await get().refreshPresets();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    presetStrengthContext: null,
+
+    applyPreset: async (presetId) => {
+      try {
+        const version = await api.latestPresetVersion(presetId);
+        const subset = parseEdlSubset(version.edl_subset_json);
+        const preset = get().presets.find((p) => p.id === presetId);
+        const baseEdl = get().developEdl;
+        const merged = mergeEdlSubset(baseEdl, subset);
+        set((state) => {
+          state.developEdl = merged;
+          state.presetStrengthContext = { presetId, presetName: preset?.name ?? "Preset", baseEdl, subset, strength: 100 };
+        });
+        await get().commitDevelopEdit(`Preset „${preset?.name ?? presetId}" angewendet`, { preservePresetStrengthContext: true });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    setPresetStrength: (strengthPercent) => {
+      const context = get().presetStrengthContext;
+      if (!context) return;
+      const clamped = Math.min(200, Math.max(0, strengthPercent));
+      const scaled = scalePresetEdlSubset(context.subset, clamped);
+      const merged = mergeEdlSubset(context.baseEdl, scaled);
+      // Nur der Live-Zustand wird aktualisiert (löst über `useDevelopRender`
+      // sofort eine neue Vorschau aus) — das eigentliche Committen passiert
+      // erst bei `commitPresetStrength` (Loslassen des Reglers), genau wie
+      // bei jedem anderen `DevelopSlider` (`onChange` vs. `onCommit`).
+      set((state) => {
+        state.developEdl = merged;
+        if (state.presetStrengthContext) state.presetStrengthContext.strength = clamped;
+      });
+    },
+
+    commitPresetStrength: () => {
+      void get().commitDevelopEdit(undefined, { preservePresetStrengthContext: true });
+    },
+
+    dismissPresetStrengthContext: () => {
+      set((state) => {
+        state.presetStrengthContext = null;
+      });
+    },
+
+    presetStack: [],
+
+    addPresetToStack: (presetId) => {
+      set((state) => {
+        state.presetStack.push(presetId);
+      });
+    },
+
+    removePresetFromStack: (index) => {
+      set((state) => {
+        state.presetStack.splice(index, 1);
+      });
+    },
+
+    movePresetInStack: (index, direction) => {
+      set((state) => {
+        const target = index + direction;
+        if (target < 0 || target >= state.presetStack.length) return;
+        const [entry] = state.presetStack.splice(index, 1);
+        if (entry === undefined) return;
+        state.presetStack.splice(target, 0, entry);
+      });
+    },
+
+    clearPresetStack: () => {
+      set((state) => {
+        state.presetStack = [];
+      });
+    },
+
+    applyPresetStack: async () => {
+      const { presetStack, presets } = get();
+      if (presetStack.length === 0) return;
+      try {
+        let merged = get().developEdl;
+        for (const presetId of presetStack) {
+          const version = await api.latestPresetVersion(presetId);
+          const subset: PresetEdlSubset = parseEdlSubset(version.edl_subset_json);
+          merged = mergeEdlSubset(merged, subset);
+        }
+        const names = presetStack.map((id) => presets.find((p) => p.id === id)?.name ?? id).join(" + ");
+        set((state) => {
+          state.developEdl = merged;
+        });
+        await get().commitDevelopEdit(`Preset-Stapel angewendet (${names})`);
       } catch (err) {
         set((state) => {
           state.catalogError = String(err);

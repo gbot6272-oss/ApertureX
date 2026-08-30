@@ -69,14 +69,18 @@ function PresetRow({ preset, folders }: PresetRowProps) {
   const renamePreset = useAppStore((s) => s.renamePreset);
   const movePresetToFolder = useAppStore((s) => s.movePresetToFolder);
   const deletePreset = useAppStore((s) => s.deletePreset);
+  const applyPreset = useAppStore((s) => s.applyPreset);
+  const addPresetToStack = useAppStore((s) => s.addPresetToStack);
+  const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
 
-  function handleRename() {
+  function handleRename(event: React.MouseEvent) {
+    event.stopPropagation();
     const name = window.prompt("Preset umbenennen", preset.name);
     if (name) void renamePreset(preset.id, name);
   }
 
   return (
-    <li className="flex items-center justify-between gap-2 rounded border border-border px-2 py-1.5 text-sm">
+    <li className="flex items-center justify-between gap-1.5 rounded border border-border px-2 py-1.5 text-sm">
       <button
         type="button"
         onClick={() => setPresetFavorite(preset.id, !preset.is_favorite)}
@@ -87,14 +91,32 @@ function PresetRow({ preset, folders }: PresetRowProps) {
       >
         {preset.is_favorite ? "★" : "☆"}
       </button>
-      <button type="button" onClick={handleRename} className="min-w-0 flex-1 truncate text-left text-text-primary hover:underline" title="Umbenennen">
+      <button
+        type="button"
+        onClick={() => void applyPreset(preset.id)}
+        disabled={!selectedPhotoId}
+        className="min-w-0 flex-1 truncate text-left text-text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+        title="Preset anwenden"
+      >
         {preset.name}
+      </button>
+      <span role="button" tabIndex={0} onClick={handleRename} className="shrink-0 text-text-muted hover:text-accent" title="Umbenennen">
+        ✎
+      </span>
+      <button
+        type="button"
+        onClick={() => addPresetToStack(preset.id)}
+        className="shrink-0 text-text-muted hover:text-accent"
+        title="Zum Preset-Stapel hinzufügen"
+        aria-label={`${preset.name} zum Stapel hinzufügen`}
+      >
+        ➕
       </button>
       <select
         aria-label={`${preset.name}: Ordner`}
         value={preset.folder_id ?? ""}
         onChange={(event) => void movePresetToFolder(preset.id, event.target.value || null)}
-        className="rounded border border-border bg-bg-panel px-1 py-0.5 text-xs"
+        className="shrink-0 rounded border border-border bg-bg-panel px-1 py-0.5 text-xs"
       >
         <option value="">Wurzel</option>
         {folders.map((folder) => (
@@ -106,12 +128,74 @@ function PresetRow({ preset, folders }: PresetRowProps) {
       <button
         type="button"
         onClick={() => void deletePreset(preset.id)}
-        className="text-xs text-danger underline"
+        className="shrink-0 text-xs text-danger underline"
         aria-label={`${preset.name} löschen`}
       >
         Löschen
       </button>
     </li>
+  );
+}
+
+/** Preset-Stapel (`SPEC.md` §3.5): eine geordnete Liste ausgewählter
+ * Presets, die auf einen Klick nacheinander angewendet werden — jedes
+ * bei 100 % Stärke, spätere Einträge überschreiben gemeinsame Sektionen
+ * früherer. */
+function PresetStackSection() {
+  const presetStack = useAppStore((s) => s.presetStack);
+  const presets = useAppStore((s) => s.presets);
+  const removePresetFromStack = useAppStore((s) => s.removePresetFromStack);
+  const movePresetInStack = useAppStore((s) => s.movePresetInStack);
+  const clearPresetStack = useAppStore((s) => s.clearPresetStack);
+  const applyPresetStack = useAppStore((s) => s.applyPresetStack);
+  const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
+
+  if (presetStack.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-1 border-t border-border pt-2">
+      <h3 className="text-xs font-medium text-text-secondary">Preset-Stapel</h3>
+      <ul className="flex flex-col gap-1">
+        {presetStack.map((presetId, index) => {
+          const preset = presets.find((p) => p.id === presetId);
+          return (
+            <li key={`${presetId}-${index}`} className="flex items-center justify-between gap-1 rounded border border-border px-2 py-1 text-xs">
+              <span className="min-w-0 flex-1 truncate">
+                {index + 1}. {preset?.name ?? presetId}
+              </span>
+              <button type="button" onClick={() => movePresetInStack(index, -1)} disabled={index === 0} className="disabled:opacity-30" aria-label="Nach oben">
+                ↑
+              </button>
+              <button
+                type="button"
+                onClick={() => movePresetInStack(index, 1)}
+                disabled={index === presetStack.length - 1}
+                className="disabled:opacity-30"
+                aria-label="Nach unten"
+              >
+                ↓
+              </button>
+              <button type="button" onClick={() => removePresetFromStack(index)} className="text-danger" aria-label="Aus dem Stapel entfernen">
+                ×
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => void applyPresetStack()}
+          disabled={!selectedPhotoId}
+          className="rounded bg-accent px-2 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Stapel anwenden
+        </button>
+        <button type="button" onClick={clearPresetStack} className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel">
+          Leeren
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -198,6 +282,8 @@ export function PresetsPanel() {
         ))}
         {visiblePresets.length === 0 && <li className="text-xs text-text-muted">Keine Presets in diesem Ordner.</li>}
       </ul>
+
+      <PresetStackSection />
     </aside>
   );
 }

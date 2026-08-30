@@ -1,14 +1,36 @@
 import { describe, expect, it } from "vitest";
 
 import { neutralEdlPayload } from "./edl";
-import { buildPresetEdlSubset, parseConditions, parseEdlSubset, serializeConditions, serializeEdlSubset } from "./presets";
+import {
+  buildPresetEdlSubset,
+  mergeEdlSubset,
+  parseConditions,
+  parseEdlSubset,
+  scalePresetEdlSubset,
+  serializeConditions,
+  serializeEdlSubset,
+} from "./presets";
 import type { PresetCondition, PresetEdlSubset } from "./presets";
+
+// `neutralEdlPayload()` teilt sich für einige Sektionen (`basic`, `hsl`,
+// `color_grading`, `effects`, `geometry`) eine gemeinsame Konstante statt
+// bei jedem Aufruf frisch zu klonen (siehe `edl.ts`s `neutralEdlPayload`)
+// — im echten Store ist das unbedenklich, weil jede Änderung über einen
+// Immer-`set()`-Producer läuft (der bei einer Mutation automatisch eine
+// Kopie anlegt). Hier in reinen Funktionstests OHNE Immer würde eine
+// direkte Feldzuweisung wie `edl.basic.exposure_ev = 0.5` diese geteilte
+// Konstante dauerhaft verändern und alle nachfolgenden Tests in dieser
+// Datei verfälschen — deshalb wird jede Sektion vor dem Ändern per
+// Spread geklont.
+function edlWithBasic(overrides: Partial<ReturnType<typeof neutralEdlPayload>["basic"]>) {
+  const edl = neutralEdlPayload();
+  edl.basic = { ...edl.basic, ...overrides };
+  return edl;
+}
 
 describe("buildPresetEdlSubset", () => {
   it("copies only the selected sections from a full EdlPayload", () => {
-    const edl = neutralEdlPayload();
-    edl.basic.exposure_ev = 0.5;
-    edl.curves.rgb = { kind: "Parametric", shadows: 10, darks: 0, lights: 0, highlights: 0 };
+    const edl = edlWithBasic({ exposure_ev: 0.5 });
 
     const subset = buildPresetEdlSubset(edl, ["basic"]);
 
@@ -38,6 +60,76 @@ describe("parseEdlSubset/serializeEdlSubset", () => {
   it("returns an empty object for JSON that isn't an object", () => {
     expect(parseEdlSubset("42")).toEqual({});
     expect(parseEdlSubset("null")).toEqual({});
+  });
+});
+
+describe("scalePresetEdlSubset", () => {
+  it("returns the preset value unchanged at 100%", () => {
+    const subset = buildPresetEdlSubset(edlWithBasic({ exposure_ev: 0.8 }), ["basic"]);
+
+    const scaled = scalePresetEdlSubset(subset, 100);
+
+    expect(scaled.basic?.exposure_ev).toBeCloseTo(0.8);
+  });
+
+  it("returns the neutral value at 0%", () => {
+    const subset = buildPresetEdlSubset(edlWithBasic({ exposure_ev: 0.8, contrast: 20 }), ["basic"]);
+
+    const scaled = scalePresetEdlSubset(subset, 0);
+
+    expect(scaled.basic?.exposure_ev).toBeCloseTo(0);
+    expect(scaled.basic?.contrast).toBeCloseTo(0);
+  });
+
+  it("doubles the distance from neutral at 200%", () => {
+    const subset = buildPresetEdlSubset(edlWithBasic({ exposure_ev: 0.5 }), ["basic"]);
+
+    const scaled = scalePresetEdlSubset(subset, 200);
+
+    expect(scaled.basic?.exposure_ev).toBeCloseTo(1.0);
+  });
+
+  it("scales nested numeric fields (e.g. white_balance) recursively", () => {
+    const subset = buildPresetEdlSubset(
+      edlWithBasic({ white_balance: { temp_shift_kelvin: 400, tint_shift: -20 } }),
+      ["basic"],
+    );
+
+    const scaled = scalePresetEdlSubset(subset, 50);
+
+    expect(scaled.basic?.white_balance.temp_shift_kelvin).toBeCloseTo(200);
+    expect(scaled.basic?.white_balance.tint_shift).toBeCloseTo(-10);
+  });
+
+  it("leaves non-numeric fields (arrays, enums) unscaled at any strength", () => {
+    const edl = neutralEdlPayload();
+    const region = {
+      target_hue_degrees: 30,
+      bandwidth_degrees: 40,
+      feather: 15,
+      hue_shift: 10,
+      saturation_shift: 10,
+      luminance_shift: 0,
+    };
+    edl.color_mixer = { regions: [region] };
+    const subset = buildPresetEdlSubset(edl, ["color_mixer"]);
+
+    const scaled = scalePresetEdlSubset(subset, 30);
+
+    expect(scaled.color_mixer?.regions).toEqual([region]);
+  });
+});
+
+describe("mergeEdlSubset", () => {
+  it("replaces only the sections present in the subset, keeping the rest of the base untouched", () => {
+    const base = neutralEdlPayload();
+    base.curves = { ...base.curves, rgb: { kind: "Parametric", shadows: 5, darks: 0, lights: 0, highlights: 0 } };
+    const subset: PresetEdlSubset = { basic: { ...neutralEdlPayload().basic, exposure_ev: 0.4 } };
+
+    const merged = mergeEdlSubset(base, subset);
+
+    expect(merged.basic.exposure_ev).toBeCloseTo(0.4);
+    expect(merged.curves).toBe(base.curves);
   });
 });
 

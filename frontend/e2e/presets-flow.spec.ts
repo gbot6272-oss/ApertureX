@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installTauriMock } from "./tauri-mock";
+import { getMockInvokeLog, installTauriMock } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000401";
 const FOLDER_PATH = "/home/user/Fotos/Presets-Test";
@@ -119,6 +119,73 @@ test.describe("Presets-Panel", () => {
     // Neues Preset landet an der Wurzel (kein Ordner ausgewählt) — die
     // Wurzel-Ansicht ist bereits der Standardzustand des Panels.
     await expect(page.getByText("Mein neues Preset")).toBeVisible();
+  });
+
+  async function readLastCommittedExposure(page: import("@playwright/test").Page): Promise<number> {
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    return (JSON.parse(edlJson).payload.basic as { exposure_ev: number }).exposure_ev;
+  }
+
+  test("wendet ein Preset an und passt die Stärke nachträglich an", async ({ page }) => {
+    await setUp(page);
+
+    // Preset mit Belichtung 0.6 speichern, Regler danach wieder auf 0
+    // zurücksetzen, damit "Anwenden" sichtbar etwas ändert.
+    const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" });
+    await exposureInput.fill("0.6");
+    await exposureInput.blur();
+    await page.getByRole("button", { name: "Preset speichern" }).click();
+    const strengthTestDialog = page.getByRole("dialog", { name: "Preset speichern" });
+    await strengthTestDialog.getByLabel("Name").fill("Stärke-Test");
+    for (const label of ["Kurven", "HSL", "Farbmischer", "Color Grading", "Details", "Objektivkorrekturen", "Effekte", "Kalibrierung", "Geometrie"]) {
+      await strengthTestDialog.getByLabel(label).uncheck();
+    }
+    await strengthTestDialog.getByRole("button", { name: "Speichern" }).click();
+    await exposureInput.fill("0");
+    await exposureInput.blur();
+
+    await page.getByRole("button", { name: "Stärke-Test", exact: true }).click();
+    await expect.poll(async () => readLastCommittedExposure(page)).toBeCloseTo(0.6, 2);
+
+    const strengthInput = page.getByRole("spinbutton", { name: "Stärke (%) (Zahlenwert)" });
+    await expect(strengthInput).toBeVisible();
+    await strengthInput.fill("50");
+    await strengthInput.blur();
+    await expect.poll(async () => readLastCommittedExposure(page)).toBeCloseTo(0.3, 2);
+
+    await page.getByRole("button", { name: "Stärke-Regler schließen" }).click();
+    await expect(strengthInput).not.toBeVisible();
+  });
+
+  test("Preset-Stapel: zwei Presets nacheinander anwenden, Reihenfolge editierbar", async ({ page }) => {
+    await setUp(page);
+
+    async function savePreset(name: string, exposure: string) {
+      await exposureInput.fill(exposure);
+      await exposureInput.blur();
+      await page.getByRole("button", { name: "Preset speichern" }).click();
+      const dialog = page.getByRole("dialog", { name: "Preset speichern" });
+      await dialog.getByLabel("Name").fill(name);
+      for (const label of ["Kurven", "HSL", "Farbmischer", "Color Grading", "Details", "Objektivkorrekturen", "Effekte", "Kalibrierung", "Geometrie"]) {
+        await dialog.getByLabel(label).uncheck();
+      }
+      await dialog.getByRole("button", { name: "Speichern" }).click();
+      await expect(dialog).not.toBeVisible();
+    }
+
+    const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" });
+    await savePreset("Preset A", "0.2");
+    await savePreset("Preset B", "0.9");
+
+    await page.getByRole("button", { name: "Preset A zum Stapel hinzufügen" }).click();
+    await page.getByRole("button", { name: "Preset B zum Stapel hinzufügen" }).click();
+    await expect(page.getByRole("heading", { name: "Preset-Stapel" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Stapel anwenden" }).click();
+    // Späterer Stapel-Eintrag (Preset B) gewinnt bei derselben Sektion.
+    await expect.poll(async () => readLastCommittedExposure(page)).toBeCloseTo(0.9, 2);
   });
 
   test("benennt einen Preset-Ordner über den Dialog um", async ({ page }) => {

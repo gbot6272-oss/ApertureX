@@ -1,3 +1,4 @@
+import { neutralEdlPayload } from "./edl";
 import type { EdlPayload } from "./edl";
 
 /**
@@ -65,6 +66,56 @@ export function parseEdlSubset(json: string): PresetEdlSubset {
 
 export function serializeEdlSubset(subset: PresetEdlSubset): string {
   return JSON.stringify(subset);
+}
+
+// ---- Preset-Stärke (0-200 %, siehe SPEC.md §3.5) ---------------------------
+
+/** Interpoliert einen einzelnen Wert zwischen seiner Neutralstellung und
+ * dem im Preset gespeicherten Zielwert. Nur numerische Blattwerte werden
+ * skaliert (Regler-Werte im eigentlichen Sinn); verschachtelte Objekte
+ * (z. B. `basic.white_balance`, HSL-Bänder, Color-Grading-Farbräder)
+ * werden rekursiv abgestiegen. Arrays (Kurven-Punkte, Farbmischer-
+ * Regionen, Objektivkorrektur-Hilfslinien) sind strukturierte Listen,
+ * kein linear interpolierbarer „Wert" — sie werden unskaliert
+ * übernommen, ebenso Strings/Booleans/Enums (Kurventyp, Upright-Modus,
+ * Kameraprofil-Auswahl usw.). Dieselbe Einschränkung hat auch Lightroom
+ * bei nicht-skalaren Preset-Bestandteilen. */
+function interpolateValue(neutral: unknown, target: unknown, t: number): unknown {
+  if (typeof target === "number" && typeof neutral === "number") {
+    return neutral + (target - neutral) * t;
+  }
+  if (Array.isArray(target)) {
+    return target;
+  }
+  if (target && typeof target === "object" && neutral && typeof neutral === "object") {
+    const result: Record<string, unknown> = {};
+    for (const key of Object.keys(target as Record<string, unknown>)) {
+      result[key] = interpolateValue((neutral as Record<string, unknown>)[key], (target as Record<string, unknown>)[key], t);
+    }
+    return result;
+  }
+  return target;
+}
+
+/** Skaliert jede Sektion einer EDL-Teilmenge auf `strengthPercent` (0–200)
+ * ihres Wegs von der jeweiligen Neutralstellung zum gespeicherten
+ * Zielwert — 100 % ist der Preset-Wert unverändert, 0 % ist neutral,
+ * 200 % verdoppelt den Abstand zur Neutralstellung. */
+export function scalePresetEdlSubset(subset: PresetEdlSubset, strengthPercent: number): PresetEdlSubset {
+  const neutral = neutralEdlPayload() as unknown as Record<string, unknown>;
+  const t = strengthPercent / 100;
+  const scaled: Record<string, unknown> = {};
+  for (const key of Object.keys(subset)) {
+    scaled[key] = interpolateValue(neutral[key], (subset as Record<string, unknown>)[key], t);
+  }
+  return scaled as PresetEdlSubset;
+}
+
+/** Ersetzt in `base` genau die in `subset` enthaltenen Sektionen — jede
+ * ausgewählte Sektion wird als Ganzes übernommen (siehe
+ * `buildPresetEdlSubset`), nicht feldweise gemischt. */
+export function mergeEdlSubset(base: EdlPayload, subset: PresetEdlSubset): EdlPayload {
+  return { ...base, ...subset };
 }
 
 // ---- Bedingte Presets (vereinfacht, siehe DECISIONS.md ADR-0031 Punkt 4) ---

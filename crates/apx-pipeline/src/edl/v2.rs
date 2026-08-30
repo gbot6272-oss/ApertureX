@@ -580,6 +580,12 @@ impl Default for GeometryAdjustment {
 pub enum RepairMode {
     Clone,
     Heal,
+    /// Inhaltsbasiertes Füllen (Phase 7, `DECISIONS.md` ADR-0033 Punkt 4)
+    /// — sucht den Füllinhalt selbst aus der Bildumgebung, statt ihn von
+    /// einem manuell gesetzten Quellpunkt zu kopieren; `source` wird
+    /// dabei ignoriert. Läuft als vereinfachtes PatchMatch **CPU-only**
+    /// (siehe `stages::repair`s Moduldoku).
+    ContentAwareFill,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

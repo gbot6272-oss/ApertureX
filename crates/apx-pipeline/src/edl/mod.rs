@@ -17,8 +17,8 @@ pub use v2::{
     ProcessVersion, RepairMode, RepairPoint, RepairStroke, UprightMode,
 };
 pub use v3::{
-    BlendMode, BrushStroke, EdlV3, Mask, MaskAdjustments, MaskCombine, MaskComponent, MaskGeometry,
-    MaskGroup, MaskPoint, OverlayColor,
+    AiMaskKind, BlendMode, BrushStroke, EdlV3, Mask, MaskAdjustments, MaskCombine, MaskComponent,
+    MaskGeometry, MaskGroup, MaskPoint, OverlayColor,
 };
 
 /// Die aktuelle EDL-Schema-Version — `EdlV3` (siehe `v3.rs`). Version 1

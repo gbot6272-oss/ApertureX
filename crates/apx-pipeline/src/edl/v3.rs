@@ -95,6 +95,38 @@ pub enum MaskGeometry {
         range_max: f32,
         feather: f32,
     },
+    /// Eine per klassischer Bildanalyse einmalig berechnete Alpha-Bitmap
+    /// (Phase 7, `apx-ai`, siehe `DECISIONS.md` ADR-0033 Punkt 3) — im
+    /// Unterschied zu den fünf parametrischen Geometrietypen oben ist das
+    /// Ergebnis naturgemäß eine Rasterfläche, kein Parametersatz.
+    /// `width`/`height` sind die Auflösung von `alpha` (lange Kante auf
+    /// 512px begrenzt, siehe `apx_core::raster::fit_within`), **nicht**
+    /// die tatsächliche Bildauflösung — `stages/masks.rs` skaliert beim
+    /// Rendern bilinear auf die jeweils angeforderte Zielgröße hoch.
+    /// Bleibt bis zu einer erneuten Generierung unverändert (kein Re-Run
+    /// bei jedem Regler-Tick).
+    /// (`ai_kind` statt schlicht `kind`, weil `MaskGeometry` selbst
+    /// `#[serde(tag = "kind")]` nutzt — ein gleichnamiges Variantenfeld
+    /// kollidiert mit dem internen Diskriminator.)
+    AiGenerated {
+        ai_kind: AiMaskKind,
+        width: u32,
+        height: u32,
+        alpha: Vec<u8>,
+    },
+}
+
+/// Welche der fünf KI-Masken-Heuristiken (`apx-ai::segmentation`) eine
+/// [`MaskGeometry::AiGenerated`]-Bitmap erzeugt hat — rein informativ
+/// fürs Frontend (z. B. Anzeige-Label „Motiv"/„Himmel"), die Pipeline
+/// selbst behandelt jede Variante identisch (nur das Alpha zählt).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AiMaskKind {
+    Subject,
+    Sky,
+    Background,
+    ClickRegion,
+    Person,
 }
 
 impl MaskGeometry {

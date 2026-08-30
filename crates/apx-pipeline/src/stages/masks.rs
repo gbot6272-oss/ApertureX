@@ -296,7 +296,22 @@ fn geometry_alpha(geometry: &MaskGeometry, pixels: &[f32], w: usize, h: usize) -
             range_max,
             feather,
         } => luminance_range_alpha(*range_min, *range_max, *feather, pixels),
+        MaskGeometry::AiGenerated {
+            width,
+            height,
+            alpha,
+            ..
+        } => ai_generated_alpha(alpha, *width, *height, w, h),
     }
+}
+
+/// Skaliert eine per `apx-ai` einmalig berechnete Alpha-Bitmap (siehe
+/// `MaskGeometry::AiGenerated`s Moduldoku) bilinear auf die aktuelle
+/// Render-Auflösung `(w, h)` und normiert von `0..=255` auf `0.0..=1.0` —
+/// dieselbe Normierung wie jede andere Alpha-Funktion in diesem Modul.
+fn ai_generated_alpha(alpha: &[u8], src_w: u32, src_h: u32, w: usize, h: usize) -> Vec<f32> {
+    let resized = apx_core::raster::bilinear_resize_u8(alpha, src_w, src_h, w as u32, h as u32);
+    resized.into_iter().map(|v| v as f32 / 255.0).collect()
 }
 
 /// Pixelmittelpunkt in normierten Bildkoordinaten (`0.0..=1.0`) — dieselbe

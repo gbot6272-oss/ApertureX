@@ -66,6 +66,13 @@ pub enum AppError {
     /// Fehlermeldung fürs Frontend um (siehe `crates/apx-app/src/commands.rs`).
     #[error("Pipeline-Fehler: {message}")]
     Pipeline { message: String },
+
+    /// Fehler in den KI-Funktionen (`apx-ai`, ab Phase 7, siehe
+    /// `DECISIONS.md` ADR-0033) — fehlgeschlagene Bildanalyse, ein nicht
+    /// hinterlegter/abgelehnter LLM-API-Schlüssel, eine unparsbare
+    /// LLM-Antwort.
+    #[error("KI-Funktion fehlgeschlagen: {message}")]
+    Ai { message: String },
 }
 
 impl AppError {
@@ -101,6 +108,12 @@ impl AppError {
 
     pub fn validation(message: impl Into<String>) -> Self {
         Self::Validation {
+            message: message.into(),
+        }
+    }
+
+    pub fn ai(message: impl Into<String>) -> Self {
+        Self::Ai {
             message: message.into(),
         }
     }
@@ -146,6 +159,15 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "Ungültiger Wert: Bewertung muss zwischen 0 und 5 liegen"
+        );
+    }
+
+    #[test]
+    fn ai_error_includes_message() {
+        let err = AppError::ai("kein API-Schlüssel hinterlegt");
+        assert_eq!(
+            err.to_string(),
+            "KI-Funktion fehlgeschlagen: kein API-Schlüssel hinterlegt"
         );
     }
 }

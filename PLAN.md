@@ -651,19 +651,21 @@ test` und `vite build` alle vollständig grün sein — keine Ausnahme.
   - [ ] `ARCHITECTURE.md` §7s Phase-7-Platzhalter wird in Schritt 6 durch ein volles Kapitel ersetzt
   - [x] `PLAN.md`: dieser Abschnitt
 
-- [ ] 1. `apx-ai`-Crate-Grundgerüst + gemeinsame Bildanalyse-Bausteine
-  - Neues Crate `crates/apx-ai`, Workspace-Mitglied, Abhängigkeiten `apx-core`/`apx-raw`/`apx-pipeline`/`apx-catalog`/`reqwest` (rustls-tls)/`serde`/`serde_json`/`rayon`
-  - Gemeinsame Hilfsfunktionen: RGB→YCbCr-Konvertierung, Gauß-Weichzeichnung (falls nicht schon aus `apx-pipeline` wiederverwendbar — prüfen, ob `stages::details` etwas Passendes exportiert, sonst neu, klein gehalten), bilineares Alpha-Upsampling (für die neue `MaskGeometry::AiGenerated`-Variante)
-  - `apx-pipeline/src/edl/v3.rs`: `MaskGeometry::AiGenerated { kind: AiMaskKind, width: u32, height: u32, alpha: Vec<u8> }` + `AiMaskKind`-Enum (Subject/Sky/Background/ClickRegion/Person); `stages/masks.rs` bekommt eine Upsampling-Alpha-Funktion für diesen Fall
+- [x] 1. `apx-ai`-Crate-Grundgerüst + gemeinsame Bildanalyse-Bausteine
+  - [x] Neues Crate `crates/apx-ai`, Workspace-Mitglied, Abhängigkeiten `apx-core`/`apx-raw`/`apx-pipeline`/`apx-catalog`/`reqwest` (rustls-tls)/`tokio`/`base64`/`serde`/`serde_json`/`rayon`; eigener `AiError`-Fehlertyp (analog `PipelineError`) + neuer `AppError::Ai`
+  - [x] Gemeinsame Hilfsfunktionen: `color.rs` (Luminanz/YCbCr/Sättigung), `blur.rs` (dreifacher Box-Filter als Gauß-Approximation) — beide neu in `apx-ai`; bilineares Alpha-Resampling (`bilinear_resize_u8`/`fit_within`) bewusst in `apx_core::raster` statt in `apx-ai` (vermeidet einen Abhängigkeitszyklus `apx-pipeline` → `apx-ai`, siehe dessen Moduldoku)
+  - [x] `apx-pipeline/src/edl/v3.rs`: `MaskGeometry::AiGenerated { ai_kind: AiMaskKind, width, height, alpha: Vec<u8> }` (Feld heißt `ai_kind` statt `kind` — Kollision mit dem internen Serde-Tag) + `AiMaskKind`-Enum (Subject/Sky/Background/ClickRegion/Person); `stages/masks.rs::ai_generated_alpha` skaliert per `apx_core::raster::bilinear_resize_u8` auf die Renderauflösung hoch
+  - [x] **Vorgezogen aus Schritt 2/3:** alle fünf KI-Masken-Heuristiken (`apx-ai::segmentation`) und beide Reparatur-Analyse-Algorithmen (`apx-ai::repair_analysis::suggest_source_point`/`detect_spots`) bereits vollständig implementiert und unit-getestet (29 Tests) — nur die Tauri-Command-/Frontend-Verdrahtung bleibt für Schritt 2/3
+  - [x] Inhaltsbasiertes Füllen (`RepairMode::ContentAwareFill` in `apx-pipeline::stages::repair.rs`) ebenfalls vorgezogen: vereinfachtes PatchMatch (Nächster-Nachbar-Vorbelegung + Zufallsinit + Propagation + Zufallssuche, deterministischer xorshift32-PRNG), 4 neue Rust-Tests
+  - [x] Volle Kette grün: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (203 Rust-Tests total, 29 davon neu in `apx-ai`) — Frontend unverändert in diesem Schritt
 
-- [ ] 2. Die fünf KI-Masken
-  - Motiv (Saliency), Himmel (Farb-/Positionsheuristik), Hintergrund (Komplement von Motiv), Objekte (Klick-Region-Growing), Personen (Hautton-Erkennung, eine Region) — alle in `apx-ai::segmentation`
+- [ ] 2. Die fünf KI-Masken (Tauri-/Frontend-Verdrahtung — Algorithmen siehe Schritt 1)
   - Neuer Tauri-Command `generate_ai_mask(photo_id, kind, click_x?, click_y?) -> AiMaskAlphaDto` (Base64-kodierte Alpha-Bitmap + Breite/Höhe), nutzt `TileCache::get_or_decode` wie `compute_develop`
   - Frontend: `MasksPanel.tsx` bekommt einen „KI-Maske hinzufügen"-Abschnitt (fünf Knöpfe, „Objekte" öffnet den Bild-Klick-Picker analog zu den bestehenden Picker-Mustern)
 
-- [ ] 3. Reparatur-Erweiterungen
-  - Auto-Quellenfindung (`apx-ai::repair_analysis::suggest_source_point`, normierte Kreuzkorrelations-Patch-Suche), Sensorflecken-Visualisierung (`apx-ai::repair_analysis::detect_spots`, Blob-Erkennung per lokaler Kontrast-Anomalie) — je ein Tauri-Command, Frontend-Overlay im `RepairOverlay.tsx`
-  - Inhaltsbasiertes Füllen: neuer `RepairMode::ContentAwareFill` in `apx-pipeline::stages::repair.rs` (vereinfachtes PatchMatch: Zufallsinit + Propagation + Zufallssuche, wenige Iterationen), EDL-Feld ergänzt
+- [ ] 3. Reparatur-Erweiterungen (Tauri-/Frontend-Verdrahtung — Algorithmen siehe Schritt 1)
+  - Je ein Tauri-Command für Auto-Quellenfindung/Sensorflecken-Visualisierung, Frontend-Overlay im `RepairOverlay.tsx`
+  - Inhaltsbasiertes Füllen als vierter Reparatur-Modus im Frontend auswählbar
 
 - [ ] 4. Preset-Generator
   - `apx-core::Settings`: neues `AiSettings { anthropic_api_key: Option<String> }`-Feld + Frontend-Einstellungen-UI zum Hinterlegen

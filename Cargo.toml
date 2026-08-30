@@ -5,6 +5,7 @@ members = [
     "crates/apx-raw",
     "crates/apx-catalog",
     "crates/apx-pipeline",
+    "crates/apx-ai",
     "crates/apx-app",
 ]
 
@@ -24,6 +25,7 @@ apx-core = { path = "crates/apx-core" }
 apx-raw = { path = "crates/apx-raw" }
 apx-catalog = { path = "crates/apx-catalog" }
 apx-pipeline = { path = "crates/apx-pipeline" }
+apx-ai = { path = "crates/apx-ai" }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

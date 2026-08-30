@@ -47,11 +47,25 @@ pub struct CatalogSettings {
     pub last_opened_catalog: Option<String>,
 }
 
+/// Einstellungen für die KI-Funktionen (Phase 7, siehe `DECISIONS.md`
+/// ADR-0033) — bislang nur der vom Nutzer selbst hinterlegte
+/// Anthropic-API-Schlüssel für den LLM-Preset-Generator (kein
+/// mitgelieferter Schlüssel, genau wie jede andere Desktop-App mit
+/// KI-Anbindung). Liegt im Klartext in derselben TOML-Einstellungsdatei
+/// wie alles andere — dieselbe Vertrauensgrenze wie z. B.
+/// `last_opened_catalog` (ein lokales, nicht synchronisiertes Profil).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AiSettings {
+    pub anthropic_api_key: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub ui: UiSettings,
     pub catalog: CatalogSettings,
+    pub ai: AiSettings,
 }
 
 impl Settings {

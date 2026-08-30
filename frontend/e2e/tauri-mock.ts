@@ -102,6 +102,11 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     edl_subset_json: string;
     created_at: string;
   }
+  interface MockImportPreset {
+    name: string;
+    mode: { mode: "AddInPlace" } | { mode: "Copy"; target_dir: string } | { mode: "Move"; target_dir: string };
+    rename_pattern: string | null;
+  }
   // Seedbar über `installTauriMock`s Fixtures (siehe `folders`/
   // `photosByFolder` oben) — Presets starten in einem echten Katalog zwar
   // immer leer, aber Tests für Umbenennen/Favorisieren/Löschen brauchen
@@ -113,6 +118,10 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   let nextPresetFolderId = 1;
   let nextPresetId = 1;
   let nextPresetVersionId = 1;
+
+  // Import-Presets (Phase 3 Backend, Phase 5 Schritt 9 Frontend) — analog
+  // zu `presetFolders`/`presets` oben über Fixtures seedbar.
+  const importPresets: MockImportPreset[] = [...((initialFixtures.importPresets as MockImportPreset[] | undefined) ?? [])];
 
   function findPreset(presetId: string): MockPreset | undefined {
     return presets.find((p) => p.id === presetId);
@@ -226,8 +235,25 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return (fixtures.photosByFolder[args.folderId as string] ?? []).map((p) => clonePhoto(p as MockPhoto));
       case "import_folder":
         return null;
+      case "import_folder_with_mode":
+        return null;
       case "cancel_import":
         return null;
+      case "list_import_presets":
+        return importPresets.map((p) => ({ ...p }));
+      case "save_import_preset": {
+        const preset = args.preset as MockImportPreset;
+        const index = importPresets.findIndex((p) => p.name === preset.name);
+        if (index >= 0) importPresets[index] = preset;
+        else importPresets.push(preset);
+        return importPresets.map((p) => ({ ...p }));
+      }
+      case "delete_import_preset": {
+        const name = args.name as string;
+        const index = importPresets.findIndex((p) => p.name === name);
+        if (index >= 0) importPresets.splice(index, 1);
+        return importPresets.map((p) => ({ ...p }));
+      }
       case "relink_folder": {
         // Nur ein No-Op-Stub — kein Playwright-Test übt Schritt 5s
         // Ordner-Relink-Fluss aus (reine Backend-/Vitest-Abdeckung dort),

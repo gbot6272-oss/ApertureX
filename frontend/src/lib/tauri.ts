@@ -125,6 +125,58 @@ export function cancelImport(): Promise<void> {
   return invoke<void>("cancel_import");
 }
 
+// ---- Import mit Modus + Umbenennungsmuster + Presets (ab Phase 3, Frontend
+// erst Phase 5 Schritt 9 — siehe DECISIONS.md ADR-0031 Punkt 7) -------------
+
+/** Spiegelt `crate::commands::ImportModeDto` (`#[serde(tag = "kind")]`) —
+ * Eingabe für {@link importFolderWithMode}. */
+export type ImportModeDto = { kind: "AddInPlace" } | { kind: "Copy"; target_dir: string } | { kind: "Move"; target_dir: string };
+
+/** Spiegelt `crate::import::presets::PresetMode` (`#[serde(tag = "mode")]`
+ * — eigenes Tag-Feld, ebenfalls `"mode"` genannt, siehe dessen Moduldoku).
+ * Bewusst ein eigener Typ statt `ImportModeDto` wiederzuverwenden — beide
+ * Rust-Typen sind strukturell identisch, tragen ihre Variante aber unter
+ * unterschiedlichen Feldnamen (`kind` vs. `mode`); siehe
+ * {@link importPresetModeToImportModeDto} für die Umwandlung. */
+export type ImportPresetModeDto = { mode: "AddInPlace" } | { mode: "Copy"; target_dir: string } | { mode: "Move"; target_dir: string };
+
+/** Spiegelt `crate::import::presets::ImportPreset`. */
+export interface ImportPresetDto {
+  name: string;
+  mode: ImportPresetModeDto;
+  rename_pattern: string | null;
+}
+
+export function importPresetModeToImportModeDto(mode: ImportPresetModeDto): ImportModeDto {
+  switch (mode.mode) {
+    case "AddInPlace":
+      return { kind: "AddInPlace" };
+    case "Copy":
+      return { kind: "Copy", target_dir: mode.target_dir };
+    case "Move":
+      return { kind: "Move", target_dir: mode.target_dir };
+  }
+}
+
+/** Wie {@link importFolder}, aber mit wählbarem Modus (Hinzufügen an Ort
+ * und Stelle/Kopieren/Verschieben in einen Zielordner) und optionalem
+ * Umbenennungsmuster — `crates/apx-app/src/commands.rs::import_folder_with_mode`. */
+export function importFolderWithMode(path: string, mode: ImportModeDto, renamePattern: string | null): Promise<void> {
+  return invoke<void>("import_folder_with_mode", { path, mode, renamePattern });
+}
+
+export function listImportPresets(): Promise<ImportPresetDto[]> {
+  return invoke<ImportPresetDto[]>("list_import_presets");
+}
+
+export function saveImportPreset(preset: ImportPresetDto): Promise<ImportPresetDto[]> {
+  return invoke<ImportPresetDto[]>("save_import_preset", { preset });
+}
+
+export function deleteImportPreset(name: string): Promise<ImportPresetDto[]> {
+  return invoke<ImportPresetDto[]>("delete_import_preset", { name });
+}
+
 /** Verknüpft einen fehlenden Ordner mit einem neuen Speicherort — siehe
  * `FolderDto.missing` und `crates/apx-app/src/commands.rs::relink_folder`. */
 export function relinkFolder(folderId: string, newPath: string): Promise<void> {

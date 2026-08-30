@@ -24,6 +24,8 @@ import type {
   FilterCriteriaDto,
   FolderDto,
   HistoryPositionDto,
+  ImportModeDto,
+  ImportPresetDto,
   KeywordDto,
   PhotoDto,
   PresetDto,
@@ -212,10 +214,23 @@ interface JobsSlice {
   importResult: ImportResultState | null;
   importErrors: string[];
   startImport: (path: string) => Promise<void>;
+  /** Wie `startImport`, aber mit wählbarem Modus (Kopieren/Verschieben in
+   * einen Zielordner) und optionalem Umbenennungsmuster (Phase 5 Schritt 9,
+   * `DECISIONS.md` ADR-0031 Punkt 7 — Frontend-Anbindung des seit Phase 3
+   * bestehenden, bis dahin ungenutzten `import_folder_with_mode`-Commands). */
+  startImportWithMode: (path: string, mode: ImportModeDto, renamePattern: string | null) => Promise<void>;
   cancelImport: () => Promise<void>;
   setImportProgress: (progress: ImportProgressState) => void;
   addImportError: (line: string) => void;
   finishImport: (result: ImportResultState) => void;
+
+  /** Gespeicherte Import-Presets (Modus + Zielordner + Umbenennungsmuster
+   * unter einem Namen) — reine Datei-Konfiguration ohne Katalog-Bezug,
+   * siehe `crate::import::presets`-Moduldoku. */
+  importPresets: ImportPresetDto[];
+  refreshImportPresets: () => Promise<void>;
+  saveImportPresetEntry: (preset: ImportPresetDto) => Promise<void>;
+  deleteImportPresetEntry: (name: string) => Promise<void>;
 }
 
 // ---- Develop-Slice (ab Phase 2) ---------------------------------------
@@ -732,8 +747,66 @@ export const useAppStore = create<AppStore>()(
       }
     },
 
+    startImportWithMode: async (path, mode, renamePattern) => {
+      set((state) => {
+        state.importRunning = true;
+        state.importProgress = { done: 0, total: 0, currentFile: null };
+        state.importResult = null;
+        state.importErrors = [];
+      });
+      try {
+        await api.importFolderWithMode(path, mode, renamePattern);
+      } catch (err) {
+        set((state) => {
+          state.importRunning = false;
+          state.importErrors.push(String(err));
+        });
+      }
+    },
+
     cancelImport: async () => {
       await api.cancelImport();
+    },
+
+    importPresets: [],
+
+    refreshImportPresets: async () => {
+      try {
+        const presets = await api.listImportPresets();
+        set((state) => {
+          state.importPresets = presets;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    saveImportPresetEntry: async (preset) => {
+      try {
+        const presets = await api.saveImportPreset(preset);
+        set((state) => {
+          state.importPresets = presets;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    deleteImportPresetEntry: async (name) => {
+      try {
+        const presets = await api.deleteImportPreset(name);
+        set((state) => {
+          state.importPresets = presets;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
     },
 
     setImportProgress: (progress) => {

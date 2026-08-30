@@ -1,7 +1,8 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 
 import { selectFolderDialog } from "../lib/tauri";
 import { useAppStore } from "../store";
+import { ImportDialog } from "./ImportDialog";
 
 export function Header() {
   const importRunning = useAppStore((s) => s.importRunning);
@@ -16,6 +17,7 @@ export function Header() {
   const toggleCenterView = useAppStore((s) => s.toggleCenterView);
   const metadataPanelOpen = useAppStore((s) => s.metadataPanelOpen);
   const toggleMetadataPanel = useAppStore((s) => s.toggleMetadataPanel);
+  const [importDialogSource, setImportDialogSource] = useState<string | null>(null);
 
   const handleImportClick = useCallback(async () => {
     const path = await selectFolderDialog();
@@ -23,6 +25,11 @@ export function Header() {
       await startImport(path);
     }
   }, [startImport]);
+
+  const handleImportWithTemplateClick = useCallback(async () => {
+    const path = await selectFolderDialog();
+    if (path) setImportDialogSource(path);
+  }, []);
 
   const percent = importProgress && importProgress.total > 0 ? Math.round((importProgress.done / importProgress.total) * 100) : 0;
 
@@ -38,6 +45,18 @@ export function Header() {
       >
         Ordner importieren
       </button>
+
+      <button
+        type="button"
+        onClick={() => void handleImportWithTemplateClick()}
+        disabled={importRunning}
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+        title="Import mit wählbarem Modus (Kopieren/Verschieben), Umbenennungsmuster und Presets"
+      >
+        Import mit Vorlage…
+      </button>
+
+      <ImportDialog open={importDialogSource !== null} sourcePath={importDialogSource ?? ""} onClose={() => setImportDialogSource(null)} />
 
       {importRunning && (
         <>

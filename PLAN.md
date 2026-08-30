@@ -500,9 +500,9 @@ Siehe ADR-0028 (plus Nachtrag): Workflow-Punkte (Schnappschüsse, Vorher/Nachher
   - [x] Neuer `PresetVersionsDialog.tsx`: „Aktuellen Stand als neue Version speichern" legt eine neue `preset_versions`-Zeile an (alte bleiben erhalten, `add_preset_version` war bereits seit Schritt 2 im Backend vorhanden, aber ungenutzt) — übernimmt dieselben Sektionen wie die bisher aktuellste Version
   - [x] Kleine Diff-Ansicht: zwei Versionen per Dropdown wählen, `lib/presets.ts`s `diffEdlSubsets` listet jedes abweichende Blattfeld (rekursiv in verschachtelte Objekte, Arrays als atomarer Wert — dieselbe Konvention wie `interpolateValue`)
 
-- [ ] 9. Import-Templates + Umbenennungs-Templates (vorgezogen aus Phase 3, siehe ADR-0031 Punkt 7)
-  - [ ] Frontend-Anbindung der bereits bestehenden `list_import_presets`/`save_import_preset`/`delete_import_preset`-Commands im Import-Dialog
-  - [ ] Kleiner Token-Editor für `rename_pattern` (Token-Liste einfügbar, Live-Vorschau eines Beispieldateinamens)
+- [x] 9. Import-Templates + Umbenennungs-Templates (vorgezogen aus Phase 3, siehe ADR-0031 Punkt 7)
+  - [x] Neuer `ImportDialog.tsx` (geöffnet über einen zusätzlichen „Import mit Vorlage…"-Knopf, additiv zum unveränderten einfachen „Ordner importieren"-Knopf) bindet `import_folder_with_mode` sowie `list_import_presets`/`save_import_preset`/`delete_import_preset` ans Frontend an — diese Commands existierten seit Phase 3 im Backend, hatten aber bis jetzt **keine** Frontend-Anbindung (die `FEATURES.md`-Zeilen „Import mit Kopieren/Verschieben/Hinzufügen" und „Import-Presets" waren entsprechend vorschnell auf Fertig markiert; korrigiert in Schritt 10)
+  - [x] Token-Editor für `rename_pattern` (Knöpfe für `{date}`/`{seq}`/`{camera}`/`{original}`, Live-Vorschau eines Beispieldateinamens über `lib/renamePattern.ts`, das dieselbe Ersetzungslogik wie `crates/apx-app/src/import/rename.rs` rein clientseitig für die Anzeige nachbildet)
 
 - [ ] 10. Dokumentation, Tests, Abnahme
   - [ ] `ARCHITECTURE.md`: neues Kapitel „Architektur Phase 5" (Datenfluss Speichern/Anwenden/Stapel, analog zu §5/§6/§8)

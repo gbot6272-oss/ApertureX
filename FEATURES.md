@@ -70,19 +70,19 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
      Phase — Weißabgleich selbst (Temperatur+Tint als Regler) ist für
      Phase 2 fertig. -->
 - [x] Weißabgleich (Temperatur, Tint) — Phase 2 — Status: Fertig
-- [ ] Weißabgleich-Pipette (Klick ins Bild) — Phase 4 — Status: Nicht begonnen
-- [ ] Weißabgleich-Kamera-Presets (Tageslicht/Bewölkt/…) — Phase 4 — Status: Nicht begonnen
+- [x] Weißabgleich-Pipette (Klick ins Bild) — Phase 4 — Status: Fertig (bewusst vereinfacht: rechnet auf dem gamma-kodierten Anzeigebild statt linearem Kamera-RGB, siehe `frontend/src/lib/whiteBalancePicker.ts`)
+- [x] Weißabgleich-Kamera-Presets (Tageslicht/Bewölkt/…) — Phase 4 — Status: Fertig (feste, nicht kamera-kalibrierte Presets, siehe ADR-0028)
 - [x] Belichtung — Phase 2 — Status: Fertig
 - [x] Kontrast — Phase 2 — Status: Fertig
 - [x] Lichter — Phase 2 — Status: Fertig
 - [x] Tiefen — Phase 2 — Status: Fertig
 - [x] Weiß — Phase 2 — Status: Fertig
 - [x] Schwarz — Phase 2 — Status: Fertig
-- [ ] Textur — Phase 4 — Status: Nicht begonnen
-- [ ] Klarheit — Phase 4 — Status: Nicht begonnen
-- [ ] Dunst entfernen — Phase 4 — Status: Nicht begonnen
-- [ ] Dynamik — Phase 4 — Status: Nicht begonnen
-- [ ] Sättigung — Phase 4 — Status: Nicht begonnen
+- [x] Textur — Phase 4 — Status: Fertig
+- [x] Klarheit — Phase 4 — Status: Fertig
+- [x] Dunst entfernen — Phase 4 — Status: Fertig (vereinfachtes Modell, kein Dark-Channel-Prior, siehe `crates/apx-pipeline/src/edl/v2.rs`)
+- [x] Dynamik — Phase 4 — Status: Fertig
+- [x] Sättigung — Phase 4 — Status: Fertig
 
 ### Gradationskurve
 - [ ] Punktkurve — Phase 4 — Status: Nicht begonnen

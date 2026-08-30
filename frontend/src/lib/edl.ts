@@ -465,6 +465,43 @@ export const BASIC_SLIDER_SPECS: readonly SliderSpec[] = [
   { key: "shadows", label: "Tiefen", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
   { key: "whites", label: "Weiß", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
   { key: "blacks", label: "Schwarz", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  // Die fünf per ADR-0011/ADR-0028 nach Phase 4 verschobenen Regler
+  // (Phase 4 Schritt 3) — Reihenfolge wie in `SPEC.md` §3.2 aufgezählt.
+  { key: "texture", label: "Textur", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "clarity", label: "Klarheit", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "dehaze", label: "Dunst entfernen", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "vibrance", label: "Dynamik", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "saturation", label: "Sättigung", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+] as const;
+
+// ---- Weißabgleich-Pipette + Kamera-Presets (Phase 4 Schritt 3) --------------
+
+export interface WhiteBalancePreset {
+  key: string;
+  label: string;
+  temp_shift_kelvin: number;
+  tint_shift: number;
+}
+
+/**
+ * Feste Weißabgleich-Presets (`SPEC.md` §3.2 „Presets pro Kamera"). Ohne
+ * echte Kamerakalibrierung (siehe `DECISIONS.md` ADR-0028: kein
+ * DCP-/Adobe-Profil-Import) sind das keine physikalisch kalibrierten
+ * Absolutwerte, sondern grobe, für die meisten Kameras plausible
+ * Verschiebungen relativ zum As-shot-Weißabgleich — bewusste
+ * Vereinfachung derselben Art wie die in ADR-0028 dokumentierten
+ * CV-Vereinfachungen. Anders als die Pipette (die additiv zum
+ * *aktuellen* Wert korrigiert) setzt ein Preset den Weißabgleich absolut
+ * — konsistent mit Lightrooms eigenem Verhalten.
+ */
+export const WHITE_BALANCE_PRESETS: readonly WhiteBalancePreset[] = [
+  { key: "as_shot", label: "Wie aufgenommen", temp_shift_kelvin: 0, tint_shift: 0 },
+  { key: "daylight", label: "Tageslicht", temp_shift_kelvin: 200, tint_shift: 0 },
+  { key: "cloudy", label: "Bewölkt", temp_shift_kelvin: 500, tint_shift: 10 },
+  { key: "shade", label: "Schatten", temp_shift_kelvin: 800, tint_shift: 15 },
+  { key: "tungsten", label: "Kunstlicht", temp_shift_kelvin: -1200, tint_shift: -5 },
+  { key: "flash", label: "Blitz", temp_shift_kelvin: 300, tint_shift: 0 },
+  { key: "fluorescent", label: "Leuchtstoffröhre", temp_shift_kelvin: -600, tint_shift: 20 },
 ] as const;
 
 export function clampSliderValue(value: number, spec: Pick<SliderSpec, "min" | "max">): number {

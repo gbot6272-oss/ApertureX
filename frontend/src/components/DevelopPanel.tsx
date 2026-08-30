@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import { BASIC_SLIDER_SPECS, readBasicField } from "../lib/edl";
+import { BASIC_SLIDER_SPECS, readBasicField, WHITE_BALANCE_PRESETS } from "../lib/edl";
 import { useAppStore } from "../store";
 import { DevelopSlider } from "./DevelopSlider";
 
@@ -31,6 +31,9 @@ export function DevelopPanel() {
   const redoDevelop = useAppStore((s) => s.redoDevelop);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
   const lastLatencyMs = useAppStore((s) => s.developLastLatencyMs);
+  const wbPickerActive = useAppStore((s) => s.wbPickerActive);
+  const toggleWbPicker = useAppStore((s) => s.toggleWbPicker);
+  const applyWhiteBalancePreset = useAppStore((s) => s.applyWhiteBalancePreset);
 
   useEffect(() => {
     if (!open) return;
@@ -97,6 +100,40 @@ export function DevelopPanel() {
         <>
           <fieldset className="flex flex-col gap-3">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Weißabgleich</legend>
+
+            <div className="flex items-center gap-2">
+              <select
+                aria-label="Weißabgleich-Preset"
+                defaultValue=""
+                onChange={(event) => {
+                  if (event.target.value) applyWhiteBalancePreset(event.target.value);
+                  event.target.value = "";
+                }}
+                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+              >
+                <option value="" disabled>
+                  Preset wählen…
+                </option>
+                {WHITE_BALANCE_PRESETS.map((preset) => (
+                  <option key={preset.key} value={preset.key}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={toggleWbPicker}
+                aria-pressed={wbPickerActive}
+                title="Weißabgleich-Pipette: ins Bild klicken, um einen neutralen Punkt zu setzen"
+                className={`rounded border px-2 py-1 text-xs ${
+                  wbPickerActive ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
+                }`}
+              >
+                Pipette
+              </button>
+            </div>
+            {wbPickerActive && <p className="text-xs text-accent">Klicken Sie in einen neutral-grauen Bildpunkt.</p>}
+
             {whiteBalanceSpecs.map((spec) => (
               <DevelopSlider
                 key={spec.key}

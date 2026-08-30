@@ -10,6 +10,7 @@ import {
   neutralEdlPayload,
   parseEdlEnvelopeJson,
   readBasicField,
+  WHITE_BALANCE_PRESETS,
   writeBasicField,
   type BasicAdjustments,
 } from "./edl";
@@ -114,17 +115,43 @@ describe("writeBasicField", () => {
 
 describe("BASIC_SLIDER_SPECS", () => {
   it("has one entry per BasicAdjustments field (temp/tint counted separately)", () => {
-    // white_balance{temp_shift_kelvin,tint_shift} + 6 direkte Felder = 8.
+    // white_balance{temp_shift_kelvin,tint_shift} + 11 direkte Felder = 13
+    // (siehe `crates/apx-pipeline/src/edl/v2.rs`s `BasicAdjustments` — 12
+    // Regler insgesamt, Weißabgleich zählt als einer mit zwei Werten).
     // Die fünf per ADR-0011/ADR-0028 nach Phase 4 verschobenen Felder
-    // (Textur/Klarheit/Dunst entfernen/Dynamik/Sättigung) bekommen ihre
-    // Regler erst in Phase 4 Schritt 3, siehe `PLAN.md`.
-    expect(BASIC_SLIDER_SPECS).toHaveLength(8);
+    // (Textur/Klarheit/Dunst entfernen/Dynamik/Sättigung) sind seit
+    // Phase 4 Schritt 3 mit dabei.
+    expect(BASIC_SLIDER_SPECS).toHaveLength(13);
   });
 
   it("every spec's neutral value is within its own range", () => {
     for (const spec of BASIC_SLIDER_SPECS) {
       expect(spec.neutral).toBeGreaterThanOrEqual(spec.min);
       expect(spec.neutral).toBeLessThanOrEqual(spec.max);
+    }
+  });
+});
+
+describe("WHITE_BALANCE_PRESETS (Phase 4, Schritt 3)", () => {
+  it("has unique keys", () => {
+    const keys = WHITE_BALANCE_PRESETS.map((preset) => preset.key);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("includes a neutral 'as-shot' preset", () => {
+    const asShot = WHITE_BALANCE_PRESETS.find((preset) => preset.key === "as_shot");
+    expect(asShot).toEqual({ key: "as_shot", label: "Wie aufgenommen", temp_shift_kelvin: 0, tint_shift: 0 });
+  });
+
+  it("keeps every preset within the slider bounds", () => {
+    const tempSpec = BASIC_SLIDER_SPECS.find((spec) => spec.key === "temp_shift_kelvin");
+    const tintSpec = BASIC_SLIDER_SPECS.find((spec) => spec.key === "tint_shift");
+    if (!tempSpec || !tintSpec) throw new Error("Test-Fixture: WB-Specs fehlen");
+    for (const preset of WHITE_BALANCE_PRESETS) {
+      expect(preset.temp_shift_kelvin).toBeGreaterThanOrEqual(tempSpec.min);
+      expect(preset.temp_shift_kelvin).toBeLessThanOrEqual(tempSpec.max);
+      expect(preset.tint_shift).toBeGreaterThanOrEqual(tintSpec.min);
+      expect(preset.tint_shift).toBeLessThanOrEqual(tintSpec.max);
     }
   });
 });

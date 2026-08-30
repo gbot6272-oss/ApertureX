@@ -31,13 +31,27 @@ async function setUpWithSelectedPhoto(page: import("@playwright/test").Page) {
 }
 
 test.describe("Entwickeln-Panel", () => {
-  test("öffnet über den Kopfzeilen-Knopf und zeigt die sieben Regler", async ({ page }) => {
+  test("öffnet über den Kopfzeilen-Knopf und zeigt die zwölf Grundeinstellungs-Regler", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
 
     await page.getByRole("button", { name: "Entwickeln" }).click();
 
     await expect(page.getByRole("complementary", { name: "Entwickeln" })).toBeVisible();
-    for (const label of ["Temperatur", "Tint", "Belichtung", "Kontrast", "Lichter", "Tiefen", "Weiß", "Schwarz"]) {
+    for (const label of [
+      "Temperatur",
+      "Tint",
+      "Belichtung",
+      "Kontrast",
+      "Lichter",
+      "Tiefen",
+      "Weiß",
+      "Schwarz",
+      "Textur",
+      "Klarheit",
+      "Dunst entfernen",
+      "Dynamik",
+      "Sättigung",
+    ]) {
       await expect(page.getByRole("slider", { name: label })).toBeVisible();
     }
   });
@@ -100,5 +114,50 @@ test.describe("Entwickeln-Panel", () => {
       const log = await getMockInvokeLog(page);
       return log.filter((entry) => entry.cmd === "apply_develop_edit").length;
     }).toBeGreaterThanOrEqual(2);
+  });
+
+  test("ein Weißabgleich-Preset setzt Temperatur/Tint absolut und committet", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    await page.getByRole("combobox", { name: "Weißabgleich-Preset" }).selectOption("tungsten");
+
+    await expect(page.getByRole("spinbutton", { name: "Temperatur (Zahlenwert)" })).toHaveValue("-1200");
+    await expect(page.getByRole("spinbutton", { name: "Tint (Zahlenwert)" })).toHaveValue("-5");
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.some((entry) => entry.cmd === "apply_develop_edit");
+    }).toBe(true);
+  });
+
+  test("die Pipette liest einen Bildpunkt und korrigiert den Weißabgleich", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    const pipetteButton = page.getByRole("button", { name: "Pipette" });
+    await expect(pipetteButton).toHaveAttribute("aria-pressed", "false");
+    await pipetteButton.click();
+    await expect(pipetteButton).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByText("Klicken Sie in einen neutral-grauen Bildpunkt.")).toBeVisible();
+
+    // Das Mock-Entwickeln-Bild ist bewusst warm-orange gefärbt (siehe
+    // `tauri-mock.ts`) — ein Klick muss also eine echte, von 0
+    // verschiedene Korrektur auslösen (kühlt Temperatur ab). Geklickt wird
+    // auf den Viewer-Container selbst statt auf das `<canvas>` (das trägt
+    // `pointer-events-none`, damit die Info-Kachel und der Canvas
+    // Mausereignisse an den Container durchreichen).
+    await page.getByRole("main").click();
+
+    await expect(pipetteButton).toHaveAttribute("aria-pressed", "false");
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.filter((entry) => entry.cmd === "apply_develop_edit").length;
+    }).toBeGreaterThan(0);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const whiteBalance = JSON.parse(edlJson).payload.basic.white_balance as { temp_shift_kelvin: number; tint_shift: number };
+    expect(whiteBalance.temp_shift_kelvin).toBeLessThan(0);
   });
 });

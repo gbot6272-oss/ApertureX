@@ -365,8 +365,11 @@ Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Obj
   - [x] GPU/CPU-Paritätstests je neuem Teil-Feature (Muster: `gpu_matches_cpu`) für Dunst entfernen/Dynamik/Sättigung/Textur/Klarheit
   - Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (235 Tests), `tsc -b`, `vitest run` (67 Tests) — alles lokal grün
 
-- [ ] 3. Grundeinstellungen-Erweiterung (Frontend + Shader)
-  - [ ] WB-Pipette, WB-Kamera-Presets, Textur/Klarheit/Dunst entfernen/Dynamik/Sättigung-Regler in `DevelopPanel.tsx`
+- [x] 3. Grundeinstellungen-Erweiterung (Frontend + Shader)
+  - [x] `BASIC_SLIDER_SPECS` auf 13 Einträge erweitert (Textur/Klarheit/Dunst entfernen/Dynamik/Sättigung, Reihenfolge wie `SPEC.md` §3.2), in `DevelopPanel.tsx` sichtbar
+  - [x] WB-Kamera-Presets: `WHITE_BALANCE_PRESETS` (7 feste Presets, kein DCP-Import, siehe ADR-0028) + Dropdown in `DevelopPanel.tsx`, setzt Temperatur/Tint absolut
+  - [x] WB-Pipette: neues `lib/whiteBalancePicker.ts` (Klick-Farbwert → additive Temperatur-/Tint-Korrektur, bewusste Vereinfachung auf dem gamma-kodierten Anzeigebild statt linearem Kamera-RGB, siehe Moduldoku), Viewer-Klick-Interaktion (Crosshair-Cursor, Pan währenddessen deaktiviert), Pipette-Umschaltknopf in `DevelopPanel.tsx`
+  - Verifiziert: `tsc -b`, `vitest run` (80 Tests), `playwright test` (15/15), `vite build` — alles lokal grün; Rust-Seite unverändert (Schritt 2 hat den Shader/CPU-Teil bereits geliefert)
 
 - [ ] 4. Kurven
   - [ ] Punktkurve (monotone kubische Spline) + parametrische Kurve, RGB-Verbundkurve + R/G/B einzeln + Luminanz-Kurve, numerische Punkteingabe, Presets

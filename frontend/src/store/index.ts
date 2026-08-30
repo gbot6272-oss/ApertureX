@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
-import { buildEdlEnvelopeJson, neutralEdlPayload, parseEdlEnvelopeJson, writeBasicField } from "../lib/edl";
+import { buildEdlEnvelopeJson, neutralEdlPayload, parseEdlEnvelopeJson, WHITE_BALANCE_PRESETS, writeBasicField } from "../lib/edl";
 import type { EdlPayload } from "../lib/edl";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
@@ -17,6 +17,7 @@ import type {
 } from "../lib/tauri";
 import * as undoStackLib from "../lib/undoStack";
 import type { UndoEntry } from "../lib/undoStack";
+import { computeWhiteBalanceShiftFromSample } from "../lib/whiteBalancePicker";
 
 /** Wandelt eine `HistoryPositionDto` (siehe `lib/tauri.ts`) in ein volles
  * `EdlPayload` um — `Neutral` bedeutet "wie aufgenommen", ein unlesbares
@@ -212,6 +213,18 @@ interface DevelopSlice {
   /** Setzt ein einzelnes Grundeinstellungs-Feld (Regler-Zwischenwert beim
    * Ziehen) — siehe `lib/edl.ts`s `SliderSpec.key` für gültige Schlüssel. */
   setBasicField: (key: string, value: number) => void;
+  /** Ob die Weißabgleich-Pipette gerade auf einen Klick in den Viewer
+   * wartet (Phase 4 Schritt 3, siehe `lib/whiteBalancePicker.ts`). */
+  wbPickerActive: boolean;
+  toggleWbPicker: () => void;
+  /** Wertet einen im Viewer angeklickten RGBA8-Bildpunkt aus, korrigiert
+   * den Weißabgleich additiv zum bestehenden Wert und committet sofort
+   * (kein Zwischenzustand wie bei den Reglern — ein Klick ist eine
+   * abgeschlossene Aktion). Schaltet die Pipette danach automatisch aus. */
+  pickWhiteBalanceAt: (r: number, g: number, b: number) => void;
+  /** Setzt den Weißabgleich absolut auf eines der `WHITE_BALANCE_PRESETS`
+   * und committet sofort. */
+  applyWhiteBalancePreset: (key: string) => void;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
    * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
    * bei jedem Zwischenwert). */
@@ -559,6 +572,31 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         writeBasicField(state.developEdl.basic, key, value);
       });
+    },
+
+    wbPickerActive: false,
+
+    toggleWbPicker: () => {
+      set((state) => {
+        state.wbPickerActive = !state.wbPickerActive;
+      });
+    },
+
+    pickWhiteBalanceAt: (r, g, b) => {
+      set((state) => {
+        state.developEdl.basic.white_balance = computeWhiteBalanceShiftFromSample(r, g, b, state.developEdl.basic.white_balance);
+        state.wbPickerActive = false;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    applyWhiteBalancePreset: (key) => {
+      const preset = WHITE_BALANCE_PRESETS.find((p) => p.key === key);
+      if (!preset) return;
+      set((state) => {
+        state.developEdl.basic.white_balance = { temp_shift_kelvin: preset.temp_shift_kelvin, tint_shift: preset.tint_shift };
+      });
+      void get().commitDevelopEdit();
     },
 
     commitDevelopEdit: async (label) => {

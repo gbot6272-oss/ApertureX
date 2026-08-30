@@ -32,6 +32,8 @@ export function Viewer() {
   const resetView = useAppStore((s) => s.resetView);
   const developPanelOpen = useAppStore((s) => s.developPanelOpen);
   const developEdl = useAppStore((s) => s.developEdl);
+  const wbPickerActive = useAppStore((s) => s.wbPickerActive);
+  const pickWhiteBalanceAt = useAppStore((s) => s.pickWhiteBalanceAt);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -146,10 +148,10 @@ export function Viewer() {
 
   const handleMouseDown = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
-      if (event.button !== 0 || !canPan) return;
+      if (wbPickerActive || event.button !== 0 || !canPan) return;
       dragState.current = { startX: event.clientX, startY: event.clientY, startPanX: panX, startPanY: panY };
     },
-    [canPan, panX, panY],
+    [wbPickerActive, canPan, panX, panY],
   );
 
   const handleMouseMove = useCallback(
@@ -173,6 +175,31 @@ export function Viewer() {
       resetView();
     }
   }, [fitMode, setZoom, setPan, resetView]);
+
+  // ---- Weißabgleich-Pipette (Phase 4 Schritt 3) ------------------------
+
+  const handleImageClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (!wbPickerActive || !developFrame || imgW <= 0 || imgH <= 0) return;
+
+      const rect = event.currentTarget.getBoundingClientRect();
+      const cursor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      const origin = imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY });
+      const imageX = (cursor.x - origin.x) / effectiveScale;
+      const imageY = (cursor.y - origin.y) / effectiveScale;
+      if (imageX < 0 || imageY < 0 || imageX >= imgW || imageY >= imgH) return;
+
+      // `developFrame` kann in einer anderen Auflösung vorliegen als
+      // `imgW`/`imgH` (Katalog-Metadaten) — Bruchteil statt Pixelwert
+      // übertragen, um beide Auflösungen konsistent aufeinander
+      // abzubilden.
+      const sampleX = Math.min(developFrame.width - 1, Math.floor((imageX / imgW) * developFrame.width));
+      const sampleY = Math.min(developFrame.height - 1, Math.floor((imageY / imgH) * developFrame.height));
+      const index = (sampleY * developFrame.width + sampleX) * 4;
+      pickWhiteBalanceAt(developFrame.pixels[index] ?? 0, developFrame.pixels[index + 1] ?? 0, developFrame.pixels[index + 2] ?? 0);
+    },
+    [wbPickerActive, developFrame, imgW, imgH, containerSize.width, containerSize.height, effectiveScale, panX, panY, pickWhiteBalanceAt],
+  );
 
   // ---- Tastatur: +/- Zoom, 0 Einpassen, 1 1:1, Leertaste zum Ziehen ------
 
@@ -215,8 +242,9 @@ export function Viewer() {
       onMouseMove={handleMouseMove}
       onMouseUp={endDrag}
       onMouseLeave={endDrag}
+      onClick={handleImageClick}
       onDoubleClick={handleDoubleClick}
-      style={{ cursor: canPan ? (dragState.current ? "grabbing" : "grab") : "default" }}
+      style={{ cursor: wbPickerActive ? "crosshair" : canPan ? (dragState.current ? "grabbing" : "grab") : "default" }}
     >
       {!photo && <p className="pointer-events-none text-sm text-text-muted">Kein Foto ausgewählt.</p>}
 

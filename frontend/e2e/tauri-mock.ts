@@ -390,7 +390,10 @@ export async function installTauriMock(page: Page, initialFixtures: Record<strin
       // Entwickeln-Route (ab Phase 2): kein Bildformat, sondern ein
       // 8-Byte-Breite/Höhe-Header + rohes RGBA8 (siehe
       // `crates/apx-app/src/protocol/mod.rs`, `DECISIONS.md` ADR-0016) —
-      // hier ein einheitlich mittelgraues, undurchsichtiges 2×2-Bild.
+      // hier ein einheitlich warm-orange gefärbtes, undurchsichtiges
+      // 2×2-Bild (bewusst *nicht* neutral-grau, siehe `develop-flow.spec.ts`s
+      // Weißabgleich-Pipette-Test, Phase 4 Schritt 3 — der braucht einen
+      // echten Farbstich, um eine tatsächliche Korrektur zu erzeugen).
       const width = 2;
       const height = 2;
       const header = Buffer.alloc(8);
@@ -398,9 +401,9 @@ export async function installTauriMock(page: Page, initialFixtures: Record<strin
       header.writeUInt32LE(height, 4);
       const pixels = Buffer.alloc(width * height * 4);
       for (let i = 0; i < pixels.length; i += 4) {
-        pixels[i] = 128;
-        pixels[i + 1] = 128;
-        pixels[i + 2] = 128;
+        pixels[i] = 180;
+        pixels[i + 1] = 140;
+        pixels[i + 2] = 100;
         pixels[i + 3] = 255;
       }
       await route.fulfill({

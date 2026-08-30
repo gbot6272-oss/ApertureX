@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { buildChildrenByParent } from "../lib/folderTree";
+import { buildPresetEdlSubset, PRESET_SECTION_KEYS } from "../lib/presets";
 import type { PresetDto, PresetFolderDto } from "../lib/tauri";
 import { selectPresetConditionMeta, useAppStore } from "../store";
 import { PresetThumbnail } from "./PresetThumbnail";
@@ -242,6 +243,179 @@ function PresetStackSection() {
 }
 
 /**
+ * KI-Preset-Generator (Phase 7 Schritt 4, siehe `DECISIONS.md` ADR-0033)
+ * — vier unabhängige Erzeugungsarten (LLM-Freitext, Referenzbild,
+ * Variationen, Lernen aus mehreren Fotos), jede liefert eine EDL-
+ * Teilmenge in `presetGeneratorPreview`. Der erzeugte Vorschlag ist
+ * bewusst noch kein Preset: „Auf aktuelles Foto anwenden" mischt ihn nur
+ * in `developEdl` (wie das Anwenden eines bestehenden Presets) — der
+ * Nutzer sichert ihn danach über den bestehenden „Preset speichern"-
+ * Knopf (`DevelopPanel.tsx`), ohne dass der Generator eine eigene
+ * Speicher-Logik bräuchte.
+ *
+ * **Bewusste Vereinfachungen** (siehe `apx-ai::preset_generator`s
+ * Moduldoku): Referenzbild-Modus vergleicht nur die sieben Tonwertregler,
+ * „Lernen" mittelt nur numerische Werte (Kurvenpunkte/Farbmischer-
+ * Regionen werden vom ersten ausgewählten Foto übernommen).
+ */
+function AiPresetGeneratorSection() {
+  const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
+  const multiSelectedIds = useAppStore((s) => s.multiSelectedIds);
+  const developEdl = useAppStore((s) => s.developEdl);
+  const aiSettings = useAppStore((s) => s.aiSettings);
+  const loadAiSettings = useAppStore((s) => s.loadAiSettings);
+  const saveAnthropicApiKey = useAppStore((s) => s.saveAnthropicApiKey);
+  const presetGeneratorLoading = useAppStore((s) => s.presetGeneratorLoading);
+  const presetGeneratorPreview = useAppStore((s) => s.presetGeneratorPreview);
+  const presetGeneratorSelectedIndex = useAppStore((s) => s.presetGeneratorSelectedIndex);
+  const generatePresetFromDescription = useAppStore((s) => s.generatePresetFromDescription);
+  const generatePresetFromReferenceImage = useAppStore((s) => s.generatePresetFromReferenceImage);
+  const generatePresetVariationsFromBase = useAppStore((s) => s.generatePresetVariationsFromBase);
+  const learnPresetFromSelectedPhotos = useAppStore((s) => s.learnPresetFromSelectedPhotos);
+  const selectPresetGeneratorPreview = useAppStore((s) => s.selectPresetGeneratorPreview);
+  const applyPresetGeneratorPreview = useAppStore((s) => s.applyPresetGeneratorPreview);
+  const clearPresetGeneratorPreview = useAppStore((s) => s.clearPresetGeneratorPreview);
+
+  const [description, setDescription] = useState("");
+  const [apiKeyInput, setApiKeyInput] = useState("");
+
+  useEffect(() => {
+    void loadAiSettings();
+    // Nur beim ersten Einblenden laden — `loadAiSettings` ist stabil
+    // (Zustand-Aktion), ein erneuter Aufruf bei jedem Tastenanschlag im
+    // Schlüsselfeld wäre unnötig.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    setApiKeyInput(aiSettings?.anthropic_api_key ?? "");
+  }, [aiSettings]);
+
+  const hasApiKey = Boolean(aiSettings?.anthropic_api_key);
+
+  function handleVariations() {
+    const base = buildPresetEdlSubset(developEdl, PRESET_SECTION_KEYS);
+    const seed = Math.floor(Math.random() * 1_000_000);
+    void generatePresetVariationsFromBase(base, 4, seed);
+  }
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-border pt-2">
+      <h3 className="text-xs font-medium text-text-secondary">KI-Preset-Generator</h3>
+
+      <details className="text-xs text-text-secondary">
+        <summary className="cursor-pointer select-none">Anthropic-API-Schlüssel {hasApiKey ? "(hinterlegt)" : "(fehlt)"}</summary>
+        <div className="mt-1 flex gap-1">
+          <input
+            type="password"
+            value={apiKeyInput}
+            onChange={(event) => setApiKeyInput(event.target.value)}
+            placeholder="sk-ant-…"
+            aria-label="Anthropic-API-Schlüssel"
+            className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+          />
+          <button
+            type="button"
+            onClick={() => void saveAnthropicApiKey(apiKeyInput)}
+            className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent"
+          >
+            Speichern
+          </button>
+        </div>
+      </details>
+
+      <div className="flex flex-col gap-1">
+        <label className="text-xs text-text-secondary" htmlFor="ai-preset-description">
+          Beschreibung (LLM-Modus)
+        </label>
+        <textarea
+          id="ai-preset-description"
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          rows={2}
+          placeholder="z. B. warmer, kontrastreicher Filmlook"
+          className="w-full resize-none rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+        />
+        <button
+          type="button"
+          disabled={!hasApiKey || !description.trim() || presetGeneratorLoading}
+          onClick={() => void generatePresetFromDescription(description)}
+          title={hasApiKey ? undefined : "Erst einen Anthropic-API-Schlüssel hinterlegen"}
+          className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {presetGeneratorLoading ? "Erzeuge…" : "Aus Beschreibung erzeugen"}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-1">
+        <button
+          type="button"
+          disabled={!selectedPhotoId || presetGeneratorLoading}
+          onClick={() => void generatePresetFromReferenceImage()}
+          className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Referenzbild…
+        </button>
+        <button
+          type="button"
+          disabled={presetGeneratorLoading}
+          onClick={handleVariations}
+          className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Variationen
+        </button>
+        <button
+          type="button"
+          disabled={multiSelectedIds.length < 2 || presetGeneratorLoading}
+          onClick={() => void learnPresetFromSelectedPhotos(multiSelectedIds, [...PRESET_SECTION_KEYS])}
+          title={multiSelectedIds.length < 2 ? "Mindestens zwei Fotos in der Filmstreifen-Mehrfachauswahl nötig" : undefined}
+          className="col-span-2 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Aus {multiSelectedIds.length} ausgewählten Fotos lernen
+        </button>
+      </div>
+
+      {presetGeneratorPreview.length > 0 && (
+        <div className="flex flex-col gap-1 rounded border border-accent/40 bg-accent/5 p-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-text-secondary">Vorschlag{presetGeneratorPreview.length > 1 ? "e" : ""}</span>
+            <button type="button" onClick={clearPresetGeneratorPreview} className="text-xs text-text-muted hover:text-danger">
+              Verwerfen
+            </button>
+          </div>
+          {presetGeneratorPreview.length > 1 && (
+            <div className="flex flex-wrap gap-1">
+              {presetGeneratorPreview.map((_, index) => (
+                <button
+                  key={index}
+                  type="button"
+                  onClick={() => selectPresetGeneratorPreview(index)}
+                  aria-pressed={index === presetGeneratorSelectedIndex}
+                  className={`rounded border px-2 py-1 text-xs ${
+                    index === presetGeneratorSelectedIndex ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"
+                  }`}
+                >
+                  {index + 1}
+                </button>
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            disabled={!selectedPhotoId}
+            onClick={applyPresetGeneratorPreview}
+            className="rounded bg-accent px-2 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Auf aktuelles Foto anwenden
+          </button>
+          <p className="text-xs text-text-muted">Danach über „Preset speichern" im Entwickeln-Panel als echtes Preset sichern.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Presets-Grundgerüst (Phase 5 Schritt 3, siehe `DECISIONS.md` ADR-0031):
  * Ordnerbaum (analog zu `Sidebar.tsx`s Ordnerbaum) + Presetliste, gefiltert
  * auf den ausgewählten Ordner. Anlegen eines neuen Presets aus dem
@@ -341,6 +515,8 @@ export function PresetsPanel() {
       </ul>
 
       <PresetStackSection />
+
+      <AiPresetGeneratorSection />
 
       <PresetVersionsDialog
         presetId={versionsDialog?.presetId ?? null}

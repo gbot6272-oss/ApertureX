@@ -1491,6 +1491,229 @@ pub fn detect_sensor_spots(
     Ok(spots.into_iter().map(SpotCandidateDto::from).collect())
 }
 
+// ---- KI: Einstellungen (Phase 7 Schritt 4) ---------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiSettingsDto {
+    /// Liegt im Klartext in der Einstellungsdatei — dieselbe
+    /// Vertrauensgrenze wie z. B. `last_opened_catalog`, siehe
+    /// `apx_core::settings::AiSettings`s Moduldoku. Wird dem Frontend
+    /// unverändert zurückgegeben, damit das Eingabefeld den hinterlegten
+    /// Schlüssel zur Kontrolle/Bearbeitung zeigen kann (maskiert per
+    /// `type="password"`, nicht serverseitig verborgen — ein lokaler,
+    /// nicht synchronisierter Einzelnutzer-Schlüssel).
+    pub anthropic_api_key: Option<String>,
+}
+
+#[tauri::command]
+pub fn get_ai_settings(state: State<'_, AppState>) -> Result<AiSettingsDto, String> {
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    Ok(AiSettingsDto {
+        anthropic_api_key: settings.ai.anthropic_api_key,
+    })
+}
+
+/// `None`/leerer String löscht den hinterlegten Schlüssel.
+#[tauri::command]
+pub fn set_anthropic_api_key(
+    state: State<'_, AppState>,
+    api_key: Option<String>,
+) -> Result<(), String> {
+    let path = state.paths.settings_file();
+    let mut settings = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    settings.ai.anthropic_api_key = api_key.filter(|key| !key.trim().is_empty());
+    settings.save(&path).map_err(|err| err.to_string())
+}
+
+// ---- KI: Preset-Generator (Phase 7 Schritt 4) ------------------------------
+//
+// Alle vier Erzeugungsarten liefern eine EDL-Teilmenge als JSON-String
+// zurück — dasselbe Format wie `PresetVersionDto::edl_subset_json` — statt
+// direkt ein Preset anzulegen: das Frontend zeigt das Ergebnis erst in
+// einer Vorschau, der Nutzer entscheidet per `create_preset`/
+// `add_preset_version` (bestehende Commands aus Phase 5), ob er es
+// tatsächlich übernimmt.
+
+/// LLM-Modus: `description` ist die Freitextbeschreibung des gewünschten
+/// Looks. Braucht einen hinterlegten Anthropic-API-Schlüssel (siehe
+/// [`get_ai_settings`]).
+#[tauri::command]
+pub async fn generate_preset_from_llm(
+    state: State<'_, AppState>,
+    description: String,
+) -> Result<String, String> {
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let api_key = settings
+        .ai
+        .anthropic_api_key
+        .filter(|key| !key.trim().is_empty())
+        .ok_or_else(|| apx_ai::AiError::MissingApiKey.to_string())?;
+    let subset = apx_ai::preset_generator::generate_from_llm(&api_key, &description)
+        .await
+        .map_err(|err| err.to_string())?;
+    serde_json::to_string(&subset)
+        .map_err(|err| format!("Preset-Teilmenge nicht serialisierbar: {err}"))
+}
+
+/// Referenzbild-Modus: öffnet einen Datei-Auswahldialog für ein beliebiges
+/// Bild (RAW oder JPEG/PNG/TIFF, siehe `apx_raw::decode_linear`s
+/// Fallback-Pfad) und gleicht die sieben Tonwertregler von `photo_id`
+/// daran an. `None`, wenn der Dialog abgebrochen wurde — kein LLM, kein
+/// API-Schlüssel nötig.
+#[tauri::command]
+pub async fn generate_preset_from_reference(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<Option<String>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("Bilder", &["jpg", "jpeg", "png", "tif", "tiff"])
+        .pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|err| format!("Öffnen-Dialog fehlgeschlagen: {err}"))?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let reference_path = picked
+        .into_path()
+        .map_err(|err| format!("Ungültiger Pfad: {err}"))?;
+
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let source = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+    // Kein Tile-Cache für das Referenzbild — eine beliebige externe Datei,
+    // deren Wiederverwendung sich nicht lohnt (anders als das Foto selbst,
+    // das über mehrere Regler-Ticks hinweg im Cache bleibt).
+    let reference =
+        apx_raw::decode_linear(&reference_path, max_edge).map_err(|err| err.to_string())?;
+
+    let subset = apx_ai::preset_generator::generate_from_reference(
+        &source.pixels,
+        source.width,
+        source.height,
+        &reference.pixels,
+        reference.width,
+        reference.height,
+    )
+    .map_err(|err| err.to_string())?;
+    let json = serde_json::to_string(&subset)
+        .map_err(|err| format!("Preset-Teilmenge nicht serialisierbar: {err}"))?;
+    Ok(Some(json))
+}
+
+/// Variationen-Generator: erzeugt `count` deterministisch geseedete
+/// kleine Störungen von `edl_subset_json` — derselbe `seed` liefert immer
+/// dieselben Varianten (Kontaktbogen-Vorschau im Frontend).
+#[tauri::command]
+pub fn generate_preset_variations(
+    edl_subset_json: String,
+    count: u32,
+    seed: u64,
+) -> Result<Vec<String>, String> {
+    let base: serde_json::Value = serde_json::from_str(&edl_subset_json)
+        .map_err(|err| format!("EDL-Teilmenge ist kein gültiges JSON: {err}"))?;
+    let variations = apx_ai::preset_generator::generate_variations(&base, count as usize, seed)
+        .map_err(|err| err.to_string())?;
+    variations
+        .iter()
+        .map(|variation| {
+            serde_json::to_string(variation)
+                .map_err(|err| format!("Variante nicht serialisierbar: {err}"))
+        })
+        .collect()
+}
+
+/// Preset aus Bearbeitung lernen: mittelt die genannten `sections` über
+/// den *aktuell committeten* Bearbeitungsstand (`Catalog::current_edit`,
+/// nicht die gerade im Frontend offene Live-Vorschau) mehrerer
+/// ausgewählter Fotos.
+#[tauri::command]
+pub fn learn_preset_from_photos(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    sections: Vec<String>,
+) -> Result<String, String> {
+    let photo_ids: Vec<apx_core::PhotoId> = photo_ids
+        .into_iter()
+        .map(parse_photo_id)
+        .collect::<Result<Vec<_>, String>>()?;
+
+    let mut subsets = Vec::with_capacity(photo_ids.len());
+    for photo_id in photo_ids {
+        let edl = match state
+            .catalog
+            .current_edit(photo_id)
+            .map_err(|err| err.to_string())?
+        {
+            apx_catalog::HistoryPosition::Neutral => apx_pipeline::edl::EdlV3::neutral(),
+            apx_catalog::HistoryPosition::At(entry) => {
+                apx_pipeline::edl::from_envelope(&entry.edl).map_err(|err| err.to_string())?
+            }
+        };
+        let full =
+            serde_json::to_value(&edl).map_err(|err| format!("EDL nicht serialisierbar: {err}"))?;
+        let mut subset = serde_json::Map::new();
+        if let serde_json::Value::Object(map) = &full {
+            for key in &sections {
+                if let Some(value) = map.get(key) {
+                    subset.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        subsets.push(serde_json::Value::Object(subset));
+    }
+
+    let averaged =
+        apx_ai::preset_generator::average_subsets(&subsets).map_err(|err| err.to_string())?;
+    serde_json::to_string(&averaged)
+        .map_err(|err| format!("Preset-Teilmenge nicht serialisierbar: {err}"))
+}
+
+// ---- KI: Auto-Tagging (Phase 7 Schritt 5) ----------------------------------
+
+/// Schlagwort-Vorschläge für `photo_id` (`apx_ai::tagging`) — schreibt
+/// nichts in den Katalog, das Frontend übernimmt ausgewählte Vorschläge
+/// über das bestehende `add_photo_keyword` (Phase 3).
+#[tauri::command]
+pub fn suggest_tags(state: State<'_, AppState>, photo_id: String) -> Result<Vec<String>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let exif = apx_ai::tagging::TagExifInput {
+        iso: photo.iso,
+        aperture: photo.aperture,
+        focal_length: photo.focal_length,
+    };
+    apx_ai::tagging::suggest_tags(&linear.pixels, linear.width, linear.height, &exif)
+        .map_err(|err| err.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

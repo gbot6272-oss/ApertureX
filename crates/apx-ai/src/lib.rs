@@ -28,7 +28,9 @@
 pub mod blur;
 pub mod color;
 pub mod error;
+pub mod preset_generator;
 pub mod repair_analysis;
 pub mod segmentation;
+pub mod tagging;
 
 pub use error::{AiError, Result};

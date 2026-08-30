@@ -25,6 +25,11 @@ export function MetadataPanel() {
   const setPhotoColorLabel = useAppStore((s) => s.setPhotoColorLabel);
   const addKeywordToPhoto = useAppStore((s) => s.addKeywordToPhoto);
   const removeKeywordFromPhoto = useAppStore((s) => s.removeKeywordFromPhoto);
+  const tagSuggestions = useAppStore((s) => s.tagSuggestions);
+  const tagSuggestionsLoading = useAppStore((s) => s.tagSuggestionsLoading);
+  const fetchTagSuggestions = useAppStore((s) => s.fetchTagSuggestions);
+  const acceptTagSuggestion = useAppStore((s) => s.acceptTagSuggestion);
+  const clearTagSuggestions = useAppStore((s) => s.clearTagSuggestions);
 
   const [newKeyword, setNewKeyword] = useState("");
 
@@ -96,6 +101,41 @@ export function MetadataPanel() {
                 +
               </button>
             </div>
+
+            {/* Auto-Tagging (Phase 7 Schritt 5, siehe DECISIONS.md ADR-0033)
+                — regelbasierte Vorschläge aus Segmentierungs-Heuristiken +
+                EXIF, keine Klassifikation. Schreibt nichts in den Katalog,
+                bis der Nutzer einen Vorschlag ausdrücklich übernimmt. */}
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                disabled={tagSuggestionsLoading}
+                onClick={() => void fetchTagSuggestions(photo.id)}
+                className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {tagSuggestionsLoading ? "Analysiere…" : "Tag-Vorschläge"}
+              </button>
+              {tagSuggestions.length > 0 && (
+                <button type="button" onClick={clearTagSuggestions} className="text-xs text-text-muted hover:text-danger">
+                  Verwerfen
+                </button>
+              )}
+            </div>
+            {tagSuggestions.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {tagSuggestions.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => void acceptTagSuggestion(photo.id, tag)}
+                    title="Als Schlagwort übernehmen"
+                    className="rounded border border-dashed border-accent/50 px-1.5 py-0.5 text-xs text-accent hover:bg-accent/10"
+                  >
+                    + {tag}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs">

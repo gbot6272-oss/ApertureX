@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
 import {
+  AI_MASK_KIND_LABELS,
+  base64ToByteArray,
   buildEdlEnvelopeJson,
   defaultColorRangeGeometry,
   defaultLinearGradientGeometry,
@@ -16,7 +18,7 @@ import {
   WHITE_BALANCE_PRESETS,
   writeBasicField,
 } from "../lib/edl";
-import type { BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairMode, RepairPoint, UprightMode } from "../lib/edl";
+import type { AiMaskKind, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairMode, RepairPoint, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import {
   applyConditionsToSubset,
@@ -35,6 +37,7 @@ import type { SortDirection, SortField } from "../lib/sortPhotos";
 import type { SoftProofIntent, SoftProofProfile } from "../lib/softProof";
 import * as api from "../lib/tauri";
 import type {
+  AiSettingsDto,
   CatalogStatusDto,
   CollectionDto,
   FilterCriteriaDto,
@@ -47,6 +50,7 @@ import type {
   PresetDto,
   PresetFolderDto,
   SnapshotDto,
+  SpotCandidateDto,
 } from "../lib/tauri";
 import * as undoStackLib from "../lib/undoStack";
 import type { UndoEntry } from "../lib/undoStack";
@@ -689,6 +693,22 @@ export const MASK_KIND_LABEL: Record<MaskKind, string> = {
   LuminanceRange: "Luminanzbereich",
 };
 
+/** Die fünf KI-Maskenarten in derselben Reihenfolge wie die Knöpfe im
+ * „KI-Maske hinzufügen"-Abschnitt von `MasksPanel.tsx`. */
+export const AI_MASK_KINDS: readonly AiMaskKind[] = ["Subject", "Sky", "Background", "ClickRegion", "Person"];
+
+/** Rusts `generate_ai_mask`-Command erwartet die Maskenart als
+ * `snake_case`-String (siehe `apx-app/src/commands.rs::parse_ai_mask_kind`),
+ * das Frontend-Enum `AiMaskKind` ist dagegen `PascalCase` (spiegelt
+ * `apx_pipeline::edl::AiMaskKind`, siehe `lib/edl.ts`). */
+const AI_MASK_KIND_TO_BACKEND: Record<AiMaskKind, string> = {
+  Subject: "subject",
+  Sky: "sky",
+  Background: "background",
+  ClickRegion: "click_region",
+  Person: "person",
+};
+
 /** Masken leben als Teil von `developEdl.masks` (siehe `lib/edl.ts`s
  * `Mask`) — dieser Slice ergänzt nur Auswahl-/Interaktionszustand plus
  * die Aktionen, die `developEdl.masks` verändern. Wie bei Reparatur
@@ -835,7 +855,96 @@ interface MasksSlice {
   removeMaskBuildingBlock: (blockId: string) => void;
 }
 
-export type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice & LibrarySlice & PresetsSlice & MasksSlice;
+// ---- KI-Slice (Phase 7, siehe DECISIONS.md ADR-0033) -----------------------
+
+/** Ein bereits geparster Vorschlag des Preset-Generators, siehe
+ * `generatePresetFromDescription`/`generatePresetFromReferenceImage`/
+ * `generatePresetVariationsFromBase`/`learnPresetFromSelectedPhotos`
+ * unten — alle vier füllen dieselbe `presetGeneratorPreview`-Liste
+ * (Variationen: mehrere Einträge gleichzeitig, die anderen drei: genau
+ * einer), damit die Vorschau-UI nur einen einzigen Zustand kennen muss. */
+interface AiSlice {
+  // -- Die fünf KI-Masken (Schritt 2) --
+  /** `true`, während auf einen Bildklick für die „Objekte"-KI-Maske
+   * gewartet wird — nur `ClickRegion` braucht einen Klickpunkt, die
+   * anderen vier Arten erzeugen sofort. Analog zu
+   * `maskColorRangePickerActive`. */
+  aiMaskClickPickerActive: boolean;
+  toggleAiMaskClickPicker: () => void;
+  /** Welche KI-Maskenart gerade per Tauri-Aufruf erzeugt wird (Anzeige
+   * eines Ladezustands am jeweiligen Knopf) — `null`, wenn keine läuft. */
+  aiMaskLoading: AiMaskKind | null;
+  /** Erzeugt eine neue Maske mit `MaskGeometry::AiGenerated`-Geometrie für
+   * `kind` und committet sofort. `click` ist nur für `"ClickRegion"`
+   * Pflicht (siehe `aiMaskClickPickerActive`) — bei fehlendem Klick für
+   * diese Art ist es ein No-op. */
+  addAiMask: (kind: AiMaskKind, click?: { x: number; y: number }) => Promise<void>;
+
+  // -- Reparatur-Erweiterungen (Schritt 3) --
+  /** Solange aktiv, löst der erste Klick im `RepairOverlay` (der sonst
+   * direkt den Quellpunkt setzt) stattdessen `suggestRepairSourceForTarget`
+   * an dieser Position aus — die Klickposition gilt dann als ungefährer
+   * Zielbereich, nicht als Quelle. */
+  autoSourceModeActive: boolean;
+  toggleAutoSourceMode: () => void;
+  repairSourceSuggestionLoading: boolean;
+  /** Fragt für den aktuellen Reparatur-Entwurfsradius einen Quellpunkt
+   * für `(targetX, targetY)` vor (`apx_ai::repair_analysis::
+   * suggest_source_point`) und setzt ihn als `repairPendingSource` — der
+   * Nutzer malt danach wie gewohnt den Zielpfad. */
+  suggestRepairSourceForTarget: (targetX: number, targetY: number) => Promise<void>;
+  sensorSpotCandidates: SpotCandidateDto[];
+  sensorSpotsLoading: boolean;
+  /** Sucht Sensorflecken im aktuell ausgewählten Foto
+   * (`apx_ai::repair_analysis::detect_spots`). */
+  detectSensorSpotsForCurrentPhoto: (sensitivity: number) => Promise<void>;
+  clearSensorSpots: () => void;
+  /** Übernimmt einen erkannten Sensorfleck als neuen
+   * `ContentAwareFill`-Reparaturstrich (ein einzelner Zielpunkt, Radius
+   * aus dem erkannten Fleck übernommen) und committet sofort. */
+  applySensorSpotAsRepairStroke: (spot: SpotCandidateDto) => void;
+
+  // -- Preset-Generator (Schritt 4) --
+  aiSettings: AiSettingsDto | null;
+  loadAiSettings: () => Promise<void>;
+  saveAnthropicApiKey: (apiKey: string) => Promise<void>;
+  presetGeneratorLoading: boolean;
+  presetGeneratorPreview: PresetEdlSubset[];
+  /** Index innerhalb `presetGeneratorPreview`, der gerade in der
+   * Live-Vorschau markiert ist (Variationen: der Nutzer wählt eine von
+   * mehreren aus). */
+  presetGeneratorSelectedIndex: number;
+  generatePresetFromDescription: (description: string) => Promise<void>;
+  /** Öffnet einen Datei-Auswahldialog (Referenzbild) — kein LLM, kein
+   * API-Schlüssel nötig. No-op (kein Fehler), wenn der Dialog abgebrochen
+   * wird. */
+  generatePresetFromReferenceImage: () => Promise<void>;
+  generatePresetVariationsFromBase: (base: PresetEdlSubset, count: number, seed: number) => Promise<void>;
+  /** Mittelt `sections` über den aktuell committeten Bearbeitungsstand
+   * der genannten Fotos (`apx_ai::preset_generator::average_subsets`). */
+  learnPresetFromSelectedPhotos: (photoIds: string[], sections: PresetSectionKey[]) => Promise<void>;
+  selectPresetGeneratorPreview: (index: number) => void;
+  /** Mischt `presetGeneratorPreview[presetGeneratorSelectedIndex]` in
+   * `developEdl` (wie das Anwenden eines Presets, `mergeEdlSubset`) und
+   * committet — der Nutzer kann das Ergebnis danach über den
+   * bestehenden „Preset speichern"-Dialog (Phase 5) als echtes Preset
+   * sichern, ohne dass der Generator eine eigene Speicher-Logik
+   * bräuchte. */
+  applyPresetGeneratorPreview: () => void;
+  clearPresetGeneratorPreview: () => void;
+
+  // -- Auto-Tagging (Schritt 5) --
+  tagSuggestions: string[];
+  tagSuggestionsLoading: boolean;
+  fetchTagSuggestions: (photoId: string) => Promise<void>;
+  /** Übernimmt einen Vorschlag als echtes Schlagwort
+   * (`add_photo_keyword`, Phase 3) und entfernt ihn aus
+   * `tagSuggestions`. */
+  acceptTagSuggestion: (photoId: string, tag: string) => Promise<void>;
+  clearTagSuggestions: () => void;
+}
+
+export type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice & LibrarySlice & PresetsSlice & MasksSlice & AiSlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -2796,6 +2905,312 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         const index = state.maskBuildingBlocks.findIndex((b) => b.id === blockId);
         if (index >= 0) state.maskBuildingBlocks.splice(index, 1);
+      });
+    },
+
+    // ---- KI-Slice (Phase 7) ----
+
+    aiMaskClickPickerActive: false,
+
+    toggleAiMaskClickPicker: () => {
+      set((state) => {
+        state.aiMaskClickPickerActive = !state.aiMaskClickPickerActive;
+      });
+    },
+
+    aiMaskLoading: null,
+
+    addAiMask: async (kind, click) => {
+      const { selectedPhotoId } = get();
+      if (!selectedPhotoId) return;
+      if (kind === "ClickRegion" && !click) return;
+      set((state) => {
+        state.aiMaskLoading = kind;
+        state.aiMaskClickPickerActive = false;
+      });
+      try {
+        const dto = await api.generateAiMask(selectedPhotoId, AI_MASK_KIND_TO_BACKEND[kind], click?.x, click?.y);
+        const geometry: MaskGeometry = {
+          kind: "AiGenerated",
+          ai_kind: kind,
+          width: dto.width,
+          height: dto.height,
+          alpha: base64ToByteArray(dto.alpha_base64),
+        };
+        const id = `mask-${crypto.randomUUID()}`;
+        const name = AI_MASK_KIND_LABELS[kind];
+        set((state) => {
+          state.developEdl.masks.push(newMask(id, name, geometry));
+          state.selectedMaskId = id;
+          state.selectedMaskComponentIndex = 0;
+        });
+        void get().commitDevelopEdit(`KI-Maske „${name}" hinzugefügt`);
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.aiMaskLoading = null;
+        });
+      }
+    },
+
+    autoSourceModeActive: false,
+
+    toggleAutoSourceMode: () => {
+      set((state) => {
+        state.autoSourceModeActive = !state.autoSourceModeActive;
+      });
+    },
+
+    repairSourceSuggestionLoading: false,
+
+    suggestRepairSourceForTarget: async (targetX, targetY) => {
+      const { selectedPhotoId, repairDraftRadius } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.repairSourceSuggestionLoading = true;
+      });
+      try {
+        const dto = await api.suggestRepairSource(selectedPhotoId, targetX, targetY, repairDraftRadius);
+        set((state) => {
+          state.repairPendingSource = { x: dto.x, y: dto.y };
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.repairSourceSuggestionLoading = false;
+        });
+      }
+    },
+
+    sensorSpotCandidates: [],
+    sensorSpotsLoading: false,
+
+    detectSensorSpotsForCurrentPhoto: async (sensitivity) => {
+      const { selectedPhotoId } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.sensorSpotsLoading = true;
+      });
+      try {
+        const spots = await api.detectSensorSpots(selectedPhotoId, sensitivity, 20);
+        set((state) => {
+          state.sensorSpotCandidates = spots;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.sensorSpotsLoading = false;
+        });
+      }
+    },
+
+    clearSensorSpots: () => {
+      set((state) => {
+        state.sensorSpotCandidates = [];
+      });
+    },
+
+    applySensorSpotAsRepairStroke: (spot) => {
+      set((state) => {
+        state.developEdl.repair.push({
+          mode: "ContentAwareFill",
+          source: { x: 0, y: 0 },
+          target_path: [{ x: spot.x, y: spot.y }],
+          radius: spot.radius,
+          feather: Math.min(spot.radius * 0.3, 0.05),
+          opacity: 1,
+        });
+        state.sensorSpotCandidates = state.sensorSpotCandidates.filter((candidate) => candidate !== spot);
+      });
+      void get().commitDevelopEdit("Sensorfleck automatisch repariert");
+    },
+
+    aiSettings: null,
+
+    loadAiSettings: async () => {
+      try {
+        const settings = await api.getAiSettings();
+        set((state) => {
+          state.aiSettings = settings;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    saveAnthropicApiKey: async (apiKey) => {
+      try {
+        await api.setAnthropicApiKey(apiKey.trim() || null);
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    presetGeneratorLoading: false,
+    presetGeneratorPreview: [],
+    presetGeneratorSelectedIndex: 0,
+
+    generatePresetFromDescription: async (description) => {
+      const trimmed = description.trim();
+      if (!trimmed) return;
+      set((state) => {
+        state.presetGeneratorLoading = true;
+      });
+      try {
+        const json = await api.generatePresetFromLlm(trimmed);
+        set((state) => {
+          state.presetGeneratorPreview = [parseEdlSubset(json)];
+          state.presetGeneratorSelectedIndex = 0;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.presetGeneratorLoading = false;
+        });
+      }
+    },
+
+    generatePresetFromReferenceImage: async () => {
+      const { selectedPhotoId } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.presetGeneratorLoading = true;
+      });
+      try {
+        const json = await api.generatePresetFromReference(selectedPhotoId);
+        if (json) {
+          set((state) => {
+            state.presetGeneratorPreview = [parseEdlSubset(json)];
+            state.presetGeneratorSelectedIndex = 0;
+          });
+        }
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.presetGeneratorLoading = false;
+        });
+      }
+    },
+
+    generatePresetVariationsFromBase: async (base, count, seed) => {
+      set((state) => {
+        state.presetGeneratorLoading = true;
+      });
+      try {
+        const jsonList = await api.generatePresetVariations(serializeEdlSubset(base), count, seed);
+        set((state) => {
+          state.presetGeneratorPreview = jsonList.map(parseEdlSubset);
+          state.presetGeneratorSelectedIndex = 0;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.presetGeneratorLoading = false;
+        });
+      }
+    },
+
+    learnPresetFromSelectedPhotos: async (photoIds, sections) => {
+      if (photoIds.length === 0) return;
+      set((state) => {
+        state.presetGeneratorLoading = true;
+      });
+      try {
+        const json = await api.learnPresetFromPhotos(photoIds, sections);
+        set((state) => {
+          state.presetGeneratorPreview = [parseEdlSubset(json)];
+          state.presetGeneratorSelectedIndex = 0;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.presetGeneratorLoading = false;
+        });
+      }
+    },
+
+    selectPresetGeneratorPreview: (index) => {
+      set((state) => {
+        state.presetGeneratorSelectedIndex = index;
+      });
+    },
+
+    applyPresetGeneratorPreview: () => {
+      const { presetGeneratorPreview, presetGeneratorSelectedIndex } = get();
+      const subset = presetGeneratorPreview[presetGeneratorSelectedIndex];
+      if (!subset) return;
+      set((state) => {
+        state.developEdl = mergeEdlSubset(state.developEdl, subset);
+      });
+      void get().commitDevelopEdit("KI-Preset angewendet");
+    },
+
+    clearPresetGeneratorPreview: () => {
+      set((state) => {
+        state.presetGeneratorPreview = [];
+        state.presetGeneratorSelectedIndex = 0;
+      });
+    },
+
+    tagSuggestions: [],
+    tagSuggestionsLoading: false,
+
+    fetchTagSuggestions: async (photoId) => {
+      set((state) => {
+        state.tagSuggestionsLoading = true;
+      });
+      try {
+        const tags = await api.suggestTags(photoId);
+        set((state) => {
+          state.tagSuggestions = tags;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.tagSuggestionsLoading = false;
+        });
+      }
+    },
+
+    acceptTagSuggestion: async (photoId, tag) => {
+      await get().addKeywordToPhoto(photoId, tag);
+      set((state) => {
+        state.tagSuggestions = state.tagSuggestions.filter((candidate) => candidate !== tag);
+      });
+    },
+
+    clearTagSuggestions: () => {
+      set((state) => {
+        state.tagSuggestions = [];
       });
     },
     };

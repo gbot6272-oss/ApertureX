@@ -20,6 +20,17 @@ interface RepairOverlayProps {
    * `onSetSource` auszulösen (siehe `DECISIONS.md` ADR-0033 Punkt 4).
    * Vorgabe `false`, damit bestehende Aufrufer unverändert bleiben. */
   skipSourceStep?: boolean;
+  /** Auto-Quellenfindung (Phase 7 Schritt 3): solange aktiv, gilt der
+   * erste Klick als ungefährer Zielbereich statt als Quellpunkt —
+   * `onSuggestSource` (statt `onSetSource`) schlägt dafür einen
+   * Quellpunkt vor, den der Aufrufer dann selbst als `pendingSource`
+   * setzt. Ignoriert, wenn `skipSourceStep` aktiv ist. */
+  autoSourceModeActive?: boolean;
+  onSuggestSource?: (point: RepairPoint) => void;
+  /** Erkannte Sensorflecken (Phase 7 Schritt 3, `apx_ai::repair_analysis::
+   * detect_spots`) — rein visuelle Markierung, das eigentliche
+   * Übernehmen als Reparaturstrich löst das Entwickeln-Panel aus. */
+  spotCandidates?: Array<{ x: number; y: number; radius: number }>;
 }
 
 /** Muss `repair.rs`s `MAX_PATH_POINTS` entsprechen. */
@@ -70,6 +81,9 @@ export function RepairOverlay({
   onPaint,
   onRemoveStroke,
   skipSourceStep = false,
+  autoSourceModeActive = false,
+  onSuggestSource,
+  spotCandidates,
 }: RepairOverlayProps) {
   const [drawingPath, setDrawingPath] = useState<RepairPoint[] | null>(null);
   const pathRef = useRef<RepairPoint[]>([]);
@@ -80,7 +94,11 @@ export function RepairOverlay({
       const rect = event.currentTarget.getBoundingClientRect();
       const point = pointFromEvent(event, rect);
       if (!pendingSource && !skipSourceStep) {
-        onSetSource(point);
+        if (autoSourceModeActive && onSuggestSource) {
+          onSuggestSource(point);
+        } else {
+          onSetSource(point);
+        }
         return;
       }
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -88,7 +106,7 @@ export function RepairOverlay({
       pathRef.current = [point];
       setDrawingPath(pathRef.current);
     },
-    [pendingSource, skipSourceStep, onSetSource],
+    [pendingSource, skipSourceStep, autoSourceModeActive, onSuggestSource, onSetSource],
   );
 
   const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -145,6 +163,19 @@ export function RepairOverlay({
           <polyline points={drawingPath.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")} fill="none" stroke="white" strokeWidth={0.6} vectorEffect="non-scaling-stroke" />
         )}
         {pendingSource && <circle cx={pendingSource.x * 100} cy={pendingSource.y * 100} r={1.2} fill="none" stroke="white" strokeWidth={0.4} vectorEffect="non-scaling-stroke" />}
+        {spotCandidates?.map((spot, index) => (
+          <circle
+            key={index}
+            cx={spot.x * 100}
+            cy={spot.y * 100}
+            r={Math.max(spot.radius * 100, 1)}
+            fill="none"
+            stroke="#fb923c"
+            strokeDasharray="1,1"
+            strokeWidth={0.4}
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
       </svg>
       {strokes.map((stroke, index) => {
         const last = stroke.target_path[stroke.target_path.length - 1] ?? stroke.source;

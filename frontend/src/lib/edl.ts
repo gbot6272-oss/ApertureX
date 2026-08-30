@@ -680,6 +680,23 @@ export type MaskGeometry =
   | { kind: "LuminanceRange"; range_min: number; range_max: number; feather: number }
   | { kind: "AiGenerated"; ai_kind: AiMaskKind; width: number; height: number; alpha: number[] };
 
+/** Dekodiert eine Base64-Ein-Kanal-Bitmap (`AiMaskAlphaDto.alpha_base64`,
+ * siehe `lib/tauri.ts`) in ein Array von Byte-Werten (`0..=255`) — genau
+ * das Format, das `MaskGeometry::AiGenerated.alpha` erwartet (Rusts
+ * `Vec<u8>` serialisiert als JSON-Zahlenarray, nicht als Base64-String;
+ * Base64 ist nur die kompakte Kodierung für den einmaligen IPC-Transport
+ * der Tauri-Antwort). `atob` ist in jedem Tauri-Webview verfügbar (Chrome/
+ * WebKit), kein zusätzliches Paket nötig.
+ */
+export function base64ToByteArray(base64: string): number[] {
+  const binary = atob(base64);
+  const bytes = new Array<number>(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
 export function emptyBrushGeometry(): MaskGeometry {
   return { kind: "Brush", strokes: [] };
 }

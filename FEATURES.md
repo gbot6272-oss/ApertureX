@@ -42,7 +42,7 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Flaggen — Phase 3 — Status: Fertig
 - [x] Schlagworte (flache Liste, ohne Hierarchie) — Phase 3 — Status: Fertig
 - [ ] Schlagworthierarchie (Synonyme, Export-Steuerung, Auto-Vervollständigung), Schlagwortvorschläge, Tag-Regeln (bedingte Auto-Tags) — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
-- [ ] Auto-Tagging — Phase 7 — Status: Nicht begonnen (siehe `SPEC.md` §5s Phase-7-Satz; **Nachtrag ADR-0033:** diese Zeile fehlte seit Phase 3 komplett in `FEATURES.md`, hier nachgetragen statt stillschweigend übersprungen — abweichend regelbasiert statt echter Bildklassifikation, siehe ADR-0033 Punkt 6)
+- [x] Auto-Tagging — Phase 7 — Status: Fertig (abweichend, siehe ADR-0033 Punkt 6) — regelbasierte Vorschläge aus Segmentierungs-Heuristiken (Himmel-/Personen-Flächenanteil) + EXIF-Faustregeln (ISO/Blende/Brennweite) statt echter Bildklassifikation; `apx-ai::tagging::suggest_tags` schreibt nichts selbst in den Katalog, das Frontend übernimmt Vorschläge über das bestehende `add_photo_keyword`
 - [x] Metadaten-Panel (Basisfelder lesen, Bewertung/Flagge/Farbe/Schlagworte editieren) — Phase 3 — Status: Fertig
 - [x] Undo/Redo für Bibliotheks-Metadaten (Bewertung/Flagge/Farbe/Schlagworte/Sammlungsmitgliedschaft) — Phase 3 — Status: Fertig (siehe DECISIONS.md ADR-0027; deckt bewusst nicht Sammlung anlegen/umbenennen/löschen ab)
 - [ ] Metadaten-Presets, Stapel-Metadatenbearbeitung, EXIF/IPTC/XMP-Editor (alle Felder), frei definierbare Metadaten-Felder, Sidecar-Export (.xmp) — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
@@ -148,9 +148,9 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
      manuelles Klonen/Reparieren (Pinsel mit Quellpunkt, Radius, Deckkraft,
      weicher Kante). -->
 - [x] Bereichsreparatur klonen/reparieren — Phase 4 — Status: Fertig (abweichend, siehe ADR-0028: Reparieren per vereinfachtem Tiefpass/Hochpass-Überblenden statt echten Poisson-Blendings, Pfad-Abstand als minimaler Stützpunkt-Abstand statt echter Punkt-zu-Liniensegment-Distanz, Striche sequenziell statt als ein Fused-Pass angewendet, siehe `stages/repair.rs`)
-- [ ] Auto-Quellenfindung — Phase 7 — Status: Nicht begonnen (siehe ADR-0028; von Phase 6 auf Phase 7 präzisiert per ADR-0032 Punkt 8 — dieselbe CV-Algorithmus-Kategorie wie die dort nach Phase 7 verschobene Referenzbild-Optimierung)
-- [ ] Sensorflecken-Visualisierung — Phase 7 — Status: Nicht begonnen (siehe ADR-0028-Nachtrag zu Schritt 12, Phase per ADR-0032 Punkt 8 präzisiert: setzt eine automatische Fleckenerkennung voraus, dieselbe Kategorie wie die Auto-Quellenfindung)
-- [ ] Inhaltsbasiertes Füllen — Phase 7 — Status: Nicht begonnen (siehe ADR-0028; Phase per ADR-0032 Punkt 8 präzisiert)
+- [x] Auto-Quellenfindung — Phase 7 — Status: Fertig — `apx-ai::repair_analysis::suggest_source_point`, normierte Kreuzkorrelation über einen festen Kandidatenring; im Frontend per Checkbox „Quelle automatisch vorschlagen" aktivierbar, ersetzt dann den manuellen Quellpunkt-Klick
+- [x] Sensorflecken-Visualisierung — Phase 7 — Status: Fertig — `apx-ai::repair_analysis::detect_spots`, Blob-Erkennung per lokaler Kontrast-Anomalie gegen ein weichgezeichnetes Referenzbild; reine Analyse (kein automatisches Committen), „Reparieren" übernimmt einen Fund als `ContentAwareFill`-Strich
+- [x] Inhaltsbasiertes Füllen — Phase 7 — Status: Fertig (abweichend, siehe ADR-0033 Punkt 4) — vereinfachtes PatchMatch (Nächster-Nachbar-Vorbelegung, Zufallsinit, Propagation, Zufallssuche) statt eines vollständigen Multi-Skalen-Verfahrens; bleibt bewusst in `apx_pipeline::stages::repair` als vierter Reparatur-Modus (render-zeitlich, nicht `apx-ai`), da es bei jedem Rendering läuft statt nur einmal auf Knopfdruck
 
 ## 3.3 Modul ENTWICKELN — Lokale Anpassungen
 <!-- Scope-Präzisierung siehe DECISIONS.md ADR-0032: SPEC.md §5s
@@ -166,11 +166,11 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Maskentyp Farbbereich — Phase 6 — Status: Fertig
 - [x] Maskentyp Luminanzbereich — Phase 6 — Status: Fertig
 - [ ] Maskentyp Tiefenbereich — Später zurückgestellt — Status: Nicht begonnen (siehe ADR-0032: kein Tiefendaten-Zulieferer existiert, keinem Phasenplan-Punkt zugeordnet)
-- [ ] KI-Motiv-Maske — Phase 7 — Status: Nicht begonnen
-- [ ] KI-Himmel-Maske — Phase 7 — Status: Nicht begonnen
-- [ ] KI-Hintergrund-Maske — Phase 7 — Status: Nicht begonnen
-- [ ] KI-Objekte-Maske (Klick-Segmentierung) — Phase 7 — Status: Nicht begonnen
-- [ ] KI-Personen-Maske (Haut, Augen, Brauen, Lippen, Zähne, Haare, Kleidung) — Phase 7 — Status: Nicht begonnen
+- [x] KI-Motiv-Maske — Phase 7 — Status: Fertig (abweichend, siehe ADR-0033 Punkt 1/2) — Center-Surround-Saliency-Heuristik statt echter ONNX-Modellinferenz (kein legitimer Weg, echte Segmentierungs-Modellgewichte in dieser Umgebung zu beschaffen und mitzuliefern)
+- [x] KI-Himmel-Maske — Phase 7 — Status: Fertig (abweichend, siehe ADR-0033 Punkt 1/2) — Farbton-/Helligkeits-/Positions-Heuristik
+- [x] KI-Hintergrund-Maske — Phase 7 — Status: Fertig (abweichend, siehe ADR-0033 Punkt 1/2) — Komplement der Motiv-Maske
+- [x] KI-Objekte-Maske (Klick-Segmentierung) — Phase 7 — Status: Fertig (abweichend, siehe ADR-0033 Punkt 1/2) — farbtoleranzbasiertes Region-Growing ab einem Klickpunkt, kein gelerntes Instanzsegmentierungs-Modell
+- [x] KI-Personen-Maske (Haut, Augen, Brauen, Lippen, Zähne, Haare, Kleidung) — Phase 7 — Status: Fertig, mit Teil-Einschränkung (siehe ADR-0033 Punkt 1/2) — Hautton-Erkennung im YCbCr-Raum als eine einzelne Region; Einzelteile (Augen/Brauen/Lippen/Zähne/Haare/Kleidung getrennt wählbar) bewusst nicht umgesetzt, siehe `PLAN.md`
 - [x] Masken kombinieren (Hinzufügen/Subtrahieren/Schneiden) — Phase 6 — Status: Fertig — mehrere `MaskComponent`s je Maske, je mit eigenem `MaskCombine` + Invertieren (siehe `PLAN.md` Schritt 6)
 - [x] Pro Maske: alle globalen Regler + Deckkraft/Weichzeichnung/Umkehren/Verfeinern — Phase 6 — Status: Fertig (abweichend, siehe ADR-0032 Punkt 2) — eingegrenzt auf die ton-/farb-/detailbezogenen Werkzeuge (Grundeinstellungen, Kurven, HSL, Farbmischer, Color Grading, Details); Objektivkorrekturen/Effekte/Kalibrierung/Geometrie/Reparatur bleiben bewusst global
 - [x] Maskengruppen, Umbenennen, Ein-/Ausblenden, Überlagerungsfarbe — Phase 6 — Status: Fertig (abweichend) — Gruppen (anlegen/umbenennen/Sichtbarkeit/entfernen) vollständig; Überlagerungsfarbe (`overlay_color`, seit Schritt 1 im EDL) bekommt bewusst keine UI, da sie eine Masken-Flächen-Voransicht im Viewer steuern würde, die es (noch) nicht gibt (siehe `PLAN.md` Schritt 7)
@@ -214,10 +214,10 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Import/Export `.apx` — Phase 5 — Status: Fertig
 - [ ] Import/Export Adobe `.xmp` / `.lrtemplate` (beide Richtungen) — Phase 8–9 — Status: Nicht begonnen (siehe ADR-0031 Punkt 3: „eine spätere Phase", ohne Phase 6 zu benennen — `ARCHITECTURE.md` §7 hatte das schon korrekt auf Phase 8–9 gelegt, diese Zeile war stehen geblieben; korrigiert im Rahmen der Phase-6-Scope-Präzisierung, ADR-0032)
 - [x] Preset-Versionierung mit Diff-Ansicht — Phase 5 — Status: Fertig
-- [ ] Preset-Generator per LLM (natürlichsprachliche Beschreibung) — Phase 7 — Status: Nicht begonnen
-- [ ] Referenzbild-Modus (numerische Optimierung, kein LLM) — Phase 7 — Status: Nicht begonnen
-- [ ] Variationen-Generator (Kontaktbogen) — Phase 7 — Status: Nicht begonnen
-- [ ] Preset aus Bearbeitung lernen (Mustererkennung über mehrere Bilder) — Phase 7 — Status: Nicht begonnen
+- [x] Preset-Generator per LLM (natürlichsprachliche Beschreibung) — Phase 7 — Status: Fertig — echter Anthropic-Messages-API-Aufruf (`apx-ai::preset_generator::generate_from_llm`), serverseitig validiert (Antwort muss auf ein neutrales EDL gemergt vollständig deserialisierbar sein), Anthropic-API-Schlüssel vom Nutzer selbst hinterlegt (kein mitgelieferter Schlüssel)
+- [x] Referenzbild-Modus (numerische Optimierung, kein LLM) — Phase 7 — Status: Fertig (abweichend, siehe ADR-0033 Punkt 4) — Koordinatenabstieg über die sechs tonwertbezogenen Grundeinstellungs-Parameter, Histogramm-Distanz (Kumulativsummen/Earth-Mover's) als Zielfunktion statt eines vollständigen Gradientenverfahrens über alle Regler
+- [x] Variationen-Generator (Kontaktbogen) — Phase 7 — Status: Fertig — deterministisch geseedete kleine Störungen eines Basis-Presets, reproduzierbar über denselben Seed
+- [x] Preset aus Bearbeitung lernen (Mustererkennung über mehrere Bilder) — Phase 7 — Status: Fertig (abweichend, siehe ADR-0033 Punkt 4) — arithmetisches Mittel der committeten EDL-Werte je Sektion über die ausgewählten Fotos statt echter Mustererkennung; strukturierte Listen (Kurvenpunkte, Farbmischer-Regionen) werden vom ersten Foto übernommen statt zusammengeführt
 - [ ] Export-Templates (Ziel, Format, Qualität, Farbraum, Größe, Schärfung, Metadaten, Wasserzeichen, Mehrfachziel) — Phase 8 — Status: Nicht begonnen
 - [ ] Wasserzeichen-Templates — Phase 8 — Status: Nicht begonnen
 - [ ] Metadaten-Templates (Copyright/Ersteller/Kontakt/IPTC) — Phase 8 — Status: Nicht begonnen

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import {
+  AI_MASK_KIND_LABELS,
   BASIC_SLIDER_SPECS,
   BLEND_MODE_OPTIONS,
   COLOR_GRADING_WHEEL_TABS,
@@ -21,7 +22,7 @@ import {
   type HslAdjustment,
   type SliderSpec,
 } from "../lib/edl";
-import { selectActivePhotos, type MaskKind } from "../store";
+import { AI_MASK_KINDS, selectActivePhotos, type MaskKind } from "../store";
 import { MASK_KIND_LABEL, useAppStore } from "../store";
 import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
@@ -145,6 +146,12 @@ export function MasksPanel() {
   const [transferTargetPhotoId, setTransferTargetPhotoId] = useState<string | null>(null);
   const [dragMaskIndex, setDragMaskIndex] = useState<number | null>(null);
 
+  // Die fünf KI-Masken (Phase 7 Schritt 2, siehe DECISIONS.md ADR-0033).
+  const aiMaskClickPickerActive = useAppStore((s) => s.aiMaskClickPickerActive);
+  const toggleAiMaskClickPicker = useAppStore((s) => s.toggleAiMaskClickPicker);
+  const aiMaskLoading = useAppStore((s) => s.aiMaskLoading);
+  const addAiMask = useAppStore((s) => s.addAiMask);
+
   if (!open) return null;
 
   const selectedMask = masks.find((m) => m.id === selectedMaskId) ?? null;
@@ -217,6 +224,43 @@ export function MasksPanel() {
         >
           + Luminanzbereich
         </button>
+      </div>
+
+      {/* Die fünf KI-Masken (Phase 7 Schritt 2, siehe DECISIONS.md
+          ADR-0033) — klassische Bildverarbeitungsheuristiken statt echter
+          ONNX-Modelle, siehe `apx-ai::segmentation`s Moduldoku. "Objekte"
+          braucht einen Klickpunkt im Bild statt sofort zu erzeugen. */}
+      <div className="flex flex-col gap-1 border-t border-border pt-2">
+        <h3 className="text-xs font-medium text-text-secondary">KI-Maske hinzufügen</h3>
+        <div className="grid grid-cols-2 gap-1">
+          {AI_MASK_KINDS.map((kind) =>
+            kind === "ClickRegion" ? (
+              <button
+                key={kind}
+                type="button"
+                onClick={toggleAiMaskClickPicker}
+                disabled={!selectedPhotoId || aiMaskLoading !== null}
+                aria-pressed={aiMaskClickPickerActive}
+                className={`rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${
+                  aiMaskClickPickerActive ? "border-accent bg-accent/10 text-accent" : "border-border text-text-secondary hover:bg-bg-panel"
+                }`}
+              >
+                {AI_MASK_KIND_LABELS[kind]}…
+              </button>
+            ) : (
+              <button
+                key={kind}
+                type="button"
+                onClick={() => void addAiMask(kind)}
+                disabled={!selectedPhotoId || aiMaskLoading !== null}
+                className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {aiMaskLoading === kind ? "…" : AI_MASK_KIND_LABELS[kind]}
+              </button>
+            ),
+          )}
+        </div>
+        {aiMaskClickPickerActive && <p className="text-xs text-accent">Klicken Sie ins Bild, um den Objektbereich auszuwählen.</p>}
       </div>
 
       <ul className="flex flex-col gap-1">

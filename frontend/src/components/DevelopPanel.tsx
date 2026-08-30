@@ -209,6 +209,15 @@ export function DevelopPanel() {
   const repairPendingSource = useAppStore((s) => s.repairPendingSource);
   const cancelRepairSource = useAppStore((s) => s.cancelRepairSource);
   const removeRepairStroke = useAppStore((s) => s.removeRepairStroke);
+  // Reparatur-Erweiterungen (Phase 7 Schritt 3, siehe DECISIONS.md ADR-0033).
+  const autoSourceModeActive = useAppStore((s) => s.autoSourceModeActive);
+  const toggleAutoSourceMode = useAppStore((s) => s.toggleAutoSourceMode);
+  const repairSourceSuggestionLoading = useAppStore((s) => s.repairSourceSuggestionLoading);
+  const sensorSpotCandidates = useAppStore((s) => s.sensorSpotCandidates);
+  const sensorSpotsLoading = useAppStore((s) => s.sensorSpotsLoading);
+  const detectSensorSpotsForCurrentPhoto = useAppStore((s) => s.detectSensorSpotsForCurrentPhoto);
+  const clearSensorSpots = useAppStore((s) => s.clearSensorSpots);
+  const applySensorSpotAsRepairStroke = useAppStore((s) => s.applySensorSpotAsRepairStroke);
 
   // Eine per Bildklick neu angelegte Region wird sofort zur Bearbeitung
   // ausgewählt statt dass der Nutzer sie erst in der Liste anklicken muss.
@@ -1083,6 +1092,17 @@ export function DevelopPanel() {
               </select>
             </label>
 
+            {/* Auto-Quellenfindung (Phase 7 Schritt 3, ADR-0033) — nur für
+                Klonen/Reparieren sinnvoll, ContentAwareFill braucht ohnehin
+                keinen Quellpunkt. */}
+            {repairDraftMode !== "ContentAwareFill" && (
+              <label className="flex items-center gap-2 text-xs text-text-secondary">
+                <input type="checkbox" checked={autoSourceModeActive} onChange={toggleAutoSourceMode} />
+                Quelle automatisch vorschlagen
+                {repairSourceSuggestionLoading && <span className="text-text-muted">(sucht…)</span>}
+              </label>
+            )}
+
             <DevelopSlider
               spec={REPAIR_RADIUS_SPEC}
               value={repairDraftRadius * 100}
@@ -1116,6 +1136,40 @@ export function DevelopPanel() {
                     </span>
                     <button type="button" onClick={() => removeRepairStroke(index)} className="text-danger underline">
                       Entfernen
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {/* Sensorflecken-Visualisierung (Phase 7 Schritt 3, ADR-0033)
+                — reine Analyse, legt selbst keine Striche an; die
+                orangen Kreise im Bild (`RepairOverlay.tsx`) markieren die
+                Fundstellen. */}
+            <div className="flex items-center gap-1 border-t border-border pt-2">
+              <button
+                type="button"
+                disabled={!selectedPhotoId || sensorSpotsLoading}
+                onClick={() => void detectSensorSpotsForCurrentPhoto(0.5)}
+                className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {sensorSpotsLoading ? "Suche…" : "Sensorflecken suchen"}
+              </button>
+              {sensorSpotCandidates.length > 0 && (
+                <button type="button" onClick={clearSensorSpots} className="text-xs text-text-muted hover:text-danger">
+                  Verwerfen
+                </button>
+              )}
+            </div>
+            {sensorSpotCandidates.length > 0 && (
+              <ul className="flex flex-col gap-1 text-xs text-text-secondary">
+                {sensorSpotCandidates.map((spot, index) => (
+                  <li key={index} className="flex items-center justify-between rounded border border-border px-2 py-1">
+                    <span>
+                      Fleck {index + 1} ({Math.round(spot.strength * 100)} %)
+                    </span>
+                    <button type="button" onClick={() => applySensorSpotAsRepairStroke(spot)} className="text-accent underline">
+                      Reparieren
                     </button>
                   </li>
                 ))}

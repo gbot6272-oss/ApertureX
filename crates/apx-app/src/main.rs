@@ -112,6 +112,13 @@ fn main() {
             commands::generate_ai_mask,
             commands::suggest_repair_source,
             commands::detect_sensor_spots,
+            commands::get_ai_settings,
+            commands::set_anthropic_api_key,
+            commands::generate_preset_from_llm,
+            commands::generate_preset_from_reference,
+            commands::generate_preset_variations,
+            commands::learn_preset_from_photos,
+            commands::suggest_tags,
         ])
         .run(tauri::generate_context!())
         .expect("Fehler beim Starten von Aperture X");

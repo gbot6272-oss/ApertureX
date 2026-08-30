@@ -379,3 +379,104 @@ export function searchAndFilterPhotos(query: string | null, criteria: FilterCrit
 export function listDuplicatePhotoGroups(): Promise<PhotoDto[][]> {
   return invoke<PhotoDto[][]>("list_duplicate_photo_groups");
 }
+
+// ---- KI-Funktionen (Phase 7, siehe DECISIONS.md ADR-0033) ------------------
+
+export interface AiMaskAlphaDto {
+  kind: string;
+  width: number;
+  height: number;
+  /** Base64-kodierte Ein-Kanal-`u8`-Alpha-Bitmap. */
+  alpha_base64: string;
+}
+
+/** Die fünf KI-Masken (`apx_ai::segmentation`) — `clickX`/`clickY` (normierte
+ * Bildkoordinaten) sind nur für `kind === "click_region"` Pflicht,
+ * `tolerance` nur dafür relevant (Vorgabe serverseitig `0.15`). */
+export function generateAiMask(
+  photoId: string,
+  kind: string,
+  clickX?: number,
+  clickY?: number,
+  tolerance?: number,
+): Promise<AiMaskAlphaDto> {
+  return invoke<AiMaskAlphaDto>("generate_ai_mask", {
+    photoId,
+    kind,
+    clickX: clickX ?? null,
+    clickY: clickY ?? null,
+    tolerance: tolerance ?? null,
+  });
+}
+
+export interface RepairSourceSuggestionDto {
+  x: number;
+  y: number;
+}
+
+/** Auto-Quellenfindung (`apx_ai::repair_analysis::suggest_source_point`). */
+export function suggestRepairSource(
+  photoId: string,
+  targetX: number,
+  targetY: number,
+  brushRadius: number,
+): Promise<RepairSourceSuggestionDto> {
+  return invoke<RepairSourceSuggestionDto>("suggest_repair_source", { photoId, targetX, targetY, brushRadius });
+}
+
+export interface SpotCandidateDto {
+  x: number;
+  y: number;
+  radius: number;
+  strength: number;
+}
+
+/** Sensorflecken-Visualisierung (`apx_ai::repair_analysis::detect_spots`). */
+export function detectSensorSpots(photoId: string, sensitivity: number, maxSpots: number): Promise<SpotCandidateDto[]> {
+  return invoke<SpotCandidateDto[]>("detect_sensor_spots", { photoId, sensitivity, maxSpots });
+}
+
+export interface AiSettingsDto {
+  anthropic_api_key: string | null;
+}
+
+export function getAiSettings(): Promise<AiSettingsDto> {
+  return invoke<AiSettingsDto>("get_ai_settings");
+}
+
+/** `null`/leerer String löscht den hinterlegten Schlüssel. */
+export function setAnthropicApiKey(apiKey: string | null): Promise<void> {
+  return invoke<void>("set_anthropic_api_key", { apiKey: apiKey || null });
+}
+
+/** LLM-Modus des Preset-Generators — liefert die EDL-Teilmenge als
+ * JSON-String (`lib/presets.ts::parseEdlSubset`). Braucht einen
+ * hinterlegten Anthropic-API-Schlüssel. */
+export function generatePresetFromLlm(description: string): Promise<string> {
+  return invoke<string>("generate_preset_from_llm", { description });
+}
+
+/** Referenzbild-Modus — öffnet einen Datei-Auswahldialog, `null` wenn
+ * abgebrochen. Kein LLM, kein API-Schlüssel nötig. */
+export function generatePresetFromReference(photoId: string): Promise<string | null> {
+  return invoke<string | null>("generate_preset_from_reference", { photoId });
+}
+
+/** Variationen-Generator — `seed` reproduzierbar, liefert `count`
+ * EDL-Teilmengen als JSON-Strings. */
+export function generatePresetVariations(edlSubsetJson: string, count: number, seed: number): Promise<string[]> {
+  return invoke<string[]>("generate_preset_variations", { edlSubsetJson, count, seed });
+}
+
+/** Preset aus Bearbeitung lernen — mittelt `sections` über den aktuell
+ * committeten Bearbeitungsstand der genannten Fotos. */
+export function learnPresetFromPhotos(photoIds: string[], sections: string[]): Promise<string> {
+  return invoke<string>("learn_preset_from_photos", { photoIds, sections });
+}
+
+/** Auto-Tagging-Vorschläge (`apx_ai::tagging`) — schreibt nichts in den
+ * Katalog, das Frontend übernimmt ausgewählte Vorschläge über
+ * {@link addPhotoKeyword}. */
+export function suggestTags(photoId: string): Promise<string[]> {
+  return invoke<string[]>("suggest_tags", { photoId });
+}

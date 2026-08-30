@@ -55,13 +55,19 @@ export function Viewer() {
   const setMaskColorRangeTargetAt = useAppStore((s) => s.setMaskColorRangeTargetAt);
   const maskColorMixerPickerActive = useAppStore((s) => s.maskColorMixerPickerActive);
   const addMaskColorMixerRegionAt = useAppStore((s) => s.addMaskColorMixerRegionAt);
-  const pickerActive = wbPickerActive || colorMixerPickerActive || maskColorRangePickerActive || maskColorMixerPickerActive;
+  const aiMaskClickPickerActive = useAppStore((s) => s.aiMaskClickPickerActive);
+  const addAiMask = useAppStore((s) => s.addAiMask);
+  const pickerActive =
+    wbPickerActive || colorMixerPickerActive || maskColorRangePickerActive || maskColorMixerPickerActive || aiMaskClickPickerActive;
   const geometryCropActive = useAppStore((s) => s.geometryCropActive);
   const setGeometryCrop = useAppStore((s) => s.setGeometryCrop);
   const repairActive = useAppStore((s) => s.repairActive);
   const repairStrokes = useAppStore((s) => s.developEdl.repair);
   const repairPendingSource = useAppStore((s) => s.repairPendingSource);
   const repairDraftMode = useAppStore((s) => s.repairDraftMode);
+  const autoSourceModeActive = useAppStore((s) => s.autoSourceModeActive);
+  const suggestRepairSourceForTarget = useAppStore((s) => s.suggestRepairSourceForTarget);
+  const sensorSpotCandidates = useAppStore((s) => s.sensorSpotCandidates);
   const setRepairSourcePoint = useAppStore((s) => s.setRepairSourcePoint);
   const addRepairStroke = useAppStore((s) => s.addRepairStroke);
   const selectedMaskId = useAppStore((s) => s.selectedMaskId);
@@ -291,6 +297,11 @@ export function Viewer() {
         setMaskColorRangeTargetAt(selectedMask.id, r, g, b);
       } else if (maskColorMixerPickerActive && selectedMask) {
         addMaskColorMixerRegionAt(selectedMask.id, r, g, b);
+      } else if (aiMaskClickPickerActive) {
+        // "Objekte"-KI-Maske (Phase 7 Schritt 2) — braucht anders als die
+        // übrigen Bild-Klick-Werkzeuge oben keine Farbe, sondern nur die
+        // normierte Klickposition als Startpunkt fürs Region-Growing.
+        void addAiMask("ClickRegion", { x: imageX / imgW, y: imageY / imgH });
       }
     },
     [
@@ -299,6 +310,8 @@ export function Viewer() {
       colorMixerPickerActive,
       maskColorRangePickerActive,
       maskColorMixerPickerActive,
+      aiMaskClickPickerActive,
+      addAiMask,
       selectedMask,
       developFrame,
       imgW,
@@ -403,6 +416,9 @@ export function Viewer() {
           onPaint={addRepairStroke}
           onRemoveStroke={removeRepairStroke}
           skipSourceStep={repairDraftMode === "ContentAwareFill"}
+          autoSourceModeActive={autoSourceModeActive}
+          onSuggestSource={(point) => void suggestRepairSourceForTarget(point.x, point.y)}
+          spotCandidates={sensorSpotCandidates}
         />
       )}
 

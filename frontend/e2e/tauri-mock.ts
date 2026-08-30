@@ -51,6 +51,22 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // `exportPresetToApxFile`/`importPresetFromApxFile`-Tests).
     exportApxPathResult: "/mock/export.apx" as string | null,
     importApxFile: null as { name: string; tags: string[]; conditions_json: string; edl_subset_json: string } | null,
+    // KI-Funktionen (Phase 7, siehe DECISIONS.md ADR-0033) — feste,
+    // per Fixture überschreibbare Antworten statt einer echten
+    // Bildanalyse (die läuft nur im echten Backend).
+    aiMaskAlpha: {
+      width: 4,
+      height: 4,
+      // 16 Bytes, alle 200 — Base64 von `Uint8Array(16).fill(200)`.
+      alpha_base64: "yMjIyMjIyMjIyMjIyMjIyA==",
+    },
+    repairSourceSuggestion: { x: 0.2, y: 0.2 },
+    sensorSpots: [{ x: 0.4, y: 0.4, radius: 0.03, strength: 0.7 }] as Array<{ x: number; y: number; radius: number; strength: number }>,
+    anthropicApiKey: null as string | null,
+    presetGeneratorSubsetJson: JSON.stringify({ basic: { exposure_ev: 0.6, contrast: 15 } }),
+    referenceImageDialogCancelled: false,
+    presetVariationCount: 3,
+    tagSuggestions: ["Himmel", "Landschaft"] as string[],
     ...initialFixtures,
   };
   w.__mockInvokeLog = [] as Array<{ cmd: string; args: unknown }>;
@@ -229,6 +245,14 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       photosByFolder: Record<string, unknown[]>;
       exportApxPathResult: string | null;
       importApxFile: { name: string; tags: string[]; conditions_json: string; edl_subset_json: string } | null;
+      aiMaskAlpha: { width: number; height: number; alpha_base64: string };
+      repairSourceSuggestion: { x: number; y: number };
+      sensorSpots: Array<{ x: number; y: number; radius: number; strength: number }>;
+      anthropicApiKey: string | null;
+      presetGeneratorSubsetJson: string;
+      referenceImageDialogCancelled: boolean;
+      presetVariationCount: number;
+      tagSuggestions: string[];
     };
 
     switch (cmd) {
@@ -597,6 +621,36 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         presetVersions[presetId] = [{ id: versionId, preset_id: presetId, sequence: 1, edl_subset_json: file.edl_subset_json, created_at: now }];
         return { ...preset, tags: [...preset.tags] };
       }
+
+      // ---- KI-Funktionen (Phase 7, siehe DECISIONS.md ADR-0033) ----------
+      case "generate_ai_mask":
+        return { kind: args.kind, ...fixtures.aiMaskAlpha };
+      case "suggest_repair_source":
+        return fixtures.repairSourceSuggestion;
+      case "detect_sensor_spots":
+        return fixtures.sensorSpots;
+      case "get_ai_settings":
+        return { anthropic_api_key: fixtures.anthropicApiKey };
+      case "set_anthropic_api_key": {
+        const key = args.apiKey as string | null;
+        fixtures.anthropicApiKey = key && key.trim() !== "" ? key : null;
+        return null;
+      }
+      case "generate_preset_from_llm":
+        return fixtures.presetGeneratorSubsetJson;
+      case "generate_preset_from_reference":
+        return fixtures.referenceImageDialogCancelled ? null : fixtures.presetGeneratorSubsetJson;
+      case "generate_preset_variations": {
+        const base = JSON.parse(args.edlSubsetJson as string) as { basic?: { exposure_ev?: number } };
+        const count = args.count as number;
+        return Array.from({ length: count }, (_, index) =>
+          JSON.stringify({ basic: { ...base.basic, exposure_ev: (base.basic?.exposure_ev ?? 0) + index * 0.1 } }),
+        );
+      }
+      case "learn_preset_from_photos":
+        return fixtures.presetGeneratorSubsetJson;
+      case "suggest_tags":
+        return fixtures.tagSuggestions;
 
       default:
         throw new Error(`Test-Stub: unbekannter invoke-Befehl "${cmd}"`);

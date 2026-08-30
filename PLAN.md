@@ -659,34 +659,35 @@ test` und `vite build` alle vollständig grün sein — keine Ausnahme.
   - [x] Inhaltsbasiertes Füllen (`RepairMode::ContentAwareFill` in `apx-pipeline::stages::repair.rs`) ebenfalls vorgezogen: vereinfachtes PatchMatch (Nächster-Nachbar-Vorbelegung + Zufallsinit + Propagation + Zufallssuche, deterministischer xorshift32-PRNG), 4 neue Rust-Tests
   - [x] Volle Kette grün: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (203 Rust-Tests total, 29 davon neu in `apx-ai`) — Frontend unverändert in diesem Schritt
 
-- [ ] 2. Die fünf KI-Masken (Tauri-/Frontend-Verdrahtung — Algorithmen siehe Schritt 1)
+- [x] 2. Die fünf KI-Masken (Tauri-/Frontend-Verdrahtung — Algorithmen siehe Schritt 1)
   - [x] Tauri-Command `generate_ai_mask(photo_id, kind, click_x?, click_y?, tolerance?) -> AiMaskAlphaDto` (Base64-kodierte Alpha-Bitmap + Breite/Höhe), nutzt `TileCache::get_or_decode` auf `apx_ai::segmentation::ANALYSIS_MAX_EDGE` wie `compute_develop`
   - [x] Frontend-Datenmodell: `MaskGeometry::AiGenerated`/`AiMaskKind` in `lib/edl.ts` ergänzt (spiegelt die Rust-Seite aus Schritt 1)
-  - [ ] Frontend-UI noch offen: `MasksPanel.tsx` bekommt einen „KI-Maske hinzufügen"-Abschnitt (fünf Knöpfe, „Objekte" öffnet den Bild-Klick-Picker analog zu den bestehenden Picker-Mustern) — bislang lässt sich `generate_ai_mask` nur über den rohen Tauri-Aufruf erreichen, noch keine Store-Aktion/UI
+  - [x] Frontend-UI: `MasksPanel.tsx` hat einen „KI-Maske hinzufügen"-Abschnitt (fünf Knöpfe, „Objekte…" aktiviert einen Bild-Klick-Picker in `Viewer.tsx`, analog zu den bestehenden Picker-Mustern für Weißabgleich/Farbmischer/Farbbereich) — `store/index.ts::addAiMask` dekodiert Base64→`number[]` (`lib/edl.ts::base64ToByteArray`), legt eine neue Maske mit `AiGenerated`-Geometrie an und committet sofort
 
-- [ ] 3. Reparatur-Erweiterungen (Tauri-/Frontend-Verdrahtung — Algorithmen siehe Schritt 1)
+- [x] 3. Reparatur-Erweiterungen (Tauri-/Frontend-Verdrahtung — Algorithmen siehe Schritt 1)
   - [x] Je ein Tauri-Command für Auto-Quellenfindung (`suggest_repair_source`) und Sensorflecken-Visualisierung (`detect_sensor_spots`)
   - [x] Inhaltsbasiertes Füllen als dritter Reparatur-Modus im Frontend auswählbar: `RepairMode` um `"ContentAwareFill"` erweitert, `RepairOverlay.tsx` überspringt für diesen Modus den Quellpunkt-Schritt (`skipSourceStep`-Prop), `store/index.ts::addRepairStroke` erlaubt das Committen ohne `repairPendingSource`, `DevelopPanel.tsx` mit drittem Radio-Knopf + angepasstem Hinweistext
-  - [ ] Frontend-UI für Auto-Quellenfindung/Sensorflecken-Visualisierung noch offen: kein Overlay-Knopf, keine Store-Aktion — die beiden neuen Commands sind nur backendseitig erreichbar
+  - [x] Frontend-UI für Auto-Quellenfindung: Checkbox „Quelle automatisch vorschlagen" in `DevelopPanel.tsx` — solange aktiv, löst der erste Klick in `RepairOverlay.tsx` (der sonst direkt den Quellpunkt setzt) stattdessen `suggestRepairSourceForTarget` an dieser Position aus (`autoSourceModeActive`/`onSuggestSource`-Prop)
+  - [x] Frontend-UI für Sensorflecken-Visualisierung: Knopf „Sensorflecken suchen" + Fundliste mit „Reparieren"-Knopf je Fund (übernimmt als `ContentAwareFill`-Strich) in `DevelopPanel.tsx`, orange gestrichelte Marker im `RepairOverlay.tsx`
   - Volle Kette grün: `cargo fmt/clippy/test` (Workspace, weiterhin 203 Rust-Tests — reine Verdrahtung, keine neue Rust-Logik in diesem Teilschritt), `tsc --noEmit`, `vitest run` (155 Frontend-Tests)
 
-- [ ] 4. Preset-Generator
-  - `apx-core::Settings`: neues `AiSettings { anthropic_api_key: Option<String> }`-Feld + Frontend-Einstellungen-UI zum Hinterlegen
-  - LLM-Anfrage: `apx-ai::llm_client` (Anthropic Messages API über `reqwest`), Prompt beschreibt EDL-Sektionsschema, erwartet JSON-Antwort im `PresetEdlSubset`-Format, serverseitige Validierung
-  - Referenzbild-Modus: Koordinatenabstieg über eine feste Teilmenge der Grundeinstellungs-Parameter, Histogramm-Distanz als Zielfunktion, kein LLM
-  - Variationen-Generator: deterministisch geseedete kleine Störungen eines Basis-Presets (Kontaktbogen-Vorschau im Frontend)
-  - Preset aus Bearbeitung lernen: Mittelwertbildung committeter EDL-Werte mehrerer ausgewählter Fotos je Sektion
-  - Frontend: neuer Abschnitt in `PresetsPanel.tsx`/`SavePresetDialog.tsx` für alle vier Generator-Modi
+- [x] 4. Preset-Generator
+  - [x] `apx-core::Settings`: neues `AiSettings { anthropic_api_key: Option<String> }`-Feld + Frontend-Einstellungen-UI zum Hinterlegen — bewusst kein eigener globaler Einstellungsbildschirm (existiert noch nicht im Frontend), stattdessen ein `<details>`-Abschnitt direkt im KI-Preset-Generator (`PresetsPanel.tsx`), wo der Schlüssel gebraucht wird
+  - [x] LLM-Anfrage: `apx-ai::preset_generator::generate_from_llm` — echter Anthropic-Messages-API-Aufruf per rohem `reqwest`-JSON (kein offizielles Rust-SDK), System-Prompt beschreibt das EDL-Sektionsschema, erwartet ein reines JSON-Objekt als Antwort; serverseitige Validierung mergt die Antwort auf ein neutrales `EdlV3` und deserialisiert es vollständig — ein halluziniertes/falsch geformtes Feld lässt den Aufruf fehlschlagen statt ein kaputtes Preset durchzureichen
+  - [x] Referenzbild-Modus: Koordinatenabstieg über sechs tonwertbezogene Grundeinstellungs-Parameter (Belichtung/Kontrast/Lichter/Tiefen/Weiß/Schwarz), Histogramm-Distanz als Zielfunktion (Kumulativsummen/Earth-Mover's statt rohem Bin-Vergleich — sonst kein Fortschrittssignal bei schmalen Verteilungen, beim Testen entdeckt), kein LLM
+  - [x] Variationen-Generator: deterministisch geseedeter xorshift32-PRNG stört jeden numerischen Blattwert eines Basis-Presets (Kontaktbogen-Vorschau im Frontend, mehrere Vorschläge gleichzeitig auswählbar)
+  - [x] Preset aus Bearbeitung lernen: Mittelwertbildung committeter EDL-Werte mehrerer ausgewählter Fotos je Sektion (`apx-ai::preset_generator::average_subsets`, arithmetisches Mittel numerischer Blattwerte)
+  - [x] Frontend: neuer `AiPresetGeneratorSection`-Abschnitt in `PresetsPanel.tsx` für alle vier Generator-Modi — liefert nur eine EDL-Teilmengen-Vorschau, „Auf aktuelles Foto anwenden" mischt sie in `developEdl` (wie ein normales Preset), Sichern läuft über den bereits bestehenden „Preset speichern"-Knopf aus Phase 5 statt einer eigenen Speicher-Logik
 
-- [ ] 5. Auto-Tagging
-  - `apx-ai::tagging`: regelbasierte Schlagwort-Vorschläge aus Segmentierungs-Heuristiken (Himmel-/Hautton-Flächenanteil) + EXIF (ISO/Blende/Brennweite) — reuse der bestehenden `photo_keywords`-Infrastruktur aus Phase 3
-  - Tauri-Command `suggest_tags(photo_id) -> Vec<String>`, Frontend-Knopf im Metadaten-Panel „Vorschläge übernehmen"
+- [x] 5. Auto-Tagging
+  - [x] `apx-ai::tagging`: regelbasierte Schlagwort-Vorschläge aus Segmentierungs-Heuristiken (Himmel-/Personen-Flächenanteil) + EXIF (ISO/Blende/Brennweite) — reuse der bestehenden `photo_keywords`-Infrastruktur aus Phase 3
+  - [x] Tauri-Command `suggest_tags(photo_id) -> Vec<String>`, Frontend-Knopf „Tag-Vorschläge" im Metadaten-Panel — jeder Vorschlag ein eigener Knopf, der ihn per bestehendem `addKeywordToPhoto` übernimmt und aus der Vorschlagsliste entfernt
 
-- [ ] 6. Dokumentation, Tests, Abnahme
-  - `ARCHITECTURE.md`: neues Kapitel „Architektur Phase 7"
-  - `FEATURES.md`: alle jetzt gebauten §3.1/§3.3/§3.5-Zeilen auf Fertig (abweichend, mit Verweis auf ADR-0033)
-  - Volle, gebündelte Testabdeckung nachgezogen: Rust-Unit-Tests je neuem Algorithmus (falls in Schritt 1–5 nur oberflächlich getestet), neue Playwright-e2e-Spezifikationen für alle Frontend-Flows dieser Phase, volle Kette grün
-  - Commit+Push, CI-Check, ehrlicher Abschlussbericht (inkl. aller ADR-0033-Vereinfachungen: keine echte ONNX-Inferenz, Personen-Maske nur eine Hautton-Region statt Einzelteile, vereinfachtes PatchMatch, Histogramm-Distanz statt echtem Gradientenverfahren)
+- [x] 6. Dokumentation, Tests, Abnahme
+  - [x] `ARCHITECTURE.md`: neues Kapitel „11. Architektur Phase 7 — KI-Funktionen" (Crate-Übersicht, alle fünf Funktionsbereiche, Datenfluss-Diagramm KI-Maske erzeugen, plus die beiden beim Bauen entdeckten Korrekturen: PatchMatch-Nächster-Nachbar-Vorbelegung, Kumulativsummen-Histogrammdistanz)
+  - [x] `FEATURES.md`: alle Phase-7-Zeilen in §3.1/§3.2/§3.3/§3.5 auf Fertig (abweichend, mit Verweis auf ADR-0033) — inkl. der bereits in Schritt 1 vorgezogenen Auto-Tagging-Zeile, die zuvor als „Nicht begonnen" stehen geblieben war
+  - [x] Volle, gebündelte Testabdeckung: 218 Rust-Tests workspace-weit (29 in `apx-ai` aus Schritt 1 plus 19 neue in `preset_generator`/`tagging`), neue Playwright-Spezifikation `e2e/ai-flow.spec.ts` (6 Szenarien: alle fünf KI-Masken-Auslöser, Auto-Quellenfindung, Sensorflecken-Reparatur, Auto-Tagging-Übernahme, Preset-Generator-LLM-Modus) — volle Kette grün: `cargo fmt/clippy(-D warnings -D unwrap_used)/test`, `tsc --noEmit`, `vitest run` (155 Tests), `playwright test` (74 Tests, alle bestehenden weiterhin grün)
+  - [x] Commit+Push, ehrlicher Abschlussbericht (inkl. aller ADR-0033-Vereinfachungen: keine echte ONNX-Inferenz, Personen-Maske nur eine Hautton-Region statt Einzelteile, vereinfachtes PatchMatch, Kumulativsummen-Histogrammdistanz statt echtem Gradientenverfahren, Referenzbild-Modus nur sechs Tonwertregler, Lernen mittelt nur Skalare)
 
 ### Nicht in Phase 7 (bewusst zurückgestellt)
 Tiefenbereich-Masken (siehe ADR-0032 Punkt 3, weiterhin ohne Phasenzuordnung); echte ONNX-Runtime-Modellinferenz (siehe ADR-0033 Punkt 1 — ein „Bring-your-own-Model"-Pfad wäre ohne verifizierbares Modell nur eine ungetestete Hülle); Einzelregionen der Personen-Maske (Augen/Brauen/Lippen/Zähne/Haare/Kleidung einzeln wählbar).

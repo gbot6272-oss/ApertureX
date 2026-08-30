@@ -447,3 +447,67 @@ Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Obj
 
 ### Nicht in Phase 4 (bewusst zurückgestellt)
 Siehe ADR-0028 (plus Nachtrag): Workflow-Punkte (Schnappschüsse, Vorher/Nachher, Copy/Paste-Einstellungen, Sync, Auto-Sync, Referenzansicht, Soft-Proof), echter Adobe-Profil-Import (Objektivprofile + DCP-Kameraprofile), Auto-Quellenfindung, inhaltsbasiertes Füllen und Sensorflecken-Visualisierung für die Reparatur-Funktion — alle auf Phase 6 verschoben. Phase 5 ist laut `SPEC.md` §5 das Preset-/Template-System (§3.5), nicht die oben genannten Workflow-Punkte — siehe `ARCHITECTURE.md` §7.
+
+## Aktuelle Phase: Phase 5 — Preset- und Template-System
+
+`SPEC.md` §5 nennt wörtlich nur „Preset- und Template-System"; §3.5 (der volle Feature-Katalog) reicht deutlich weiter als in dieser Phase sinnvoll baubar — siehe `DECISIONS.md` ADR-0031 für die Scope-Präzisierung (Preset-Grundlagen + vereinfachte bedingte Presets + vorgezogene Import-/Umbenennungs-Templates jetzt; KI-Generator auf Phase 7, Adobe-Interop und der übrige Templates-Unterabschnitt auf spätere Phasen verschoben; kein eigenes `apx-presets`-Crate, siehe ADR-0031 Punkt 6).
+
+**Architektur-Grundsatz:** ein Preset ist reine Katalogdaten — Name, Ordner, Favorit, Tags, Bedingungsregeln, und eine EDL-*Teilmenge* als opakes JSON (analog zu `edit_history.edl_json`, siehe `ARCHITECTURE.md` §5). `apx-catalog` muss den EDL-Teilmengen-Inhalt nie verstehen; das Zusammenführen in `developEdl` (inkl. Stärke-Skalierung, Stapel-Anwendung, Bedingungsauswertung) passiert ausschließlich im Frontend, vor dem bereits bestehenden `commitDevelopEdit()`.
+
+- [ ] 0. Scope festzurren
+  - [x] `DECISIONS.md`: neues ADR-0031 (die Scope-Entscheidungen oben)
+  - [x] `FEATURES.md` §3.5 umgetaggt (Preset-Grundlagen bleiben Phase 5, KI-Generator→Phase 7, Adobe-Interop→Phase 6, Templates-Unterabschnitt→größtenteils Phase 8 außer Import-/Umbenennungs-Templates→Phase 5)
+  - [x] `ARCHITECTURE.md` §7s Phase-5-Zeile präzisiert (kein `apx-presets`-Crate)
+  - [ ] `PLAN.md`: dieser Abschnitt
+
+- [ ] 1. Datenmodell: `apx-catalog`-Migration + Repository
+  - [ ] Neue `apx_core`-ID-Typen: `PresetFolderId`, `PresetId`, `PresetVersionId` (via `define_id_type!`)
+  - [ ] Neue Migration `0004_presets.sql`: `preset_folders` (id, name, parent_id, position — Baum wie `folders`), `presets` (id, folder_id, name, is_favorite, tags als JSON-Array-TEXT, condition_rules als JSON-TEXT, created_at), `preset_versions` (id, preset_id, sequence, edl_subset_json, created_at — jede Speicherung eine neue Version, wie `edit_history`)
+  - [ ] `repository::presets.rs`: CRUD für Ordner/Presets/Versionen, `list_tree`/`list_by_folder`/`search_by_name_or_tag`, `create_version`/`list_versions`/`latest_version`
+  - [ ] `models.rs`: `PresetFolder`, `Preset`, `PresetVersion` Structs
+  - [ ] Tests: Baum-Hierarchie (wie `folders.rs`s Kaskaden-Test), Versions-Sequenz, Tag-Suche
+
+- [ ] 2. `apx-app`-Commands + DTOs
+  - [ ] `create_preset_folder`/`rename_preset_folder`/`delete_preset_folder`/`list_preset_folders`
+  - [ ] `create_preset` (Name, Ordner, EDL-Teilmengen-JSON, Tags, Bedingungsregeln) → legt Preset + erste Version an
+  - [ ] `update_preset` (überschreibt Metadaten und/oder legt neue Version an), `delete_preset`, `list_presets`, `toggle_preset_favorite`
+  - [ ] `list_preset_versions`/`get_preset_version` (für Diff-Ansicht)
+  - [ ] `export_preset_to_apx_file`/`import_preset_from_apx_file` (Tauri-Dateidialog, eigenes `.apx`-JSON-Format: `{schema_version, name, tags, condition_rules, edl_subset}`)
+
+- [ ] 3. Frontend-Grundgerüst: Datenmodell + Presets-Panel
+  - [ ] `frontend/src/lib/presets.ts`: TS-Typen (`PresetFolder`, `Preset`, `PresetVersion`, `EdlSubset` = `Partial<EdlPayload>`-artiges Objekt mit einem `included: Set<EdlSectionKey>`-Begleitfeld), `.apx`-Schema-Typ
+  - [ ] Store-Slice `presets`: Ordnerbaum + Presetliste laden, Auswahl, Suche/Tag-Filter
+  - [ ] Neues `components/PresetsPanel.tsx` (Ordnerbaum + Liste, analog zum bestehenden Sammlungen-Muster aus Phase 3) als neuer Tab/Abschnitt neben dem Entwickeln-Panel
+
+- [ ] 4. Preset speichern
+  - [ ] Neues `components/SavePresetDialog.tsx`: Checkbox je Einstellungsgruppe (die zehn Phase-4-Sektionen, Reparatur ausgenommen — bildspezifische Striche sind kein „Look"), Name/Ordner/Tags-Eingabe
+  - [ ] Extrahiert die ausgewählten Sektionen aus `developEdl` in ein `EdlSubset`-Objekt, ruft `create_preset` auf
+
+- [ ] 5. Preset anwenden + Stärke + Stapel
+  - [ ] Anwenden: mischt `EdlSubset`-Felder in `developEdl`, numerische Felder bei Stärke ≠ 100 % linear zur jeweiligen Neutral-Konstante hin skaliert, kategoriale Felder (Enums/Strings) unskaliert übernommen
+  - [ ] Stärke-Regler (0–200 %) bleibt nachträglich änderbar, solange seit dem Anwenden kein anderer Edit committet wurde (Store merkt sich `lastAppliedPreset { presetId, strength, baseEdl }`, jeder andere Setter löscht diesen Zustand)
+  - [ ] Preset-Stapel: kleine geordnete Liste ausgewählter Presets, sequenziell angewendet, Reihenfolge per Drag oder Auf/Ab-Knöpfen änderbar
+
+- [ ] 6. Live-Vorschau
+  - [ ] Hover über einen Preset-Eintrag rendert ihn testweise in den Viewer (`useDevelopRender` mit einem temporären, nicht committeten EDL), verlässt die Maus den Eintrag ohne Klick, kehrt die Vorschau zum vorherigen Zustand zurück
+  - [ ] Thumbnail je Preset-Eintrag in der Liste (kleine Vorschau-Auflösung, gleicher Renderpfad)
+
+- [ ] 7. Bedingte Presets (vereinfacht, siehe ADR-0031 Punkt 4)
+  - [ ] Feste Feldliste (ISO, Blende, Brennweite, Kameramodell, Objektiv — bereits in `photos` vorhanden), Operatoren (`>`, `<`, `=`, „enthält"), UND-verknüpft
+  - [ ] Kleiner Regel-Editor in `SavePresetDialog.tsx`; Auswertung beim Anwenden gegen die Metadaten des aktuellen Fotos — Regel-Fehlschlag lässt die betroffene Preset-Sektion aus (nicht das ganze Preset)
+
+- [ ] 8. Versionierung + Diff-Ansicht
+  - [ ] Jede erneute Speicherung über ein bestehendes Preset legt eine neue `preset_versions`-Zeile an (alte bleibt erhalten)
+  - [ ] Kleine Diff-Ansicht: zwei Versionen wählen, Liste der Felder mit unterschiedlichem Wert
+
+- [ ] 9. Import-Templates + Umbenennungs-Templates (vorgezogen aus Phase 3, siehe ADR-0031 Punkt 7)
+  - [ ] Frontend-Anbindung der bereits bestehenden `list_import_presets`/`save_import_preset`/`delete_import_preset`-Commands im Import-Dialog
+  - [ ] Kleiner Token-Editor für `rename_pattern` (Token-Liste einfügbar, Live-Vorschau eines Beispieldateinamens)
+
+- [ ] 10. Dokumentation, Tests, Abnahme
+  - [ ] `ARCHITECTURE.md`: neues Kapitel „Architektur Phase 5" (Datenfluss Speichern/Anwenden/Stapel, analog zu §5/§6/§8)
+  - [ ] `FEATURES.md`: alle jetzt gebauten §3.5-Zeilen auf Fertig
+  - [ ] Volle Verifikation, Commit+Push, CI-Check, ehrlicher Abschlussbericht
+
+### Nicht in Phase 5 (bewusst zurückgestellt)
+Siehe ADR-0031: Preset-Generator (KI: LLM-Anfrage, Referenzbild-Modus, Variationen-Generator, Preset-aus-Bearbeitung-Lernen) → Phase 7; Adobe-`.xmp`/`.lrtemplate`-Import/-Export → spätere Phase; Export-/Wasserzeichen-/Metadaten-/Layout-/Workflow-Templates + Template-Marktplatz → Phase 8–9 (setzen die dort erst gebaute Export-Engine voraus).

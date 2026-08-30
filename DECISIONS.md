@@ -991,3 +991,104 @@ Bildbereich nach der geometrischen Korrektur bleiben auf eine spätere
 Phase verschoben (zusammen mit den bereits in ADR-0028 zurückgestellten
 Punkten: echter Adobe-Profil-Import, Auto-Quellenfindung/
 Content-Aware-Fill, echte Auto-Horizont-Kantenerkennung).
+
+## ADR-0031: Phase-5-Scope präzisiert — Preset-Grundlagen jetzt, KI-Generator/Adobe-Interop/Templates-Unterabschnitt verschoben; kein eigenes `apx-presets`-Crate
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §5 nennt für Phase 5 wörtlich nur „Preset- und
+Template-System" — `SPEC.md` §3.5 (der komplette Feature-Katalog dahinter)
+ist aber mit Abstand der am weitesten in die Zukunft greifende Abschnitt
+des ganzen Dokuments: er setzt eine echte LLM-Anbindung (Anthropic API,
+API-Key-Verwaltung), eine numerische Referenzbild-Optimierung über die
+Pipeline-Parameter, vollständige Adobe-`.xmp`/`.lrtemplate`-Kompatibilität
+in beide Richtungen, und — beim „Templates"-Unterabschnitt — mehrere
+Subsysteme voraus, die schlicht noch nicht existieren: `ARCHITECTURE.md`
+§7 reserviert die Export-Engine explizit erst für Phase 8–9. Ein
+„Export-Template" jetzt zu bauen hieße, eine Konfigurationsoberfläche für
+ein Subsystem zu bauen, das sie noch gar nicht ansteuern kann — dieselbe
+Art von verfrühter Arbeit, die ADR-0029 für Phase 4 bereits vermieden hat
+(kein Shader für ein Werkzeug bauen, bevor sein Frontend-Vertrag
+feststeht). Genau wie bei ADR-0011/ADR-0022/ADR-0028 gilt: der §5-Satz ist
+normativ, der vollständige §3.x-Katalog wird hier scope-präzisiert.
+
+**Entscheidung:**
+1. **Preset-Grundlagen** (`SPEC.md` §3.5, erster Unterabschnitt) sind die
+   Phase-5-Basis und werden vollständig gebaut: EDL-Teilmengen-Presets
+   (Speichern-Dialog mit Checkbox je Einstellungsgruppe), Ordnerhierarchie
+   beliebiger Tiefe, Favoriten, Suche/Tags, Preset-Stärke (0–200 %,
+   nachträglich änderbar solange kein anderer Edit dazwischen liegt),
+   Live-Vorschau (Hover im Bild + Thumbnail in der Liste), Preset-Stapel
+   (mehrere nacheinander, Reihenfolge editierbar), eigenes `.apx`-
+   Dateiformat-Im-/Export, Versionierung mit Diff-Ansicht, sowie eine
+   vereinfachte Fassung der bedingten Presets (siehe Punkt 4).
+2. **Preset-Generator (KI)** — LLM-Anfrage, Referenzbild-Modus,
+   Variationen-Generator, „Preset aus Bearbeitung lernen" — wird
+   komplett auf **Phase 7** verschoben. `ARCHITECTURE.md` §7 reserviert
+   diese Phase bereits wörtlich für „`apx-ai` — ONNX-Runtime-Integration,
+   LLM-Client für Preset-Generator" — das ist keine neue Zurückstellung,
+   sondern nur die Bestätigung der bereits bestehenden Architektur-Planung.
+   Ein Referenzbild-Optimierer (Gradientenverfahren über die
+   Pipeline-Parameter) ist zudem dieselbe Kategorie CV-/Optimierungs-
+   Aufgabe wie die in ADR-0028 zurückgestellten Punkte.
+3. **Adobe-`.xmp`/`.lrtemplate`-Import/-Export** wird auf eine spätere
+   Phase verschoben — derselbe Grund wie beim Objektivprofil-/DCP-Import
+   in ADR-0028 (kein Adobe-Format-Reverse-Engineering ohne Testdaten als
+   eigenständiges Mammutprojekt neben dem eigentlichen Feature). Das
+   eigene `.apx`-Format deckt Im-/Export vollständig ab.
+4. **Bedingte Presets** werden bewusst vereinfacht gebaut statt ganz
+   zurückgestellt (echte, nicht nur angetäuschte Fähigkeit ohne externe
+   Abhängigkeit): eine feste, kleine Liste vergleichbarer Metadatenfelder
+   (ISO, Blende, Brennweite, Kameramodell, Objektiv — alle bereits in
+   `photos` gespeichert), UND-verknüpfte Regeln (Feld, Operator, Wert),
+   **kein** UI-Builder für eine freie Bedingungssprache mit ODER/
+   Verschachtelung.
+5. **„Templates" (über Presets hinaus)** — Export-/Wasserzeichen-/
+   Metadaten-/Import-/Umbenennungs-/Layout-/Workflow-Templates,
+   Template-Marktplatz — wird komplett auf eine spätere Phase verschoben.
+   Jedes davon konfiguriert ein Subsystem, das entweder noch gar nicht
+   existiert (Export-Engine: Phase 8–9, siehe oben; Layout-Templates für
+   Druck/Buch/Diashow/Web: in keinem früheren Phasenplan erwähnt) oder nur
+   in Ansätzen (Umbenennungs-Templates: `import::rename` existiert bereits
+   rudimentär aus Phase 3, ein vollwertiger Token-Editor bräuchte ohnehin
+   erst die anderen Import-Template-Bausteine). Diese Punkte wandern in
+   `FEATURES.md` auf die jeweilige Phase, in der ihr zugehöriges
+   Subsystem tatsächlich gebaut wird (überwiegend Phase 8–9).
+6. **Kein eigenes `apx-presets`-Crate**, obwohl `ARCHITECTURE.md` §7 eines
+   vorab benannt hatte: die Phase-5-Basis aus Punkt 1 braucht keine neue
+   Pixelverarbeitungslogik — ein Preset ist reine Katalogdaten (Name,
+   Ordner, Tags, Bedingungen, eine EDL-*Teilmenge* als opakes JSON) plus
+   Frontend-seitiges Zusammenführen/Skalieren in den bestehenden
+   `developEdl`-Zustand vor dem ohnehin schon bestehenden
+   `commitDevelopEdit`. Genau wie `apx-catalog`s `edit_history.edl_json`
+   nie von `apx-catalog` selbst verstanden werden muss (siehe
+   `ARCHITECTURE.md` §5), muss auch der Preset-JSON-Blob nie von
+   `apx-catalog` verstanden werden — eine neue Erweiterung von
+   `apx-catalog` (Migration + Repository-Modul) plus neue `apx-app`-
+   Commands reichen. Ein leeres `apx-presets`-Crate jetzt anzulegen wäre
+   dieselbe Art von Vorab-Arbeit ohne aktuellen Abnehmer, die ADR-0029
+   bereits für Phase 4 vermieden hat. Sollte Phase 7s KI-Generator später
+   echte, eigenständige Preset-Berechnungslogik brauchen (Referenzbild-
+   Optimierung, Variationen-Generator), ist das der richtige Zeitpunkt,
+   ein solches Crate tatsächlich anzulegen.
+7. **Import-Templates/Umbenennungs-Templates werden nach Phase 5
+   vorgezogen** (waren in `FEATURES.md` fälschlich als „Phase 3"
+   getaggt, obwohl Phase 3 bereits abgeschlossen ist, ohne sie zu bauen —
+   derselbe Fehlertyp, den ADR-0026/ADR-0027 für andere Zeilen schon
+   einmal korrigiert haben). Der Rust-Unterbau existiert bereits
+   vollständig aus Phase 3 (`apx-app::import::presets::ImportPreset` +
+   die Commands `list_import_presets`/`save_import_preset`/
+   `delete_import_preset`), nur ohne jede Frontend-Anbindung — kein
+   Import-Dialog nutzt sie, kein Token-Editor existiert. Da beide Punkte
+   ohnehin unter „Templates" fallen und ihr Unterbau bereits da ist,
+   werden sie als kleiner, eigenständiger Schritt in Phase 5
+   mitgenommen statt weiter unbenutzt zu bleiben.
+
+**Konsequenzen:** `FEATURES.md` §3.5 wird zeilenweise auf „Phase 5"
+(Preset-Grundlagen + vereinfachte bedingte Presets), „Phase 7" (KI-
+Generator) bzw. „Phase 8–9"/„Phase 6" (Templates-Unterabschnitt, je nach
+zugehörigem Subsystem) umgetaggt; Adobe-Interop bleibt als offener
+späterer Punkt sichtbar. `PLAN.md` bekommt einen neuen Abschnitt „Aktuelle
+Phase: Phase 5" mit einer feingranularen Schrittfolge, analog zu Phase 4.
+`ARCHITECTURE.md` §7s Phase-5-Platzhalterzeile wird entsprechend
+präzisiert (kein `apx-presets`-Crate, stattdessen `apx-catalog`-
+Erweiterung + `apx-app`-Commands + Frontend-Merge-Logik).

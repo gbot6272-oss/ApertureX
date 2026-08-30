@@ -185,15 +185,27 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [ ] Soft-Proof (Zielprofil, Renderpriorität, Farbumfangswarnung, Papierweiß) — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
 
 ## 3.5 PRESET- UND TEMPLATE-SYSTEM
+<!-- Scope-Präzisierung siehe DECISIONS.md ADR-0031: Preset-Grundlagen
+     (erste 9 Zeilen unten, bedingte Presets vereinfacht auf UND-verknüpfte
+     Regeln über eine feste Metadatenfeld-Liste statt einer freien
+     Bedingungssprache) sind die Phase-5-Basis. Preset-Generator (KI) auf
+     Phase 7 verschoben (bereits in ARCHITECTURE.md §7 so vorgesehen).
+     Adobe-Interop auf eine spätere Phase verschoben (dasselbe
+     Format-Problem wie beim Objektivprofil-/DCP-Import, ADR-0028).
+     Templates-Unterabschnitt: nur Import-/Umbenennungs-Templates ziehen
+     nach Phase 5 vor (Rust-Unterbau existiert bereits unbenutzt aus
+     Phase 3, war dort fälschlich als erledigt-fällig getaggt), alle
+     anderen bleiben auf der Phase ihres zugehörigen Subsystems (Export-
+     Engine: Phase 8–9). -->
 
 - [ ] Presets: wählbare EDL-Teilmenge, Checkbox-Dialog beim Speichern — Phase 5 — Status: Nicht begonnen
 - [ ] Preset-Ordnerhierarchie, Drag & Drop, Favoriten, Suche, Tags — Phase 5 — Status: Nicht begonnen
 - [ ] Preset-Stärke 0–200 %, nachträglich änderbar — Phase 5 — Status: Nicht begonnen
 - [ ] Live-Vorschau (Hover im Bild + Thumbnail in der Liste) — Phase 5 — Status: Nicht begonnen
 - [ ] Preset-Stapel mit editierbarer Reihenfolge — Phase 5 — Status: Nicht begonnen
-- [ ] Bedingte Presets (Bedingungssprache im UI-Builder) — Phase 5 — Status: Nicht begonnen
+- [ ] Bedingte Presets (Bedingungssprache im UI-Builder) — Phase 5 — Status: Nicht begonnen (wird abweichend vereinfacht umgesetzt, siehe ADR-0031)
 - [ ] Import/Export `.apx` — Phase 5 — Status: Nicht begonnen
-- [ ] Import/Export Adobe `.xmp` / `.lrtemplate` (beide Richtungen) — Phase 5 — Status: Nicht begonnen
+- [ ] Import/Export Adobe `.xmp` / `.lrtemplate` (beide Richtungen) — Phase 6 — Status: Nicht begonnen (siehe ADR-0031)
 - [ ] Preset-Versionierung mit Diff-Ansicht — Phase 5 — Status: Nicht begonnen
 - [ ] Preset-Generator per LLM (natürlichsprachliche Beschreibung) — Phase 7 — Status: Nicht begonnen
 - [ ] Referenzbild-Modus (numerische Optimierung, kein LLM) — Phase 7 — Status: Nicht begonnen
@@ -202,11 +214,11 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [ ] Export-Templates (Ziel, Format, Qualität, Farbraum, Größe, Schärfung, Metadaten, Wasserzeichen, Mehrfachziel) — Phase 8 — Status: Nicht begonnen
 - [ ] Wasserzeichen-Templates — Phase 8 — Status: Nicht begonnen
 - [ ] Metadaten-Templates (Copyright/Ersteller/Kontakt/IPTC) — Phase 8 — Status: Nicht begonnen
-- [ ] Import-Templates — Phase 3 — Status: Nicht begonnen
-- [ ] Umbenennungs-Templates mit Token-Editor — Phase 3 — Status: Nicht begonnen
+- [ ] Import-Templates — Phase 5 — Status: Nicht begonnen (vorgezogen aus Phase 3, siehe ADR-0031 Punkt 7 — Rust-Unterbau existiert bereits seit Phase 3 unbenutzt)
+- [ ] Umbenennungs-Templates mit Token-Editor — Phase 5 — Status: Nicht begonnen (vorgezogen aus Phase 3, siehe ADR-0031 Punkt 7)
 - [ ] Layout-Templates (Druck/Buch/Diashow/Web) — Phase 8 — Status: Nicht begonnen
 - [ ] Workflow-Templates (Import→Filter→Preset→Export als ein Klick) — Phase 8 — Status: Nicht begonnen
-- [ ] Template-Marktplatz-Struktur (lokales Repo-Format, Manifest, Installation) — Phase 5 — Status: Nicht begonnen
+- [ ] Template-Marktplatz-Struktur (lokales Repo-Format, Manifest, Installation) — Phase 8 — Status: Nicht begonnen (siehe ADR-0031: setzt die anderen Template-Bausteine voraus)
 
 ## 3.6 Weitere Module
 

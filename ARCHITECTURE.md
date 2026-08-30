@@ -185,7 +185,7 @@ Raster/Filmstreifen nötig.
 
 Diese Abschnitte werden erst gefüllt, wenn die jeweilige Phase beginnt — hier nur benannt, damit die Zielarchitektur nicht aus dem Blick gerät:
 
-- **Phase 5:** `apx-presets` — Preset-/Template-Engine, Adobe-Interop.
+- **Phase 5:** Preset-Grundlagen (siehe `DECISIONS.md` ADR-0031) — kein eigenes `apx-presets`-Crate, stattdessen `apx-catalog`-Erweiterung (Preset-Tabellen, opakes EDL-Teilmengen-JSON, analog zu `edit_history.edl_json`) + neue `apx-app`-Commands + Frontend-Merge-/Skalierungslogik. Adobe-Interop und der „Templates"-Unterabschnitt (bis auf Import-/Umbenennungs-Templates, vorgezogen) bleiben auf spätere Phasen verschoben.
 - **Phase 6:** Maskensystem als eigene Pipeline-Stufe(n), plus die in `DECISIONS.md` ADR-0028 auf diese Phase verschobenen Workflow-Punkte (Schnappschüsse, Vorher/Nachher, Copy/Paste-Einstellungen, Sync, Referenzansicht, Soft-Proof) und Reparatur-Erweiterungen (Auto-Quellenfindung, Content-Aware-Fill, Sensorflecken-Visualisierung).
 - **Phase 7:** `apx-ai` — ONNX-Runtime-Integration, LLM-Client für Preset-Generator.
 - **Phase 8–9:** Export-Engine, Ausgabe-Module, Node-Editor, Stacking, Tethering, Skript-API/Plugins.

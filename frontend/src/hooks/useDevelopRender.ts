@@ -21,6 +21,57 @@ function parseFrame(buffer: ArrayBuffer): DevelopFrame {
   return { width, height, pixels };
 }
 
+/** Gemeinsamer, entprellter Fetch-Kern für `useDevelopRender` und
+ * `useDevelopPreviewThumbnail` — identische Anfrage-/Abbruch-/
+ * Entprellungslogik, nur der optionale `onLatency`-Callback
+ * unterscheidet sie (siehe `useDevelopRender`s Moduldoku für die
+ * Begründung der `requestAnimationFrame`-Entprellung). */
+function useDevelopFrameInternal(
+  photoId: string | null,
+  edlJson: string | null,
+  maxEdge: number | undefined,
+  onLatency?: (ms: number) => void,
+): DevelopFrame | null {
+  const [frame, setFrame] = useState<DevelopFrame | null>(null);
+
+  useEffect(() => {
+    if (!photoId || !edlJson) {
+      setFrame(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    const url = developUrl(photoId, edlJson, maxEdge);
+
+    const rafId = requestAnimationFrame(() => {
+      const startedAt = performance.now();
+      void (async () => {
+        try {
+          const response = await fetch(url, { signal: controller.signal });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status} für ${url}`);
+          }
+          const buffer = await response.arrayBuffer();
+          if (controller.signal.aborted) return;
+          setFrame(parseFrame(buffer));
+          onLatency?.(performance.now() - startedAt);
+        } catch (err) {
+          if ((err as DOMException).name !== "AbortError") {
+            console.error("Entwickeln-Rendering fehlgeschlagen:", url, err);
+          }
+        }
+      })();
+    });
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      controller.abort();
+    };
+  }, [photoId, edlJson, maxEdge, onLatency]);
+
+  return frame;
+}
+
 /**
  * Rendert `photoId` live über die `develop/...`-Route mit dem aktuellen
  * `edlJson`-Zustand — analog zu `useImageBitmap`, aber für das rohe
@@ -47,43 +98,19 @@ function parseFrame(buffer: ArrayBuffer): DevelopFrame {
  * nicht das Neuzeichnen im Browser selbst).
  */
 export function useDevelopRender(photoId: string | null, edlJson: string | null, maxEdge: number | undefined): DevelopFrame | null {
-  const [frame, setFrame] = useState<DevelopFrame | null>(null);
   const setDevelopLatencyMs = useAppStore((s) => s.setDevelopLatencyMs);
+  return useDevelopFrameInternal(photoId, edlJson, maxEdge, setDevelopLatencyMs);
+}
 
-  useEffect(() => {
-    if (!photoId || !edlJson) {
-      setFrame(null);
-      return;
-    }
-
-    const controller = new AbortController();
-    const url = developUrl(photoId, edlJson, maxEdge);
-
-    const rafId = requestAnimationFrame(() => {
-      const startedAt = performance.now();
-      void (async () => {
-        try {
-          const response = await fetch(url, { signal: controller.signal });
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status} für ${url}`);
-          }
-          const buffer = await response.arrayBuffer();
-          if (controller.signal.aborted) return;
-          setFrame(parseFrame(buffer));
-          setDevelopLatencyMs(performance.now() - startedAt);
-        } catch (err) {
-          if ((err as DOMException).name !== "AbortError") {
-            console.error("Entwickeln-Rendering fehlgeschlagen:", url, err);
-          }
-        }
-      })();
-    });
-
-    return () => {
-      cancelAnimationFrame(rafId);
-      controller.abort();
-    };
-  }, [photoId, edlJson, maxEdge, setDevelopLatencyMs]);
-
-  return frame;
+/**
+ * Wie `useDevelopRender`, aber ohne die globale `developLastLatencyMs`-
+ * Anzeige zu berühren — für die kleinen Preset-Thumbnails (Phase 5
+ * Schritt 6, `SPEC.md` §3.5: „Live-Vorschau … als Thumbnail des
+ * aktuellen Bildes in der Preset-Liste"), von denen potenziell mehrere
+ * gleichzeitig auf dem Bildschirm sichtbar sind — die für den
+ * Haupt-Viewer gedachte Performance-Anzeige (`PLAN.md` Phase 2 Schritt 7)
+ * soll nicht mit jedem kleinen Thumbnail-Rendering überschrieben werden.
+ */
+export function useDevelopPreviewThumbnail(photoId: string | null, edlJson: string | null, maxEdge: number | undefined): DevelopFrame | null {
+  return useDevelopFrameInternal(photoId, edlJson, maxEdge);
 }

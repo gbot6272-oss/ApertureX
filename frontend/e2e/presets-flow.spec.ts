@@ -188,6 +188,25 @@ test.describe("Presets-Panel", () => {
     await expect.poll(async () => readLastCommittedExposure(page)).toBeCloseTo(0.9, 2);
   });
 
+  test("Hover über einen Preset zeigt eine Thumbnail-Vorschau, ohne etwas zu committen", async ({ page }) => {
+    await setUp(page);
+
+    await page.getByRole("button", { name: PRESET_FOLDER.name }).click();
+    const presetRow = page.getByRole("button", { name: PRESET.name, exact: true });
+    await expect(page.locator(`canvas[aria-label="Vorschau: ${PRESET.name}"]`)).toBeAttached();
+
+    const commitCountBefore = (await getMockInvokeLog(page)).filter((entry) => entry.cmd === "apply_develop_edit").length;
+    await presetRow.hover();
+    await page.waitForTimeout(200);
+    const commitCountAfterHover = (await getMockInvokeLog(page)).filter((entry) => entry.cmd === "apply_develop_edit").length;
+    expect(commitCountAfterHover).toBe(commitCountBefore);
+
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(50);
+    const commitCountAfterLeave = (await getMockInvokeLog(page)).filter((entry) => entry.cmd === "apply_develop_edit").length;
+    expect(commitCountAfterLeave).toBe(commitCountBefore);
+  });
+
   test("benennt einen Preset-Ordner über den Dialog um", async ({ page }) => {
     await setUp(page);
 

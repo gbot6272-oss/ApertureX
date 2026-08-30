@@ -512,6 +512,14 @@ interface PresetsSlice {
    * (spätere Einträge überschreiben gemeinsame Sektionen früherer) und
    * committet einmal am Ende. */
   applyPresetStack: () => Promise<void>;
+
+  /** Live-Vorschau beim Überfahren eines Preset-Eintrags mit der Maus
+   * (`SPEC.md` §3.5) — rein visuell im Viewer, ändert `developEdl` nicht
+   * und committet nichts. `Viewer.tsx` rendert `hoverPresetSubset`
+   * zusammengeführt mit `developEdl`, sobald gesetzt. */
+  hoverPresetSubset: PresetEdlSubset | null;
+  previewPresetHover: (presetId: string) => Promise<void>;
+  clearPresetHoverPreview: () => void;
 }
 
 export type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice & LibrarySlice & PresetsSlice;
@@ -1745,6 +1753,26 @@ export const useAppStore = create<AppStore>()(
           state.catalogError = String(err);
         });
       }
+    },
+
+    hoverPresetSubset: null,
+
+    previewPresetHover: async (presetId) => {
+      try {
+        const version = await api.latestPresetVersion(presetId);
+        set((state) => {
+          state.hoverPresetSubset = parseEdlSubset(version.edl_subset_json);
+        });
+      } catch {
+        // Keine Vorschau statt eines Absturzes — z. B. bei einem
+        // zwischenzeitlich gelöschten Preset.
+      }
+    },
+
+    clearPresetHoverPreview: () => {
+      set((state) => {
+        state.hoverPresetSubset = null;
+      });
     },
     };
   }),

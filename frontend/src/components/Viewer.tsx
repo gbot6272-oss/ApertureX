@@ -6,6 +6,7 @@ import { useImageBitmap } from "../hooks/useImageBitmap";
 import { buildEdlEnvelopeJson } from "../lib/edl";
 import { formatShutter } from "../lib/format";
 import { imageUrl, previewUrl } from "../lib/media";
+import { mergeEdlSubset } from "../lib/presets";
 import { clampZoom, computeBaseScale, imageOrigin, nextZoomStep, panForZoomAtCursor } from "../lib/viewerMath";
 import { QuadRenderer } from "../lib/webgl";
 import { useAppStore } from "../store";
@@ -34,6 +35,7 @@ export function Viewer() {
   const resetView = useAppStore((s) => s.resetView);
   const developPanelOpen = useAppStore((s) => s.developPanelOpen);
   const developEdl = useAppStore((s) => s.developEdl);
+  const hoverPresetSubset = useAppStore((s) => s.hoverPresetSubset);
   const wbPickerActive = useAppStore((s) => s.wbPickerActive);
   const pickWhiteBalanceAt = useAppStore((s) => s.pickWhiteBalanceAt);
   const colorMixerPickerActive = useAppStore((s) => s.colorMixerPickerActive);
@@ -72,7 +74,11 @@ export function Viewer() {
   // `PLAN.md` Phase 2 Schritt 6) — bis die erste Antwort da ist, bleibt
   // `activeBitmap` als Platzhalter sichtbar (kein Weißblitz beim Öffnen
   // des Panels, analog zum Vorschau/Vollbild-Übergang oben).
-  const developEdlJson = developPanelOpen && photo ? buildEdlEnvelopeJson(developEdl) : null;
+  // Hover-Vorschau eines Presets (Phase 5 Schritt 6, `SPEC.md` §3.5)
+  // überschreibt rein visuell, welche EDL gerendert wird — `developEdl`
+  // selbst bleibt unverändert, solange nicht tatsächlich geklickt wird.
+  const renderedEdl = hoverPresetSubset ? mergeEdlSubset(developEdl, hoverPresetSubset) : developEdl;
+  const developEdlJson = developPanelOpen && photo ? buildEdlEnvelopeJson(renderedEdl) : null;
   const developPhotoId = developPanelOpen ? (photo?.id ?? null) : null;
   const developFrame = useDevelopRender(developPhotoId, developEdlJson, photo && containerSize.width > 0 ? targetFullEdge : undefined);
 

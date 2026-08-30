@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { buildChildrenByParent } from "../lib/folderTree";
 import type { PresetDto, PresetFolderDto } from "../lib/tauri";
 import { useAppStore } from "../store";
+import { PresetThumbnail } from "./PresetThumbnail";
 
 interface PresetFolderNodeProps {
   folder: PresetFolderDto;
@@ -72,6 +73,9 @@ function PresetRow({ preset, folders }: PresetRowProps) {
   const applyPreset = useAppStore((s) => s.applyPreset);
   const addPresetToStack = useAppStore((s) => s.addPresetToStack);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
+  const developEdl = useAppStore((s) => s.developEdl);
+  const previewPresetHover = useAppStore((s) => s.previewPresetHover);
+  const clearPresetHoverPreview = useAppStore((s) => s.clearPresetHoverPreview);
 
   function handleRename(event: React.MouseEvent) {
     event.stopPropagation();
@@ -80,59 +84,68 @@ function PresetRow({ preset, folders }: PresetRowProps) {
   }
 
   return (
-    <li className="flex items-center justify-between gap-1.5 rounded border border-border px-2 py-1.5 text-sm">
-      <button
-        type="button"
-        onClick={() => setPresetFavorite(preset.id, !preset.is_favorite)}
-        aria-label={preset.is_favorite ? `${preset.name} aus Favoriten entfernen` : `${preset.name} zu Favoriten hinzufügen`}
-        aria-pressed={preset.is_favorite}
-        className={preset.is_favorite ? "text-accent" : "text-text-muted hover:text-accent"}
-        title="Favorit"
-      >
-        {preset.is_favorite ? "★" : "☆"}
-      </button>
-      <button
-        type="button"
-        onClick={() => void applyPreset(preset.id)}
-        disabled={!selectedPhotoId}
-        className="min-w-0 flex-1 truncate text-left text-text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40"
-        title="Preset anwenden"
-      >
-        {preset.name}
-      </button>
-      <span role="button" tabIndex={0} onClick={handleRename} className="shrink-0 text-text-muted hover:text-accent" title="Umbenennen">
-        ✎
-      </span>
-      <button
-        type="button"
-        onClick={() => addPresetToStack(preset.id)}
-        className="shrink-0 text-text-muted hover:text-accent"
-        title="Zum Preset-Stapel hinzufügen"
-        aria-label={`${preset.name} zum Stapel hinzufügen`}
-      >
-        ➕
-      </button>
-      <select
-        aria-label={`${preset.name}: Ordner`}
-        value={preset.folder_id ?? ""}
-        onChange={(event) => void movePresetToFolder(preset.id, event.target.value || null)}
-        className="shrink-0 rounded border border-border bg-bg-panel px-1 py-0.5 text-xs"
-      >
-        <option value="">Wurzel</option>
-        {folders.map((folder) => (
-          <option key={folder.id} value={folder.id}>
-            {folder.name}
-          </option>
-        ))}
-      </select>
-      <button
-        type="button"
-        onClick={() => void deletePreset(preset.id)}
-        className="shrink-0 text-xs text-danger underline"
-        aria-label={`${preset.name} löschen`}
-      >
-        Löschen
-      </button>
+    <li
+      className="flex flex-col gap-1 rounded border border-border px-2 py-1.5 text-sm"
+      onMouseEnter={() => selectedPhotoId && void previewPresetHover(preset.id)}
+      onMouseLeave={clearPresetHoverPreview}
+    >
+      <div className="flex items-center gap-1.5">
+        <PresetThumbnail presetId={preset.id} presetName={preset.name} currentEdl={developEdl} photoId={selectedPhotoId} />
+        <button
+          type="button"
+          onClick={() => setPresetFavorite(preset.id, !preset.is_favorite)}
+          aria-label={preset.is_favorite ? `${preset.name} aus Favoriten entfernen` : `${preset.name} zu Favoriten hinzufügen`}
+          aria-pressed={preset.is_favorite}
+          className={`shrink-0 ${preset.is_favorite ? "text-accent" : "text-text-muted hover:text-accent"}`}
+          title="Favorit"
+        >
+          {preset.is_favorite ? "★" : "☆"}
+        </button>
+        <button
+          type="button"
+          onClick={() => void applyPreset(preset.id)}
+          disabled={!selectedPhotoId}
+          className="min-w-0 flex-1 truncate text-left text-text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+          title="Preset anwenden"
+        >
+          {preset.name}
+        </button>
+      </div>
+      <div className="flex items-center justify-between gap-1.5 text-xs">
+        <span role="button" tabIndex={0} onClick={handleRename} className="shrink-0 text-text-muted hover:text-accent" title="Umbenennen">
+          ✎
+        </span>
+        <button
+          type="button"
+          onClick={() => addPresetToStack(preset.id)}
+          className="shrink-0 text-text-muted hover:text-accent"
+          title="Zum Preset-Stapel hinzufügen"
+          aria-label={`${preset.name} zum Stapel hinzufügen`}
+        >
+          ➕
+        </button>
+        <select
+          aria-label={`${preset.name}: Ordner`}
+          value={preset.folder_id ?? ""}
+          onChange={(event) => void movePresetToFolder(preset.id, event.target.value || null)}
+          className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-1 py-0.5 text-xs"
+        >
+          <option value="">Wurzel</option>
+          {folders.map((folder) => (
+            <option key={folder.id} value={folder.id}>
+              {folder.name}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => void deletePreset(preset.id)}
+          className="shrink-0 text-danger underline"
+          aria-label={`${preset.name} löschen`}
+        >
+          Löschen
+        </button>
+      </div>
     </li>
   );
 }

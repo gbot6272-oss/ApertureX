@@ -33,28 +33,28 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Ordnerbaum-Synchronisation (echte Hierarchie über `parent_id`) — Phase 3 — Status: Fertig (siehe DECISIONS.md ADR-0027: Import legt jetzt die volle Verzeichniskette bis zum gewählten Import-Ordner bzw. bei Copy/Move bis zum Zielordner an, statt nur den unmittelbaren Elternordner)
 - [x] Ordner fehlend/wiederfinden — Phase 3 — Status: Fertig
 - [x] Sammlungen (manuell, feste Reihenfolge) — Phase 3 — Status: Fertig
-- [ ] Sammlungssätze, intelligente Sammlungen mit verschachtelten UND/ODER-Regeln, Zielsammlung — Phase 6 — Status: Nicht begonnen
-- [ ] Stapel (automatisch nach Zeit, manuell) — Phase 6 — Status: Nicht begonnen
-- [ ] Virtuelle Kopien — Phase 6 — Status: Nicht begonnen
+- [ ] Sammlungssätze, intelligente Sammlungen mit verschachtelten UND/ODER-Regeln, Zielsammlung — Phase 9 — Status: Nicht begonnen (siehe ADR-0032: von Phase 6 auf Phase 9 verschoben — keine ADR hatte Phase 6 für diese Zeile je zugesagt)
+- [ ] Stapel (automatisch nach Zeit, manuell) — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
+- [ ] Virtuelle Kopien — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
 - [x] Bewertung 0–5 — Phase 3 — Status: Fertig
 - [x] Farbmarkierungen (fester Grundsatz) — Phase 3 — Status: Fertig (feste Palette aus 5 Farben: rot/gelb/grün/blau/violett)
-- [ ] Farbmarkierungen erweiterbar auf beliebig viele, benannt — Phase 6 — Status: Nicht begonnen
+- [ ] Farbmarkierungen erweiterbar auf beliebig viele, benannt — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
 - [x] Flaggen — Phase 3 — Status: Fertig
 - [x] Schlagworte (flache Liste, ohne Hierarchie) — Phase 3 — Status: Fertig
-- [ ] Schlagworthierarchie (Synonyme, Export-Steuerung, Auto-Vervollständigung), Schlagwortvorschläge, Tag-Regeln (bedingte Auto-Tags) — Phase 6 — Status: Nicht begonnen
+- [ ] Schlagworthierarchie (Synonyme, Export-Steuerung, Auto-Vervollständigung), Schlagwortvorschläge, Tag-Regeln (bedingte Auto-Tags) — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
 - [x] Metadaten-Panel (Basisfelder lesen, Bewertung/Flagge/Farbe/Schlagworte editieren) — Phase 3 — Status: Fertig
 - [x] Undo/Redo für Bibliotheks-Metadaten (Bewertung/Flagge/Farbe/Schlagworte/Sammlungsmitgliedschaft) — Phase 3 — Status: Fertig (siehe DECISIONS.md ADR-0027; deckt bewusst nicht Sammlung anlegen/umbenennen/löschen ab)
-- [ ] Metadaten-Presets, Stapel-Metadatenbearbeitung, EXIF/IPTC/XMP-Editor (alle Felder), frei definierbare Metadaten-Felder, Sidecar-Export (.xmp) — Phase 6 — Status: Nicht begonnen
+- [ ] Metadaten-Presets, Stapel-Metadatenbearbeitung, EXIF/IPTC/XMP-Editor (alle Felder), frei definierbare Metadaten-Felder, Sidecar-Export (.xmp) — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
 - [x] Volltextsuche (FTS5) über Dateiname, Kamera, Objektiv — Phase 3 — Status: Fertig
 - [x] Rasteransicht — Phase 3 — Status: Fertig
 - [x] Lupe/Einzelbildansicht (Basis-Viewer) — Phase 1 — Status: Fertig
-- [ ] Vergleichsansicht, Übersichtsansicht — Phase 6 — Status: Nicht begonnen
+- [ ] Vergleichsansicht, Übersichtsansicht — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
 - [ ] Personenansicht (Gesichtserkennung) — Phase 9 — Status: Nicht begonnen
 - [x] Filterleiste (Text, Attribut, Metadaten, kombiniert) — Phase 3 — Status: Fertig (siehe DECISIONS.md ADR-0027: Text- und Attributfilter [inkl. Kameramodell] sind jetzt per UND kombinierbar, nicht mehr alternativ wie in ADR-0026)
-- [ ] Filter-Presets — Phase 6 — Status: Nicht begonnen
+- [ ] Filter-Presets — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
 - [x] Sortierung nach beliebigem Feld — Phase 3 — Status: Fertig (siehe ADR-0027: client-seitig, Dateiname/Aufnahmedatum/Bewertung/Dateigröße/Kameramodell, fehlende Werte immer ans Ende)
-- [ ] Schnellentwicklung im Raster — Phase 6 — Status: Nicht begonnen
-- [ ] Vorschau-Cache-Verwaltung (Standard, 1:1), Smart Previews, Offline-Bearbeitung über Smart Previews — Phase 6 — Status: Nicht begonnen
+- [ ] Schnellentwicklung im Raster — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
+- [ ] Vorschau-Cache-Verwaltung (Standard, 1:1), Smart Previews, Offline-Bearbeitung über Smart Previews — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
 - [ ] Sekundäres Display mit unabhängiger Ansicht — Phase 9 — Status: Nicht begonnen
 - [ ] Katalog-Statistiken-Dashboard — Phase 9 — Status: Nicht begonnen
 
@@ -147,25 +147,31 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
      manuelles Klonen/Reparieren (Pinsel mit Quellpunkt, Radius, Deckkraft,
      weicher Kante). -->
 - [x] Bereichsreparatur klonen/reparieren — Phase 4 — Status: Fertig (abweichend, siehe ADR-0028: Reparieren per vereinfachtem Tiefpass/Hochpass-Überblenden statt echten Poisson-Blendings, Pfad-Abstand als minimaler Stützpunkt-Abstand statt echter Punkt-zu-Liniensegment-Distanz, Striche sequenziell statt als ein Fused-Pass angewendet, siehe `stages/repair.rs`)
-- [ ] Auto-Quellenfindung — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
-- [ ] Sensorflecken-Visualisierung — Phase 6 — Status: Nicht begonnen (siehe ADR-0028-Nachtrag zu Schritt 12: setzt eine automatische Fleckenerkennung voraus, dieselbe Kategorie wie die Auto-Quellenfindung)
-- [ ] Inhaltsbasiertes Füllen — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
+- [ ] Auto-Quellenfindung — Phase 7 — Status: Nicht begonnen (siehe ADR-0028; von Phase 6 auf Phase 7 präzisiert per ADR-0032 Punkt 8 — dieselbe CV-Algorithmus-Kategorie wie die dort nach Phase 7 verschobene Referenzbild-Optimierung)
+- [ ] Sensorflecken-Visualisierung — Phase 7 — Status: Nicht begonnen (siehe ADR-0028-Nachtrag zu Schritt 12, Phase per ADR-0032 Punkt 8 präzisiert: setzt eine automatische Fleckenerkennung voraus, dieselbe Kategorie wie die Auto-Quellenfindung)
+- [ ] Inhaltsbasiertes Füllen — Phase 7 — Status: Nicht begonnen (siehe ADR-0028; Phase per ADR-0032 Punkt 8 präzisiert)
 
 ## 3.3 Modul ENTWICKELN — Lokale Anpassungen
+<!-- Scope-Präzisierung siehe DECISIONS.md ADR-0032: SPEC.md §5s
+     Phase-6-Satz nennt nur "Pinsel, Verläufe, Bereichsmasken,
+     Maskenkombination, Ebenen-Mischmodi" — Tiefenbereich (kein
+     Tiefendaten-Zulieferer existiert) und die fünf KI-Masken
+     (Phase 7, dieselbe apx-ai/ONNX-Runtime-Integration wie der
+     Preset-Generator) fallen aus dem Phase-6-Kern heraus. -->
 
 - [ ] Maskentyp Pinsel — Phase 6 — Status: Nicht begonnen
 - [ ] Maskentyp Linearer Verlauf — Phase 6 — Status: Nicht begonnen
 - [ ] Maskentyp Radialer Verlauf — Phase 6 — Status: Nicht begonnen
 - [ ] Maskentyp Farbbereich — Phase 6 — Status: Nicht begonnen
 - [ ] Maskentyp Luminanzbereich — Phase 6 — Status: Nicht begonnen
-- [ ] Maskentyp Tiefenbereich — Phase 6 — Status: Nicht begonnen
+- [ ] Maskentyp Tiefenbereich — Später zurückgestellt — Status: Nicht begonnen (siehe ADR-0032: kein Tiefendaten-Zulieferer existiert, keinem Phasenplan-Punkt zugeordnet)
 - [ ] KI-Motiv-Maske — Phase 7 — Status: Nicht begonnen
 - [ ] KI-Himmel-Maske — Phase 7 — Status: Nicht begonnen
 - [ ] KI-Hintergrund-Maske — Phase 7 — Status: Nicht begonnen
 - [ ] KI-Objekte-Maske (Klick-Segmentierung) — Phase 7 — Status: Nicht begonnen
 - [ ] KI-Personen-Maske (Haut, Augen, Brauen, Lippen, Zähne, Haare, Kleidung) — Phase 7 — Status: Nicht begonnen
 - [ ] Masken kombinieren (Hinzufügen/Subtrahieren/Schneiden) — Phase 6 — Status: Nicht begonnen
-- [ ] Pro Maske: alle globalen Regler + Deckkraft/Weichzeichnung/Umkehren/Verfeinern — Phase 6 — Status: Nicht begonnen
+- [ ] Pro Maske: alle globalen Regler + Deckkraft/Weichzeichnung/Umkehren/Verfeinern — Phase 6 — Status: Nicht begonnen (wird abweichend auf die ton-/farb-/detailbezogenen Werkzeuge eingegrenzt, siehe ADR-0032 Punkt 2 — Objektivkorrekturen/Effekte/Kalibrierung/Geometrie/Reparatur bleiben global)
 - [ ] Maskengruppen, Umbenennen, Ein-/Ausblenden, Überlagerungsfarbe — Phase 6 — Status: Nicht begonnen
 - [ ] Maske duplizieren / auf anderes Foto übertragen — Phase 6 — Status: Nicht begonnen
 - [ ] Ebenen-Mischmodi pro Maske — Phase 6 — Status: Nicht begonnen
@@ -205,7 +211,7 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Preset-Stapel mit editierbarer Reihenfolge — Phase 5 — Status: Fertig
 - [x] Bedingte Presets (Bedingungssprache im UI-Builder) — Phase 5 — Status: Fertig (abweichend vereinfacht umgesetzt, siehe ADR-0031: feste Feldliste + UND-verknüpfte Regeln statt freiem UI-Builder mit ODER/Verschachtelung)
 - [x] Import/Export `.apx` — Phase 5 — Status: Fertig
-- [ ] Import/Export Adobe `.xmp` / `.lrtemplate` (beide Richtungen) — Phase 6 — Status: Nicht begonnen (siehe ADR-0031)
+- [ ] Import/Export Adobe `.xmp` / `.lrtemplate` (beide Richtungen) — Phase 8–9 — Status: Nicht begonnen (siehe ADR-0031 Punkt 3: „eine spätere Phase", ohne Phase 6 zu benennen — `ARCHITECTURE.md` §7 hatte das schon korrekt auf Phase 8–9 gelegt, diese Zeile war stehen geblieben; korrigiert im Rahmen der Phase-6-Scope-Präzisierung, ADR-0032)
 - [x] Preset-Versionierung mit Diff-Ansicht — Phase 5 — Status: Fertig
 - [ ] Preset-Generator per LLM (natürlichsprachliche Beschreibung) — Phase 7 — Status: Nicht begonnen
 - [ ] Referenzbild-Modus (numerische Optimierung, kein LLM) — Phase 7 — Status: Nicht begonnen

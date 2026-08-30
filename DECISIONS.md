@@ -1099,3 +1099,135 @@ Phase: Phase 5" mit einer feingranularen Schrittfolge, analog zu Phase 4.
 `ARCHITECTURE.md` §7s Phase-5-Platzhalterzeile wird entsprechend
 präzisiert (kein `apx-presets`-Crate, stattdessen `apx-catalog`-
 Erweiterung + `apx-app`-Commands + Frontend-Merge-Logik).
+
+## ADR-0032: Phase-6-Scope präzisiert — Maskensystem (§5) plus die in ADR-0028 versprochenen Workflow-Punkte; Bibliotheks-Backlog explizit auf Phase 9 verschoben; Tiefenbereich/KI-Masken zurückgestellt
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §5 nennt für Phase 6 wörtlich nur „Masken und
+lokale Anpassungen. Pinsel, Verläufe, Bereichsmasken, Maskenkombination,
+Ebenen-Mischmodi." — das deckt sich mit `SPEC.md` §3.3 bis auf zwei
+Punkte, die dort zusätzlich stehen: Tiefenbereich-Masken (brauchen
+Tiefendaten, die in keiner früheren Phase je erzeugt wurden — keine
+Tiefenschätzung, kein Tiefensensor-Import existiert) und die fünf
+KI-Masken (Motiv/Himmel/Hintergrund/Objekte/Personen — Segmentierung per
+ONNX-Runtime). Letztere sind wörtlich das, was `ARCHITECTURE.md` §7 für
+Phase 7 reserviert („`apx-ai` — ONNX-Runtime-Integration"); sie jetzt
+vorzuziehen hieße, eine komplette Modell-Inferenz-Pipeline parallel zum
+eigentlichen Maskensystem aufzubauen — derselbe Fehler, den ADR-0031 für
+den Preset-Generator vermieden hat.
+
+Daneben tragen zwei Gruppen von `FEATURES.md`-Zeilen bereits die Marke
+„Phase 6", ohne in `SPEC.md` §5s Phase-6-Satz vorzukommen:
+1. Die acht Workflow-Punkte aus §3.4 (Schnappschüsse, Vorher/Nachher,
+   Copy/Paste-Einstellungen, Vorherige übernehmen, Sync, Auto-Sync,
+   Referenzansicht, Soft-Proof) — diese Zuordnung ist kein Versehen,
+   sondern eine **bereits gegebene Zusage**: ADR-0028 hat sie explizit
+   „auf Phase 6 verschoben", nicht generisch „auf später". Ein
+   Versprechen aus einer bereits abgenommenen Phase ohne neue ADR wieder
+   zu brechen wäre derselbe Fehlertyp, den ADR-0026/ADR-0027 an anderer
+   Stelle schon einmal korrigiert haben — hier gilt also das Gegenteil:
+   die Zusage wird eingehalten.
+2. Ein rund ein Dutzend Bibliotheks-Zeilen aus §3.1 (Sammlungssätze/
+   intelligente Sammlungen, Stapel, virtuelle Kopien, erweiterbare
+   Farbmarkierungen, Schlagworthierarchie/-vorschläge/Tag-Regeln,
+   Metadaten-Presets/Stapel-Metadatenbearbeitung/EXIF-IPTC-XMP-Editor/
+   Sidecar-Export, Vergleichs-/Übersichtsansicht, Filter-Presets,
+   Schnellentwicklung im Raster, Vorschau-Cache-Verwaltung/Smart
+   Previews/Offline-Bearbeitung) — anders als Gruppe 1 stammt diese
+   Zuordnung aus **keiner** ADR, die Phase 6 beim Namen genannt hätte;
+   „Phase 6" war hier nur der nächste freie Platzhalter nach Phase 3s
+   Abschluss, kein eingelöstes Versprechen. Alle zusammen wären, grob
+   geschätzt, mindestens so viel Aufwand wie das eigentliche
+   Maskensystem — sie parallel zu bauen würde Phase 6 auf etwa das
+   Dreifache der in `SPEC.md` §5 tatsächlich benannten Arbeit aufblähen.
+
+**Entscheidung:**
+1. **Maskensystem-Kern** (`SPEC.md` §3.3, ohne Tiefenbereich/KI-Masken,
+   siehe Punkt 3) wird vollständig gebaut: Maskentypen Pinsel, Linearer
+   Verlauf, Radialer Verlauf, Farbbereich, Luminanzbereich; Kombination
+   per Hinzufügen/Subtrahieren/Schneiden; echte Ebenen-Mischmodi pro
+   Maske; Maskenverwaltung (Gruppen, Umbenennen, Ein-/Ausblenden,
+   Überlagerungsfarbe, Duplizieren, auf anderes Foto übertragen, als
+   wiederverwendbarer Baustein speichern, Kette mit Drag-&-Drop-
+   Sortierung).
+2. **Pro Maske stehen nur die ton-/farb-/detailbezogenen Werkzeuge zur
+   Verfügung** — Grundeinstellungen, Kurven, HSL, Farbmischer, Color
+   Grading, Details (Schärfung + Rauschreduzierung) — nicht
+   Objektivkorrekturen, Effekte, Kalibrierung, Geometrie oder Reparatur.
+   `SPEC.md` §3.3 sagt zwar wörtlich „alle globalen Regler", aber die
+   ausgenommenen fünf sind strukturell Ganzbild-Operationen (ein
+   Objektiv-Warp oder ein Crop pro Maske separat anzuwenden ergibt
+   pipeline-technisch keinen Sinn — beide ändern bereits laut ADR-0030/
+   der Phase-4-Pipeline-Reihenfolge die Geometrie des *gesamten* Bildes
+   an einer festen Stelle im Ablauf, nicht pro Region) — eine genuine,
+   nicht nur vorgetäuschte Fähigkeit für exakt die Werkzeugklasse, für
+   die regionale Anwendung tatsächlich Sinn ergibt.
+3. **Tiefenbereich-Masken** werden auf eine spätere Phase zurückgestellt
+   (kein Tiefendaten-Zulieferer existiert — das wäre eine komplette
+   Tiefenschätzungs- oder Sensor-Import-Pipeline als Vorprojekt).
+   **KI-Masken** (Motiv/Himmel/Hintergrund/Objekte/Personen) werden auf
+   **Phase 7** verschoben — dort baut `apx-ai` ohnehin erstmals die
+   ONNX-Runtime-Integration auf, die diese Masken als Erstes brauchen.
+4. **Architektur — Ebenenmodell statt Fused-Pass:** die Phase-4-Pipeline
+   bleibt unverändert die Grundlage (`render_rgba8`s feste Stufenfolge,
+   siehe `ARCHITECTURE.md` §8); Masken laufen danach als neue, letzte
+   Gruppe von Stufen, jede Maske sequenziell: (a) Maskenalpha berechnen
+   (Pinsel: akkumulierte Stempel-Textur aus den Pinselstrichen, analog
+   zu `repair.rs`s Pfad-Uniform; Verläufe: analytische Funktion über
+   Position; Farbbereich/Luminanzbereich: Klassifikation pro Pixel), (b)
+   Kombinationsregeln mit vorangehenden Masken derselben Gruppe
+   anwenden, (c) die in der Maske hinterlegten Werkzeuge auf eine Kopie
+   des aktuellen Bildzustands anwenden (derselbe Fused-Pass-Baustein wie
+   Phase 4, nur mit den Masken-EDL-Werten statt den globalen), (d)
+   alpha-gewichtet mit dem gewählten Ebenen-Mischmodus in den
+   Bildzustand zurückmischen. Jede Maske ist damit ein eigener
+   Pipeline-Durchlauf — das 16-ms-Ziel wird bei vielen/komplexen Masken
+   voraussichtlich Grenzen aufzeigen und ist Gegenstand der
+   Abnahme-Schritt-Performance-Nachmessung, genau wie in Phase 2/4.
+5. **EDL-Schema v3** (`crates/apx-pipeline/src/edl/v3.rs`) statt einer
+   Erweiterung von `EdlV2` — derselbe Grund wie beim v1→v2-Sprung in
+   Phase 4 (`migrate.rs` kennt keine automatische Feldergänzung, siehe
+   ADR aus Phase 4 Schritt 1): `masks: Vec<Mask>` ist ein komplett neues
+   Feld, `v2_to_v3` hebt bestehende `EdlV2`-Daten unverändert an, `masks`
+   startet leer.
+6. **Workflow-Punkte** (ADR-0028-Zusage, siehe Kontext) werden
+   vollständig gebaut: Schnappschüsse (benannte, klickbare EDL-
+   Zwischenstände zusätzlich zum linearen Verlauf), Vorher/Nachher in
+   vier Ansichten, Einstellungen kopieren/einfügen mit granularer
+   Sektionsauswahl (reine Frontend-Logik auf demselben `PresetEdlSubset`-
+   Mechanismus wie Presets — kopiert einfach `developEdl` statt eines
+   gespeicherten Presets), Vorherige übernehmen, Synchronisieren über
+   beliebig viele ausgewählte Fotos, Auto-Sync-Modus, Referenzansicht,
+   Soft-Proof (Zielprofil/Renderpriorität/Farbumfangswarnung/
+   Papierweiß — vereinfacht auf die in `apx-pipeline` bereits
+   vorhandenen Farbraum-Grundlagen, kein vollständiges ICC-
+   Farbmanagement-Subsystem; echte Profilverwaltung wäre ein eigenes
+   Mammutprojekt und ist hier nicht das Ziel).
+7. **Bibliotheks-Backlog (Gruppe 2, siehe Kontext) wird explizit auf
+   Phase 9 verschoben, nicht in Phase 6 mitgenommen.** Keine ADR hat
+   Phase 6 für diese Zeilen je zugesagt; sie parallel zum Maskensystem
+   und den acht Workflow-Punkten zu bauen würde diese ohnehin schon
+   große Phase auf einen Umfang aufblähen, der `SPEC.md` §5s eigentlicher
+   Phase-6-Beschreibung nicht mehr entspricht. Phase 9 („Fortgeschrittenes")
+   ist bereits der Sammelpunkt für nachgezogene Reife-Themen (Node-
+   Editor, Stacking, Tethering, Skript-API) und passt strukturell besser
+   als ein weiteres Aufblähen von Phase 6.
+8. **Reparatur-Erweiterungen aus ADR-0028** (Auto-Quellenfindung,
+   Sensorflecken-Visualisierung, inhaltsbasiertes Füllen) werden von
+   ihrer bisherigen `FEATURES.md`-Markierung „Phase 6" auf **Phase 7**
+   verschoben. ADR-0028 hatte sie nur generisch „auf eine spätere Phase"
+   verschoben, ohne Phase 6 beim Namen zu nennen — dieselbe Situation wie
+   bei Gruppe 2, nicht wie bei den acht Workflow-Punkten. Inhaltlich
+   passen sie ohnehin besser zu Phase 7: automatisches Erkennen guter
+   Quellregionen und echtes inhaltsbasiertes Füllen sind PatchMatch-
+   artige Bildanalyse-Algorithmen, dieselbe CV-Kategorie wie die in
+   ADR-0031 nach Phase 7 verschobene Referenzbild-Optimierung.
+
+**Konsequenzen:** `FEATURES.md` §3.3/§3.4-Zeilen werden auf „Phase 6"
+bestätigt bzw. bei Tiefenbereich/KI-Masken auf „zurückgestellt"/„Phase 7"
+korrigiert; die rund ein Dutzend Bibliotheks-Zeilen aus Gruppe 2 werden
+von „Phase 6" auf „Phase 9" umgetaggt. `PLAN.md` bekommt einen neuen
+Abschnitt „Aktuelle Phase: Phase 6" mit feingranularer Schrittfolge,
+analog zu Phase 4/5. `ARCHITECTURE.md` §7s Phase-6-Platzhalterzeile wird
+entsprechend präzisiert (Ebenenmodell statt Fused-Pass, EDL v3, kein
+Tiefenbereich/keine KI-Masken).

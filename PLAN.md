@@ -512,3 +512,81 @@ Siehe ADR-0028 (plus Nachtrag): Workflow-Punkte (Schnappschüsse, Vorher/Nachher
 
 ### Nicht in Phase 5 (bewusst zurückgestellt)
 Siehe ADR-0031: Preset-Generator (KI: LLM-Anfrage, Referenzbild-Modus, Variationen-Generator, Preset-aus-Bearbeitung-Lernen) → Phase 7; Adobe-`.xmp`/`.lrtemplate`-Import/-Export → spätere Phase; Export-/Wasserzeichen-/Metadaten-/Layout-/Workflow-Templates + Template-Marktplatz → Phase 8–9 (setzen die dort erst gebaute Export-Engine voraus).
+
+## Aktuelle Phase: Phase 6 — Masken und lokale Anpassungen
+
+`SPEC.md` §5 nennt wörtlich nur „Masken und lokale Anpassungen. Pinsel,
+Verläufe, Bereichsmasken, Maskenkombination, Ebenen-Mischmodi." — siehe
+`DECISIONS.md` ADR-0032 für die Scope-Präzisierung: Maskensystem-Kern
+(ohne Tiefenbereich/KI-Masken) plus die acht in ADR-0028 explizit für
+diese Phase versprochenen Workflow-Punkte; der Bibliotheks-Backlog aus
+§3.1 (keine ADR hatte ihn je Phase 6 zugesagt) wandert nach Phase 9, die
+Reparatur-Erweiterungen und KI-Masken nach Phase 7.
+
+**Architektur-Grundsatz (ADR-0032 Punkt 4):** Ebenenmodell statt
+Fused-Pass — die Phase-4-Pipeline (`render_rgba8`) bleibt unverändert die
+Grundlage; Masken laufen danach als neue, letzte Stufengruppe, jede Maske
+sequenziell: Maskenalpha berechnen → mit vorangehenden Masken derselben
+Gruppe kombinieren → die Maskenwerkzeuge (Grundeinstellungen, Kurven,
+HSL, Farbmischer, Color Grading, Details — siehe ADR-0032 Punkt 2) auf
+eine Bildkopie anwenden → alpha-gewichtet mit dem gewählten
+Ebenen-Mischmodus zurückmischen.
+
+- [ ] 0. Scope festzurren
+  - [x] `DECISIONS.md`: neues ADR-0032
+  - [x] `FEATURES.md` §3.1/§3.3/§3.4 umgetaggt (Bibliotheks-Backlog → Phase 9, Reparatur-Erweiterungen/KI-Masken → Phase 7, Tiefenbereich zurückgestellt, Adobe-Interop-Zeile korrigiert auf Phase 8–9)
+  - [x] `ARCHITECTURE.md` §7s Phase-6/7-Zeilen präzisiert
+  - [x] `PLAN.md`: dieser Abschnitt
+
+- [ ] 1. Datenmodell: EDL-Schema v3
+  - [ ] `crates/apx-pipeline/src/edl/v3.rs`: `Mask` (id, name, kind, geometrie-spezifische Felder je Maskentyp, `adjustments` mit denselben Sektionen wie ein Preset ohne Reparatur/Objektiv/Effekte/Kalibrierung/Geometrie, opacity, feather, invert, blend_mode, group_id, visible, overlay_color), `MaskKind`-Enum (Brush/LinearGradient/RadialGradient/ColorRange/LuminanceRange), `BlendMode`-Enum; `EdlV3 { ..EdlV2-Felder, masks: Vec<Mask> }`
+  - [ ] `migrate.rs`: `v2_to_v3` (masks startet leer), `from_envelope` probiert v3 zuerst
+  - [ ] Tests: v2→v3-Upgrade-Rundreise, alte v1/v2-`edit_history`-Zeilen laden weiterhin korrekt
+  - [ ] `frontend/src/lib/edl.ts`: gespiegelte TS-Typen + Neutral-Konstanten + Builder
+
+- [ ] 2. Pipeline-Architektur: Maskenalpha-Grundgerüst + Anwenden + Zurückmischen
+  - [ ] Neue Dispatch-Form: Maskenalpha-Berechnung (2D, pro Maskentyp ein eigener kleiner Shader/CPU-Fallback, Ausgabe ein Alpha-Puffer)
+  - [ ] Kombinationslogik (Hinzufügen/Subtrahieren/Schneiden) über mehrere Alpha-Puffer
+  - [ ] Zurückmischen: alpha-gewichtete Interpolation zwischen unverändertem und maskiert-bearbeitetem Bildzustand, mit wählbarem Ebenen-Mischmodus (Normal zuerst, weitere in Schritt 6)
+  - [ ] `develop.rs`: Masken-Stufengruppe nach der bestehenden Phase-4-Pipeline einhängen, pro Maske die bestehenden Fused-Pass-Bausteine mit den Masken-EDL-Werten statt der globalen wiederverwenden
+  - [ ] Test mit einer Test-Maske (voll deckend, ganzes Bild) bestätigt: Ergebnis identisch zu einer globalen Anwendung derselben Werte
+
+- [ ] 3. Maskentyp Linearer Verlauf + Radialer Verlauf
+  - [ ] Analytische Alpha-Funktion (Position relativ zu Start/Ende bzw. Mittelpunkt/Radien), GPU/CPU-Parität
+  - [ ] Viewer-Overlay: ziehbare Kontrollpunkte (Linie bzw. Ellipse mit Skalierungs-Griffen)
+
+- [ ] 4. Maskentyp Pinsel
+  - [ ] Stempel-Akkumulation ähnlich `stages/repair.rs`s Pfad-Ansatz, aber als eigenständige weiche Maske (kein Klon-Versatz)
+  - [ ] Viewer-Pinsel-Interaktion (Radius/Weichzeichnung/Deckkraft, Hinzufügen-/Subtrahieren-Modus direkt beim Malen)
+
+- [ ] 5. Maskentyp Farbbereich + Luminanzbereich
+  - [ ] Pro-Pixel-Klassifikation (Farbbereich: Bildklick nimmt Referenzfarbe + Toleranz, teilt Sampling-Code mit der Farbmischer-/WB-Pipette-Infrastruktur aus Phase 4; Luminanzbereich: Schwellwert-Bereich mit weicher Kante)
+
+- [ ] 6. Maskenkombination + vollständige Ebenen-Mischmodi
+  - [ ] Alle in `SPEC.md` genannten Mischmodi (Multiplizieren, Weiches Licht, Farbe, Luminanz, …) im Zurückmisch-Schritt aus Schritt 2 ergänzen, GPU/CPU-Parität je Modus
+
+- [ ] 7. Frontend: Maskenverwaltung + Pro-Maske-Regler
+  - [ ] Neues `MasksPanel.tsx` (Liste, Gruppen, Umbenennen, Sichtbarkeit, Überlagerungsfarbe, Duplizieren, auf anderes Foto übertragen, als wiederverwendbarer Baustein speichern — reuse der Preset-EDL-Teilmengen-Infrastruktur aus Phase 5, Kette mit Drag-&-Drop-Sortierung)
+  - [ ] Pro-Maske-Reglerabschnitt (reuse der bestehenden `DevelopSlider`/`CurveEditor`/`ColorWheel`-Komponenten aus Phase 4, auf das aktive Masken-EDL statt `developEdl` gerichtet)
+
+- [ ] 8. Workflow: Schnappschüsse + Vorher/Nachher
+  - [ ] Schnappschüsse: benannte, klickbare EDL-Zwischenstände zusätzlich zum linearen Verlauf (kleine Erweiterung von `edit_history`/Frontend-Store, kein neues Backend-Konzept nötig — ein Schnappschuss ist ein benannter Verweis auf einen bestehenden Verlaufs-Stand)
+  - [ ] Vorher/Nachher in vier Ansichten (links/rechts, geteilt horizontal/vertikal, oben/unten) im Viewer
+
+- [ ] 9. Workflow: Copy/Paste + Vorherige übernehmen + Sync + Auto-Sync
+  - [ ] Einstellungen kopieren/einfügen mit granularer Sektionsauswahl (derselbe `PresetEdlSubset`-Mechanismus wie Presets, nur direkt aus `developEdl` statt einem gespeicherten Preset)
+  - [ ] Vorherige übernehmen (letzten committeten Stand eines anderen Fotos übernehmen)
+  - [ ] Synchronisieren über die aktuelle Mehrfachauswahl, Auto-Sync-Modus (jede Änderung am aktiven Foto sofort auf die übrige Auswahl übertragen)
+
+- [ ] 10. Workflow: Referenzansicht + Soft-Proof
+  - [ ] Referenzansicht (Referenzbild links, Arbeitsbild rechts, unabhängiger Zoom/Pan)
+  - [ ] Soft-Proof (vereinfacht auf die vorhandenen Farbraum-Grundlagen, siehe ADR-0032 Punkt 6 — kein vollständiges ICC-Profil-Subsystem)
+
+- [ ] 11. Dokumentation, Tests, Abnahme
+  - [ ] `ARCHITECTURE.md`: neues Kapitel „Architektur Phase 6"
+  - [ ] `FEATURES.md`: alle jetzt gebauten §3.3/§3.4-Zeilen auf Fertig
+  - [ ] Performance-Nachmessung (mehrere Masken gleichzeitig gegen das 16-ms-Ziel, siehe ADR-0032 Punkt 4)
+  - [ ] Volle Verifikation, Commit+Push, CI-Check, ehrlicher Abschlussbericht
+
+### Nicht in Phase 6 (bewusst zurückgestellt)
+Siehe ADR-0032: Tiefenbereich-Masken (kein Tiefendaten-Zulieferer, ohne Phasenzuordnung); KI-Masken (Motiv/Himmel/Hintergrund/Objekte/Personen) → Phase 7; Reparatur-Erweiterungen (Auto-Quellenfindung, inhaltsbasiertes Füllen, Sensorflecken-Visualisierung) → Phase 7; Bibliotheks-Backlog (Sammlungssätze, Stapel, virtuelle Kopien, erweiterbare Farbmarkierungen, Schlagworthierarchie, Metadaten-Presets/EXIF-IPTC-XMP-Editor, Vergleichs-/Übersichtsansicht, Filter-Presets, Schnellentwicklung im Raster, Vorschau-Cache/Smart Previews) → Phase 9.

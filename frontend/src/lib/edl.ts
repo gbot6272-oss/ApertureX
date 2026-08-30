@@ -1,18 +1,19 @@
 /**
- * TypeScript-Gegenstück zu `crates/apx-pipeline/src/edl/v2.rs` und
+ * TypeScript-Gegenstück zu `crates/apx-pipeline/src/edl/v3.rs` und
  * `crates/apx-core/src/edl.rs` — von Hand synchron gehalten. Seit Phase 4
  * (Schritt 1, `DECISIONS.md` ADR-0028) ist das EDL deutlich größer als
- * die ursprünglichen sieben Phase-2-Regler; die hier gespiegelten Typen
- * folgen exakt `apx_pipeline::edl::v2`s Struktur- und Feldnamen (`serde`s
- * Standard-Serialisierung, keine Umbenennungen).
+ * die ursprünglichen sieben Phase-2-Regler; seit Phase 6 (Schritt 1,
+ * ADR-0032) kommt das Maskensystem (`masks`/`mask_groups`) hinzu. Die
+ * hier gespiegelten Typen folgen exakt `apx_pipeline::edl::v3`s Struktur-
+ * und Feldnamen (`serde`s Standard-Serialisierung, keine Umbenennungen).
  *
  * Die JSON-Form muss exakt der `serde`-Serialisierung von
- * `apx_pipeline::EdlV2` entsprechen (Feldnamen, Verschachtelung), da
+ * `apx_pipeline::EdlV3` entsprechen (Feldnamen, Verschachtelung), da
  * `crate::edl::migrate::from_envelope` sie strikt gegen die Struktur
  * validiert statt fehlende Felder mit Defaults aufzufüllen.
  */
 
-export const EDL_SCHEMA_VERSION = 2;
+export const EDL_SCHEMA_VERSION = 3;
 
 // ---- Grundeinstellungen (12 Regler: 7 aus Phase 2 + 5 aus Phase 4) --------
 
@@ -600,9 +601,143 @@ export interface RepairStroke {
   opacity: number;
 }
 
+// ---- Masken (Phase 6, siehe DECISIONS.md ADR-0032) --------------------------
+
+export interface MaskPoint {
+  x: number;
+  y: number;
+}
+
+export interface BrushStroke {
+  points: MaskPoint[];
+  radius: number;
+  feather: number;
+}
+
+/** Spiegelt Rusts intern getaggtes `#[serde(tag = "kind")]`-Enum — die
+ * fünf `SPEC.md` §5 genannten Maskentypen (Tiefenbereich/KI-Masken sind
+ * bewusst nicht Teil dieses Schemas, siehe ADR-0032 Punkt 3). */
+export type MaskGeometry =
+  | { kind: "Brush"; strokes: BrushStroke[] }
+  | { kind: "LinearGradient"; x1: number; y1: number; x2: number; y2: number }
+  | {
+      kind: "RadialGradient";
+      center_x: number;
+      center_y: number;
+      radius_x: number;
+      radius_y: number;
+      angle_degrees: number;
+      feather: number;
+    }
+  | { kind: "ColorRange"; target_r: number; target_g: number; target_b: number; tolerance: number; feather: number }
+  | { kind: "LuminanceRange"; range_min: number; range_max: number; feather: number };
+
+export function emptyBrushGeometry(): MaskGeometry {
+  return { kind: "Brush", strokes: [] };
+}
+
+export type MaskCombine = "Add" | "Subtract" | "Intersect";
+
+export interface MaskComponent {
+  geometry: MaskGeometry;
+  combine: MaskCombine;
+  invert: boolean;
+}
+
+/** Die ton-/farb-/detailbezogenen Werkzeuge, die pro Maske zur Verfügung
+ * stehen (`DECISIONS.md` ADR-0032 Punkt 2) — bewusst ohne
+ * Objektivkorrekturen/Effekte/Kalibrierung/Geometrie/Reparatur. */
+export interface MaskAdjustments {
+  basic: BasicAdjustments;
+  curves: CurvesAdjustment;
+  hsl: HslAdjustment;
+  color_mixer: ColorMixerAdjustment;
+  color_grading: ColorGradingAdjustment;
+  details: DetailsAdjustment;
+}
+
+export function neutralMaskAdjustments(): MaskAdjustments {
+  return {
+    basic: NEUTRAL_BASIC_ADJUSTMENTS,
+    curves: neutralCurves(),
+    hsl: NEUTRAL_HSL,
+    color_mixer: neutralColorMixer(),
+    color_grading: NEUTRAL_COLOR_GRADING,
+    details: NEUTRAL_DETAILS,
+  };
+}
+
+/** `SPEC.md` §5: „Normal" plus die namentlich genannten Beispiele
+ * (Multiplizieren, Weiches Licht, Farbe, Luminanz). */
+export type BlendMode = "Normal" | "Multiply" | "SoftLight" | "Color" | "Luminosity";
+
+export const BLEND_MODE_OPTIONS: ReadonlyArray<{ value: BlendMode; label: string }> = [
+  { value: "Normal", label: "Normal" },
+  { value: "Multiply", label: "Multiplizieren" },
+  { value: "SoftLight", label: "Weiches Licht" },
+  { value: "Color", label: "Farbe" },
+  { value: "Luminosity", label: "Luminanz" },
+];
+
+export type OverlayColor = "Red" | "Green" | "Blue" | "Yellow" | "Magenta";
+
+export const OVERLAY_COLOR_OPTIONS: ReadonlyArray<{ value: OverlayColor; label: string }> = [
+  { value: "Red", label: "Rot" },
+  { value: "Green", label: "Grün" },
+  { value: "Blue", label: "Blau" },
+  { value: "Yellow", label: "Gelb" },
+  { value: "Magenta", label: "Magenta" },
+];
+
+/** Eine lokale Anpassung (`SPEC.md` §3.3) — `id` clientseitig vergeben
+ * (Masken leben ausschließlich im opaken EDL-JSON-Blob, nie als eigene
+ * Katalogzeile). */
+export interface Mask {
+  id: string;
+  name: string;
+  components: MaskComponent[];
+  adjustments: MaskAdjustments;
+  opacity: number;
+  feather: number;
+  invert: boolean;
+  blend_mode: BlendMode;
+  visible: boolean;
+  group_id: string | null;
+  overlay_color: OverlayColor;
+}
+
+/** Eine neue, leere Pinsel-Maske mit neutralen Anpassungen — der
+ * Startzustand beim Anlegen einer Maske im Frontend. */
+export function newBrushMask(id: string, name: string): Mask {
+  return {
+    id,
+    name,
+    components: [{ geometry: emptyBrushGeometry(), combine: "Add", invert: false }],
+    adjustments: neutralMaskAdjustments(),
+    opacity: 100,
+    feather: 0,
+    invert: false,
+    blend_mode: "Normal",
+    visible: true,
+    group_id: null,
+    overlay_color: "Red",
+  };
+}
+
+export interface MaskGroup {
+  id: string;
+  name: string;
+  visible: boolean;
+}
+
+export const MASK_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "opacity", label: "Maske: Deckkraft", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 100 },
+  { key: "feather", label: "Maske: Weichzeichnung", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+];
+
 // ---- Der vollständige EDL-Payload -------------------------------------------
 
-/** Spiegelt `apx_pipeline::edl::v2::EdlV2` — der komplette Inhalt eines
+/** Spiegelt `apx_pipeline::edl::v3::EdlV3` — der komplette Inhalt eines
  * `EdlEnvelope.payload`. */
 export interface EdlPayload {
   basic: BasicAdjustments;
@@ -616,6 +751,8 @@ export interface EdlPayload {
   calibration: CalibrationAdjustment;
   geometry: GeometryAdjustment;
   repair: RepairStroke[];
+  masks: Mask[];
+  mask_groups: MaskGroup[];
 }
 
 export function neutralEdlPayload(): EdlPayload {
@@ -631,6 +768,8 @@ export function neutralEdlPayload(): EdlPayload {
     calibration: neutralCalibration(),
     geometry: NEUTRAL_GEOMETRY,
     repair: [],
+    masks: [],
+    mask_groups: [],
   };
 }
 

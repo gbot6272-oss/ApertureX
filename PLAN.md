@@ -538,11 +538,11 @@ Ebenen-Mischmodus zurückmischen.
   - [x] `ARCHITECTURE.md` §7s Phase-6/7-Zeilen präzisiert
   - [x] `PLAN.md`: dieser Abschnitt
 
-- [ ] 1. Datenmodell: EDL-Schema v3
-  - [ ] `crates/apx-pipeline/src/edl/v3.rs`: `Mask` (id, name, kind, geometrie-spezifische Felder je Maskentyp, `adjustments` mit denselben Sektionen wie ein Preset ohne Reparatur/Objektiv/Effekte/Kalibrierung/Geometrie, opacity, feather, invert, blend_mode, group_id, visible, overlay_color), `MaskKind`-Enum (Brush/LinearGradient/RadialGradient/ColorRange/LuminanceRange), `BlendMode`-Enum; `EdlV3 { ..EdlV2-Felder, masks: Vec<Mask> }`
-  - [ ] `migrate.rs`: `v2_to_v3` (masks startet leer), `from_envelope` probiert v3 zuerst
-  - [ ] Tests: v2→v3-Upgrade-Rundreise, alte v1/v2-`edit_history`-Zeilen laden weiterhin korrekt
-  - [ ] `frontend/src/lib/edl.ts`: gespiegelte TS-Typen + Neutral-Konstanten + Builder
+- [x] 1. Datenmodell: EDL-Schema v3
+  - [x] `crates/apx-pipeline/src/edl/v3.rs`: `Mask` (id, name, `components: Vec<MaskComponent>` — jede Komponente eigene Geometrie + `MaskCombine` + `invert`, `adjustments: MaskAdjustments` mit Grundeinstellungen/Kurven/HSL/Farbmischer/Color Grading/Details, opacity, feather, invert, blend_mode, group_id, visible, overlay_color), `MaskGeometry`-Enum (Brush/LinearGradient/RadialGradient/ColorRange/LuminanceRange), `BlendMode`-Enum (Normal/Multiply/SoftLight/Color/Luminosity), `MaskGroup`; `EdlV3 { ..EdlV2-Felder, masks: Vec<Mask>, mask_groups: Vec<MaskGroup> }` — feingranularer als ursprünglich geplant: eine Maske besteht aus mehreren kombinierbaren Komponenten (`SPEC.md` §5 „Maskenkombination" als eigener Punkt, nicht nur ein Maskentyp pro Maske)
+  - [x] `migrate.rs`: `v2_to_v3`/`from_v2` (masks/mask_groups starten leer), `from_envelope` probiert v3 zuerst, danach v2, danach v1 (alle drei Versionen bleiben lesbar)
+  - [x] Tests: v1→v3- und v2→v3-Upgrade-Rundreise, Mask-JSON-Roundtrip mit mehreren Komponententypen
+  - [x] `frontend/src/lib/edl.ts`: gespiegelte TS-Typen (`Mask`, `MaskGeometry`, `MaskComponent`, `MaskAdjustments`, `BlendMode`, `MaskGroup`) + Neutral-Konstanten + `newBrushMask`/`emptyBrushGeometry`-Builder; `PresetSectionKey` (Phase 5) schließt `masks`/`mask_groups` mit aus (dieselbe Begründung wie bei `repair`)
 
 - [ ] 2. Pipeline-Architektur: Maskenalpha-Grundgerüst + Anwenden + Zurückmischen
   - [ ] Neue Dispatch-Form: Maskenalpha-Berechnung (2D, pro Maskentyp ein eigener kleiner Shader/CPU-Fallback, Ausgabe ein Alpha-Puffer)

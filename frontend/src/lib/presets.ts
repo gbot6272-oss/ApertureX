@@ -4,11 +4,12 @@ import type { EdlPayload } from "./edl";
 /**
  * Presets (Phase 5, siehe `DECISIONS.md` ADR-0031) — ein Preset speichert
  * eine *Teilmenge* der EDL-Sektionen, nicht das komplette `EdlPayload`.
- * Reparatur ist bewusst nie Teil eines Presets (bildspezifische
- * Klon-/Reparatur-Striche sind kein „Look", der auf ein anderes Foto
- * übertragbar wäre).
+ * Reparatur und Masken sind bewusst nie Teil eines Presets (bildspezifische
+ * Klon-/Reparatur-Striche und lokale Masken-Geometrie — z. B. ein Pinsel-
+ * Strich an einer bestimmten Bildposition — sind kein „Look", der auf ein
+ * anderes Foto übertragbar wäre; siehe auch `DECISIONS.md` ADR-0032).
  */
-export type PresetSectionKey = Exclude<keyof EdlPayload, "repair">;
+export type PresetSectionKey = Exclude<keyof EdlPayload, "repair" | "masks" | "mask_groups">;
 
 export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [
   "basic",

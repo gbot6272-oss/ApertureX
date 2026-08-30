@@ -6,13 +6,17 @@ import {
   buildEdlEnvelopeJson,
   clampSliderValue,
   EDL_SCHEMA_VERSION,
+  emptyBrushGeometry,
   NEUTRAL_BASIC_ADJUSTMENTS,
   neutralEdlPayload,
+  neutralMaskAdjustments,
+  newBrushMask,
   parseEdlEnvelopeJson,
   readBasicField,
   WHITE_BALANCE_PRESETS,
   writeBasicField,
   type BasicAdjustments,
+  type Mask,
 } from "./edl";
 
 describe("buildEdlEnvelopeJson / parseEdlEnvelopeJson", () => {
@@ -195,5 +199,41 @@ describe("neutralEdlPayload (Phase 4, Schritt 1)", () => {
     const { lens_corrections } = neutralEdlPayload();
     expect(lens_corrections.profile_id).toBeNull();
     expect(lens_corrections.upright_mode).toBe("Off");
+  });
+
+  it("starts with no masks and no mask groups", () => {
+    const payload = neutralEdlPayload();
+    expect(payload.masks).toEqual([]);
+    expect(payload.mask_groups).toEqual([]);
+  });
+});
+
+describe("Masken (Phase 6)", () => {
+  it("newBrushMask() has one empty brush component and neutral adjustments", () => {
+    const mask = newBrushMask("mask-1", "Neue Maske");
+    expect(mask.components).toEqual([{ geometry: { kind: "Brush", strokes: [] }, combine: "Add", invert: false }]);
+    expect(mask.adjustments).toEqual(neutralMaskAdjustments());
+    expect(mask.visible).toBe(true);
+    expect(mask.blend_mode).toBe("Normal");
+  });
+
+  it("roundtrips a mask with multiple component types through JSON", () => {
+    const mask: Mask = {
+      ...newBrushMask("mask-2", "Himmel"),
+      components: [
+        { geometry: { kind: "LinearGradient", x1: 0, y1: 0, x2: 1, y2: 1 }, combine: "Add", invert: false },
+        {
+          geometry: { kind: "ColorRange", target_r: 0.8, target_g: 0.2, target_b: 0.2, tolerance: 0.1, feather: 0.2 },
+          combine: "Intersect",
+          invert: true,
+        },
+      ],
+    };
+    const json = JSON.stringify(mask);
+    expect(JSON.parse(json)).toEqual(mask);
+  });
+
+  it("emptyBrushGeometry() tags itself with kind 'Brush'", () => {
+    expect(emptyBrushGeometry()).toEqual({ kind: "Brush", strokes: [] });
   });
 });

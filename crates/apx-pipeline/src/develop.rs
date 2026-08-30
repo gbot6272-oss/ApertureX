@@ -13,7 +13,7 @@ use apx_raw::LinearImage;
 
 use crate::color::linear_camera_rgb_to_srgb_rgba8;
 use crate::edl::{
-    CalibrationAdjustment, ColorGradingAdjustment, CurvesAdjustment, DetailsAdjustment, EdlV2,
+    CalibrationAdjustment, ColorGradingAdjustment, CurvesAdjustment, DetailsAdjustment, EdlV3,
     EffectsAdjustment, GeometryAdjustment, HslAdjustment,
 };
 use crate::error::Result;
@@ -69,7 +69,7 @@ pub struct RenderedImage {
 pub fn render_rgba8(
     ctx: Option<&GpuContext>,
     linear: &LinearImage,
-    edl: &EdlV2,
+    edl: &EdlV3,
 ) -> Result<RenderedImage> {
     let basic = &edl.basic;
     let wb_gains = white_balance::compute_gains(linear.as_shot_wb_coeffs, basic.white_balance);
@@ -309,7 +309,7 @@ pub fn render_rgba8(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::edl::{BasicAdjustments, EdlV2, WhiteBalanceAdjustment};
+    use crate::edl::{BasicAdjustments, EdlV3, WhiteBalanceAdjustment};
 
     const IDENTITY: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn neutral_edl_produces_correctly_sized_opaque_output() {
         let linear = flat_gray_linear_image(0.5);
-        let rendered = render_rgba8(None, &linear, &EdlV2::neutral()).expect("sollte rendern");
+        let rendered = render_rgba8(None, &linear, &EdlV3::neutral()).expect("sollte rendern");
         assert_eq!(rendered.width, 2);
         assert_eq!(rendered.height, 2);
         assert_eq!(rendered.pixels.len(), 2 * 2 * 4);
@@ -338,13 +338,13 @@ mod tests {
     #[test]
     fn negative_exposure_darkens_output() {
         let linear = flat_gray_linear_image(0.5);
-        let neutral = render_rgba8(None, &linear, &EdlV2::neutral()).expect("rendern");
-        let darker_edl = EdlV2 {
+        let neutral = render_rgba8(None, &linear, &EdlV3::neutral()).expect("rendern");
+        let darker_edl = EdlV3 {
             basic: BasicAdjustments {
                 exposure_ev: -2.0,
                 ..BasicAdjustments::NEUTRAL
             },
-            ..EdlV2::neutral()
+            ..EdlV3::neutral()
         };
         let darker = render_rgba8(None, &linear, &darker_edl).expect("rendern");
         assert!(
@@ -365,13 +365,13 @@ mod tests {
             }
         };
         let linear = flat_gray_linear_image(0.4);
-        let edl = EdlV2 {
+        let edl = EdlV3 {
             basic: BasicAdjustments {
                 exposure_ev: 0.3,
                 contrast: 15.0,
                 ..BasicAdjustments::NEUTRAL
             },
-            ..EdlV2::neutral()
+            ..EdlV3::neutral()
         };
         let cpu = render_rgba8(None, &linear, &edl).expect("CPU-Rendering");
         let gpu = render_rgba8(Some(&ctx), &linear, &edl).expect("GPU-Rendering");
@@ -412,7 +412,7 @@ mod tests {
             as_shot_wb_coeffs: [1.05, 1.0, 0.9, 1.0],
             cam_to_srgb: IDENTITY,
         };
-        let edl = EdlV2 {
+        let edl = EdlV3 {
             basic: BasicAdjustments {
                 exposure_ev: 0.4,
                 contrast: 15.0,
@@ -426,7 +426,7 @@ mod tests {
                 },
                 ..BasicAdjustments::NEUTRAL
             },
-            ..EdlV2::neutral()
+            ..EdlV3::neutral()
         };
 
         if let Some(ctx) = &ctx {
@@ -495,7 +495,7 @@ mod tests {
             PrimaryColorAdjustment, RepairMode, RepairPoint, RepairStroke,
         };
 
-        let edl = EdlV2 {
+        let edl = EdlV3 {
             basic: BasicAdjustments {
                 exposure_ev: 0.4,
                 contrast: 15.0,
@@ -602,6 +602,8 @@ mod tests {
                 feather: 0.01,
                 opacity: 1.0,
             }],
+            masks: Vec::new(),
+            mask_groups: Vec::new(),
         };
 
         if let Some(ctx) = &ctx {

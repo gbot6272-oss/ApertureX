@@ -7,6 +7,7 @@ import { FilterBar } from "./components/FilterBar";
 import { Filmstrip } from "./components/Filmstrip";
 import { GridView } from "./components/GridView";
 import { Header } from "./components/Header";
+import { MasksPanel } from "./components/MasksPanel";
 import { MetadataPanel } from "./components/MetadataPanel";
 import { PresetsPanel } from "./components/PresetsPanel";
 import { Sidebar } from "./components/Sidebar";
@@ -123,6 +124,7 @@ export default function App() {
         {centerView === "grid" ? <GridView /> : <Viewer />}
         <MetadataPanel />
         <DevelopPanel />
+        <MasksPanel />
       </div>
       <Filmstrip />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />

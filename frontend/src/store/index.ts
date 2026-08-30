@@ -1,8 +1,20 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
-import { buildEdlEnvelopeJson, MAX_COLOR_MIXER_REGIONS, neutralEdlPayload, newColorMixerRegion, parseEdlEnvelopeJson, WHITE_BALANCE_PRESETS, writeBasicField } from "../lib/edl";
-import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, PrimaryColorAdjustment, RepairMode, RepairPoint, UprightMode } from "../lib/edl";
+import {
+  buildEdlEnvelopeJson,
+  defaultLinearGradientGeometry,
+  defaultRadialGradientGeometry,
+  emptyBrushGeometry,
+  MAX_COLOR_MIXER_REGIONS,
+  neutralEdlPayload,
+  newColorMixerRegion,
+  newMask,
+  parseEdlEnvelopeJson,
+  WHITE_BALANCE_PRESETS,
+  writeBasicField,
+} from "../lib/edl";
+import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, MaskGeometry, PrimaryColorAdjustment, RepairMode, RepairPoint, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import {
   applyConditionsToSubset,
@@ -568,7 +580,38 @@ interface PresetsSlice {
   clearPresetHoverPreview: () => void;
 }
 
-export type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice & LibrarySlice & PresetsSlice;
+// ---- Masken-Slice (ab Phase 6, siehe DECISIONS.md ADR-0032) ----------------
+
+/** Masken leben als Teil von `developEdl.masks` (siehe `lib/edl.ts`s
+ * `Mask`) — dieser Slice ergänzt nur Auswahl-/Interaktionszustand plus
+ * die Aktionen, die `developEdl.masks` verändern. Wie bei Reparatur
+ * (Phase 4) committen diskrete Aktionen (Anlegen/Löschen/Sichtbarkeit)
+ * sofort; Geometrie-Änderungen während des Ziehens im Viewer mutieren nur
+ * `developEdl` (Live-Vorschau über `useDevelopRender`), `commitMaskDrag`
+ * committet erst beim Loslassen — dieselbe onChange/onCommit-Trennung wie
+ * bei jedem `DevelopSlider`. */
+interface MasksSlice {
+  selectedMaskId: string | null;
+  selectMask: (maskId: string | null) => void;
+  /** Legt eine neue Maske mit einer einzelnen Startkomponente des
+   * gewählten Geometrietyps an, wählt sie aus und committet sofort. */
+  addMask: (kind: "LinearGradient" | "RadialGradient" | "Brush") => void;
+  removeMask: (maskId: string) => void;
+  setMaskVisible: (maskId: string, visible: boolean) => void;
+  renameMask: (maskId: string, name: string) => void;
+  /** Aktualisiert die Geometrie der ersten Komponente einer Maske
+   * (Schritt 3 unterstützt nur eine Komponente je Maske — Mehrfach-
+   * Komponenten-UI ist Schritt 6) — nur Live-Zustand, kein Commit. */
+  updateMaskGeometry: (maskId: string, geometry: MaskGeometry) => void;
+  /** Committet den zuletzt per `updateMaskGeometry` gesetzten Zwischenwert
+   * (Loslassen eines Ziehgriffs im Viewer). */
+  commitMaskDrag: () => void;
+  setMaskOpacity: (maskId: string, opacity: number) => void;
+  setMaskFeather: (maskId: string, feather: number) => void;
+  setMaskBasicField: (maskId: string, key: string, value: number) => void;
+}
+
+export type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice & LibrarySlice & PresetsSlice & MasksSlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -1920,6 +1963,86 @@ export const useAppStore = create<AppStore>()(
     clearPresetHoverPreview: () => {
       set((state) => {
         state.hoverPresetSubset = null;
+      });
+    },
+
+    selectedMaskId: null,
+
+    selectMask: (maskId) => {
+      set((state) => {
+        state.selectedMaskId = maskId;
+      });
+    },
+
+    addMask: (kind) => {
+      const id = `mask-${crypto.randomUUID()}`;
+      const geometry: MaskGeometry =
+        kind === "LinearGradient" ? defaultLinearGradientGeometry() : kind === "RadialGradient" ? defaultRadialGradientGeometry() : emptyBrushGeometry();
+      const name = kind === "LinearGradient" ? "Linearer Verlauf" : kind === "RadialGradient" ? "Radialer Verlauf" : "Pinsel";
+      set((state) => {
+        state.developEdl.masks.push(newMask(id, name, geometry));
+        state.selectedMaskId = id;
+      });
+      void get().commitDevelopEdit(`Maske „${name}" hinzugefügt`);
+    },
+
+    removeMask: (maskId) => {
+      set((state) => {
+        const index = state.developEdl.masks.findIndex((m) => m.id === maskId);
+        if (index >= 0) state.developEdl.masks.splice(index, 1);
+        if (state.selectedMaskId === maskId) state.selectedMaskId = null;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    setMaskVisible: (maskId, visible) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (mask) mask.visible = visible;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    renameMask: (maskId, name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (mask) mask.name = trimmed;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    updateMaskGeometry: (maskId, geometry) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        const component = mask?.components[0];
+        if (component) component.geometry = geometry;
+      });
+    },
+
+    commitMaskDrag: () => {
+      void get().commitDevelopEdit();
+    },
+
+    setMaskOpacity: (maskId, opacity) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (mask) mask.opacity = opacity;
+      });
+    },
+
+    setMaskFeather: (maskId, feather) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (mask) mask.feather = feather;
+      });
+    },
+
+    setMaskBasicField: (maskId, key, value) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (mask) writeBasicField(mask.adjustments.basic, key, value);
       });
     },
     };

@@ -11,6 +11,7 @@ import { clampZoom, computeBaseScale, imageOrigin, nextZoomStep, panForZoomAtCur
 import { QuadRenderer } from "../lib/webgl";
 import { useAppStore } from "../store";
 import { CropOverlay } from "./CropOverlay";
+import { MaskOverlay } from "./MaskOverlay";
 import { RepairOverlay } from "./RepairOverlay";
 
 // Zielkante für die hochauflösende Anzeige: an der Container-Größe
@@ -48,6 +49,10 @@ export function Viewer() {
   const repairPendingSource = useAppStore((s) => s.repairPendingSource);
   const setRepairSourcePoint = useAppStore((s) => s.setRepairSourcePoint);
   const addRepairStroke = useAppStore((s) => s.addRepairStroke);
+  const selectedMaskId = useAppStore((s) => s.selectedMaskId);
+  const selectedMask = useAppStore((s) => s.developEdl.masks.find((m) => m.id === selectedMaskId) ?? null);
+  const updateMaskGeometry = useAppStore((s) => s.updateMaskGeometry);
+  const commitMaskDrag = useAppStore((s) => s.commitMaskDrag);
   const removeRepairStroke = useAppStore((s) => s.removeRepairStroke);
   const commitDevelopEdit = useAppStore((s) => s.commitDevelopEdit);
 
@@ -327,6 +332,22 @@ export function Viewer() {
           onRemoveStroke={removeRepairStroke}
         />
       )}
+
+      {photo &&
+        selectedMask &&
+        (selectedMask.components[0]?.geometry.kind === "LinearGradient" || selectedMask.components[0]?.geometry.kind === "RadialGradient") &&
+        imgW > 0 &&
+        imgH > 0 && (
+          <MaskOverlay
+            imageLeft={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).x}
+            imageTop={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).y}
+            imageWidth={imgW * effectiveScale}
+            imageHeight={imgH * effectiveScale}
+            geometry={selectedMask.components[0].geometry}
+            onChange={(geometry) => updateMaskGeometry(selectedMask.id, geometry)}
+            onCommit={commitMaskDrag}
+          />
+        )}
 
       {photo && (
         <div className="pointer-events-none absolute right-3 bottom-3 rounded bg-bg-raised/90 px-3 py-2 text-xs text-text-secondary backdrop-blur">

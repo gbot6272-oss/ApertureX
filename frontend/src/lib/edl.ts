@@ -706,13 +706,14 @@ export interface Mask {
   overlay_color: OverlayColor;
 }
 
-/** Eine neue, leere Pinsel-Maske mit neutralen Anpassungen — der
- * Startzustand beim Anlegen einer Maske im Frontend. */
-export function newBrushMask(id: string, name: string): Mask {
+/** Eine neue Maske mit einer einzelnen Startkomponente und neutralen
+ * Anpassungen — der Startzustand beim Anlegen einer Maske im Frontend,
+ * unabhängig vom Geometrietyp. */
+export function newMask(id: string, name: string, geometry: MaskGeometry): Mask {
   return {
     id,
     name,
-    components: [{ geometry: emptyBrushGeometry(), combine: "Add", invert: false }],
+    components: [{ geometry, combine: "Add", invert: false }],
     adjustments: neutralMaskAdjustments(),
     opacity: 100,
     feather: 0,
@@ -721,6 +722,31 @@ export function newBrushMask(id: string, name: string): Mask {
     visible: true,
     group_id: null,
     overlay_color: "Red",
+  };
+}
+
+export function newBrushMask(id: string, name: string): Mask {
+  return newMask(id, name, emptyBrushGeometry());
+}
+
+/** Senkrechter Verlauf über das mittlere Drittel des Bildes — ein
+ * plausibler Startzustand, den der Nutzer danach per Ziehgriffen im
+ * Viewer verschiebt (Phase 6 Schritt 3). */
+export function defaultLinearGradientGeometry(): MaskGeometry {
+  return { kind: "LinearGradient", x1: 0.5, y1: 0.2, x2: 0.5, y2: 0.8 };
+}
+
+/** Zentrierter Radialverlauf über etwa ein Drittel der kürzeren
+ * Bildkante — derselbe Zweck wie [`defaultLinearGradientGeometry`]. */
+export function defaultRadialGradientGeometry(): MaskGeometry {
+  return {
+    kind: "RadialGradient",
+    center_x: 0.5,
+    center_y: 0.5,
+    radius_x: 0.3,
+    radius_y: 0.3,
+    angle_degrees: 0,
+    feather: 0.5,
   };
 }
 

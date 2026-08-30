@@ -183,6 +183,8 @@ fn main() {
             commands::cancel_export_job,
             commands::clear_finished_export_jobs,
             commands::pick_file_path,
+            commands::pick_save_file_path,
+            commands::print_photos,
         ])
         .run(tauri::generate_context!())
         .expect("Fehler beim Starten von Aperture X");

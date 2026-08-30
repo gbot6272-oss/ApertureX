@@ -20,6 +20,7 @@ pub mod error;
 pub mod format;
 pub mod icc;
 pub mod metadata;
+pub mod print;
 pub mod queue;
 pub mod resize;
 pub mod sharpen;

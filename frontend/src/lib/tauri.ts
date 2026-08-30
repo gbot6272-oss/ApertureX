@@ -593,3 +593,42 @@ export function clearFinishedExportJobs(): Promise<void> {
 export function pickFilePath(filterName: string, extensions: string[]): Promise<string | null> {
   return invoke<string | null>("pick_file_path", { filterName, extensions });
 }
+
+/** Speichern-unter-Dialog (Drucken/Buch) — gibt den gewählten Zielpfad
+ * zurück, `null` wenn abgebrochen. */
+export function pickSaveFilePath(filterName: string, extensions: string[], defaultFileName: string): Promise<string | null> {
+  return invoke<string | null>("pick_save_file_path", { filterName, extensions, defaultFileName });
+}
+
+// ---- Drucken (Phase 8 Schritt 3) -------------------------------------------
+
+export type PrintLayoutKind = "single" | "contact_sheet" | "custom_grid" | "picture_package";
+export type PrintFit = "contain" | "cover";
+export type PicturePackageTemplate = "one_large_two_small" | "four_equal" | "eight_wallet";
+
+export interface PrintLayoutOptions {
+  layout: PrintLayoutKind;
+  cols?: number;
+  rows?: number;
+  picturePackageTemplate?: PicturePackageTemplate;
+  pageWidthIn: number;
+  pageHeightIn: number;
+  dpi: number;
+  marginIn?: number;
+  gapIn?: number;
+  fit?: PrintFit;
+  backgroundRgb?: [number, number, number];
+  sharpenAmount?: number;
+  sharpenRadius?: number;
+  iccProfile?: IccProfileChoice;
+  iccProfilePath?: string;
+}
+
+/** Rendert `photoIds` (eines je Layout-Zelle) auf eine gemeinsame
+ * Druckseite und schreibt sie als JPEG nach `destPath` — wiederverwendet
+ * dieselbe Export-Engine wie {@link exportPhoto} (siehe
+ * `apx_export::print`s Moduldoku). Kein System-Druckdialog in dieser
+ * Phase, siehe ADR-0034. */
+export function printPhotos(photoIds: string[], destPath: string, options: PrintLayoutOptions): Promise<ExportOutcomeDto> {
+  return invoke<ExportOutcomeDto>("print_photos", { photoIds, destPath, options });
+}

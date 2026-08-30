@@ -249,10 +249,10 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [ ] Video-Export (MP4 via ffmpeg) — Phase 8 — Status: Nicht begonnen
 
 ### Drucken
-- [ ] Einzelbild, Kontaktbogen, Bilderpaket, benutzerdefiniertes Raster — Phase 8 — Status: Nicht begonnen
-- [ ] Randeinstellungen, Zellen, Zoom — Phase 8 — Status: Nicht begonnen
-- [ ] Druckschärfung, Farbmanagement, Druckauflösung — Phase 8 — Status: Nicht begonnen
-- [ ] Speichern als JPEG — Phase 8 — Status: Nicht begonnen
+- [x] Einzelbild, Kontaktbogen, Bilderpaket, benutzerdefiniertes Raster — Phase 8 — Status: Fertig (abweichend, siehe ADR-0034/PLAN.md Schritt 3) — Bilderpaket nutzt drei feste Vorlagen statt echtem Bin-Packing beliebiger Formate
+- [x] Randeinstellungen, Zellen, Zoom — Phase 8 — Status: Fertig — Rand/Zellabstand in Zoll, Zoom als Einpassen/Füllen-Beschneiden
+- [x] Druckschärfung, Farbmanagement, Druckauflösung — Phase 8 — Status: Fertig — nutzt die Export-Engine aus Schritt 1/2 (Unsharp-Masking, ICC-Profile) je Foto vor der Seitenkomposition; Druckauflösung als DPI-Parameter zusammen mit den Seitenmaßen
+- [x] Speichern als JPEG — Phase 8 — Status: Fertig — kein System-Druckertreiber-Zugriff, Ausgabe ist eine druckfertige JPEG-Datei über einen Speichern-unter-Dialog
 
 ### Web
 - [ ] HTML-/responsive Galerie-Generator, Themes — Phase 8 — Status: Nicht begonnen

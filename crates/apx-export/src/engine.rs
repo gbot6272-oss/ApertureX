@@ -121,6 +121,53 @@ pub fn render_and_encode(
     ctx: Option<&GpuContext>,
     request: &ExportRequest,
 ) -> Result<ExportOutcome> {
+    let (target_w, target_h, final_pixels) = render_to_pixels(ctx, request)?;
+
+    let bytes = match (request.format, request.max_file_size_bytes) {
+        (ExportFormat::Jpeg, Some(max_bytes)) => {
+            resize::fit_jpeg_to_max_bytes(target_w, target_h, &final_pixels, max_bytes)?
+        }
+        _ => encode_rgba8(
+            target_w,
+            target_h,
+            &final_pixels,
+            request.format,
+            &EncodeOptions {
+                quality: request.quality,
+                bit_depth: request.bit_depth,
+            },
+        )?,
+    };
+
+    // Metadaten-Filter (Schritt 2) — nur JPEG unterstützt das Einbetten
+    // bislang, siehe `metadata.rs`s Moduldoku.
+    let bytes = if request.format == ExportFormat::Jpeg {
+        match metadata::build_exif_app1_segment(&request.metadata) {
+            Some(segment) => metadata::embed_into_jpeg(&bytes, &segment)?,
+            None => bytes,
+        }
+    } else {
+        bytes
+    };
+
+    Ok(ExportOutcome {
+        width: target_w,
+        height: target_h,
+        bytes,
+    })
+}
+
+/// Rendert + verkleinert + schärft + wendet ICC-Farbmanagement/
+/// Wasserzeichen an — alles bis kurz vor der formatspezifischen Kodierung.
+/// Öffentlich (nicht nur intern von [`render_and_encode`] genutzt), damit
+/// das Druck-Modul (`print.rs`, Schritt 3) mehrere Fotos zu einer
+/// gemeinsamen Seite zusammensetzen kann, bevor überhaupt kodiert wird —
+/// eine Druckseite ist eine einzige Bilddatei, kein Ordner mit
+/// Einzelexporten.
+pub fn render_to_pixels(
+    ctx: Option<&GpuContext>,
+    request: &ExportRequest,
+) -> Result<(u32, u32, Vec<u8>)> {
     // Volle Auflösung (`max_edge: None`) — ein Export ist kein
     // Vorschau-Vorgang, die Größenbegrenzung passiert gezielt danach über
     // `request.size_constraint`, nicht durch einen verlustbehafteten
@@ -203,38 +250,7 @@ pub fn render_and_encode(
     }
     let final_pixels = watermarked;
 
-    let bytes = match (request.format, request.max_file_size_bytes) {
-        (ExportFormat::Jpeg, Some(max_bytes)) => {
-            resize::fit_jpeg_to_max_bytes(target_w, target_h, &final_pixels, max_bytes)?
-        }
-        _ => encode_rgba8(
-            target_w,
-            target_h,
-            &final_pixels,
-            request.format,
-            &EncodeOptions {
-                quality: request.quality,
-                bit_depth: request.bit_depth,
-            },
-        )?,
-    };
-
-    // Metadaten-Filter (Schritt 2) — nur JPEG unterstützt das Einbetten
-    // bislang, siehe `metadata.rs`s Moduldoku.
-    let bytes = if request.format == ExportFormat::Jpeg {
-        match metadata::build_exif_app1_segment(&request.metadata) {
-            Some(segment) => metadata::embed_into_jpeg(&bytes, &segment)?,
-            None => bytes,
-        }
-    } else {
-        bytes
-    };
-
-    Ok(ExportOutcome {
-        width: target_w,
-        height: target_h,
-        bytes,
-    })
+    Ok((target_w, target_h, final_pixels))
 }
 
 /// Wie [`render_and_encode`], schreibt das Ergebnis aber zusätzlich nach

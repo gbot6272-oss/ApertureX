@@ -4,6 +4,7 @@ import { selectFolderDialog } from "../lib/tauri";
 import { useAppStore } from "../store";
 import { ExportDialog } from "./ExportDialog";
 import { ImportDialog } from "./ImportDialog";
+import { PrintDialog } from "./PrintDialog";
 
 export function Header() {
   const importRunning = useAppStore((s) => s.importRunning);
@@ -22,6 +23,9 @@ export function Header() {
   const exportDialogOpen = useAppStore((s) => s.exportDialogOpen);
   const openExportDialog = useAppStore((s) => s.openExportDialog);
   const closeExportDialog = useAppStore((s) => s.closeExportDialog);
+  const printDialogOpen = useAppStore((s) => s.printDialogOpen);
+  const openPrintDialog = useAppStore((s) => s.openPrintDialog);
+  const closePrintDialog = useAppStore((s) => s.closePrintDialog);
   const [importDialogSource, setImportDialogSource] = useState<string | null>(null);
 
   const exportPhotoIds = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
@@ -137,6 +141,17 @@ export function Header() {
       </button>
 
       <ExportDialog open={exportDialogOpen} photoIds={exportPhotoIds} onClose={closeExportDialog} />
+
+      <button
+        type="button"
+        onClick={openPrintDialog}
+        disabled={exportPhotoIds.length === 0}
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Drucken…
+      </button>
+
+      <PrintDialog open={printDialogOpen} photoIds={exportPhotoIds} onClose={closePrintDialog} />
 
       <span className="text-xs text-text-muted">Strg/Cmd+K — Befehlspalette</span>
     </header>

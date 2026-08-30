@@ -79,6 +79,15 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // `pick_file_path` (ICC-/Schriftdatei/-Wasserzeichenbild-Auswahl) —
     // `null` simuliert einen abgebrochenen Dialog.
     pickFilePathResult: null as string | null,
+    // Drucken (Phase 8 Schritt 3) — Speichern-unter-Dialog + Ergebnis.
+    pickSaveFilePathResult: null as string | null,
+    printOutcome: { path: "/mock/print/Druckseite.jpg", width: 2550, height: 3300, byte_size: 654321 } as {
+      path: string;
+      width: number;
+      height: number;
+      byte_size: number;
+    },
+    printPhotoShouldFail: false,
     ...initialFixtures,
   };
   w.__mockInvokeLog = [] as Array<{ cmd: string; args: unknown }>;
@@ -278,6 +287,9 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       exportPhotoOutcome: { path: string; width: number; height: number; byte_size: number };
       exportPhotoShouldFail: boolean;
       pickFilePathResult: string | null;
+      pickSaveFilePathResult: string | null;
+      printOutcome: { path: string; width: number; height: number; byte_size: number };
+      printPhotoShouldFail: boolean;
     };
 
     switch (cmd) {
@@ -748,6 +760,14 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       }
       case "pick_file_path":
         return fixtures.pickFilePathResult;
+      case "pick_save_file_path":
+        return fixtures.pickSaveFilePathResult;
+      case "print_photos": {
+        if (fixtures.printPhotoShouldFail) {
+          throw new Error("Test-Stub: Drucken fehlgeschlagen");
+        }
+        return fixtures.printOutcome;
+      }
 
       default:
         throw new Error(`Test-Stub: unbekannter invoke-Befehl "${cmd}"`);

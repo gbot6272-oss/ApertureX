@@ -40,6 +40,7 @@ import type {
   AiSettingsDto,
   CatalogStatusDto,
   CollectionDto,
+  ExportOutcomeDto,
   ExportPhotoOptions,
   FilterCriteriaDto,
   FolderDto,
@@ -50,6 +51,7 @@ import type {
   PhotoDto,
   PresetDto,
   PresetFolderDto,
+  PrintLayoutOptions,
   SnapshotDto,
   SpotCandidateDto,
 } from "../lib/tauri";
@@ -978,6 +980,19 @@ interface ExportSlice {
   toggleExportQueuePause: () => Promise<void>;
 }
 
+/** Drucken (Phase 8 Schritt 3) — wiederverwendet die Export-Engine
+ * komplett (`apx_export::print`), rendert also serverseitig; das
+ * Frontend wählt nur Layout/Seitengröße und den Zieldateipfad. */
+interface PrintSlice {
+  printDialogOpen: boolean;
+  openPrintDialog: () => void;
+  closePrintDialog: () => void;
+  printRunning: boolean;
+  printError: string | null;
+  printLastOutcome: ExportOutcomeDto | null;
+  printPhotos: (photoIds: string[], destPath: string, options: PrintLayoutOptions) => Promise<void>;
+}
+
 export type AppStore = CatalogSlice &
   SelectionSlice &
   ViewerSlice &
@@ -987,7 +1002,8 @@ export type AppStore = CatalogSlice &
   PresetsSlice &
   MasksSlice &
   AiSlice &
-  ExportSlice;
+  ExportSlice &
+  PrintSlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -3366,6 +3382,46 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.exportQueuePaused = !paused;
       });
+    },
+
+    // ---- Drucken (Phase 8 Schritt 3) ---------------------------------
+
+    printDialogOpen: false,
+    printRunning: false,
+    printError: null,
+    printLastOutcome: null,
+
+    openPrintDialog: () => {
+      set((state) => {
+        state.printDialogOpen = true;
+      });
+    },
+
+    closePrintDialog: () => {
+      set((state) => {
+        state.printDialogOpen = false;
+      });
+    },
+
+    printPhotos: async (photoIds, destPath, options) => {
+      set((state) => {
+        state.printRunning = true;
+        state.printError = null;
+      });
+      try {
+        const outcome = await api.printPhotos(photoIds, destPath, options);
+        set((state) => {
+          state.printLastOutcome = outcome;
+        });
+      } catch (err) {
+        set((state) => {
+          state.printError = err instanceof Error ? err.message : String(err);
+        });
+      } finally {
+        set((state) => {
+          state.printRunning = false;
+        });
+      }
     },
     };
   }),

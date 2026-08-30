@@ -1766,6 +1766,30 @@ pub async fn pick_file_path(
     Ok(picked.map(|p| p.to_string()))
 }
 
+/// Generischer Speichern-unter-Dialog (Drucken/Buch — eine fertige Datei
+/// statt eines Zielordners). `None`, wenn abgebrochen.
+#[tauri::command]
+pub async fn pick_save_file_path(
+    app: AppHandle,
+    filter_name: String,
+    extensions: Vec<String>,
+    default_file_name: String,
+) -> Result<Option<String>, String> {
+    let extension_refs: Vec<&str> = extensions.iter().map(String::as_str).collect();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter(&filter_name, &extension_refs)
+        .set_file_name(default_file_name)
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|err| format!("Speichern-Dialog fehlgeschlagen: {err}"))?;
+    Ok(picked.map(|p| p.to_string()))
+}
+
 /// Der aktuell aktive EDL-Stand eines Fotos, aufgelöst zu `EdlV3` — dieselbe
 /// Quelle wie `current_develop_edit`, nur direkt als Rust-Wert statt als
 /// JSON-DTO (der Export braucht kein IPC-JSON, er rendert serverseitig).
@@ -2106,6 +2130,177 @@ pub fn clear_finished_export_jobs(state: State<'_, AppState>) -> Result<(), Stri
         .map_err(|_| "Export-Warteschlange nicht erreichbar".to_string())?
         .clear_finished();
     Ok(())
+}
+
+// ---- Drucken (Phase 8 Schritt 3) -------------------------------------------
+//
+// Wiederverwendet die Export-Engine komplett: pro Foto rendert
+// `apx_export::engine::render_to_pixels` (Größenbegrenzung/Wasserzeichen/
+// Metadaten-Filter sind hier bedeutungslos — eine Druckseite exportiert
+// keine Einzeldatei), `apx_export::print` setzt die gerenderten Zellbilder
+// zu einer Seite zusammen, `apx_export::format` kodiert sie als JPEG
+// ("Speichern als JPEG" statt echtem Druckdialog, siehe ADR-0034).
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrintLayoutOptions {
+    /// `"single"`/`"contact_sheet"`/`"custom_grid"`/`"picture_package"`.
+    pub layout: String,
+    pub cols: Option<u32>,
+    pub rows: Option<u32>,
+    /// Nur bei `layout == "picture_package"`: `"one_large_two_small"`/
+    /// `"four_equal"`/`"eight_wallet"`.
+    pub picture_package_template: Option<String>,
+    pub page_width_in: f32,
+    pub page_height_in: f32,
+    pub dpi: u32,
+    pub margin_in: Option<f32>,
+    pub gap_in: Option<f32>,
+    /// `"contain"` (Standard) oder `"cover"`.
+    pub fit: Option<String>,
+    pub background_rgb: Option<[u8; 3]>,
+    pub sharpen_amount: Option<f32>,
+    pub sharpen_radius: Option<f32>,
+    pub icc_profile: Option<String>,
+    pub icc_profile_path: Option<String>,
+}
+
+fn parse_fit_mode(fit: Option<&str>) -> Result<apx_export::print::FitMode, String> {
+    match fit.unwrap_or("contain") {
+        "contain" => Ok(apx_export::print::FitMode::Contain),
+        "cover" => Ok(apx_export::print::FitMode::Cover),
+        other => Err(format!("unbekannter Anpassungsmodus '{other}'")),
+    }
+}
+
+fn resolve_print_slots(
+    options: &PrintLayoutOptions,
+) -> Result<Vec<apx_export::print::PrintSlot>, String> {
+    use apx_export::print::{grid_slots, picture_package_slots, PicturePackageTemplate};
+    match options.layout.as_str() {
+        "single" => Ok(grid_slots(
+            options.page_width_in,
+            options.page_height_in,
+            options.margin_in.unwrap_or(0.25),
+            options.gap_in.unwrap_or(0.1),
+            1,
+            1,
+        )),
+        "contact_sheet" | "custom_grid" => Ok(grid_slots(
+            options.page_width_in,
+            options.page_height_in,
+            options.margin_in.unwrap_or(0.25),
+            options.gap_in.unwrap_or(0.1),
+            options.cols.unwrap_or(1),
+            options.rows.unwrap_or(1),
+        )),
+        "picture_package" => {
+            let template = match options.picture_package_template.as_deref() {
+                Some("one_large_two_small") => PicturePackageTemplate::OneLargeTwoSmall,
+                Some("four_equal") => PicturePackageTemplate::FourEqual,
+                Some("eight_wallet") => PicturePackageTemplate::EightWallet,
+                other => return Err(format!("unbekannte Bilderpaket-Vorlage '{other:?}'")),
+            };
+            Ok(picture_package_slots(template))
+        }
+        other => Err(format!("unbekanntes Drucklayout '{other}'")),
+    }
+}
+
+/// Rendert `photo_ids` (eines je Zelle, überzählige Fotos werden ignoriert
+/// — der Nutzer wählt im Frontend genau so viele Fotos wie das Layout
+/// Zellen hat) auf eine gemeinsame Druckseite und schreibt sie als JPEG
+/// nach `dest_path`.
+#[tauri::command]
+pub fn print_photos(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    dest_path: String,
+    options: PrintLayoutOptions,
+) -> Result<ExportOutcomeDto, String> {
+    let slots = resolve_print_slots(&options)?;
+    let fit = parse_fit_mode(options.fit.as_deref())?;
+
+    let mut rendered_cells: Vec<(u32, u32, Vec<u8>)> = Vec::new();
+    for photo_id in &photo_ids {
+        if rendered_cells.len() >= slots.len() {
+            break;
+        }
+        let photo_id = parse_photo_id(photo_id.clone())?;
+        let photo = state
+            .catalog
+            .get_photo(photo_id)
+            .map_err(|err| err.to_string())?;
+        let folder = state
+            .catalog
+            .get_folder(photo.folder_id)
+            .map_err(|err| err.to_string())?;
+        let edl = resolve_current_edl(&state.catalog, photo_id)?;
+
+        let mut request = apx_export::engine::ExportRequest::new(
+            folder.path.join(&photo.filename),
+            edl,
+            apx_export::format::ExportFormat::Jpeg,
+        );
+        if let Some(amount) = options.sharpen_amount {
+            if amount > 0.0 {
+                request.sharpen = Some((amount, options.sharpen_radius.unwrap_or(1.0)));
+            }
+        }
+        if let Some(profile) = &options.icc_profile {
+            request.icc_target = Some(parse_icc_target(
+                profile,
+                options.icc_profile_path.as_deref(),
+            )?);
+        }
+
+        let (width, height, rgba) =
+            apx_export::engine::render_to_pixels(Some(&state.pipeline), &request)
+                .map_err(|err| err.to_string())?;
+        rendered_cells.push((width, height, rgba));
+    }
+
+    let cells: Vec<apx_export::print::PrintCell> = slots
+        .iter()
+        .zip(rendered_cells.iter())
+        .map(
+            |(slot, (width, height, rgba))| apx_export::print::PrintCell {
+                slot: *slot,
+                width: *width,
+                height: *height,
+                rgba,
+                fit,
+            },
+        )
+        .collect();
+
+    let (page_w, page_h, page_pixels) = apx_export::print::compose_page(
+        options.page_width_in,
+        options.page_height_in,
+        options.dpi,
+        options.background_rgb.unwrap_or([255, 255, 255]),
+        &cells,
+    )
+    .map_err(|err| err.to_string())?;
+
+    let bytes = apx_export::format::encode_rgba8(
+        page_w,
+        page_h,
+        &page_pixels,
+        apx_export::format::ExportFormat::Jpeg,
+        &apx_export::format::EncodeOptions::default(),
+    )
+    .map_err(|err| err.to_string())?;
+
+    std::fs::write(&dest_path, &bytes)
+        .map_err(|err| format!("Datei '{dest_path}' konnte nicht geschrieben werden: {err}"))?;
+
+    Ok(ExportOutcomeDto {
+        path: dest_path,
+        width: page_w,
+        height: page_h,
+        byte_size: bytes.len(),
+    })
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
 import { buildEdlEnvelopeJson, MAX_COLOR_MIXER_REGIONS, neutralEdlPayload, newColorMixerRegion, parseEdlEnvelopeJson, WHITE_BALANCE_PRESETS, writeBasicField } from "../lib/edl";
-import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, PrimaryColorAdjustment, UprightMode } from "../lib/edl";
+import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, PrimaryColorAdjustment, RepairMode, RepairPoint, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
@@ -309,6 +309,33 @@ interface DevelopSlice {
   /** Setzt die Rasterüberlagerung absolut und committet sofort. */
   setGeometryOverlay: (value: GridOverlay) => void;
   setGeometryAutoHorizon: (value: boolean) => void;
+  /** Ob das Reparatur-Werkzeug (Klonen/Reparieren, Phase 4 Schritt 12)
+   * gerade aktiv ist — ein erster Klick im Viewer setzt danach den
+   * Quellpunkt, ein Ziehvorgang malt den Zielpfad (siehe
+   * `components/RepairOverlay.tsx`). */
+  repairActive: boolean;
+  toggleRepairActive: () => void;
+  /** Pinsel-Einstellungen für den *nächsten* Strich — bereits gemalte
+   * Striche behalten ihre zum Malzeitpunkt gültigen Werte unverändert. */
+  repairDraftMode: RepairMode;
+  repairDraftRadius: number;
+  repairDraftFeather: number;
+  repairDraftOpacity: number;
+  setRepairDraftMode: (mode: RepairMode) => void;
+  setRepairDraftField: (key: "radius" | "feather" | "opacity", value: number) => void;
+  /** Der nach dem ersten Klick gesetzte Quellpunkt eines neuen Strichs,
+   * bis der Zielpfad fertig gemalt ist (`null` = als Nächstes wird der
+   * Quellpunkt gesetzt). */
+  repairPendingSource: RepairPoint | null;
+  setRepairSourcePoint: (point: RepairPoint) => void;
+  cancelRepairSource: () => void;
+  /** Schließt den aktuellen Strich ab (Quellpunkt + gemalter, bereits
+   * ausgedünnter Zielpfad + aktuelle Pinsel-Einstellungen) und committet
+   * sofort — wie ein abgeschlossener Pinselzug in Lightroom. No-op ohne
+   * gesetzten Quellpunkt oder leeren Pfad. */
+  addRepairStroke: (targetPath: RepairPoint[]) => void;
+  /** Entfernt einen Reparatur-Strich per Index und committet sofort. */
+  removeRepairStroke: (index: number) => void;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
    * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
    * bei jedem Zwischenwert). */
@@ -832,6 +859,72 @@ export const useAppStore = create<AppStore>()(
     setGeometryAutoHorizon: (value) => {
       set((state) => {
         state.developEdl.geometry.auto_horizon = value;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    repairActive: false,
+
+    toggleRepairActive: () => {
+      set((state) => {
+        state.repairActive = !state.repairActive;
+        state.repairPendingSource = null;
+      });
+    },
+
+    repairDraftMode: "Clone",
+    repairDraftRadius: 0.05,
+    repairDraftFeather: 0.02,
+    repairDraftOpacity: 1,
+
+    setRepairDraftMode: (mode) => {
+      set((state) => {
+        state.repairDraftMode = mode;
+      });
+    },
+
+    setRepairDraftField: (key, value) => {
+      set((state) => {
+        if (key === "radius") state.repairDraftRadius = value;
+        else if (key === "feather") state.repairDraftFeather = value;
+        else state.repairDraftOpacity = value;
+      });
+    },
+
+    repairPendingSource: null,
+
+    setRepairSourcePoint: (point) => {
+      set((state) => {
+        state.repairPendingSource = point;
+      });
+    },
+
+    cancelRepairSource: () => {
+      set((state) => {
+        state.repairPendingSource = null;
+      });
+    },
+
+    addRepairStroke: (targetPath) => {
+      const { repairPendingSource, repairDraftMode, repairDraftRadius, repairDraftFeather, repairDraftOpacity } = get();
+      if (!repairPendingSource || targetPath.length === 0) return;
+      set((state) => {
+        state.developEdl.repair.push({
+          mode: repairDraftMode,
+          source: repairPendingSource,
+          target_path: targetPath,
+          radius: repairDraftRadius,
+          feather: repairDraftFeather,
+          opacity: repairDraftOpacity,
+        });
+        state.repairPendingSource = null;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    removeRepairStroke: (index) => {
+      set((state) => {
+        state.developEdl.repair.splice(index, 1);
       });
       void get().commitDevelopEdit();
     },

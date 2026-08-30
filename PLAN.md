@@ -431,10 +431,12 @@ Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Obj
   - [x] Frontend: Winkel-Regler, Seitenverhältnis-/Raster-Dropdowns, Auto-Ausrichtung-Checkbox, "Freistellen"-Umschaltknopf
   - Verifiziert: `cargo fmt/clippy/test --workspace` (308 Rust-Tests), `tsc -b`, `vitest run` (100 Tests), `playwright test` (31/31), `vite build` — alles lokal grün
 
-- [ ] 12. Reparatur (Klonen/Reparieren)
-  - [ ] Pinsel-Interaktion (Quellpunkt, Zielpfad, Radius/Deckkraft/weiche Kante)
-  - [ ] Klonen (versetzter Lesezugriff + radiale Weichzeichnung), Reparieren (vereinfachtes nahtloses Überblenden, kein echtes Poisson-Blending)
-  - [ ] `repair: Vec<RepairStroke>`, je Strich einzeln entfernbar
+- [x] 12. Reparatur (Klonen/Reparieren)
+  - [x] Neues `crates/apx-pipeline/src/stages/repair.rs`/`.wgsl`, läuft als allererster Schritt in `develop::render_rgba8` (vor Kalibrierung, direkt auf `linear.pixels`) — jeder `RepairStroke` wird als eigener sequenzieller Durchlauf angewendet statt als ein gemeinsamer Fused-Pass (unterschiedlich lange Pfade passen nicht in einen festen Gesamtstrich-Uniform-Puffer), Punktzahl je Strich auf `MAX_PATH_POINTS = 32` gedeckelt, beliebig viele Striche bleiben möglich
+  - [x] `RepairParams`s `path`-Array nutzt ein auf 16 Byte aufgefülltes `PathPoint` (wie `hsl_color_mixer.rs`s `BandParams`/`RegionParams`) — WGSL verlangt für Arrays im `uniform`-Adressraum eine auf 16 Byte ausgerichtete Element-Schrittweite, ein rohes `[f32; 2]` hätte Rust- und Shader-Seite auseinanderlaufen lassen
+  - [x] Klonen: bilinear abgetasteter, um einen festen Versatz verschobener Lesezugriff, `smoothstep`-weichgezeichnet am Rand von `radius`+`feather`; Reparieren: vereinfachtes Tiefpass/Hochpass-Überblenden (Tiefpass von der Quelle, Hochpass vom Ziel) statt echten Poisson-Blendings, siehe `repair.rs`s Moduldoku
+  - [x] Frontend: neues `components/RepairOverlay.tsx` (erster Klick setzt den Quellpunkt, Ziehen malt den Zielpfad, SVG-Vorschau rein clientseitig — der Pipeline-Effekt committet erst beim Loslassen mit ausgedünntem Pfad), Store-Erweiterung (`repairActive`, `repairDraft*`, `repairPendingSource`, `addRepairStroke`, `removeRepairStroke`), DevelopPanel-Sektion mit Modus-Auswahl, Radius/Weiche-Kante/Deckkraft-Reglern und entfernbarer Strichliste
+  - Verifiziert: `cargo fmt/clippy/test --workspace` (314 Rust-Tests), `tsc -b`, `vitest run` (100 Tests), `playwright test` (32/32), `vite build` — alles lokal grün
 
 - [ ] 13. Dokumentation, Tests, Abnahme
   - [ ] `ARCHITECTURE.md`: Phase-4-Platzhalter durch echte Architekturbeschreibung ersetzen

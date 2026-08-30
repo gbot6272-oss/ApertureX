@@ -10,6 +10,7 @@ import { clampZoom, computeBaseScale, imageOrigin, nextZoomStep, panForZoomAtCur
 import { QuadRenderer } from "../lib/webgl";
 import { useAppStore } from "../store";
 import { CropOverlay } from "./CropOverlay";
+import { RepairOverlay } from "./RepairOverlay";
 
 // Zielkante für die hochauflösende Anzeige: an der Container-Größe
 // orientiert (siehe PHASE1_PROMPT.md Abschnitt 6, das Beispiel
@@ -40,6 +41,12 @@ export function Viewer() {
   const pickerActive = wbPickerActive || colorMixerPickerActive;
   const geometryCropActive = useAppStore((s) => s.geometryCropActive);
   const setGeometryCrop = useAppStore((s) => s.setGeometryCrop);
+  const repairActive = useAppStore((s) => s.repairActive);
+  const repairStrokes = useAppStore((s) => s.developEdl.repair);
+  const repairPendingSource = useAppStore((s) => s.repairPendingSource);
+  const setRepairSourcePoint = useAppStore((s) => s.setRepairSourcePoint);
+  const addRepairStroke = useAppStore((s) => s.addRepairStroke);
+  const removeRepairStroke = useAppStore((s) => s.removeRepairStroke);
   const commitDevelopEdit = useAppStore((s) => s.commitDevelopEdit);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -151,7 +158,12 @@ export function Viewer() {
     [photo, imgW, imgH, effectiveScale, containerSize.width, containerSize.height, panX, panY, setZoom, setPan],
   );
 
-  const canPan = spaceHeld || effectiveScale > fitScale + 1e-6;
+  // Solange das Reparatur-Werkzeug aktiv ist, deckt `RepairOverlay` die
+  // gesamte Bildfläche mit einem eigenen `pointer-events-auto`-Div ab
+  // (anders als `CropOverlay`, dessen anfassbare Fläche auf das kleine
+  // Freistellungsrechteck beschränkt ist) — Ziehen soll dort malen, nicht
+  // schwenken.
+  const canPan = !repairActive && (spaceHeld || effectiveScale > fitScale + 1e-6);
 
   const handleMouseDown = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
@@ -293,6 +305,20 @@ export function Viewer() {
           aspectRatio={developEdl.geometry.aspect_ratio}
           onChange={setGeometryCrop}
           onCommit={() => void commitDevelopEdit()}
+        />
+      )}
+
+      {photo && repairActive && imgW > 0 && imgH > 0 && (
+        <RepairOverlay
+          imageLeft={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).x}
+          imageTop={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).y}
+          imageWidth={imgW * effectiveScale}
+          imageHeight={imgH * effectiveScale}
+          strokes={repairStrokes}
+          pendingSource={repairPendingSource}
+          onSetSource={setRepairSourcePoint}
+          onPaint={addRepairStroke}
+          onRemoveStroke={removeRepairStroke}
         />
       )}
 

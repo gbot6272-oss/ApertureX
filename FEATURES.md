@@ -146,9 +146,9 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
      Fill) und werden auf eine spätere Phase verschoben. Phase 4 liefert
      manuelles Klonen/Reparieren (Pinsel mit Quellpunkt, Radius, Deckkraft,
      weicher Kante). -->
-- [ ] Bereichsreparatur klonen/reparieren — Phase 4 — Status: Nicht begonnen
+- [x] Bereichsreparatur klonen/reparieren — Phase 4 — Status: Fertig (abweichend, siehe ADR-0028: Reparieren per vereinfachtem Tiefpass/Hochpass-Überblenden statt echten Poisson-Blendings, Pfad-Abstand als minimaler Stützpunkt-Abstand statt echter Punkt-zu-Liniensegment-Distanz, Striche sequenziell statt als ein Fused-Pass angewendet, siehe `stages/repair.rs`)
 - [ ] Auto-Quellenfindung — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
-- [ ] Sensorflecken-Visualisierung — Phase 4 — Status: Nicht begonnen
+- [ ] Sensorflecken-Visualisierung — Phase 6 — Status: Nicht begonnen (siehe ADR-0028-Nachtrag zu Schritt 12: setzt eine automatische Fleckenerkennung voraus, dieselbe Kategorie wie die Auto-Quellenfindung)
 - [ ] Inhaltsbasiertes Füllen — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
 
 ## 3.3 Modul ENTWICKELN — Lokale Anpassungen

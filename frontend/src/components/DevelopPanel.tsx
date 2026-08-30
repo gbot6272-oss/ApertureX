@@ -32,11 +32,29 @@ import {
   type HslAdjustment,
   type LensCorrectionAdjustment,
   type ManualTransform,
+  type RepairMode,
+  type SliderSpec,
 } from "../lib/edl";
 import { useAppStore } from "../store";
 import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
+
+// ---- Reparatur (Klonen/Reparieren) — Phase 4 Schritt 12 --------------------
+//
+// `radius`/`feather` sind im EDL Bruchteile der Bildbreite (0..1, siehe
+// `repair.rs`s Moduldoku), hier für eine handlichere Regler-Skala als
+// Prozent der Bildbreite dargestellt; `opacity` ist 0..1, hier als
+// Prozent. Keine `SliderSpec.key`-basierte generische Feld-Zuordnung wie
+// bei den EDL-Reglern nötig, da diese drei nur den *nächsten* Strich
+// betreffen (siehe `store/index.ts`s `repairDraft*`-Felder), kein EDL-Feld.
+const REPAIR_RADIUS_SPEC: SliderSpec = { key: "radius", label: "Radius (% der Bildbreite)", min: 1, max: 50, fineStep: 0.5, coarseStep: 5, neutral: 5 };
+const REPAIR_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Weiche Kante (% der Bildbreite)", min: 0, max: 25, fineStep: 0.5, coarseStep: 2, neutral: 2 };
+const REPAIR_OPACITY_SPEC: SliderSpec = { key: "opacity", label: "Deckkraft (%)", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 100 };
+const REPAIR_MODE_OPTIONS: ReadonlyArray<{ value: RepairMode; label: string }> = [
+  { value: "Clone", label: "Klonen" },
+  { value: "Heal", label: "Reparieren" },
+];
 
 const WHITE_BALANCE_KEYS = new Set(["temp_shift_kelvin", "tint_shift"]);
 
@@ -141,6 +159,18 @@ export function DevelopPanel() {
   const setGeometryAspectRatio = useAppStore((s) => s.setGeometryAspectRatio);
   const setGeometryOverlay = useAppStore((s) => s.setGeometryOverlay);
   const setGeometryAutoHorizon = useAppStore((s) => s.setGeometryAutoHorizon);
+  const repairStrokes = useAppStore((s) => s.developEdl.repair);
+  const repairActive = useAppStore((s) => s.repairActive);
+  const toggleRepairActive = useAppStore((s) => s.toggleRepairActive);
+  const repairDraftMode = useAppStore((s) => s.repairDraftMode);
+  const setRepairDraftMode = useAppStore((s) => s.setRepairDraftMode);
+  const repairDraftRadius = useAppStore((s) => s.repairDraftRadius);
+  const repairDraftFeather = useAppStore((s) => s.repairDraftFeather);
+  const repairDraftOpacity = useAppStore((s) => s.repairDraftOpacity);
+  const setRepairDraftField = useAppStore((s) => s.setRepairDraftField);
+  const repairPendingSource = useAppStore((s) => s.repairPendingSource);
+  const cancelRepairSource = useAppStore((s) => s.cancelRepairSource);
+  const removeRepairStroke = useAppStore((s) => s.removeRepairStroke);
 
   // Eine per Bildklick neu angelegte Region wird sofort zur Bearbeitung
   // ausgewählt statt dass der Nutzer sie erst in der Liste anklicken muss.
@@ -724,6 +754,81 @@ export function DevelopPanel() {
               />
               Automatische Ausrichtung (nur EXIF-Ausrichtung, siehe ADR-0028)
             </label>
+          </fieldset>
+
+          <fieldset className="flex flex-col gap-3">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Reparatur (Klonen/Reparieren)</legend>
+            <button
+              type="button"
+              aria-pressed={repairActive}
+              onClick={toggleRepairActive}
+              className={`rounded border px-2 py-1 text-xs ${repairActive ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
+            >
+              Reparatur-Pinsel {repairActive ? "(aktiv)" : ""}
+            </button>
+
+            {repairActive && (
+              <p className="text-xs text-text-muted">
+                {repairPendingSource
+                  ? "Ziel im Bild malen (Ziehen), um den Strich abzuschließen."
+                  : "Quellpunkt im Bild anklicken."}
+                {repairPendingSource && (
+                  <button type="button" onClick={cancelRepairSource} className="ml-2 underline">
+                    Quellpunkt verwerfen
+                  </button>
+                )}
+              </p>
+            )}
+
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              Modus
+              <select
+                aria-label="Reparatur-Modus"
+                value={repairDraftMode}
+                onChange={(event) => setRepairDraftMode(event.target.value as RepairMode)}
+                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+              >
+                {REPAIR_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <DevelopSlider
+              spec={REPAIR_RADIUS_SPEC}
+              value={repairDraftRadius * 100}
+              onChange={(value) => setRepairDraftField("radius", value / 100)}
+              onCommit={() => {}}
+            />
+            <DevelopSlider
+              spec={REPAIR_FEATHER_SPEC}
+              value={repairDraftFeather * 100}
+              onChange={(value) => setRepairDraftField("feather", value / 100)}
+              onCommit={() => {}}
+            />
+            <DevelopSlider
+              spec={REPAIR_OPACITY_SPEC}
+              value={repairDraftOpacity * 100}
+              onChange={(value) => setRepairDraftField("opacity", value / 100)}
+              onCommit={() => {}}
+            />
+
+            {repairStrokes.length > 0 && (
+              <ul className="flex flex-col gap-1 text-xs text-text-secondary">
+                {repairStrokes.map((stroke, index) => (
+                  <li key={index} className="flex items-center justify-between rounded border border-border px-2 py-1">
+                    <span>
+                      {index + 1}. {stroke.mode === "Heal" ? "Reparieren" : "Klonen"}
+                    </span>
+                    <button type="button" onClick={() => removeRepairStroke(index)} className="text-danger underline">
+                      Entfernen
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </fieldset>
         </>
       )}

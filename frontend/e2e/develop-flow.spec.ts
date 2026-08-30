@@ -592,4 +592,66 @@ test.describe("Entwickeln-Panel", () => {
     expect(geometry.crop.width).toBeLessThan(1);
     expect(geometry.crop.height).toBeLessThan(1);
   });
+
+  test("Reparatur: Quellpunkt setzen und Zielpfad malen committet einen Strich, Entfernen committet erneut", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    const repairButton = page.getByRole("button", { name: "Reparatur-Pinsel" });
+    await expect(repairButton).toHaveAttribute("aria-pressed", "false");
+    await repairButton.click();
+    await expect(repairButton).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByText("Quellpunkt im Bild anklicken.")).toBeVisible();
+
+    await page.getByRole("combobox", { name: "Reparatur-Modus" }).selectOption("Heal");
+
+    // Quellpunkt: ein einzelner Klick auf die Bildmitte (siehe die
+    // Weißabgleich-Pipette weiter oben für dieselbe Annahme: die Bildmitte
+    // deckt sich immer mit der Container-Mitte, unabhängig vom Zoom-Faktor).
+    await page.getByRole("main").click();
+    await expect(page.getByText(/Ziel im Bild malen/)).toBeVisible();
+
+    // Zielpfad: ein kurzer Ziehvorgang neben der Bildmitte.
+    const mainBox = await page.getByRole("main").boundingBox();
+    if (!mainBox) throw new Error("Viewer-Container nicht gefunden");
+    const centerX = mainBox.x + mainBox.width / 2;
+    const centerY = mainBox.y + mainBox.height / 2;
+    await page.mouse.move(centerX + 20, centerY + 20);
+    await page.mouse.down();
+    await page.mouse.move(centerX + 40, centerY + 30, { steps: 4 });
+    await page.mouse.up();
+
+    await expect(repairButton).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.filter((entry) => entry.cmd === "apply_develop_edit").length;
+    }).toBeGreaterThan(0);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const repair = JSON.parse(edlJson).payload.repair as Array<{
+      mode: string;
+      source: { x: number; y: number };
+      target_path: Array<{ x: number; y: number }>;
+    }>;
+    expect(repair).toHaveLength(1);
+    expect(repair[0].mode).toBe("Heal");
+    expect(repair[0].target_path.length).toBeGreaterThan(0);
+    // Quellpunkt (Bildmitte) sollte deutlich vom Zielpfad (leicht versetzt)
+    // abweichen.
+    expect(Math.abs(repair[0].source.x - repair[0].target_path[0].x)).toBeGreaterThan(0);
+
+    await page.getByRole("button", { name: "Entfernen", exact: true }).click();
+
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.filter((entry) => entry.cmd === "apply_develop_edit").length;
+    }).toBeGreaterThan(1);
+
+    const logAfterRemove = await getMockInvokeLog(page);
+    const lastCommitAfterRemove = [...logAfterRemove].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJsonAfterRemove = (lastCommitAfterRemove?.args as { edlJson: string }).edlJson;
+    expect(JSON.parse(edlJsonAfterRemove).payload.repair).toHaveLength(0);
+  });
 });

@@ -20,7 +20,7 @@ use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
     basic_fused, calibration, color_grading, curves, details, effects, geometry, hsl_color_mixer,
-    lens_corrections, local_contrast, white_balance,
+    lens_corrections, local_contrast, repair, white_balance,
 };
 
 /// Das Ergebnis von [`render_rgba8`] — `width`/`height` beschreiben
@@ -46,7 +46,9 @@ pub struct RenderedImage {
 /// `DECISIONS.md` ADR-0012) — der Aufrufer muss diese Entscheidung nicht
 /// selbst treffen.
 ///
-/// **Phase-4-Übergangsstand (siehe `PLAN.md` Phase 4 Schritt 11):**
+/// **Phase 4 abgeschlossen (siehe `PLAN.md` Phase 4 Schritt 12):**
+/// Reparatur (`stages::repair`, läuft als allererster Schritt auf den
+/// unveränderten linearen Sensordaten — siehe `repair.rs`s Moduldoku),
 /// Kalibrierung (`stages::calibration`, läuft *vor* Weißabgleich/den
 /// Grundeinstellungen — siehe `calibration.rs`s Moduldoku), alle zwölf
 /// Grundeinstellungs-Regler (`stages::basic_fused` /
@@ -64,7 +66,6 @@ pub struct RenderedImage {
 /// (`stages::geometry`, Drehung + Zuschnitt — der einzige Schritt, der
 /// die Ausgabegröße ändert, siehe `geometry.rs`s Moduldoku und
 /// [`RenderedImage`] — läuft als allerletzter Schritt) sind verdrahtet.
-/// Reparatur ist noch inert — der letzte Schritt verdrahtet es.
 pub fn render_rgba8(
     ctx: Option<&GpuContext>,
     linear: &LinearImage,
@@ -73,20 +74,43 @@ pub fn render_rgba8(
     let basic = &edl.basic;
     let wb_gains = white_balance::compute_gains(linear.as_shot_wb_coeffs, basic.white_balance);
 
-    let calibrated: Cow<[f32]> = if edl.calibration == CalibrationAdjustment::NEUTRAL {
-        // Kein zusätzlicher Durchlauf, wenn Kalibrierung neutral steht
-        // (Regelfall).
+    let repaired: Cow<[f32]> = if edl.repair.is_empty() {
+        // Kein zusätzlicher Durchlauf, wenn keine Reparatur-Striche
+        // vorhanden sind (Regelfall).
         Cow::Borrowed(&linear.pixels)
     } else {
         Cow::Owned(match ctx {
-            Some(ctx) => match calibration::apply_gpu(ctx, &linear.pixels, &edl.calibration) {
+            Some(ctx) => match repair::apply_gpu(
+                ctx,
+                &linear.pixels,
+                linear.width,
+                linear.height,
+                &edl.repair,
+            ) {
+                Ok(pixels) => pixels,
+                Err(err) => {
+                    tracing::warn!(error = %err, "GPU-Rendering (Reparatur) fehlgeschlagen, nutze CPU-Fallback");
+                    repair::apply_cpu(&linear.pixels, linear.width, linear.height, &edl.repair)
+                }
+            },
+            None => repair::apply_cpu(&linear.pixels, linear.width, linear.height, &edl.repair),
+        })
+    };
+
+    let calibrated: Cow<[f32]> = if edl.calibration == CalibrationAdjustment::NEUTRAL {
+        // Kein zusätzlicher Durchlauf, wenn Kalibrierung neutral steht
+        // (Regelfall).
+        Cow::Borrowed(&repaired)
+    } else {
+        Cow::Owned(match ctx {
+            Some(ctx) => match calibration::apply_gpu(ctx, &repaired, &edl.calibration) {
                 Ok(pixels) => pixels,
                 Err(err) => {
                     tracing::warn!(error = %err, "GPU-Rendering (Kalibrierung) fehlgeschlagen, nutze CPU-Fallback");
-                    calibration::apply_cpu(&linear.pixels, &edl.calibration)
+                    calibration::apply_cpu(&repaired, &edl.calibration)
                 }
             },
-            None => calibration::apply_cpu(&linear.pixels, &edl.calibration),
+            None => calibration::apply_cpu(&repaired, &edl.calibration),
         })
     };
 

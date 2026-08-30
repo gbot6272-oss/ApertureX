@@ -880,6 +880,28 @@ Schrittfolge 0–13. Ein echter Adobe-Profil-/DCP-Import sowie
 Auto-Quellenfindung/Content-Aware-Fill bleiben in `FEATURES.md` als
 offene Phase-6-Punkte sichtbar, nicht stillschweigend fallen gelassen.
 
+**Nachtrag (Schritt 12, Reparatur-Umsetzung):** zwei weitere kleine
+Vereinfachungen aus derselben Kategorie wie Punkt 4 (CV-artige
+Detailfragen ohne unmittelbaren Minimal-Nutzen), zusammen mit der
+tatsächlichen Umsetzung entschieden:
+- **Pfad-Ausdünnung:** jeder Strich ist auf `MAX_PATH_POINTS = 32`
+  Stützpunkte gedeckelt (`repair.rs`) — das Frontend dünnt einen dicht
+  abgetasteten Zeigerpfad beim Loslassen entsprechend aus
+  (`RepairOverlay.tsx`s `thinPath`). Bei den Zeigerauflösungen üblicher
+  Pinselstriche visuell nicht von einer ungedeckelten Punktzahl zu
+  unterscheiden.
+- **Live-Vorschau beim Malen ist rein clientseitig:** das SVG-Overlay
+  zeigt den gerade gemalten Pfad sofort, der tatsächliche
+  Pipeline-Effekt erscheint erst nach dem Loslassen (committeter,
+  ausgedünnter Strich) — ein voller Entwickeln-Durchlauf über einen
+  wachsenden, noch nicht ausgedünnten Pfad bei jeder Zeigerbewegung wäre
+  unnötig teuer.
+- **Sensorflecken-Visualisierung** (`FEATURES.md` §3.2) wird ebenfalls
+  auf Phase 6 verschoben — sie setzt eine automatische Fleckenerkennung
+  voraus (Blob-/Kantenerkennung auf dem Bild), dieselbe Kategorie
+  Bildverarbeitungsaufgabe wie die bereits zurückgestellte
+  Auto-Quellenfindung, ohne die sie nur eine leere Overlay-Hülle wäre.
+
 ## ADR-0029: Schritt 2 baut nur die Grundeinstellungs-Regler + die GPU-Dispatch-Grundlage; Kurven/HSL/Farbmischer/Color-Grading/Kalibrierung/Effekte bekommen ihren eigenen Shader in ihrem eigenen Schritt
 
 **Status:** Angenommen

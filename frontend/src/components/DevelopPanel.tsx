@@ -5,14 +5,18 @@ import {
   CALIBRATION_PRIMARY_ROWS,
   CAMERA_PROFILE_OPTIONS,
   COLOR_MIXER_REGION_SLIDER_SPECS,
+  COLOR_NR_SLIDER_SPECS,
   HSL_BAND_SLIDER_SPECS,
   HSL_BAND_TABS,
+  LUMINANCE_NR_SLIDER_SPECS,
   MAX_COLOR_MIXER_REGIONS,
   readBasicField,
+  SHARPEN_SLIDER_SPECS,
   WHITE_BALANCE_PRESETS,
   type ColorGradingAdjustment,
   type ColorMixerRegion,
   type CurvesAdjustment,
+  type DetailsAdjustment,
   type HslAdjustment,
 } from "../lib/edl";
 import { useAppStore } from "../store";
@@ -39,6 +43,10 @@ const COLOR_GRADING_WHEEL_TABS: ReadonlyArray<{ key: keyof Pick<ColorGradingAdju
   { key: "highlights", label: "Lichter" },
   { key: "global", label: "Global" },
 ];
+
+/** Die zehn numerischen Details-Regler (Phase 4 Schritt 8) — der elfte
+ * Feld (`use_deconvolution_sharpen`) ist eine Checkbox, kein Regler. */
+type DetailsSliderKey = keyof Omit<DetailsAdjustment, "use_deconvolution_sharpen">;
 
 /**
  * Das Entwickeln-Panel: die sieben Grundeinstellungs-Regler (Weißabgleich
@@ -89,6 +97,9 @@ export function DevelopPanel() {
   const setCalibrationPrimaryField = useAppStore((s) => s.setCalibrationPrimaryField);
   const setCalibrationShadowTint = useAppStore((s) => s.setCalibrationShadowTint);
   const setCalibrationCameraProfile = useAppStore((s) => s.setCalibrationCameraProfile);
+  const details = useAppStore((s) => s.developEdl.details);
+  const setDetailsField = useAppStore((s) => s.setDetailsField);
+  const setDetailsUseDeconvolutionSharpen = useAppStore((s) => s.setDetailsUseDeconvolutionSharpen);
 
   // Eine per Bildklick neu angelegte Region wird sofort zur Bearbeitung
   // ausgewählt statt dass der Nutzer sie erst in der Liste anklicken muss.
@@ -424,6 +435,51 @@ export function DevelopPanel() {
                 ))}
               </select>
             </label>
+          </fieldset>
+
+          <fieldset className="flex flex-col gap-3">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Details</legend>
+            <div className="flex flex-col gap-2">
+              {SHARPEN_SLIDER_SPECS.map((spec) => (
+                <DevelopSlider
+                  key={spec.key}
+                  spec={spec}
+                  value={details[spec.key as DetailsSliderKey]}
+                  onChange={(value) => setDetailsField(spec.key as DetailsSliderKey, value)}
+                  onCommit={() => void commitDevelopEdit()}
+                />
+              ))}
+              <label className="flex items-center gap-2 text-xs text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={details.use_deconvolution_sharpen}
+                  onChange={(event) => setDetailsUseDeconvolutionSharpen(event.target.checked)}
+                />
+                Deconvolution-Schärfung (Alternativmodus)
+              </label>
+            </div>
+            <div className="flex flex-col gap-2">
+              {LUMINANCE_NR_SLIDER_SPECS.map((spec) => (
+                <DevelopSlider
+                  key={spec.key}
+                  spec={spec}
+                  value={details[spec.key as DetailsSliderKey]}
+                  onChange={(value) => setDetailsField(spec.key as DetailsSliderKey, value)}
+                  onCommit={() => void commitDevelopEdit()}
+                />
+              ))}
+            </div>
+            <div className="flex flex-col gap-2">
+              {COLOR_NR_SLIDER_SPECS.map((spec) => (
+                <DevelopSlider
+                  key={spec.key}
+                  spec={spec}
+                  value={details[spec.key as DetailsSliderKey]}
+                  onChange={(value) => setDetailsField(spec.key as DetailsSliderKey, value)}
+                  onCommit={() => void commitDevelopEdit()}
+                />
+              ))}
+            </div>
           </fieldset>
         </>
       )}

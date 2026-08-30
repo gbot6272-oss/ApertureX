@@ -98,12 +98,12 @@ test.describe("Entwickeln-Panel", () => {
     await setUpWithSelectedPhoto(page);
     await page.getByRole("button", { name: "Entwickeln" }).click();
 
-    const contrastInput = page.getByRole("spinbutton", { name: "Kontrast (Zahlenwert)" });
+    const contrastInput = page.getByRole("spinbutton", { name: "Kontrast (Zahlenwert)", exact: true });
     await contrastInput.fill("40");
     await contrastInput.blur();
     await expect(contrastInput).toHaveValue("40");
 
-    await page.getByRole("slider", { name: "Kontrast" }).dblclick();
+    await page.getByRole("slider", { name: "Kontrast", exact: true }).dblclick();
 
     await expect(contrastInput).toHaveValue("0");
     await expect.poll(async () => {
@@ -416,5 +416,31 @@ test.describe("Entwickeln-Panel", () => {
     const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
     const calibration = JSON.parse(edlJson).payload.calibration as { camera_profile: string | null };
     expect(calibration.camera_profile).toBe("Vivid");
+  });
+
+  test("Details: ein Schärfung-Regler und die Deconvolution-Checkbox committen", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    const amountInput = page.getByRole("spinbutton", { name: "Schärfung: Betrag (Zahlenwert)" });
+    await amountInput.fill("80");
+    await amountInput.blur();
+
+    await page.getByRole("checkbox", { name: "Deconvolution-Schärfung (Alternativmodus)" }).check();
+
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.filter((entry) => entry.cmd === "apply_develop_edit").length >= 2;
+    }).toBe(true);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const details = JSON.parse(edlJson).payload.details as {
+      sharpen_amount: number;
+      use_deconvolution_sharpen: boolean;
+    };
+    expect(details.sharpen_amount).toBeCloseTo(80);
+    expect(details.use_deconvolution_sharpen).toBe(true);
   });
 });

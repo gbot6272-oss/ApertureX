@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
 import { buildEdlEnvelopeJson, MAX_COLOR_MIXER_REGIONS, neutralEdlPayload, newColorMixerRegion, parseEdlEnvelopeJson, WHITE_BALANCE_PRESETS, writeBasicField } from "../lib/edl";
-import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CurveChannel, CurvesAdjustment, EdlPayload, HslAdjustment, HslBand, PrimaryColorAdjustment } from "../lib/edl";
+import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, HslAdjustment, HslBand, PrimaryColorAdjustment } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
@@ -266,6 +266,13 @@ interface DevelopSlice {
    * committet sofort — ein Dropdown-Wechsel ist wie ein WB-Preset-Klick
    * eine abgeschlossene Aktion, kein Zwischenstand beim Ziehen. */
   setCalibrationCameraProfile: (value: string | null) => void;
+  /** Setzt eines der zehn numerischen Details-Felder (Phase 4 Schritt 8)
+   * — Zwischenstand beim Ziehen. */
+  setDetailsField: (key: keyof Omit<DetailsAdjustment, "use_deconvolution_sharpen">, value: number) => void;
+  /** Schaltet den Deconvolution-Schärfung-Alternativmodus um und
+   * committet sofort — eine Checkbox ist wie ein Dropdown-Wechsel eine
+   * abgeschlossene Aktion. */
+  setDetailsUseDeconvolutionSharpen: (value: boolean) => void;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
    * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
    * bei jedem Zwischenwert). */
@@ -685,6 +692,19 @@ export const useAppStore = create<AppStore>()(
     setCalibrationCameraProfile: (value) => {
       set((state) => {
         state.developEdl.calibration.camera_profile = value;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    setDetailsField: (key, value) => {
+      set((state) => {
+        state.developEdl.details[key] = value;
+      });
+    },
+
+    setDetailsUseDeconvolutionSharpen: (value) => {
+      set((state) => {
+        state.developEdl.details.use_deconvolution_sharpen = value;
       });
       void get().commitDevelopEdit();
     },

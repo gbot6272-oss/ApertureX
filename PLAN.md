@@ -398,9 +398,14 @@ Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Obj
   - [x] Frontend: 3× Farbton-/Sättigungs-Regler (Primärfarben, eindeutige Labels `Farbton (Rot)` usw. gegen Kollision mit HSL-Bändern), Schattentönung-Regler, Kameraprofil-`<select>` (`CAMERA_PROFILE_OPTIONS` spiegelt `CAMERA_PROFILES`, committet sofort wie ein WB-Preset)
   - Verifiziert: `cargo fmt/clippy/test --workspace` (268 Rust-Tests), `tsc -b`, `vitest run` (100 Tests), `playwright test` (25/25), `vite build` — alles lokal grün
 
-- [ ] 8. Details (Schärfung + Rauschreduzierung)
-  - [ ] Schärfung, Luminanz-/Farbrauschen, Deconvolution-Alternativmodus
-  - [ ] Erster Schritt, der Schritt 2s Nachbarschafts-Dispatch tatsächlich braucht
+- [x] 8. Details (Schärfung + Rauschreduzierung)
+  - [x] Neues `crates/apx-pipeline/src/stages/details.rs`/`.wgsl`, direkt nach Textur/Klarheit in `develop.rs` verdrahtet — erster Schritt, der Schritt 2s Nachbarschafts-Dispatch mit variablem Radius tatsächlich braucht (`sharpen_radius` rundet auf einen ganzzahligen 1–3-Pixel-Box-Filter-Radius, Rauschreduzierung nutzt einen festen 3×3-Box-Weichzeichner wie `local_contrast.rs`)
+  - [x] Schärfung (Unsharp Masking je Kanal), Maskierung über eine `smoothstep`-Schwelle auf den Hochpass-Betrag, Deconvolution-Alternativmodus als Potenzfunktions-Verstärkung (bewusster Stand-in statt echter iterativer Entfaltung)
+  - [x] Luminanz-/Farbrauschen: Chroma-Glättung relativ zur Luminanz, `detail` bewahrt Kanten über denselben Luminanz-Kantenwert für beide, `contrast`/`smoothness` als zusätzliche Gewichtungsfaktoren — beide bewusst gegenüber `amount` gated, damit die NEUTRAL-Default-Werte (`detail=50`, `smoothness=50`) bei `amount=0` keinen Effekt haben
+  - [x] Rauschreduzierung und Schärfung laufen in einem gemeinsamen Durchlauf statt zweier sequenzieller Stufen (echtes Lightroom wendet NR vor Schärfung an) — beide Anteile unabhängig aus derselben Original-Nachbarschaft berechnet und addiert, siehe Moduldoku
+  - [x] WGSL-Fallstrick gefunden und behoben (dieselbe Fehlerklasse wie die frühere `active`-Falle, hier aber Indizierung statt Namenskonflikt): naga erlaubt nur konstante Indizes in ein lokales `array<f32, 3>` — die anfängliche Für-Schleife über den Kanal-Index wurde manuell zu drei Blöcken entrollt
+  - [x] Frontend: 3 Regler-Gruppen (Schärfung/Luminanzrauschen/Farbrauschen) + eine native Checkbox für den Deconvolution-Modus (erste Checkbox im Projekt — kein eigenständiges `Checkbox.tsx` gebaut, da bislang nur ein einziger Bool-Regler existiert)
+  - Verifiziert: `cargo fmt/clippy/test --workspace` (275 Rust-Tests), `tsc -b`, `vitest run` (100 Tests), `playwright test` (26/26), `vite build` — alles lokal grün
 
 - [ ] 9. Objektivkorrekturen
   - [ ] Mini-Profilformat (`crates/apx-pipeline/lens_profiles/*.json` + Lade-/Zuordnungsmodul per EXIF-Objektiv-/Kamerastring)

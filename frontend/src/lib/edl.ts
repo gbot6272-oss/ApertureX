@@ -318,6 +318,25 @@ export const NEUTRAL_DETAILS: DetailsAdjustment = {
   color_nr_smoothness: 50,
 };
 
+export const SHARPEN_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "sharpen_amount", label: "Schärfung: Betrag", min: 0, max: 150, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "sharpen_radius", label: "Schärfung: Radius", min: 0.5, max: 3, fineStep: 0.1, coarseStep: 0.5, neutral: 1 },
+  { key: "sharpen_detail", label: "Schärfung: Detail", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 25 },
+  { key: "sharpen_masking", label: "Schärfung: Maskierung", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+];
+
+export const LUMINANCE_NR_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "luminance_nr_amount", label: "Luminanzrauschen: Betrag", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "luminance_nr_detail", label: "Luminanzrauschen: Detail", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 },
+  { key: "luminance_nr_contrast", label: "Luminanzrauschen: Kontrast", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+];
+
+export const COLOR_NR_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "color_nr_amount", label: "Farbrauschen: Betrag", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "color_nr_detail", label: "Farbrauschen: Detail", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 },
+  { key: "color_nr_smoothness", label: "Farbrauschen: Glättung", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 },
+];
+
 // ---- Objektivkorrekturen ----------------------------------------------------
 
 /** Die fünf `SPEC.md`-Modi plus `"Off"` als neutraler Standard. */

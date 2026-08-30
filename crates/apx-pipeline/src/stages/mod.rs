@@ -15,6 +15,7 @@ pub mod color_grading;
 mod color_math;
 pub mod contrast;
 pub mod curves;
+pub mod details;
 pub mod exposure;
 pub mod highlights_shadows;
 pub mod hsl_color_mixer;

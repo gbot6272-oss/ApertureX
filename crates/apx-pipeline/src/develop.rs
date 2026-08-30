@@ -13,12 +13,14 @@ use apx_raw::LinearImage;
 
 use crate::color::linear_camera_rgb_to_srgb_rgba8;
 use crate::edl::{
-    CalibrationAdjustment, ColorGradingAdjustment, CurvesAdjustment, EdlV2, HslAdjustment,
+    CalibrationAdjustment, ColorGradingAdjustment, CurvesAdjustment, DetailsAdjustment, EdlV2,
+    HslAdjustment,
 };
 use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
-    basic_fused, calibration, color_grading, curves, hsl_color_mixer, local_contrast, white_balance,
+    basic_fused, calibration, color_grading, curves, details, hsl_color_mixer, local_contrast,
+    white_balance,
 };
 
 /// Rendert `linear` mit den in `edl` beschriebenen Anpassungen zu einem
@@ -32,19 +34,21 @@ use crate::stages::{
 /// `DECISIONS.md` ADR-0012) — der Aufrufer muss diese Entscheidung nicht
 /// selbst treffen.
 ///
-/// **Phase-4-Übergangsstand (siehe `PLAN.md` Phase 4 Schritt 7):**
+/// **Phase-4-Übergangsstand (siehe `PLAN.md` Phase 4 Schritt 8):**
 /// Kalibrierung (`stages::calibration`, läuft *vor* Weißabgleich/den
 /// Grundeinstellungen — siehe `calibration.rs`s Moduldoku), alle zwölf
 /// Grundeinstellungs-Regler (`stages::basic_fused` /
-/// `stages::local_contrast`), HSL + Farbmischer erweitert
+/// `stages::local_contrast`), Details/Schärfung+Rauschreduzierung
+/// (`stages::details`, läuft direkt nach Textur/Klarheit — siehe
+/// `details.rs`s Moduldoku), HSL + Farbmischer erweitert
 /// (`stages::hsl_color_mixer`) und Color Grading
-/// (`stages::color_grading`, alle drei im linearen Arbeitsraum wie
+/// (`stages::color_grading`, alle im linearen Arbeitsraum wie
 /// `basic_fused`) sowie die Gradationskurven (`stages::curves`, laufen
 /// bewusst *nach* der Farbraum-Konvertierung auf dem fertigen
 /// RGBA8-Puffer, siehe `curves.rs`s Moduldoku) sind verdrahtet. Alle
-/// übrigen Werkzeugkategorien (Details, Objektivkorrekturen, Effekte,
-/// Geometrie, Reparatur) sind noch inert — die folgenden Schritte
-/// verdrahten sie schrittweise.
+/// übrigen Werkzeugkategorien (Objektivkorrekturen, Effekte, Geometrie,
+/// Reparatur) sind noch inert — die folgenden Schritte verdrahten sie
+/// schrittweise.
 pub fn render_rgba8(
     ctx: Option<&GpuContext>,
     linear: &LinearImage,
@@ -117,22 +121,42 @@ pub fn render_rgba8(
         }
     };
 
-    let hsl_shifted = if edl.hsl == HslAdjustment::NEUTRAL && edl.color_mixer.regions.is_empty() {
-        // Kein zusätzlicher Durchlauf, wenn weder HSL noch Farbmischer
-        // etwas zu tun haben (Regelfall).
+    let detailed = if edl.details == DetailsAdjustment::NEUTRAL {
+        // Kein zusätzlicher Durchlauf, wenn Details (Schärfung +
+        // Rauschreduzierung) neutral steht (Regelfall).
         textured
     } else {
         match ctx {
             Some(ctx) => {
-                match hsl_color_mixer::apply_gpu(ctx, &textured, &edl.hsl, &edl.color_mixer) {
+                match details::apply_gpu(ctx, &textured, linear.width, linear.height, &edl.details)
+                {
                     Ok(pixels) => pixels,
                     Err(err) => {
-                        tracing::warn!(error = %err, "GPU-Rendering (HSL/Farbmischer) fehlgeschlagen, nutze CPU-Fallback");
-                        hsl_color_mixer::apply_cpu(&textured, &edl.hsl, &edl.color_mixer)
+                        tracing::warn!(error = %err, "GPU-Rendering (Details) fehlgeschlagen, nutze CPU-Fallback");
+                        details::apply_cpu(&textured, linear.width, linear.height, &edl.details)
                     }
                 }
             }
-            None => hsl_color_mixer::apply_cpu(&textured, &edl.hsl, &edl.color_mixer),
+            None => details::apply_cpu(&textured, linear.width, linear.height, &edl.details),
+        }
+    };
+
+    let hsl_shifted = if edl.hsl == HslAdjustment::NEUTRAL && edl.color_mixer.regions.is_empty() {
+        // Kein zusätzlicher Durchlauf, wenn weder HSL noch Farbmischer
+        // etwas zu tun haben (Regelfall).
+        detailed
+    } else {
+        match ctx {
+            Some(ctx) => {
+                match hsl_color_mixer::apply_gpu(ctx, &detailed, &edl.hsl, &edl.color_mixer) {
+                    Ok(pixels) => pixels,
+                    Err(err) => {
+                        tracing::warn!(error = %err, "GPU-Rendering (HSL/Farbmischer) fehlgeschlagen, nutze CPU-Fallback");
+                        hsl_color_mixer::apply_cpu(&detailed, &edl.hsl, &edl.color_mixer)
+                    }
+                }
+            }
+            None => hsl_color_mixer::apply_cpu(&detailed, &edl.hsl, &edl.color_mixer),
         }
     };
 

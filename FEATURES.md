@@ -104,10 +104,10 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Balance, Überblendung — Phase 4 — Status: Fertig (Balance verschiebt das Gewicht zwischen Schatten-/Lichter-Zonen statt deren Zentren zu verschieben, siehe Moduldoku in `color_grading.rs`)
 
 ### Details
-- [ ] Schärfung (Betrag, Radius, Detail, Maskierung) — Phase 4 — Status: Nicht begonnen
-- [ ] Luminanzrauschen (Betrag, Detail, Kontrast) — Phase 4 — Status: Nicht begonnen
-- [ ] Farbrauschen (Betrag, Detail, Glättung) — Phase 4 — Status: Nicht begonnen
-- [ ] Deconvolution-Schärfung — Phase 4 — Status: Nicht begonnen
+- [x] Schärfung (Betrag, Radius, Detail, Maskierung) — Phase 4 — Status: Fertig (abweichend, siehe ADR-0028: Unsharp-Masking mit ganzzahligem Box-Filter-Radius statt eines echten Gauß-Kerns, `sharpen_masking` über eine `smoothstep`-Schwelle statt echter Kantenerkennung, siehe `stages/details.rs`)
+- [x] Luminanzrauschen (Betrag, Detail, Kontrast) — Phase 4 — Status: Fertig (abweichend: einfacher fester 3×3-Box-Weichzeichner statt eines echten bilateralen Filters)
+- [x] Farbrauschen (Betrag, Detail, Glättung) — Phase 4 — Status: Fertig (abweichend: teilt sich den Luminanz-Kantenwert mit der Luminanzrauschen-Reduktion statt eines eigenen Chroma-Kantenmaßes)
+- [x] Deconvolution-Schärfung — Phase 4 — Status: Fertig (abweichend, siehe ADR-0028: Potenzfunktions-Verstärkung des Hochpass-Anteils als bewusst einfacher Stand-in, kein echtes iteratives Entfaltungsverfahren)
 
 ### Objektivkorrekturen
 <!-- Scope-Präzisierung siehe DECISIONS.md ADR-0028: eine echte

@@ -692,3 +692,84 @@ test` und `vite build` alle vollständig grün sein — keine Ausnahme.
 
 ### Nicht in Phase 7 (bewusst zurückgestellt)
 Tiefenbereich-Masken (siehe ADR-0032 Punkt 3, weiterhin ohne Phasenzuordnung); echte ONNX-Runtime-Modellinferenz (siehe ADR-0033 Punkt 1 — ein „Bring-your-own-Model"-Pfad wäre ohne verifizierbares Modell nur eine ungetestete Hülle); Einzelregionen der Personen-Maske (Augen/Brauen/Lippen/Zähne/Haare/Kleidung einzeln wählbar).
+
+## Aktuelle Phase: Phase 8 — Export und Ausgabe-Module
+
+`SPEC.md` §5 nennt wörtlich „Export und Ausgabe-Module. Export-Engine,
+Warteschlange, Wasserzeichen, dann Drucken, Diashow, Buch, Web, Karte."
+Siehe `DECISIONS.md` ADR-0034 für die Scope-Präzisierung: anders als
+Phase 6/7 ist dies kein einzelnes fachliches Thema, sondern sechs
+weitgehend unabhängige Ausgabe-Module, die nur die Export-Engine als
+gemeinsamen Unterbau teilen — die Schrittfolge unten übernimmt deshalb
+`SPEC.md`s eigene Reihenfolge (Export-Engine zuerst, dann
+Drucken/Diashow/Buch/Web/Karte), Templates erst ganz am Ende (sie
+setzen alle anderen Module voraus, siehe ADR-0031 Punkt 5).
+
+**Reale vs. zurückgestellte Fähigkeiten (ADR-0034):** WebP-/AVIF-Export,
+echtes ICC-Farbmanagement (`lcms2`, mit echtem Verdrahtungsgrund diesmal
+— eine exportierte Datei muss ihr Profil korrekt tragen, anders als
+Phase 6s simulierter Soft-Proof), PDF-Export (`printpdf`), FTP/SFTP-
+Upload (`suppaftp`/`russh`) und Reverse Geocoding (`reverse_geocoder`,
+vollständig offline) sind **echt** umsetzbar, keine Simulation. PSD-/
+HEIF-/JPEG-XL-Export bleiben zurückgestellt (keine tragfähige
+Rust-Bibliothek bzw. Lizenz-/Beschaffungsmauer wie bei ONNX in
+ADR-0033). Video-Export ruft ein System-`ffmpeg` auf statt eines
+mitgelieferten Binaries (Lizenz-/Bundling-Aufwand pro Plattform) — echt,
+wenn vorhanden, sonst eine klare Fehlermeldung statt einer leeren
+Funktion. Die Kartenansicht selbst (Kachel-Bilder) ist die einzige
+Ausnahme von „offline zuerst" in dieser Phase.
+
+- [x] 0. Scope festzurren
+  - [x] `DECISIONS.md`: neues ADR-0034 (Machbarkeitsprüfung sechs Module: Export-Engine/Drucken/Diashow/Buch/Web/Karte)
+  - [x] `FEATURES.md`: bereits vollständig und korrekt auf Phase 8 getaggt (inkl. Export-Warteschlange-Zeile) — keine Korrektur nötig
+  - [ ] `ARCHITECTURE.md` §7s Phase-8-Platzhalter wird im letzten Schritt durch ein volles Kapitel ersetzt
+  - [x] `PLAN.md`: dieser Abschnitt
+
+- [ ] 1. Export-Engine-Grundgerüst + Formate
+  - Neues Crate `crates/apx-export` (Workspace-Mitglied), hängt von `apx-core`/`apx-raw`/`apx-pipeline`/`apx-catalog` ab; rendert über den bestehenden `apx_pipeline::develop::render_rgba8`-Pfad, kein zweiter Rendering-Codepfad
+  - Formate: JPEG/PNG/TIFF (vorhandenes `image`-Crate, Schreib-Features aktivieren), WebP + AVIF neu (`ravif` fürs AVIF-Encoding, rein Rust)
+  - Bit-Tiefe 8/16, Größenbegrenzung (Kante/Megapixel/Dateigröße), Ausgabeschärfung nach Medium — Parametrisierung des bestehenden Renderers
+  - Import mit DNG-Konvertierung: `dng`-Bibliothek evaluieren (Reader-only vs. auch Schreibpfad), bei Bedarf zurückstellen statt den Schritt zu blockieren
+  - Tauri-Command(s) + Frontend-Exportdialog-Grundgerüst (Zielordner, Format, Qualität)
+
+- [ ] 2. Farbräume/ICC, Wasserzeichen, Export-Warteschlange, Metadaten-Filter
+  - `lcms2` (Feature `static`) zurück als echte Abhängigkeit — vier gebündelte Standardprofile (sRGB/Adobe RGB/ProPhoto RGB/Display P3) + Dateiauswahl für „eigenes ICC"; Phase 6s simulierter Soft-Proof bleibt unverändert
+  - Wasserzeichen: Bild-/Text-Overlay auf dem gerenderten RGBA8-Puffer vor der Kodierung (Font-Rasterisierung z. B. `ab_glyph`), Metadaten-Filter (welche EXIF/IPTC-Felder mit exportiert werden)
+  - Export-Warteschlange: dieselbe Fortschritts-/Abbruch-Architektur wie der bestehende Import-Job (Phase 1) — Fortschritt, Pausieren, Priorisieren
+
+- [ ] 3. Drucken
+  - Layout-Geometrie (Einzelbild/Kontaktbogen/Bilderpaket/benutzerdefiniertes Raster), Randeinstellungen/Zellen/Zoom, Druckschärfung/Farbmanagement/Druckauflösung über die Export-Engine aus Schritt 1/2
+  - „Speichern als JPEG" (Druck-Layout als Exportziel statt Einzelbild) — kein System-Druckertreiber-Zugriff in dieser Phase, Ausgabe ist eine druckfertige Datei
+
+- [ ] 4. Diashow
+  - Übergänge/Ken-Burns-Effekt/Intro-Outro-Screens: reine Frontend-Canvas-Wiedergabe
+  - Musik-Synchronisation: Tauri-Webview-`<audio>`-Element (`duration`/Zeitstempel-Events), kein Rust-Audio-Crate nötig
+  - Video-Export (MP4): `std::process::Command` prüft `ffmpeg -version` beim Start; vorhanden → echter Export über den System-Encoder, sonst klare Fehlermeldung
+
+- [ ] 5. Buch
+  - Seitenlayouts/Vorlagen/Text-Stile als datengetriebene Layout-Engine (Raster + konfigurierbare Slots, wie Masken-/Preset-System), automatische Befüllung
+  - PDF-Export über `printpdf` (reines Rust), Druckerei-Presets als Parametersätze (Beschnitt/Farbprofil/Auflösung je Anbieter)
+
+- [ ] 6. Web
+  - HTML-/responsiver Galerie-Generator (serverseitiges Rust-Templating, Miniaturbilder über den bestehenden Import-Thumbnail-Verkleinerungspfad), Themes
+  - Upload via FTP/SFTP: `suppaftp` (FTP/FTPS) + `russh`/`russh-sftp` (reines Rust, keine OpenSSL-/libssh2-Systemabhängigkeit)
+
+- [ ] 7. Karte
+  - GPS aus EXIF (Erweiterung des bestehenden Metadaten-Pfads, `kamadak-exif`/`rawler` lesen GPS-Tags bereits mit), Kartenansicht im Frontend (Leaflet.js + OpenStreetMap-Kacheln — einzige Netzwerk-Abhängigkeit dieser Phase)
+  - Reverse Geocoding vollständig offline (`reverse_geocoder`, GeoNames-Datensatz gebündelt)
+  - GPX-Tracklog-Import (`quick-xml`), Fotos per Drag auf Karte setzen, Reiserouten-Ansicht (GPS-getaggte Fotos nach Aufnahmezeit sortiert)
+
+- [ ] 8. Templates (setzen alle Module aus Schritt 1–7 voraus)
+  - Export-/Wasserzeichen-/Metadaten-Templates (Parametersätze für die Export-Engine aus Schritt 1/2)
+  - Layout-Templates (Druck/Buch/Diashow/Web — je ein vorkonfiguriertes Layout je Modul)
+  - Workflow-Templates (Import→Filter→Preset→Export als ein Klick)
+  - Template-Marktplatz-Struktur (lokales Repo-Format, Manifest, Installation — kein Online-Marktplatz-Hosting in dieser Phase)
+
+- [ ] 9. Dokumentation, Tests, Abnahme
+  - `ARCHITECTURE.md`: neues Kapitel „Architektur Phase 8" (Export-Engine als Unterbau, alle sechs Module, Datenfluss-Diagramm Export)
+  - `FEATURES.md`: alle jetzt gebauten Phase-8-Zeilen auf Fertig (abweichend, mit Verweis auf ADR-0034 wo zutreffend), PSD-/HEIF-/JPEG-XL-Export bleiben „Nicht begonnen"
+  - Volle Testabdeckung: Rust-Unit-Tests je neuem Modul, neue Playwright-e2e-Spezifikationen für die Frontend-Flows, volle Kette grün (`cargo fmt/clippy/test`, `tsc --noEmit`, `vitest run`, `playwright test`)
+  - Commit+Push, ehrlicher Abschlussbericht (inkl. aller ADR-0034-Vereinfachungen)
+
+### Nicht in Phase 8 (bewusst zurückgestellt)
+PSD-/HEIF-/JPEG-XL-Export (siehe ADR-0034 Punkt 1 — keine tragfähige Rust-Bibliothek bzw. Lizenz-/Beschaffungsmauer); System-Druckdialog-/Druckertreiber-Integration (Ausgabe bleibt eine druckfertige Datei); Online-Template-Marktplatz-Hosting (nur die lokale Repo-Struktur); Adobe `.xmp`/`.lrtemplate`-Interop (weiterhin auf „eine spätere Phase" verschoben, siehe ADR-0031 Punkt 3).

@@ -1408,3 +1408,167 @@ ersetzt. `PLAN.md` bekommt einen neuen Abschnitt „Aktuelle Phase: Phase 7"
 mit feingranularer Schrittfolge. Tiefenbereich-Masken (siehe ADR-0032
 Punkt 3) bleiben weiterhin ohne Phasenzuordnung zurückgestellt — kein
 Tiefendaten-Zulieferer existiert, das ändert auch diese ADR nicht.
+
+## ADR-0034: Phase-8-Scope präzisiert — Export-Engine als gemeinsamer Unterbau, reale Zusatzformate/ICC-Farbmanagement/PDF/SFTP wo machbar, HEIF-/JPEG-XL-Export und Kartenkacheln bewusst zurückgestellt
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §5 nennt für Phase 8 wörtlich „Export und
+Ausgabe-Module. Export-Engine, Warteschlange, Wasserzeichen, dann
+Drucken, Diashow, Buch, Web, Karte." `ARCHITECTURE.md` §7 reservierte
+dafür bislang nur einen Platzhalter. Mehrere frühere ADRs haben
+zusätzlich einzelne `FEATURES.md`-Zeilen ausdrücklich auf Phase 8
+vorgemerkt (ADR-0025: DNG-Konvertierung beim Import; ADR-0031 Punkt 5:
+Export-/Wasserzeichen-/Metadaten-/Layout-/Workflow-Templates +
+Template-Marktplatz-Struktur). Anders als Phase 6/7 ist Phase 8 damit
+kein einzelnes fachliches Thema, sondern sechs weitgehend unabhängige
+Ausgabe-Module (Export-Engine, Drucken, Diashow, Buch, Web, Karte), die
+nur die Export-Engine als gemeinsamen Unterbau teilen. Diese ADR prüft
+für jedes Modul, was in dieser Umgebung tatsächlich echt umsetzbar ist
+(dieselbe Prüfungspflicht wie ADR-0033 für ONNX-Runtime), bevor
+`PLAN.md` die feingranulare Schrittfolge bekommt.
+
+**Vorab durchgeführte Machbarkeitsprüfung** (`cargo add --dry-run`
+gegen den echten crates.io-Index, da direkte HTTP-Anfragen an die
+crates.io-API in dieser Sandbox durch den Proxy blockiert werden):
+`printpdf`, `lcms2`, `suppaftp`, `russh`, `ravif`, `webp`, `libheif-rs`,
+`jxl-oxide`, `psd`, `dng`, `quick-xml`, `geoutils` und
+`reverse_geocoder` lösen alle erfolgreich auf. Kein System-`ffmpeg`
+in dieser Sandbox vorhanden (`command -v ffmpeg` liefert nichts) —
+das sagt nichts über die Zielmaschine der Nutzer aus, ist aber
+Anlass für die Video-Export-Entscheidung unten.
+
+**Entscheidung** (in der von `SPEC.md` §5 vorgegebenen Reihenfolge):
+
+1. **Export-Engine (gemeinsamer Unterbau).** Neues `apx-export`-Crate
+   (dieselbe „ein Crate pro fachlicher Domäne"-Konvention wie
+   `apx-catalog`/`apx-pipeline`/`apx-ai`), hängt von `apx-core`/
+   `apx-raw`/`apx-pipeline`/`apx-catalog` ab. Rendert über den
+   bestehenden `apx_pipeline::develop::render_rgba8`-Pfad (derselbe
+   Renderer wie Vorschau/Viewer — kein zweiter Rendering-Codepfad) und
+   kodiert dann in das Zielformat.
+   - **Formate:** JPEG/PNG/TIFF sind über das bereits vorhandene
+     `image`-Crate abgedeckt (bislang nur zum *Lesen* im
+     Fallback-Importpfad genutzt, Schreib-Features werden hier neu
+     aktiviert). **WebP und AVIF kommen echt dazu** (`ravif` für
+     AVIF-Encoding ist reines Rust, kein Systemabhängigkeit). **PSD-,
+     HEIF/HEIC- und JPEG-XL-Export werden bewusst zurückgestellt:**
+     PSD hat keine ausgereifte Rust-Schreib-Bibliothek (die einzige
+     gefundene, `psd`, ist ein Lese-Parser für Spieleentwicklungs-
+     Pipelines, kein Encoder); HEIF/HEIC-Encoding braucht einen
+     lizenzierten HEVC-Encoder (dieselbe Art Lizenz-/Beschaffungs-
+     mauer wie ONNX-Modellgewichte in ADR-0033 Punkt 1 — `libheif-rs`
+     bindet zwar an `libheif`, aber ohne einen frei redistribuierbaren
+     HEVC-Encoder dahinter bliebe „HEIF-Export" eine Hülle ohne
+     echten Encoder); JPEG XL hat aktuell keinen ausgereiften
+     reinen-Rust-Encoder (`jxl-oxide`, bereits transitive
+     Depenenz von `image` für JPEG-XL-*Decoding*, ist ein Decoder,
+     kein Encoder — echtes Encoding bräuchte `libjxl`-Bindungen).
+     `FEATURES.md`s Formatzeile wird bei Umsetzung entsprechend in
+     „Fertig (abweichend)" mit den drei genannten Ausnahmen
+     umgetaggt statt stillschweigend übersprungen.
+   - **Farbräume/ICC:** **`lcms2` kommt zurück** (war seit Phase 1 in
+     `Cargo.toml`, wurde aber nie verdrahtet und in Phase 2 Schritt 9
+     wieder entfernt, siehe `THIRD_PARTY.md` — Farbtransformation kam
+     bislang mit einer festen Matrix plus Gammakurve aus, Phase 6s
+     Soft-Proof simuliert Zielprofile nur über einen
+     Sättigungs-Kompressionsfaktor statt echter Profile). Diesmal mit
+     echtem Verdrahtungsgrund: eine *exportierte Datei* muss ihr
+     Farbprofil korrekt einbetten (Druckdienstleister/Web-Betrachter
+     werten es aus), eine reine Bildschirmvorschau (Soft-Proof) verzeiht
+     Ungenauigkeit stärker als eine tatsächlich weitergereichte Datei.
+     `lcms2`s `static`-Feature baut Little-CMS aus dem Quellcode statt
+     eine System-Bibliothek vorauszusetzen (dieselbe Bundled-statt-
+     System-Konvention wie `rusqlite`s `bundled`-Feature). Bundle die
+     vier in `SPEC.md` genannten Standardprofile (sRGB/Adobe
+     RGB/ProPhoto RGB/Display P3, feste Primärvalenzen + Tonkurve,
+     dieselben Daten, die Phase 6s Soft-Proof bereits für seine
+     Simulation nutzt) plus einen Dateiauswahl-Dialog für „eigenes
+     ICC" (`lcms2::Profile::new_file`). Phase 6s Soft-Proof bleibt
+     unverändert simuliert (reine Vorschau, kein Umbau nötig) —
+     nur der tatsächliche Datei-Export bekommt echtes Farbmanagement.
+   - **Wasserzeichen:** Bild-/Text-Overlay direkt auf dem gerenderten
+     RGBA8-Puffer vor der Kodierung — Text-Rendering über eine
+     Font-Rasterisierungs-Bibliothek (z. B. `ab_glyph`), kein neues
+     Architekturrisiko.
+   - **Export-Warteschlange:** dieselbe Fortschritts-/Abbruch-Architektur
+     wie der bestehende Import-Job (Phase 1: `tokio`-Task +
+     Tauri-Events fürs Fortschritts-Streaming, `CancellationToken` für
+     Pausieren/Abbrechen) — keine neue Konstruktion, reuse.
+   - **Import mit DNG-Konvertierung:** die `dng`-Bibliothek existiert
+     und löst auf; ihr tatsächlicher Funktionsumfang (reiner Reader
+     oder auch Schreibpfad) wird erst bei der Umsetzung geprüft — falls
+     sie sich als lese-only herausstellt, wird diese eine Zeile
+     zurückgestellt statt das ganze Schritt zu blockieren.
+   - **Bit-Tiefe 8/16, Größenbegrenzung, Ausgabeschärfung nach Medium:**
+     reine Parametrisierung des bestehenden Renderers, kein neues
+     Architekturrisiko.
+
+2. **Drucken.** Reine Layout-/Rastergeometrie (Einzelbild/Kontaktbogen/
+   Bilderpaket/benutzerdefiniertes Raster) über der Export-Engine aus
+   Punkt 1 — „Speichern als JPEG" ist derselbe Exportpfad mit einem
+   Druck-Layout als Eingabe statt eines Einzelbilds. Kein Rust-System-
+   Druckertreiber-Zugriff (CUPS/Windows-Druckdialog) in dieser
+   Phase — Ausgabe ist eine druckfertige Bilddatei, kein direkter
+   Druckauftrag; System-Druckdialog-Integration bliebe, falls je
+   gewünscht, eine spätere Erweiterung.
+
+3. **Diashow.** Übergänge/Ken-Burns/Intro-Outro sind reine Frontend-
+   Canvas-Wiedergabe (dieselbe Art clientseitige Animation wie
+   Phase 6s Vorher/Nachher-Ansicht), kein neues Rust-Crate.
+   Musik-Synchronisation braucht kein Rust-Audio-Crate — das
+   Tauri-Webview-`<audio>`-Element liefert `duration`/Zeitstempel-
+   Events bereits im Browser. **Video-Export (MP4) ruft ein
+   System-`ffmpeg` auf, statt eines mitgelieferten Binaries oder
+   eines reinen-Rust-Encoders** (für H.264/MP4 gibt es keinen
+   praxistauglichen reinen-Rust-Encoder; `ffmpeg` selbst mitliefern
+   hieße, pro Zielplattform ein Binary mit eigener Lizenzprüfung
+   auszuliefern, siehe `THIRD_PARTY.md`s GPL-Ausnahme-Regel). Beim
+   Start wird `ffmpeg -version` per `std::process::Command` geprüft
+   — vorhanden: echter Video-Export über einen echten Encoder; fehlt
+   es: eine klare, umsetzbare Fehlermeldung („ffmpeg installieren"),
+   keine stillschweigend leere Funktion. Dieselbe Holen-und-notfalls-
+   ehrlich-scheitern-Vorgehensweise wie diese Umgebung selbst für
+   `ANTHROPIC_API_KEY`/Cargo-Registry-Zugriff verwendet.
+
+4. **Buch.** Seitenlayouts/Vorlagen/Text-Stile als datengetriebene
+   Layout-Engine (Raster + konfigurierbare Slots), derselbe deklarative
+   Aufbau wie das Masken-/Preset-System. **PDF-Export ist echt
+   umsetzbar** über `printpdf` (reines Rust, MIT-Lizenz, keine
+   System-Bibliothek). Druckerei-Presets sind reine Parametersätze
+   (Beschnitt/Farbprofil/Auflösung je Anbieter), keine neue Fähigkeit.
+
+5. **Web.** HTML-/responsiver Galerie-Generator ist serverseitiges
+   Rust-Templating (Miniaturbilder über den bestehenden
+   `image`-Verkleinerungspfad aus dem Import-Thumbnail-Schritt, Phase 1).
+   **FTP/SFTP-Upload ist echt umsetzbar:** `suppaftp` (FTP/FTPS) und
+   `russh` + `russh-sftp` (reines Rust SSH/SFTP, keine
+   OpenSSL-/libssh2-Systemabhängigkeit, dieselbe Bevorzugung reiner
+   Rust-Implementierungen wie `rustls` an anderer Stelle im Projekt).
+
+6. **Karte.** GPS-Auslesen aus EXIF ist eine Erweiterung des
+   bestehenden Metadaten-Pfads (`kamadak-exif`/`rawler` lesen GPS-Tags
+   bereits mit, bislang nur ungenutzt durchgereicht). **Reverse
+   Geocoding bleibt vollständig offline**: `reverse_geocoder` bündelt
+   einen GeoNames-Städte-Datensatz und braucht keinen Online-Dienst —
+   dieselbe Offline-zuerst-Haltung wie der Rest der App. **Bewusste
+   Einschränkung, einzige Ausnahme von „offline zuerst" in dieser
+   Phase:** die eigentliche Kartenansicht (Kachel-Bilder) ist ein
+   Frontend-Feature (z. B. Leaflet.js gegen OpenStreetMap-Kacheln) und
+   braucht zum *Anzeigen* der Hintergrundkarte eine Internetverbindung
+   — ein weltweiter Offline-Kachelsatz wäre unverhältnismäßig groß;
+   ohne Netzwerk bleiben die GPS-Koordinaten/Ortsschlagworte trotzdem
+   nutzbar, nur ohne Kartenbild. GPX-Tracklog-Import ist einfaches
+   XML-Parsing (`quick-xml`). Reiserouten-Ansicht leitet sich aus
+   GPS-getaggten Fotos nach Aufnahmezeit sortiert ab, reine
+   Frontend-Darstellung ohne neues Backend-Risiko.
+
+**Konsequenzen:** `PLAN.md` bekommt einen neuen Abschnitt „Aktuelle
+Phase: Phase 8" mit feingranularer Schrittfolge in der oben
+begründeten Reihenfolge (Export-Engine zuerst als Unterbau, danach
+Drucken/Diashow/Buch/Web/Karte, exakt wie `SPEC.md` §5 sie nennt).
+`FEATURES.md`s Phase-8-Zeilen bleiben bis zur jeweiligen Umsetzung
+„Nicht begonnen" — keine Korrektur nötig, sie waren bereits vollständig
+und korrekt getaggt (inkl. der Export-Warteschlange-Zeile). PSD-/
+HEIF-/JPEG-XL-Export und echte System-Druckdialog-Integration bleiben
+ohne Phasenzuordnung zurückgestellt, bis eine lizenzrechtlich/technisch
+tragfähige Bibliothek verfügbar ist.

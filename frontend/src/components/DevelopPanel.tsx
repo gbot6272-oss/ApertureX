@@ -36,6 +36,7 @@ import {
   type RepairMode,
   type SliderSpec,
 } from "../lib/edl";
+import { PRESET_SECTION_KEYS, PRESET_SECTION_LABELS, type PresetSectionKey } from "../lib/presets";
 import { useAppStore } from "../store";
 import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
@@ -106,6 +107,26 @@ export function DevelopPanel() {
   const restoreSnapshot = useAppStore((s) => s.restoreSnapshot);
   const beforeAfterMode = useAppStore((s) => s.beforeAfterMode);
   const setBeforeAfterMode = useAppStore((s) => s.setBeforeAfterMode);
+  const copiedEdlSubset = useAppStore((s) => s.copiedEdlSubset);
+  const copyDevelopSettings = useAppStore((s) => s.copyDevelopSettings);
+  const pasteDevelopSettings = useAppStore((s) => s.pasteDevelopSettings);
+  const lastDevelopPhotoId = useAppStore((s) => s.lastDevelopPhotoId);
+  const applyPreviousSettings = useAppStore((s) => s.applyPreviousSettings);
+  const syncSettingsToSelection = useAppStore((s) => s.syncSettingsToSelection);
+  const autoSyncActive = useAppStore((s) => s.autoSyncActive);
+  const toggleAutoSync = useAppStore((s) => s.toggleAutoSync);
+  const multiSelectedIds = useAppStore((s) => s.multiSelectedIds);
+  const [workflowSections, setWorkflowSections] = useState<Set<PresetSectionKey>>(new Set(PRESET_SECTION_KEYS));
+  const otherSelectedCount = selectedPhotoId && multiSelectedIds.includes(selectedPhotoId) ? multiSelectedIds.length - 1 : 0;
+
+  function toggleWorkflowSection(key: PresetSectionKey) {
+    setWorkflowSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
   const wbPickerActive = useAppStore((s) => s.wbPickerActive);
   const toggleWbPicker = useAppStore((s) => s.toggleWbPicker);
   const applyWhiteBalancePreset = useAppStore((s) => s.applyWhiteBalancePreset);
@@ -326,6 +347,59 @@ export function DevelopPanel() {
               Geteilt vertikal
             </button>
           </div>
+        </fieldset>
+      )}
+
+      {selectedPhotoId && (
+        <fieldset className="flex flex-col gap-2">
+          <legend className="mb-1 text-xs font-medium text-text-secondary">Einstellungen kopieren/einfügen/synchronisieren</legend>
+          <div className="flex flex-col gap-1">
+            {PRESET_SECTION_KEYS.map((key) => (
+              <label key={key} className="flex items-center gap-2 text-xs text-text-secondary">
+                <input type="checkbox" checked={workflowSections.has(key)} onChange={() => toggleWorkflowSection(key)} />
+                {PRESET_SECTION_LABELS[key]}
+              </label>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              onClick={() => copyDevelopSettings([...workflowSections])}
+              disabled={workflowSections.size === 0}
+              className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Kopieren
+            </button>
+            <button
+              type="button"
+              onClick={pasteDevelopSettings}
+              disabled={!copiedEdlSubset}
+              className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Einfügen
+            </button>
+            <button
+              type="button"
+              onClick={() => void applyPreviousSettings()}
+              disabled={!lastDevelopPhotoId}
+              className="col-span-2 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+              title="Übernimmt den zuletzt gespeicherten Stand des vorher im Entwickeln-Modul geöffneten Fotos"
+            >
+              Vorherige übernehmen
+            </button>
+            <button
+              type="button"
+              onClick={() => void syncSettingsToSelection([...workflowSections])}
+              disabled={workflowSections.size === 0 || otherSelectedCount === 0}
+              className="col-span-2 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Auf {otherSelectedCount || ""} weitere ausgewählte Foto{otherSelectedCount === 1 ? "" : "s"} synchronisieren
+            </button>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-text-secondary">
+            <input type="checkbox" checked={autoSyncActive} onChange={toggleAutoSync} />
+            Auto-Sync (jede Änderung sofort auf die übrige Auswahl übertragen, alle Sektionen)
+          </label>
         </fieldset>
       )}
 

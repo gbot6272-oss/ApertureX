@@ -24,11 +24,12 @@ const PHOTO = {
   captured_at: "2024-06-01T10:00:00Z",
   missing: false,
 };
+const PHOTO_2 = { ...PHOTO, id: "01977f4a-0000-7000-8000-000000000102", filename: "IMG_0002.CR3" };
 
-async function setUpWithSelectedPhoto(page: import("@playwright/test").Page) {
+async function setUpWithSelectedPhoto(page: import("@playwright/test").Page, extraPhotos: (typeof PHOTO)[] = []) {
   await installTauriMock(page, {
-    folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }],
-    photosByFolder: { [FOLDER_ID]: [PHOTO] },
+    folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 + extraPhotos.length }],
+    photosByFolder: { [FOLDER_ID]: [PHOTO, ...extraPhotos] },
   });
   await page.goto("/");
   await page.getByRole("button", { name: /Urlaub/ }).click();
@@ -40,6 +41,13 @@ async function lastCommittedExposure(page: import("@playwright/test").Page): Pro
   const log = await getMockInvokeLog(page);
   const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
   return JSON.parse((lastCommit?.args as { edlJson: string }).edlJson).payload.basic.exposure_ev;
+}
+
+async function lastExposureFor(page: import("@playwright/test").Page, photoId: string): Promise<number | undefined> {
+  const log = await getMockInvokeLog(page);
+  const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit" && (entry.args as { photoId: string }).photoId === photoId);
+  if (!lastCommit) return undefined;
+  return JSON.parse((lastCommit.args as { edlJson: string }).edlJson).payload.basic.exposure_ev;
 }
 
 test.describe("Workflow: Schnappschüsse + Vorher/Nachher", () => {
@@ -101,5 +109,96 @@ test.describe("Workflow: Schnappschüsse + Vorher/Nachher", () => {
     await splitButton.click();
     await expect(splitButton).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByLabel("Vorher/Nachher")).toBeVisible();
+  });
+});
+
+/**
+ * Deckt Phase 6 Schritt 9 ab (`DECISIONS.md` ADR-0032, `SPEC.md` §3.4):
+ * Einstellungen kopieren/einfügen (Teilmenge über Sektions-Checkboxen,
+ * dasselbe `PresetEdlSubset`-Mechanismus wie Phase 5s Presets), "Vorherige
+ * übernehmen" (übernimmt den zuletzt im Entwickeln-Modul offenen Foto-
+ * Stand), Synchronisieren auf die übrige Mehrfachauswahl und Auto-Sync.
+ */
+test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () => {
+  test("Kopieren merkt sich die markierten Sektionen, Einfügen wendet sie an und committet", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+
+    const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" }).first();
+    await exposureInput.fill("0.8");
+    await exposureInput.blur();
+    await expect.poll(async () => lastCommittedExposure(page)).toBeCloseTo(0.8, 2);
+
+    // Alle Sektionen sind per Vorgabe markiert (siehe `DevelopPanel.tsx`s
+    // `workflowSections`-Initialwert) — Kopieren übernimmt also auch die
+    // Belichtung.
+    await page.getByRole("button", { name: "Kopieren" }).click();
+
+    await exposureInput.fill("-1.2");
+    await exposureInput.blur();
+    await expect.poll(async () => lastCommittedExposure(page)).toBeCloseTo(-1.2, 2);
+
+    await page.getByRole("button", { name: "Einfügen" }).click();
+    await expect.poll(async () => lastCommittedExposure(page)).toBeCloseTo(0.8, 2);
+    await expect(exposureInput).toHaveValue("0.8");
+  });
+
+  test("Vorherige übernehmen kopiert den zuletzt offenen Foto-Stand auf das aktuelle Foto und committet", async ({ page }) => {
+    await setUpWithSelectedPhoto(page, [PHOTO_2]);
+
+    // "Vorherige übernehmen" ist deaktiviert, solange noch kein anderes
+    // Foto im Entwickeln-Modul offen war.
+    const applyPreviousButton = page.getByRole("button", { name: "Vorherige übernehmen" });
+    await expect(applyPreviousButton).toBeDisabled();
+
+    const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" }).first();
+    await exposureInput.fill("0.6");
+    await exposureInput.blur();
+    await expect.poll(async () => lastExposureFor(page, PHOTO.id)).toBeCloseTo(0.6, 2);
+
+    // Zum zweiten Foto wechseln — das Entwickeln-Panel bleibt offen und
+    // lädt automatisch dessen (neutralen) Stand; `lastDevelopPhotoId`
+    // merkt sich dabei das erste Foto.
+    await page.getByRole("img", { name: PHOTO_2.filename }).click();
+    await expect(applyPreviousButton).toBeEnabled();
+
+    await applyPreviousButton.click();
+    await expect.poll(async () => lastExposureFor(page, PHOTO_2.id)).toBeCloseTo(0.6, 2);
+    await expect(exposureInput).toHaveValue("0.6");
+  });
+
+  test("Synchronisieren überträgt die markierten Sektionen auf die übrige Mehrfachauswahl", async ({ page }) => {
+    await setUpWithSelectedPhoto(page, [PHOTO_2]);
+
+    // Zusätzlich zum bereits ausgewählten ersten Foto das zweite per
+    // Strg-Klick zur Mehrfachauswahl hinzufügen (`resolveSelectionMode`:
+    // `ctrlKey`/`metaKey` → "toggle").
+    await page.getByRole("img", { name: PHOTO_2.filename }).click({ modifiers: ["Control"] });
+
+    const syncButton = page.getByRole("button", { name: "Auf 1 weitere ausgewählte Foto synchronisieren" });
+    await expect(syncButton).toBeEnabled();
+
+    const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" }).first();
+    await exposureInput.fill("0.5");
+    await exposureInput.blur();
+    await expect.poll(async () => lastExposureFor(page, PHOTO_2.id)).toBeCloseTo(0.5, 2);
+
+    await syncButton.click();
+    await expect.poll(async () => lastExposureFor(page, PHOTO.id)).toBeCloseTo(0.5, 2);
+  });
+
+  test("Auto-Sync überträgt jede Änderung sofort auf die übrige Mehrfachauswahl, ohne den Sync-Knopf zu klicken", async ({ page }) => {
+    await setUpWithSelectedPhoto(page, [PHOTO_2]);
+    await page.getByRole("img", { name: PHOTO_2.filename }).click({ modifiers: ["Control"] });
+
+    await page.getByRole("checkbox", { name: /Auto-Sync/ }).check();
+
+    const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" }).first();
+    await exposureInput.fill("-0.3");
+    await exposureInput.blur();
+
+    await expect.poll(async () => lastExposureFor(page, PHOTO_2.id)).toBeCloseTo(-0.3, 2);
+    // Kein Klick auf den Sync-Knopf nötig — Auto-Sync löst die
+    // Übertragung direkt aus `commitDevelopEdit` heraus aus.
+    await expect.poll(async () => lastExposureFor(page, PHOTO.id)).toBeCloseTo(-0.3, 2);
   });
 });

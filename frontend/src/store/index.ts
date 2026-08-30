@@ -24,6 +24,7 @@ import {
   mergeEdlSubset,
   parseConditions,
   parseEdlSubset,
+  PRESET_SECTION_KEYS,
   scalePresetEdlSubset,
   serializeConditions,
   serializeEdlSubset,
@@ -268,6 +269,34 @@ interface DevelopSlice {
    * (oder neutral, falls noch nie bearbeitet) — aufgerufen beim Öffnen
    * des Panels und bei jedem Fotowechsel, während es offen ist. */
   loadDevelopStateForPhoto: (photoId: string) => Promise<void>;
+
+  // ---- Schritt 9: Einstellungen kopieren/einfügen, Vorherige, Sync --------
+  /** Der zuletzt kopierte Ausschnitt (Schritt 9, `SPEC.md` §3.4) —
+   * derselbe `PresetEdlSubset`-Mechanismus wie Presets aus Phase 5, nur
+   * direkt aus `developEdl` gebaut statt aus einem gespeicherten Preset. */
+  copiedEdlSubset: PresetEdlSubset | null;
+  copyDevelopSettings: (sections: PresetSectionKey[]) => void;
+  /** Fügt `copiedEdlSubset` in das aktuelle `developEdl` ein und committet
+   * sofort — No-op, wenn noch nichts kopiert wurde. */
+  pasteDevelopSettings: () => void;
+  /** Das zuletzt im Entwickeln-Panel aktive Foto *vor* dem aktuellen —
+   * gepflegt in `loadDevelopStateForPhoto`, Grundlage für
+   * `applyPreviousSettings` ("Vorherige übernehmen", Lightroom-Analog). */
+  lastDevelopPhotoId: string | null;
+  /** Übernimmt den zuletzt gespeicherten Stand von `lastDevelopPhotoId`
+   * vollständig (alle Sektionen) auf das aktuelle Foto und committet. */
+  applyPreviousSettings: () => Promise<void>;
+  /** Überträgt einen Ausschnitt des aktuellen `developEdl` auf die
+   * übrige Mehrfachauswahl (`multiSelectedIds`, siehe `setPhotoRating`s
+   * Stapel-Bearbeitungs-Muster) — jedes Zielfoto behält seine sonstigen
+   * Einstellungen, nur die gewählten Sektionen werden überschrieben. */
+  syncSettingsToSelection: (sections: PresetSectionKey[]) => Promise<void>;
+  /** Ist Auto-Sync aktiv, überträgt jeder `commitDevelopEdit`-Aufruf das
+   * *gesamte* `developEdl` (alle Sektionen — bewusste Vereinfachung ggü.
+   * `syncSettingsToSelection`s granularer Auswahl, siehe Moduldoku dort)
+   * sofort auf die übrige Mehrfachauswahl. */
+  autoSyncActive: boolean;
+  toggleAutoSync: () => void;
 
   /** Benannte EDL-Zwischenstände zusätzlich zum linearen Verlauf (Phase 6
    * Schritt 8, `SPEC.md` §3.4) — siehe `crates/apx-app/src/commands.rs`s
@@ -1066,20 +1095,87 @@ export const useAppStore = create<AppStore>()(
     },
 
     loadDevelopStateForPhoto: async (photoId) => {
+      const previousPhotoId = get().developPhotoId;
       try {
         const position = await api.currentDevelopEdit(photoId);
         set((state) => {
           state.developEdl = edlFromHistoryPosition(position);
           state.developPhotoId = photoId;
+          if (previousPhotoId && previousPhotoId !== photoId) state.lastDevelopPhotoId = previousPhotoId;
         });
       } catch (err) {
         console.error("Bearbeitungszustand konnte nicht geladen werden:", err);
         set((state) => {
           state.developEdl = neutralEdlPayload();
           state.developPhotoId = photoId;
+          if (previousPhotoId && previousPhotoId !== photoId) state.lastDevelopPhotoId = previousPhotoId;
         });
       }
       void get().refreshSnapshots();
+    },
+
+    copiedEdlSubset: null,
+
+    copyDevelopSettings: (sections) => {
+      set((state) => {
+        state.copiedEdlSubset = buildPresetEdlSubset(state.developEdl, sections);
+      });
+    },
+
+    pasteDevelopSettings: () => {
+      const subset = get().copiedEdlSubset;
+      if (!subset) return;
+      set((state) => {
+        state.developEdl = mergeEdlSubset(state.developEdl, subset);
+      });
+      void get().commitDevelopEdit("Einstellungen eingefügt");
+    },
+
+    lastDevelopPhotoId: null,
+
+    applyPreviousSettings: async () => {
+      const { developPhotoId, lastDevelopPhotoId } = get();
+      if (!developPhotoId || !lastDevelopPhotoId) return;
+      try {
+        const position = await api.currentDevelopEdit(lastDevelopPhotoId);
+        const payload = edlFromHistoryPosition(position);
+        await api.applyDevelopEdit(developPhotoId, buildEdlEnvelopeJson(payload), "Vorherige Einstellungen übernommen");
+        set((state) => {
+          state.developEdl = payload;
+        });
+      } catch (err) {
+        console.error("Vorherige Einstellungen konnten nicht übernommen werden:", err);
+      }
+    },
+
+    syncSettingsToSelection: async (sections) => {
+      const { developPhotoId, multiSelectedIds, developEdl } = get();
+      if (!developPhotoId || sections.length === 0) return;
+      const targets = multiSelectedIds.includes(developPhotoId) ? multiSelectedIds.filter((id) => id !== developPhotoId) : [];
+      if (targets.length === 0) return;
+      const subset = buildPresetEdlSubset(developEdl, sections);
+      for (const targetId of targets) {
+        try {
+          const position = await api.currentDevelopEdit(targetId);
+          const targetPayload = mergeEdlSubset(edlFromHistoryPosition(position), subset);
+          await api.applyDevelopEdit(targetId, buildEdlEnvelopeJson(targetPayload), "Synchronisiert");
+          if (get().developPhotoId === targetId) {
+            set((state) => {
+              state.developEdl = targetPayload;
+            });
+          }
+        } catch (err) {
+          console.error(`Synchronisieren mit Foto ${targetId} fehlgeschlagen:`, err);
+        }
+      }
+    },
+
+    autoSyncActive: false,
+
+    toggleAutoSync: () => {
+      set((state) => {
+        state.autoSyncActive = !state.autoSyncActive;
+      });
     },
 
     snapshots: [],
@@ -1460,6 +1556,9 @@ export const useAppStore = create<AppStore>()(
         await api.applyDevelopEdit(developPhotoId, buildEdlEnvelopeJson(developEdl), label);
       } catch (err) {
         console.error("Bearbeitung konnte nicht gespeichert werden:", err);
+      }
+      if (get().autoSyncActive) {
+        void get().syncSettingsToSelection([...PRESET_SECTION_KEYS]);
       }
     },
 

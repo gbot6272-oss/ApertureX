@@ -1743,6 +1743,29 @@ pub fn suggest_tags(state: State<'_, AppState>, photo_id: String) -> Result<Vec<
 // `apx_export::engine` aufrufen, Ergebnis als DTO zurückreichen. Die
 // eigentliche Render-/Kodier-/Größenlogik lebt komplett in `apx-export`.
 
+/// Generischer Datei-Auswahldialog, der nur den gewählten Pfad zurückgibt
+/// (nichts liest/parst) — fürs Exportdialog-Grundgerüst (ICC-Profil,
+/// Wasserzeichen-Schriftdatei/-Bild). `None`, wenn abgebrochen.
+#[tauri::command]
+pub async fn pick_file_path(
+    app: AppHandle,
+    filter_name: String,
+    extensions: Vec<String>,
+) -> Result<Option<String>, String> {
+    let extension_refs: Vec<&str> = extensions.iter().map(String::as_str).collect();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter(&filter_name, &extension_refs)
+        .pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|err| format!("Öffnen-Dialog fehlgeschlagen: {err}"))?;
+    Ok(picked.map(|p| p.to_string()))
+}
+
 /// Der aktuell aktive EDL-Stand eines Fotos, aufgelöst zu `EdlV3` — dieselbe
 /// Quelle wie `current_develop_edit`, nur direkt als Rust-Wert statt als
 /// JSON-DTO (der Export braucht kein IPC-JSON, er rendert serverseitig).
@@ -1780,9 +1803,44 @@ pub struct ExportOutcomeDto {
     pub byte_size: usize,
 }
 
-/// Export-Parameter fürs Frontend-Exportdialog-Grundgerüst (Schritt 1).
-/// Größenbegrenzung/Zieldateigröße/Schärfung sind optional — nicht gesetzt
-/// heißt "unverändert lassen" (siehe `apx_export::resize`/`sharpen`).
+fn parse_icc_target(
+    profile: &str,
+    custom_path: Option<&str>,
+) -> Result<apx_export::icc::IccTarget, String> {
+    use apx_export::icc::{IccTarget, StandardIccProfile};
+    match profile {
+        "srgb" => Ok(IccTarget::Standard(StandardIccProfile::Srgb)),
+        "adobe_rgb" => Ok(IccTarget::Standard(StandardIccProfile::AdobeRgb)),
+        "pro_photo_rgb" => Ok(IccTarget::Standard(StandardIccProfile::ProPhotoRgb)),
+        "display_p3" => Ok(IccTarget::Standard(StandardIccProfile::DisplayP3)),
+        "custom" => {
+            let path = custom_path
+                .ok_or_else(|| "iccProfilePath fehlt für iccProfile='custom'".to_string())?;
+            Ok(IccTarget::CustomFile(PathBuf::from(path)))
+        }
+        other => Err(format!("unbekanntes ICC-Zielprofil '{other}'")),
+    }
+}
+
+fn parse_watermark_position(
+    position: &str,
+) -> Result<apx_export::watermark::WatermarkPosition, String> {
+    use apx_export::watermark::WatermarkPosition;
+    match position {
+        "top_left" => Ok(WatermarkPosition::TopLeft),
+        "top_right" => Ok(WatermarkPosition::TopRight),
+        "bottom_left" => Ok(WatermarkPosition::BottomLeft),
+        "bottom_right" => Ok(WatermarkPosition::BottomRight),
+        "center" => Ok(WatermarkPosition::Center),
+        other => Err(format!("unbekannte Wasserzeichen-Position '{other}'")),
+    }
+}
+
+/// Export-Parameter fürs Frontend-Exportdialog. Größenbegrenzung/
+/// Zieldateigröße/Schärfung (Schritt 1) sowie ICC-Zielprofil/Wasserzeichen/
+/// Metadaten (Schritt 2) sind optional — nicht gesetzt heißt "unverändert
+/// lassen"/"weglassen" (siehe `apx_export::resize`/`sharpen`/`icc`/
+/// `watermark`/`metadata`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportPhotoOptions {
@@ -1797,20 +1855,40 @@ pub struct ExportPhotoOptions {
     /// Dateiname ohne Endung — wird um `format`s Endung ergänzt. `None`
     /// übernimmt den Ausgangsdateinamen (ohne dessen ursprüngliche Endung).
     pub filename: Option<String>,
+    /// `"srgb"`/`"adobe_rgb"`/`"pro_photo_rgb"`/`"display_p3"`/`"custom"`.
+    pub icc_profile: Option<String>,
+    /// Nur bei `icc_profile == "custom"` gelesen.
+    pub icc_profile_path: Option<String>,
+    /// Text-Wasserzeichen — braucht zusätzlich `watermark_font_path`.
+    pub watermark_text: Option<String>,
+    pub watermark_font_path: Option<String>,
+    pub watermark_font_size: Option<f32>,
+    /// `[R, G, B]`, `0..=255`.
+    pub watermark_color: Option<[u8; 3]>,
+    /// Bild-Wasserzeichen — Alternative zu `watermark_text`, wird
+    /// dekodiert (beliebiges von `image` unterstütztes Format).
+    pub watermark_image_path: Option<String>,
+    /// `"top_left"`/`"top_right"`/`"bottom_left"`/`"bottom_right"`/`"center"`.
+    pub watermark_position: Option<String>,
+    pub watermark_opacity: Option<f32>,
+    pub watermark_margin: Option<u32>,
+    pub metadata_make: Option<String>,
+    pub metadata_model: Option<String>,
+    pub metadata_date_time: Option<String>,
+    pub metadata_copyright: Option<String>,
+    pub metadata_artist: Option<String>,
 }
 
-/// Exportiert ein einzelnes Foto mit seinem aktuellen Bearbeitungsstand
-/// nach `dest_folder`. Rendert über denselben Pfad wie die Entwickeln-
-/// Vorschau (`apx_pipeline::develop::render_rgba8`, siehe
-/// `apx_export::engine`s Moduldoku) — keine zweite Rendering-Logik.
-#[tauri::command]
-pub fn export_photo(
-    state: State<'_, AppState>,
-    photo_id: String,
-    dest_folder: String,
+/// Baut aus `options` einen `apx_export::engine::ExportRequest` samt
+/// Zielpfad, ohne selbst zu rendern — gemeinsam genutzt von
+/// [`export_photo`] (sofort, synchron) und [`enqueue_export_photo`]
+/// (Schritt 2: über die Warteschlange).
+fn build_export_request(
+    state: &AppState,
+    photo_id: apx_core::PhotoId,
+    dest_folder: &str,
     options: ExportPhotoOptions,
-) -> Result<ExportOutcomeDto, String> {
-    let photo_id = parse_photo_id(photo_id)?;
+) -> Result<(apx_export::engine::ExportRequest, PathBuf), String> {
     let photo = state
         .catalog
         .get_photo(photo_id)
@@ -1843,13 +1921,91 @@ pub fn export_photo(
         }
     }
 
-    let stem = options.filename.unwrap_or_else(|| {
+    if let Some(profile) = &options.icc_profile {
+        request.icc_target = Some(parse_icc_target(
+            profile,
+            options.icc_profile_path.as_deref(),
+        )?);
+    }
+
+    if let Some(image_path) = &options.watermark_image_path {
+        let decoded = image::open(image_path)
+            .map_err(|err| {
+                format!("Wasserzeichen-Bild '{image_path}' konnte nicht geladen werden: {err}")
+            })?
+            .to_rgba8();
+        request.watermark = Some(apx_export::engine::WatermarkSpec::Image {
+            width: decoded.width(),
+            height: decoded.height(),
+            rgba: decoded.into_raw(),
+            position: parse_watermark_position(
+                options
+                    .watermark_position
+                    .as_deref()
+                    .unwrap_or("bottom_right"),
+            )?,
+            opacity: options.watermark_opacity.unwrap_or(1.0),
+            margin: options.watermark_margin.unwrap_or(16),
+        });
+    } else if let Some(text) = &options.watermark_text {
+        let font_path = options
+            .watermark_font_path
+            .as_deref()
+            .ok_or_else(|| "watermarkFontPath fehlt für ein Text-Wasserzeichen".to_string())?;
+        let font_bytes = std::fs::read(font_path).map_err(|err| {
+            format!("Schriftdatei '{font_path}' konnte nicht gelesen werden: {err}")
+        })?;
+        request.watermark = Some(apx_export::engine::WatermarkSpec::Text {
+            font_bytes,
+            text: text.clone(),
+            font_size_px: options.watermark_font_size.unwrap_or(24.0),
+            color: options.watermark_color.unwrap_or([255, 255, 255]),
+            position: parse_watermark_position(
+                options
+                    .watermark_position
+                    .as_deref()
+                    .unwrap_or("bottom_right"),
+            )?,
+            opacity: options.watermark_opacity.unwrap_or(1.0),
+            margin: options.watermark_margin.unwrap_or(16),
+        });
+    }
+
+    request.metadata = apx_export::metadata::MetadataFilter {
+        make: options.metadata_make.clone(),
+        model: options.metadata_model.clone(),
+        date_time: options.metadata_date_time.clone(),
+        copyright: options.metadata_copyright.clone(),
+        artist: options.metadata_artist.clone(),
+    };
+
+    let stem = options.filename.clone().unwrap_or_else(|| {
         PathBuf::from(&photo.filename)
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| photo.filename.clone())
     });
     let dest_path = PathBuf::from(dest_folder).join(format!("{stem}.{}", format.extension()));
+
+    Ok((request, dest_path))
+}
+
+/// Exportiert ein einzelnes Foto mit seinem aktuellen Bearbeitungsstand
+/// nach `dest_folder`. Rendert über denselben Pfad wie die Entwickeln-
+/// Vorschau (`apx_pipeline::develop::render_rgba8`, siehe
+/// `apx_export::engine`s Moduldoku) — keine zweite Rendering-Logik.
+/// Läuft synchron/sofort im aufrufenden Tauri-Command — für einen
+/// Stapelexport mehrerer Fotos mit Fortschritt/Pausieren siehe
+/// [`enqueue_export_photo`] (Schritt 2).
+#[tauri::command]
+pub fn export_photo(
+    state: State<'_, AppState>,
+    photo_id: String,
+    dest_folder: String,
+    options: ExportPhotoOptions,
+) -> Result<ExportOutcomeDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let (request, dest_path) = build_export_request(&state, photo_id, &dest_folder, options)?;
 
     let outcome = apx_export::engine::export_to_file(Some(&state.pipeline), &request, &dest_path)
         .map_err(|err| err.to_string())?;
@@ -1860,6 +2016,96 @@ pub fn export_photo(
         height: outcome.height,
         byte_size: outcome.bytes.len(),
     })
+}
+
+// ---- Export-Warteschlange (Phase 8 Schritt 2) ------------------------------
+//
+// `apx_export::queue::ExportQueue` ist reine, threading-freie Logik — die
+// eigentliche Hintergrund-Arbeit (rendern+kodieren+schreiben) läuft in
+// einer einzigen, beim App-Start gestarteten Tokio-Task (siehe `main.rs`),
+// die die Warteschlange in einer kurzen Schlaufe abfragt (dieselbe
+// Größenordnung wie der Import-Job, siehe `PLAN.md` Phase 8 Schritt 2 —
+// **vereinfacht**: Abfragen statt einer Weck-Benachrichtigung, für eine
+// Warteschlange, die nicht auf Sub-Sekunden-Reaktionszeit angewiesen ist).
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportQueueProgressDto {
+    pub done: usize,
+    pub total: usize,
+    pub failed: usize,
+    pub paused: bool,
+}
+
+/// Reiht einen Foto-Export in die Warteschlange ein, statt ihn sofort
+/// auszuführen — gibt die Auftrags-ID zurück (für [`cancel_export_job`]).
+#[tauri::command]
+pub fn enqueue_export_photo(
+    state: State<'_, AppState>,
+    photo_id: String,
+    dest_folder: String,
+    options: ExportPhotoOptions,
+) -> Result<u64, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let (request, dest_path) = build_export_request(&state, photo_id, &dest_folder, options)?;
+    let mut queue = state
+        .export_queue
+        .lock()
+        .map_err(|_| "Export-Warteschlange nicht erreichbar".to_string())?;
+    Ok(queue.push(crate::state::QueuedExport { request, dest_path }, 0))
+}
+
+#[tauri::command]
+pub fn export_queue_progress(state: State<'_, AppState>) -> Result<ExportQueueProgressDto, String> {
+    let queue = state
+        .export_queue
+        .lock()
+        .map_err(|_| "Export-Warteschlange nicht erreichbar".to_string())?;
+    let progress = queue.progress();
+    Ok(ExportQueueProgressDto {
+        done: progress.done,
+        total: progress.total,
+        failed: progress.failed,
+        paused: queue.is_paused(),
+    })
+}
+
+#[tauri::command]
+pub fn pause_export_queue(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .export_queue
+        .lock()
+        .map_err(|_| "Export-Warteschlange nicht erreichbar".to_string())?
+        .pause();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn resume_export_queue(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .export_queue
+        .lock()
+        .map_err(|_| "Export-Warteschlange nicht erreichbar".to_string())?
+        .resume();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cancel_export_job(state: State<'_, AppState>, job_id: u64) -> Result<bool, String> {
+    Ok(state
+        .export_queue
+        .lock()
+        .map_err(|_| "Export-Warteschlange nicht erreichbar".to_string())?
+        .cancel(job_id))
+}
+
+#[tauri::command]
+pub fn clear_finished_export_jobs(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .export_queue
+        .lock()
+        .map_err(|_| "Export-Warteschlange nicht erreichbar".to_string())?
+        .clear_finished();
+    Ok(())
 }
 
 #[cfg(test)]

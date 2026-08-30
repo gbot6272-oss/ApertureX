@@ -58,7 +58,15 @@ ICC-Farbmanagement existiert.
 | `rav1e` | BSD-2-Clause | AV1-Encoder hinter `ravif` | Unkritisch |
 | `image-webp` | MIT OR Apache-2.0 | WebP-Encoding/-Decoding (verlustfrei) hinter `image`s `webp`-Feature | Unkritisch |
 
-Weitere für Phase 8 geprüfte, aber noch nicht direkt eingebundene Abhängigkeiten (siehe ADR-0034, `PLAN.md`-Vermerk bei Schritt 1: erst im jeweiligen Schritt ergänzt, nicht vorab alle auf einmal — `printpdf`s transitiver Font-/Layout-Baum hat in dieser Sandbox das Plattenkontingent tatsächlich erschöpft): `lcms2` (MIT, „static"-Feature), `ab_glyph` (Apache-2.0), `printpdf` (MIT), `suppaftp` (Apache-2.0), `russh`/`russh-sftp` (Apache-2.0), `reverse_geocoder` (MIT), `quick-xml` (MIT OR Apache-2.0) — keine GPL-Kandidaten, werden bei ihrer jeweiligen Einbindung hier mit vollem Eintrag nachgetragen.
+## Rust — Phase 8 (Schritt 2, siehe `DECISIONS.md` ADR-0034)
+
+| Crate | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `lcms2` | MIT | Echtes ICC-Farbmanagement für den Export (`apx_export::icc`) | „static"-Feature bündelt Little-CMS2 (selbst MIT) als C-Quelle, keine Systembibliothek. Zweiter Anlauf nach Phase 1 (siehe Eintrag oben unter „Nachträglich entfernt") — diesmal mit echtem Aufrufer |
+| `ab_glyph` | Apache-2.0 | Text-Wasserzeichen-Rasterisierung (`apx_export::watermark`) | Reines Rust, keine Systemschrift-API |
+| `ttf-parser` / `owned_ttf_parser` / `ab_glyph_rasterizer` | MIT OR Apache-2.0 / Apache-2.0 / Apache-2.0 | Transitiv über `ab_glyph` | Unkritisch |
+
+Weitere für Phase 8 geprüfte, aber noch nicht direkt eingebundene Abhängigkeiten (siehe ADR-0034, `PLAN.md`-Vermerk bei Schritt 1: erst im jeweiligen Schritt ergänzt, nicht vorab alle auf einmal — `printpdf`s transitiver Font-/Layout-Baum hat in dieser Sandbox das Plattenkontingent tatsächlich erschöpft): `printpdf` (MIT), `suppaftp` (Apache-2.0), `russh`/`russh-sftp` (Apache-2.0), `reverse_geocoder` (MIT), `quick-xml` (MIT OR Apache-2.0) — keine GPL-Kandidaten, werden bei ihrer jeweiligen Einbindung hier mit vollem Eintrag nachgetragen.
 
 ## Frontend — geplant für Phase 1
 

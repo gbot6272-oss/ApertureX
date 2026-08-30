@@ -18,9 +18,12 @@
 pub mod engine;
 pub mod error;
 pub mod format;
+pub mod icc;
+pub mod metadata;
+pub mod queue;
 pub mod resize;
 pub mod sharpen;
+pub mod watermark;
 
-// Schritt 2 (ICC/Wasserzeichen/Metadaten-Filter/Warteschlange) sowie
 // Schritt 3–8 (Drucken/Diashow/Buch/Web/Karte/Templates) ergänzen hier
 // jeweils ihr eigenes Modul, sobald sie umgesetzt sind (siehe `PLAN.md`).

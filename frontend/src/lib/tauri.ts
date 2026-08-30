@@ -502,6 +502,9 @@ export function suggestTags(photoId: string): Promise<string[]> {
 
 export type ExportFormat = "jpeg" | "png" | "tiff" | "webp" | "avif";
 
+export type WatermarkPosition = "top_left" | "top_right" | "bottom_left" | "bottom_right" | "center";
+export type IccProfileChoice = "srgb" | "adobe_rgb" | "pro_photo_rgb" | "display_p3" | "custom";
+
 export interface ExportPhotoOptions {
   format: ExportFormat;
   quality?: number;
@@ -512,6 +515,22 @@ export interface ExportPhotoOptions {
   sharpenAmount?: number;
   sharpenRadius?: number;
   filename?: string;
+  /** Schritt 2: ICC-Farbmanagement, Wasserzeichen, Metadaten-Filter. */
+  iccProfile?: IccProfileChoice;
+  iccProfilePath?: string;
+  watermarkText?: string;
+  watermarkFontPath?: string;
+  watermarkFontSize?: number;
+  watermarkColor?: [number, number, number];
+  watermarkImagePath?: string;
+  watermarkPosition?: WatermarkPosition;
+  watermarkOpacity?: number;
+  watermarkMargin?: number;
+  metadataMake?: string;
+  metadataModel?: string;
+  metadataDateTime?: string;
+  metadataCopyright?: string;
+  metadataArtist?: string;
 }
 
 export interface ExportOutcomeDto {
@@ -523,11 +542,54 @@ export interface ExportOutcomeDto {
 
 /** Exportiert ein Foto mit seinem aktuellen Bearbeitungsstand nach
  * `destFolder` (siehe `apx_export::engine`) — rendert serverseitig über
- * denselben Pfad wie die Entwickeln-Vorschau. */
+ * denselben Pfad wie die Entwickeln-Vorschau. Läuft synchron/sofort; für
+ * einen Stapelexport mehrerer Fotos mit Fortschritt/Pausieren siehe
+ * {@link enqueueExportPhoto} (Schritt 2). */
 export function exportPhoto(
   photoId: string,
   destFolder: string,
   options: ExportPhotoOptions,
 ): Promise<ExportOutcomeDto> {
   return invoke<ExportOutcomeDto>("export_photo", { photoId, destFolder, options });
+}
+
+// ---- Export-Warteschlange (Phase 8 Schritt 2) ------------------------------
+
+export interface ExportQueueProgressDto {
+  done: number;
+  total: number;
+  failed: number;
+  paused: boolean;
+}
+
+/** Reiht einen Foto-Export in die Backend-Warteschlange ein, statt ihn
+ * sofort auszuführen — gibt die Auftrags-ID zurück. */
+export function enqueueExportPhoto(photoId: string, destFolder: string, options: ExportPhotoOptions): Promise<number> {
+  return invoke<number>("enqueue_export_photo", { photoId, destFolder, options });
+}
+
+export function getExportQueueProgress(): Promise<ExportQueueProgressDto> {
+  return invoke<ExportQueueProgressDto>("export_queue_progress");
+}
+
+export function pauseExportQueue(): Promise<void> {
+  return invoke<void>("pause_export_queue");
+}
+
+export function resumeExportQueue(): Promise<void> {
+  return invoke<void>("resume_export_queue");
+}
+
+export function cancelExportJob(jobId: number): Promise<boolean> {
+  return invoke<boolean>("cancel_export_job", { jobId });
+}
+
+export function clearFinishedExportJobs(): Promise<void> {
+  return invoke<void>("clear_finished_export_jobs");
+}
+
+/** Generischer Datei-Auswahldialog (ICC-Profil, Wasserzeichen-Schriftdatei/
+ * -Bild) — gibt nur den gewählten Pfad zurück, `null` wenn abgebrochen. */
+export function pickFilePath(filterName: string, extensions: string[]): Promise<string | null> {
+  return invoke<string | null>("pick_file_path", { filterName, extensions });
 }

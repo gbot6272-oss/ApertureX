@@ -260,12 +260,12 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 
 ### Export
 - [x] Formate JPEG/PNG/TIFF/PSD/DNG/WebP/AVIF/HEIF/JPEG XL — Phase 8 — Status: Fertig (abweichend, siehe ADR-0034 Punkt 1) — JPEG/PNG/TIFF/WebP(verlustfrei)/AVIF echt umgesetzt (`apx_export::format`); PSD/HEIF/JPEG-XL-Export sowie eine DNG-Konvertierung beim Import bleiben zurückgestellt (keine tragfähige reine-Rust-Bibliothek mit Schreibpfad bzw. Lizenzmauer, siehe `apx_export::engine`s Moduldoku)
-- [ ] Farbräume sRGB/AdobeRGB/ProPhoto/Display-P3/eigenes ICC — Phase 8 — Status: Nicht begonnen (Schritt 2)
+- [x] Farbräume sRGB/AdobeRGB/ProPhoto/Display-P3/eigenes ICC — Phase 8 — Status: Fertig (abweichend, siehe ADR-0034) — `apx_export::icc`, vier Standardprofile aus Chromatizitätswerten aufgebaut (`lcms2`) statt als `.icc`-Dateien mitgeliefert; ProPhoto/Display-P3 nutzen eine vereinfachte Potenzgammakurve statt der echten stückweisen Übertragungsfunktion
 - [x] Bit-Tiefe 8/16 — Phase 8 — Status: Fertig (abweichend, siehe ADR-0034 Punkt 1) — 16-Bit ist für PNG/TIFF eine lineare Streckung des fertigen 8-Bit-Werts auf den vollen 16-Bit-Bereich (Dateiformat-Kompatibilität), keine echte zusätzliche Tonwertpräzision — dafür müsste `apx_pipeline::develop::render_rgba8` durchgehend auf einem `u16`/`f32`-Pfad rendern, siehe `apx_export::format`s Moduldoku
 - [x] Größenbegrenzung (Kante/Megapixel/Dateigröße) — Phase 8 — Status: Fertig (`apx_export::resize`, Dateigröße per iterativer JPEG-Qualitätssuche)
 - [x] Ausgabeschärfung nach Medium — Phase 8 — Status: Fertig (`apx_export::sharpen`, Unsharp-Masking mit Bildschirm-/Matt-/Hochglanz-Voreinstellungen)
-- [ ] Wasserzeichen, Metadaten-Filter — Phase 8 — Status: Nicht begonnen (Schritt 2)
-- [ ] Export-Warteschlange (Fortschritt, Pausieren, Priorisieren) — Phase 8 — Status: Nicht begonnen (Schritt 2; Schritt 1 exportiert bereits mehrere ausgewählte Fotos sequenziell mit sichtbarem Fortschritt, aber ohne Pausieren/Priorisieren/Persistenz über Neustarts)
+- [x] Wasserzeichen, Metadaten-Filter — Phase 8 — Status: Fertig (abweichend, siehe ADR-0034) — Bild-/Text-Wasserzeichen (`apx_export::watermark`, Text braucht eine vom Nutzer gewählte Schriftdatei statt einer eingebetteten); Metadaten-Filter als echter minimaler EXIF-Writer (`apx_export::metadata`), **nur für JPEG**, GPS/`DateTimeOriginal`-Sub-IFD zurückgestellt
+- [x] Export-Warteschlange (Fortschritt, Pausieren, Priorisieren) — Phase 8 — Status: Fertig (abweichend, siehe ADR-0034) — echte `apx_export::queue::ExportQueue` (Priorisierung, Pausieren, Abbrechen) mit einem Hintergrund-Worker in `apx-app`; Fortschritt per Abfragen (150ms Worker, 250ms Frontend) statt Weck-Benachrichtigung/Tauri-Events, keine Persistenz über App-Neustarts hinweg
 
 ### Zusätzliche Module (über Lightroom hinaus)
 - [ ] Node-Editor (Pipeline als Knotengraph) — Phase 9 — Status: Nicht begonnen

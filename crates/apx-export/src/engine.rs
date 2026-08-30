@@ -21,8 +21,36 @@ use apx_pipeline::GpuContext;
 
 use crate::error::{ExportError, Result};
 use crate::format::{encode_rgba8, BitDepth, EncodeOptions, ExportFormat};
+use crate::icc::{self, IccTarget};
+use crate::metadata::{self, MetadataFilter};
 use crate::resize::{self, SizeConstraint};
 use crate::sharpen;
+use crate::watermark::{self, WatermarkPosition};
+
+/// Ein einzelnes Wasserzeichen (Schritt 2) — Bild- oder Textvariante, s.
+/// `watermark.rs`s Moduldoku. Bild-Wasserzeichen tragen die bereits
+/// dekodierten RGBA8-Pixel (Dekodierung ist `apx-app`s Aufgabe, dieses
+/// Crate kennt keine Dateisystem-Bilddekodierung außer `apx_raw`s Fotos).
+#[derive(Debug, Clone)]
+pub enum WatermarkSpec {
+    Image {
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+        position: WatermarkPosition,
+        opacity: f32,
+        margin: u32,
+    },
+    Text {
+        font_bytes: Vec<u8>,
+        text: String,
+        font_size_px: f32,
+        color: [u8; 3],
+        position: WatermarkPosition,
+        opacity: f32,
+        margin: u32,
+    },
+}
 
 /// Alle Parameter für einen einzelnen Foto-Export — von der Auswahl im
 /// Exportdialog bis zur fertigen Datei. Trägt das bereits aufgelöste
@@ -44,6 +72,16 @@ pub struct ExportRequest {
     pub max_file_size_bytes: Option<u64>,
     /// `(Betrag, Radius)` — `None`/Betrag `0.0` schaltet die Schärfung ab.
     pub sharpen: Option<(f32, f32)>,
+    /// `None` = kein ICC-Farbmanagement, Ausgabe bleibt in sRGB (wie
+    /// bisher, siehe `icc.rs`s Moduldoku).
+    pub icc_target: Option<IccTarget>,
+    /// Höchstens ein Wasserzeichen pro Export — für mehrere Overlays baut
+    /// der Aufrufer mehrere `ExportRequest`s hintereinander (selten genug
+    /// gebraucht, keine eigene Liste nötig).
+    pub watermark: Option<WatermarkSpec>,
+    /// Leer (`MetadataFilter::default()`) = keine Metadaten eingebettet.
+    /// Nur für JPEG wirksam, siehe `metadata.rs`s Moduldoku.
+    pub metadata: MetadataFilter,
 }
 
 impl ExportRequest {
@@ -59,6 +97,9 @@ impl ExportRequest {
             bit_depth: BitDepth::Eight,
             size_constraint: SizeConstraint::Original,
             max_file_size_bytes: None,
+            icc_target: None,
+            watermark: None,
+            metadata: MetadataFilter::default(),
             sharpen: None,
         }
     }
@@ -105,20 +146,88 @@ pub fn render_and_encode(
         _ => resized,
     };
 
+    // ICC-Farbmanagement (Schritt 2) — sRGB→Zielprofil, bevor Wasserzeichen
+    // aufgetragen werden (die sollen im selben Zielfarbraum landen, nicht
+    // separat konvertiert werden müssen).
+    let color_managed = match &request.icc_target {
+        Some(target) => icc::convert_from_srgb(target_w, target_h, &sharpened, target)?,
+        None => sharpened,
+    };
+
+    let mut watermarked = color_managed;
+    if let Some(spec) = &request.watermark {
+        match spec {
+            WatermarkSpec::Image {
+                width,
+                height,
+                rgba,
+                position,
+                opacity,
+                margin,
+            } => {
+                watermark::apply_image_watermark(
+                    target_w,
+                    target_h,
+                    &mut watermarked,
+                    *width,
+                    *height,
+                    rgba,
+                    *position,
+                    *opacity,
+                    *margin,
+                )?;
+            }
+            WatermarkSpec::Text {
+                font_bytes,
+                text,
+                font_size_px,
+                color,
+                position,
+                opacity,
+                margin,
+            } => {
+                watermark::apply_text_watermark(
+                    target_w,
+                    target_h,
+                    &mut watermarked,
+                    font_bytes,
+                    text,
+                    *font_size_px,
+                    *color,
+                    *position,
+                    *opacity,
+                    *margin,
+                )?;
+            }
+        }
+    }
+    let final_pixels = watermarked;
+
     let bytes = match (request.format, request.max_file_size_bytes) {
         (ExportFormat::Jpeg, Some(max_bytes)) => {
-            resize::fit_jpeg_to_max_bytes(target_w, target_h, &sharpened, max_bytes)?
+            resize::fit_jpeg_to_max_bytes(target_w, target_h, &final_pixels, max_bytes)?
         }
         _ => encode_rgba8(
             target_w,
             target_h,
-            &sharpened,
+            &final_pixels,
             request.format,
             &EncodeOptions {
                 quality: request.quality,
                 bit_depth: request.bit_depth,
             },
         )?,
+    };
+
+    // Metadaten-Filter (Schritt 2) — nur JPEG unterstützt das Einbetten
+    // bislang, siehe `metadata.rs`s Moduldoku.
+    let bytes = if request.format == ExportFormat::Jpeg {
+        match metadata::build_exif_app1_segment(&request.metadata) {
+            Some(segment) => metadata::embed_into_jpeg(&bytes, &segment)?,
+            None => bytes,
+        }
+    } else {
+        bytes
     };
 
     Ok(ExportOutcome {
@@ -192,6 +301,62 @@ mod tests {
 
         let outcome = render_and_encode(None, &request).unwrap();
         assert!(outcome.bytes.len() as u64 <= 3000 || outcome.bytes.len() < 6000);
+    }
+
+    #[test]
+    fn icc_target_actually_transforms_the_output_pixels() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = write_test_png(dir.path());
+        let plain = render_and_encode(
+            None,
+            &ExportRequest::new(source.clone(), EdlV3::default(), ExportFormat::Png),
+        )
+        .unwrap();
+
+        let mut with_icc = ExportRequest::new(source.clone(), EdlV3::default(), ExportFormat::Png);
+        with_icc.icc_target = Some(crate::icc::IccTarget::Standard(
+            crate::icc::StandardIccProfile::AdobeRgb,
+        ));
+        let converted = render_and_encode(None, &with_icc).unwrap();
+
+        assert_ne!(
+            plain.bytes, converted.bytes,
+            "AdobeRGB-Zielprofil sollte die kodierten Bytes verändern"
+        );
+    }
+
+    #[test]
+    fn watermark_is_visibly_composited_into_the_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = write_test_png(dir.path());
+        let mut request = ExportRequest::new(source.clone(), EdlV3::default(), ExportFormat::Png);
+        request.watermark = Some(WatermarkSpec::Image {
+            width: 4,
+            height: 4,
+            rgba: [255u8, 0, 0, 255].repeat(16),
+            position: WatermarkPosition::TopLeft,
+            opacity: 1.0,
+            margin: 0,
+        });
+        let outcome = render_and_encode(None, &request).unwrap();
+        let decoded = image::load_from_memory(&outcome.bytes).unwrap().to_rgba8();
+        let corner = decoded.get_pixel(0, 0);
+        assert_eq!(corner.0, [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn metadata_filter_embeds_exif_only_for_jpeg() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = write_test_png(dir.path());
+        let mut request = ExportRequest::new(source.clone(), EdlV3::default(), ExportFormat::Jpeg);
+        request.metadata = MetadataFilter {
+            make: Some("Canon".to_string()),
+            ..Default::default()
+        };
+        let outcome = render_and_encode(None, &request).unwrap();
+        // "Canon" sollte irgendwo im JPEG-Byte-Strom auftauchen (im
+        // eingebetteten APP1-Segment).
+        assert!(outcome.bytes.windows(5).any(|w| w == b"Canon"));
     }
 
     #[test]

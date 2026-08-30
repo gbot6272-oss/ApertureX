@@ -14,10 +14,54 @@ mod reconcile;
 mod state;
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use apx_catalog::Catalog;
 use apx_core::AppPaths;
 use state::AppState;
+
+/// Der einzige Hintergrund-Worker für die Export-Warteschlange (Phase 8
+/// Schritt 2, siehe `state.rs`s Moduldoku) — fragt `queue` in einer
+/// kurzen Schlaufe ab (**vereinfacht**: Abfragen statt einer Weck-
+/// Benachrichtigung, siehe `commands.rs`s Moduldoku zur Warteschlange)
+/// und rendert/kodiert/schreibt jeden anstehenden Auftrag in
+/// `spawn_blocking` (dieselbe Begründung wie beim Import-Job: die
+/// eigentliche Arbeit ist synchroner, CPU-gebundener Code).
+async fn export_queue_worker(
+    pipeline: Arc<apx_pipeline::GpuContext>,
+    queue: Arc<Mutex<apx_export::queue::ExportQueue<state::QueuedExport>>>,
+) {
+    loop {
+        let next = {
+            let mut guard = queue
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.take_next().map(|(id, job)| (id, job.clone()))
+        };
+        match next {
+            Some((id, job)) => {
+                let pipeline = pipeline.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    apx_export::engine::export_to_file(
+                        Some(&pipeline),
+                        &job.request,
+                        &job.dest_path,
+                    )
+                })
+                .await;
+                let mut guard = queue
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                match result {
+                    Ok(Ok(_outcome)) => guard.mark_done(id),
+                    Ok(Err(err)) => guard.mark_failed(id, err.to_string()),
+                    Err(join_err) => guard.mark_failed(id, join_err.to_string()),
+                }
+            }
+            None => tokio::time::sleep(Duration::from_millis(150)).await,
+        }
+    }
+}
 
 fn main() {
     // Fehler beim Ermitteln der Systempfade, beim Initialisieren des
@@ -48,14 +92,24 @@ fn main() {
 
     let builder = protocol::register(tauri::Builder::default());
 
+    let pipeline = Arc::new(pipeline);
+    let export_queue = Arc::new(Mutex::new(apx_export::queue::ExportQueue::new()));
+    let worker_pipeline = pipeline.clone();
+    let worker_queue = export_queue.clone();
+
     builder
         .plugin(tauri_plugin_dialog::init())
+        .setup(move |_app| {
+            tauri::async_runtime::spawn(export_queue_worker(worker_pipeline, worker_queue));
+            Ok(())
+        })
         .manage(AppState {
             paths,
             catalog: Arc::new(catalog),
             active_import: Arc::new(Mutex::new(None)),
-            pipeline: Arc::new(pipeline),
+            pipeline,
             tile_cache: Arc::new(apx_pipeline::tile_cache::TileCache::new()),
+            export_queue,
         })
         .invoke_handler(tauri::generate_handler![
             commands::select_folder,
@@ -122,6 +176,13 @@ fn main() {
             commands::learn_preset_from_photos,
             commands::suggest_tags,
             commands::export_photo,
+            commands::enqueue_export_photo,
+            commands::export_queue_progress,
+            commands::pause_export_queue,
+            commands::resume_export_queue,
+            commands::cancel_export_job,
+            commands::clear_finished_export_jobs,
+            commands::pick_file_path,
         ])
         .run(tauri::generate_context!())
         .expect("Fehler beim Starten von Aperture X");

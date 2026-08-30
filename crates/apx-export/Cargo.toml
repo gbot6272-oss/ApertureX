@@ -21,14 +21,24 @@ rayon.workspace = true
 # über ravif/rav1e, ebenfalls reines Rust) zusätzlich zu den vom Workspace
 # vorgegebenen JPEG/PNG/TIFF-Features — siehe ADR-0034 Punkt 1.
 image = { workspace = true, features = ["webp", "avif"] }
+# Echtes ICC-Farbmanagement für den Export (ADR-0034 Punkt 1, Schritt 2)
+# — anders als der frühere, nie verdrahtete Cargo.toml-Eintrag aus
+# Phase 1 (siehe `THIRD_PARTY.md`), diesmal mit echtem Aufrufer:
+# Konvertierung gerenderter sRGB-Pixel in ein Ziel-Ausgabeprofil vor der
+# Kodierung. "static"-Feature bündelt Little-CMS2 als C-Quelle mit,
+# keine Systembibliothek nötig (dieselbe Bevorzugung wie rusqlites
+# "bundled"-Feature).
+lcms2 = { version = "6", features = ["static"] }
+# Wasserzeichen-Textrasterisierung (reines Rust, keine Systemschrift-API).
+ab_glyph = "0.2"
 
-# Die übrigen in ADR-0034 geprüften Abhängigkeiten (lcms2/ab_glyph für
-# Schritt 2, printpdf für Schritt 5, suppaftp/russh für Schritt 6,
-# reverse_geocoder/quick-xml für Schritt 7) werden erst im jeweiligen
-# Schritt ergänzt, nicht schon hier — `printpdf` zieht transitiv einen
-# sehr großen Font-/Layout-Baum (`azul-layout`, `allsorts`, `taffy` …)
-# nach sich, der in dieser Sandbox mit begrenztem Plattenkontingent den
-# Build sonst unnötig aufbläht, solange er noch nicht gebraucht wird.
+# Die übrigen in ADR-0034 geprüften Abhängigkeiten (printpdf für
+# Schritt 5, suppaftp/russh für Schritt 6, reverse_geocoder/quick-xml
+# für Schritt 7) werden erst im jeweiligen Schritt ergänzt, nicht schon
+# hier — `printpdf` zieht transitiv einen sehr großen Font-/Layout-Baum
+# (`azul-layout`, `allsorts`, `taffy` …) nach sich, der in dieser
+# Sandbox mit begrenztem Plattenkontingent den Build sonst unnötig
+# aufbläht, solange er noch nicht gebraucht wird.
 
 [dev-dependencies]
 tempfile = "3"

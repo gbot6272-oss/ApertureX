@@ -40,7 +40,6 @@ import type {
   AiSettingsDto,
   CatalogStatusDto,
   CollectionDto,
-  ExportOutcomeDto,
   ExportPhotoOptions,
   FilterCriteriaDto,
   FolderDto,
@@ -958,25 +957,25 @@ interface AiSlice {
 /** Export-Engine-Grundgerüst (Phase 8 Schritt 1, siehe `DECISIONS.md`
  * ADR-0034 und `apx_export::engine`s Moduldoku). Exportiert eine oder
  * mehrere Fotos mit ihrem jeweils *aktuellen* committeten Bearbeitungsstand
- * — dieselbe Quelle, die `Entwickeln` anzeigt. Eine echte Warteschlange
- * (Fortschritt/Pausieren/Priorisieren über mehrere App-Neustarts hinweg)
- * kommt erst in Schritt 2 (`ADR-0034` Punkt 1) — hier ein einfacher
- * sequenzieller Durchlauf mit sichtbarem Fortschritt, kein Persistieren
- * zwischen Neustarts. */
+ * — dieselbe Quelle, die `Entwickeln` anzeigt. Reiht alle Fotos in die
+ * Backend-Warteschlange ein (`apx_export::queue`, Schritt 2 — Fortschritt/
+ * Pausieren/Priorisieren, siehe ADR-0034 Punkt 1) und pollt danach den
+ * Fortschritt, statt selbst sequenziell zu warten — **vereinfacht**:
+ * Abfragen alle 250ms statt eines Event-Push, kein Persistieren der
+ * Warteschlange über App-Neustarts hinweg. */
 interface ExportSlice {
   exportDialogOpen: boolean;
   openExportDialog: () => void;
   closeExportDialog: () => void;
   exportRunning: boolean;
-  exportProgress: { done: number; total: number } | null;
+  exportProgress: { done: number; total: number; failed: number } | null;
   exportError: string | null;
-  exportLastOutcomes: ExportOutcomeDto[];
-  /** Exportiert `photoIds` sequenziell nach `destFolder` mit `options`
-   * (siehe `ExportPhotoOptions`) — bricht bei einem Fehler NICHT den
-   * ganzen Stapel ab, sammelt aber die erste Fehlermeldung in
-   * `exportError`, damit ein einzelnes fehlerhaftes Foto (z. B. fehlende
-   * Quelldatei) nicht die übrigen blockiert. */
+  exportQueuePaused: boolean;
+  /** Reiht `photoIds` in die Export-Warteschlange ein und pollt den
+   * Fortschritt bis alle abgeschlossen sind (egal ob erfolgreich oder
+   * fehlgeschlagen). */
   exportPhotos: (photoIds: string[], destFolder: string, options: ExportPhotoOptions) => Promise<void>;
+  toggleExportQueuePause: () => Promise<void>;
 }
 
 export type AppStore = CatalogSlice &
@@ -3294,13 +3293,13 @@ export const useAppStore = create<AppStore>()(
       });
     },
 
-    // ---- Export (Phase 8 Schritt 1) ---------------------------------
+    // ---- Export (Phase 8 Schritt 1+2) --------------------------------
 
     exportDialogOpen: false,
     exportRunning: false,
     exportProgress: null,
     exportError: null,
-    exportLastOutcomes: [],
+    exportQueuePaused: false,
 
     openExportDialog: () => {
       set((state) => {
@@ -3318,28 +3317,54 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.exportRunning = true;
         state.exportError = null;
-        state.exportProgress = { done: 0, total: photoIds.length };
-        state.exportLastOutcomes = [];
+        state.exportProgress = { done: 0, total: 0, failed: 0 };
+        state.exportQueuePaused = false;
       });
 
-      const outcomes: ExportOutcomeDto[] = [];
       let firstError: string | null = null;
-      for (const photoId of photoIds) {
-        try {
-          const outcome = await api.exportPhoto(photoId, destFolder, options);
-          outcomes.push(outcome);
-        } catch (err) {
-          firstError ??= err instanceof Error ? err.message : String(err);
+      try {
+        for (const photoId of photoIds) {
+          await api.enqueueExportPhoto(photoId, destFolder, options);
         }
-        set((state) => {
-          state.exportProgress = { done: (state.exportProgress?.done ?? 0) + 1, total: photoIds.length };
-        });
+      } catch (err) {
+        firstError = err instanceof Error ? err.message : String(err);
       }
+
+      // Fortschritt abfragen (siehe `ExportSlice`s Moduldoku), bis alle
+      // eingereihten Aufträge dieser Sitzung abgeschlossen sind — die
+      // Warteschlange kann bereits ältere Aufträge enthalten, daher zählt
+      // hier `total` immer die komplette Backend-Warteschlange, nicht nur
+      // `photoIds.length`.
+      let progress = await api.getExportQueueProgress();
+      while (progress.done < progress.total) {
+        set((state) => {
+          state.exportProgress = { done: progress.done, total: progress.total, failed: progress.failed };
+          state.exportQueuePaused = progress.paused;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        progress = await api.getExportQueueProgress();
+      }
+      set((state) => {
+        state.exportProgress = { done: progress.done, total: progress.total, failed: progress.failed };
+        state.exportQueuePaused = progress.paused;
+      });
 
       set((state) => {
         state.exportRunning = false;
-        state.exportLastOutcomes = outcomes;
         state.exportError = firstError;
+      });
+      await api.clearFinishedExportJobs();
+    },
+
+    toggleExportQueuePause: async () => {
+      const paused = get().exportQueuePaused;
+      if (paused) {
+        await api.resumeExportQueue();
+      } else {
+        await api.pauseExportQueue();
+      }
+      set((state) => {
+        state.exportQueuePaused = !paused;
       });
     },
     };

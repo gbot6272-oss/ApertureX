@@ -76,6 +76,9 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       byte_size: number;
     },
     exportPhotoShouldFail: false,
+    // `pick_file_path` (ICC-/Schriftdatei/-Wasserzeichenbild-Auswahl) —
+    // `null` simuliert einen abgebrochenen Dialog.
+    pickFilePathResult: null as string | null,
     ...initialFixtures,
   };
   w.__mockInvokeLog = [] as Array<{ cmd: string; args: unknown }>;
@@ -153,6 +156,16 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   // Import-Presets (Phase 3 Backend, Phase 5 Schritt 9 Frontend) — analog
   // zu `presetFolders`/`presets` oben über Fixtures seedbar.
   const importPresets: MockImportPreset[] = [...((initialFixtures.importPresets as MockImportPreset[] | undefined) ?? [])];
+
+  // Export-Warteschlange (Phase 8 Schritt 2) — vereinfachte In-Memory-
+  // Simulation: ein eingereihter Auftrag wird sofort als abgeschlossen
+  // markiert, außer die Warteschlange ist pausiert (dann bleibt er
+  // "pending", bis `resume_export_queue` ihn nachträglich abschließt) —
+  // genug, um Fortschritt/Pausieren/Fehler in e2e-Tests zu beobachten,
+  // ohne einen echten Hintergrund-Worker nachzubauen.
+  let nextExportJobId = 1;
+  let exportQueuePaused = Boolean(initialFixtures.exportQueueStartsPaused);
+  const exportQueueJobs: Array<{ id: number; status: "pending" | "done" | "failed" }> = [];
 
   function findPreset(presetId: string): MockPreset | undefined {
     return presets.find((p) => p.id === presetId);
@@ -264,6 +277,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       tagSuggestions: string[];
       exportPhotoOutcome: { path: string; width: number; height: number; byte_size: number };
       exportPhotoShouldFail: boolean;
+      pickFilePathResult: string | null;
     };
 
     switch (cmd) {
@@ -698,6 +712,42 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         }
         return fixtures.exportPhotoOutcome;
       }
+
+      case "enqueue_export_photo": {
+        const id = nextExportJobId++;
+        const status: "pending" | "done" | "failed" = exportQueuePaused ? "pending" : fixtures.exportPhotoShouldFail ? "failed" : "done";
+        exportQueueJobs.push({ id, status });
+        return id;
+      }
+      case "export_queue_progress": {
+        const total = exportQueueJobs.length;
+        const done = exportQueueJobs.filter((j) => j.status !== "pending").length;
+        const failed = exportQueueJobs.filter((j) => j.status === "failed").length;
+        return { done, total, failed, paused: exportQueuePaused };
+      }
+      case "pause_export_queue":
+        exportQueuePaused = true;
+        return null;
+      case "resume_export_queue": {
+        exportQueuePaused = false;
+        for (const job of exportQueueJobs) {
+          if (job.status === "pending") job.status = fixtures.exportPhotoShouldFail ? "failed" : "done";
+        }
+        return null;
+      }
+      case "cancel_export_job": {
+        const job = exportQueueJobs.find((j) => j.id === (args.jobId as number));
+        if (!job || job.status !== "pending") return false;
+        job.status = "failed";
+        return true;
+      }
+      case "clear_finished_export_jobs": {
+        const stillPending = exportQueueJobs.filter((j) => j.status === "pending");
+        exportQueueJobs.splice(0, exportQueueJobs.length, ...stillPending);
+        return null;
+      }
+      case "pick_file_path":
+        return fixtures.pickFilePathResult;
 
       default:
         throw new Error(`Test-Stub: unbekannter invoke-Befehl "${cmd}"`);

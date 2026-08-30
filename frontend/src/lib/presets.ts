@@ -41,6 +41,18 @@ export const PRESET_SECTION_LABELS: Record<PresetSectionKey, string> = {
  * ausgewählten Sektionen sind gesetzt. */
 export type PresetEdlSubset = Partial<Pick<EdlPayload, PresetSectionKey>>;
 
+/** Extrahiert genau die ausgewählten Sektionen aus einem vollständigen
+ * `EdlPayload` — der Checkbox-Dialog beim Speichern eines Presets
+ * (`SavePresetDialog.tsx`, `SPEC.md` §3.5: „Beim Speichern zeigt ein
+ * Dialog jede einzelne Einstellungsgruppe mit Checkbox"). */
+export function buildPresetEdlSubset(edl: EdlPayload, sections: readonly PresetSectionKey[]): PresetEdlSubset {
+  const subset: Record<string, unknown> = {};
+  for (const key of sections) {
+    subset[key] = edl[key];
+  }
+  return subset as PresetEdlSubset;
+}
+
 export function parseEdlSubset(json: string): PresetEdlSubset {
   try {
     const parsed: unknown = JSON.parse(json);

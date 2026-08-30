@@ -95,6 +95,32 @@ test.describe("Presets-Panel", () => {
     await expect(page.getByText("Keine Presets in diesem Ordner.")).toBeVisible();
   });
 
+  test("speichert die aktuellen Einstellungen als neues Preset mit den ausgewählten Sektionen", async ({ page }) => {
+    await setUp(page);
+
+    // Regler-Wert setzen, damit die gespeicherte EDL-Teilmenge auch
+    // tatsächlich etwas von neutral Abweichendes enthält.
+    const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" });
+    await exposureInput.fill("0.6");
+    await exposureInput.blur();
+
+    await page.getByRole("button", { name: "Preset speichern" }).click();
+    const dialog = page.getByRole("dialog", { name: "Preset speichern" });
+    await expect(dialog).toBeVisible();
+
+    await dialog.getByLabel("Name").fill("Mein neues Preset");
+    // Nur "Grundeinstellungen" behalten — alle anderen Sektionen abwählen.
+    for (const label of ["Kurven", "HSL", "Farbmischer", "Color Grading", "Details", "Objektivkorrekturen", "Effekte", "Kalibrierung", "Geometrie"]) {
+      await dialog.getByLabel(label).uncheck();
+    }
+    await dialog.getByRole("button", { name: "Speichern" }).click();
+
+    await expect(dialog).not.toBeVisible();
+    // Neues Preset landet an der Wurzel (kein Ordner ausgewählt) — die
+    // Wurzel-Ansicht ist bereits der Standardzustand des Panels.
+    await expect(page.getByText("Mein neues Preset")).toBeVisible();
+  });
+
   test("benennt einen Preset-Ordner über den Dialog um", async ({ page }) => {
     await setUp(page);
 

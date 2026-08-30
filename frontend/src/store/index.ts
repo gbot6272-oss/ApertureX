@@ -4,6 +4,8 @@ import { immer } from "zustand/middleware/immer";
 import { buildEdlEnvelopeJson, MAX_COLOR_MIXER_REGIONS, neutralEdlPayload, newColorMixerRegion, parseEdlEnvelopeJson, WHITE_BALANCE_PRESETS, writeBasicField } from "../lib/edl";
 import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, PrimaryColorAdjustment, RepairMode, RepairPoint, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
+import { buildPresetEdlSubset, serializeEdlSubset } from "../lib/presets";
+import type { PresetSectionKey } from "../lib/presets";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
 import * as api from "../lib/tauri";
@@ -455,6 +457,16 @@ interface PresetsSlice {
   renamePreset: (presetId: string, name: string) => Promise<void>;
   movePresetToFolder: (presetId: string, folderId: string | null) => Promise<void>;
   deletePreset: (presetId: string) => Promise<void>;
+  /** Legt ein neues Preset aus dem aktuellen `developEdl` an — nur die
+   * ausgewählten Sektionen wandern in die EDL-Teilmenge (siehe
+   * `lib/presets.ts`s `buildPresetEdlSubset`). No-op ohne Namen oder ohne
+   * mindestens eine ausgewählte Sektion. */
+  savePresetFromCurrentEdl: (
+    name: string,
+    folderId: string | null,
+    tags: string[],
+    sections: PresetSectionKey[],
+  ) => Promise<void>;
 }
 
 export type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice & LibrarySlice & PresetsSlice;
@@ -1564,6 +1576,20 @@ export const useAppStore = create<AppStore>()(
     deletePreset: async (presetId) => {
       try {
         await api.deletePreset(presetId);
+        await get().refreshPresets();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    savePresetFromCurrentEdl: async (name, folderId, tags, sections) => {
+      const trimmed = name.trim();
+      if (!trimmed || sections.length === 0) return;
+      try {
+        const subset = buildPresetEdlSubset(get().developEdl, sections);
+        await api.createPreset(folderId, trimmed, tags, "[]", serializeEdlSubset(subset));
         await get().refreshPresets();
       } catch (err) {
         set((state) => {

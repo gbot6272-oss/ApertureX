@@ -39,6 +39,7 @@ import { useAppStore } from "../store";
 import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
+import { SavePresetDialog } from "./SavePresetDialog";
 
 // ---- Reparatur (Klonen/Reparieren) — Phase 4 Schritt 12 --------------------
 //
@@ -132,6 +133,7 @@ export function DevelopPanel() {
   const updateColorMixerRegion = useAppStore((s) => s.updateColorMixerRegion);
   const [selectedRegionIndex, setSelectedRegionIndex] = useState<number | null>(null);
   const previousRegionCount = useRef(colorMixer.regions.length);
+  const [savePresetOpen, setSavePresetOpen] = useState(false);
   const colorGrading = useAppStore((s) => s.developEdl.color_grading);
   const setColorGradingWheel = useAppStore((s) => s.setColorGradingWheel);
   const setColorGradingBalance = useAppStore((s) => s.setColorGradingBalance);
@@ -207,10 +209,21 @@ export function DevelopPanel() {
   const toneSpecs = BASIC_SLIDER_SPECS.filter((spec) => !WHITE_BALANCE_KEYS.has(spec.key));
 
   return (
+    <>
     <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border bg-bg-raised p-3" aria-label="Entwickeln">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-text-primary">Entwickeln</h2>
         <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => setSavePresetOpen(true)}
+            disabled={!selectedPhotoId}
+            aria-label="Preset speichern"
+            title="Aktuelle Einstellungen als Preset speichern"
+            className="rounded px-2 py-1 text-xs hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Preset speichern
+          </button>
           <button
             type="button"
             onClick={() => void undoDevelop()}
@@ -833,5 +846,7 @@ export function DevelopPanel() {
         </>
       )}
     </aside>
+    <SavePresetDialog open={savePresetOpen} onClose={() => setSavePresetOpen(false)} />
+    </>
   );
 }

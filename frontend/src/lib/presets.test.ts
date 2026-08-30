@@ -1,7 +1,26 @@
 import { describe, expect, it } from "vitest";
 
-import { parseConditions, parseEdlSubset, serializeConditions, serializeEdlSubset } from "./presets";
+import { neutralEdlPayload } from "./edl";
+import { buildPresetEdlSubset, parseConditions, parseEdlSubset, serializeConditions, serializeEdlSubset } from "./presets";
 import type { PresetCondition, PresetEdlSubset } from "./presets";
+
+describe("buildPresetEdlSubset", () => {
+  it("copies only the selected sections from a full EdlPayload", () => {
+    const edl = neutralEdlPayload();
+    edl.basic.exposure_ev = 0.5;
+    edl.curves.rgb = { kind: "Parametric", shadows: 10, darks: 0, lights: 0, highlights: 0 };
+
+    const subset = buildPresetEdlSubset(edl, ["basic"]);
+
+    expect(subset.basic).toEqual(edl.basic);
+    expect(subset.curves).toBeUndefined();
+    expect(subset.hsl).toBeUndefined();
+  });
+
+  it("returns an empty object when no sections are selected", () => {
+    expect(buildPresetEdlSubset(neutralEdlPayload(), [])).toEqual({});
+  });
+});
 
 describe("parseEdlSubset/serializeEdlSubset", () => {
   it("roundtrips a subset with only the selected sections", () => {

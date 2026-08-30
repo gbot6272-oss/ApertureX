@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useDevelopPreviewThumbnail } from "../hooks/useDevelopRender";
 import { buildEdlEnvelopeJson, type EdlPayload } from "../lib/edl";
-import { mergeEdlSubset, parseEdlSubset } from "../lib/presets";
+import { applyConditionsToSubset, mergeEdlSubset, parseConditions, parseEdlSubset, type PresetConditionPhotoMeta } from "../lib/presets";
 import { latestPresetVersion } from "../lib/tauri";
 
 const THUMBNAIL_MAX_EDGE = 64;
@@ -15,17 +15,27 @@ const THUMBNAIL_MAX_EDGE = 64;
  * Preset erscheint erst nach einem erneuten Mount, z. B. Ordnerwechsel),
  * rendert dann über [`useDevelopPreviewThumbnail`] bei niedriger
  * Auflösung, unabhängig vom Haupt-Viewer-Rendering.
+ *
+ * Wertet — wie `applyPreset`/die Hover-Vorschau — die Bedingungen des
+ * Presets gegen `photoMeta` aus (`lib/presets.ts`s
+ * `applyConditionsToSubset`): eine fürs ganze Preset fehlgeschlagene
+ * Regel zeigt das unveränderte `currentEdl` (keine Vorschau-Wirkung),
+ * eine sektionsbezogene Regel blendet nur diese Sektion aus.
  */
 export function PresetThumbnail({
   presetId,
   presetName,
   currentEdl,
   photoId,
+  conditionsJson,
+  photoMeta,
 }: {
   presetId: string;
   presetName: string;
   currentEdl: EdlPayload;
   photoId: string | null;
+  conditionsJson: string;
+  photoMeta: PresetConditionPhotoMeta | null;
 }) {
   const [edlJson, setEdlJson] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -36,7 +46,9 @@ export function PresetThumbnail({
       try {
         const version = await latestPresetVersion(presetId);
         if (cancelled) return;
-        const subset = parseEdlSubset(version.edl_subset_json);
+        const rawSubset = parseEdlSubset(version.edl_subset_json);
+        const conditions = parseConditions(conditionsJson);
+        const subset = applyConditionsToSubset(rawSubset, conditions, photoMeta) ?? {};
         const merged = mergeEdlSubset(currentEdl, subset);
         setEdlJson(buildEdlEnvelopeJson(merged));
       } catch {
@@ -48,7 +60,7 @@ export function PresetThumbnail({
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- lädt bewusst nur einmal je presetId, siehe Moduldoku oben (currentEdl-Änderungen sollen kein erneutes Nachladen der Version auslösen).
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lädt bewusst nur einmal je presetId, siehe Moduldoku oben (currentEdl-/photoMeta-Änderungen sollen kein erneutes Nachladen der Version auslösen).
   }, [presetId]);
 
   const frame = useDevelopPreviewThumbnail(photoId, edlJson, THUMBNAIL_MAX_EDGE);

@@ -1,12 +1,29 @@
 import { useState } from "react";
 
-import { PRESET_SECTION_KEYS, PRESET_SECTION_LABELS } from "../lib/presets";
-import type { PresetSectionKey } from "../lib/presets";
+import {
+  PRESET_CONDITION_FIELD_OPTIONS,
+  PRESET_CONDITION_OPERATOR_OPTIONS,
+  PRESET_SECTION_KEYS,
+  PRESET_SECTION_LABELS,
+} from "../lib/presets";
+import type { PresetCondition, PresetConditionField, PresetConditionOperator, PresetSectionKey } from "../lib/presets";
 import { useAppStore } from "../store";
 
 interface SavePresetDialogProps {
   open: boolean;
   onClose: () => void;
+}
+
+let nextConditionKey = 0;
+
+/** Eine Bedingungsregel im Editor-Zustand — `key` ist reines React-Listen-
+ * Schlüssel-Hilfsmittel, kein Teil der gespeicherten `PresetCondition`. */
+interface DraftCondition extends PresetCondition {
+  key: number;
+}
+
+function makeDraftCondition(): DraftCondition {
+  return { key: nextConditionKey++, field: "iso", op: ">", value: "", section: null };
 }
 
 /**
@@ -23,6 +40,7 @@ export function SavePresetDialog({ open, onClose }: SavePresetDialogProps) {
   const [folderId, setFolderId] = useState<string>("");
   const [tagsText, setTagsText] = useState("");
   const [selectedSections, setSelectedSections] = useState<Set<PresetSectionKey>>(new Set(PRESET_SECTION_KEYS));
+  const [conditions, setConditions] = useState<DraftCondition[]>([]);
 
   if (!open) return null;
 
@@ -35,11 +53,24 @@ export function SavePresetDialog({ open, onClose }: SavePresetDialogProps) {
     });
   }
 
+  function addCondition() {
+    setConditions((previous) => [...previous, makeDraftCondition()]);
+  }
+
+  function updateCondition(key: number, patch: Partial<PresetCondition>) {
+    setConditions((previous) => previous.map((condition) => (condition.key === key ? { ...condition, ...patch } : condition)));
+  }
+
+  function removeCondition(key: number) {
+    setConditions((previous) => previous.filter((condition) => condition.key !== key));
+  }
+
   function reset() {
     setName("");
     setFolderId("");
     setTagsText("");
     setSelectedSections(new Set(PRESET_SECTION_KEYS));
+    setConditions([]);
   }
 
   async function handleSave() {
@@ -47,7 +78,10 @@ export function SavePresetDialog({ open, onClose }: SavePresetDialogProps) {
       .split(",")
       .map((tag) => tag.trim())
       .filter((tag) => tag.length > 0);
-    await savePresetFromCurrentEdl(name, folderId || null, tags, [...selectedSections]);
+    const savedConditions: PresetCondition[] = conditions
+      .filter((condition) => condition.value.trim().length > 0)
+      .map(({ field, op, value, section }) => ({ field, op, value: value.trim(), section }));
+    await savePresetFromCurrentEdl(name, folderId || null, tags, [...selectedSections], savedConditions);
     reset();
     onClose();
   }
@@ -110,6 +144,75 @@ export function SavePresetDialog({ open, onClose }: SavePresetDialogProps) {
               {PRESET_SECTION_LABELS[key]}
             </label>
           ))}
+        </fieldset>
+
+        <fieldset className="mb-3 flex flex-col gap-2">
+          <legend className="mb-1 text-xs font-medium text-text-secondary">
+            Bedingungen (optional — mehrere Regeln müssen alle zutreffen)
+          </legend>
+          {conditions.map((condition) => (
+            <div key={condition.key} className="flex flex-wrap items-center gap-1 text-xs">
+              <select
+                aria-label="Bedingungsfeld"
+                value={condition.field}
+                onChange={(event) => updateCondition(condition.key, { field: event.target.value as PresetConditionField })}
+                className="min-w-0 rounded border border-border bg-bg-panel px-1 py-0.5"
+              >
+                {PRESET_CONDITION_FIELD_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Bedingungsoperator"
+                value={condition.op}
+                onChange={(event) => updateCondition(condition.key, { op: event.target.value as PresetConditionOperator })}
+                className="min-w-0 rounded border border-border bg-bg-panel px-1 py-0.5"
+              >
+                {PRESET_CONDITION_OPERATOR_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="text"
+                aria-label="Bedingungswert"
+                value={condition.value}
+                onChange={(event) => updateCondition(condition.key, { value: event.target.value })}
+                className="w-16 min-w-0 rounded border border-border bg-bg-panel px-1 py-0.5"
+              />
+              <select
+                aria-label="Betroffene Sektion"
+                value={condition.section ?? ""}
+                onChange={(event) => updateCondition(condition.key, { section: (event.target.value || null) as PresetSectionKey | null })}
+                className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-1 py-0.5"
+              >
+                <option value="">Ganzes Preset</option>
+                {PRESET_SECTION_KEYS.map((key) => (
+                  <option key={key} value={key}>
+                    Nur {PRESET_SECTION_LABELS[key]}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => removeCondition(condition.key)}
+                aria-label="Bedingung entfernen"
+                className="shrink-0 text-danger"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={addCondition}
+            className="self-start rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel"
+          >
+            + Bedingung
+          </button>
         </fieldset>
 
         <div className="flex justify-end gap-2">

@@ -207,6 +207,66 @@ test.describe("Presets-Panel", () => {
     expect(commitCountAfterLeave).toBe(commitCountBefore);
   });
 
+  test("Bedingte Presets: eine fürs ganze Preset fehlschlagende Regel verhindert das Anwenden", async ({ page }) => {
+    await setUp(page);
+
+    const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" });
+    await exposureInput.fill("0.6");
+    await exposureInput.blur();
+    await page.getByRole("button", { name: "Preset speichern" }).click();
+    const dialog = page.getByRole("dialog", { name: "Preset speichern" });
+    await dialog.getByLabel("Name").fill("Nur hohe ISO");
+    for (const label of ["Kurven", "HSL", "Farbmischer", "Color Grading", "Details", "Objektivkorrekturen", "Effekte", "Kalibrierung", "Geometrie"]) {
+      await dialog.getByLabel(label).uncheck();
+    }
+    await dialog.getByRole("button", { name: "+ Bedingung" }).click();
+    // Feld bleibt beim Default "ISO", Operator beim Default ">" — PHOTO.iso
+    // ist 200, die Bedingung (> 1000) schlägt also fehl. Sektion bleibt
+    // beim Default "Ganzes Preset".
+    await dialog.getByLabel("Bedingungswert").fill("1000");
+    await dialog.getByRole("button", { name: "Speichern" }).click();
+    await expect(dialog).not.toBeVisible();
+
+    await exposureInput.fill("0");
+    await exposureInput.blur();
+
+    const commitCountBefore = (await getMockInvokeLog(page)).filter((entry) => entry.cmd === "apply_develop_edit").length;
+    await page.getByRole("button", { name: "Nur hohe ISO", exact: true }).click();
+    await expect(page.getByText(/erfüllt die Bedingungen für dieses Foto nicht/)).toBeVisible();
+    const commitCountAfter = (await getMockInvokeLog(page)).filter((entry) => entry.cmd === "apply_develop_edit").length;
+    expect(commitCountAfter).toBe(commitCountBefore);
+  });
+
+  test("Bedingte Presets: eine sektionsbezogene Regel schließt nur die betroffene Sektion aus, der Rest wird trotzdem angewendet", async ({
+    page,
+  }) => {
+    await setUp(page);
+
+    const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" });
+    await exposureInput.fill("0.7");
+    await exposureInput.blur();
+    await page.getByRole("button", { name: "Preset speichern" }).click();
+    const dialog = page.getByRole("dialog", { name: "Preset speichern" });
+    await dialog.getByLabel("Name").fill("Sektion bedingt");
+    for (const label of ["HSL", "Farbmischer", "Color Grading", "Details", "Objektivkorrekturen", "Effekte", "Kalibrierung", "Geometrie"]) {
+      await dialog.getByLabel(label).uncheck();
+    }
+    await dialog.getByRole("button", { name: "+ Bedingung" }).click();
+    // ISO 200 ist nicht > 1000 — die Regel schlägt fehl, betrifft aber nur
+    // die Sektion "Kurven", nicht "Grundeinstellungen".
+    await dialog.getByLabel("Bedingungswert").fill("1000");
+    await dialog.getByLabel("Betroffene Sektion").selectOption({ label: "Nur Kurven" });
+    await dialog.getByRole("button", { name: "Speichern" }).click();
+    await expect(dialog).not.toBeVisible();
+
+    await exposureInput.fill("0");
+    await exposureInput.blur();
+
+    await page.getByRole("button", { name: "Sektion bedingt", exact: true }).click();
+    await expect.poll(async () => readLastCommittedExposure(page)).toBeCloseTo(0.7, 2);
+    await expect(page.getByText(/erfüllt die Bedingungen/)).not.toBeVisible();
+  });
+
   test("benennt einen Preset-Ordner über den Dialog um", async ({ page }) => {
     await setUp(page);
 

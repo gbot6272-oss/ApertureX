@@ -492,9 +492,9 @@ Siehe ADR-0028 (plus Nachtrag): Workflow-Punkte (Schnappschüsse, Vorher/Nachher
   - [ ] Hover über einen Preset-Eintrag rendert ihn testweise in den Viewer (`useDevelopRender` mit einem temporären, nicht committeten EDL), verlässt die Maus den Eintrag ohne Klick, kehrt die Vorschau zum vorherigen Zustand zurück
   - [ ] Thumbnail je Preset-Eintrag in der Liste (kleine Vorschau-Auflösung, gleicher Renderpfad)
 
-- [ ] 7. Bedingte Presets (vereinfacht, siehe ADR-0031 Punkt 4)
-  - [ ] Feste Feldliste (ISO, Blende, Brennweite, Kameramodell, Objektiv — bereits in `photos` vorhanden), Operatoren (`>`, `<`, `=`, „enthält"), UND-verknüpft
-  - [ ] Kleiner Regel-Editor in `SavePresetDialog.tsx`; Auswertung beim Anwenden gegen die Metadaten des aktuellen Fotos — Regel-Fehlschlag lässt die betroffene Preset-Sektion aus (nicht das ganze Preset)
+- [x] 7. Bedingte Presets (vereinfacht, siehe ADR-0031 Punkt 4)
+  - [x] Feste Feldliste (ISO, Blende, Brennweite, Kameramodell, Objektiv — bereits in `photos` vorhanden), Operatoren (`>`, `<`, `=`, „enthält"), UND-verknüpft
+  - [x] Kleiner Regel-Editor in `SavePresetDialog.tsx`; Auswertung beim Anwenden gegen die Metadaten des aktuellen Fotos. Jede Regel trägt zusätzlich eine optionale Sektion: „Ganzes Preset" (schlägt sie fehl, wird das komplette Preset nicht angewendet) oder eine einzelne Sektion (schlägt sie fehl, wird nur diese Sektion ausgeschlossen, der Rest des Presets bleibt wirksam) — Erweiterung ggü. der ursprünglichen Formulierung, die nur den sektionsbezogenen Fall nannte, aber der praxisnähere Fall „ganzes Preset nur unter Bedingung X" (z. B. „nur für Teleobjektive") ist mindestens genauso häufig und ließ sich ohne Mehraufwand mitbauen.
 
 - [ ] 8. Versionierung + Diff-Ansicht
   - [ ] Jede erneute Speicherung über ein bestehendes Preset legt eine neue `preset_versions`-Zeile an (alte bleibt erhalten)

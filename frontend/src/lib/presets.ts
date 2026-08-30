@@ -124,11 +124,113 @@ export type PresetConditionField = "iso" | "aperture" | "focal_length" | "camera
 export type PresetConditionOperator = ">" | "<" | "=" | "contains";
 
 /** Eine einzelne Bedingungsregel — mehrere Regeln in einem Preset sind
- * immer UND-verknüpft (kein ODER, keine Verschachtelung). */
+ * immer UND-verknüpft (kein ODER, keine Verschachtelung). `section: null`
+ * bedeutet „gilt für das ganze Preset" (schlägt die Regel fehl, wird das
+ * gesamte Preset nicht angewendet); eine gesetzte Sektion grenzt die
+ * Wirkung eines Fehlschlags auf genau diese Sektion ein (`PLAN.md` Phase
+ * 5 Schritt 7: „Eine fehlgeschlagene Regel schließt nur die betroffene
+ * Sektion aus, nicht das ganze Preset"). */
 export interface PresetCondition {
   field: PresetConditionField;
   op: PresetConditionOperator;
   value: string;
+  section: PresetSectionKey | null;
+}
+
+/** Die für die Regel-Auswertung relevante Teilmenge der Fotometadaten
+ * (`PhotoDto`) — als eigenes, schlankes Interface statt eines Imports aus
+ * `lib/tauri.ts`, damit dieses Modul unabhängig von den Tauri-DTOs bleibt
+ * und einfach zu testen ist. */
+export interface PresetConditionPhotoMeta {
+  iso: number | null;
+  aperture: number | null;
+  focal_length: number | null;
+  camera_model: string | null;
+  lens: string | null;
+}
+
+/** Prüft eine einzelne Regel gegen die Fotometadaten. Ein `null`-Metadatum
+ * (z. B. kein EXIF-ISO-Wert vorhanden) lässt die Regel fehlschlagen —
+ * konservativ: eine Bedingung, die sich nicht auswerten lässt, gilt als
+ * nicht erfüllt, statt sie stillschweigend zu ignorieren. `contains` ist
+ * nur für die String-Felder (Kameramodell/Objektiv) sinnvoll und
+ * vergleicht Kleinbuchstaben-Teilstrings; numerische Operatoren (`>`, `<`,
+ * `=`) sind nur für die Zahlenfelder definiert. Ein nicht passender
+ * Feld/Operator-Kombination (z. B. `>` auf `camera_model`) gilt ebenfalls
+ * als nicht erfüllt. */
+export function evaluateCondition(condition: PresetCondition, photo: PresetConditionPhotoMeta): boolean {
+  switch (condition.field) {
+    case "iso":
+    case "aperture":
+    case "focal_length": {
+      const actual = photo[condition.field];
+      if (actual === null) return false;
+      const expected = Number(condition.value);
+      if (Number.isNaN(expected)) return false;
+      switch (condition.op) {
+        case ">":
+          return actual > expected;
+        case "<":
+          return actual < expected;
+        case "=":
+          return actual === expected;
+        default:
+          return false;
+      }
+    }
+    case "camera_model":
+    case "lens": {
+      const actual = photo[condition.field];
+      if (actual === null) return false;
+      switch (condition.op) {
+        case "contains":
+          return actual.toLowerCase().includes(condition.value.toLowerCase());
+        case "=":
+          return actual.toLowerCase() === condition.value.toLowerCase();
+        default:
+          return false;
+      }
+    }
+  }
+}
+
+/** Wendet alle Regeln eines Presets auf eine EDL-Teilmenge an: Regeln ohne
+ * `section` (gelten fürs ganze Preset) — schlägt eine davon fehl, wird
+ * `null` zurückgegeben (Preset komplett übersprungen); Regeln mit
+ * `section` entfernen bei einem Fehlschlag nur ihre eine Sektion aus der
+ * Teilmenge (mehrere Regeln je Sektion sind UND-verknüpft, siehe
+ * `PresetCondition`-Doku oben). Presets ohne jede Bedingung (`conditions`
+ * leer) geben `subset` unverändert zurück. */
+export function applyConditionsToSubset(
+  subset: PresetEdlSubset,
+  conditions: readonly PresetCondition[],
+  photo: PresetConditionPhotoMeta | null,
+): PresetEdlSubset | null {
+  if (conditions.length === 0) return subset;
+  // Ohne bekanntes Foto (z. B. noch keine Auswahl) werden Bedingungen
+  // konservativ als nicht erfüllt behandelt — siehe `evaluateCondition`s
+  // Dokumentation zu fehlenden Metadaten.
+  const meta: PresetConditionPhotoMeta = photo ?? { iso: null, aperture: null, focal_length: null, camera_model: null, lens: null };
+
+  for (const condition of conditions) {
+    if (condition.section === null && !evaluateCondition(condition, meta)) {
+      return null;
+    }
+  }
+
+  const excludedSections = new Set<PresetSectionKey>();
+  for (const condition of conditions) {
+    if (condition.section !== null && !evaluateCondition(condition, meta)) {
+      excludedSections.add(condition.section);
+    }
+  }
+  if (excludedSections.size === 0) return subset;
+
+  const result: Record<string, unknown> = { ...subset };
+  for (const section of excludedSections) {
+    delete result[section];
+  }
+  return result as PresetEdlSubset;
 }
 
 export const PRESET_CONDITION_FIELD_OPTIONS: ReadonlyArray<{ value: PresetConditionField; label: string }> = [

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { buildChildrenByParent } from "../lib/folderTree";
 import type { PresetDto, PresetFolderDto } from "../lib/tauri";
-import { useAppStore } from "../store";
+import { selectPresetConditionMeta, useAppStore } from "../store";
 import { PresetThumbnail } from "./PresetThumbnail";
 
 interface PresetFolderNodeProps {
@@ -76,6 +76,7 @@ function PresetRow({ preset, folders }: PresetRowProps) {
   const developEdl = useAppStore((s) => s.developEdl);
   const previewPresetHover = useAppStore((s) => s.previewPresetHover);
   const clearPresetHoverPreview = useAppStore((s) => s.clearPresetHoverPreview);
+  const photoMeta = useAppStore(selectPresetConditionMeta);
 
   function handleRename(event: React.MouseEvent) {
     event.stopPropagation();
@@ -90,7 +91,14 @@ function PresetRow({ preset, folders }: PresetRowProps) {
       onMouseLeave={clearPresetHoverPreview}
     >
       <div className="flex items-center gap-1.5">
-        <PresetThumbnail presetId={preset.id} presetName={preset.name} currentEdl={developEdl} photoId={selectedPhotoId} />
+        <PresetThumbnail
+          presetId={preset.id}
+          presetName={preset.name}
+          currentEdl={developEdl}
+          photoId={selectedPhotoId}
+          conditionsJson={preset.conditions_json}
+          photoMeta={photoMeta}
+        />
         <button
           type="button"
           onClick={() => setPresetFavorite(preset.id, !preset.is_favorite)}

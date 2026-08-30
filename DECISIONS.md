@@ -1042,6 +1042,13 @@ normativ, der vollständige §3.x-Katalog wird hier scope-präzisiert.
    `photos` gespeichert), UND-verknüpfte Regeln (Feld, Operator, Wert),
    **kein** UI-Builder für eine freie Bedingungssprache mit ODER/
    Verschachtelung.
+   **Nachtrag (Schritt 7):** jede Regel trägt zusätzlich ein optionales
+   `section`-Feld — `null` bedeutet „gilt fürs ganze Preset" (Fehlschlag
+   verhindert das Anwenden komplett), eine gesetzte Sektion grenzt einen
+   Fehlschlag auf genau diese Sektion ein (Rest des Presets bleibt
+   wirksam). Ein fehlendes Metadatum am aktuellen Foto (z. B. kein
+   EXIF-ISO-Wert) lässt die betroffene Regel konservativ als nicht
+   erfüllt gelten, statt sie zu ignorieren.
 5. **„Templates" (über Presets hinaus)** — Export-/Wasserzeichen-/
    Metadaten-/Import-/Umbenennungs-/Layout-/Workflow-Templates,
    Template-Marktplatz — wird komplett auf eine spätere Phase verschoben.

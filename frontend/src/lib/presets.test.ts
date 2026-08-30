@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { neutralEdlPayload } from "./edl";
 import {
+  applyConditionsToSubset,
   buildPresetEdlSubset,
+  evaluateCondition,
   mergeEdlSubset,
   parseConditions,
   parseEdlSubset,
@@ -10,7 +12,7 @@ import {
   serializeConditions,
   serializeEdlSubset,
 } from "./presets";
-import type { PresetCondition, PresetEdlSubset } from "./presets";
+import type { PresetCondition, PresetConditionPhotoMeta, PresetEdlSubset } from "./presets";
 
 // `neutralEdlPayload()` teilt sich für einige Sektionen (`basic`, `hsl`,
 // `color_grading`, `effects`, `geometry`) eine gemeinsame Konstante statt
@@ -136,8 +138,8 @@ describe("mergeEdlSubset", () => {
 describe("parseConditions/serializeConditions", () => {
   it("roundtrips a list of AND-combined rules", () => {
     const conditions: PresetCondition[] = [
-      { field: "iso", op: ">", value: "3200" },
-      { field: "lens", op: "contains", value: "35mm" },
+      { field: "iso", op: ">", value: "3200", section: null },
+      { field: "lens", op: "contains", value: "35mm", section: "basic" },
     ];
     const json = serializeConditions(conditions);
     expect(parseConditions(json)).toEqual(conditions);
@@ -149,5 +151,96 @@ describe("parseConditions/serializeConditions", () => {
 
   it("returns an empty array when the JSON is valid but not an array", () => {
     expect(parseConditions('{"field":"iso"}')).toEqual([]);
+  });
+});
+
+describe("evaluateCondition", () => {
+  const photo: PresetConditionPhotoMeta = { iso: 800, aperture: 2.8, focal_length: 85, camera_model: "EOS R5", lens: "RF 85mm f/1.2L" };
+
+  it.each([
+    [{ field: "iso", op: ">", value: "400" }, true],
+    [{ field: "iso", op: ">", value: "1600" }, false],
+    [{ field: "iso", op: "<", value: "1600" }, true],
+    [{ field: "iso", op: "=", value: "800" }, true],
+    [{ field: "aperture", op: "=", value: "2.8" }, true],
+    [{ field: "focal_length", op: ">", value: "50" }, true],
+  ] as const)("numeric field %o -> %s", (partial, expected) => {
+    expect(evaluateCondition({ ...partial, section: null }, photo)).toBe(expected);
+  });
+
+  it("evaluates 'contains' case-insensitively on string fields", () => {
+    expect(evaluateCondition({ field: "lens", op: "contains", value: "85mm", section: null }, photo)).toBe(true);
+    expect(evaluateCondition({ field: "lens", op: "contains", value: "24-70", section: null }, photo)).toBe(false);
+    expect(evaluateCondition({ field: "camera_model", op: "contains", value: "r5", section: null }, photo)).toBe(true);
+  });
+
+  it("evaluates '=' case-insensitively on string fields", () => {
+    expect(evaluateCondition({ field: "camera_model", op: "=", value: "eos r5", section: null }, photo)).toBe(true);
+  });
+
+  it("treats a missing metadata value as not satisfied", () => {
+    const noIso: PresetConditionPhotoMeta = { ...photo, iso: null };
+    expect(evaluateCondition({ field: "iso", op: ">", value: "0", section: null }, noIso)).toBe(false);
+  });
+
+  it("treats a non-numeric operator on a numeric field as not satisfied", () => {
+    expect(evaluateCondition({ field: "iso", op: "contains", value: "800", section: null }, photo)).toBe(false);
+  });
+
+  it("treats a numeric operator on a string field as not satisfied", () => {
+    expect(evaluateCondition({ field: "camera_model", op: ">", value: "A", section: null }, photo)).toBe(false);
+  });
+
+  it("treats an unparseable numeric value as not satisfied", () => {
+    expect(evaluateCondition({ field: "iso", op: ">", value: "not-a-number", section: null }, photo)).toBe(false);
+  });
+});
+
+describe("applyConditionsToSubset", () => {
+  const photo: PresetConditionPhotoMeta = { iso: 200, aperture: 4, focal_length: 50, camera_model: "EOS R5", lens: "RF 24-70mm" };
+  const subset: PresetEdlSubset = {
+    basic: { ...neutralEdlPayload().basic, exposure_ev: 0.5 },
+    curves: neutralEdlPayload().curves,
+  };
+
+  it("returns the subset unchanged when there are no conditions", () => {
+    expect(applyConditionsToSubset(subset, [], photo)).toBe(subset);
+  });
+
+  it("returns the full subset when a whole-preset condition (section: null) is satisfied", () => {
+    const conditions: PresetCondition[] = [{ field: "iso", op: "<", value: "400", section: null }];
+    expect(applyConditionsToSubset(subset, conditions, photo)).toEqual(subset);
+  });
+
+  it("returns null when a whole-preset condition fails, excluding the entire preset", () => {
+    const conditions: PresetCondition[] = [{ field: "iso", op: ">", value: "400", section: null }];
+    expect(applyConditionsToSubset(subset, conditions, photo)).toBeNull();
+  });
+
+  it("excludes only the affected section when a section-scoped condition fails", () => {
+    const conditions: PresetCondition[] = [{ field: "iso", op: ">", value: "400", section: "curves" }];
+    const result = applyConditionsToSubset(subset, conditions, photo);
+    expect(result?.basic).toEqual(subset.basic);
+    expect(result?.curves).toBeUndefined();
+  });
+
+  it("keeps a section whose condition is satisfied", () => {
+    const conditions: PresetCondition[] = [{ field: "iso", op: "<", value: "400", section: "curves" }];
+    expect(applyConditionsToSubset(subset, conditions, photo)).toEqual(subset);
+  });
+
+  it("ANDs multiple rules on the same section — one failure excludes it", () => {
+    const conditions: PresetCondition[] = [
+      { field: "iso", op: "<", value: "400", section: "curves" },
+      { field: "aperture", op: ">", value: "8", section: "curves" },
+    ];
+    const result = applyConditionsToSubset(subset, conditions, photo);
+    expect(result?.curves).toBeUndefined();
+    expect(result?.basic).toEqual(subset.basic);
+  });
+
+  it("treats a null photo (no selection) conservatively — every condition fails", () => {
+    const conditions: PresetCondition[] = [{ field: "iso", op: ">", value: "0", section: null }];
+    expect(applyConditionsToSubset(subset, conditions, null)).toBeNull();
   });
 });

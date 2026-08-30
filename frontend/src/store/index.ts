@@ -4,8 +4,17 @@ import { immer } from "zustand/middleware/immer";
 import { buildEdlEnvelopeJson, MAX_COLOR_MIXER_REGIONS, neutralEdlPayload, newColorMixerRegion, parseEdlEnvelopeJson, WHITE_BALANCE_PRESETS, writeBasicField } from "../lib/edl";
 import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, PrimaryColorAdjustment, RepairMode, RepairPoint, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
-import { buildPresetEdlSubset, mergeEdlSubset, parseEdlSubset, scalePresetEdlSubset, serializeEdlSubset } from "../lib/presets";
-import type { PresetEdlSubset, PresetSectionKey } from "../lib/presets";
+import {
+  applyConditionsToSubset,
+  buildPresetEdlSubset,
+  mergeEdlSubset,
+  parseConditions,
+  parseEdlSubset,
+  scalePresetEdlSubset,
+  serializeConditions,
+  serializeEdlSubset,
+} from "../lib/presets";
+import type { PresetCondition, PresetConditionPhotoMeta, PresetEdlSubset, PresetSectionKey } from "../lib/presets";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
 import * as api from "../lib/tauri";
@@ -79,6 +88,20 @@ function patchPhotoEverywhere(state: AppStore, photoId: string, patch: Partial<P
  * `lib/undoStack.ts`, `DECISIONS.md` ADR-0027). Anders als
  * [`patchPhotoEverywhere`] (das *alle* Fundstellen patcht) genügt hier die
  * erste Fundstelle — der Wert ist an jeder Stelle identisch. */
+/** Liest die für bedingte Presets relevanten Metadaten des aktuell
+ * ausgewählten Fotos (`lib/presets.ts`s `evaluateCondition`) — `null` ohne
+ * Auswahl, wodurch jede Bedingung dort konservativ als nicht erfüllt gilt.
+ * Gibt bewusst die `PhotoDto`-Referenz selbst zurück (strukturell kompatibel
+ * zu `PresetConditionPhotoMeta`, das nur eine Teilmenge ihrer Felder
+ * verlangt) statt ein neues Objekt zu bauen — als React-Hook-Selektor
+ * (`useAppStore(selectPresetConditionMeta)`) würde ein frisches Objekt bei
+ * jedem Aufruf sonst Zustands eingebauten Referenzgleichheits-Check
+ * durchgängig als „geändert" werten und eine Endlosschleife auslösen. */
+export function selectPresetConditionMeta(state: AppStore): PresetConditionPhotoMeta | null {
+  if (!state.selectedPhotoId) return null;
+  return findPhotoAnywhere(state, state.selectedPhotoId) ?? null;
+}
+
 function findPhotoAnywhere(state: AppStore, photoId: string): PhotoDto | undefined {
   for (const list of Object.values(state.photosByFolder)) {
     const found = list.find((p) => p.id === photoId);
@@ -471,6 +494,7 @@ interface PresetsSlice {
     folderId: string | null,
     tags: string[],
     sections: PresetSectionKey[],
+    conditions?: PresetCondition[],
   ) => Promise<void>;
 
   /** Zustand für den nachträglich änderbaren Preset-Stärke-Regler
@@ -1642,12 +1666,12 @@ export const useAppStore = create<AppStore>()(
       }
     },
 
-    savePresetFromCurrentEdl: async (name, folderId, tags, sections) => {
+    savePresetFromCurrentEdl: async (name, folderId, tags, sections, conditions = []) => {
       const trimmed = name.trim();
       if (!trimmed || sections.length === 0) return;
       try {
         const subset = buildPresetEdlSubset(get().developEdl, sections);
-        await api.createPreset(folderId, trimmed, tags, "[]", serializeEdlSubset(subset));
+        await api.createPreset(folderId, trimmed, tags, serializeConditions(conditions), serializeEdlSubset(subset));
         await get().refreshPresets();
       } catch (err) {
         set((state) => {
@@ -1661,8 +1685,19 @@ export const useAppStore = create<AppStore>()(
     applyPreset: async (presetId) => {
       try {
         const version = await api.latestPresetVersion(presetId);
-        const subset = parseEdlSubset(version.edl_subset_json);
+        const rawSubset = parseEdlSubset(version.edl_subset_json);
         const preset = get().presets.find((p) => p.id === presetId);
+        const conditions = parseConditions(preset?.conditions_json ?? "[]");
+        const subset = applyConditionsToSubset(rawSubset, conditions, selectPresetConditionMeta(get()));
+        if (subset === null) {
+          // Bedingung fürs ganze Preset nicht erfüllt (`section: null`) —
+          // Preset wird gar nicht angewendet (`lib/presets.ts`s
+          // `applyConditionsToSubset`).
+          set((state) => {
+            state.catalogError = `Preset „${preset?.name ?? presetId}" erfüllt die Bedingungen für dieses Foto nicht.`;
+          });
+          return;
+        }
         const baseEdl = get().developEdl;
         const merged = mergeEdlSubset(baseEdl, subset);
         set((state) => {
@@ -1738,9 +1773,14 @@ export const useAppStore = create<AppStore>()(
       if (presetStack.length === 0) return;
       try {
         let merged = get().developEdl;
+        const meta = selectPresetConditionMeta(get());
         for (const presetId of presetStack) {
           const version = await api.latestPresetVersion(presetId);
-          const subset: PresetEdlSubset = parseEdlSubset(version.edl_subset_json);
+          const rawSubset: PresetEdlSubset = parseEdlSubset(version.edl_subset_json);
+          const preset = presets.find((p) => p.id === presetId);
+          const conditions = parseConditions(preset?.conditions_json ?? "[]");
+          const subset = applyConditionsToSubset(rawSubset, conditions, meta);
+          if (subset === null) continue;
           merged = mergeEdlSubset(merged, subset);
         }
         const names = presetStack.map((id) => presets.find((p) => p.id === id)?.name ?? id).join(" + ");
@@ -1760,8 +1800,15 @@ export const useAppStore = create<AppStore>()(
     previewPresetHover: async (presetId) => {
       try {
         const version = await api.latestPresetVersion(presetId);
+        const rawSubset = parseEdlSubset(version.edl_subset_json);
+        const preset = get().presets.find((p) => p.id === presetId);
+        const conditions = parseConditions(preset?.conditions_json ?? "[]");
+        const subset = applyConditionsToSubset(rawSubset, conditions, selectPresetConditionMeta(get()));
         set((state) => {
-          state.hoverPresetSubset = parseEdlSubset(version.edl_subset_json);
+          // `null` (Bedingung fürs ganze Preset nicht erfüllt) zeigt eine
+          // leere Vorschau — entspricht dem tatsächlichen `applyPreset`-
+          // Verhalten (Preset würde gar nicht angewendet).
+          state.hoverPresetSubset = subset ?? {};
         });
       } catch {
         // Keine Vorschau statt eines Absturzes — z. B. bei einem

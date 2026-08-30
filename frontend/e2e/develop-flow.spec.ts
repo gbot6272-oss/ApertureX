@@ -371,4 +371,50 @@ test.describe("Entwickeln-Panel", () => {
     expect(colorGrading.balance).toBeCloseTo(-30);
     expect(colorGrading.blending).toBe(50); // unverändertes Default
   });
+
+  test("Kalibrierung: eine Primärfarbe und die Schattentönung committen", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    const redHueInput = page.getByRole("spinbutton", { name: "Farbton (Rot) (Zahlenwert)" });
+    await redHueInput.fill("40");
+    await redHueInput.blur();
+
+    const shadowTintInput = page.getByRole("spinbutton", { name: "Schattentönung (Zahlenwert)" });
+    await shadowTintInput.fill("-25");
+    await shadowTintInput.blur();
+
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.filter((entry) => entry.cmd === "apply_develop_edit").length >= 2;
+    }).toBe(true);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const calibration = JSON.parse(edlJson).payload.calibration as {
+      shadow_tint: number;
+      red_primary: { hue: number };
+    };
+    expect(calibration.red_primary.hue).toBeCloseTo(40);
+    expect(calibration.shadow_tint).toBeCloseTo(-25);
+  });
+
+  test("Kalibrierung: ein Kameraprofil committet sofort", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    await page.getByRole("combobox", { name: "Kameraprofil" }).selectOption("Vivid");
+
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.some((entry) => entry.cmd === "apply_develop_edit");
+    }).toBe(true);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const calibration = JSON.parse(edlJson).payload.calibration as { camera_profile: string | null };
+    expect(calibration.camera_profile).toBe("Vivid");
+  });
 });

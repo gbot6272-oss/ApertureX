@@ -129,10 +129,10 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [ ] Körnung — Phase 4 — Status: Nicht begonnen
 
 ### Kalibrierung
-- [ ] Prozessversion — Phase 4 — Status: Nicht begonnen
-- [ ] Schattentönung — Phase 4 — Status: Nicht begonnen
-- [ ] Primärfarben-Regler R/G/B (Farbton, Sättigung) — Phase 4 — Status: Nicht begonnen
-- [ ] Kamera-Profile (kleine eingebaute Liste) inkl. DCP-Import — Phase 4 — Status: Nicht begonnen (DCP-Import selbst auf spätere Phase verschoben, siehe ADR-0028 — dasselbe Adobe-Format-Problem wie bei Objektivprofilen)
+- [x] Prozessversion — Phase 4 — Status: Fertig (abweichend, siehe ADR-0028: nur `V1` existiert, reiner Vorwärtskompatibilitäts-Platzhalter ohne aktuellen Effekt, siehe `edl/v2.rs`s Moduldoku)
+- [x] Schattentönung — Phase 4 — Status: Fertig (additive Grün-/Magenta-Verschiebung, gewichtet mit einer festen Gauß-Schatten-Zone statt eines editierbaren Umschlagpunkts, siehe `stages/calibration.rs`)
+- [x] Primärfarben-Regler R/G/B (Farbton, Sättigung) — Phase 4 — Status: Fertig (Gauß-gewichtete Farbton-Bänder um 0°/120°/240° statt echter Matrixrotation, siehe Moduldoku)
+- [x] Kamera-Profile (kleine eingebaute Liste) inkl. DCP-Import — Phase 4 — Status: Fertig (abweichend, siehe ADR-0028: `CAMERA_PROFILES` ist eine kleine handgepflegte Liste mit festem Sättigungs-/Kontrast-Bias je Profil, kein echter DCP-/ICC-Profilwechsel; DCP-Import selbst auf spätere Phase verschoben — dasselbe Adobe-Format-Problem wie bei Objektivprofilen)
 
 ### Geometrie
 - [ ] Freistellen (Presets, eigene Verhältnisse, Rasterüberlagerungen) — Phase 4 — Status: Nicht begonnen

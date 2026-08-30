@@ -498,15 +498,17 @@ pub struct CalibrationAdjustment {
 }
 
 impl CalibrationAdjustment {
+    pub const NEUTRAL: Self = Self {
+        process_version: ProcessVersion::V1,
+        shadow_tint: 0.0,
+        red_primary: PrimaryColorAdjustment::NEUTRAL,
+        green_primary: PrimaryColorAdjustment::NEUTRAL,
+        blue_primary: PrimaryColorAdjustment::NEUTRAL,
+        camera_profile: None,
+    };
+
     pub fn neutral() -> Self {
-        Self {
-            process_version: ProcessVersion::V1,
-            shadow_tint: 0.0,
-            red_primary: PrimaryColorAdjustment::NEUTRAL,
-            green_primary: PrimaryColorAdjustment::NEUTRAL,
-            blue_primary: PrimaryColorAdjustment::NEUTRAL,
-            camera_profile: None,
-        }
+        Self::NEUTRAL
     }
 }
 

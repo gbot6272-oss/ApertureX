@@ -435,6 +435,30 @@ export function neutralCalibration(): CalibrationAdjustment {
   };
 }
 
+/** Die drei Kalibrierungs-Primärfarben — Anzeigereihenfolge Rot/Grün/Blau. */
+export const CALIBRATION_PRIMARY_ROWS: ReadonlyArray<{
+  key: keyof Pick<CalibrationAdjustment, "red_primary" | "green_primary" | "blue_primary">;
+  label: string;
+}> = [
+  { key: "red_primary", label: "Rot" },
+  { key: "green_primary", label: "Grün" },
+  { key: "blue_primary", label: "Blau" },
+];
+
+/** Spiegelt `crates/apx-pipeline/src/stages/calibration.rs`s
+ * `CAMERA_PROFILES`-Liste für das Dropdown — nur Namen, die eigentliche
+ * Sättigungs-/Kontrast-Umrechnung passiert ausschließlich serverseitig.
+ * `null` = Standardprofil (siehe `neutralCalibration`), entspricht
+ * funktional dem `"Standard"`-Eintrag der Rust-Liste. */
+export const CAMERA_PROFILE_OPTIONS: ReadonlyArray<{ value: string | null; label: string }> = [
+  { value: null, label: "Standard" },
+  { value: "Neutral", label: "Neutral" },
+  { value: "Vivid", label: "Vivid" },
+  { value: "Landscape", label: "Landscape" },
+  { value: "Portrait", label: "Portrait" },
+  { value: "Monochrome", label: "Monochrome" },
+];
+
 // ---- Geometrie (Crop/Rotation) ----------------------------------------------
 
 export type GridOverlay = "None" | "Thirds" | "GoldenRatio" | "Diagonals" | "Spiral" | "Triangles";

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   BASIC_SLIDER_SPECS,
+  CALIBRATION_PRIMARY_ROWS,
+  CAMERA_PROFILE_OPTIONS,
   COLOR_MIXER_REGION_SLIDER_SPECS,
   HSL_BAND_SLIDER_SPECS,
   HSL_BAND_TABS,
@@ -83,6 +85,10 @@ export function DevelopPanel() {
   const setColorGradingWheel = useAppStore((s) => s.setColorGradingWheel);
   const setColorGradingBalance = useAppStore((s) => s.setColorGradingBalance);
   const setColorGradingBlending = useAppStore((s) => s.setColorGradingBlending);
+  const calibration = useAppStore((s) => s.developEdl.calibration);
+  const setCalibrationPrimaryField = useAppStore((s) => s.setCalibrationPrimaryField);
+  const setCalibrationShadowTint = useAppStore((s) => s.setCalibrationShadowTint);
+  const setCalibrationCameraProfile = useAppStore((s) => s.setCalibrationCameraProfile);
 
   // Eine per Bildklick neu angelegte Region wird sofort zur Bearbeitung
   // ausgewählt statt dass der Nutzer sie erst in der Liste anklicken muss.
@@ -370,6 +376,54 @@ export function DevelopPanel() {
                 onCommit={() => void commitDevelopEdit()}
               />
             </div>
+          </fieldset>
+
+          <fieldset className="flex flex-col gap-3">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Kalibrierung</legend>
+            {/* Nur `V1` existiert — reiner Vorwärtskompatibilitäts-Platzhalter
+                (siehe `crates/apx-pipeline/src/edl/v2.rs`s Moduldoku),
+                deshalb kein Auswahl-Widget, nur eine informative Anzeige. */}
+            <p className="text-xs text-text-secondary">Prozessversion: V1</p>
+
+            {CALIBRATION_PRIMARY_ROWS.map((row) => (
+              <div key={row.key} className="flex flex-col gap-2">
+                <DevelopSlider
+                  spec={{ key: "hue", label: `Farbton (${row.label})`, min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 }}
+                  value={calibration[row.key].hue}
+                  onChange={(value) => setCalibrationPrimaryField(row.key, "hue", value)}
+                  onCommit={() => void commitDevelopEdit()}
+                />
+                <DevelopSlider
+                  spec={{ key: "saturation", label: `Sättigung (${row.label})`, min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 }}
+                  value={calibration[row.key].saturation}
+                  onChange={(value) => setCalibrationPrimaryField(row.key, "saturation", value)}
+                  onCommit={() => void commitDevelopEdit()}
+                />
+              </div>
+            ))}
+
+            <DevelopSlider
+              spec={{ key: "shadow_tint", label: "Schattentönung", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 }}
+              value={calibration.shadow_tint}
+              onChange={setCalibrationShadowTint}
+              onCommit={() => void commitDevelopEdit()}
+            />
+
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              Kameraprofil
+              <select
+                aria-label="Kameraprofil"
+                value={calibration.camera_profile ?? ""}
+                onChange={(event) => setCalibrationCameraProfile(event.target.value || null)}
+                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+              >
+                {CAMERA_PROFILE_OPTIONS.map((option) => (
+                  <option key={option.label} value={option.value ?? ""}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </fieldset>
         </>
       )}

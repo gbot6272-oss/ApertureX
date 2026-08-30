@@ -7,14 +7,18 @@
 //! kennt damit weder `crate::stages` noch `crate::color` einzeln — reine
 //! Verdrahtung bleibt reine Verdrahtung (`ARCHITECTURE.md` §4).
 
+use std::borrow::Cow;
+
 use apx_raw::LinearImage;
 
 use crate::color::linear_camera_rgb_to_srgb_rgba8;
-use crate::edl::{ColorGradingAdjustment, CurvesAdjustment, EdlV2, HslAdjustment};
+use crate::edl::{
+    CalibrationAdjustment, ColorGradingAdjustment, CurvesAdjustment, EdlV2, HslAdjustment,
+};
 use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
-    basic_fused, color_grading, curves, hsl_color_mixer, local_contrast, white_balance,
+    basic_fused, calibration, color_grading, curves, hsl_color_mixer, local_contrast, white_balance,
 };
 
 /// Rendert `linear` mit den in `edl` beschriebenen Anpassungen zu einem
@@ -28,8 +32,10 @@ use crate::stages::{
 /// `DECISIONS.md` ADR-0012) — der Aufrufer muss diese Entscheidung nicht
 /// selbst treffen.
 ///
-/// **Phase-4-Übergangsstand (siehe `PLAN.md` Phase 4 Schritt 6):** alle
-/// zwölf Grundeinstellungs-Regler (`stages::basic_fused` /
+/// **Phase-4-Übergangsstand (siehe `PLAN.md` Phase 4 Schritt 7):**
+/// Kalibrierung (`stages::calibration`, läuft *vor* Weißabgleich/den
+/// Grundeinstellungen — siehe `calibration.rs`s Moduldoku), alle zwölf
+/// Grundeinstellungs-Regler (`stages::basic_fused` /
 /// `stages::local_contrast`), HSL + Farbmischer erweitert
 /// (`stages::hsl_color_mixer`) und Color Grading
 /// (`stages::color_grading`, alle drei im linearen Arbeitsraum wie
@@ -37,8 +43,8 @@ use crate::stages::{
 /// bewusst *nach* der Farbraum-Konvertierung auf dem fertigen
 /// RGBA8-Puffer, siehe `curves.rs`s Moduldoku) sind verdrahtet. Alle
 /// übrigen Werkzeugkategorien (Details, Objektivkorrekturen, Effekte,
-/// Kalibrierung, Geometrie, Reparatur) sind noch inert — die folgenden
-/// Schritte verdrahten sie schrittweise.
+/// Geometrie, Reparatur) sind noch inert — die folgenden Schritte
+/// verdrahten sie schrittweise.
 pub fn render_rgba8(
     ctx: Option<&GpuContext>,
     linear: &LinearImage,
@@ -47,15 +53,32 @@ pub fn render_rgba8(
     let basic = &edl.basic;
     let wb_gains = white_balance::compute_gains(linear.as_shot_wb_coeffs, basic.white_balance);
 
+    let calibrated: Cow<[f32]> = if edl.calibration == CalibrationAdjustment::NEUTRAL {
+        // Kein zusätzlicher Durchlauf, wenn Kalibrierung neutral steht
+        // (Regelfall).
+        Cow::Borrowed(&linear.pixels)
+    } else {
+        Cow::Owned(match ctx {
+            Some(ctx) => match calibration::apply_gpu(ctx, &linear.pixels, &edl.calibration) {
+                Ok(pixels) => pixels,
+                Err(err) => {
+                    tracing::warn!(error = %err, "GPU-Rendering (Kalibrierung) fehlgeschlagen, nutze CPU-Fallback");
+                    calibration::apply_cpu(&linear.pixels, &edl.calibration)
+                }
+            },
+            None => calibration::apply_cpu(&linear.pixels, &edl.calibration),
+        })
+    };
+
     let tonal = match ctx {
-        Some(ctx) => match basic_fused::apply_gpu(ctx, &linear.pixels, wb_gains, basic) {
+        Some(ctx) => match basic_fused::apply_gpu(ctx, &calibrated, wb_gains, basic) {
             Ok(pixels) => pixels,
             Err(err) => {
                 tracing::warn!(error = %err, "GPU-Rendering fehlgeschlagen, nutze CPU-Fallback");
-                basic_fused::apply_cpu(&linear.pixels, wb_gains, basic)
+                basic_fused::apply_cpu(&calibrated, wb_gains, basic)
             }
         },
-        None => basic_fused::apply_cpu(&linear.pixels, wb_gains, basic),
+        None => basic_fused::apply_cpu(&calibrated, wb_gains, basic),
     };
 
     let textured = if basic.texture == 0.0 && basic.clarity == 0.0 {

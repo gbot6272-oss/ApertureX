@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
 import { buildEdlEnvelopeJson, MAX_COLOR_MIXER_REGIONS, neutralEdlPayload, newColorMixerRegion, parseEdlEnvelopeJson, WHITE_BALANCE_PRESETS, writeBasicField } from "../lib/edl";
-import type { ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CurveChannel, CurvesAdjustment, EdlPayload, HslAdjustment, HslBand } from "../lib/edl";
+import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CurveChannel, CurvesAdjustment, EdlPayload, HslAdjustment, HslBand, PrimaryColorAdjustment } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
@@ -254,6 +254,18 @@ interface DevelopSlice {
   setColorGradingWheel: (key: keyof Pick<ColorGradingAdjustment, "shadows" | "midtones" | "highlights" | "global">, wheel: ColorGradingWheel) => void;
   setColorGradingBalance: (value: number) => void;
   setColorGradingBlending: (value: number) => void;
+  /** Ändert ein Feld (Farbton/Sättigung) einer der drei Kalibrierungs-
+   * Primärfarben (Phase 4 Schritt 7) — Zwischenstand beim Ziehen. */
+  setCalibrationPrimaryField: (
+    primary: keyof Pick<CalibrationAdjustment, "red_primary" | "green_primary" | "blue_primary">,
+    field: keyof PrimaryColorAdjustment,
+    value: number,
+  ) => void;
+  setCalibrationShadowTint: (value: number) => void;
+  /** Setzt das Kameraprofil absolut (`null` = Standardprofil) und
+   * committet sofort — ein Dropdown-Wechsel ist wie ein WB-Preset-Klick
+   * eine abgeschlossene Aktion, kein Zwischenstand beim Ziehen. */
+  setCalibrationCameraProfile: (value: string | null) => void;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
    * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
    * bei jedem Zwischenwert). */
@@ -656,6 +668,25 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.developEdl.color_grading.blending = value;
       });
+    },
+
+    setCalibrationPrimaryField: (primary, field, value) => {
+      set((state) => {
+        state.developEdl.calibration[primary][field] = value;
+      });
+    },
+
+    setCalibrationShadowTint: (value) => {
+      set((state) => {
+        state.developEdl.calibration.shadow_tint = value;
+      });
+    },
+
+    setCalibrationCameraProfile: (value) => {
+      set((state) => {
+        state.developEdl.calibration.camera_profile = value;
+      });
+      void get().commitDevelopEdit();
     },
 
     colorMixerPickerActive: false,

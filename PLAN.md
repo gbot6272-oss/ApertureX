@@ -392,8 +392,11 @@ Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Obj
   - [x] Echter Fehler gefunden und behoben (nicht nur bei Color Grading selbst, sondern ein vorbestehender Bug, der durch dessen Tastatur-E2E-Test aufgedeckt wurde): `App.tsx`s globaler `keydown`-Handler für die Foto-Navigation (Pfeiltasten) prüfte nur auf `INPUT`/`TEXTAREA`-Tags, nicht auf `role="slider"`-Elemente ohne natives Eingabe-Tag — dadurch feuerten `ColorWheel.tsx`s und `CurveEditor.tsx`s eigene Pfeiltasten-Handler gemeinsam mit dem globalen Foto-Wechsel-Kurzbefehl, dessen asynchrones `loadDevelopStateForPhoto` die gerade vorgenommene Regler-Änderung Millisekunden später wieder überschrieb. Behoben durch eine `target.closest('[role="slider"]')`-Ausnahme im selben Guard.
   - Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (261 Rust-Tests), `tsc -b`, `vitest run` (100 Tests), `playwright test` (23/23), `vite build` — alles lokal grün
 
-- [ ] 7. Kalibrierung
-  - [ ] Prozessversion, Schattentönung, Primärfarben R/G/B, Kameraprofil-Auswahl (kleine eingebaute Liste, kein DCP-Import)
+- [x] 7. Kalibrierung
+  - [x] Neues `crates/apx-pipeline/src/stages/calibration.rs`/`.wgsl`, läuft *vor* Weißabgleich/den Grundeinstellungen (in `develop.rs`, per `Cow<[f32]>` ohne Klon im Regelfall): drei Gauß-gewichtete Primärfarben-Bänder um 0°/120°/240° (Farbton-/Sättigungs-Verschiebung, keine echte Matrixrotation), Schattentönung als additive Grün-/Magenta-Verschiebung (gewichtet mit fester Gauß-Schatten-Zone, dieselbe Konvention wie `white_balance.rs`s Tint), Kameraprofil als globaler Sättigungs-/Kontrast-Bias aus einer kleinen handgepflegten `CAMERA_PROFILES`-Liste (kein DCP-Import) — `PrimaryColorAdjustment`/`CalibrationAdjustment` bekommen einen `pub const NEUTRAL` (vorher nur eine `neutral()`-Fn, jetzt konsistent mit den übrigen Phase-4-Adjustments)
+  - [x] Prozessversion bleibt inert (nur `V1` existiert, siehe `edl/v2.rs`s Moduldoku) — dafür in der UI nur eine informative Anzeige statt eines toten Auswahl-Feldes
+  - [x] Frontend: 3× Farbton-/Sättigungs-Regler (Primärfarben, eindeutige Labels `Farbton (Rot)` usw. gegen Kollision mit HSL-Bändern), Schattentönung-Regler, Kameraprofil-`<select>` (`CAMERA_PROFILE_OPTIONS` spiegelt `CAMERA_PROFILES`, committet sofort wie ein WB-Preset)
+  - Verifiziert: `cargo fmt/clippy/test --workspace` (268 Rust-Tests), `tsc -b`, `vitest run` (100 Tests), `playwright test` (25/25), `vite build` — alles lokal grün
 
 - [ ] 8. Details (Schärfung + Rauschreduzierung)
   - [ ] Schärfung, Luminanz-/Farbrauschen, Deconvolution-Alternativmodus

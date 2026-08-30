@@ -1,7 +1,12 @@
 import type { SliderSpec } from "../lib/edl";
-import { BASIC_SLIDER_SPECS, MASK_SLIDER_SPECS, readBasicField } from "../lib/edl";
-import { useAppStore } from "../store";
+import { BASIC_SLIDER_SPECS, BLEND_MODE_OPTIONS, MASK_SLIDER_SPECS, readBasicField } from "../lib/edl";
+import type { MaskKind } from "../store";
+import { MASK_KIND_LABEL, useAppStore } from "../store";
 import { DevelopSlider } from "./DevelopSlider";
+
+/** Die fünf Maskentypen, in derselben Reihenfolge wie die „+ …"-Knöpfe
+ * oben im Panel — wiederverwendet für „+ Komponente hinzufügen". */
+const MASK_KINDS: readonly MaskKind[] = ["LinearGradient", "RadialGradient", "Brush", "ColorRange", "LuminanceRange"];
 
 /** Die für Schritt 3 sichtbaren Grundeinstellungs-Regler pro Maske — eine
  * kleine, repräsentative Auswahl (Belichtung/Kontrast) statt aller zwölf,
@@ -27,7 +32,7 @@ const LUMINANCE_RANGE_MAX_SPEC: SliderSpec = { key: "range_max", label: "Obere G
 const LUMINANCE_RANGE_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Weiche Kante (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 10 };
 
 /**
- * Maskenverwaltung (Phase 6 Schritt 3-5, siehe `DECISIONS.md` ADR-0032) —
+ * Maskenverwaltung (Phase 6 Schritt 3-6, siehe `DECISIONS.md` ADR-0032) —
  * Liste vorhandener Masken, Anlegen neuer Masken (Linearer/Radialer
  * Verlauf, Pinsel, Farbbereich, Luminanzbereich), Auswahl zum Bearbeiten,
  * kleine Reglerauswahl für die ausgewählte Maske. Wie `DevelopPanel` nur
@@ -41,6 +46,14 @@ const LUMINANCE_RANGE_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Weich
  * Moduldoku), der Bildklick liefert aber den bereits gerenderten,
  * display-referred Vorschau-Frame — dieselbe Näherung, die die
  * Weißabgleich-Pipette/der Farbmischer schon seit Phase 4 verwenden.
+ *
+ * **Maskenkombination (Schritt 6, `SPEC.md` §5):** eine Maske kann aus
+ * mehreren Komponenten bestehen, jede mit ihrer eigenen Geometrie und
+ * `combine`-Verrechnung (Hinzufügen/Subtrahieren/Schneiden) gegen die
+ * vorangehenden Komponenten derselben Maske. Die „Komponenten"-Liste
+ * unten wählt aus, welche Komponente gerade im Viewer bearbeitet wird
+ * (`selectedMaskComponentIndex`) — dieselbe Maske kann so z. B. einen
+ * Pinselstrich UND einen Farbbereich kombinieren.
  */
 export function MasksPanel() {
   const open = useAppStore((s) => s.developPanelOpen);
@@ -51,6 +64,7 @@ export function MasksPanel() {
   const removeMask = useAppStore((s) => s.removeMask);
   const setMaskVisible = useAppStore((s) => s.setMaskVisible);
   const renameMask = useAppStore((s) => s.renameMask);
+  const setMaskBlendMode = useAppStore((s) => s.setMaskBlendMode);
   const setMaskOpacity = useAppStore((s) => s.setMaskOpacity);
   const setMaskFeather = useAppStore((s) => s.setMaskFeather);
   const commitMaskDrag = useAppStore((s) => s.commitMaskDrag);
@@ -63,11 +77,17 @@ export function MasksPanel() {
   const updateMaskGeometry = useAppStore((s) => s.updateMaskGeometry);
   const maskColorRangePickerActive = useAppStore((s) => s.maskColorRangePickerActive);
   const toggleMaskColorRangePicker = useAppStore((s) => s.toggleMaskColorRangePicker);
+  const selectedMaskComponentIndex = useAppStore((s) => s.selectedMaskComponentIndex);
+  const selectMaskComponent = useAppStore((s) => s.selectMaskComponent);
+  const addMaskComponent = useAppStore((s) => s.addMaskComponent);
+  const removeMaskComponent = useAppStore((s) => s.removeMaskComponent);
+  const setMaskComponentCombine = useAppStore((s) => s.setMaskComponentCombine);
+  const setMaskComponentInvert = useAppStore((s) => s.setMaskComponentInvert);
 
   if (!open) return null;
 
   const selectedMask = masks.find((m) => m.id === selectedMaskId) ?? null;
-  const selectedMaskGeometry = selectedMask?.components[0]?.geometry;
+  const selectedMaskGeometry = selectedMask?.components[selectedMaskComponentIndex]?.geometry;
 
   function handleRename(maskId: string, currentName: string, event: React.MouseEvent) {
     event.stopPropagation();
@@ -162,6 +182,90 @@ export function MasksPanel() {
         ))}
         {masks.length === 0 && <li className="text-xs text-text-muted">Keine Masken vorhanden.</li>}
       </ul>
+
+      {selectedMask && (
+        <div className="flex flex-col gap-2 border-t border-border pt-2">
+          <label className="flex items-center gap-2 text-xs text-text-secondary">
+            Mischmodus
+            <select
+              aria-label="Mischmodus"
+              value={selectedMask.blend_mode}
+              onChange={(event) => setMaskBlendMode(selectedMask.id, event.target.value as (typeof BLEND_MODE_OPTIONS)[number]["value"])}
+              className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+            >
+              {BLEND_MODE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <h4 className="text-xs font-medium text-text-secondary">Komponenten</h4>
+          <ul className="flex flex-col gap-1">
+            {selectedMask.components.map((component, index) => (
+              <li
+                key={index}
+                className={`flex flex-col gap-1 rounded border px-2 py-1.5 text-xs ${
+                  index === selectedMaskComponentIndex ? "border-accent bg-accent/10" : "border-border"
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <button type="button" onClick={() => selectMaskComponent(index)} className="min-w-0 flex-1 truncate text-left text-text-primary hover:underline">
+                    {index + 1}. {MASK_KIND_LABEL[component.geometry.kind as MaskKind]}
+                  </button>
+                  {selectedMask.components.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeMaskComponent(selectedMask.id, index)}
+                      className="shrink-0 text-danger"
+                      aria-label={`Komponente ${index + 1} entfernen`}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+                {index > 0 && (
+                  <label className="flex items-center gap-2 text-text-secondary">
+                    Verrechnung
+                    <select
+                      aria-label={`Komponente ${index + 1}: Verrechnung`}
+                      value={component.combine}
+                      onChange={(event) => setMaskComponentCombine(selectedMask.id, index, event.target.value as typeof component.combine)}
+                      className="flex-1 rounded border border-border bg-bg-panel px-1.5 py-0.5"
+                    >
+                      <option value="Add">Hinzufügen</option>
+                      <option value="Subtract">Subtrahieren</option>
+                      <option value="Intersect">Schneiden</option>
+                    </select>
+                  </label>
+                )}
+                <label className="flex items-center gap-2 text-text-secondary">
+                  <input
+                    type="checkbox"
+                    aria-label={`Komponente ${index + 1}: Invertieren`}
+                    checked={component.invert}
+                    onChange={(event) => setMaskComponentInvert(selectedMask.id, index, event.target.checked)}
+                  />
+                  Invertieren
+                </label>
+              </li>
+            ))}
+          </ul>
+          <div className="grid grid-cols-2 gap-1">
+            {MASK_KINDS.map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                onClick={() => addMaskComponent(selectedMask.id, kind)}
+                className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel"
+              >
+                + Komponente: {MASK_KIND_LABEL[kind]}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {selectedMask && selectedMaskGeometry?.kind === "Brush" && (
         <div className="flex flex-col gap-2 border-t border-border pt-2">

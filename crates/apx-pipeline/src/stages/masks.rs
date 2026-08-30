@@ -25,10 +25,22 @@
 //! tatsächlich über eine Frontend-Interaktion befüllt werden kann
 //! (Schritt 3–5); ein GPU-Pfad vorab für noch unbenutzte Geometrie wäre
 //! dieselbe Art Vorab-Arbeit, die ADR-0029 bereits für Phase 4 vermieden
-//! hat. Ebenso ist `blend_mode` hier nur für `BlendMode::Normal`
-//! implementiert — die übrigen vier Modi fallen bis Schritt 6 (siehe
-//! `PLAN.md` Phase 6) auf denselben linearen Mix zurück, statt einen
-//! Platzhalter-Fehler zu werfen.
+//! hat.
+//!
+//! **Alle fünf `BlendMode`-Varianten sind seit Schritt 6 echt
+//! implementiert** (`blend_pixel`) — Multiplizieren/Weiches Licht sind
+//! pro Kanal separierbar, Farbe/Luminanz brauchen die Ganzpixel-
+//! Luminanz-Formel (`luminosity`/`set_luminosity`/`clip_color`, nach dem
+//! Photoshop-/W3C-Compositing-Standardverfahren „SetLum"/„ClipColor").
+//! **Bewusste Vereinfachung:** diese Formeln setzen einen ungefähr
+//! `0.0..=1.0`-Wertebereich voraus (Standardverfahren für
+//! Ebenen-Mischmodi); im linearen Arbeitsraum können helle Lichter
+//! diesen Bereich überschreiten — `clip_color` faltet solche Werte auf
+//! den gültigen Bereich zurück statt sie unverändert durchzureichen,
+//! was bei extremen Lichtern zu einem leicht anderen Ergebnis führen
+//! kann als ein Compositing-Werkzeug, das explizit für HDR ausgelegt
+//! ist. Für die in dieser Phase erreichbaren Werte ist das nicht
+//! sichtbar relevant.
 
 use rayon::prelude::*;
 
@@ -73,22 +85,72 @@ fn apply_one(
         .zip(adjusted.par_chunks_exact(3))
         .zip(alpha.par_iter())
         .flat_map_iter(|((base, adjusted), &a)| {
-            (0..3).map(move |channel| {
-                blend_channel(base[channel], adjusted[channel], a, mask.blend_mode)
-            })
+            let base = [base[0], base[1], base[2]];
+            let adjusted = [adjusted[0], adjusted[1], adjusted[2]];
+            let blended = blend_pixel(base, adjusted, mask.blend_mode);
+            (0..3).map(move |channel| base[channel] * (1.0 - a) + blended[channel] * a)
         })
         .collect()
 }
 
-fn blend_channel(base: f32, adjusted: f32, alpha: f32, mode: BlendMode) -> f32 {
-    let blended = match mode {
-        BlendMode::Normal
-        | BlendMode::Multiply
-        | BlendMode::SoftLight
-        | BlendMode::Color
-        | BlendMode::Luminosity => adjusted,
+/// Verrechnet den unveränderten (`base`) mit dem maskiert-bearbeiteten
+/// (`adjusted`) Pixel nach dem gewählten Ebenen-Mischmodus — das
+/// Ergebnis wird danach in `apply_one` alpha-gewichtet mit `base`
+/// zurückgemischt (Normal-Modus liefert also `adjusted` unverändert,
+/// als hätte gar kein Mischmodus stattgefunden).
+fn blend_pixel(base: [f32; 3], adjusted: [f32; 3], mode: BlendMode) -> [f32; 3] {
+    match mode {
+        BlendMode::Normal => adjusted,
+        BlendMode::Multiply => std::array::from_fn(|i| base[i] * adjusted[i]),
+        BlendMode::SoftLight => std::array::from_fn(|i| soft_light_channel(base[i], adjusted[i])),
+        // „Farbe": Farbton/Sättigung von `adjusted`, Luminanz von `base`.
+        BlendMode::Color => set_luminosity(adjusted, luminosity(base)),
+        // „Luminanz": Luminanz von `adjusted`, Farbton/Sättigung von `base`.
+        BlendMode::Luminosity => set_luminosity(base, luminosity(adjusted)),
+    }
+}
+
+/// Photoshop-/W3C-Compositing-„Soft Light"-Formel, pro Kanal separierbar.
+fn soft_light_channel(cb: f32, cs: f32) -> f32 {
+    let d = if cb <= 0.25 {
+        ((16.0 * cb - 12.0) * cb + 4.0) * cb
+    } else {
+        cb.sqrt()
     };
-    base * (1.0 - alpha) + blended * alpha
+    if cs <= 0.5 {
+        cb - (1.0 - 2.0 * cs) * cb * (1.0 - cb)
+    } else {
+        cb + (2.0 * cs - 1.0) * (d - cb)
+    }
+}
+
+/// Photoshop-/W3C-Compositing-„Lum"-Gewichtung (Rec.601-Luminanzgewichte,
+/// dieselben wie `luminance_range_alpha` weiter unten).
+fn luminosity(c: [f32; 3]) -> f32 {
+    0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]
+}
+
+/// „SetLum": verschiebt `c` so, dass seine Luminanz `target_lum` wird,
+/// ohne seinen Farbton/seine Sättigung zu ändern; `clip_color` faltet ein
+/// dadurch außerhalb `0.0..=1.0` geratenes Ergebnis zurück (siehe
+/// Moduldoku oben zur bewussten Vereinfachung im linearen Arbeitsraum).
+fn set_luminosity(c: [f32; 3], target_lum: f32) -> [f32; 3] {
+    let diff = target_lum - luminosity(c);
+    clip_color(std::array::from_fn(|i| c[i] + diff))
+}
+
+fn clip_color(c: [f32; 3]) -> [f32; 3] {
+    let lum = luminosity(c);
+    let min = c[0].min(c[1]).min(c[2]);
+    let max = c[0].max(c[1]).max(c[2]);
+    let mut c = c;
+    if min < 0.0 && lum > min {
+        c = std::array::from_fn(|i| lum + (c[i] - lum) * lum / (lum - min));
+    }
+    if max > 1.0 && max > lum {
+        c = std::array::from_fn(|i| lum + (c[i] - lum) * (1.0 - lum) / (max - lum));
+    }
+    c
 }
 
 /// Wendet die ton-/farb-/detailbezogenen Werkzeuge einer Maske auf eine
@@ -665,5 +727,93 @@ mod tests {
         // subtrahiert damit die gesamte erste Komponente wieder weg.
         let pixels = vec![0.5, 0.5, 0.5];
         assert!(compose_mask_alpha(&mask, &pixels, 1, 1)[0] < 0.1);
+    }
+
+    // ---- Ebenen-Mischmodi (Schritt 6) ----------------------------------
+
+    #[test]
+    fn normal_blend_mode_ignores_the_base_pixel_entirely() {
+        let base = [0.2, 0.3, 0.4];
+        let adjusted = [0.9, 0.1, 0.5];
+        assert_eq!(blend_pixel(base, adjusted, BlendMode::Normal), adjusted);
+    }
+
+    #[test]
+    fn multiply_blend_mode_with_a_white_adjusted_layer_leaves_the_base_unchanged() {
+        let base = [0.2, 0.3, 0.4];
+        let white = [1.0, 1.0, 1.0];
+        let blended = blend_pixel(base, white, BlendMode::Multiply);
+        for i in 0..3 {
+            assert!((blended[i] - base[i]).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn multiply_blend_mode_with_a_black_adjusted_layer_yields_black() {
+        let base = [0.2, 0.3, 0.4];
+        let black = [0.0, 0.0, 0.0];
+        assert_eq!(
+            blend_pixel(base, black, BlendMode::Multiply),
+            [0.0, 0.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn soft_light_blend_mode_with_mid_gray_adjusted_leaves_the_base_unchanged() {
+        // Reine mathematische Eigenschaft der Soft-Light-Formel: bei
+        // `cs == 0.5` ist der Term `(1 - 2*cs)` bzw. `(2*cs - 1)` null,
+        // das Ergebnis bleibt also exakt `cb`.
+        let base = [0.2, 0.3, 0.4];
+        let mid_gray = [0.5, 0.5, 0.5];
+        let blended = blend_pixel(base, mid_gray, BlendMode::SoftLight);
+        for i in 0..3 {
+            assert!((blended[i] - base[i]).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn soft_light_blend_mode_stays_within_the_valid_range() {
+        for cb in [0.0, 0.1, 0.25, 0.5, 0.9, 1.0] {
+            for cs in [0.0, 0.3, 0.5, 0.7, 1.0] {
+                let result = soft_light_channel(cb, cs);
+                assert!(
+                    (-1e-4..=1.0001).contains(&result),
+                    "cb={cb} cs={cs} -> {result}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn color_blend_mode_takes_hue_and_saturation_from_adjusted_and_luminance_from_base() {
+        let base = [0.8, 0.8, 0.8]; // neutralgrau, hohe Luminanz
+        let adjusted = [0.8, 0.2, 0.2]; // gesättigtes Rot, niedrigere Luminanz
+        let blended = blend_pixel(base, adjusted, BlendMode::Color);
+        // Das Ergebnis übernimmt die Luminanz von `base` (hell)...
+        assert!((luminosity(blended) - luminosity(base)).abs() < 1e-4);
+        // ...bleibt aber farbig (nicht neutralgrau wie `base`).
+        assert!(blended[0] - blended[1] > 0.05);
+    }
+
+    #[test]
+    fn luminosity_blend_mode_takes_luminance_from_adjusted_and_hue_saturation_from_base() {
+        let base = [0.8, 0.2, 0.2]; // gesättigtes Rot
+        let adjusted = [0.3, 0.3, 0.3]; // dunkles Neutralgrau
+        let blended = blend_pixel(base, adjusted, BlendMode::Luminosity);
+        // Das Ergebnis übernimmt die (niedrige) Luminanz von `adjusted`...
+        assert!((luminosity(blended) - luminosity(adjusted)).abs() < 1e-4);
+        // ...bleibt aber farbig (die Rot-Tönung von `base` bleibt erhalten).
+        assert!(blended[0] - blended[1] > 0.05);
+    }
+
+    #[test]
+    fn set_luminosity_clips_out_of_range_results_back_into_zero_to_one() {
+        // Eine sehr hohe Ziel-Luminanz auf einem bereits hellen Pixel
+        // würde ohne `clip_color` Kanäle über 1.0 treiben.
+        let bright = [0.9, 0.95, 0.99];
+        let result = set_luminosity(bright, 1.0);
+        for channel in result {
+            assert!((-1e-4..=1.0001).contains(&channel), "channel={channel}");
+        }
     }
 }

@@ -243,4 +243,49 @@ test.describe("Masken-Panel", () => {
     const geometry = (masks[0] as unknown as { components: Array<{ geometry: { range_min: number } }> }).components[0].geometry;
     expect(geometry.range_min).toBeCloseTo(0.2, 2);
   });
+
+  test("Maskenkombination: eine zweite Komponente mit Subtrahieren+Invertieren committet, Mischmodus committet zusätzlich", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "+ Linearer Verlauf" }).click();
+
+    await page.getByRole("button", { name: "+ Komponente: Farbbereich" }).click();
+
+    type MaskWithComponents = {
+      blend_mode: string;
+      components: Array<{ geometry: { kind: string }; combine: string; invert: boolean }>;
+    };
+    let masks = (await lastMasks(page)) as unknown as MaskWithComponents[];
+    expect(masks[0].components).toHaveLength(2);
+    expect(masks[0].components[1].geometry.kind).toBe("ColorRange");
+
+    await page.getByRole("combobox", { name: "Komponente 2: Verrechnung" }).selectOption("Subtract");
+    await page.getByRole("checkbox", { name: "Komponente 2: Invertieren" }).check();
+
+    await expect
+      .poll(async () => {
+        const log = await getMockInvokeLog(page);
+        return log.filter((entry) => entry.cmd === "apply_develop_edit").length;
+      })
+      .toBeGreaterThan(2);
+    masks = (await lastMasks(page)) as unknown as MaskWithComponents[];
+    expect(masks[0].components[1].combine).toBe("Subtract");
+    expect(masks[0].components[1].invert).toBe(true);
+
+    await page.getByRole("combobox", { name: "Mischmodus" }).selectOption("Multiply");
+    await expect
+      .poll(async () => {
+        const masks = (await lastMasks(page)) as unknown as MaskWithComponents[];
+        return masks[0].blend_mode;
+      })
+      .toBe("Multiply");
+
+    // Komponente wieder entfernen: nur noch eine Komponente übrig.
+    await page.getByRole("button", { name: "Komponente 2 entfernen" }).click();
+    await expect
+      .poll(async () => {
+        const masks = (await lastMasks(page)) as unknown as MaskWithComponents[];
+        return masks[0].components.length;
+      })
+      .toBe(1);
+  });
 });

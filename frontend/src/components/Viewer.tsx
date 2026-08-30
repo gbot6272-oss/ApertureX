@@ -53,6 +53,7 @@ export function Viewer() {
   const addRepairStroke = useAppStore((s) => s.addRepairStroke);
   const selectedMaskId = useAppStore((s) => s.selectedMaskId);
   const selectedMask = useAppStore((s) => s.developEdl.masks.find((m) => m.id === selectedMaskId) ?? null);
+  const selectedMaskComponentIndex = useAppStore((s) => s.selectedMaskComponentIndex);
   const updateMaskGeometry = useAppStore((s) => s.updateMaskGeometry);
   const commitMaskDrag = useAppStore((s) => s.commitMaskDrag);
   const addMaskBrushStroke = useAppStore((s) => s.addMaskBrushStroke);
@@ -179,7 +180,7 @@ export function Viewer() {
   // Freistellungsrechteck beschränkt ist) — Ziehen soll dort malen, nicht
   // schwenken. Dieselbe Fläche deckt `MaskOverlay` für eine ausgewählte
   // Pinselmaske ab (Phase 6 Schritt 4).
-  const selectedMaskIsBrush = selectedMask?.components[0]?.geometry.kind === "Brush";
+  const selectedMaskIsBrush = selectedMask?.components[selectedMaskComponentIndex]?.geometry.kind === "Brush";
   const canPan = !repairActive && !selectedMaskIsBrush && (spaceHeld || effectiveScale > fitScale + 1e-6);
 
   const handleMouseDown = useCallback(
@@ -346,9 +347,9 @@ export function Viewer() {
 
       {photo &&
         selectedMask &&
-        (selectedMask.components[0]?.geometry.kind === "LinearGradient" ||
-          selectedMask.components[0]?.geometry.kind === "RadialGradient" ||
-          selectedMask.components[0]?.geometry.kind === "Brush") &&
+        (selectedMask.components[selectedMaskComponentIndex]?.geometry.kind === "LinearGradient" ||
+          selectedMask.components[selectedMaskComponentIndex]?.geometry.kind === "RadialGradient" ||
+          selectedMask.components[selectedMaskComponentIndex]?.geometry.kind === "Brush") &&
         imgW > 0 &&
         imgH > 0 && (
           <MaskOverlay
@@ -356,7 +357,7 @@ export function Viewer() {
             imageTop={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).y}
             imageWidth={imgW * effectiveScale}
             imageHeight={imgH * effectiveScale}
-            geometry={selectedMask.components[0].geometry}
+            geometry={selectedMask.components[selectedMaskComponentIndex].geometry}
             onChange={(geometry) => updateMaskGeometry(selectedMask.id, geometry)}
             onCommit={commitMaskDrag}
             onPaintBrushStroke={(points) => addMaskBrushStroke(selectedMask.id, points)}

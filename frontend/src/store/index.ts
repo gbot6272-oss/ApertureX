@@ -16,7 +16,7 @@ import {
   WHITE_BALANCE_PRESETS,
   writeBasicField,
 } from "../lib/edl";
-import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairMode, RepairPoint, UprightMode } from "../lib/edl";
+import type { BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairMode, RepairPoint, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import {
   applyConditionsToSubset,
@@ -584,7 +584,7 @@ interface PresetsSlice {
 
 // ---- Masken-Slice (ab Phase 6, siehe DECISIONS.md ADR-0032) ----------------
 
-type MaskKind = "LinearGradient" | "RadialGradient" | "Brush" | "ColorRange" | "LuminanceRange";
+export type MaskKind = "LinearGradient" | "RadialGradient" | "Brush" | "ColorRange" | "LuminanceRange";
 
 const MASK_KIND_DEFAULT_GEOMETRY: Record<MaskKind, () => MaskGeometry> = {
   LinearGradient: defaultLinearGradientGeometry,
@@ -594,7 +594,11 @@ const MASK_KIND_DEFAULT_GEOMETRY: Record<MaskKind, () => MaskGeometry> = {
   LuminanceRange: defaultLuminanceRangeGeometry,
 };
 
-const MASK_KIND_LABEL: Record<MaskKind, string> = {
+/** `MaskGeometry["kind"]` verwendet dieselben String-Literale wie
+ * `MaskKind` — exportiert, damit `MasksPanel.tsx` bestehende
+ * Komponenten-Geometrien beschriften kann, ohne die Zuordnung zu
+ * duplizieren. */
+export const MASK_KIND_LABEL: Record<MaskKind, string> = {
   LinearGradient: "Linearer Verlauf",
   RadialGradient: "Radialer Verlauf",
   Brush: "Pinsel",
@@ -612,16 +616,35 @@ const MASK_KIND_LABEL: Record<MaskKind, string> = {
  * bei jedem `DevelopSlider`. */
 interface MasksSlice {
   selectedMaskId: string | null;
+  /** Wählt eine Maske aus und setzt die aktive Komponente (siehe
+   * `selectedMaskComponentIndex`) zurück auf die erste. */
   selectMask: (maskId: string | null) => void;
   /** Legt eine neue Maske mit einer einzelnen Startkomponente des
-   * gewählten Geometrietyps an, wählt sie aus und committet sofort. */
+   * gewählten Geometrietyps an, wählt sie samt ihrer (einzigen)
+   * Komponente aus und committet sofort. */
   addMask: (kind: MaskKind) => void;
   removeMask: (maskId: string) => void;
   setMaskVisible: (maskId: string, visible: boolean) => void;
   renameMask: (maskId: string, name: string) => void;
-  /** Aktualisiert die Geometrie der ersten Komponente einer Maske
-   * (Schritt 3 unterstützt nur eine Komponente je Maske — Mehrfach-
-   * Komponenten-UI ist Schritt 6) — nur Live-Zustand, kein Commit. */
+  setMaskBlendMode: (maskId: string, mode: BlendMode) => void;
+
+  /** Index in `mask.components`, dessen Geometrie gerade im Viewer
+   * bearbeitet wird bzw. den Pinsel-/Farbbereich-Klick-Werkzeuge
+   * betreffen (Phase 6 Schritt 6: mehrere Komponenten je Maske,
+   * `SPEC.md` §5 „Maskenkombination"). */
+  selectedMaskComponentIndex: number;
+  selectMaskComponent: (index: number) => void;
+  /** Hängt eine neue Komponente mit Standardgeometrie des gewählten Typs
+   * an, `combine: "Add"`, wählt sie als aktive Komponente aus und
+   * committet sofort. */
+  addMaskComponent: (maskId: string, kind: MaskKind) => void;
+  /** No-op, wenn die Maske nur noch eine Komponente hätte (mindestens
+   * eine Komponente ist Pflicht). Committet sofort. */
+  removeMaskComponent: (maskId: string, componentIndex: number) => void;
+  setMaskComponentCombine: (maskId: string, componentIndex: number, combine: MaskCombine) => void;
+  setMaskComponentInvert: (maskId: string, componentIndex: number, invert: boolean) => void;
+  /** Aktualisiert die Geometrie der *aktiven* Komponente
+   * (`selectedMaskComponentIndex`) — nur Live-Zustand, kein Commit. */
   updateMaskGeometry: (maskId: string, geometry: MaskGeometry) => void;
   /** Committet den zuletzt per `updateMaskGeometry` gesetzten Zwischenwert
    * (Loslassen eines Ziehgriffs im Viewer). */
@@ -638,8 +661,9 @@ interface MasksSlice {
   maskBrushDraftFeather: number;
   setMaskBrushDraftField: (key: "radius" | "feather", value: number) => void;
   /** Hängt einen fertig gemalten Strich (bereits ausgedünnter Zielpfad,
-   * siehe `MaskOverlay.tsx`) an die erste Komponente der Maske an — ein
-   * No-op, falls deren Geometrie kein `Brush` ist. Committet sofort. */
+   * siehe `MaskOverlay.tsx`) an die *aktive* Komponente der Maske
+   * (`selectedMaskComponentIndex`) an — ein No-op, falls deren Geometrie
+   * kein `Brush` ist. Committet sofort. */
   addMaskBrushStroke: (maskId: string, points: MaskPoint[]) => void;
   removeMaskBrushStroke: (maskId: string, strokeIndex: number) => void;
 
@@ -2018,6 +2042,7 @@ export const useAppStore = create<AppStore>()(
     selectMask: (maskId) => {
       set((state) => {
         state.selectedMaskId = maskId;
+        state.selectedMaskComponentIndex = 0;
       });
     },
 
@@ -2028,6 +2053,7 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.developEdl.masks.push(newMask(id, name, geometry));
         state.selectedMaskId = id;
+        state.selectedMaskComponentIndex = 0;
       });
       void get().commitDevelopEdit(`Maske „${name}" hinzugefügt`);
     },
@@ -2059,10 +2085,63 @@ export const useAppStore = create<AppStore>()(
       void get().commitDevelopEdit();
     },
 
+    setMaskBlendMode: (maskId, mode) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (mask) mask.blend_mode = mode;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    selectedMaskComponentIndex: 0,
+
+    selectMaskComponent: (index) => {
+      set((state) => {
+        state.selectedMaskComponentIndex = index;
+      });
+    },
+
+    addMaskComponent: (maskId, kind) => {
+      const geometry: MaskGeometry = MASK_KIND_DEFAULT_GEOMETRY[kind]();
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (!mask) return;
+        mask.components.push({ geometry, combine: "Add", invert: false });
+        state.selectedMaskComponentIndex = mask.components.length - 1;
+      });
+      void get().commitDevelopEdit(`Maskenkomponente „${MASK_KIND_LABEL[kind]}" hinzugefügt`);
+    },
+
+    removeMaskComponent: (maskId, componentIndex) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (!mask || mask.components.length <= 1) return;
+        mask.components.splice(componentIndex, 1);
+        state.selectedMaskComponentIndex = Math.min(state.selectedMaskComponentIndex, mask.components.length - 1);
+      });
+      void get().commitDevelopEdit();
+    },
+
+    setMaskComponentCombine: (maskId, componentIndex, combine) => {
+      set((state) => {
+        const component = state.developEdl.masks.find((m) => m.id === maskId)?.components[componentIndex];
+        if (component) component.combine = combine;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    setMaskComponentInvert: (maskId, componentIndex, invert) => {
+      set((state) => {
+        const component = state.developEdl.masks.find((m) => m.id === maskId)?.components[componentIndex];
+        if (component) component.invert = invert;
+      });
+      void get().commitDevelopEdit();
+    },
+
     updateMaskGeometry: (maskId, geometry) => {
       set((state) => {
         const mask = state.developEdl.masks.find((m) => m.id === maskId);
-        const component = mask?.components[0];
+        const component = mask?.components[state.selectedMaskComponentIndex];
         if (component) component.geometry = geometry;
       });
     },
@@ -2106,7 +2185,7 @@ export const useAppStore = create<AppStore>()(
       if (points.length === 0) return;
       const { maskBrushDraftRadius, maskBrushDraftFeather } = get();
       set((state) => {
-        const geometry = state.developEdl.masks.find((m) => m.id === maskId)?.components[0]?.geometry;
+        const geometry = state.developEdl.masks.find((m) => m.id === maskId)?.components[state.selectedMaskComponentIndex]?.geometry;
         if (geometry?.kind !== "Brush") return;
         geometry.strokes.push({ points, radius: maskBrushDraftRadius, feather: maskBrushDraftFeather });
       });
@@ -2115,7 +2194,7 @@ export const useAppStore = create<AppStore>()(
 
     removeMaskBrushStroke: (maskId, strokeIndex) => {
       set((state) => {
-        const geometry = state.developEdl.masks.find((m) => m.id === maskId)?.components[0]?.geometry;
+        const geometry = state.developEdl.masks.find((m) => m.id === maskId)?.components[state.selectedMaskComponentIndex]?.geometry;
         if (geometry?.kind !== "Brush") return;
         geometry.strokes.splice(strokeIndex, 1);
       });
@@ -2132,7 +2211,7 @@ export const useAppStore = create<AppStore>()(
 
     setMaskColorRangeTargetAt: (maskId, r, g, b) => {
       set((state) => {
-        const geometry = state.developEdl.masks.find((m) => m.id === maskId)?.components[0]?.geometry;
+        const geometry = state.developEdl.masks.find((m) => m.id === maskId)?.components[state.selectedMaskComponentIndex]?.geometry;
         if (geometry?.kind !== "ColorRange") return;
         geometry.target_r = r / 255;
         geometry.target_g = g / 255;

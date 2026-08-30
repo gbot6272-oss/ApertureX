@@ -185,8 +185,45 @@ Raster/Filmstreifen nötig.
 
 Diese Abschnitte werden erst gefüllt, wenn die jeweilige Phase beginnt — hier nur benannt, damit die Zielarchitektur nicht aus dem Blick gerät:
 
-- **Phase 4:** Volles Entwickeln-Modul als weitere Pipeline-Stufen (über die 7 Grundregler aus Phase 2 hinaus).
 - **Phase 5:** `apx-presets` — Preset-/Template-Engine, Adobe-Interop.
-- **Phase 6:** Maskensystem als eigene Pipeline-Stufe(n).
+- **Phase 6:** Maskensystem als eigene Pipeline-Stufe(n), plus die in `DECISIONS.md` ADR-0028 auf diese Phase verschobenen Workflow-Punkte (Schnappschüsse, Vorher/Nachher, Copy/Paste-Einstellungen, Sync, Referenzansicht, Soft-Proof) und Reparatur-Erweiterungen (Auto-Quellenfindung, Content-Aware-Fill, Sensorflecken-Visualisierung).
 - **Phase 7:** `apx-ai` — ONNX-Runtime-Integration, LLM-Client für Preset-Generator.
 - **Phase 8–9:** Export-Engine, Ausgabe-Module, Node-Editor, Stacking, Tethering, Skript-API/Plugins.
+
+## 8. Architektur Phase 4 — Entwickeln vollständig
+
+Beschreibt den tatsächlich gebauten Stand (siehe `DECISIONS.md` ADR-0028 bis ADR-0030 für die Scope-Entscheidungen samt der Korrekturen, die sich beim tatsächlichen Bauen ergaben — insbesondere ADR-0030, die die unten unter „Drei Dispatch-Formen" beschriebene Zuordnung gegenüber der ursprünglichen Vorab-Planung präzisiert).
+
+**EDL-Schema v2** (`crates/apx-pipeline/src/edl/v2.rs`, `EDL_SCHEMA_VERSION = 2`): `EdlV1` bleibt unverändert bestehen (historische `edit_history`-Zeilen bleiben lesbar, `migrate.rs::from_envelope` versucht Version 2 zuerst und hebt `schema_version == 1` per `v1_to_v2` an, alles Neue auf neutral/leer). `EdlV2` fügt der um fünf Regler erweiterten `basic: BasicAdjustments` (Textur/Klarheit/Dunst entfernen/Dynamik/Sättigung) zehn weitere Unterstrukturen hinzu — je eine pro Werkzeugkategorie aus `SPEC.md` §5s Phase-4-Satz: `curves`, `hsl`, `color_mixer`, `color_grading`, `details`, `lens_corrections`, `effects`, `calibration`, `geometry`, `repair: Vec<RepairStroke>` (Liste statt Skalar — ein Stroke pro Klon-/Reparatur-Pinselzug, siehe unten). `frontend/src/lib/edl.ts` spiegelt dieselbe Struktur 1:1 (verschachtelte Sub-Objekte je Werkzeug, eigene Neutral-Konstanten und Builder-Helfer je Sektion, analog zum bestehenden `white_balance`-Unterobjekt aus Phase 2).
+
+**Drei GPU-Dispatch-Formen** (`gpu/dispatch.rs::run_compute_f32` unverändert als gemeinsame Grundlage für alle drei, siehe ADR-0029 für die Entscheidung, sie schrittweise statt vorab zu bauen):
+1. **1:1, positions-bewusst** (Breite/Höhe als zusätzliche `Params`-Uniform-Felder, aber jeder Invocation liest/schreibt nur seinen eigenen Pixel): der erweiterte `basic_fused`-Pass (Grundeinstellungs-Ergänzung, Kurven-Vorstufe entfällt — siehe unten), HSL/Farbmischer, Color Grading, Kalibrierung, Objektivkorrekturen (der geometrische Warp braucht zwar Nachbarschafts-*Lesezugriff* auf den Eingabepuffer, bleibt aber 1:1 in der Puffergröße, siehe Punkt 3 unten für die Abgrenzung), Effekte (Vignette/Körnung).
+2. **Nachbarschafts-Zugriff** (2D-Dispatch, liest umliegende Pixel aus demselben Eingabepuffer): Textur/Klarheit (`local_contrast`, aus Phase 2 wiederverwendet), Details (Unschärfe-Referenz fürs Unsharp-Masking + lokale Mittelung für Rauschreduzierung), Reparatur (versetzter/gefilterter Lesezugriff für Klonen/Reparieren).
+3. **Größenverändernd** (Ausgabepuffer ≠ Eingabepuffer): entgegen der ursprünglichen Vorab-Planung (die diese Form sowohl für Objektivkorrekturen als auch Crop/Geometrie vorsah) wird sie tatsächlich **nur von Geometrie** gebraucht — Objektivkorrekturens Warp bleibt bewusst größenerhaltend (Randpixel geklemmt statt automatisch zugeschnitten, siehe ADR-0030) und läuft deshalb als Form 1. Geometrie (Drehung + Zuschnitt) läuft zudem bewusst **CPU-only** (kein GPU-Dispatch, `stages/geometry.rs`, analog zu `curves.rs`) als allerletzter Schritt in `render_rgba8` — ein GPU-Rundtrip lohnt sich für einen pro Regler-Tick nur einmal laufenden Schritt auf dem bereits herunterskalierten Vorschaubild nicht.
+
+**Vollständige Pipeline-Reihenfolge** (`develop::render_rgba8`, jede Stufe mit „Regelfall überspringen"-Kurzschluss, wenn ihr EDL-Anteil neutral/leer ist):
+
+```
+linear.pixels (Kamera-RGB, f32)
+  -> repair            (Klon-/Reparatur-Striche, sequenziell je Strich, vor allem anderen — Flecken-
+                         entfernung soll auf unveränderten Sensordaten passieren)
+  -> calibration       (Prozessversion/Schattentönung/Primärfarben/Kameraprofil, vor Weißabgleich)
+  -> basic_fused       (die zwölf Grundeinstellungs-Regler inkl. Weißabgleich-Gains)
+  -> local_contrast    (Textur/Klarheit, Nachbarschafts-Dispatch)
+  -> details           (Schärfung + Rauschreduzierung, Nachbarschafts-Dispatch)
+  -> hsl_color_mixer   (HSL-Bänder + Farbmischer-Regionen)
+  -> color_grading     (vier Farbräder)
+  -> lens_corrections  (CA/Vignette/Verzeichnung/Upright/manuelle Transformation, ein kombinierter
+                         geometrischer Warp, größenerhaltend)
+  -> effects           (nachträgliche Vignettierung + Körnung)
+  -> color::linear_camera_rgb_to_srgb_rgba8   (feste Matrix + Gammakurve + u8-Quantisierung — ab hier RGBA8)
+  -> curves            (CPU-LUT auf dem fertigen u8-Puffer, siehe ADR-0029: Sequenzierungsfrage
+                         zugunsten eines einfachen CPU-Nachschritts statt eines WGSL-Farbraum-Shaders
+                         entschieden)
+  -> geometry          (Drehung + Zuschnitt, CPU-only, ändert als einziger Schritt die Ausgabegröße)
+  -> RenderedImage { width, height, pixels }
+```
+
+`RenderedImage` (statt eines nackten `Vec<u8>`) macht diese Größenänderung im Typsystem sichtbar — `apx-app::protocol::compute_develop` rahmt entsprechend `rendered.width`/`.height` (statt `linear.width`/`.height`) in den 8-Byte-Wire-Header; das Wire-Format selbst ist unverändert (war schon immer breiten-/höhen-präfixiert).
+
+**Frontend-Widgets** (alle neu, `frontend/src/components/`): `CurveEditor.tsx` (Canvas, ziehbare Punkte, monotone kubische Spline + parametrischer Modus), `ColorWheel.tsx` (2D-Puck auf Farbton/Sättigungs-Scheibe, 4× für Color Grading), `CropOverlay.tsx` (Ziehgriffe + Rasterüberlagerungen), `RepairOverlay.tsx` (Quellpunkt-Klick + Zielpfad-Ziehen, rein clientseitige Live-Vorschau). Alle teilen sich, wo sinnvoll, Code mit bestehenden Mustern statt eigener Parallel-Logik: Farbmischer-Bildklick und Weißabgleich-Pipette teilen sich `lib/colorSampling.ts`; jedes neue `role="slider"`-Element mit eigenem `onKeyDown` braucht `event.stopPropagation()`, sobald es in ein anderes `role="slider"`-Element verschachtelt ist (zweimal in dieser Phase als echter Bug gefunden — `CropOverlay.tsx`s Ecken-Ziehgriffe und, aus früheren Phasen bekannt, `App.tsx`s globaler Tastatur-Listener).

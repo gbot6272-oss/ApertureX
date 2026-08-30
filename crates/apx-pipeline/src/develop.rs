@@ -459,4 +459,187 @@ mod tests {
             "CPU-Fallback ungewöhnlich langsam: {elapsed:?}"
         );
     }
+
+    /// Phase-4-Nachmessung (`PLAN.md` Phase 4 Schritt 13, analog zum
+    /// Phase-2-Schritt-7-Vorbild oben): dieselbe Messmethode, aber mit
+    /// jeder einzelnen der zehn Phase-4-Werkzeugkategorien auf einen
+    /// spürbar von neutral abweichenden Wert gesetzt — die obige Messung
+    /// oben trifft für die meisten Stufen den „Regelfall überspringen"-
+    /// Kurzschluss (siehe `render_rgba8`s Moduldoku) und misst damit nur
+    /// den ursprünglichen Phase-2-Kern. Dieselben Ehrlichkeits-Einschränkungen
+    /// gelten (keine echte Fenster-/IPC-/Compositing-Umgebung in dieser
+    /// Sandbox, generöse Zeitschranke nur als Regressionswächter).
+    #[test]
+    fn render_rgba8_timing_with_all_phase4_stages_active() {
+        let ctx = GpuContext::new_blocking().ok();
+        if ctx.is_none() {
+            eprintln!("übersprungen: kein GPU-Adapter in dieser Umgebung verfügbar");
+        }
+
+        let width = 2048;
+        let height = 1365;
+        let pixels = crate::test_support::gray_gradient((width * height) as usize);
+        let linear = LinearImage {
+            width,
+            height,
+            pixels,
+            as_shot_wb_coeffs: [1.05, 1.0, 0.9, 1.0],
+            cam_to_srgb: IDENTITY,
+        };
+
+        use crate::edl::v2::{CropRect, ManualTransform};
+        use crate::edl::{
+            CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerAdjustment,
+            ColorMixerRegion, CurveChannel, CurvesAdjustment, DetailsAdjustment, EffectsAdjustment,
+            GeometryAdjustment, GridOverlay, HslAdjustment, HslBand, LensCorrectionAdjustment,
+            PrimaryColorAdjustment, RepairMode, RepairPoint, RepairStroke,
+        };
+
+        let edl = EdlV2 {
+            basic: BasicAdjustments {
+                exposure_ev: 0.4,
+                contrast: 15.0,
+                highlights: -10.0,
+                shadows: 10.0,
+                whites: 5.0,
+                blacks: -5.0,
+                texture: 20.0,
+                clarity: 15.0,
+                dehaze: 10.0,
+                vibrance: 10.0,
+                saturation: 5.0,
+                white_balance: WhiteBalanceAdjustment {
+                    temp_shift_kelvin: 200.0,
+                    tint_shift: -5.0,
+                },
+            },
+            curves: CurvesAdjustment {
+                rgb: CurveChannel::Parametric {
+                    shadows: 10.0,
+                    darks: 5.0,
+                    lights: -5.0,
+                    highlights: -10.0,
+                },
+                ..CurvesAdjustment::neutral()
+            },
+            hsl: HslAdjustment {
+                red: HslBand {
+                    hue: 10.0,
+                    saturation: 15.0,
+                    luminance: -5.0,
+                },
+                ..HslAdjustment::NEUTRAL
+            },
+            color_mixer: ColorMixerAdjustment {
+                regions: vec![ColorMixerRegion {
+                    target_hue_degrees: 30.0,
+                    bandwidth_degrees: 40.0,
+                    feather: 15.0,
+                    hue_shift: 10.0,
+                    saturation_shift: 10.0,
+                    luminance_shift: 0.0,
+                }],
+            },
+            color_grading: ColorGradingAdjustment {
+                shadows: ColorGradingWheel {
+                    hue_degrees: 220.0,
+                    saturation: 20.0,
+                    luminance: -5.0,
+                },
+                balance: 10.0,
+                ..ColorGradingAdjustment::NEUTRAL
+            },
+            details: DetailsAdjustment {
+                sharpen_amount: 40.0,
+                sharpen_radius: 1.0,
+                luminance_nr_amount: 20.0,
+                color_nr_amount: 20.0,
+                ..DetailsAdjustment::NEUTRAL
+            },
+            lens_corrections: LensCorrectionAdjustment {
+                ca_red_cyan: 10.0,
+                ca_blue_yellow: -10.0,
+                vignette_amount: 15.0,
+                distortion_amount: 10.0,
+                manual_transform: ManualTransform {
+                    rotate_degrees: 1.0,
+                    ..ManualTransform::NEUTRAL
+                },
+                ..LensCorrectionAdjustment::NEUTRAL
+            },
+            effects: EffectsAdjustment {
+                post_vignette_amount: -20.0,
+                grain_amount: 15.0,
+                ..EffectsAdjustment::NEUTRAL
+            },
+            calibration: CalibrationAdjustment {
+                shadow_tint: 10.0,
+                red_primary: PrimaryColorAdjustment {
+                    hue: 5.0,
+                    saturation: 10.0,
+                },
+                ..CalibrationAdjustment::NEUTRAL
+            },
+            geometry: GeometryAdjustment {
+                crop: CropRect {
+                    x: 0.02,
+                    y: 0.02,
+                    width: 0.96,
+                    height: 0.96,
+                },
+                angle_degrees: 2.0,
+                overlay: GridOverlay::Thirds,
+                ..GeometryAdjustment::NEUTRAL
+            },
+            repair: vec![RepairStroke {
+                mode: RepairMode::Clone,
+                source: RepairPoint { x: 0.1, y: 0.1 },
+                target_path: vec![
+                    RepairPoint { x: 0.5, y: 0.5 },
+                    RepairPoint { x: 0.52, y: 0.51 },
+                ],
+                radius: 0.03,
+                feather: 0.01,
+                opacity: 1.0,
+            }],
+        };
+
+        if let Some(ctx) = &ctx {
+            let started = std::time::Instant::now();
+            let _ = render_rgba8(Some(ctx), &linear, &edl).expect("GPU-Rendering");
+            let elapsed = started.elapsed();
+            eprintln!(
+                "render_rgba8 mit allen Phase-4-Stufen aktiv (GPU, {width}x{height}, Adapter '{}'): {:.2} ms",
+                ctx.adapter_info.name,
+                elapsed.as_secs_f64() * 1000.0
+            );
+            // Großzügige Schranke — mehrere zusätzliche sequenzielle
+            // Durchläufe (u. a. Details/Objektivkorrekturen/Effekte/
+            // Reparatur) statt eines einzigen Fused-Passes sind hier
+            // erwartbar teurer als der Phase-2-Kern oben, siehe
+            // `develop.rs`s Moduldoku für die Begründung je Stufe.
+            // In dieser Sandbox läuft „GPU" auf `llvmpipe` (siehe die
+            // Adapter-Ausgabe oben) — einem Software-Rasterisierer, der
+            // neun sequenzielle Dispatches spürbar langsamer ausführt als
+            // echte GPU-Hardware. Die Schranke ist entsprechend großzügig
+            // gewählt (reiner Regressionswächter, keine Aussage über das
+            // 16-ms-Ziel auf echter Hardware, siehe Moduldoku oben).
+            assert!(
+                elapsed.as_millis() < 10_000,
+                "GPU-Rendering mit allen Phase-4-Stufen ungewöhnlich langsam: {elapsed:?}"
+            );
+        }
+
+        let started = std::time::Instant::now();
+        let _ = render_rgba8(None, &linear, &edl);
+        let elapsed = started.elapsed();
+        eprintln!(
+            "render_rgba8 mit allen Phase-4-Stufen aktiv (CPU-Fallback, {width}x{height}): {:.2} ms",
+            elapsed.as_secs_f64() * 1000.0
+        );
+        assert!(
+            elapsed.as_millis() < 10_000,
+            "CPU-Fallback mit allen Phase-4-Stufen ungewöhnlich langsam: {elapsed:?}"
+        );
+    }
 }

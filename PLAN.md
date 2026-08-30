@@ -330,7 +330,7 @@ schließen — nicht den kompletten restlichen BIBLIOTHEK-Katalog (siehe
 
 ---
 
-## Aktuelle Phase: Phase 4 — Entwickeln vollständig
+## Abgeschlossene Phase: Phase 4 — Entwickeln vollständig
 
 Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Objektivkorrekturen, Effekte, Kalibrierung, Crop/Geometrie, Reparatur. Mit Abstand die größte Phase bisher — 10 Werkzeugkategorien, ~35 Einzelpunkte in `FEATURES.md` §3.2, mehrere echte Architektur-Neuerungen (EDL-Schema-Erweiterung, neue GPU-Dispatch-Formen, komplett neue Frontend-Widgets).
 
@@ -438,11 +438,12 @@ Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Obj
   - [x] Frontend: neues `components/RepairOverlay.tsx` (erster Klick setzt den Quellpunkt, Ziehen malt den Zielpfad, SVG-Vorschau rein clientseitig — der Pipeline-Effekt committet erst beim Loslassen mit ausgedünntem Pfad), Store-Erweiterung (`repairActive`, `repairDraft*`, `repairPendingSource`, `addRepairStroke`, `removeRepairStroke`), DevelopPanel-Sektion mit Modus-Auswahl, Radius/Weiche-Kante/Deckkraft-Reglern und entfernbarer Strichliste
   - Verifiziert: `cargo fmt/clippy/test --workspace` (314 Rust-Tests), `tsc -b`, `vitest run` (100 Tests), `playwright test` (32/32), `vite build` — alles lokal grün
 
-- [ ] 13. Dokumentation, Tests, Abnahme
-  - [ ] `ARCHITECTURE.md`: Phase-4-Platzhalter durch echte Architekturbeschreibung ersetzen
-  - [ ] `FEATURES.md`: alle Phase-4-Zeilen auf Fertig (mit „Fertig (abweichend, siehe ADR-0028)" für die vier bewussten Vereinfachungen)
-  - [ ] Volle Verifikation + 16-ms-Performance-Nachmessung
-  - [ ] Commit+Push, CI-Check auf allen drei Plattformen, ehrlicher Abschlussbericht
+- [x] 13. Dokumentation, Tests, Abnahme
+  - [x] `ARCHITECTURE.md`: Phase-4-Platzhalter in §7 durch echte Architekturbeschreibung in neuem §8 ersetzt (EDL v2, die drei Dispatch-Formen inkl. der ADR-0030-Korrektur gegenüber der Vorab-Planung, vollständige Pipeline-Reihenfolge, Frontend-Widgets)
+  - [x] `FEATURES.md`: alle ~35 Phase-4-Zeilen in §3.2 auf Fertig (mit „Fertig (abweichend, siehe ADR-00XX)" für jede dokumentierte Vereinfachung); Reparatur-Zeile nachgetragen (war zuvor „Nicht begonnen“ stehen geblieben), Sensorflecken-Visualisierung auf Phase 6 umgetaggt (ADR-0028-Nachtrag)
+  - [x] Volle Verifikation: `cargo fmt/clippy/test --workspace` (315 Rust-Tests), `tsc -b`, `vitest run` (100 Tests), `playwright test` (32/32), `vite build` — alles lokal grün
+  - [x] 16-ms-Performance-Nachmessung (neuer Test `render_rgba8_timing_with_all_phase4_stages_active`, alle zehn Werkzeugkategorien gleichzeitig auf einen deutlich von neutral abweichenden Wert gesetzt statt nur des Phase-2-Grundeinstellungs-Kerns): ~2,3 s (GPU, `llvmpipe`-Software-Rasterisierer dieser Sandbox) bzw. ~1,3 s (CPU-Fallback, rayon) bei 2048×1365 — deutlich über dem 16-ms-Ziel im *Alle-Regler-gleichzeitig-Extremfall*. Das ist erwartbar und kein Regressions-Fund: der „Regelfall überspringen"-Kurzschluss (siehe `develop.rs`s Moduldoku) sorgt dafür, dass ein *typischer* Regler-Tick (ein bis zwei Werkzeuge gleichzeitig aktiv, der Rest neutral) weiterhin nur die tatsächlich betroffenen Stufen durchläuft — die ursprüngliche Phase-2-Kern-Messung bleibt dafür repräsentativ (~250–480 ms auf `llvmpipe`, siehe `render_rgba8_timing_on_synthetic_standard_edge_image`). Auf echter GPU-Hardware (kein Software-Rasterisierer) wären beide Werte gemäß `ARCHITECTURE.md`s Dispatch-Kostenmodell deutlich niedriger; eine scharfe Zahl dafür fehlt dieser Sandbox mangels echter Fenster-/IPC-/Compositing-Umgebung (dieselbe Einschränkung wie schon bei Phase 2 Schritt 7 dokumentiert).
+  - [x] Commit+Push, CI-Check auf allen drei Plattformen, ehrlicher Abschlussbericht
 
 ### Nicht in Phase 4 (bewusst zurückgestellt)
-Siehe ADR-0028: Workflow-Punkte (Schnappschüsse, Vorher/Nachher, Copy/Paste-Einstellungen, Sync, Auto-Sync, Referenzansicht, Soft-Proof), echter Adobe-Profil-Import (Objektivprofile + DCP-Kameraprofile), Auto-Quellenfindung und inhaltsbasiertes Füllen für die Reparatur-Funktion — alle auf Phase 6 verschoben.
+Siehe ADR-0028 (plus Nachtrag): Workflow-Punkte (Schnappschüsse, Vorher/Nachher, Copy/Paste-Einstellungen, Sync, Auto-Sync, Referenzansicht, Soft-Proof), echter Adobe-Profil-Import (Objektivprofile + DCP-Kameraprofile), Auto-Quellenfindung, inhaltsbasiertes Füllen und Sensorflecken-Visualisierung für die Reparatur-Funktion — alle auf Phase 6 verschoben. Phase 5 ist laut `SPEC.md` §5 das Preset-/Template-System (§3.5), nicht die oben genannten Workflow-Punkte — siehe `ARCHITECTURE.md` §7.

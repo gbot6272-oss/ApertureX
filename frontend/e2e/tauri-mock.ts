@@ -188,6 +188,19 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     return entry ? { kind: "At", edl_json: entry.edl_json } : { kind: "Neutral" };
   }
 
+  // Simulierte `snapshots`-Tabelle (Phase 6 Schritt 8, siehe
+  // `crates/apx-catalog/src/repository/snapshots.rs`) — anders als
+  // `editHistories` oben unabhängig vom linearen Verlauf, nie
+  // automatisch beschnitten.
+  interface MockSnapshot {
+    id: string;
+    name: string;
+    edl_json: string;
+    created_at: string;
+  }
+  const snapshotsByPhoto: Record<string, MockSnapshot[]> = {};
+  let nextSnapshotId = 1;
+
   w.__mockEmit = (eventName: string, payload: unknown) => {
     const ids = listenersByEvent[eventName] ?? [];
     for (const id of [...ids]) {
@@ -295,6 +308,35 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         if (!history || history.currentIndex + 1 >= history.entries.length) return null;
         history.currentIndex += 1;
         return historyPositionAt(history);
+      }
+
+      // ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------
+      case "create_snapshot": {
+        const photoId = args.photoId as string;
+        const list = (snapshotsByPhoto[photoId] ??= []);
+        list.push({
+          id: `snapshot-${nextSnapshotId++}`,
+          name: args.name as string,
+          edl_json: args.edlJson as string,
+          created_at: new Date().toISOString(),
+        });
+        return null;
+      }
+      case "list_snapshots": {
+        return (snapshotsByPhoto[args.photoId as string] ?? []).map((s) => ({ ...s }));
+      }
+      case "rename_snapshot": {
+        for (const list of Object.values(snapshotsByPhoto)) {
+          const snapshot = list.find((s) => s.id === args.snapshotId);
+          if (snapshot) snapshot.name = args.name as string;
+        }
+        return null;
+      }
+      case "delete_snapshot": {
+        for (const [photoId, list] of Object.entries(snapshotsByPhoto)) {
+          snapshotsByPhoto[photoId] = list.filter((s) => s.id !== args.snapshotId);
+        }
+        return null;
       }
 
       // ---- Bibliothek: Bewertung/Flagge/Farbe (ab Phase 3) -----------------

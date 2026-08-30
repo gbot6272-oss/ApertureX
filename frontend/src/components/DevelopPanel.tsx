@@ -99,6 +99,13 @@ export function DevelopPanel() {
   const redoDevelop = useAppStore((s) => s.redoDevelop);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
   const lastLatencyMs = useAppStore((s) => s.developLastLatencyMs);
+  const snapshots = useAppStore((s) => s.snapshots);
+  const saveSnapshot = useAppStore((s) => s.saveSnapshot);
+  const renameSnapshotAction = useAppStore((s) => s.renameSnapshotAction);
+  const removeSnapshot = useAppStore((s) => s.removeSnapshot);
+  const restoreSnapshot = useAppStore((s) => s.restoreSnapshot);
+  const beforeAfterMode = useAppStore((s) => s.beforeAfterMode);
+  const setBeforeAfterMode = useAppStore((s) => s.setBeforeAfterMode);
   const wbPickerActive = useAppStore((s) => s.wbPickerActive);
   const toggleWbPicker = useAppStore((s) => s.toggleWbPicker);
   const applyWhiteBalancePreset = useAppStore((s) => s.applyWhiteBalancePreset);
@@ -239,6 +246,87 @@ export function DevelopPanel() {
         <p className="text-xs text-text-muted" title="Ende-zu-Ende-Antwortzeit der letzten Regler-Vorschau (IPC + Dekodierung/Rendern, ohne Neuzeichnen im Browser) — siehe PLAN.md Phase 2 Schritt 7">
           Letztes Rendering: {Math.round(lastLatencyMs)} ms
         </p>
+      )}
+
+      {selectedPhotoId && (
+        <fieldset className="flex flex-col gap-2">
+          <legend className="mb-1 text-xs font-medium text-text-secondary">Schnappschüsse</legend>
+          <button
+            type="button"
+            onClick={() => {
+              const name = window.prompt("Schnappschuss benennen");
+              if (name) void saveSnapshot(name);
+            }}
+            className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel"
+          >
+            + Schnappschuss vom aktuellen Stand
+          </button>
+          {snapshots.length === 0 && <p className="text-xs text-text-muted">Noch keine Schnappschüsse.</p>}
+          <ul className="flex flex-col gap-1">
+            {snapshots.map((snapshot) => (
+              <li key={snapshot.id} className="flex items-center gap-1.5 rounded border border-border px-2 py-1 text-xs">
+                <button type="button" onClick={() => void restoreSnapshot(snapshot.id)} className="min-w-0 flex-1 truncate text-left text-text-primary hover:underline" title="Wiederherstellen">
+                  {snapshot.name}
+                </button>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    const name = window.prompt("Schnappschuss umbenennen", snapshot.name);
+                    if (name) void renameSnapshotAction(snapshot.id, name);
+                  }}
+                  className="shrink-0 text-text-muted hover:text-accent"
+                  title="Umbenennen"
+                >
+                  ✎
+                </span>
+                <button type="button" onClick={() => void removeSnapshot(snapshot.id)} className="shrink-0 text-danger" aria-label={`Schnappschuss ${snapshot.name} löschen`}>
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        </fieldset>
+      )}
+
+      {selectedPhotoId && (
+        <fieldset className="flex flex-col gap-1">
+          <legend className="mb-1 text-xs font-medium text-text-secondary">Vorher/Nachher</legend>
+          <div className="grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              onClick={() => setBeforeAfterMode(beforeAfterMode === "sideBySide" ? "none" : "sideBySide")}
+              aria-pressed={beforeAfterMode === "sideBySide"}
+              className={`rounded border px-2 py-1 text-xs ${beforeAfterMode === "sideBySide" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"}`}
+            >
+              Links/Rechts
+            </button>
+            <button
+              type="button"
+              onClick={() => setBeforeAfterMode(beforeAfterMode === "stacked" ? "none" : "stacked")}
+              aria-pressed={beforeAfterMode === "stacked"}
+              className={`rounded border px-2 py-1 text-xs ${beforeAfterMode === "stacked" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"}`}
+            >
+              Oben/Unten
+            </button>
+            <button
+              type="button"
+              onClick={() => setBeforeAfterMode(beforeAfterMode === "splitVertical" ? "none" : "splitVertical")}
+              aria-pressed={beforeAfterMode === "splitVertical"}
+              className={`rounded border px-2 py-1 text-xs ${beforeAfterMode === "splitVertical" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"}`}
+            >
+              Geteilt
+            </button>
+            <button
+              type="button"
+              onClick={() => setBeforeAfterMode(beforeAfterMode === "splitHorizontal" ? "none" : "splitHorizontal")}
+              aria-pressed={beforeAfterMode === "splitHorizontal"}
+              className={`rounded border px-2 py-1 text-xs ${beforeAfterMode === "splitHorizontal" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"}`}
+            >
+              Geteilt vertikal
+            </button>
+          </div>
+        </fieldset>
       )}
 
       {presetStrengthContext && (

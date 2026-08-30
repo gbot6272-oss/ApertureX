@@ -10,6 +10,7 @@ import { mergeEdlSubset } from "../lib/presets";
 import { clampZoom, computeBaseScale, imageOrigin, nextZoomStep, panForZoomAtCursor } from "../lib/viewerMath";
 import { QuadRenderer } from "../lib/webgl";
 import { useAppStore } from "../store";
+import { BeforeAfterView } from "./BeforeAfterView";
 import { CropOverlay } from "./CropOverlay";
 import { MaskOverlay } from "./MaskOverlay";
 import { RepairOverlay } from "./RepairOverlay";
@@ -36,6 +37,7 @@ export function Viewer() {
   const resetView = useAppStore((s) => s.resetView);
   const developPanelOpen = useAppStore((s) => s.developPanelOpen);
   const developEdl = useAppStore((s) => s.developEdl);
+  const beforeAfterMode = useAppStore((s) => s.beforeAfterMode);
   const hoverPresetSubset = useAppStore((s) => s.hoverPresetSubset);
   const wbPickerActive = useAppStore((s) => s.wbPickerActive);
   const pickWhiteBalanceAt = useAppStore((s) => s.pickWhiteBalanceAt);
@@ -322,6 +324,10 @@ export function Viewer() {
       {!photo && <p className="pointer-events-none text-sm text-text-muted">Kein Foto ausgewählt.</p>}
 
       <canvas ref={canvasRef} className="pointer-events-none absolute inset-0" />
+
+      {photo && beforeAfterMode !== "none" && (
+        <BeforeAfterView photoId={developPhotoId} afterEdlJson={developEdlJson} maxEdge={containerSize.width > 0 ? targetFullEdge : undefined} />
+      )}
 
       {photo && geometryCropActive && imgW > 0 && imgH > 0 && (
         <CropOverlay

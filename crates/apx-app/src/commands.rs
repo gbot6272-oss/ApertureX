@@ -651,6 +651,105 @@ pub fn redo_develop_edit(
     result.map(history_position_to_dto).transpose()
 }
 
+// ---- Schnappschüsse (Phase 6 Schritt 8) ------------------------------------
+//
+// Anders als der lineare Verlauf oben (`apply_develop_edit`/
+// `current_develop_edit`/…): ein Schnappschuss trägt seine eigene Kopie
+// des EDL (siehe `apx_catalog::repository::snapshots`s Moduldoku) und
+// bleibt bestehen, auch wenn spätere Bearbeitungen den linearen Verlauf
+// umschreiben. Ihn "anzuwenden" heißt einfach: sein `edl_json` wie jeden
+// anderen EDL-Stand über das bestehende `apply_develop_edit` committen
+// — kein eigener Restore-Befehl nötig (reuse statt Duplikat).
+
+fn parse_snapshot_id(id: String) -> Result<apx_core::SnapshotId, String> {
+    id.parse()
+        .map_err(|err: apx_core::AppError| err.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SnapshotDto {
+    pub id: String,
+    pub name: String,
+    pub edl_json: String,
+    pub created_at: String,
+}
+
+impl SnapshotDto {
+    fn try_from_model(snapshot: apx_catalog::Snapshot) -> Result<Self, String> {
+        Ok(Self {
+            id: snapshot.id.to_string(),
+            name: snapshot.name,
+            edl_json: snapshot
+                .edl
+                .to_json_string()
+                .map_err(|err| err.to_string())?,
+            created_at: snapshot
+                .created_at
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_default(),
+        })
+    }
+}
+
+/// Legt einen neuen Schnappschuss des aktuell übergebenen EDL an —
+/// validiert `edl_json` genau wie `apply_develop_edit`, damit der
+/// Katalog nie einen unlesbaren Schnappschuss bekommt.
+#[tauri::command]
+pub fn create_snapshot(
+    state: State<'_, AppState>,
+    photo_id: String,
+    name: String,
+    edl_json: String,
+) -> Result<(), String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let envelope =
+        apx_core::EdlEnvelope::from_json_str(&edl_json).map_err(|err| err.to_string())?;
+    apx_pipeline::edl::from_envelope(&envelope).map_err(|err| err.to_string())?;
+    state
+        .catalog
+        .create_snapshot(photo_id, &name, &envelope)
+        .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+/// Alle Schnappschüsse eines Fotos, älteste zuerst.
+#[tauri::command]
+pub fn list_snapshots(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<Vec<SnapshotDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    state
+        .catalog
+        .list_snapshots(photo_id)
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .map(SnapshotDto::try_from_model)
+        .collect()
+}
+
+#[tauri::command]
+pub fn rename_snapshot(
+    state: State<'_, AppState>,
+    snapshot_id: String,
+    name: String,
+) -> Result<(), String> {
+    let snapshot_id = parse_snapshot_id(snapshot_id)?;
+    state
+        .catalog
+        .rename_snapshot(snapshot_id, &name)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn delete_snapshot(state: State<'_, AppState>, snapshot_id: String) -> Result<(), String> {
+    let snapshot_id = parse_snapshot_id(snapshot_id)?;
+    state
+        .catalog
+        .delete_snapshot(snapshot_id)
+        .map_err(|err| err.to_string())
+}
+
 // ---- Bibliothek: Import-Presets (ab Phase 3) -------------------------------
 //
 // Presets werden bewusst direkt als `import::presets::ImportPreset`

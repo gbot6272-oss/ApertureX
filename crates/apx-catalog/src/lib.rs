@@ -30,14 +30,14 @@ use std::sync::{Mutex, MutexGuard};
 
 use apx_core::{
     AppError, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId, PhotoId,
-    PresetFolderId, PresetId, PresetVersionId, Result,
+    PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId,
 };
 use rusqlite::Connection;
 use time::OffsetDateTime;
 
 pub use models::{
     Collection, EditHistoryEntry, FilterCriteria, Folder, HistoryPosition, Keyword, NewPhoto,
-    Photo, Preset, PresetFolder, PresetVersion, Preview, PreviewLevel,
+    Photo, Preset, PresetFolder, PresetVersion, Preview, PreviewLevel, Snapshot,
 };
 
 pub struct Catalog {
@@ -223,6 +223,37 @@ impl Catalog {
     pub fn list_edit_history(&self, photo_id: PhotoId) -> Result<Vec<EditHistoryEntry>> {
         let conn = self.lock()?;
         repository::edits::list_history(&conn, photo_id)
+    }
+
+    // ---- Schnappschüsse (Phase 6 Schritt 8) ------------------------------
+    // Anders als der lineare Bearbeitungsverlauf oben: siehe
+    // `repository::snapshots`s Moduldoku für die Abgrenzung.
+
+    /// Legt einen neuen Schnappschuss mit einer eigenen Kopie von `edl` an.
+    pub fn create_snapshot(
+        &self,
+        photo_id: PhotoId,
+        name: &str,
+        edl: &EdlEnvelope,
+    ) -> Result<SnapshotId> {
+        let conn = self.lock()?;
+        repository::snapshots::create(&conn, photo_id, name, edl, OffsetDateTime::now_utc())
+    }
+
+    /// Alle Schnappschüsse eines Fotos, älteste zuerst.
+    pub fn list_snapshots(&self, photo_id: PhotoId) -> Result<Vec<Snapshot>> {
+        let conn = self.lock()?;
+        repository::snapshots::list(&conn, photo_id)
+    }
+
+    pub fn rename_snapshot(&self, snapshot_id: SnapshotId, name: &str) -> Result<()> {
+        let conn = self.lock()?;
+        repository::snapshots::rename(&conn, snapshot_id, name)
+    }
+
+    pub fn delete_snapshot(&self, snapshot_id: SnapshotId) -> Result<()> {
+        let conn = self.lock()?;
+        repository::snapshots::delete(&conn, snapshot_id)
     }
 
     // ---- Bewertung/Flagge/Farbe (ab Phase 3) -----------------------------

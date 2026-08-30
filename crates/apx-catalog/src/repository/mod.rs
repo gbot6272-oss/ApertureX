@@ -10,3 +10,4 @@ pub(crate) mod photos;
 pub(crate) mod presets;
 pub(crate) mod previews;
 pub(crate) mod search;
+pub(crate) mod snapshots;

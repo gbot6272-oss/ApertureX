@@ -44,6 +44,7 @@ import type {
   PhotoDto,
   PresetDto,
   PresetFolderDto,
+  SnapshotDto,
 } from "../lib/tauri";
 import * as undoStackLib from "../lib/undoStack";
 import type { UndoEntry } from "../lib/undoStack";
@@ -267,6 +268,28 @@ interface DevelopSlice {
    * (oder neutral, falls noch nie bearbeitet) — aufgerufen beim Öffnen
    * des Panels und bei jedem Fotowechsel, während es offen ist. */
   loadDevelopStateForPhoto: (photoId: string) => Promise<void>;
+
+  /** Benannte EDL-Zwischenstände zusätzlich zum linearen Verlauf (Phase 6
+   * Schritt 8, `SPEC.md` §3.4) — siehe `crates/apx-app/src/commands.rs`s
+   * Moduldoku zur Abgrenzung gegenüber Undo/Redo. Für das gerade in
+   * `developPhotoId` offene Foto. */
+  snapshots: SnapshotDto[];
+  refreshSnapshots: () => Promise<void>;
+  /** Legt einen Schnappschuss des *aktuellen* `developEdl`-Stands an. */
+  saveSnapshot: (name: string) => Promise<void>;
+  renameSnapshotAction: (snapshotId: string, name: string) => Promise<void>;
+  removeSnapshot: (snapshotId: string) => Promise<void>;
+  /** Committet den gespeicherten Schnappschuss-EDL als neuen aktiven
+   * Bearbeitungsschritt (reuse von `apply_develop_edit`, kein eigener
+   * Backend-Restore-Weg) und übernimmt ihn sofort in die Anzeige. */
+  restoreSnapshot: (snapshotId: string) => Promise<void>;
+
+  /** Vorher/Nachher-Ansicht im Viewer (Phase 6 Schritt 8, `SPEC.md` §3.4:
+   * „in vier Ansichten") — „Vorher" ist das neutrale EDL (wie
+   * aufgenommen), „Nachher" der aktuelle `developEdl`-Stand. */
+  beforeAfterMode: "none" | "sideBySide" | "stacked" | "splitVertical" | "splitHorizontal";
+  setBeforeAfterMode: (mode: AppStore["beforeAfterMode"]) => void;
+
   /** Setzt ein einzelnes Grundeinstellungs-Feld (Regler-Zwischenwert beim
    * Ziehen) — siehe `lib/edl.ts`s `SliderSpec.key` für gültige Schlüssel. */
   setBasicField: (key: string, value: number) => void;
@@ -1056,6 +1079,86 @@ export const useAppStore = create<AppStore>()(
           state.developPhotoId = photoId;
         });
       }
+      void get().refreshSnapshots();
+    },
+
+    snapshots: [],
+
+    refreshSnapshots: async () => {
+      const photoId = get().developPhotoId;
+      if (!photoId) {
+        set((state) => {
+          state.snapshots = [];
+        });
+        return;
+      }
+      try {
+        const snapshots = await api.listSnapshots(photoId);
+        set((state) => {
+          state.snapshots = snapshots;
+        });
+      } catch (err) {
+        console.error("Schnappschüsse konnten nicht geladen werden:", err);
+      }
+    },
+
+    saveSnapshot: async (name) => {
+      const trimmed = name.trim();
+      const photoId = get().developPhotoId;
+      if (!trimmed || !photoId) return;
+      try {
+        await api.createSnapshot(photoId, trimmed, buildEdlEnvelopeJson(get().developEdl));
+        await get().refreshSnapshots();
+      } catch (err) {
+        console.error("Schnappschuss konnte nicht angelegt werden:", err);
+      }
+    },
+
+    renameSnapshotAction: async (snapshotId, name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      try {
+        await api.renameSnapshot(snapshotId, trimmed);
+        await get().refreshSnapshots();
+      } catch (err) {
+        console.error("Schnappschuss konnte nicht umbenannt werden:", err);
+      }
+    },
+
+    removeSnapshot: async (snapshotId) => {
+      try {
+        await api.deleteSnapshot(snapshotId);
+        await get().refreshSnapshots();
+      } catch (err) {
+        console.error("Schnappschuss konnte nicht gelöscht werden:", err);
+      }
+    },
+
+    restoreSnapshot: async (snapshotId) => {
+      const photoId = get().developPhotoId;
+      const snapshot = get().snapshots.find((s) => s.id === snapshotId);
+      if (!photoId || !snapshot) return;
+      const payload = parseEdlEnvelopeJson(snapshot.edl_json);
+      if (!payload) {
+        console.error("Schnappschuss enthält ein unlesbares EDL:", snapshot.id);
+        return;
+      }
+      try {
+        await api.applyDevelopEdit(photoId, snapshot.edl_json, `Schnappschuss „${snapshot.name}" wiederhergestellt`);
+        set((state) => {
+          state.developEdl = payload;
+        });
+      } catch (err) {
+        console.error("Schnappschuss konnte nicht wiederhergestellt werden:", err);
+      }
+    },
+
+    beforeAfterMode: "none",
+
+    setBeforeAfterMode: (mode) => {
+      set((state) => {
+        state.beforeAfterMode = mode;
+      });
     },
 
     setBasicField: (key, value) => {

@@ -85,6 +85,13 @@ define_id_type!(CollectionId);
 define_id_type!(PresetFolderId);
 define_id_type!(PresetId);
 define_id_type!(PresetVersionId);
+// Phase 6 Schritt 8: ein benannter Schnappschuss (siehe
+// `apx_catalog::repository::snapshots`s Moduldoku für die Begründung,
+// warum das eine eigene Tabelle statt eines Verweises auf eine
+// `edit_history`-Zeile ist). Ein Doc-Kommentar auf einer
+// Makro-Invokation wird von rustdoc nicht übernommen (siehe
+// `unused_doc_comments`-Warnung), deshalb ein normaler Kommentar.
+define_id_type!(SnapshotId);
 
 #[cfg(test)]
 mod tests {

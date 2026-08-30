@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use apx_core::{
     AppError, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId, PhotoId,
-    PresetFolderId, PresetId, PresetVersionId, Result,
+    PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId,
 };
 use time::OffsetDateTime;
 
@@ -159,6 +159,19 @@ pub enum HistoryPosition {
     Neutral,
     /// Ein konkreter, gespeicherter Bearbeitungsschritt ist aktiv.
     At(EditHistoryEntry),
+}
+
+/// Ein benannter Schnappschuss (Phase 6 Schritt 8, siehe
+/// `migrations/0005_snapshots.sql`s Moduldoku für die Abgrenzung
+/// gegenüber `EditHistoryEntry`) — trägt seine eigene Kopie des EDL,
+/// unabhängig vom linearen Verlauf.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Snapshot {
+    pub id: SnapshotId,
+    pub photo_id: PhotoId,
+    pub name: String,
+    pub edl: EdlEnvelope,
+    pub created_at: OffsetDateTime,
 }
 
 /// Ein Schlagwort — flache Liste ohne Hierarchie/Synonyme, siehe

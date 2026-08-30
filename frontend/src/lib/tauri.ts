@@ -203,6 +203,35 @@ export function redoDevelopEdit(photoId: string): Promise<HistoryPositionDto | n
   return invoke<HistoryPositionDto | null>("redo_develop_edit", { photoId });
 }
 
+// ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------------
+// Anders als der lineare Verlauf oben: siehe `crates/apx-app/src/commands.rs`s
+// Moduldoku für die Abgrenzung. Kein eigener "restore"-Aufruf — die
+// gespeicherte `edl_json` wird wie jeder andere EDL-Stand über
+// `applyDevelopEdit` committet (siehe `store/index.ts`s `restoreSnapshot`).
+
+export interface SnapshotDto {
+  id: string;
+  name: string;
+  edl_json: string;
+  created_at: string;
+}
+
+export function createSnapshot(photoId: string, name: string, edlJson: string): Promise<void> {
+  return invoke<void>("create_snapshot", { photoId, name, edlJson });
+}
+
+export function listSnapshots(photoId: string): Promise<SnapshotDto[]> {
+  return invoke<SnapshotDto[]>("list_snapshots", { photoId });
+}
+
+export function renameSnapshot(snapshotId: string, name: string): Promise<void> {
+  return invoke<void>("rename_snapshot", { snapshotId, name });
+}
+
+export function deleteSnapshot(snapshotId: string): Promise<void> {
+  return invoke<void>("delete_snapshot", { snapshotId });
+}
+
 // ---- Bibliothek: Bewertung/Flagge/Farbe (ab Phase 3) -----------------------
 
 export function setPhotoRating(photoId: string, rating: number): Promise<void> {

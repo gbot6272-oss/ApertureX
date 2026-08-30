@@ -1215,6 +1215,18 @@ Daneben tragen zwei Gruppen von `FEATURES.md`-Zeilen bereits die Marke
    vorhandenen Farbraum-Grundlagen, kein vollständiges ICC-
    Farbmanagement-Subsystem; echte Profilverwaltung wäre ein eigenes
    Mammutprojekt und ist hier nicht das Ziel).
+   **Nachtrag (Schritt 8, beim Bauen entdeckt):** „ein Schnappschuss ist
+   ein benannter Verweis auf einen bestehenden Verlaufs-Stand" (siehe
+   `PLAN.md`s ursprüngliche Formulierung) war unsicher — ein Blick in
+   `repository/edits.rs::commit` zeigt, dass jede Bearbeitung nach einem
+   Rückgängig die „Zukunft" (Zeilen mit höherer Sequenznummer) hart
+   löscht (ADR-0014). Ein Verweis auf so eine Zeile könnte also
+   verschwinden, sobald man über einen Schnappschuss hinaus weiterarbeitet
+   — das Gegenteil von „zusätzlich zum linearen Verlauf". Präzisierung:
+   eine eigene, kleine `snapshots`-Tabelle mit eigener EDL-Kopie je
+   Schnappschuss statt eines Verweises — kein Restore-Sonderweg nötig,
+   ihr Anwenden ist derselbe `apply_develop_edit`-Aufruf wie jeder andere
+   EDL-Stand.
 7. **Bibliotheks-Backlog (Gruppe 2, siehe Kontext) wird explizit auf
    Phase 9 verschoben, nicht in Phase 6 mitgenommen.** Keine ADR hat
    Phase 6 für diese Zeilen je zugesagt; sie parallel zum Maskensystem

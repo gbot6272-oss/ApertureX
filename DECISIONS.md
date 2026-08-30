@@ -879,3 +879,46 @@ Phase 6 umgetaggt, da sie in Phase 4 überhaupt nicht gebaut werden).
 Schrittfolge 0–13. Ein echter Adobe-Profil-/DCP-Import sowie
 Auto-Quellenfindung/Content-Aware-Fill bleiben in `FEATURES.md` als
 offene Phase-6-Punkte sichtbar, nicht stillschweigend fallen gelassen.
+
+## ADR-0029: Schritt 2 baut nur die Grundeinstellungs-Regler + die GPU-Dispatch-Grundlage; Kurven/HSL/Farbmischer/Color-Grading/Kalibrierung/Effekte bekommen ihren eigenen Shader in ihrem eigenen Schritt
+
+**Status:** Angenommen
+**Kontext:** Der ursprüngliche Plan für Schritt 2 sah vor,
+`stages/basic_fused.wgsl`/`.rs` sofort um praktisch alle verbleibenden
+1:1-/positions-bewussten Werkzeugkategorien zu erweitern (Kurven, HSL,
+Farbmischer, Color Grading, Kalibrierung, Vignette, Körnung) — bevor
+deren Frontend-Verträge (welche Felder, welche Interaktion) in ihren
+jeweils eigenen Schritten (4–10) überhaupt feststehen. Das würde
+`SPEC.md` §6s Grundsatz „jede Operation ein eigenes Modul mit eigenem
+Shader, eigenem Test" verletzen (ein einziges Mega-Modul für acht
+verschiedene Werkzeuge) und spekulative Arbeit an Formeln leisten, die
+noch keinen Abnehmer haben.
+
+**Entscheidung:** Schritt 2 liefert nur:
+1. Die Prüfung/Bestätigung, dass `gpu/dispatch.rs::run_compute_f32`
+   unverändert sowohl positions-bewusste als auch nachbarschafts-fähige
+   Operationen trägt (Breite/Höhe als zusätzliche `Params`-Felder,
+   uneingeschränkter Lesezugriff auf den gesamten Eingabepuffer im
+   WGSL-Shader) — keine Änderung an `dispatch.rs` selbst nötig.
+2. Die letzten fünf der zwölf Grundeinstellungs-Regler
+   (Dunst&nbsp;entfernen/Dynamik/Sättigung in `basic_fused`,
+   Textur/Klarheit im neuen, eigenen `stages/local_contrast.{rs,wgsl}` —
+   Letztere brauchen echten Nachbarschafts-Zugriff, siehe dessen
+   Moduldoku) — damit sind alle zwölf Regler aus `SPEC.md`s
+   „Grundeinstellungen" fertig.
+
+Kurven, HSL, Farbmischer, Color Grading, Kalibrierung und Effekte
+bekommen stattdessen je ein eigenes Modul mit eigenem Shader und
+eigenem GPU/CPU-Paritätstest in ihrem jeweils eigenen Schritt (4–10),
+genau wie die sieben Phase-2-Regler es taten — nur der interaktive
+Vorschau-Pfad fasst sie am Ende jeweils per ADR-0017-Muster zu einem
+Dispatch zusammen, sobald ihre Formel feststeht.
+
+**Konsequenzen:** `PLAN.md`s Schritt-2-Checkliste wird auf die zwei
+oben genannten Punkte präzisiert; die „GPU/CPU-Paritätstests je neuem
+Teil-Feature"-Zeile bezieht sich nur noch auf Dunst
+entfernen/Dynamik/Sättigung/Textur/Klarheit (bereits erledigt), nicht
+mehr auf die acht später gebauten Kategorien. Die
+Kurven-Sequenzierungsfrage (Farbraum-Konvertierung ins WGSL verlagern
+oder Kurven als CPU-LUT-Nachschritt) verschiebt sich entsprechend auf
+Schritt 4, wenn Kurven tatsächlich gebaut werden.

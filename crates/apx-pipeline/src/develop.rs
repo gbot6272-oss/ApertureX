@@ -13,7 +13,7 @@ use crate::color::linear_camera_rgb_to_srgb_rgba8;
 use crate::edl::EdlV2;
 use crate::error::Result;
 use crate::gpu::GpuContext;
-use crate::stages::{basic_fused, white_balance};
+use crate::stages::{basic_fused, local_contrast, white_balance};
 
 /// Rendert `linear` mit den in `edl` beschriebenen Anpassungen zu einem
 /// interleaved RGBA8-Puffer (`4 * linear.width * linear.height` Bytes,
@@ -26,32 +26,72 @@ use crate::stages::{basic_fused, white_balance};
 /// `DECISIONS.md` ADR-0012) — der Aufrufer muss diese Entscheidung nicht
 /// selbst treffen.
 ///
-/// **Phase-4-Übergangsstand (siehe `PLAN.md` Phase 4 Schritt 1/2):** `edl`
-/// ist bereits der volle `EdlV2` mit allen zehn Werkzeugkategorien, aber
-/// der Fused-Pass hier verarbeitet bislang nur die sieben v1-Grundregler
-/// (`BasicAdjustments::to_v1_subset`) — alle neuen Felder sind noch
-/// inert. Schritt 2 erweitert `basic_fused` schrittweise um die
-/// restlichen Kategorien.
+/// **Phase-4-Übergangsstand (siehe `PLAN.md` Phase 4 Schritt 2):** Neun
+/// der zwölf Grundeinstellungs-Regler laufen bereits über
+/// `stages::basic_fused` bzw. `stages::local_contrast` (Textur/Klarheit,
+/// echter Nachbarschafts-Zugriff). Alle übrigen Werkzeugkategorien
+/// (Kurven, HSL, Farbmischer, Color Grading, Details, Objektivkorrekturen,
+/// Effekte, Kalibrierung, Geometrie, Reparatur) sind noch inert — die
+/// folgenden Schritte verdrahten sie schrittweise.
 pub fn render_rgba8(
     ctx: Option<&GpuContext>,
     linear: &LinearImage,
     edl: &EdlV2,
 ) -> Result<Vec<u8>> {
-    let basic = edl.basic.to_v1_subset();
+    let basic = &edl.basic;
     let wb_gains = white_balance::compute_gains(linear.as_shot_wb_coeffs, basic.white_balance);
 
     let tonal = match ctx {
-        Some(ctx) => match basic_fused::apply_gpu(ctx, &linear.pixels, wb_gains, &basic) {
+        Some(ctx) => match basic_fused::apply_gpu(ctx, &linear.pixels, wb_gains, basic) {
             Ok(pixels) => pixels,
             Err(err) => {
                 tracing::warn!(error = %err, "GPU-Rendering fehlgeschlagen, nutze CPU-Fallback");
-                basic_fused::apply_cpu(&linear.pixels, wb_gains, &basic)
+                basic_fused::apply_cpu(&linear.pixels, wb_gains, basic)
             }
         },
-        None => basic_fused::apply_cpu(&linear.pixels, wb_gains, &basic),
+        None => basic_fused::apply_cpu(&linear.pixels, wb_gains, basic),
     };
 
-    Ok(linear_camera_rgb_to_srgb_rgba8(&tonal, linear.cam_to_srgb))
+    let textured = if basic.texture == 0.0 && basic.clarity == 0.0 {
+        // Kein zusätzlicher Durchlauf, wenn beide Regler neutral stehen —
+        // spart den vollen Nachbarschafts-Dispatch im Regelfall.
+        tonal
+    } else {
+        match ctx {
+            Some(ctx) => match local_contrast::apply_gpu(
+                ctx,
+                &tonal,
+                linear.width,
+                linear.height,
+                basic.texture,
+                basic.clarity,
+            ) {
+                Ok(pixels) => pixels,
+                Err(err) => {
+                    tracing::warn!(error = %err, "GPU-Rendering (Textur/Klarheit) fehlgeschlagen, nutze CPU-Fallback");
+                    local_contrast::apply_cpu(
+                        &tonal,
+                        linear.width,
+                        linear.height,
+                        basic.texture,
+                        basic.clarity,
+                    )
+                }
+            },
+            None => local_contrast::apply_cpu(
+                &tonal,
+                linear.width,
+                linear.height,
+                basic.texture,
+                basic.clarity,
+            ),
+        }
+    };
+
+    Ok(linear_camera_rgb_to_srgb_rgba8(
+        &textured,
+        linear.cam_to_srgb,
+    ))
 }
 
 #[cfg(test)]

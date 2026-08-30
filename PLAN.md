@@ -340,7 +340,7 @@ Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Obj
 - **EDL-Schema v2** statt Erweiterung von `EdlV1` — `apx-pipeline/src/edl/migrate.rs` lehnt unbekannte Schema-Versionen bewusst hart ab (kein `#[serde(default)]`), neue Felder kommen als `EdlV2` mit explizitem `v1_to_v2`-Aufwärtspfad. Keine DB-Migration nötig (`edit_history.edl_json` ist eine opake TEXT-Spalte).
 - **Drei GPU-Dispatch-Formen** statt einer: (1) positions-bewusst aber 1:1 (Vignette, Körnung — brauchen Breite/Höhe), (2) Nachbarschafts-Zugriff (Textur/Klarheit, Details, Reparatur-Klonen), (3) größenverändernd (Objektivkorrekturen-Warp, Crop/Geometrie — Ausgabe ≠ Eingabe). Crop/Geometrie wird als CPU-seitiger letzter Schritt in `render_rgba8` umgesetzt (nach der RGBA8-Quantisierung), nicht als GPU-Pass.
 - **16-ms-Budget (ADR-0017-Präzedenzfall):** alle Werkzeuge im 1:1-/positions-bewussten Modell (Grundeinstellungs-Ergänzung, Kurven-LUT, HSL, Farbmischer, Color Grading, Kalibrierung, Vignette, Körnung) werden zu einem erweiterten Fused-Pass zusammengefasst statt N einzelner Dispatch-Rundtripps.
-- **Kurven-Sequenzierung:** laufen laut bestehendem Code-Kommentar (`stages/contrast.rs`) nach der Farbraum-Konvertierung, auf Luminanz statt pro Kanal — Schritt 2 entscheidet anhand eines Benchmarks, ob die Farbraum-Konvertierung ins WGSL wandert oder Kurven ein schneller CPU-LUT-Nachschritt bleiben.
+- **Kurven-Sequenzierung:** laufen laut bestehendem Code-Kommentar (`stages/contrast.rs`) nach der Farbraum-Konvertierung, auf Luminanz statt pro Kanal — Schritt 4 (nicht mehr Schritt 2, siehe ADR-0029) entscheidet anhand eines Benchmarks, ob die Farbraum-Konvertierung ins WGSL wandert oder Kurven ein schneller CPU-LUT-Nachschritt bleiben.
 - **Frontend:** fast alle nötigen UI-Widgets sind komplett neu (Kurven-Editor, Farbrad, HSL-Bänder, Crop-Overlay, Checkbox, Accordion) — einzige wiederverwendbare Primitive sind Regler+Zahlenfeld, gedrückte Buttons, feste Paletten-Swatches, ein natives `<select>`.
 
 ### Reihenfolge
@@ -357,14 +357,16 @@ Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Obj
   - [x] `frontend/src/lib/edl.ts`: gespiegelte TS-Typen (`EdlPayload` mit allen zehn Sektionen) + Neutral-Konstanten/-Funktionen je Sektion; `store/index.ts`s `developBasic`-Zustand zu `developEdl: EdlPayload` erweitert/umbenannt
   - Übergangsstand: `render_rgba8` verarbeitet bislang nur `basic` (über `to_v1_subset`) — die neuen Felder sind bis Schritt 2 inert. Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (228 Tests), `tsc -b`, `vitest run` (67 Tests), `playwright test` (13/13), `vite build` — alles lokal grün
 
-- [ ] 2. GPU-Dispatch-Erweiterung + erweiterter Fused-Pass
-  - [ ] `gpu/dispatch.rs`: neue Varianten (positions-bewusst mit Breite/Höhe-Uniform; nachbarschafts-fähig mit 2D-Workgroups)
-  - [ ] `stages/basic_fused.wgsl`/`.rs` erweitert um: Dynamik/Sättigung, Kurven (LUT), HSL, Farbmischer, Color Grading, Kalibrierung, Vignette, Körnung
-  - [ ] GPU/CPU-Paritätstests je neuem Teil-Feature (Muster: `gpu_matches_cpu`)
+- [x] 2. GPU-Dispatch-Erweiterung + erweiterter Fused-Pass (Scope präzisiert, siehe ADR-0029: Kurven/HSL/Farbmischer/Color-Grading/Kalibrierung/Effekte bekommen ihr eigenes Modul in ihrem eigenen Schritt statt hier vorgebaut zu werden)
+  - [x] `gpu/dispatch.rs` geprüft: `run_compute_f32` trägt unverändert sowohl positions-bewusste als auch nachbarschafts-fähige Operationen (Breite/Höhe als zusätzliche `Params`-Felder, uneingeschränkter Lesezugriff im Shader) — keine Änderung nötig
+  - [x] `stages/basic_fused.wgsl`/`.rs` um Dunst entfernen/Dynamik/Sättigung erweitert (12-Feld-`Params`, keine Padding nötig da bereits 48 Byte)
+  - [x] Neues `stages/local_contrast.{rs,wgsl}` für Textur/Klarheit (echter 3×3-Nachbarschafts-Zugriff, in `develop.rs` nur dispatcht, wenn mindestens einer der beiden Regler ungleich neutral steht)
+  - [x] `develop.rs::render_rgba8` verdrahtet beide Erweiterungen — damit sind alle zwölf Grundeinstellungs-Regler fertig
+  - [x] GPU/CPU-Paritätstests je neuem Teil-Feature (Muster: `gpu_matches_cpu`) für Dunst entfernen/Dynamik/Sättigung/Textur/Klarheit
+  - Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (235 Tests), `tsc -b`, `vitest run` (67 Tests) — alles lokal grün
 
 - [ ] 3. Grundeinstellungen-Erweiterung (Frontend + Shader)
   - [ ] WB-Pipette, WB-Kamera-Presets, Textur/Klarheit/Dunst entfernen/Dynamik/Sättigung-Regler in `DevelopPanel.tsx`
-  - [ ] Textur/Klarheit/Dunst entfernen ggf. als eigener Nachbarschafts-Vorschritt, falls Schritt 2s Benchmark zeigt, dass sie nicht ins 1:1-Modell passen
 
 - [ ] 4. Kurven
   - [ ] Punktkurve (monotone kubische Spline) + parametrische Kurve, RGB-Verbundkurve + R/G/B einzeln + Luminanz-Kurve, numerische Punkteingabe, Presets

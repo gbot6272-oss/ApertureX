@@ -3,7 +3,9 @@ import { immer } from "zustand/middleware/immer";
 
 import {
   buildEdlEnvelopeJson,
+  defaultColorRangeGeometry,
   defaultLinearGradientGeometry,
+  defaultLuminanceRangeGeometry,
   defaultRadialGradientGeometry,
   emptyBrushGeometry,
   MAX_COLOR_MIXER_REGIONS,
@@ -582,6 +584,24 @@ interface PresetsSlice {
 
 // ---- Masken-Slice (ab Phase 6, siehe DECISIONS.md ADR-0032) ----------------
 
+type MaskKind = "LinearGradient" | "RadialGradient" | "Brush" | "ColorRange" | "LuminanceRange";
+
+const MASK_KIND_DEFAULT_GEOMETRY: Record<MaskKind, () => MaskGeometry> = {
+  LinearGradient: defaultLinearGradientGeometry,
+  RadialGradient: defaultRadialGradientGeometry,
+  Brush: emptyBrushGeometry,
+  ColorRange: defaultColorRangeGeometry,
+  LuminanceRange: defaultLuminanceRangeGeometry,
+};
+
+const MASK_KIND_LABEL: Record<MaskKind, string> = {
+  LinearGradient: "Linearer Verlauf",
+  RadialGradient: "Radialer Verlauf",
+  Brush: "Pinsel",
+  ColorRange: "Farbbereich",
+  LuminanceRange: "Luminanzbereich",
+};
+
 /** Masken leben als Teil von `developEdl.masks` (siehe `lib/edl.ts`s
  * `Mask`) — dieser Slice ergänzt nur Auswahl-/Interaktionszustand plus
  * die Aktionen, die `developEdl.masks` verändern. Wie bei Reparatur
@@ -595,7 +615,7 @@ interface MasksSlice {
   selectMask: (maskId: string | null) => void;
   /** Legt eine neue Maske mit einer einzelnen Startkomponente des
    * gewählten Geometrietyps an, wählt sie aus und committet sofort. */
-  addMask: (kind: "LinearGradient" | "RadialGradient" | "Brush") => void;
+  addMask: (kind: MaskKind) => void;
   removeMask: (maskId: string) => void;
   setMaskVisible: (maskId: string, visible: boolean) => void;
   renameMask: (maskId: string, name: string) => void;
@@ -622,6 +642,20 @@ interface MasksSlice {
    * No-op, falls deren Geometrie kein `Brush` ist. Committet sofort. */
   addMaskBrushStroke: (maskId: string, points: MaskPoint[]) => void;
   removeMaskBrushStroke: (maskId: string, strokeIndex: number) => void;
+
+  /** Bild-Klick-Werkzeug zum Aufnehmen der Zielfarbe einer Farbbereich-
+   * Maske (Phase 6 Schritt 5) — teilt sich `Viewer.tsx`s Sampling-Code mit
+   * der Weißabgleich-Pipette/dem Farbmischer (`wbPickerActive`/
+   * `colorMixerPickerActive`), siehe dort. */
+  maskColorRangePickerActive: boolean;
+  toggleMaskColorRangePicker: () => void;
+  /** `r`/`g`/`b` als Byte-Werte (`0..=255`) aus dem gerenderten Vorschau-
+   * Frame — dieselbe Vereinfachung wie bei der WB-Pipette/dem
+   * Farbmischer: `masks.rs`s `ColorRange` vergleicht eigentlich im
+   * linearen Arbeitsraum, aber der Vorschau-Frame ist bereits
+   * display-referred/gamma-kodiert. Für ein interaktives Klick-Werkzeug
+   * reicht die Näherung (siehe `MasksPanel.tsx`s Moduldoku). */
+  setMaskColorRangeTargetAt: (maskId: string, r: number, g: number, b: number) => void;
 }
 
 export type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice & LibrarySlice & PresetsSlice & MasksSlice;
@@ -1989,9 +2023,8 @@ export const useAppStore = create<AppStore>()(
 
     addMask: (kind) => {
       const id = `mask-${crypto.randomUUID()}`;
-      const geometry: MaskGeometry =
-        kind === "LinearGradient" ? defaultLinearGradientGeometry() : kind === "RadialGradient" ? defaultRadialGradientGeometry() : emptyBrushGeometry();
-      const name = kind === "LinearGradient" ? "Linearer Verlauf" : kind === "RadialGradient" ? "Radialer Verlauf" : "Pinsel";
+      const geometry: MaskGeometry = MASK_KIND_DEFAULT_GEOMETRY[kind]();
+      const name = MASK_KIND_LABEL[kind];
       set((state) => {
         state.developEdl.masks.push(newMask(id, name, geometry));
         state.selectedMaskId = id;
@@ -2085,6 +2118,26 @@ export const useAppStore = create<AppStore>()(
         const geometry = state.developEdl.masks.find((m) => m.id === maskId)?.components[0]?.geometry;
         if (geometry?.kind !== "Brush") return;
         geometry.strokes.splice(strokeIndex, 1);
+      });
+      void get().commitDevelopEdit();
+    },
+
+    maskColorRangePickerActive: false,
+
+    toggleMaskColorRangePicker: () => {
+      set((state) => {
+        state.maskColorRangePickerActive = !state.maskColorRangePickerActive;
+      });
+    },
+
+    setMaskColorRangeTargetAt: (maskId, r, g, b) => {
+      set((state) => {
+        const geometry = state.developEdl.masks.find((m) => m.id === maskId)?.components[0]?.geometry;
+        if (geometry?.kind !== "ColorRange") return;
+        geometry.target_r = r / 255;
+        geometry.target_g = g / 255;
+        geometry.target_b = b / 255;
+        state.maskColorRangePickerActive = false;
       });
       void get().commitDevelopEdit();
     },

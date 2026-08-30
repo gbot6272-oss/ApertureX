@@ -41,7 +41,9 @@ export function Viewer() {
   const pickWhiteBalanceAt = useAppStore((s) => s.pickWhiteBalanceAt);
   const colorMixerPickerActive = useAppStore((s) => s.colorMixerPickerActive);
   const addColorMixerRegionAt = useAppStore((s) => s.addColorMixerRegionAt);
-  const pickerActive = wbPickerActive || colorMixerPickerActive;
+  const maskColorRangePickerActive = useAppStore((s) => s.maskColorRangePickerActive);
+  const setMaskColorRangeTargetAt = useAppStore((s) => s.setMaskColorRangeTargetAt);
+  const pickerActive = wbPickerActive || colorMixerPickerActive || maskColorRangePickerActive;
   const geometryCropActive = useAppStore((s) => s.geometryCropActive);
   const setGeometryCrop = useAppStore((s) => s.setGeometryCrop);
   const repairActive = useAppStore((s) => s.repairActive);
@@ -241,12 +243,16 @@ export function Viewer() {
         pickWhiteBalanceAt(r, g, b);
       } else if (colorMixerPickerActive) {
         addColorMixerRegionAt(r, g, b);
+      } else if (maskColorRangePickerActive && selectedMask) {
+        setMaskColorRangeTargetAt(selectedMask.id, r, g, b);
       }
     },
     [
       pickerActive,
       wbPickerActive,
       colorMixerPickerActive,
+      maskColorRangePickerActive,
+      selectedMask,
       developFrame,
       imgW,
       imgH,
@@ -257,6 +263,7 @@ export function Viewer() {
       panY,
       pickWhiteBalanceAt,
       addColorMixerRegionAt,
+      setMaskColorRangeTargetAt,
     ],
   );
 

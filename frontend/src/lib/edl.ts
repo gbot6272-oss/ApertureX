@@ -750,6 +750,21 @@ export function defaultRadialGradientGeometry(): MaskGeometry {
   };
 }
 
+/** Neutrales Mittelgrau als Platzhalter-Zielfarbe, bis der Nutzer per
+ * Bildklick eine echte Farbe aufnimmt (Phase 6 Schritt 5) — passende
+ * Toleranz/Weichzeichnung, damit die Maske vor dem ersten Klick schon
+ * eine sichtbare, aber nicht das ganze Bild abdeckende Fläche zeigt. */
+export function defaultColorRangeGeometry(): MaskGeometry {
+  return { kind: "ColorRange", target_r: 0.5, target_g: 0.5, target_b: 0.5, tolerance: 0.15, feather: 0.1 };
+}
+
+/** Obere Tonwerthälfte (Lichter) als plausibler Startzustand — dieselbe
+ * Konvention wie Lightrooms Luminanzbereichs-Maske, die üblicherweise
+ * zuerst auf „Lichter" steht. */
+export function defaultLuminanceRangeGeometry(): MaskGeometry {
+  return { kind: "LuminanceRange", range_min: 0.5, range_max: 1, feather: 0.1 };
+}
+
 export interface MaskGroup {
   id: string;
   name: string;

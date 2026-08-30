@@ -17,12 +17,30 @@ const MASK_BASIC_SLIDER_SPECS = BASIC_SLIDER_SPECS.filter((spec) => MASK_BASIC_S
 const BRUSH_RADIUS_SPEC: SliderSpec = { key: "radius", label: "Pinsel: Radius (% der Bildbreite)", min: 1, max: 50, fineStep: 0.5, coarseStep: 5, neutral: 5 };
 const BRUSH_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Pinsel: Weiche Kante (% der Bildbreite)", min: 0, max: 25, fineStep: 0.5, coarseStep: 2, neutral: 2 };
 
+/** Regler für Farbbereich-/Luminanzbereich-Masken (Phase 6 Schritt 5) —
+ * `tolerance`/`feather`/`range_min`/`range_max` sind im EDL `0.0..=1.0`,
+ * die Regler zeigen sie wie überall sonst als Prozent an. */
+const COLOR_RANGE_TOLERANCE_SPEC: SliderSpec = { key: "tolerance", label: "Toleranz (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 15 };
+const COLOR_RANGE_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Weiche Kante (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 10 };
+const LUMINANCE_RANGE_MIN_SPEC: SliderSpec = { key: "range_min", label: "Untere Grenze (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 50 };
+const LUMINANCE_RANGE_MAX_SPEC: SliderSpec = { key: "range_max", label: "Obere Grenze (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 100 };
+const LUMINANCE_RANGE_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Weiche Kante (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 10 };
+
 /**
- * Maskenverwaltung (Phase 6 Schritt 3+4, siehe `DECISIONS.md` ADR-0032) —
+ * Maskenverwaltung (Phase 6 Schritt 3-5, siehe `DECISIONS.md` ADR-0032) —
  * Liste vorhandener Masken, Anlegen neuer Masken (Linearer/Radialer
- * Verlauf, Pinsel), Auswahl zum Bearbeiten, kleine Reglerauswahl für die
- * ausgewählte Maske. Wie `DevelopPanel` nur sichtbar, während das
- * Entwickeln-Panel offen ist.
+ * Verlauf, Pinsel, Farbbereich, Luminanzbereich), Auswahl zum Bearbeiten,
+ * kleine Reglerauswahl für die ausgewählte Maske. Wie `DevelopPanel` nur
+ * sichtbar, während das Entwickeln-Panel offen ist.
+ *
+ * Die Farbbereich-Zielfarbe wird per Bildklick aufgenommen
+ * (`maskColorRangePickerActive`/`toggleMaskColorRangePicker`) — derselbe
+ * Viewer-Sampling-Code wie die Weißabgleich-Pipette/der Farbmischer
+ * (siehe `Viewer.tsx`). **Bewusste Vereinfachung:** `masks.rs`s
+ * `ColorRange` vergleicht im linearen Arbeitsraum (siehe dessen
+ * Moduldoku), der Bildklick liefert aber den bereits gerenderten,
+ * display-referred Vorschau-Frame — dieselbe Näherung, die die
+ * Weißabgleich-Pipette/der Farbmischer schon seit Phase 4 verwenden.
  */
 export function MasksPanel() {
   const open = useAppStore((s) => s.developPanelOpen);
@@ -42,6 +60,9 @@ export function MasksPanel() {
   const maskBrushDraftFeather = useAppStore((s) => s.maskBrushDraftFeather);
   const setMaskBrushDraftField = useAppStore((s) => s.setMaskBrushDraftField);
   const removeMaskBrushStroke = useAppStore((s) => s.removeMaskBrushStroke);
+  const updateMaskGeometry = useAppStore((s) => s.updateMaskGeometry);
+  const maskColorRangePickerActive = useAppStore((s) => s.maskColorRangePickerActive);
+  const toggleMaskColorRangePicker = useAppStore((s) => s.toggleMaskColorRangePicker);
 
   if (!open) return null;
 
@@ -58,12 +79,12 @@ export function MasksPanel() {
     <aside className="flex w-64 shrink-0 flex-col gap-3 overflow-y-auto border-l border-border bg-bg-raised p-3" aria-label="Masken">
       <h2 className="text-sm font-semibold text-text-primary">Masken</h2>
 
-      <div className="flex gap-1">
+      <div className="grid grid-cols-2 gap-1">
         <button
           type="button"
           onClick={() => addMask("LinearGradient")}
           disabled={!selectedPhotoId}
-          className="flex-1 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
           + Linearer Verlauf
         </button>
@@ -71,7 +92,7 @@ export function MasksPanel() {
           type="button"
           onClick={() => addMask("RadialGradient")}
           disabled={!selectedPhotoId}
-          className="flex-1 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
           + Radialer Verlauf
         </button>
@@ -79,9 +100,25 @@ export function MasksPanel() {
           type="button"
           onClick={() => addMask("Brush")}
           disabled={!selectedPhotoId}
-          className="flex-1 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
           + Pinsel
+        </button>
+        <button
+          type="button"
+          onClick={() => addMask("ColorRange")}
+          disabled={!selectedPhotoId}
+          className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          + Farbbereich
+        </button>
+        <button
+          type="button"
+          onClick={() => addMask("LuminanceRange")}
+          disabled={!selectedPhotoId}
+          className="col-span-2 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          + Luminanzbereich
         </button>
       </div>
 
@@ -153,6 +190,68 @@ export function MasksPanel() {
               ))}
             </ul>
           )}
+        </div>
+      )}
+
+      {selectedMask && selectedMaskGeometry?.kind === "ColorRange" && (
+        <div className="flex flex-col gap-2 border-t border-border pt-2">
+          <div className="flex items-center gap-2">
+            <span
+              className="h-5 w-5 shrink-0 rounded border border-border"
+              style={{
+                backgroundColor: `rgb(${Math.round(selectedMaskGeometry.target_r * 255)}, ${Math.round(selectedMaskGeometry.target_g * 255)}, ${Math.round(
+                  selectedMaskGeometry.target_b * 255,
+                )})`,
+              }}
+              title="Aktuelle Zielfarbe"
+            />
+            <button
+              type="button"
+              onClick={toggleMaskColorRangePicker}
+              aria-pressed={maskColorRangePickerActive}
+              className={`flex-1 rounded border px-2 py-1 text-xs ${
+                maskColorRangePickerActive ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel text-text-secondary hover:border-accent"
+              }`}
+            >
+              Farbe aufnehmen
+            </button>
+          </div>
+          {maskColorRangePickerActive && <p className="text-xs text-accent">Klicken Sie ins Bild, um die Zielfarbe zu setzen.</p>}
+          <DevelopSlider
+            spec={COLOR_RANGE_TOLERANCE_SPEC}
+            value={selectedMaskGeometry.tolerance * 100}
+            onChange={(value) => updateMaskGeometry(selectedMask.id, { ...selectedMaskGeometry, tolerance: value / 100 })}
+            onCommit={commitMaskDrag}
+          />
+          <DevelopSlider
+            spec={COLOR_RANGE_FEATHER_SPEC}
+            value={selectedMaskGeometry.feather * 100}
+            onChange={(value) => updateMaskGeometry(selectedMask.id, { ...selectedMaskGeometry, feather: value / 100 })}
+            onCommit={commitMaskDrag}
+          />
+        </div>
+      )}
+
+      {selectedMask && selectedMaskGeometry?.kind === "LuminanceRange" && (
+        <div className="flex flex-col gap-2 border-t border-border pt-2">
+          <DevelopSlider
+            spec={LUMINANCE_RANGE_MIN_SPEC}
+            value={selectedMaskGeometry.range_min * 100}
+            onChange={(value) => updateMaskGeometry(selectedMask.id, { ...selectedMaskGeometry, range_min: value / 100 })}
+            onCommit={commitMaskDrag}
+          />
+          <DevelopSlider
+            spec={LUMINANCE_RANGE_MAX_SPEC}
+            value={selectedMaskGeometry.range_max * 100}
+            onChange={(value) => updateMaskGeometry(selectedMask.id, { ...selectedMaskGeometry, range_max: value / 100 })}
+            onCommit={commitMaskDrag}
+          />
+          <DevelopSlider
+            spec={LUMINANCE_RANGE_FEATHER_SPEC}
+            value={selectedMaskGeometry.feather * 100}
+            onChange={(value) => updateMaskGeometry(selectedMask.id, { ...selectedMaskGeometry, feather: value / 100 })}
+            onCommit={commitMaskDrag}
+          />
         </div>
       )}
 

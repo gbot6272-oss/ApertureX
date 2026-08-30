@@ -181,4 +181,66 @@ test.describe("Masken-Panel", () => {
       })
       .toBe(0);
   });
+
+  test("Farbbereich-Maske: ein Bildklick nimmt die Zielfarbe auf, die Toleranz committet zusätzlich", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "+ Farbbereich" }).click();
+
+    const pickButton = page.getByRole("button", { name: "Farbe aufnehmen" });
+    await expect(pickButton).toHaveAttribute("aria-pressed", "false");
+    await pickButton.click();
+    await expect(pickButton).toHaveAttribute("aria-pressed", "true");
+
+    await page.getByRole("main").click();
+
+    await expect(pickButton).toHaveAttribute("aria-pressed", "false");
+    await expect
+      .poll(async () => {
+        const log = await getMockInvokeLog(page);
+        return log.filter((entry) => entry.cmd === "apply_develop_edit").length;
+      })
+      .toBeGreaterThan(0);
+
+    type ColorRangeGeometry = { target_r: number; target_g: number; target_b: number; tolerance: number };
+    let masks = await lastMasks(page);
+    let geometry = (masks[0] as unknown as { components: Array<{ geometry: ColorRangeGeometry }> }).components[0].geometry;
+    // Das Mock-Entwickeln-Bild ist warm-orange (180, 140, 100).
+    expect(geometry.target_r).toBeCloseTo(180 / 255, 2);
+    expect(geometry.target_g).toBeCloseTo(140 / 255, 2);
+    expect(geometry.target_b).toBeCloseTo(100 / 255, 2);
+
+    const toleranceInput = page.getByRole("spinbutton", { name: "Toleranz (%) (Zahlenwert)" });
+    await toleranceInput.fill("40");
+    await toleranceInput.blur();
+
+    await expect
+      .poll(async () => {
+        const log = await getMockInvokeLog(page);
+        return log.filter((entry) => entry.cmd === "apply_develop_edit").length;
+      })
+      .toBeGreaterThan(1);
+    masks = await lastMasks(page);
+    geometry = (masks[0] as unknown as { components: Array<{ geometry: ColorRangeGeometry }> }).components[0].geometry;
+    expect(geometry.tolerance).toBeCloseTo(0.4, 2);
+  });
+
+  test("Luminanzbereich-Maske: die Reglerwerte committen", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "+ Luminanzbereich" }).click();
+
+    const rangeMinInput = page.getByRole("spinbutton", { name: "Untere Grenze (%) (Zahlenwert)" });
+    await rangeMinInput.fill("20");
+    await rangeMinInput.blur();
+
+    await expect
+      .poll(async () => {
+        const log = await getMockInvokeLog(page);
+        return log.filter((entry) => entry.cmd === "apply_develop_edit").length;
+      })
+      .toBeGreaterThan(1);
+
+    const masks = await lastMasks(page);
+    const geometry = (masks[0] as unknown as { components: Array<{ geometry: { range_min: number } }> }).components[0].geometry;
+    expect(geometry.range_min).toBeCloseTo(0.2, 2);
+  });
 });

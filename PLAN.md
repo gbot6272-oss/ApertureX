@@ -565,8 +565,12 @@ Ebenen-Mischmodus zurückmischen.
   - **Bewusste Vereinfachung ggü. der ursprünglichen Formulierung:** kein Deckkraft-Regler pro Strich (Deckkraft existiert bereits pro *Maske*, siehe Schritt 3) und kein Hinzufügen-/Subtrahieren-Umschalter direkt beim Malen (jede neue Maske startet mit einer einzelnen `Add`-Komponente, siehe `newMask`) — echte Maskenkombination mit mehreren Komponenten unterschiedlicher `MaskCombine`-Modi ist genau Schritt 6s Thema und würde hier vorgezogen unnötig Komplexität in die Pinsel-UI ziehen, bevor die Mehrfach-Komponenten-Verwaltung existiert
   - [x] Tests: `frontend/e2e/masks-flow.spec.ts` (1 weiterer Test: Ziehvorgang im Bild malt einen Strich und committet, Entfernen committet erneut) — volle Kette (`tsc -b`, `vitest run` 149/149, `playwright test` 51/51, `vite build`) grün; keine Rust-Änderungen in diesem Schritt (Backend war bereits in Schritt 2 vollständig)
 
-- [ ] 5. Maskentyp Farbbereich + Luminanzbereich
-  - [ ] Pro-Pixel-Klassifikation (Farbbereich: Bildklick nimmt Referenzfarbe + Toleranz, teilt Sampling-Code mit der Farbmischer-/WB-Pipette-Infrastruktur aus Phase 4; Luminanzbereich: Schwellwert-Bereich mit weicher Kante)
+- [x] 5. Maskentyp Farbbereich + Luminanzbereich
+  - [x] Pro-Pixel-Klassifikation — bereits vollständig in Schritt 2 gebaut (`stages/masks.rs::color_range_alpha`/`luminance_range_alpha`), CPU-only, GPU-Parität bleibt wie bei den anderen Geometrietypen zurückgestellt bis Schritt 11
+  - [x] Farbbereich: Bildklick nimmt Referenzfarbe auf (`maskColorRangePickerActive`/`toggleMaskColorRangePicker`/`setMaskColorRangeTargetAt` in `store/index.ts`), teilt den Viewer-Sampling-Code mit der Farbmischer-/WB-Pipette-Infrastruktur aus Phase 4 (`Viewer.tsx`s `handleImageClick`); Toleranz-/Weichzeichnung-Regler in `MasksPanel.tsx`
+  - [x] Luminanzbereich: Regler für untere/obere Grenze + Weichzeichnung in `MasksPanel.tsx`, direkt auf `updateMaskGeometry`/`commitMaskDrag` (kein Bildklick nötig)
+  - **Bewusste Vereinfachung:** `masks.rs`s `ColorRange` vergleicht im linearen Arbeitsraum (siehe dessen Moduldoku aus Schritt 2), der Bildklick liefert aber den bereits gerenderten, display-referred Vorschau-Frame (RGBA8-Byte, `/255` normiert) — dieselbe Näherung, die die Weißabgleich-Pipette/der Farbmischer seit Phase 4 verwenden, hier auf einen dritten Aufrufer ausgedehnt
+  - [x] Tests: `frontend/e2e/masks-flow.spec.ts` (2 weitere Tests: Farbbereich-Bildklick + Toleranz-Commit, Luminanzbereich-Reglerwerte) — volle Kette (`tsc -b`, `vitest run` 149/149, `playwright test` 53/53, `vite build`) grün; keine Rust-Änderungen in diesem Schritt
 
 - [ ] 6. Maskenkombination + vollständige Ebenen-Mischmodi
   - [ ] Alle in `SPEC.md` genannten Mischmodi (Multiplizieren, Weiches Licht, Farbe, Luminanz, …) im Zurückmisch-Schritt aus Schritt 2 ergänzen, GPU/CPU-Parität je Modus

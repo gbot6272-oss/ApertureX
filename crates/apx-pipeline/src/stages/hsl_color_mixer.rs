@@ -23,6 +23,7 @@
 use bytemuck::{Pod, Zeroable};
 use rayon::prelude::*;
 
+use super::color_math::{circular_distance_degrees, gaussian_weight, hsl_to_rgb, rgb_to_hsl};
 use crate::edl::v2::{ColorMixerAdjustment, HslAdjustment};
 use crate::error::Result;
 use crate::gpu::{dispatch, GpuContext};
@@ -115,75 +116,6 @@ impl HslColorMixerParams {
 
         Self { bands, regions }
     }
-}
-
-fn circular_distance_degrees(a: f32, b: f32) -> f32 {
-    let diff = (a - b).abs() % 360.0;
-    diff.min(360.0 - diff)
-}
-
-fn gaussian_weight(distance: f32, sigma: f32) -> f32 {
-    (-(distance * distance) / (2.0 * sigma * sigma)).exp()
-}
-
-fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
-    let max_c = r.max(g).max(b);
-    let min_c = r.min(g).min(b);
-    let l = (max_c + min_c) / 2.0;
-    let d = max_c - min_c;
-    if d < 1e-6 {
-        return (0.0, 0.0, l);
-    }
-    let s = if l > 0.5 {
-        d / (2.0 - max_c - min_c)
-    } else {
-        d / (max_c + min_c)
-    };
-    let h = if max_c == r {
-        ((g - b) / d).rem_euclid(6.0)
-    } else if max_c == g {
-        (b - r) / d + 2.0
-    } else {
-        (r - g) / d + 4.0
-    };
-    (h * 60.0, s, l)
-}
-
-fn hue_to_rgb_component(p: f32, q: f32, mut t: f32) -> f32 {
-    if t < 0.0 {
-        t += 1.0;
-    }
-    if t > 1.0 {
-        t -= 1.0;
-    }
-    if t < 1.0 / 6.0 {
-        return p + (q - p) * 6.0 * t;
-    }
-    if t < 1.0 / 2.0 {
-        return q;
-    }
-    if t < 2.0 / 3.0 {
-        return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
-    }
-    p
-}
-
-fn hsl_to_rgb(h_degrees: f32, s: f32, l: f32) -> (f32, f32, f32) {
-    if s <= 0.0 {
-        return (l, l, l);
-    }
-    let h = h_degrees.rem_euclid(360.0) / 360.0;
-    let q = if l < 0.5 {
-        l * (1.0 + s)
-    } else {
-        l + s - l * s
-    };
-    let p = 2.0 * l - q;
-    (
-        hue_to_rgb_component(p, q, h + 1.0 / 3.0),
-        hue_to_rgb_component(p, q, h),
-        hue_to_rgb_component(p, q, h - 1.0 / 3.0),
-    )
 }
 
 fn tonal_shift(r: f32, g: f32, b: f32, params: &HslColorMixerParams) -> (f32, f32, f32) {

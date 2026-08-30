@@ -8,11 +8,13 @@ import {
   MAX_COLOR_MIXER_REGIONS,
   readBasicField,
   WHITE_BALANCE_PRESETS,
+  type ColorGradingAdjustment,
   type ColorMixerRegion,
   type CurvesAdjustment,
   type HslAdjustment,
 } from "../lib/edl";
 import { useAppStore } from "../store";
+import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
 
@@ -26,6 +28,14 @@ const CURVE_CHANNEL_TABS: ReadonlyArray<{ key: keyof CurvesAdjustment; label: st
   { key: "green", label: "Grün" },
   { key: "blue", label: "Blau" },
   { key: "luminance", label: "Luminanz" },
+];
+
+/** Die vier Color-Grading-Farbräder (Phase 4 Schritt 6). */
+const COLOR_GRADING_WHEEL_TABS: ReadonlyArray<{ key: keyof Pick<ColorGradingAdjustment, "shadows" | "midtones" | "highlights" | "global">; label: string }> = [
+  { key: "shadows", label: "Schatten" },
+  { key: "midtones", label: "Mitteltöne" },
+  { key: "highlights", label: "Lichter" },
+  { key: "global", label: "Global" },
 ];
 
 /**
@@ -69,6 +79,10 @@ export function DevelopPanel() {
   const updateColorMixerRegion = useAppStore((s) => s.updateColorMixerRegion);
   const [selectedRegionIndex, setSelectedRegionIndex] = useState<number | null>(null);
   const previousRegionCount = useRef(colorMixer.regions.length);
+  const colorGrading = useAppStore((s) => s.developEdl.color_grading);
+  const setColorGradingWheel = useAppStore((s) => s.setColorGradingWheel);
+  const setColorGradingBalance = useAppStore((s) => s.setColorGradingBalance);
+  const setColorGradingBlending = useAppStore((s) => s.setColorGradingBlending);
 
   // Eine per Bildklick neu angelegte Region wird sofort zur Bearbeitung
   // ausgewählt statt dass der Nutzer sie erst in der Liste anklicken muss.
@@ -327,6 +341,35 @@ export function DevelopPanel() {
                 })}
               </div>
             )}
+          </fieldset>
+
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Color Grading</legend>
+            <div className="flex flex-wrap justify-center gap-3">
+              {COLOR_GRADING_WHEEL_TABS.map((tab) => (
+                <ColorWheel
+                  key={tab.key}
+                  label={tab.label}
+                  wheel={colorGrading[tab.key]}
+                  onChange={(next) => setColorGradingWheel(tab.key, next)}
+                  onCommit={() => void commitDevelopEdit()}
+                />
+              ))}
+            </div>
+            <div className="flex flex-col gap-3">
+              <DevelopSlider
+                spec={{ key: "balance", label: "Balance", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 }}
+                value={colorGrading.balance}
+                onChange={setColorGradingBalance}
+                onCommit={() => void commitDevelopEdit()}
+              />
+              <DevelopSlider
+                spec={{ key: "blending", label: "Überblendung", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 }}
+                value={colorGrading.blending}
+                onChange={setColorGradingBlending}
+                onCommit={() => void commitDevelopEdit()}
+              />
+            </div>
           </fieldset>
         </>
       )}

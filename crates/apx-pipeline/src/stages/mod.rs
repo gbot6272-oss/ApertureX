@@ -10,6 +10,8 @@
 //! tonwertzonen-gewichtete Operation sind (siehe deren Modul-Doku).
 
 pub mod basic_fused;
+pub mod color_grading;
+mod color_math;
 pub mod contrast;
 pub mod curves;
 pub mod exposure;

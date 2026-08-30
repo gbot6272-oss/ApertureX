@@ -384,9 +384,13 @@ Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Obj
   - [x] 8-Band-HSL-UI (Tabs + 3 Regler) und Farbmischer-UI (Regionen-Liste mit Klick-Aufnahme, Bandbreite/Farbton/Sättigung/Luminanz-Verschiebung je Region) in `DevelopPanel.tsx`
   - Verifiziert: `cargo fmt/clippy/test --workspace` (250 Rust-Tests), `tsc -b`, `vitest run` (93 Tests), `playwright test` (21/21), `vite build` — alles lokal grün
 
-- [ ] 6. Color Grading (Farbräder)
-  - [ ] Neues `frontend/src/components/ColorWheel.tsx`, 4× instanziiert (Schatten/Mitteltöne/Lichter/Global)
-  - [ ] GPU/CPU: tonwertzonen-gewichtete Farbverschiebung
+- [x] 6. Color Grading (Farbräder)
+  - [x] Neues `crates/apx-pipeline/src/stages/color_math.rs`: aus `hsl_color_mixer.rs` extrahierte gemeinsame RGB↔HSL-Konvertierung/Gauß-Gewichtung (`pub(crate)`, private `mod color_math`), vermeidet Duplizierung zwischen den beiden Rust-Modulen — WGSL dupliziert die Helfer weiterhin je Shader-Datei, da dieses Shader-Modell keine Cross-File-Imports kennt
+  - [x] Neues `crates/apx-pipeline/src/stages/color_grading.rs`/`.wgsl`: 4 Farbräder (Schatten/Mitteltöne/Lichter/Global), Gauß-gewichtete Tonwertzonen (fixe Zentren bei Luminanz 0/0,5/1 statt echter verschiebbarer Umschlagpunkte), Balance verschiebt das Gewicht zwischen Schatten-/Lichter-Zone statt deren Zentren zu bewegen (siehe Moduldoku), Überblendung steuert die Zonenbreite (`sigma`); direkt nach `hsl_color_mixer` in `develop.rs` verdrahtet
+  - [x] Neues `frontend/src/components/ColorWheel.tsx`, 4× instanziiert (Schatten/Mitteltöne/Lichter/Global) — HTML/CSS-Rad (`radial-gradient`+`conic-gradient`) statt SVG/Canvas, da hier kein Pixel-Hit-Testing nötig ist; `frontend/src/lib/colorWheelMath.ts` (Pixel-Offset↔Farbton/Sättigung, mit Rundreise-Tests)
+  - [x] GPU/CPU: tonwertzonen-gewichtete Farbverschiebung (`gpu_matches_cpu`-Paritätstest wie bei den übrigen Werkzeugen)
+  - [x] Echter Fehler gefunden und behoben (nicht nur bei Color Grading selbst, sondern ein vorbestehender Bug, der durch dessen Tastatur-E2E-Test aufgedeckt wurde): `App.tsx`s globaler `keydown`-Handler für die Foto-Navigation (Pfeiltasten) prüfte nur auf `INPUT`/`TEXTAREA`-Tags, nicht auf `role="slider"`-Elemente ohne natives Eingabe-Tag — dadurch feuerten `ColorWheel.tsx`s und `CurveEditor.tsx`s eigene Pfeiltasten-Handler gemeinsam mit dem globalen Foto-Wechsel-Kurzbefehl, dessen asynchrones `loadDevelopStateForPhoto` die gerade vorgenommene Regler-Änderung Millisekunden später wieder überschrieb. Behoben durch eine `target.closest('[role="slider"]')`-Ausnahme im selben Guard.
+  - Verifiziert: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (261 Rust-Tests), `tsc -b`, `vitest run` (100 Tests), `playwright test` (23/23), `vite build` — alles lokal grün
 
 - [ ] 7. Kalibrierung
   - [ ] Prozessversion, Schattentönung, Primärfarben R/G/B, Kameraprofil-Auswahl (kleine eingebaute Liste, kein DCP-Import)

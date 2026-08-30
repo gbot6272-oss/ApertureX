@@ -58,7 +58,19 @@ export default function App() {
       }
 
       const target = event.target as HTMLElement | null;
-      const isEditable = target !== null && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+      const isEditable =
+        target !== null &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          // Eigene interaktive Regel-Widgets (`ColorWheel.tsx`s Farbrad,
+          // `CurveEditor.tsx`s Kurvenpunkte) sind `role="slider"`-Elemente
+          // ohne natives Eingabe-Tag und behandeln Pfeiltasten selbst
+          // (Feinjustierung von Farbton/Sättigung bzw. Kurvenpunkten) — ohne
+          // diesen Ausschluss würde der globale Foto-Navigations-Kurzbefehl
+          // (`stepSelection`, unten) parallel feuern und über
+          // `loadDevelopStateForPhoto` die gerade vorgenommene Änderung
+          // wieder überschreiben.
+          target.closest('[role="slider"]') !== null);
       if (isEditable) return;
 
       // Rückgängig/Wiederholen für Bibliotheks-Metadaten (Schritt 8.1,

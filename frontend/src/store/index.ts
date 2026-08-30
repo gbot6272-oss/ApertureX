@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
 import { buildEdlEnvelopeJson, MAX_COLOR_MIXER_REGIONS, neutralEdlPayload, newColorMixerRegion, parseEdlEnvelopeJson, WHITE_BALANCE_PRESETS, writeBasicField } from "../lib/edl";
-import type { ColorMixerRegion, CurveChannel, CurvesAdjustment, EdlPayload, HslAdjustment, HslBand } from "../lib/edl";
+import type { ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CurveChannel, CurvesAdjustment, EdlPayload, HslAdjustment, HslBand } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
@@ -249,6 +249,11 @@ interface DevelopSlice {
   /** Ändert ein Feld einer bestehenden Farbmischer-Region — Zwischenstand
    * beim Ziehen. */
   updateColorMixerRegion: (index: number, patch: Partial<ColorMixerRegion>) => void;
+  /** Ersetzt eines der vier Color-Grading-Farbräder (Phase 4 Schritt 6) —
+   * Zwischenstand beim Ziehen. */
+  setColorGradingWheel: (key: keyof Pick<ColorGradingAdjustment, "shadows" | "midtones" | "highlights" | "global">, wheel: ColorGradingWheel) => void;
+  setColorGradingBalance: (value: number) => void;
+  setColorGradingBlending: (value: number) => void;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
    * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
    * bei jedem Zwischenwert). */
@@ -632,6 +637,24 @@ export const useAppStore = create<AppStore>()(
     setHslBandField: (band, field, value) => {
       set((state) => {
         state.developEdl.hsl[band][field] = value;
+      });
+    },
+
+    setColorGradingWheel: (key, wheel) => {
+      set((state) => {
+        state.developEdl.color_grading[key] = wheel;
+      });
+    },
+
+    setColorGradingBalance: (value) => {
+      set((state) => {
+        state.developEdl.color_grading.balance = value;
+      });
+    },
+
+    setColorGradingBlending: (value) => {
+      set((state) => {
+        state.developEdl.color_grading.blending = value;
       });
     },
 

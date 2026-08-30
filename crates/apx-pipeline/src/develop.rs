@@ -10,10 +10,12 @@
 use apx_raw::LinearImage;
 
 use crate::color::linear_camera_rgb_to_srgb_rgba8;
-use crate::edl::{CurvesAdjustment, EdlV2, HslAdjustment};
+use crate::edl::{ColorGradingAdjustment, CurvesAdjustment, EdlV2, HslAdjustment};
 use crate::error::Result;
 use crate::gpu::GpuContext;
-use crate::stages::{basic_fused, curves, hsl_color_mixer, local_contrast, white_balance};
+use crate::stages::{
+    basic_fused, color_grading, curves, hsl_color_mixer, local_contrast, white_balance,
+};
 
 /// Rendert `linear` mit den in `edl` beschriebenen Anpassungen zu einem
 /// interleaved RGBA8-Puffer (`4 * linear.width * linear.height` Bytes,
@@ -26,16 +28,17 @@ use crate::stages::{basic_fused, curves, hsl_color_mixer, local_contrast, white_
 /// `DECISIONS.md` ADR-0012) — der Aufrufer muss diese Entscheidung nicht
 /// selbst treffen.
 ///
-/// **Phase-4-Übergangsstand (siehe `PLAN.md` Phase 4 Schritt 5):** alle
+/// **Phase-4-Übergangsstand (siehe `PLAN.md` Phase 4 Schritt 6):** alle
 /// zwölf Grundeinstellungs-Regler (`stages::basic_fused` /
 /// `stages::local_contrast`), HSL + Farbmischer erweitert
-/// (`stages::hsl_color_mixer`, linearer Arbeitsraum wie `basic_fused`)
-/// und die Gradationskurven (`stages::curves`, laufen bewusst *nach* der
-/// Farbraum-Konvertierung auf dem fertigen RGBA8-Puffer, siehe
-/// `curves.rs`s Moduldoku) sind verdrahtet. Alle übrigen
-/// Werkzeugkategorien (Color Grading, Details, Objektivkorrekturen,
-/// Effekte, Kalibrierung, Geometrie, Reparatur) sind noch inert — die
-/// folgenden Schritte verdrahten sie schrittweise.
+/// (`stages::hsl_color_mixer`) und Color Grading
+/// (`stages::color_grading`, alle drei im linearen Arbeitsraum wie
+/// `basic_fused`) sowie die Gradationskurven (`stages::curves`, laufen
+/// bewusst *nach* der Farbraum-Konvertierung auf dem fertigen
+/// RGBA8-Puffer, siehe `curves.rs`s Moduldoku) sind verdrahtet. Alle
+/// übrigen Werkzeugkategorien (Details, Objektivkorrekturen, Effekte,
+/// Kalibrierung, Geometrie, Reparatur) sind noch inert — die folgenden
+/// Schritte verdrahten sie schrittweise.
 pub fn render_rgba8(
     ctx: Option<&GpuContext>,
     linear: &LinearImage,
@@ -110,7 +113,24 @@ pub fn render_rgba8(
         }
     };
 
-    let rgba = linear_camera_rgb_to_srgb_rgba8(&hsl_shifted, linear.cam_to_srgb);
+    let graded = if edl.color_grading == ColorGradingAdjustment::NEUTRAL {
+        // Kein zusätzlicher Durchlauf, wenn alle vier Farbräder neutral
+        // stehen (Regelfall).
+        hsl_shifted
+    } else {
+        match ctx {
+            Some(ctx) => match color_grading::apply_gpu(ctx, &hsl_shifted, &edl.color_grading) {
+                Ok(pixels) => pixels,
+                Err(err) => {
+                    tracing::warn!(error = %err, "GPU-Rendering (Color Grading) fehlgeschlagen, nutze CPU-Fallback");
+                    color_grading::apply_cpu(&hsl_shifted, &edl.color_grading)
+                }
+            },
+            None => color_grading::apply_cpu(&hsl_shifted, &edl.color_grading),
+        }
+    };
+
+    let rgba = linear_camera_rgb_to_srgb_rgba8(&graded, linear.cam_to_srgb);
 
     Ok(if edl.curves == CurvesAdjustment::neutral() {
         // Kein zusätzlicher Durchlauf über den ganzen Puffer, wenn alle

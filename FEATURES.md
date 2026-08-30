@@ -99,9 +99,9 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Frei definierbare Farbbereiche per Klick im Bild — Phase 4 — Status: Fertig (auf 8 Regionen begrenzt, siehe `hsl_color_mixer.rs`s Moduldoku)
 
 ### Farbklassifizierung / Color Grading
-- [ ] Farbräder Schatten/Mitteltöne/Lichter/Global — Phase 4 — Status: Nicht begonnen
-- [ ] Luminanz und Mischung pro Rad — Phase 4 — Status: Nicht begonnen
-- [ ] Balance, Überblendung — Phase 4 — Status: Nicht begonnen
+- [x] Farbräder Schatten/Mitteltöne/Lichter/Global — Phase 4 — Status: Fertig (Gauß-gewichtete Tonwertzonen statt fester Umschlagpunkte, siehe `crates/apx-pipeline/src/stages/color_grading.rs`)
+- [x] Luminanz und Mischung pro Rad — Phase 4 — Status: Fertig
+- [x] Balance, Überblendung — Phase 4 — Status: Fertig (Balance verschiebt das Gewicht zwischen Schatten-/Lichter-Zonen statt deren Zentren zu verschieben, siehe Moduldoku in `color_grading.rs`)
 
 ### Details
 - [ ] Schärfung (Betrag, Radius, Detail, Maskierung) — Phase 4 — Status: Nicht begonnen

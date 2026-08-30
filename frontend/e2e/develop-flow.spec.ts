@@ -313,4 +313,62 @@ test.describe("Entwickeln-Panel", () => {
     const updatedRegions = JSON.parse(updatedEdlJson).payload.color_mixer.regions as Array<{ hue_shift: number }>;
     expect(updatedRegions[0]?.hue_shift).toBeCloseTo(25);
   });
+
+  test("Color Grading: ein Farbrad per Tastatur committet Farbton/Sättigung", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+    // Der Klick oben löst `loadDevelopStateForPhoto` (ein asynchrones
+    // `current_develop_edit`) aus, das den Panel-Zustand — ungefragt —
+    // mit dem (noch neutralen) Backend-Stand überschreibt, sobald es
+    // durchläuft. Ohne diese kurze, deterministische Wartezeit (die
+    // Mock-Zusage löst ohne echte Netzwerklatenz fast sofort auf) würde
+    // ein sofort danach gesetzter Regler-Wert von diesem Überschreiben
+    // wieder verworfen — anders als in den übrigen Tests dieser Datei
+    // gibt es hier keine weitere await-Aktion dazwischen, die dafür
+    // zufällig genug Zeit ließe.
+    await page.waitForTimeout(100);
+
+    const shadowWheel = page.getByRole("slider", { name: "Schatten-Farbrad" });
+    await shadowWheel.focus();
+    // Je ein Schritt nach rechts (2° fein, siehe ColorWheel.tsx) und nach
+    // oben (Sättigung anheben) — zwischen den Tastendrücken auf das
+    // sichtbare `aria-valuenow` gewartet, statt Tastendrücke schneller
+    // als Reacts Re-Render aufeinanderfolgen zu lassen.
+    await shadowWheel.press("ArrowRight");
+    await expect(shadowWheel).toHaveAttribute("aria-valuenow", "2");
+    await shadowWheel.press("ArrowUp");
+
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.some((entry) => entry.cmd === "apply_develop_edit");
+    }).toBe(true);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const shadows = JSON.parse(edlJson).payload.color_grading.shadows as { hue_degrees: number; saturation: number };
+    expect(shadows.hue_degrees).toBeCloseTo(2);
+    expect(shadows.saturation).toBeGreaterThan(0);
+  });
+
+  test("Color Grading: Balance und Überblendung committen", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    const balanceInput = page.getByRole("spinbutton", { name: "Balance (Zahlenwert)" });
+    await balanceInput.fill("-30");
+    await balanceInput.blur();
+
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.some((entry) => entry.cmd === "apply_develop_edit");
+    }).toBe(true);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const colorGrading = JSON.parse(edlJson).payload.color_grading as { balance: number; blending: number };
+    expect(colorGrading.balance).toBeCloseTo(-30);
+    expect(colorGrading.blending).toBe(50); // unverändertes Default
+  });
 });

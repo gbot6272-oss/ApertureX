@@ -638,6 +638,35 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       }
       case "generate_preset_from_llm":
         return fixtures.presetGeneratorSubsetJson;
+      case "build_preset_prompt_text":
+        return `Du bist ein Farbbearbeitungs-Assistent für Aperture X.\n\nGewünschter Bildlook: ${args.description as string}`;
+      case "import_preset_json": {
+        // Toleriert einen Markdown-Codeblock ums JSON, genau wie das
+        // echte Backend (`apx_ai::preset_generator::extract_json_object`)
+        // — Claude fügt oft trotz gegenteiliger Anweisung einen an.
+        const raw = (args.json as string).trim();
+        const withoutPrefix = (raw.startsWith("```") ? raw.replace(/^```(json)?/, "") : raw).trim();
+        const candidate = (withoutPrefix.endsWith("```") ? withoutPrefix.slice(0, -3) : withoutPrefix).trim();
+        const parsed = JSON.parse(candidate) as Record<string, unknown>;
+        const allowedKeys = [
+          "basic",
+          "curves",
+          "hsl",
+          "color_mixer",
+          "color_grading",
+          "details",
+          "lens_corrections",
+          "effects",
+          "calibration",
+          "geometry",
+        ];
+        for (const key of Object.keys(parsed)) {
+          if (!allowedKeys.includes(key)) {
+            throw new Error(`Test-Stub: unbekannte Sektion '${key}'`);
+          }
+        }
+        return JSON.stringify(parsed);
+      }
       case "generate_preset_from_reference":
         return fixtures.referenceImageDialogCancelled ? null : fixtures.presetGeneratorSubsetJson;
       case "generate_preset_variations": {

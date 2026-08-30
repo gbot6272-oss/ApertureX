@@ -915,6 +915,15 @@ interface AiSlice {
    * mehreren aus). */
   presetGeneratorSelectedIndex: number;
   generatePresetFromDescription: (description: string) => Promise<void>;
+  /** **Manueller LLM-Modus ohne API-Schlüssel:** kopiert einen fertigen
+   * Prompt-Text (System-Prompt + `description`) in die Zwischenablage,
+   * zum Einfügen in die Claude-App (claude.ai). Kein Netzwerk-Aufruf. */
+  copyPresetPromptForClaudeApp: (description: string) => Promise<void>;
+  /** Validiert ein von Hand aus der Claude-App zurückkopiertes
+   * JSON-Ergebnis serverseitig und übernimmt es als Vorschlag — dieselbe
+   * Prüfung wie `generatePresetFromDescription`s Antwort, nur ohne den
+   * API-Aufruf selbst. */
+  importPresetFromPastedJson: (json: string) => Promise<void>;
   /** Öffnet einen Datei-Auswahldialog (Referenzbild) — kein LLM, kein
    * API-Schlüssel nötig. No-op (kein Fehler), wenn der Dialog abgebrochen
    * wird. */
@@ -3074,6 +3083,42 @@ export const useAppStore = create<AppStore>()(
         const json = await api.generatePresetFromLlm(trimmed);
         set((state) => {
           state.presetGeneratorPreview = [parseEdlSubset(json)];
+          state.presetGeneratorSelectedIndex = 0;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.presetGeneratorLoading = false;
+        });
+      }
+    },
+
+    copyPresetPromptForClaudeApp: async (description) => {
+      const trimmed = description.trim();
+      if (!trimmed) return;
+      try {
+        const prompt = await api.buildPresetPromptText(trimmed);
+        await navigator.clipboard.writeText(prompt);
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    importPresetFromPastedJson: async (json) => {
+      const trimmed = json.trim();
+      if (!trimmed) return;
+      set((state) => {
+        state.presetGeneratorLoading = true;
+      });
+      try {
+        const validated = await api.importPresetJson(trimmed);
+        set((state) => {
+          state.presetGeneratorPreview = [parseEdlSubset(validated)];
           state.presetGeneratorSelectedIndex = 0;
         });
       } catch (err) {

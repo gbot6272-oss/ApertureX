@@ -269,6 +269,8 @@ function AiPresetGeneratorSection() {
   const presetGeneratorPreview = useAppStore((s) => s.presetGeneratorPreview);
   const presetGeneratorSelectedIndex = useAppStore((s) => s.presetGeneratorSelectedIndex);
   const generatePresetFromDescription = useAppStore((s) => s.generatePresetFromDescription);
+  const copyPresetPromptForClaudeApp = useAppStore((s) => s.copyPresetPromptForClaudeApp);
+  const importPresetFromPastedJson = useAppStore((s) => s.importPresetFromPastedJson);
   const generatePresetFromReferenceImage = useAppStore((s) => s.generatePresetFromReferenceImage);
   const generatePresetVariationsFromBase = useAppStore((s) => s.generatePresetVariationsFromBase);
   const learnPresetFromSelectedPhotos = useAppStore((s) => s.learnPresetFromSelectedPhotos);
@@ -278,6 +280,8 @@ function AiPresetGeneratorSection() {
 
   const [description, setDescription] = useState("");
   const [apiKeyInput, setApiKeyInput] = useState("");
+  const [pastedJson, setPastedJson] = useState("");
+  const [promptCopied, setPromptCopied] = useState(false);
 
   useEffect(() => {
     void loadAiSettings();
@@ -297,6 +301,18 @@ function AiPresetGeneratorSection() {
     const base = buildPresetEdlSubset(developEdl, PRESET_SECTION_KEYS);
     const seed = Math.floor(Math.random() * 1_000_000);
     void generatePresetVariationsFromBase(base, 4, seed);
+  }
+
+  async function handleCopyPrompt() {
+    await copyPresetPromptForClaudeApp(description);
+    setPromptCopied(true);
+    setTimeout(() => setPromptCopied(false), 2000);
+  }
+
+  async function handleImportPastedJson() {
+    if (!pastedJson.trim()) return;
+    await importPresetFromPastedJson(pastedJson);
+    setPastedJson("");
   }
 
   return (
@@ -336,15 +352,51 @@ function AiPresetGeneratorSection() {
           placeholder="z. B. warmer, kontrastreicher Filmlook"
           className="w-full resize-none rounded border border-border bg-bg-panel px-2 py-1 text-xs"
         />
-        <button
-          type="button"
-          disabled={!hasApiKey || !description.trim() || presetGeneratorLoading}
-          onClick={() => void generatePresetFromDescription(description)}
-          title={hasApiKey ? undefined : "Erst einen Anthropic-API-Schlüssel hinterlegen"}
-          className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {presetGeneratorLoading ? "Erzeuge…" : "Aus Beschreibung erzeugen"}
-        </button>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            disabled={!hasApiKey || !description.trim() || presetGeneratorLoading}
+            onClick={() => void generatePresetFromDescription(description)}
+            title={hasApiKey ? undefined : "Erst einen Anthropic-API-Schlüssel hinterlegen"}
+            className="flex-1 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {presetGeneratorLoading ? "Erzeuge…" : "Aus Beschreibung erzeugen"}
+          </button>
+          <button
+            type="button"
+            disabled={!description.trim()}
+            onClick={() => void handleCopyPrompt()}
+            title="Prompt in die Zwischenablage kopieren, zum Einfügen in die Claude-App (claude.ai) — kein API-Schlüssel nötig"
+            className="flex-1 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {promptCopied ? "Kopiert!" : "Prompt für Claude-App"}
+          </button>
+        </div>
+
+        <details className="text-xs text-text-secondary">
+          <summary className="cursor-pointer select-none">Antwort aus der Claude-App einfügen (kein API-Schlüssel nötig)</summary>
+          <div className="mt-1 flex flex-col gap-1">
+            <p className="text-text-muted">
+              "Prompt für Claude-App" oben, in <span className="whitespace-nowrap">claude.ai</span> einfügen, Antwort hier zurück einfügen.
+            </p>
+            <textarea
+              value={pastedJson}
+              onChange={(event) => setPastedJson(event.target.value)}
+              rows={3}
+              placeholder='{"basic": {"exposure_ev": 0.5}}'
+              aria-label="Aus der Claude-App eingefügte JSON-Antwort"
+              className="w-full resize-none rounded border border-border bg-bg-panel px-2 py-1 font-mono text-xs"
+            />
+            <button
+              type="button"
+              disabled={!pastedJson.trim() || presetGeneratorLoading}
+              onClick={() => void handleImportPastedJson()}
+              className="self-start rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Übernehmen
+            </button>
+          </div>
+        </details>
       </div>
 
       <div className="grid grid-cols-2 gap-1">

@@ -1557,6 +1557,28 @@ pub async fn generate_preset_from_llm(
         .map_err(|err| format!("Preset-Teilmenge nicht serialisierbar: {err}"))
 }
 
+/// **Manueller LLM-Modus ohne API-Schlüssel:** liefert einen fertigen
+/// Prompt-Text (System-Prompt + `description` zu einer Nachricht
+/// zusammengefügt) zum Einfügen in die **Claude-App** (claude.ai) — die
+/// Antwort dort kommt über [`import_preset_json`] zurück. Kein Netzwerk-
+/// Aufruf, keine Einstellungen nötig.
+#[tauri::command]
+pub fn build_preset_prompt_text(description: String) -> String {
+    apx_ai::preset_generator::standalone_prompt_text(&description)
+}
+
+/// Validiert ein von Hand eingefügtes JSON-Ergebnis (aus der Claude-App
+/// kopiert, siehe [`build_preset_prompt_text`]) serverseitig — dieselbe
+/// Prüfung wie [`generate_preset_from_llm`]s Antwort, nur ohne den
+/// API-Aufruf selbst.
+#[tauri::command]
+pub fn import_preset_json(json: String) -> Result<String, String> {
+    let subset = apx_ai::preset_generator::parse_and_validate_pasted_json(&json)
+        .map_err(|err| err.to_string())?;
+    serde_json::to_string(&subset)
+        .map_err(|err| format!("Preset-Teilmenge nicht serialisierbar: {err}"))
+}
+
 /// Referenzbild-Modus: öffnet einen Datei-Auswahldialog für ein beliebiges
 /// Bild (RAW oder JPEG/PNG/TIFF, siehe `apx_raw::decode_linear`s
 /// Fallback-Pfad) und gleicht die sieben Tonwertregler von `photo_id`

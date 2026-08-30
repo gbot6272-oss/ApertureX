@@ -165,4 +165,35 @@ test.describe("KI-Funktionen (Phase 7)", () => {
     expect(payload.basic.exposure_ev).toBeCloseTo(0.75, 2);
     expect(payload.basic.contrast).toBeCloseTo(20, 2);
   });
+
+  test("Preset-Generator ohne API-Schlüssel: Prompt kopieren + Claude-App-Antwort einfügen", async ({ page, context }) => {
+    await setUpWithSelectedPhoto(page);
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+
+    await page.getByLabel("Beschreibung (LLM-Modus)").fill("kühler, entsättigter Look");
+
+    // "Aus Beschreibung erzeugen" bleibt ohne Schlüssel deaktiviert, "Prompt
+    // kopieren" braucht keinen.
+    await expect(page.getByRole("button", { name: "Aus Beschreibung erzeugen" })).toBeDisabled();
+    const copyButton = page.getByRole("button", { name: "Prompt für Claude-App" });
+    await expect(copyButton).toBeEnabled();
+    await copyButton.click();
+    await expect(page.getByRole("button", { name: "Kopiert!" })).toBeVisible();
+
+    const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clipboardText).toContain("kühler, entsättigter Look");
+    expect(clipboardText).toContain("Aperture X");
+
+    // Antwort aus der Claude-App zurück einfügen (per Hand kopiert) —
+    // inklusive Markdown-Codeblock, wie ihn Claude oft anfügt.
+    await page.getByText("Antwort aus der Claude-App einfügen (kein API-Schlüssel nötig)").click();
+    await page.getByLabel("Aus der Claude-App eingefügte JSON-Antwort").fill('```json\n{"basic": {"saturation": -40}}\n```');
+    await page.getByRole("button", { name: "Übernehmen", exact: true }).click();
+
+    await expect(page.getByText("Vorschlag", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Auf aktuelles Foto anwenden" }).click();
+
+    const payload = await lastCommit(page);
+    expect(payload.basic.saturation).toBeCloseTo(-40, 2);
+  });
 });

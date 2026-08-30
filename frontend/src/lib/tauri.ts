@@ -456,6 +456,23 @@ export function generatePresetFromLlm(description: string): Promise<string> {
   return invoke<string>("generate_preset_from_llm", { description });
 }
 
+/** **Manueller LLM-Modus ohne API-Schlüssel:** liefert einen fertigen
+ * Prompt-Text (System-Prompt + `description`) zum Einfügen in die
+ * Claude-App (claude.ai) — kein Netzwerk-Aufruf, keine Einstellungen
+ * nötig. Die Antwort von dort kommt über {@link importPresetJson}
+ * zurück. */
+export function buildPresetPromptText(description: string): Promise<string> {
+  return invoke<string>("build_preset_prompt_text", { description });
+}
+
+/** Validiert ein von Hand eingefügtes JSON-Ergebnis (aus der Claude-App
+ * kopiert, siehe {@link buildPresetPromptText}) serverseitig, ohne
+ * selbst einen API-Aufruf zu machen — liefert es normalisiert als
+ * JSON-String zurück (dieselbe Form wie {@link generatePresetFromLlm}). */
+export function importPresetJson(json: string): Promise<string> {
+  return invoke<string>("import_preset_json", { json });
+}
+
 /** Referenzbild-Modus — öffnet einen Datei-Auswahldialog, `null` wenn
  * abgebrochen. Kein LLM, kein API-Schlüssel nötig. */
 export function generatePresetFromReference(photoId: string): Promise<string | null> {

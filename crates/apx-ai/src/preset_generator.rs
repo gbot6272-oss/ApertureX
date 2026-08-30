@@ -137,6 +137,9 @@ fn system_prompt() -> String {
      Für \"hsl\", \"color_mixer\", \"color_grading\", \"curves\", \"lens_corrections\", \"geometry\" \
      gilt: nur setzen, wenn der Wunsch das eindeutig verlangt, sonst weglassen — ihre Struktur ist \
      komplexer (mehrere benannte Bänder/Regionen/Kanäle), verwende bei Unsicherheit lieber \"basic\". \
+     Auch innerhalb einer Sektion sind nicht genannte Felder optional — nenne nur die Felder, die \
+     sich ändern sollen, alles Weggelassene bleibt beim neutralen Ausgangswert (kein Bedarf, z. B. \
+     bei \"basic\" alle zwölf Felder aufzuzählen, wenn nur \"exposure_ev\" gemeint ist). \
      Erzeuge keine Felder außerhalb dieser Namen. Antworte NUR mit dem JSON-Objekt.".to_string()
 }
 
@@ -226,6 +229,29 @@ fn extract_json_object(text: &str) -> Result<Value> {
     })
 }
 
+/// Eigenständiger Prompt-Text zum manuellen Einfügen in die **Claude-App**
+/// (claude.ai) — für Nutzer ohne Anthropic-API-Schlüssel: derselbe
+/// System-Prompt wie [`generate_from_llm`], hier aber mit der
+/// Beschreibung zu einer einzigen Nachricht zusammengefügt, weil die
+/// Chat-Oberfläche der Claude-App kein separates `system`-Feld kennt
+/// (anders als die Messages API). Der Nutzer kopiert diesen Text dort
+/// hinein, kopiert die Antwort zurück und fügt sie über
+/// [`parse_and_validate_pasted_json`] ein.
+pub fn standalone_prompt_text(description: &str) -> String {
+    format!("{}\n\nGewünschter Bildlook: {description}", system_prompt())
+}
+
+/// Parst und validiert ein von Hand eingefügtes JSON-Ergebnis (z. B. aus
+/// der Claude-App kopiert) — dieselbe serverseitige Validierung wie
+/// [`generate_from_llm`]s Antwort (siehe [`validate_preset_subset`]), nur
+/// ohne den API-Aufruf selbst. Toleriert einen Markdown-Codeblock ums
+/// JSON, genau wie [`extract_json_object`].
+pub fn parse_and_validate_pasted_json(text: &str) -> Result<Value> {
+    let subset = extract_json_object(text)?;
+    validate_preset_subset(&subset)?;
+    Ok(subset)
+}
+
 /// Serverseitige Validierung (siehe Moduldoku): nur bekannte
 /// Sektionsschlüssel erlaubt, und das Ergebnis muss — auf ein neutrales
 /// `EdlV3` gemergt — vollständig als `EdlV3` deserialisierbar sein. Ein
@@ -245,26 +271,44 @@ pub fn validate_preset_subset(subset: &Value) -> Result<()> {
         }
     }
 
-    let neutral = serde_json::to_value(EdlV3::neutral()).map_err(|source| {
+    let mut merged = serde_json::to_value(EdlV3::neutral()).map_err(|source| {
         AiError::LlmResponseUnparsable {
             message: format!("Neutrales EDL konnte nicht serialisiert werden: {source}"),
         }
     })?;
-    let Value::Object(mut merged) = neutral else {
-        return Err(AiError::LlmResponseUnparsable {
-            message: "Neutrales EDL ist kein JSON-Objekt".to_string(),
-        });
-    };
-    for (key, value) in object {
-        merged.insert(key.clone(), value.clone());
-    }
+    merge_json_patch(&mut merged, subset);
 
-    serde_json::from_value::<EdlV3>(Value::Object(merged)).map_err(|source| {
-        AiError::LlmResponseUnparsable {
-            message: format!("Modellantwort ergibt kein gültiges EDL: {source}"),
-        }
+    serde_json::from_value::<EdlV3>(merged).map_err(|source| AiError::LlmResponseUnparsable {
+        message: format!("Modellantwort ergibt kein gültiges EDL: {source}"),
     })?;
     Ok(())
+}
+
+/// Rekursiver Merge im Stil von JSON Merge Patch (RFC 7396): zwei
+/// Objekte werden Schlüssel für Schlüssel zusammengeführt (fehlende
+/// Unterfelder bleiben beim neutralen Wert aus `base`), alles andere
+/// (Arrays, Skalare, ein Typwechsel) ersetzt `base` komplett durch
+/// `patch`. **Wichtig für tolerante Modellantworten:** eine ältere
+/// Fassung ersetzte jede oberste Sektion (z. B. `"basic"`) komplett
+/// durch die Modellantwort — ein knappes `{"basic": {"exposure_ev": 0.5}}`
+/// ohne die übrigen elf `BasicAdjustments`-Felder scheiterte dadurch an
+/// der anschließenden `EdlV3`-Deserialisierung, obwohl der Wunsch (nur
+/// die Belichtung ändern) eindeutig war. Der rekursive Merge lässt jedes
+/// nicht genannte Unterfeld beim neutralen Wert.
+fn merge_json_patch(base: &mut Value, patch: &Value) {
+    match (base, patch) {
+        (Value::Object(base_map), Value::Object(patch_map)) => {
+            for (key, patch_value) in patch_map {
+                match base_map.get_mut(key) {
+                    Some(base_value) => merge_json_patch(base_value, patch_value),
+                    None => {
+                        base_map.insert(key.clone(), patch_value.clone());
+                    }
+                }
+            }
+        }
+        (base_slot, _) => *base_slot = patch.clone(),
+    }
 }
 
 // ---- Referenzbild-Modus (kein LLM) -----------------------------------------
@@ -619,6 +663,17 @@ mod tests {
     }
 
     #[test]
+    fn validate_preset_subset_accepts_a_partial_basic_section_and_keeps_the_rest_neutral() {
+        // Nur die Belichtung genannt — die übrigen elf `BasicAdjustments`-
+        // Felder (inkl. `white_balance`) fehlen komplett. Das muss dank
+        // des rekursiven Merges (`merge_json_patch`) trotzdem gültig
+        // sein: die fehlenden Felder bleiben beim neutralen Wert statt
+        // die Deserialisierung scheitern zu lassen.
+        let subset = serde_json::json!({ "basic": { "exposure_ev": 0.5 } });
+        assert!(validate_preset_subset(&subset).is_ok());
+    }
+
+    #[test]
     fn validate_preset_subset_rejects_unknown_section() {
         let subset = serde_json::json!({ "unbekannt": {} });
         assert!(validate_preset_subset(&subset).is_err());
@@ -647,6 +702,25 @@ mod tests {
     fn extract_json_object_accepts_plain_json() {
         let value = extract_json_object("{\"basic\": {}}").expect("sollte parsen");
         assert_eq!(value, serde_json::json!({"basic": {}}));
+    }
+
+    #[test]
+    fn standalone_prompt_text_embeds_the_description() {
+        let text = standalone_prompt_text("warmer Filmlook");
+        assert!(text.contains("warmer Filmlook"));
+        assert!(text.contains("Aperture X"));
+    }
+
+    #[test]
+    fn parse_and_validate_pasted_json_accepts_a_fenced_valid_subset() {
+        let pasted = "```json\n{\"basic\": {\"exposure_ev\": 0.5}}\n```";
+        let subset = parse_and_validate_pasted_json(pasted).expect("sollte gelingen");
+        assert_eq!(subset, serde_json::json!({"basic": {"exposure_ev": 0.5}}));
+    }
+
+    #[test]
+    fn parse_and_validate_pasted_json_rejects_unknown_section() {
+        assert!(parse_and_validate_pasted_json("{\"unbekannt\": {}}").is_err());
     }
 
     fn flat_pixels(width: u32, height: u32, value: f32) -> Vec<f32> {

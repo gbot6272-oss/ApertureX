@@ -115,6 +115,8 @@ fn main() {
             commands::get_ai_settings,
             commands::set_anthropic_api_key,
             commands::generate_preset_from_llm,
+            commands::build_preset_prompt_text,
+            commands::import_preset_json,
             commands::generate_preset_from_reference,
             commands::generate_preset_variations,
             commands::learn_preset_from_photos,

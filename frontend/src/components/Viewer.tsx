@@ -61,6 +61,7 @@ export function Viewer() {
   const repairActive = useAppStore((s) => s.repairActive);
   const repairStrokes = useAppStore((s) => s.developEdl.repair);
   const repairPendingSource = useAppStore((s) => s.repairPendingSource);
+  const repairDraftMode = useAppStore((s) => s.repairDraftMode);
   const setRepairSourcePoint = useAppStore((s) => s.setRepairSourcePoint);
   const addRepairStroke = useAppStore((s) => s.addRepairStroke);
   const selectedMaskId = useAppStore((s) => s.selectedMaskId);
@@ -401,6 +402,7 @@ export function Viewer() {
           onSetSource={setRepairSourcePoint}
           onPaint={addRepairStroke}
           onRemoveStroke={removeRepairStroke}
+          skipSourceStep={repairDraftMode === "ContentAwareFill"}
         />
       )}
 

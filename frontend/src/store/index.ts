@@ -1567,11 +1567,16 @@ export const useAppStore = create<AppStore>()(
 
     addRepairStroke: (targetPath) => {
       const { repairPendingSource, repairDraftMode, repairDraftRadius, repairDraftFeather, repairDraftOpacity } = get();
-      if (!repairPendingSource || targetPath.length === 0) return;
+      // Inhaltsbasiertes Füllen (Phase 7) sucht seinen Füllinhalt selbst
+      // aus der Bildumgebung — anders als Klonen/Reparieren braucht es
+      // keinen vom Nutzer gesetzten Quellpunkt (`source` wird von
+      // `apx-pipeline` für diesen Modus ignoriert, siehe ADR-0033 Punkt 4).
+      const isContentAwareFill = repairDraftMode === "ContentAwareFill";
+      if ((!repairPendingSource && !isContentAwareFill) || targetPath.length === 0) return;
       set((state) => {
         state.developEdl.repair.push({
           mode: repairDraftMode,
-          source: repairPendingSource,
+          source: repairPendingSource ?? { x: 0, y: 0 },
           target_path: targetPath,
           radius: repairDraftRadius,
           feather: repairDraftFeather,

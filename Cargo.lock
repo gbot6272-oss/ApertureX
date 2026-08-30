@@ -112,10 +112,12 @@ dependencies = [
 name = "apx-app"
 version = "0.1.0"
 dependencies = [
+ "apx-ai",
  "apx-catalog",
  "apx-core",
  "apx-pipeline",
  "apx-raw",
+ "base64 0.22.1",
  "image",
  "num_cpus",
  "percent-encoding",

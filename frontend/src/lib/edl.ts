@@ -612,7 +612,10 @@ export const GRID_OVERLAY_OPTIONS: ReadonlyArray<{ value: GridOverlay; label: st
 
 // ---- Reparatur (Klonen/Reparieren) ------------------------------------------
 
-export type RepairMode = "Clone" | "Heal";
+/** `ContentAwareFill` seit Phase 7 (siehe `DECISIONS.md` ADR-0033 Punkt
+ * 4) — `source` wird für diesen Modus ignoriert, der Füllinhalt kommt
+ * aus der Bildumgebung statt einem manuell gesetzten Quellpunkt. */
+export type RepairMode = "Clone" | "Heal" | "ContentAwareFill";
 
 export interface RepairPoint {
   x: number;
@@ -643,8 +646,23 @@ export interface BrushStroke {
   feather: number;
 }
 
+/** Die fünf KI-Masken-Heuristiken (Phase 7, siehe `DECISIONS.md`
+ * ADR-0033) — klassische Bildverarbeitung statt echter ONNX-Modelle,
+ * siehe `apx-ai::segmentation`s Moduldoku. Rein informativ fürs
+ * Anzeige-Label; die Pipeline behandelt jede Variante identisch. */
+export type AiMaskKind = "Subject" | "Sky" | "Background" | "ClickRegion" | "Person";
+
+export const AI_MASK_KIND_LABELS: Record<AiMaskKind, string> = {
+  Subject: "Motiv",
+  Sky: "Himmel",
+  Background: "Hintergrund",
+  ClickRegion: "Objekte",
+  Person: "Personen",
+};
+
 /** Spiegelt Rusts intern getaggtes `#[serde(tag = "kind")]`-Enum — die
- * fünf `SPEC.md` §5 genannten Maskentypen (Tiefenbereich/KI-Masken sind
+ * fünf `SPEC.md` §5 genannten Maskentypen plus die sechste, ab Phase 7
+ * hinzugekommene KI-generierte Rasterfläche (Tiefenbereich ist weiterhin
  * bewusst nicht Teil dieses Schemas, siehe ADR-0032 Punkt 3). */
 export type MaskGeometry =
   | { kind: "Brush"; strokes: BrushStroke[] }
@@ -659,7 +677,8 @@ export type MaskGeometry =
       feather: number;
     }
   | { kind: "ColorRange"; target_r: number; target_g: number; target_b: number; tolerance: number; feather: number }
-  | { kind: "LuminanceRange"; range_min: number; range_max: number; feather: number };
+  | { kind: "LuminanceRange"; range_min: number; range_max: number; feather: number }
+  | { kind: "AiGenerated"; ai_kind: AiMaskKind; width: number; height: number; alpha: number[] };
 
 export function emptyBrushGeometry(): MaskGeometry {
   return { kind: "Brush", strokes: [] };

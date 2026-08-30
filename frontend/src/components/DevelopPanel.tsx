@@ -59,6 +59,10 @@ const REPAIR_OPACITY_SPEC: SliderSpec = { key: "opacity", label: "Deckkraft (%)"
 const REPAIR_MODE_OPTIONS: ReadonlyArray<{ value: RepairMode; label: string }> = [
   { value: "Clone", label: "Klonen" },
   { value: "Heal", label: "Reparieren" },
+  // Inhaltsbasiertes Füllen (Phase 7, ADR-0033 Punkt 4): kein
+  // Quellpunkt nötig, siehe RepairOverlay.tsx/store/index.ts's
+  // addRepairStroke.
+  { value: "ContentAwareFill", label: "Inhaltsbasiert füllen" },
 ];
 
 // ---- Preset-Stärke (Phase 5 Schritt 5, siehe SPEC.md §3.5) -----------------
@@ -1050,10 +1054,12 @@ export function DevelopPanel() {
 
             {repairActive && (
               <p className="text-xs text-text-muted">
-                {repairPendingSource
-                  ? "Ziel im Bild malen (Ziehen), um den Strich abzuschließen."
-                  : "Quellpunkt im Bild anklicken."}
-                {repairPendingSource && (
+                {repairDraftMode === "ContentAwareFill"
+                  ? "Ziel im Bild malen (Ziehen) — kein Quellpunkt nötig, der Füllinhalt kommt aus der Umgebung."
+                  : repairPendingSource
+                    ? "Ziel im Bild malen (Ziehen), um den Strich abzuschließen."
+                    : "Quellpunkt im Bild anklicken."}
+                {repairDraftMode !== "ContentAwareFill" && repairPendingSource && (
                   <button type="button" onClick={cancelRepairSource} className="ml-2 underline">
                     Quellpunkt verwerfen
                   </button>
@@ -1101,7 +1107,12 @@ export function DevelopPanel() {
                 {repairStrokes.map((stroke, index) => (
                   <li key={index} className="flex items-center justify-between rounded border border-border px-2 py-1">
                     <span>
-                      {index + 1}. {stroke.mode === "Heal" ? "Reparieren" : "Klonen"}
+                      {index + 1}.{" "}
+                      {stroke.mode === "Heal"
+                        ? "Reparieren"
+                        : stroke.mode === "ContentAwareFill"
+                          ? "Inhaltsbasiert gefüllt"
+                          : "Klonen"}
                     </span>
                     <button type="button" onClick={() => removeRepairStroke(index)} className="text-danger underline">
                       Entfernen

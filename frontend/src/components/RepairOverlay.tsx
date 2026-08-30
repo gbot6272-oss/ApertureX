@@ -15,6 +15,11 @@ interface RepairOverlayProps {
   onSetSource: (point: RepairPoint) => void;
   onPaint: (path: RepairPoint[]) => void;
   onRemoveStroke: (index: number) => void;
+  /** Inhaltsbasiertes Füllen (Phase 7) braucht keinen Quellpunkt — der
+   * erste Klick startet dort direkt das Malen des Zielpfads statt zuerst
+   * `onSetSource` auszulösen (siehe `DECISIONS.md` ADR-0033 Punkt 4).
+   * Vorgabe `false`, damit bestehende Aufrufer unverändert bleiben. */
+  skipSourceStep?: boolean;
 }
 
 /** Muss `repair.rs`s `MAX_PATH_POINTS` entsprechen. */
@@ -64,6 +69,7 @@ export function RepairOverlay({
   onSetSource,
   onPaint,
   onRemoveStroke,
+  skipSourceStep = false,
 }: RepairOverlayProps) {
   const [drawingPath, setDrawingPath] = useState<RepairPoint[] | null>(null);
   const pathRef = useRef<RepairPoint[]>([]);
@@ -73,7 +79,7 @@ export function RepairOverlay({
     (event: React.PointerEvent<HTMLDivElement>) => {
       const rect = event.currentTarget.getBoundingClientRect();
       const point = pointFromEvent(event, rect);
-      if (!pendingSource) {
+      if (!pendingSource && !skipSourceStep) {
         onSetSource(point);
         return;
       }
@@ -82,7 +88,7 @@ export function RepairOverlay({
       pathRef.current = [point];
       setDrawingPath(pathRef.current);
     },
-    [pendingSource, onSetSource],
+    [pendingSource, skipSourceStep, onSetSource],
   );
 
   const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {

@@ -1299,6 +1299,198 @@ pub fn list_duplicate_photo_groups(
         .collect())
 }
 
+// ---- KI-Funktionen (Phase 7, siehe `DECISIONS.md` ADR-0033) ---------------
+//
+// Alle Analyse-Algorithmen selbst leben in `apx-ai` (klassische
+// Bildverarbeitungsheuristiken statt echter ONNX-Modellinferenz, siehe
+// dessen Moduldoku) — diese Commands sind reine Verdrahtung: Foto-Pfad
+// auflösen, über den bestehenden `TileCache` dekodieren (derselbe Weg wie
+// `protocol::compute_develop`), Ergebnis als DTO zurückreichen.
+
+fn resolve_source_path_for_ai(
+    catalog: &apx_catalog::Catalog,
+    photo_id: apx_core::PhotoId,
+) -> Result<PathBuf, String> {
+    let photo = catalog.get_photo(photo_id).map_err(|err| err.to_string())?;
+    let folder = catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    Ok(folder.path.join(photo.filename))
+}
+
+fn parse_ai_mask_kind(kind: &str) -> Result<apx_pipeline::edl::AiMaskKind, String> {
+    match kind {
+        "subject" => Ok(apx_pipeline::edl::AiMaskKind::Subject),
+        "sky" => Ok(apx_pipeline::edl::AiMaskKind::Sky),
+        "background" => Ok(apx_pipeline::edl::AiMaskKind::Background),
+        "click_region" => Ok(apx_pipeline::edl::AiMaskKind::ClickRegion),
+        "person" => Ok(apx_pipeline::edl::AiMaskKind::Person),
+        other => Err(format!("unbekannte KI-Maskenart '{other}'")),
+    }
+}
+
+fn ai_mask_kind_to_string(kind: apx_pipeline::edl::AiMaskKind) -> String {
+    match kind {
+        apx_pipeline::edl::AiMaskKind::Subject => "subject",
+        apx_pipeline::edl::AiMaskKind::Sky => "sky",
+        apx_pipeline::edl::AiMaskKind::Background => "background",
+        apx_pipeline::edl::AiMaskKind::ClickRegion => "click_region",
+        apx_pipeline::edl::AiMaskKind::Person => "person",
+    }
+    .to_string()
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AiMaskAlphaDto {
+    pub kind: String,
+    pub width: u32,
+    pub height: u32,
+    /// Base64-kodierte Ein-Kanal-`u8`-Alpha-Bitmap, `width * height` Bytes
+    /// nach dem Dekodieren — direkt als `MaskGeometry::AiGenerated.alpha`
+    /// im Frontend übernehmbar.
+    pub alpha_base64: String,
+}
+
+/// Erzeugt eine KI-Masken-Alpha-Bitmap für `photo_id` (siehe
+/// `apx_ai::segmentation`). `click_x`/`click_y` (normierte
+/// Bildkoordinaten) sind nur für `kind == "click_region"` Pflicht,
+/// `tolerance` nur dafür relevant (Vorgabe `0.15`, wenn nicht gesetzt).
+#[tauri::command]
+pub fn generate_ai_mask(
+    state: State<'_, AppState>,
+    photo_id: String,
+    kind: String,
+    click_x: Option<f32>,
+    click_y: Option<f32>,
+    tolerance: Option<f32>,
+) -> Result<AiMaskAlphaDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let kind = parse_ai_mask_kind(&kind)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let click = match (click_x, click_y) {
+        (Some(x), Some(y)) => Some((x, y)),
+        _ => None,
+    };
+    let alpha = apx_ai::segmentation::generate(
+        kind,
+        &linear.pixels,
+        linear.width,
+        linear.height,
+        click,
+        tolerance.unwrap_or(0.15),
+    )
+    .map_err(|err| err.to_string())?;
+
+    Ok(AiMaskAlphaDto {
+        kind: ai_mask_kind_to_string(kind),
+        width: linear.width,
+        height: linear.height,
+        alpha_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &alpha),
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RepairSourceSuggestionDto {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// Auto-Quellenfindung (`apx_ai::repair_analysis::suggest_source_point`) —
+/// schlägt für einen geplanten Klon-/Reparatur-Strich einen Quellpunkt
+/// vor, ohne selbst etwas zu committen (der Nutzer kann den Vorschlag im
+/// Frontend noch verwerfen/verschieben).
+#[tauri::command]
+pub fn suggest_repair_source(
+    state: State<'_, AppState>,
+    photo_id: String,
+    target_x: f32,
+    target_y: f32,
+    brush_radius: f32,
+) -> Result<RepairSourceSuggestionDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let (x, y) = apx_ai::repair_analysis::suggest_source_point(
+        &linear.pixels,
+        linear.width,
+        linear.height,
+        target_x,
+        target_y,
+        brush_radius,
+    )
+    .map_err(|err| err.to_string())?;
+    Ok(RepairSourceSuggestionDto { x, y })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SpotCandidateDto {
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    pub strength: f32,
+}
+
+impl From<apx_ai::repair_analysis::SpotCandidate> for SpotCandidateDto {
+    fn from(candidate: apx_ai::repair_analysis::SpotCandidate) -> Self {
+        Self {
+            x: candidate.x,
+            y: candidate.y,
+            radius: candidate.radius,
+            strength: candidate.strength,
+        }
+    }
+}
+
+/// Sensorflecken-Visualisierung (`apx_ai::repair_analysis::detect_spots`)
+/// — reine Analyse, legt selbst keine Reparatur-Striche an. `max_spots`
+/// deckelt die Ergebnisliste, `sensitivity` (`0.0..=1.0`) die
+/// Erkennungsschwelle.
+#[tauri::command]
+pub fn detect_sensor_spots(
+    state: State<'_, AppState>,
+    photo_id: String,
+    sensitivity: f32,
+    max_spots: u32,
+) -> Result<Vec<SpotCandidateDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let spots = apx_ai::repair_analysis::detect_spots(
+        &linear.pixels,
+        linear.width,
+        linear.height,
+        sensitivity,
+        max_spots as usize,
+    )
+    .map_err(|err| err.to_string())?;
+    Ok(spots.into_iter().map(SpotCandidateDto::from).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

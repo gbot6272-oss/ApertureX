@@ -660,12 +660,15 @@ test` und `vite build` alle vollständig grün sein — keine Ausnahme.
   - [x] Volle Kette grün: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used`, `cargo test --workspace` (203 Rust-Tests total, 29 davon neu in `apx-ai`) — Frontend unverändert in diesem Schritt
 
 - [ ] 2. Die fünf KI-Masken (Tauri-/Frontend-Verdrahtung — Algorithmen siehe Schritt 1)
-  - Neuer Tauri-Command `generate_ai_mask(photo_id, kind, click_x?, click_y?) -> AiMaskAlphaDto` (Base64-kodierte Alpha-Bitmap + Breite/Höhe), nutzt `TileCache::get_or_decode` wie `compute_develop`
-  - Frontend: `MasksPanel.tsx` bekommt einen „KI-Maske hinzufügen"-Abschnitt (fünf Knöpfe, „Objekte" öffnet den Bild-Klick-Picker analog zu den bestehenden Picker-Mustern)
+  - [x] Tauri-Command `generate_ai_mask(photo_id, kind, click_x?, click_y?, tolerance?) -> AiMaskAlphaDto` (Base64-kodierte Alpha-Bitmap + Breite/Höhe), nutzt `TileCache::get_or_decode` auf `apx_ai::segmentation::ANALYSIS_MAX_EDGE` wie `compute_develop`
+  - [x] Frontend-Datenmodell: `MaskGeometry::AiGenerated`/`AiMaskKind` in `lib/edl.ts` ergänzt (spiegelt die Rust-Seite aus Schritt 1)
+  - [ ] Frontend-UI noch offen: `MasksPanel.tsx` bekommt einen „KI-Maske hinzufügen"-Abschnitt (fünf Knöpfe, „Objekte" öffnet den Bild-Klick-Picker analog zu den bestehenden Picker-Mustern) — bislang lässt sich `generate_ai_mask` nur über den rohen Tauri-Aufruf erreichen, noch keine Store-Aktion/UI
 
 - [ ] 3. Reparatur-Erweiterungen (Tauri-/Frontend-Verdrahtung — Algorithmen siehe Schritt 1)
-  - Je ein Tauri-Command für Auto-Quellenfindung/Sensorflecken-Visualisierung, Frontend-Overlay im `RepairOverlay.tsx`
-  - Inhaltsbasiertes Füllen als vierter Reparatur-Modus im Frontend auswählbar
+  - [x] Je ein Tauri-Command für Auto-Quellenfindung (`suggest_repair_source`) und Sensorflecken-Visualisierung (`detect_sensor_spots`)
+  - [x] Inhaltsbasiertes Füllen als dritter Reparatur-Modus im Frontend auswählbar: `RepairMode` um `"ContentAwareFill"` erweitert, `RepairOverlay.tsx` überspringt für diesen Modus den Quellpunkt-Schritt (`skipSourceStep`-Prop), `store/index.ts::addRepairStroke` erlaubt das Committen ohne `repairPendingSource`, `DevelopPanel.tsx` mit drittem Radio-Knopf + angepasstem Hinweistext
+  - [ ] Frontend-UI für Auto-Quellenfindung/Sensorflecken-Visualisierung noch offen: kein Overlay-Knopf, keine Store-Aktion — die beiden neuen Commands sind nur backendseitig erreichbar
+  - Volle Kette grün: `cargo fmt/clippy/test` (Workspace, weiterhin 203 Rust-Tests — reine Verdrahtung, keine neue Rust-Logik in diesem Teilschritt), `tsc --noEmit`, `vitest run` (155 Frontend-Tests)
 
 - [ ] 4. Preset-Generator
   - `apx-core::Settings`: neues `AiSettings { anthropic_api_key: Option<String> }`-Feld + Frontend-Einstellungen-UI zum Hinterlegen

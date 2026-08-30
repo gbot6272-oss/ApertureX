@@ -378,9 +378,11 @@ Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Obj
   - [x] Neues `frontend/src/components/CurveEditor.tsx` — SVG statt `<canvas>` (fokussierbare, per Tastatur bedienbare Punkte statt Pixel-Hit-Testing, siehe Moduldoku dort), Punkte-/Parametrisch-Umschalter, numerische Punkteingabe, Presets-Dropdown; in `DevelopPanel.tsx` mit 5 Kanal-Tabs (RGB/Rot/Grün/Blau/Luminanz)
   - Verifiziert: `cargo fmt/clippy/test --workspace` (244 Rust-Tests), `tsc -b`, `vitest run` (88 Tests), `playwright test` (19/19), `vite build` — alles lokal grün
 
-- [ ] 5. HSL + Farbmischer erweitert
-  - [ ] 8-Band-HSL-UI, Farbmischer mit Bild-Klick-Farbaufnahme (teilt Sampling-Code mit WB-Pipette)
-  - [ ] GPU/CPU: RGB→HSL-Konvertierung, bandgewichtete Verschiebung
+- [x] 5. HSL + Farbmischer erweitert
+  - [x] Neues `crates/apx-pipeline/src/stages/hsl_color_mixer.rs`/`.wgsl`: RGB↔HSL-Konvertierung, Gauß-gewichtete Verschiebung nach Farbton-Abstand zu 8 festen Bändern + offener Regionenliste (gekappt auf `MAX_COLOR_MIXER_REGIONS = 8`, siehe Moduldoku), läuft im linearen Arbeitsraum wie `basic_fused`, direkt davor in `develop.rs` verdrahtet
+  - [x] `frontend/src/lib/colorSampling.ts` (neu): teilt die Farbton-Berechnung aus einem Bildklick mit der WB-Pipette (`Viewer.tsx`s `handleImageClick` bedient jetzt beide Werkzeuge)
+  - [x] 8-Band-HSL-UI (Tabs + 3 Regler) und Farbmischer-UI (Regionen-Liste mit Klick-Aufnahme, Bandbreite/Farbton/Sättigung/Luminanz-Verschiebung je Region) in `DevelopPanel.tsx`
+  - Verifiziert: `cargo fmt/clippy/test --workspace` (250 Rust-Tests), `tsc -b`, `vitest run` (93 Tests), `playwright test` (21/21), `vite build` — alles lokal grün
 
 - [ ] 6. Color Grading (Farbräder)
   - [ ] Neues `frontend/src/components/ColorWheel.tsx`, 4× instanziiert (Schatten/Mitteltöne/Lichter/Global)

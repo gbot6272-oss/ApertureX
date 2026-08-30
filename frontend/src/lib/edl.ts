@@ -188,6 +188,28 @@ export const NEUTRAL_HSL: HslAdjustment = {
   magenta: NEUTRAL_HSL_BAND,
 };
 
+/** Die acht festen HSL-Bänder (Phase 4 Schritt 5) — Reihenfolge/Zentren
+ * wie in `crates/apx-pipeline/src/stages/hsl_color_mixer.rs`s
+ * `HSL_BAND_CENTERS_DEGREES`. */
+export const HSL_BAND_TABS: ReadonlyArray<{ key: keyof HslAdjustment; label: string }> = [
+  { key: "red", label: "Rot" },
+  { key: "orange", label: "Orange" },
+  { key: "yellow", label: "Gelb" },
+  { key: "green", label: "Grün" },
+  { key: "aqua", label: "Aqua" },
+  { key: "blue", label: "Blau" },
+  { key: "purple", label: "Lila" },
+  { key: "magenta", label: "Magenta" },
+] as const;
+
+/** Regler-Spezifikationen für ein einzelnes HSL-Band — dieselben drei
+ * Felder für jedes der acht Bänder. */
+export const HSL_BAND_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "hue", label: "Farbton", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "saturation", label: "Sättigung", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "luminance", label: "Luminanz", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+] as const;
+
 // ---- Farbmischer erweitert --------------------------------------------------
 
 export interface ColorMixerRegion {
@@ -206,6 +228,37 @@ export interface ColorMixerAdjustment {
 export function neutralColorMixer(): ColorMixerAdjustment {
   return { regions: [] };
 }
+
+/** Eine neue, per Bildklick aufgenommene Region — neutrale Regler-Werte,
+ * eine mittelbreite Bandbreite mit etwas Weichzeichnung als Startpunkt. */
+export function newColorMixerRegion(targetHueDegrees: number): ColorMixerRegion {
+  return {
+    target_hue_degrees: targetHueDegrees,
+    bandwidth_degrees: 30,
+    feather: 0.3,
+    hue_shift: 0,
+    saturation_shift: 0,
+    luminance_shift: 0,
+  };
+}
+
+/** Obergrenze für Farbmischer-Regionen im fusionierten GPU/CPU-Pfad —
+ * spiegelt `hsl_color_mixer.rs`s `MAX_COLOR_MIXER_REGIONS` (siehe dessen
+ * Moduldoku für die Begründung). Das Frontend verhindert das Anlegen
+ * weiterer Regionen, statt sie stillschweigend wirkungslos zu lassen. */
+export const MAX_COLOR_MIXER_REGIONS = 8;
+
+// Beschriftungen bewusst mit "-Verschiebung"-Suffix, da sie sich sonst mit
+// den gleichnamigen HSL-Band-Reglern überschneiden würden (beide
+// Abschnitte sind gleichzeitig sichtbar, sobald eine Region ausgewählt
+// ist) — sowohl für Screenreader-Nutzer als auch für
+// `getByRole("slider", { name })` in Tests eindeutig.
+export const COLOR_MIXER_REGION_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "bandwidth_degrees", label: "Bandbreite", min: 5, max: 180, fineStep: 1, coarseStep: 10, neutral: 30 },
+  { key: "hue_shift", label: "Farbton-Verschiebung", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "saturation_shift", label: "Sättigung-Verschiebung", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "luminance_shift", label: "Luminanz-Verschiebung", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+] as const;
 
 // ---- Color Grading (Farbräder) ---------------------------------------------
 

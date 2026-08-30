@@ -14,6 +14,7 @@ pub mod contrast;
 pub mod curves;
 pub mod exposure;
 pub mod highlights_shadows;
+pub mod hsl_color_mixer;
 pub mod local_contrast;
 pub mod white_balance;
 pub mod whites_blacks;

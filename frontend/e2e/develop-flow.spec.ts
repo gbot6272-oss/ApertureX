@@ -37,22 +37,18 @@ test.describe("Entwickeln-Panel", () => {
     await page.getByRole("button", { name: "Entwickeln" }).click();
 
     await expect(page.getByRole("complementary", { name: "Entwickeln" })).toBeVisible();
-    for (const label of [
-      "Temperatur",
-      "Tint",
-      "Belichtung",
-      "Kontrast",
-      "Lichter",
-      "Tiefen",
-      "Weiß",
-      "Schwarz",
-      "Textur",
-      "Klarheit",
-      "Dunst entfernen",
-      "Dynamik",
-      "Sättigung",
-    ]) {
-      await expect(page.getByRole("slider", { name: label })).toBeVisible();
+
+    const whiteBalanceGroup = page.getByRole("group", { name: "Weißabgleich" });
+    for (const label of ["Temperatur", "Tint"]) {
+      await expect(whiteBalanceGroup.getByRole("slider", { name: label })).toBeVisible();
+    }
+
+    // Eigene, per sr-only-Legende benannte Gruppe (siehe DevelopPanel.tsx) —
+    // sonst wäre z. B. "Sättigung" mit dem gleichnamigen HSL-Band-Regler
+    // mehrdeutig, da beide Abschnitte gleichzeitig sichtbar sind.
+    const toneGroup = page.getByRole("group", { name: "Grundeinstellungen (Ton)" });
+    for (const label of ["Belichtung", "Kontrast", "Lichter", "Tiefen", "Weiß", "Schwarz", "Textur", "Klarheit", "Dunst entfernen", "Dynamik", "Sättigung"]) {
+      await expect(toneGroup.getByRole("slider", { name: label })).toBeVisible();
     }
   });
 
@@ -165,7 +161,7 @@ test.describe("Entwickeln-Panel", () => {
     await setUpWithSelectedPhoto(page);
     await page.getByRole("button", { name: "Entwickeln" }).click();
 
-    await page.getByRole("button", { name: "Grün" }).click();
+    await page.getByRole("group", { name: "Kurven" }).getByRole("button", { name: "Grün" }).click();
     await page.getByRole("combobox", { name: "Kurven-Preset" }).selectOption("strong_contrast");
 
     await expect.poll(async () => {
@@ -187,7 +183,7 @@ test.describe("Entwickeln-Panel", () => {
     await setUpWithSelectedPhoto(page);
     await page.getByRole("button", { name: "Entwickeln" }).click();
 
-    await page.getByRole("button", { name: "Rot" }).click();
+    await page.getByRole("group", { name: "Kurven" }).getByRole("button", { name: "Rot" }).click();
     await page.getByRole("button", { name: "Parametrisch" }).click();
 
     const shadowsInput = page.getByRole("spinbutton", { name: "Tiefen (Kurve) (Zahlenwert)" });
@@ -250,5 +246,71 @@ test.describe("Entwickeln-Panel", () => {
     const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
     const rgb = JSON.parse(edlJson).payload.curves.rgb as { points: Array<{ input: number; output: number }> };
     expect(rgb.points[0]).toEqual({ input: 0, output: 0.3 });
+  });
+
+  test("HSL: ein Band-Regler committet das entsprechende Feld", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    const hslGroup = page.getByRole("group", { name: "HSL" });
+    await hslGroup.getByRole("button", { name: "Aqua" }).click();
+    const saturationInput = hslGroup.getByRole("spinbutton", { name: "Sättigung (Zahlenwert)" });
+    await saturationInput.fill("-40");
+    await saturationInput.blur();
+
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.some((entry) => entry.cmd === "apply_develop_edit");
+    }).toBe(true);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const hsl = JSON.parse(edlJson).payload.hsl as { aqua: { saturation: number }; red: { saturation: number } };
+    expect(hsl.aqua.saturation).toBeCloseTo(-40);
+    expect(hsl.red.saturation).toBe(0);
+  });
+
+  test("Farbmischer: ein Bildklick legt eine Region an ihrem Farbton an", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    const addButton = page.getByRole("button", { name: "Region hinzufügen" });
+    await expect(addButton).toHaveAttribute("aria-pressed", "false");
+    await addButton.click();
+    await expect(addButton).toHaveAttribute("aria-pressed", "true");
+
+    await page.getByRole("main").click();
+
+    await expect(addButton).toHaveAttribute("aria-pressed", "false");
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.some((entry) => entry.cmd === "apply_develop_edit");
+    }).toBe(true);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const colorMixer = JSON.parse(edlJson).payload.color_mixer as { regions: Array<{ target_hue_degrees: number }> };
+    expect(colorMixer.regions).toHaveLength(1);
+    // Das Mock-Entwickeln-Bild ist warm-orange (180, 140, 100) — der
+    // resultierende Farbton liegt im Gelb/Orange-Bereich (grob 20-45°).
+    expect(colorMixer.regions[0]?.target_hue_degrees).toBeGreaterThan(0);
+    expect(colorMixer.regions[0]?.target_hue_degrees).toBeLessThan(60);
+
+    // Die neu angelegte Region wird sofort zur Bearbeitung ausgewählt.
+    const hueShiftInput = page.getByRole("spinbutton", { name: "Farbton-Verschiebung (Zahlenwert)" });
+    await hueShiftInput.fill("25");
+    await hueShiftInput.blur();
+
+    await expect.poll(async () => {
+      const updatedLog = await getMockInvokeLog(page);
+      return updatedLog.filter((entry) => entry.cmd === "apply_develop_edit").length;
+    }).toBeGreaterThan(1);
+    const updatedLog = await getMockInvokeLog(page);
+    const lastUpdate = [...updatedLog].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const updatedEdlJson = (lastUpdate?.args as { edlJson: string }).edlJson;
+    const updatedRegions = JSON.parse(updatedEdlJson).payload.color_mixer.regions as Array<{ hue_shift: number }>;
+    expect(updatedRegions[0]?.hue_shift).toBeCloseTo(25);
   });
 });

@@ -34,6 +34,9 @@ export function Viewer() {
   const developEdl = useAppStore((s) => s.developEdl);
   const wbPickerActive = useAppStore((s) => s.wbPickerActive);
   const pickWhiteBalanceAt = useAppStore((s) => s.pickWhiteBalanceAt);
+  const colorMixerPickerActive = useAppStore((s) => s.colorMixerPickerActive);
+  const addColorMixerRegionAt = useAppStore((s) => s.addColorMixerRegionAt);
+  const pickerActive = wbPickerActive || colorMixerPickerActive;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -148,10 +151,10 @@ export function Viewer() {
 
   const handleMouseDown = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
-      if (wbPickerActive || event.button !== 0 || !canPan) return;
+      if (pickerActive || event.button !== 0 || !canPan) return;
       dragState.current = { startX: event.clientX, startY: event.clientY, startPanX: panX, startPanY: panY };
     },
-    [wbPickerActive, canPan, panX, panY],
+    [pickerActive, canPan, panX, panY],
   );
 
   const handleMouseMove = useCallback(
@@ -176,11 +179,14 @@ export function Viewer() {
     }
   }, [fitMode, setZoom, setPan, resetView]);
 
-  // ---- Weißabgleich-Pipette (Phase 4 Schritt 3) ------------------------
+  // ---- Bild-Klick-Werkzeuge: Weißabgleich-Pipette (Phase 4 Schritt 3)
+  // und Farbmischer-Region-Aufnahme (Phase 4 Schritt 5) teilen sich das
+  // Sampling — nur der Aufrufer (`pickWhiteBalanceAt` vs.
+  // `addColorMixerRegionAt`) unterscheidet sich.
 
   const handleImageClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
-      if (!wbPickerActive || !developFrame || imgW <= 0 || imgH <= 0) return;
+      if (!pickerActive || !developFrame || imgW <= 0 || imgH <= 0) return;
 
       const rect = event.currentTarget.getBoundingClientRect();
       const cursor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
@@ -196,9 +202,31 @@ export function Viewer() {
       const sampleX = Math.min(developFrame.width - 1, Math.floor((imageX / imgW) * developFrame.width));
       const sampleY = Math.min(developFrame.height - 1, Math.floor((imageY / imgH) * developFrame.height));
       const index = (sampleY * developFrame.width + sampleX) * 4;
-      pickWhiteBalanceAt(developFrame.pixels[index] ?? 0, developFrame.pixels[index + 1] ?? 0, developFrame.pixels[index + 2] ?? 0);
+      const r = developFrame.pixels[index] ?? 0;
+      const g = developFrame.pixels[index + 1] ?? 0;
+      const b = developFrame.pixels[index + 2] ?? 0;
+
+      if (wbPickerActive) {
+        pickWhiteBalanceAt(r, g, b);
+      } else if (colorMixerPickerActive) {
+        addColorMixerRegionAt(r, g, b);
+      }
     },
-    [wbPickerActive, developFrame, imgW, imgH, containerSize.width, containerSize.height, effectiveScale, panX, panY, pickWhiteBalanceAt],
+    [
+      pickerActive,
+      wbPickerActive,
+      colorMixerPickerActive,
+      developFrame,
+      imgW,
+      imgH,
+      containerSize.width,
+      containerSize.height,
+      effectiveScale,
+      panX,
+      panY,
+      pickWhiteBalanceAt,
+      addColorMixerRegionAt,
+    ],
   );
 
   // ---- Tastatur: +/- Zoom, 0 Einpassen, 1 1:1, Leertaste zum Ziehen ------
@@ -244,7 +272,7 @@ export function Viewer() {
       onMouseLeave={endDrag}
       onClick={handleImageClick}
       onDoubleClick={handleDoubleClick}
-      style={{ cursor: wbPickerActive ? "crosshair" : canPan ? (dragState.current ? "grabbing" : "grab") : "default" }}
+      style={{ cursor: pickerActive ? "crosshair" : canPan ? (dragState.current ? "grabbing" : "grab") : "default" }}
     >
       {!photo && <p className="pointer-events-none text-sm text-text-muted">Kein Foto ausgewählt.</p>}
 

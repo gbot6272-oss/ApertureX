@@ -1,6 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { BASIC_SLIDER_SPECS, readBasicField, WHITE_BALANCE_PRESETS, type CurvesAdjustment } from "../lib/edl";
+import {
+  BASIC_SLIDER_SPECS,
+  COLOR_MIXER_REGION_SLIDER_SPECS,
+  HSL_BAND_SLIDER_SPECS,
+  HSL_BAND_TABS,
+  MAX_COLOR_MIXER_REGIONS,
+  readBasicField,
+  WHITE_BALANCE_PRESETS,
+  type ColorMixerRegion,
+  type CurvesAdjustment,
+  type HslAdjustment,
+} from "../lib/edl";
 import { useAppStore } from "../store";
 import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
@@ -48,6 +59,25 @@ export function DevelopPanel() {
   const curves = useAppStore((s) => s.developEdl.curves);
   const setCurveChannel = useAppStore((s) => s.setCurveChannel);
   const [activeCurveChannel, setActiveCurveChannel] = useState<keyof CurvesAdjustment>("rgb");
+  const hsl = useAppStore((s) => s.developEdl.hsl);
+  const setHslBandField = useAppStore((s) => s.setHslBandField);
+  const [activeHslBand, setActiveHslBand] = useState<keyof HslAdjustment>("red");
+  const colorMixer = useAppStore((s) => s.developEdl.color_mixer);
+  const colorMixerPickerActive = useAppStore((s) => s.colorMixerPickerActive);
+  const toggleColorMixerPicker = useAppStore((s) => s.toggleColorMixerPicker);
+  const removeColorMixerRegion = useAppStore((s) => s.removeColorMixerRegion);
+  const updateColorMixerRegion = useAppStore((s) => s.updateColorMixerRegion);
+  const [selectedRegionIndex, setSelectedRegionIndex] = useState<number | null>(null);
+  const previousRegionCount = useRef(colorMixer.regions.length);
+
+  // Eine per Bildklick neu angelegte Region wird sofort zur Bearbeitung
+  // ausgewählt statt dass der Nutzer sie erst in der Liste anklicken muss.
+  useEffect(() => {
+    if (colorMixer.regions.length > previousRegionCount.current) {
+      setSelectedRegionIndex(colorMixer.regions.length - 1);
+    }
+    previousRegionCount.current = colorMixer.regions.length;
+  }, [colorMixer.regions.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -159,7 +189,13 @@ export function DevelopPanel() {
             ))}
           </fieldset>
 
-          <div className="flex flex-col gap-3">
+          <fieldset className="flex flex-col gap-3">
+            {/* Nur für Assistive Technologien / Tests: gruppiert diese
+                Regler unter einem eigenen Namen, damit z. B. "Sättigung"
+                hier eindeutig von der gleichnamigen HSL-Band-Regler
+                unterscheidbar bleibt (beide Abschnitte sind gleichzeitig
+                sichtbar). */}
+            <legend className="sr-only">Grundeinstellungen (Ton)</legend>
             {toneSpecs.map((spec) => (
               <DevelopSlider
                 key={spec.key}
@@ -169,7 +205,7 @@ export function DevelopPanel() {
                 onCommit={() => void commitDevelopEdit()}
               />
             ))}
-          </div>
+          </fieldset>
 
           <fieldset className="flex flex-col gap-2">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Kurven</legend>
@@ -194,6 +230,103 @@ export function DevelopPanel() {
               onChange={(next) => setCurveChannel(activeCurveChannel, next)}
               onCommit={() => void commitDevelopEdit()}
             />
+          </fieldset>
+
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">HSL</legend>
+            <div className="flex flex-wrap gap-1">
+              {HSL_BAND_TABS.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setActiveHslBand(tab.key)}
+                  aria-pressed={activeHslBand === tab.key}
+                  className={`rounded border px-2 py-1 text-xs ${
+                    activeHslBand === tab.key ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-col gap-3">
+              {HSL_BAND_SLIDER_SPECS.map((spec) => {
+                const field = spec.key as "hue" | "saturation" | "luminance";
+                return (
+                  <DevelopSlider
+                    key={spec.key}
+                    spec={spec}
+                    value={hsl[activeHslBand][field]}
+                    onChange={(value) => setHslBandField(activeHslBand, field, value)}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
+                );
+              })}
+            </div>
+          </fieldset>
+
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Farbmischer</legend>
+            <button
+              type="button"
+              onClick={toggleColorMixerPicker}
+              disabled={colorMixer.regions.length >= MAX_COLOR_MIXER_REGIONS && !colorMixerPickerActive}
+              aria-pressed={colorMixerPickerActive}
+              title="Region hinzufügen: ins Bild klicken, um eine neue Farbmischer-Region an dieser Farbe anzulegen"
+              className={`rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${
+                colorMixerPickerActive ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
+              }`}
+            >
+              Region hinzufügen
+            </button>
+            {colorMixerPickerActive && <p className="text-xs text-accent">Klicken Sie ins Bild, um eine Region an dieser Farbe anzulegen.</p>}
+
+            {colorMixer.regions.length === 0 && <p className="text-xs text-text-muted">Noch keine Regionen.</p>}
+
+            <div className="flex flex-wrap gap-1">
+              {colorMixer.regions.map((region, index) => (
+                <span key={index} className="flex items-center gap-1 rounded border border-border bg-bg-panel px-1 py-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRegionIndex(index)}
+                    aria-pressed={selectedRegionIndex === index}
+                    className={selectedRegionIndex === index ? "text-accent" : "text-text-secondary hover:text-accent"}
+                  >
+                    {Math.round(region.target_hue_degrees)}°
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      removeColorMixerRegion(index);
+                      if (selectedRegionIndex === index) setSelectedRegionIndex(null);
+                    }}
+                    aria-label={`Region bei ${Math.round(region.target_hue_degrees)}° entfernen`}
+                    className="text-text-muted hover:text-danger"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+
+            {selectedRegionIndex !== null && colorMixer.regions[selectedRegionIndex] && (
+              <div className="flex flex-col gap-3">
+                {COLOR_MIXER_REGION_SLIDER_SPECS.map((spec) => {
+                  const field = spec.key as keyof ColorMixerRegion;
+                  const region = colorMixer.regions[selectedRegionIndex];
+                  if (!region) return null;
+                  return (
+                    <DevelopSlider
+                      key={spec.key}
+                      spec={spec}
+                      value={region[field]}
+                      onChange={(value) => updateColorMixerRegion(selectedRegionIndex, { [field]: value })}
+                      onCommit={() => void commitDevelopEdit()}
+                    />
+                  );
+                })}
+              </div>
+            )}
           </fieldset>
         </>
       )}

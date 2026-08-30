@@ -10,10 +10,10 @@
 use apx_raw::LinearImage;
 
 use crate::color::linear_camera_rgb_to_srgb_rgba8;
-use crate::edl::{CurvesAdjustment, EdlV2};
+use crate::edl::{CurvesAdjustment, EdlV2, HslAdjustment};
 use crate::error::Result;
 use crate::gpu::GpuContext;
-use crate::stages::{basic_fused, curves, local_contrast, white_balance};
+use crate::stages::{basic_fused, curves, hsl_color_mixer, local_contrast, white_balance};
 
 /// Rendert `linear` mit den in `edl` beschriebenen Anpassungen zu einem
 /// interleaved RGBA8-Puffer (`4 * linear.width * linear.height` Bytes,
@@ -26,15 +26,16 @@ use crate::stages::{basic_fused, curves, local_contrast, white_balance};
 /// `DECISIONS.md` ADR-0012) — der Aufrufer muss diese Entscheidung nicht
 /// selbst treffen.
 ///
-/// **Phase-4-Übergangsstand (siehe `PLAN.md` Phase 4 Schritt 4):** alle
+/// **Phase-4-Übergangsstand (siehe `PLAN.md` Phase 4 Schritt 5):** alle
 /// zwölf Grundeinstellungs-Regler (`stages::basic_fused` /
-/// `stages::local_contrast`) und die Gradationskurven
-/// (`stages::curves`, laufen bewusst *nach* der Farbraum-Konvertierung
-/// auf dem fertigen RGBA8-Puffer, siehe `curves.rs`s Moduldoku) sind
-/// verdrahtet. Alle übrigen Werkzeugkategorien (HSL, Farbmischer, Color
-/// Grading, Details, Objektivkorrekturen, Effekte, Kalibrierung,
-/// Geometrie, Reparatur) sind noch inert — die folgenden Schritte
-/// verdrahten sie schrittweise.
+/// `stages::local_contrast`), HSL + Farbmischer erweitert
+/// (`stages::hsl_color_mixer`, linearer Arbeitsraum wie `basic_fused`)
+/// und die Gradationskurven (`stages::curves`, laufen bewusst *nach* der
+/// Farbraum-Konvertierung auf dem fertigen RGBA8-Puffer, siehe
+/// `curves.rs`s Moduldoku) sind verdrahtet. Alle übrigen
+/// Werkzeugkategorien (Color Grading, Details, Objektivkorrekturen,
+/// Effekte, Kalibrierung, Geometrie, Reparatur) sind noch inert — die
+/// folgenden Schritte verdrahten sie schrittweise.
 pub fn render_rgba8(
     ctx: Option<&GpuContext>,
     linear: &LinearImage,
@@ -90,7 +91,26 @@ pub fn render_rgba8(
         }
     };
 
-    let rgba = linear_camera_rgb_to_srgb_rgba8(&textured, linear.cam_to_srgb);
+    let hsl_shifted = if edl.hsl == HslAdjustment::NEUTRAL && edl.color_mixer.regions.is_empty() {
+        // Kein zusätzlicher Durchlauf, wenn weder HSL noch Farbmischer
+        // etwas zu tun haben (Regelfall).
+        textured
+    } else {
+        match ctx {
+            Some(ctx) => {
+                match hsl_color_mixer::apply_gpu(ctx, &textured, &edl.hsl, &edl.color_mixer) {
+                    Ok(pixels) => pixels,
+                    Err(err) => {
+                        tracing::warn!(error = %err, "GPU-Rendering (HSL/Farbmischer) fehlgeschlagen, nutze CPU-Fallback");
+                        hsl_color_mixer::apply_cpu(&textured, &edl.hsl, &edl.color_mixer)
+                    }
+                }
+            }
+            None => hsl_color_mixer::apply_cpu(&textured, &edl.hsl, &edl.color_mixer),
+        }
+    };
+
+    let rgba = linear_camera_rgb_to_srgb_rgba8(&hsl_shifted, linear.cam_to_srgb);
 
     Ok(if edl.curves == CurvesAdjustment::neutral() {
         // Kein zusätzlicher Durchlauf über den ganzen Puffer, wenn alle

@@ -1,8 +1,9 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
-import { buildEdlEnvelopeJson, neutralEdlPayload, parseEdlEnvelopeJson, WHITE_BALANCE_PRESETS, writeBasicField } from "../lib/edl";
-import type { CurveChannel, CurvesAdjustment, EdlPayload } from "../lib/edl";
+import { buildEdlEnvelopeJson, MAX_COLOR_MIXER_REGIONS, neutralEdlPayload, newColorMixerRegion, parseEdlEnvelopeJson, WHITE_BALANCE_PRESETS, writeBasicField } from "../lib/edl";
+import type { ColorMixerRegion, CurveChannel, CurvesAdjustment, EdlPayload, HslAdjustment, HslBand } from "../lib/edl";
+import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
 import * as api from "../lib/tauri";
@@ -229,6 +230,25 @@ interface DevelopSlice {
    * `components/CurveEditor.tsx`) — Zwischenstand beim Ziehen, committet
    * wird separat über `commitDevelopEdit()`. */
   setCurveChannel: (key: keyof CurvesAdjustment, channel: CurveChannel) => void;
+  /** Setzt ein einzelnes Feld eines der acht festen HSL-Bänder (Phase 4
+   * Schritt 5) — Zwischenstand beim Ziehen. */
+  setHslBandField: (band: keyof HslAdjustment, field: keyof HslBand, value: number) => void;
+  /** Ob der Farbmischer gerade auf einen Klick in den Viewer wartet, um
+   * eine neue Region anzulegen (teilt den Sampling-Code im Viewer mit
+   * der Weißabgleich-Pipette, siehe `lib/colorSampling.ts`). */
+  colorMixerPickerActive: boolean;
+  toggleColorMixerPicker: () => void;
+  /** Legt aus einem im Viewer angeklickten RGBA8-Bildpunkt eine neue
+   * Farbmischer-Region an (Zielfarbton = Farbton des Klickpunkts,
+   * restliche Regler neutral) — no-op, wenn `MAX_COLOR_MIXER_REGIONS`
+   * bereits erreicht ist. Schaltet den Picker danach automatisch aus und
+   * committet sofort. */
+  addColorMixerRegionAt: (r: number, g: number, b: number) => void;
+  /** Entfernt eine Farbmischer-Region per Index und committet sofort. */
+  removeColorMixerRegion: (index: number) => void;
+  /** Ändert ein Feld einer bestehenden Farbmischer-Region — Zwischenstand
+   * beim Ziehen. */
+  updateColorMixerRegion: (index: number, patch: Partial<ColorMixerRegion>) => void;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
    * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
    * bei jedem Zwischenwert). */
@@ -606,6 +626,49 @@ export const useAppStore = create<AppStore>()(
     setCurveChannel: (key, channel) => {
       set((state) => {
         state.developEdl.curves[key] = channel;
+      });
+    },
+
+    setHslBandField: (band, field, value) => {
+      set((state) => {
+        state.developEdl.hsl[band][field] = value;
+      });
+    },
+
+    colorMixerPickerActive: false,
+
+    toggleColorMixerPicker: () => {
+      set((state) => {
+        state.colorMixerPickerActive = !state.colorMixerPickerActive;
+      });
+    },
+
+    addColorMixerRegionAt: (r, g, b) => {
+      if (get().developEdl.color_mixer.regions.length >= MAX_COLOR_MIXER_REGIONS) {
+        set((state) => {
+          state.colorMixerPickerActive = false;
+        });
+        return;
+      }
+      const hue = hueDegreesFromRgbByte(r, g, b);
+      set((state) => {
+        state.developEdl.color_mixer.regions.push(newColorMixerRegion(hue));
+        state.colorMixerPickerActive = false;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    removeColorMixerRegion: (index) => {
+      set((state) => {
+        state.developEdl.color_mixer.regions.splice(index, 1);
+      });
+      void get().commitDevelopEdit();
+    },
+
+    updateColorMixerRegion: (index, patch) => {
+      set((state) => {
+        const region = state.developEdl.color_mixer.regions[index];
+        if (region) Object.assign(region, patch);
       });
     },
 

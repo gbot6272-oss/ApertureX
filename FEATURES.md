@@ -93,10 +93,10 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Kurven-Presets — Phase 4 — Status: Fertig (4 feste Presets: Linear/Leichter Kontrast/Starker Kontrast/Negativ)
 
 ### HSL / Farbe
-- [ ] HSL für 8 Standardbereiche — Phase 4 — Status: Nicht begonnen
+- [x] HSL für 8 Standardbereiche — Phase 4 — Status: Fertig (Gauß-gewichtete Farbton-Bandzuordnung statt scharfer Grenzen, siehe `crates/apx-pipeline/src/stages/hsl_color_mixer.rs`)
 
 ### Farbmischer erweitert
-- [ ] Frei definierbare Farbbereiche per Klick im Bild — Phase 4 — Status: Nicht begonnen
+- [x] Frei definierbare Farbbereiche per Klick im Bild — Phase 4 — Status: Fertig (auf 8 Regionen begrenzt, siehe `hsl_color_mixer.rs`s Moduldoku)
 
 ### Farbklassifizierung / Color Grading
 - [ ] Farbräder Schatten/Mitteltöne/Lichter/Global — Phase 4 — Status: Nicht begonnen

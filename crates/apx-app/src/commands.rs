@@ -121,6 +121,117 @@ impl From<apx_catalog::Collection> for CollectionDto {
     }
 }
 
+// ---- Presets (ab Phase 5, siehe DECISIONS.md ADR-0031) ---------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PresetFolderDto {
+    pub id: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub position: i64,
+}
+
+impl From<apx_catalog::PresetFolder> for PresetFolderDto {
+    fn from(folder: apx_catalog::PresetFolder) -> Self {
+        Self {
+            id: folder.id.to_string(),
+            name: folder.name,
+            parent_id: folder.parent_id.map(|id| id.to_string()),
+            position: folder.position,
+        }
+    }
+}
+
+/// Metadaten eines Presets, ohne seine EDL-Teilmenge — die lebt in
+/// [`PresetVersionDto`] (siehe `apx_catalog::repository::presets`s
+/// Moduldoku: ein Preset kann mehrere Versionen haben, nur die aktuellste
+/// zählt normalerweise).
+#[derive(Debug, Clone, Serialize)]
+pub struct PresetDto {
+    pub id: String,
+    pub folder_id: Option<String>,
+    pub name: String,
+    pub is_favorite: bool,
+    pub tags: Vec<String>,
+    /// Bedingungsregeln (Feld/Operator/Wert, UND-verknüpft) als JSON-
+    /// String — für `apx-app`/`apx-catalog` opak, nur das Frontend kennt
+    /// die Struktur (siehe `DECISIONS.md` ADR-0031 Punkt 4).
+    pub conditions_json: String,
+    pub created_at: String,
+}
+
+impl From<apx_catalog::Preset> for PresetDto {
+    fn from(preset: apx_catalog::Preset) -> Self {
+        Self {
+            id: preset.id.to_string(),
+            folder_id: preset.folder_id.map(|id| id.to_string()),
+            name: preset.name,
+            is_favorite: preset.is_favorite,
+            tags: preset.tags,
+            conditions_json: preset.conditions_json,
+            created_at: preset
+                .created_at
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PresetVersionDto {
+    pub id: String,
+    pub preset_id: String,
+    pub sequence: i64,
+    /// Die EDL-Teilmenge — für `apx-app`/`apx-catalog` ein opaker JSON-
+    /// String, nur das Frontend (`lib/presets.ts`) kennt seine Struktur
+    /// (ein `Partial<EdlPayload>`-artiges Objekt).
+    pub edl_subset_json: String,
+    pub created_at: String,
+}
+
+impl From<apx_catalog::PresetVersion> for PresetVersionDto {
+    fn from(version: apx_catalog::PresetVersion) -> Self {
+        Self {
+            id: version.id.to_string(),
+            preset_id: version.preset_id.to_string(),
+            sequence: version.sequence,
+            edl_subset_json: version.edl_subset_json,
+            created_at: version
+                .created_at
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CreatePresetResultDto {
+    pub preset_id: String,
+    pub version_id: String,
+}
+
+/// Eigenes Dateiformat für Preset-Im-/Export (`DECISIONS.md` ADR-0031
+/// Punkt 3 — kein Adobe-`.xmp`/`.lrtemplate`). `edl_subset`/`conditions`
+/// sind hier bewusst eingebettetes JSON (`serde_json::Value`) statt
+/// eines noch einmal String-kodierten Strings — eine `.apx`-Datei soll
+/// bei Bedarf lesbar sein, kein doppelt escapetes JSON-in-JSON.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ApxPresetFile {
+    schema_version: u32,
+    name: String,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default = "default_json_array")]
+    conditions: serde_json::Value,
+    edl_subset: serde_json::Value,
+}
+
+fn default_json_array() -> serde_json::Value {
+    serde_json::Value::Array(Vec::new())
+}
+
+const APX_PRESET_SCHEMA_VERSION: u32 = 1;
+
 /// Eingabe für [`filter_photos`] — spiegelt `apx_catalog::FilterCriteria`,
 /// aber mit `#[serde(default)]`-Feldern, damit das Frontend nur die
 /// tatsächlich gesetzten Filter mitschicken muss.
@@ -457,6 +568,16 @@ fn parse_collection_id(collection_id: String) -> Result<apx_core::CollectionId, 
         .map_err(|err: apx_core::AppError| err.to_string())
 }
 
+fn parse_preset_folder_id(id: String) -> Result<apx_core::PresetFolderId, String> {
+    id.parse()
+        .map_err(|err: apx_core::AppError| err.to_string())
+}
+
+fn parse_preset_id(id: String) -> Result<apx_core::PresetId, String> {
+    id.parse()
+        .map_err(|err: apx_core::AppError| err.to_string())
+}
+
 /// Committet `edl_json` als neuen, aktiven Bearbeitungsschritt für
 /// `photo_id` — ausgelöst beim Loslassen eines Reglers, nicht bei jedem
 /// Zwischenwert (siehe `PLAN.md` Phase 2 Schritt 5). Validiert die
@@ -737,6 +858,289 @@ pub fn list_photos_in_collection(
     Ok(photos.into_iter().map(PhotoDto::from).collect())
 }
 
+// ---- Presets (ab Phase 5, siehe DECISIONS.md ADR-0031) ---------------------
+
+#[tauri::command]
+pub fn create_preset_folder(
+    state: State<'_, AppState>,
+    name: String,
+    parent_id: Option<String>,
+) -> Result<String, String> {
+    let parent_id = parent_id.map(parse_preset_folder_id).transpose()?;
+    let id = state
+        .catalog
+        .create_preset_folder(&name, parent_id)
+        .map_err(|err| err.to_string())?;
+    Ok(id.to_string())
+}
+
+#[tauri::command]
+pub fn rename_preset_folder(
+    state: State<'_, AppState>,
+    folder_id: String,
+    name: String,
+) -> Result<(), String> {
+    let folder_id = parse_preset_folder_id(folder_id)?;
+    state
+        .catalog
+        .rename_preset_folder(folder_id, &name)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn delete_preset_folder(state: State<'_, AppState>, folder_id: String) -> Result<(), String> {
+    let folder_id = parse_preset_folder_id(folder_id)?;
+    state
+        .catalog
+        .delete_preset_folder(folder_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn list_preset_folders(state: State<'_, AppState>) -> Result<Vec<PresetFolderDto>, String> {
+    let folders = state
+        .catalog
+        .list_preset_folders()
+        .map_err(|err| err.to_string())?;
+    Ok(folders.into_iter().map(PresetFolderDto::from).collect())
+}
+
+#[tauri::command]
+pub fn create_preset(
+    state: State<'_, AppState>,
+    folder_id: Option<String>,
+    name: String,
+    tags: Vec<String>,
+    conditions_json: String,
+    edl_subset_json: String,
+) -> Result<CreatePresetResultDto, String> {
+    let folder_id = folder_id.map(parse_preset_folder_id).transpose()?;
+    let (preset_id, version_id) = state
+        .catalog
+        .create_preset(folder_id, &name, &tags, &conditions_json, &edl_subset_json)
+        .map_err(|err| err.to_string())?;
+    Ok(CreatePresetResultDto {
+        preset_id: preset_id.to_string(),
+        version_id: version_id.to_string(),
+    })
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn update_preset_metadata(
+    state: State<'_, AppState>,
+    preset_id: String,
+    folder_id: Option<String>,
+    name: String,
+    tags: Vec<String>,
+    conditions_json: String,
+) -> Result<(), String> {
+    let preset_id = parse_preset_id(preset_id)?;
+    let folder_id = folder_id.map(parse_preset_folder_id).transpose()?;
+    state
+        .catalog
+        .update_preset_metadata(preset_id, folder_id, &name, &tags, &conditions_json)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn set_preset_favorite(
+    state: State<'_, AppState>,
+    preset_id: String,
+    is_favorite: bool,
+) -> Result<(), String> {
+    let preset_id = parse_preset_id(preset_id)?;
+    state
+        .catalog
+        .set_preset_favorite(preset_id, is_favorite)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn delete_preset(state: State<'_, AppState>, preset_id: String) -> Result<(), String> {
+    let preset_id = parse_preset_id(preset_id)?;
+    state
+        .catalog
+        .delete_preset(preset_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn list_presets(state: State<'_, AppState>) -> Result<Vec<PresetDto>, String> {
+    let presets = state
+        .catalog
+        .list_presets()
+        .map_err(|err| err.to_string())?;
+    Ok(presets.into_iter().map(PresetDto::from).collect())
+}
+
+/// Legt eine neue Version an (siehe `repository::presets`s Moduldoku:
+/// ältere Versionen bleiben erhalten, nur die höchste `sequence` zählt
+/// als aktuell).
+#[tauri::command]
+pub fn add_preset_version(
+    state: State<'_, AppState>,
+    preset_id: String,
+    edl_subset_json: String,
+) -> Result<String, String> {
+    let preset_id = parse_preset_id(preset_id)?;
+    let version_id = state
+        .catalog
+        .add_preset_version(preset_id, &edl_subset_json)
+        .map_err(|err| err.to_string())?;
+    Ok(version_id.to_string())
+}
+
+#[tauri::command]
+pub fn list_preset_versions(
+    state: State<'_, AppState>,
+    preset_id: String,
+) -> Result<Vec<PresetVersionDto>, String> {
+    let preset_id = parse_preset_id(preset_id)?;
+    let versions = state
+        .catalog
+        .list_preset_versions(preset_id)
+        .map_err(|err| err.to_string())?;
+    Ok(versions.into_iter().map(PresetVersionDto::from).collect())
+}
+
+#[tauri::command]
+pub fn latest_preset_version(
+    state: State<'_, AppState>,
+    preset_id: String,
+) -> Result<PresetVersionDto, String> {
+    let preset_id = parse_preset_id(preset_id)?;
+    let version = state
+        .catalog
+        .latest_preset_version(preset_id)
+        .map_err(|err| err.to_string())?;
+    Ok(PresetVersionDto::from(version))
+}
+
+/// Schreibt die aktuellste Version von `preset_id` als eigenes
+/// `.apx`-JSON-Format in eine vom Nutzer gewählte Datei (siehe
+/// `DECISIONS.md` ADR-0031 Punkt 3 — kein Adobe-Format). `Ok(None)`, wenn
+/// der Dateidialog abgebrochen wurde.
+#[tauri::command]
+pub async fn export_preset_to_apx_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    preset_id: String,
+) -> Result<Option<String>, String> {
+    let preset_id = parse_preset_id(preset_id)?;
+    let preset = state
+        .catalog
+        .list_presets()
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .find(|p| p.id == preset_id)
+        .ok_or_else(|| "Preset nicht gefunden".to_string())?;
+    let version = state
+        .catalog
+        .latest_preset_version(preset_id)
+        .map_err(|err| err.to_string())?;
+
+    let file = ApxPresetFile {
+        schema_version: APX_PRESET_SCHEMA_VERSION,
+        name: preset.name.clone(),
+        tags: preset.tags,
+        conditions: serde_json::from_str(&preset.conditions_json)
+            .unwrap_or(serde_json::Value::Array(Vec::new())),
+        edl_subset: serde_json::from_str(&version.edl_subset_json)
+            .map_err(|err| format!("Preset-EDL-Teilmenge ist kein gültiges JSON: {err}"))?,
+    };
+    let json = serde_json::to_string_pretty(&file)
+        .map_err(|err| format!("Preset nicht serialisierbar: {err}"))?;
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("Aperture X Preset", &["apx"])
+        .set_file_name(format!("{}.apx", preset.name))
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|err| format!("Speichern-Dialog fehlgeschlagen: {err}"))?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|err| format!("Ungültiger Pfad: {err}"))?;
+    std::fs::write(&path, json)
+        .map_err(|err| format!("Datei '{}' nicht schreibbar: {err}", path.display()))?;
+    Ok(Some(path.display().to_string()))
+}
+
+/// Liest eine `.apx`-Datei und legt sie als neues Preset in `folder_id`
+/// an. `Ok(None)`, wenn der Dateidialog abgebrochen wurde.
+#[tauri::command]
+pub async fn import_preset_from_apx_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    folder_id: Option<String>,
+) -> Result<Option<PresetDto>, String> {
+    let folder_id = folder_id.map(parse_preset_folder_id).transpose()?;
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("Aperture X Preset", &["apx"])
+        .pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|err| format!("Öffnen-Dialog fehlgeschlagen: {err}"))?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|err| format!("Ungültiger Pfad: {err}"))?;
+    let text = std::fs::read_to_string(&path)
+        .map_err(|err| format!("Datei '{}' nicht lesbar: {err}", path.display()))?;
+    let file: ApxPresetFile = serde_json::from_str(&text).map_err(|err| {
+        format!(
+            "Datei '{}' ist keine gültige .apx-Datei: {err}",
+            path.display()
+        )
+    })?;
+    if file.schema_version > APX_PRESET_SCHEMA_VERSION {
+        return Err(format!(
+            "Datei '{}' hat Schema-Version {}, diese Aperture-X-Version kennt nur {}",
+            path.display(),
+            file.schema_version,
+            APX_PRESET_SCHEMA_VERSION
+        ));
+    }
+
+    let conditions_json =
+        serde_json::to_string(&file.conditions).unwrap_or_else(|_| "[]".to_string());
+    let edl_subset_json = serde_json::to_string(&file.edl_subset)
+        .map_err(|err| format!("EDL-Teilmenge nicht serialisierbar: {err}"))?;
+    let (preset_id, _) = state
+        .catalog
+        .create_preset(
+            folder_id,
+            &file.name,
+            &file.tags,
+            &conditions_json,
+            &edl_subset_json,
+        )
+        .map_err(|err| err.to_string())?;
+    let preset = state
+        .catalog
+        .list_presets()
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .find(|p| p.id == preset_id)
+        .ok_or_else(|| "Preset nach dem Anlegen nicht gefunden".to_string())?;
+    Ok(Some(PresetDto::from(preset)))
+}
+
 // ---- Bibliothek: Suche/Filter (ab Phase 3) ---------------------------------
 
 #[tauri::command]
@@ -858,5 +1262,39 @@ mod tests {
     #[test]
     fn parse_photo_id_rejects_invalid_string() {
         assert!(parse_photo_id("nicht-valide".to_string()).is_err());
+    }
+
+    #[test]
+    fn parse_preset_id_rejects_invalid_string() {
+        assert!(parse_preset_id("nicht-valide".to_string()).is_err());
+    }
+
+    #[test]
+    fn parse_preset_folder_id_rejects_invalid_string() {
+        assert!(parse_preset_folder_id("nicht-valide".to_string()).is_err());
+    }
+
+    #[test]
+    fn apx_preset_file_roundtrips_through_json() {
+        let file = ApxPresetFile {
+            schema_version: APX_PRESET_SCHEMA_VERSION,
+            name: "Warmer Filmlook".to_string(),
+            tags: vec!["warm".to_string(), "film".to_string()],
+            conditions: serde_json::json!([{"field": "iso", "op": ">", "value": "3200"}]),
+            edl_subset: serde_json::json!({"basic": {"exposure_ev": 0.3}}),
+        };
+        let json = serde_json::to_string(&file).expect("sollte serialisierbar sein");
+        let parsed: ApxPresetFile = serde_json::from_str(&json).expect("sollte wieder parsen");
+        assert_eq!(parsed.name, "Warmer Filmlook");
+        assert_eq!(parsed.tags, vec!["warm".to_string(), "film".to_string()]);
+        assert_eq!(parsed.edl_subset, file.edl_subset);
+    }
+
+    #[test]
+    fn apx_preset_file_defaults_missing_tags_and_conditions() {
+        let json = r#"{"schema_version":1,"name":"Minimal","edl_subset":{}}"#;
+        let parsed: ApxPresetFile = serde_json::from_str(json).expect("sollte parsen");
+        assert!(parsed.tags.is_empty());
+        assert_eq!(parsed.conditions, serde_json::Value::Array(Vec::new()));
     }
 }

@@ -501,4 +501,32 @@ test.describe("Entwickeln-Panel", () => {
     expect(lensCorrections.upright_mode).toBe("Guided");
     expect(lensCorrections.guided_lines[0]?.x2).toBeCloseTo(0.8);
   });
+
+  test("Effekte: ein Vignettierung-Regler und ein Körnung-Regler committen", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    const vignetteAmountInput = page.getByRole("spinbutton", { name: "Vignettierung: Betrag (Zahlenwert)" });
+    await vignetteAmountInput.fill("-40");
+    await vignetteAmountInput.blur();
+
+    const grainAmountInput = page.getByRole("spinbutton", { name: "Körnung: Betrag (Zahlenwert)" });
+    await grainAmountInput.fill("60");
+    await grainAmountInput.blur();
+
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.filter((entry) => entry.cmd === "apply_develop_edit").length >= 2;
+    }).toBe(true);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const effects = JSON.parse(edlJson).payload.effects as {
+      post_vignette_amount: number;
+      grain_amount: number;
+    };
+    expect(effects.post_vignette_amount).toBeCloseTo(-40);
+    expect(effects.grain_amount).toBeCloseTo(60);
+  });
 });

@@ -415,8 +415,12 @@ Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Obj
   - [x] Frontend: Objektivprofil-Dropdown, Auto-CA-Checkbox + 2 CA-Regler, Vignette-/Verzeichnungs-Regler, Perspektive/Upright-Dropdown, Hilfslinien-Zahlenfelder (statt Viewer-Klick-Interaktion, siehe ADR-0030) im Guided-Modus, 7 Regler für die manuelle Transformation
   - Verifiziert: `cargo fmt/clippy/test --workspace` (292 Rust-Tests), `tsc -b`, `vitest run` (100 Tests), `playwright test` (28/28), `vite build` — alles lokal grün
 
-- [ ] 10. Effekte
-  - [ ] Nachträgliche Vignettierung, Körnung mit stabilem Pro-Pixel-Seed
+- [x] 10. Effekte
+  - [x] Neues `crates/apx-pipeline/src/stages/effects.rs`/`.wgsl`, läuft nach den Objektivkorrekturen, noch vor der Farbraum-Konvertierung — positions-bewusst, aber ohne echten Nachbarschafts-Zugriff (beide Effekte sind reine Funktionen der Pixelposition)
+  - [x] Nachträgliche Vignettierung: `roundness` blendet zwischen bildseitenverhältnis-passender Ellipse (`0`) und Kreis (`100`, negative Werte wirken wie `0`), `midpoint`/`feather` steuern eine `smoothstep`-Übergangszone, `highlights` schützt helle Pixel proportional zu ihrer Luminanz
+  - [x] Körnung mit stabilem Pro-Pixel-Seed: deterministischer Ganzzahl-Hash aus der (auf `grain_size` heruntergerechneten) Pixelposition — reine Funktion der Position ohne Zeit-/Aufruf-Anteil, daher automatisch flackerfrei über beliebig viele Re-Renders; `roughness` verzerrt die Rauschverteilung über eine Potenzfunktion
+  - [x] Frontend: 5 Vignettierung-Regler + 3 Körnung-Regler
+  - Verifiziert: `cargo fmt/clippy/test --workspace` (302 Rust-Tests), `tsc -b`, `vitest run` (100 Tests), `playwright test` (29/29), `vite build` — alles lokal grün
 
 - [ ] 11. Geometrie (Crop/Rotation)
   - [ ] Freistellen (Presets, Rasterüberlagerungen), Winkel-Werkzeug, vereinfachte Auto-Ausrichtung (nur EXIF-Orientierung)

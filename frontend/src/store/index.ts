@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
 import { buildEdlEnvelopeJson, MAX_COLOR_MIXER_REGIONS, neutralEdlPayload, newColorMixerRegion, parseEdlEnvelopeJson, WHITE_BALANCE_PRESETS, writeBasicField } from "../lib/edl";
-import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, PrimaryColorAdjustment, UprightMode } from "../lib/edl";
+import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, PrimaryColorAdjustment, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
@@ -294,6 +294,9 @@ interface DevelopSlice {
    * Klick-Interaktion im Viewer) — legt die Linie mit Nullkoordinaten an,
    * falls sie noch nicht existiert. Zwischenstand beim Ziehen/Tippen. */
   setLensCorrectionGuidedLineField: (lineIndex: 0 | 1, field: keyof GuidedLine, value: number) => void;
+  /** Setzt eines der acht numerischen Effekte-Felder (Phase 4 Schritt
+   * 10, Vignettierung + Körnung) — Zwischenstand beim Ziehen. */
+  setEffectsField: (key: keyof EffectsAdjustment, value: number) => void;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
    * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
    * bei jedem Zwischenwert). */
@@ -771,6 +774,12 @@ export const useAppStore = create<AppStore>()(
         }
         const line = lines[lineIndex];
         if (line) line[field] = value;
+      });
+    },
+
+    setEffectsField: (key, value) => {
+      set((state) => {
+        state.developEdl.effects[key] = value;
       });
     },
 

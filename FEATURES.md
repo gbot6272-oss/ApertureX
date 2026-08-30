@@ -125,8 +125,8 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Manuelle Transformation (V/H, Drehen, Seitenverhältnis, Skalieren, Versatz) — Phase 4 — Status: Fertig (V/H als Scherung statt echter Homografie, Ausgabegröße bleibt unverändert — Randpixel geklemmt, echtes Zuschneiden folgt in Schritt 11, siehe ADR-0030)
 
 ### Effekte
-- [ ] Nachträgliche Vignettierung — Phase 4 — Status: Nicht begonnen
-- [ ] Körnung — Phase 4 — Status: Nicht begonnen
+- [x] Nachträgliche Vignettierung — Phase 4 — Status: Fertig (abweichend: `roundness` blendet nur in Richtung „runder", `feather`/`midpoint` steuern eine einzelne `smoothstep`-Übergangszone statt eines mehrstufigen Verlaufs, siehe `stages/effects.rs`)
+- [x] Körnung — Phase 4 — Status: Fertig (abweichend: deterministischer Ganzzahl-Hash aus der Pixelposition statt echten mehrstufigen Frequenz-Rauschens — dadurch automatisch stabil über Re-Renders, kein Flackern)
 
 ### Kalibrierung
 - [x] Prozessversion — Phase 4 — Status: Fertig (abweichend, siehe ADR-0028: nur `V1` existiert, reiner Vorwärtskompatibilitäts-Platzhalter ohne aktuellen Effekt, siehe `edl/v2.rs`s Moduldoku)

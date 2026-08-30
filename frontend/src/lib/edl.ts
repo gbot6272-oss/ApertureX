@@ -460,6 +460,20 @@ export const NEUTRAL_EFFECTS: EffectsAdjustment = {
   grain_roughness: 50,
 };
 
+export const POST_VIGNETTE_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "post_vignette_amount", label: "Vignettierung: Betrag", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "post_vignette_midpoint", label: "Vignettierung: Mittelpunkt", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 },
+  { key: "post_vignette_roundness", label: "Vignettierung: Rundheit", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "post_vignette_feather", label: "Vignettierung: Weiche Kante", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 },
+  { key: "post_vignette_highlights", label: "Vignettierung: Lichter", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+];
+
+export const GRAIN_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "grain_amount", label: "Körnung: Betrag", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "grain_size", label: "Körnung: Größe", min: 1, max: 100, fineStep: 1, coarseStep: 10, neutral: 25 },
+  { key: "grain_roughness", label: "Körnung: Unregelmäßigkeit", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 },
+];
+
 // ---- Kalibrierung -----------------------------------------------------------
 
 export type ProcessVersion = "V1";

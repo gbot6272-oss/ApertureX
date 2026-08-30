@@ -6,6 +6,7 @@ import {
   CAMERA_PROFILE_OPTIONS,
   COLOR_MIXER_REGION_SLIDER_SPECS,
   COLOR_NR_SLIDER_SPECS,
+  GRAIN_SLIDER_SPECS,
   HSL_BAND_SLIDER_SPECS,
   HSL_BAND_TABS,
   LENS_CA_SLIDER_SPECS,
@@ -14,6 +15,7 @@ import {
   LUMINANCE_NR_SLIDER_SPECS,
   MANUAL_TRANSFORM_SLIDER_SPECS,
   MAX_COLOR_MIXER_REGIONS,
+  POST_VIGNETTE_SLIDER_SPECS,
   readBasicField,
   SHARPEN_SLIDER_SPECS,
   UPRIGHT_MODE_OPTIONS,
@@ -22,6 +24,7 @@ import {
   type ColorMixerRegion,
   type CurvesAdjustment,
   type DetailsAdjustment,
+  type EffectsAdjustment,
   type GuidedLine,
   type HslAdjustment,
   type LensCorrectionAdjustment,
@@ -126,6 +129,8 @@ export function DevelopPanel() {
   const setLensCorrectionAutoCa = useAppStore((s) => s.setLensCorrectionAutoCa);
   const setLensCorrectionUprightMode = useAppStore((s) => s.setLensCorrectionUprightMode);
   const setLensCorrectionGuidedLineField = useAppStore((s) => s.setLensCorrectionGuidedLineField);
+  const effects = useAppStore((s) => s.developEdl.effects);
+  const setEffectsField = useAppStore((s) => s.setEffectsField);
 
   // Eine per Bildklick neu angelegte Region wird sofort zur Bearbeitung
   // ausgewählt statt dass der Nutzer sie erst in der Liste anklicken muss.
@@ -619,6 +624,32 @@ export function DevelopPanel() {
                   spec={spec}
                   value={lensCorrections.manual_transform[spec.key as keyof ManualTransform]}
                   onChange={(value) => setLensCorrectionManualTransformField(spec.key as keyof ManualTransform, value)}
+                  onCommit={() => void commitDevelopEdit()}
+                />
+              ))}
+            </div>
+          </fieldset>
+
+          <fieldset className="flex flex-col gap-3">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Effekte</legend>
+            <div className="flex flex-col gap-2">
+              {POST_VIGNETTE_SLIDER_SPECS.map((spec) => (
+                <DevelopSlider
+                  key={spec.key}
+                  spec={spec}
+                  value={effects[spec.key as keyof EffectsAdjustment]}
+                  onChange={(value) => setEffectsField(spec.key as keyof EffectsAdjustment, value)}
+                  onCommit={() => void commitDevelopEdit()}
+                />
+              ))}
+            </div>
+            <div className="flex flex-col gap-2">
+              {GRAIN_SLIDER_SPECS.map((spec) => (
+                <DevelopSlider
+                  key={spec.key}
+                  spec={spec}
+                  value={effects[spec.key as keyof EffectsAdjustment]}
+                  onChange={(value) => setEffectsField(spec.key as keyof EffectsAdjustment, value)}
                   onCommit={() => void commitDevelopEdit()}
                 />
               ))}

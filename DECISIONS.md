@@ -1184,6 +1184,18 @@ Daneben tragen zwei Gruppen von `FEATURES.md`-Zeilen bereits die Marke
    Pipeline-Durchlauf — das 16-ms-Ziel wird bei vielen/komplexen Masken
    voraussichtlich Grenzen aufzeigen und ist Gegenstand der
    Abnahme-Schritt-Performance-Nachmessung, genau wie in Phase 2/4.
+   **Nachtrag (Schritt 2, beim Bauen entdeckt):** „nach der
+   Phase-4-Pipeline" war ungenau — Kurven laufen in der globalen
+   Pipeline erst *nach* der Farbraum-Konvertierung auf dem fertigen
+   RGBA8-Puffer, während Grundeinstellungen/HSL/Color Grading/Details im
+   linearen Arbeitsraum *davor* laufen. Da eine Maske alle sechs
+   Werkzeuge in einem Durchlauf anwendet, kann sie nicht an zwei
+   Pipeline-Stellen zugleich sitzen. Präzisierung: die gesamte
+   Maskenstufe läuft im linearen Arbeitsraum, direkt nach `effects` und
+   vor der Farbraum-Konvertierung — Masken-Kurven bekommen dafür eine
+   eigene `curves::apply_linear_rgb`-Funktion (dieselbe LUT, angewendet
+   auf den linearen statt dem display-referred Tonwert), um eine
+   verlustreiche zweite Farbraum-Konvertierung pro Maske zu vermeiden.
 5. **EDL-Schema v3** (`crates/apx-pipeline/src/edl/v3.rs`) statt einer
    Erweiterung von `EdlV2` — derselbe Grund wie beim v1→v2-Sprung in
    Phase 4 (`migrate.rs` kennt keine automatische Feldergänzung, siehe

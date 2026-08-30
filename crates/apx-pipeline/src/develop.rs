@@ -20,7 +20,7 @@ use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
     basic_fused, calibration, color_grading, curves, details, effects, geometry, hsl_color_mixer,
-    lens_corrections, local_contrast, repair, white_balance,
+    lens_corrections, local_contrast, masks, repair, white_balance,
 };
 
 /// Das Ergebnis von [`render_rgba8`] — `width`/`height` beschreiben
@@ -66,6 +66,15 @@ pub struct RenderedImage {
 /// (`stages::geometry`, Drehung + Zuschnitt — der einzige Schritt, der
 /// die Ausgabegröße ändert, siehe `geometry.rs`s Moduldoku und
 /// [`RenderedImage`] — läuft als allerletzter Schritt) sind verdrahtet.
+///
+/// **Phase 6 (siehe `PLAN.md` Phase 6 Schritt 2, `DECISIONS.md`
+/// ADR-0032):** Masken (`stages::masks`) laufen direkt nach `effects`,
+/// noch vor der Farbraum-Konvertierung — jede sichtbare Maske ist ein
+/// eigener Durchlauf, der ihre eigenen ton-/farb-/detailbezogenen
+/// Werkzeuge auf eine Kopie des aktuellen Bildzustands anwendet und
+/// alpha-gewichtet zurückmischt (siehe `masks.rs`s Moduldoku für die
+/// genaue Reihenfolge und die bewusst vereinfachte Kurven-Anwendung im
+/// linearen Arbeitsraum).
 pub fn render_rgba8(
     ctx: Option<&GpuContext>,
     linear: &LinearImage,
@@ -281,7 +290,23 @@ pub fn render_rgba8(
         }
     };
 
-    let rgba = linear_camera_rgb_to_srgb_rgba8(&effected, linear.cam_to_srgb);
+    let masked = if edl.masks.is_empty() {
+        // Kein zusätzlicher Durchlauf, wenn keine Masken vorhanden sind
+        // (Regelfall) — siehe `stages::masks`s Moduldoku für die
+        // Pipeline-Position (nach `effects`, vor der
+        // Farbraum-Konvertierung, noch im linearen Arbeitsraum).
+        effected
+    } else {
+        masks::apply_all(
+            &effected,
+            linear.width,
+            linear.height,
+            linear.as_shot_wb_coeffs,
+            &edl.masks,
+        )
+    };
+
+    let rgba = linear_camera_rgb_to_srgb_rgba8(&masked, linear.cam_to_srgb);
 
     let curved = if edl.curves == CurvesAdjustment::neutral() {
         // Kein zusätzlicher Durchlauf über den ganzen Puffer, wenn alle

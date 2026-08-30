@@ -244,6 +244,50 @@ pub fn apply_rgba8(pixels: &[u8], curves: &CurvesAdjustment) -> Vec<u8> {
         .collect()
 }
 
+/// Wendet dieselben fünf Kurven wie [`apply_rgba8`] an, aber auf einen
+/// interleaved *linearen* RGB-f32-Puffer (3 Kanäle je Pixel, kein Alpha)
+/// — für Masken (`stages::masks`), deren Werkzeuge bewusst alle im
+/// selben linearen Arbeitsraum laufen statt für die Kurve allein einen
+/// Umweg über Farbraum-Konvertierung + Rückkonvertierung zu nehmen
+/// (siehe `masks.rs`s Moduldoku). Dieselbe LUT-Aufbau-/Sample-Logik wie
+/// `apply_rgba8`, nur ohne die u8-Quantisierung am Ein-/Ausgang — die
+/// Kurve wirkt hier auf dem linearen Wert selbst statt auf dem
+/// display-referred Tonwert wie beim globalen Kurven-Werkzeug, eine
+/// bewusste Vereinfachung (siehe `DECISIONS.md` ADR-0032).
+pub fn apply_linear_rgb(pixels: &[f32], curves: &CurvesAdjustment) -> Vec<f32> {
+    let luminance_lut = build_lut(&curves.luminance);
+    let rgb_lut = build_lut(&curves.rgb);
+    let red_lut = build_lut(&curves.red);
+    let green_lut = build_lut(&curves.green);
+    let blue_lut = build_lut(&curves.blue);
+
+    pixels
+        .par_chunks_exact(3)
+        .flat_map_iter(|rgb| {
+            let r0 = rgb[0];
+            let g0 = rgb[1];
+            let b0 = rgb[2];
+
+            let luminance = 0.299 * r0 + 0.587 * g0 + 0.114 * b0;
+            let delta = sample_lut(&luminance_lut, luminance) - luminance;
+
+            let r1 = (r0 + delta).max(0.0);
+            let g1 = (g0 + delta).max(0.0);
+            let b1 = (b0 + delta).max(0.0);
+
+            let r2 = sample_lut(&rgb_lut, r1);
+            let g2 = sample_lut(&rgb_lut, g1);
+            let b2 = sample_lut(&rgb_lut, b1);
+
+            [
+                sample_lut(&red_lut, r2),
+                sample_lut(&green_lut, g2),
+                sample_lut(&blue_lut, b2),
+            ]
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

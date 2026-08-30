@@ -544,12 +544,13 @@ Ebenen-Mischmodus zurückmischen.
   - [x] Tests: v1→v3- und v2→v3-Upgrade-Rundreise, Mask-JSON-Roundtrip mit mehreren Komponententypen
   - [x] `frontend/src/lib/edl.ts`: gespiegelte TS-Typen (`Mask`, `MaskGeometry`, `MaskComponent`, `MaskAdjustments`, `BlendMode`, `MaskGroup`) + Neutral-Konstanten + `newBrushMask`/`emptyBrushGeometry`-Builder; `PresetSectionKey` (Phase 5) schließt `masks`/`mask_groups` mit aus (dieselbe Begründung wie bei `repair`)
 
-- [ ] 2. Pipeline-Architektur: Maskenalpha-Grundgerüst + Anwenden + Zurückmischen
-  - [ ] Neue Dispatch-Form: Maskenalpha-Berechnung (2D, pro Maskentyp ein eigener kleiner Shader/CPU-Fallback, Ausgabe ein Alpha-Puffer)
-  - [ ] Kombinationslogik (Hinzufügen/Subtrahieren/Schneiden) über mehrere Alpha-Puffer
-  - [ ] Zurückmischen: alpha-gewichtete Interpolation zwischen unverändertem und maskiert-bearbeitetem Bildzustand, mit wählbarem Ebenen-Mischmodus (Normal zuerst, weitere in Schritt 6)
-  - [ ] `develop.rs`: Masken-Stufengruppe nach der bestehenden Phase-4-Pipeline einhängen, pro Maske die bestehenden Fused-Pass-Bausteine mit den Masken-EDL-Werten statt der globalen wiederverwenden
-  - [ ] Test mit einer Test-Maske (voll deckend, ganzes Bild) bestätigt: Ergebnis identisch zu einer globalen Anwendung derselben Werte
+- [x] 2. Pipeline-Architektur: Maskenalpha-Grundgerüst + Anwenden + Zurückmischen
+  - [x] Neues `stages/masks.rs`: Maskenalpha-Berechnung **für alle fünf Geometrietypen bereits vollständig implementiert** (nicht nur ein Grundgerüst) — CPU-only in diesem Schritt, siehe Modul-Nachtrag unten für die Begründung; GPU-Beschleunigung + Frontend-Interaktion kommen erst in Schritt 3–5, je Geometriegruppe
+  - [x] Kombinationslogik (`MaskCombine::Add` = Vereinigung/Maximum, `Subtract` = `c·(1-a)`, `Intersect` = `c·a`) über die Komponenten *derselben* Maske
+  - [x] Zurückmischen: alpha-gewichtete Interpolation zwischen unverändertem und maskiert-bearbeitetem Bildzustand — `BlendMode` ist bereits vollständig als Enum da, aber nur `Normal` ist tatsächlich implementiert; die übrigen vier Modi fallen bis Schritt 6 auf denselben linearen Mix zurück (dokumentiert in `masks.rs`, kein `todo!()`)
+  - [x] `develop.rs`: Masken-Stufengruppe **direkt nach `effects`, vor der Farbraum-Konvertierung** eingehängt (Korrektur ggü. der ursprünglichen Formulierung „nach der Phase-4-Pipeline" — siehe Nachtrag unten), pro Maske die bestehenden Stufenfunktionen (`basic_fused`/`local_contrast`/`details`/`hsl_color_mixer`/`color_grading`/neue `curves::apply_linear_rgb`) mit den Masken-EDL-Werten statt der globalen wiederverwendet
+  - [x] Test mit einer Test-Maske (voll deckend, ganzes Bild — ein `RadialGradient` mit Radius 10 und Feather 0) bestätigt: Ergebnis identisch zu einer globalen Anwendung derselben Werte
+  - **Nachtrag (während des Bauens entdeckt):** die ursprüngliche Formulierung „Masken laufen nach der Phase-4-Pipeline" war ungenau — Kurven laufen in der globalen Pipeline erst *nach* der Farbraum-Konvertierung auf dem fertigen RGBA8-Puffer (`curves::apply_rgba8`), während Grundeinstellungen/HSL/Color Grading/Details im linearen Arbeitsraum *davor* laufen. Da eine Maske alle sechs Werkzeuge in einem einzigen Durchlauf anwendet, kann sie nicht an zwei verschiedenen Pipeline-Stellen zugleich sitzen. Entscheidung: die gesamte Maskenstufe läuft im linearen Arbeitsraum (nach `effects`, vor der Konvertierung); Masken-Kurven bekommen dafür eine neue `curves::apply_linear_rgb`-Funktion, die dieselbe LUT auf dem linearen Wert statt dem display-referred Tonwert anwendet — eine bewusste, dokumentierte Vereinfachung (siehe `masks.rs`s Moduldoku), die eine verlustreiche zweite Farbraum-Konvertierung pro Maske vermeidet.
 
 - [ ] 3. Maskentyp Linearer Verlauf + Radialer Verlauf
   - [ ] Analytische Alpha-Funktion (Position relativ zu Start/Ende bzw. Mittelpunkt/Radien), GPU/CPU-Parität

@@ -65,6 +65,42 @@ export interface FilterCriteriaDto {
   camera_model?: string;
 }
 
+// ---- Presets (ab Phase 5, siehe DECISIONS.md ADR-0031) --------------------
+
+export interface PresetFolderDto {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  position: number;
+}
+
+/** Metadaten eines Presets, ohne seine EDL-Teilmenge — die kommt separat
+ * über {@link listPresetVersions}/{@link latestPresetVersion}. */
+export interface PresetDto {
+  id: string;
+  folder_id: string | null;
+  name: string;
+  is_favorite: boolean;
+  tags: string[];
+  /** JSON-String, siehe `lib/presets.ts`s `PresetCondition[]`. */
+  conditions_json: string;
+  created_at: string;
+}
+
+export interface PresetVersionDto {
+  id: string;
+  preset_id: string;
+  sequence: number;
+  /** JSON-String, siehe `lib/presets.ts`s `PresetEdlSubset`. */
+  edl_subset_json: string;
+  created_at: string;
+}
+
+export interface CreatePresetResultDto {
+  preset_id: string;
+  version_id: string;
+}
+
 export function selectFolderDialog(): Promise<string | null> {
   return invoke<string | null>("select_folder");
 }
@@ -163,6 +199,80 @@ export function removeFromCollection(collectionId: string, photoId: string): Pro
 
 export function listPhotosInCollection(collectionId: string): Promise<PhotoDto[]> {
   return invoke<PhotoDto[]>("list_photos_in_collection", { collectionId });
+}
+
+// ---- Presets (ab Phase 5, siehe DECISIONS.md ADR-0031) --------------------
+
+export function createPresetFolder(name: string, parentId: string | null): Promise<string> {
+  return invoke<string>("create_preset_folder", { name, parentId });
+}
+
+export function renamePresetFolder(folderId: string, name: string): Promise<void> {
+  return invoke<void>("rename_preset_folder", { folderId, name });
+}
+
+export function deletePresetFolder(folderId: string): Promise<void> {
+  return invoke<void>("delete_preset_folder", { folderId });
+}
+
+export function listPresetFolders(): Promise<PresetFolderDto[]> {
+  return invoke<PresetFolderDto[]>("list_preset_folders");
+}
+
+export function createPreset(
+  folderId: string | null,
+  name: string,
+  tags: string[],
+  conditionsJson: string,
+  edlSubsetJson: string,
+): Promise<CreatePresetResultDto> {
+  return invoke<CreatePresetResultDto>("create_preset", { folderId, name, tags, conditionsJson, edlSubsetJson });
+}
+
+export function updatePresetMetadata(
+  presetId: string,
+  folderId: string | null,
+  name: string,
+  tags: string[],
+  conditionsJson: string,
+): Promise<void> {
+  return invoke<void>("update_preset_metadata", { presetId, folderId, name, tags, conditionsJson });
+}
+
+export function setPresetFavorite(presetId: string, isFavorite: boolean): Promise<void> {
+  return invoke<void>("set_preset_favorite", { presetId, isFavorite });
+}
+
+export function deletePreset(presetId: string): Promise<void> {
+  return invoke<void>("delete_preset", { presetId });
+}
+
+export function listPresets(): Promise<PresetDto[]> {
+  return invoke<PresetDto[]>("list_presets");
+}
+
+export function addPresetVersion(presetId: string, edlSubsetJson: string): Promise<string> {
+  return invoke<string>("add_preset_version", { presetId, edlSubsetJson });
+}
+
+export function listPresetVersions(presetId: string): Promise<PresetVersionDto[]> {
+  return invoke<PresetVersionDto[]>("list_preset_versions", { presetId });
+}
+
+export function latestPresetVersion(presetId: string): Promise<PresetVersionDto> {
+  return invoke<PresetVersionDto>("latest_preset_version", { presetId });
+}
+
+/** Öffnet einen Speichern-Dialog und schreibt das Preset als `.apx`-Datei.
+ * `null`, wenn der Dialog abgebrochen wurde. */
+export function exportPresetToApxFile(presetId: string): Promise<string | null> {
+  return invoke<string | null>("export_preset_to_apx_file", { presetId });
+}
+
+/** Öffnet einen Öffnen-Dialog und legt die gewählte `.apx`-Datei als neues
+ * Preset an. `null`, wenn der Dialog abgebrochen wurde. */
+export function importPresetFromApxFile(folderId: string | null): Promise<PresetDto | null> {
+  return invoke<PresetDto | null>("import_preset_from_apx_file", { folderId });
 }
 
 // ---- Bibliothek: Suche/Filter (ab Phase 3) ---------------------------------

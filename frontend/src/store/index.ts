@@ -15,6 +15,8 @@ import type {
   HistoryPositionDto,
   KeywordDto,
   PhotoDto,
+  PresetDto,
+  PresetFolderDto,
 } from "../lib/tauri";
 import * as undoStackLib from "../lib/undoStack";
 import type { UndoEntry } from "../lib/undoStack";
@@ -431,7 +433,31 @@ interface LibrarySlice {
   redoLibraryAction: () => Promise<void>;
 }
 
-export type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice & LibrarySlice;
+// ---- Presets-Slice (ab Phase 5, siehe DECISIONS.md ADR-0031) --------------
+
+interface PresetsSlice {
+  presetFolders: PresetFolderDto[];
+  /** Metadaten aller Presets — ihre EDL-Teilmenge wird separat je nach
+   * Bedarf geladen (`api.latestPresetVersion`/`api.listPresetVersions`),
+   * nicht hier vorgehalten (kann pro Preset mehrere Versionen haben). */
+  presets: PresetDto[];
+  /** `null` = Wurzel-Ansicht (Presets ohne Ordner + alle Unterordner). */
+  selectedPresetFolderId: string | null;
+  refreshPresetFolders: () => Promise<void>;
+  refreshPresets: () => Promise<void>;
+  createPresetFolder: (name: string, parentId: string | null) => Promise<void>;
+  renamePresetFolder: (folderId: string, name: string) => Promise<void>;
+  deletePresetFolder: (folderId: string) => Promise<void>;
+  selectPresetFolder: (folderId: string | null) => void;
+  setPresetFavorite: (presetId: string, isFavorite: boolean) => Promise<void>;
+  /** Benennt ein Preset um, ohne seine übrigen Metadaten (Ordner/Tags/
+   * Bedingungen) zu verändern. */
+  renamePreset: (presetId: string, name: string) => Promise<void>;
+  movePresetToFolder: (presetId: string, folderId: string | null) => Promise<void>;
+  deletePreset: (presetId: string) => Promise<void>;
+}
+
+export type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice & LibrarySlice & PresetsSlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -1416,6 +1442,134 @@ export const useAppStore = create<AppStore>()(
         state.libraryUndoStack = next.undoStack;
         state.libraryRedoStack = next.redoStack;
       });
+    },
+
+    presetFolders: [],
+    presets: [],
+    selectedPresetFolderId: null,
+
+    refreshPresetFolders: async () => {
+      try {
+        const folders = await api.listPresetFolders();
+        set((state) => {
+          state.presetFolders = folders;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    refreshPresets: async () => {
+      try {
+        const presets = await api.listPresets();
+        set((state) => {
+          state.presets = presets;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    createPresetFolder: async (name, parentId) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      try {
+        await api.createPresetFolder(trimmed, parentId);
+        await get().refreshPresetFolders();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    renamePresetFolder: async (folderId, name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      try {
+        await api.renamePresetFolder(folderId, trimmed);
+        await get().refreshPresetFolders();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    deletePresetFolder: async (folderId) => {
+      try {
+        await api.deletePresetFolder(folderId);
+        await Promise.all([get().refreshPresetFolders(), get().refreshPresets()]);
+        if (get().selectedPresetFolderId === folderId) {
+          set((state) => {
+            state.selectedPresetFolderId = null;
+          });
+        }
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    selectPresetFolder: (folderId) => {
+      set((state) => {
+        state.selectedPresetFolderId = folderId;
+      });
+    },
+
+    setPresetFavorite: async (presetId, isFavorite) => {
+      try {
+        await api.setPresetFavorite(presetId, isFavorite);
+        await get().refreshPresets();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    renamePreset: async (presetId, name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      const preset = get().presets.find((p) => p.id === presetId);
+      if (!preset) return;
+      try {
+        await api.updatePresetMetadata(presetId, preset.folder_id, trimmed, preset.tags, preset.conditions_json);
+        await get().refreshPresets();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    movePresetToFolder: async (presetId, folderId) => {
+      const preset = get().presets.find((p) => p.id === presetId);
+      if (!preset) return;
+      try {
+        await api.updatePresetMetadata(presetId, folderId, preset.name, preset.tags, preset.conditions_json);
+        await get().refreshPresets();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    deletePreset: async (presetId) => {
+      try {
+        await api.deletePreset(presetId);
+        await get().refreshPresets();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
     },
     };
   }),

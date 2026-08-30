@@ -8,6 +8,7 @@ import { Filmstrip } from "./components/Filmstrip";
 import { GridView } from "./components/GridView";
 import { Header } from "./components/Header";
 import { MetadataPanel } from "./components/MetadataPanel";
+import { PresetsPanel } from "./components/PresetsPanel";
 import { Sidebar } from "./components/Sidebar";
 import { Viewer } from "./components/Viewer";
 import { useImportEvents } from "./hooks/useImportEvents";
@@ -118,6 +119,7 @@ export default function App() {
       {centerView === "grid" && <FilterBar />}
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
+        <PresetsPanel />
         {centerView === "grid" ? <GridView /> : <Viewer />}
         <MetadataPanel />
         <DevelopPanel />

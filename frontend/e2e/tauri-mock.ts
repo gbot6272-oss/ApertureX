@@ -77,6 +77,47 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   let nextCollectionId = 1;
   let nextKeywordId = 1;
 
+  // Presets (ab Phase 5, siehe `DECISIONS.md` ADR-0031) — wie bei
+  // Sammlungen: einfache In-Memory-Nachbildung von `apx-catalog`s
+  // preset_folders/presets/preset_versions.
+  interface MockPresetFolder {
+    id: string;
+    name: string;
+    parent_id: string | null;
+    position: number;
+  }
+  interface MockPreset {
+    id: string;
+    folder_id: string | null;
+    name: string;
+    is_favorite: boolean;
+    tags: string[];
+    conditions_json: string;
+    created_at: string;
+  }
+  interface MockPresetVersion {
+    id: string;
+    preset_id: string;
+    sequence: number;
+    edl_subset_json: string;
+    created_at: string;
+  }
+  // Seedbar über `installTauriMock`s Fixtures (siehe `folders`/
+  // `photosByFolder` oben) — Presets starten in einem echten Katalog zwar
+  // immer leer, aber Tests für Umbenennen/Favorisieren/Löschen brauchen
+  // ein bereits vorhandenes Preset, ohne den (erst in Schritt 4 gebauten)
+  // Erstellen-Dialog durchklicken zu müssen.
+  const presetFolders: MockPresetFolder[] = [...((initialFixtures.presetFolders as MockPresetFolder[] | undefined) ?? [])];
+  const presets: MockPreset[] = [...((initialFixtures.presets as MockPreset[] | undefined) ?? [])];
+  const presetVersions: Record<string, MockPresetVersion[]> = {};
+  let nextPresetFolderId = 1;
+  let nextPresetId = 1;
+  let nextPresetVersionId = 1;
+
+  function findPreset(presetId: string): MockPreset | undefined {
+    return presets.find((p) => p.id === presetId);
+  }
+
   function allPhotos(): MockPhoto[] {
     const fixtures = w.__mockFixtures as { photosByFolder: Record<string, MockPhoto[]> };
     return Object.values(fixtures.photosByFolder).flat();
@@ -346,6 +387,118 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         }
         return [...byHash.values()].filter((group) => group.length > 1).map((group) => group.map(clonePhoto));
       }
+
+      // ---- Presets (ab Phase 5) ---------------------------------------------
+      case "create_preset_folder": {
+        const id = `preset-folder-${nextPresetFolderId++}`;
+        const parentId = (args.parentId as string | null) ?? null;
+        const siblingCount = presetFolders.filter((f) => f.parent_id === parentId).length;
+        presetFolders.push({ id, name: args.name as string, parent_id: parentId, position: siblingCount });
+        return id;
+      }
+      case "rename_preset_folder": {
+        const folder = presetFolders.find((f) => f.id === args.folderId);
+        if (folder) folder.name = args.name as string;
+        return null;
+      }
+      case "delete_preset_folder": {
+        const folderId = args.folderId as string;
+        const toDelete = new Set([folderId]);
+        // Kaskadierendes Löschen verschachtelter Unterordner, wie
+        // `ON DELETE CASCADE` bei echten `preset_folders`.
+        let grew = true;
+        while (grew) {
+          grew = false;
+          for (const f of presetFolders) {
+            if (f.parent_id && toDelete.has(f.parent_id) && !toDelete.has(f.id)) {
+              toDelete.add(f.id);
+              grew = true;
+            }
+          }
+        }
+        for (let i = presetFolders.length - 1; i >= 0; i -= 1) {
+          if (toDelete.has(presetFolders[i].id)) presetFolders.splice(i, 1);
+        }
+        // Presets rutschen an die Wurzel statt gelöscht zu werden (siehe
+        // `repository::presets::delete_folder`s Moduldoku).
+        for (const preset of presets) {
+          if (preset.folder_id && toDelete.has(preset.folder_id)) preset.folder_id = null;
+        }
+        return null;
+      }
+      case "list_preset_folders":
+        return presetFolders.map((f) => ({ ...f }));
+      case "create_preset": {
+        const presetId = `preset-${nextPresetId++}`;
+        const versionId = `preset-version-${nextPresetVersionId++}`;
+        const now = new Date().toISOString();
+        presets.push({
+          id: presetId,
+          folder_id: (args.folderId as string | null) ?? null,
+          name: args.name as string,
+          is_favorite: false,
+          tags: [...(args.tags as string[])],
+          conditions_json: args.conditionsJson as string,
+          created_at: now,
+        });
+        presetVersions[presetId] = [
+          { id: versionId, preset_id: presetId, sequence: 1, edl_subset_json: args.edlSubsetJson as string, created_at: now },
+        ];
+        return { preset_id: presetId, version_id: versionId };
+      }
+      case "update_preset_metadata": {
+        const preset = findPreset(args.presetId as string);
+        if (preset) {
+          preset.folder_id = (args.folderId as string | null) ?? null;
+          preset.name = args.name as string;
+          preset.tags = [...(args.tags as string[])];
+          preset.conditions_json = args.conditionsJson as string;
+        }
+        return null;
+      }
+      case "set_preset_favorite": {
+        const preset = findPreset(args.presetId as string);
+        if (preset) preset.is_favorite = args.isFavorite as boolean;
+        return null;
+      }
+      case "delete_preset": {
+        const presetId = args.presetId as string;
+        const index = presets.findIndex((p) => p.id === presetId);
+        if (index >= 0) presets.splice(index, 1);
+        delete presetVersions[presetId];
+        return null;
+      }
+      case "list_presets":
+        return presets.map((p) => ({ ...p, tags: [...p.tags] }));
+      case "add_preset_version": {
+        const presetId = args.presetId as string;
+        const versions = (presetVersions[presetId] ??= []);
+        const versionId = `preset-version-${nextPresetVersionId++}`;
+        const nextSequence = versions.reduce((max, v) => Math.max(max, v.sequence), 0) + 1;
+        versions.push({
+          id: versionId,
+          preset_id: presetId,
+          sequence: nextSequence,
+          edl_subset_json: args.edlSubsetJson as string,
+          created_at: new Date().toISOString(),
+        });
+        return versionId;
+      }
+      case "list_preset_versions":
+        return [...(presetVersions[args.presetId as string] ?? [])];
+      case "latest_preset_version": {
+        const versions = presetVersions[args.presetId as string] ?? [];
+        const latest = versions[versions.length - 1];
+        if (!latest) throw new Error(`Test-Stub: keine Version für Preset "${String(args.presetId)}"`);
+        return { ...latest };
+      }
+      // `.apx`-Dateidialoge lassen sich ohne echtes Betriebssystemfenster
+      // nicht sinnvoll nachbilden — beide Commands simulieren einen
+      // abgebrochenen Dialog (`null`), die eigentliche Im-/Export-Logik
+      // ist bereits in `apx-app`s `commands.rs`-Tests abgedeckt.
+      case "export_preset_to_apx_file":
+      case "import_preset_from_apx_file":
+        return null;
 
       default:
         throw new Error(`Test-Stub: unbekannter invoke-Befehl "${cmd}"`);

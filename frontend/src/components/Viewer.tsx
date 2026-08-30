@@ -53,6 +53,8 @@ export function Viewer() {
   const selectedMask = useAppStore((s) => s.developEdl.masks.find((m) => m.id === selectedMaskId) ?? null);
   const updateMaskGeometry = useAppStore((s) => s.updateMaskGeometry);
   const commitMaskDrag = useAppStore((s) => s.commitMaskDrag);
+  const addMaskBrushStroke = useAppStore((s) => s.addMaskBrushStroke);
+  const removeMaskBrushStroke = useAppStore((s) => s.removeMaskBrushStroke);
   const removeRepairStroke = useAppStore((s) => s.removeRepairStroke);
   const commitDevelopEdit = useAppStore((s) => s.commitDevelopEdit);
 
@@ -173,8 +175,10 @@ export function Viewer() {
   // gesamte Bildfläche mit einem eigenen `pointer-events-auto`-Div ab
   // (anders als `CropOverlay`, dessen anfassbare Fläche auf das kleine
   // Freistellungsrechteck beschränkt ist) — Ziehen soll dort malen, nicht
-  // schwenken.
-  const canPan = !repairActive && (spaceHeld || effectiveScale > fitScale + 1e-6);
+  // schwenken. Dieselbe Fläche deckt `MaskOverlay` für eine ausgewählte
+  // Pinselmaske ab (Phase 6 Schritt 4).
+  const selectedMaskIsBrush = selectedMask?.components[0]?.geometry.kind === "Brush";
+  const canPan = !repairActive && !selectedMaskIsBrush && (spaceHeld || effectiveScale > fitScale + 1e-6);
 
   const handleMouseDown = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
@@ -335,7 +339,9 @@ export function Viewer() {
 
       {photo &&
         selectedMask &&
-        (selectedMask.components[0]?.geometry.kind === "LinearGradient" || selectedMask.components[0]?.geometry.kind === "RadialGradient") &&
+        (selectedMask.components[0]?.geometry.kind === "LinearGradient" ||
+          selectedMask.components[0]?.geometry.kind === "RadialGradient" ||
+          selectedMask.components[0]?.geometry.kind === "Brush") &&
         imgW > 0 &&
         imgH > 0 && (
           <MaskOverlay
@@ -346,6 +352,8 @@ export function Viewer() {
             geometry={selectedMask.components[0].geometry}
             onChange={(geometry) => updateMaskGeometry(selectedMask.id, geometry)}
             onCommit={commitMaskDrag}
+            onPaintBrushStroke={(points) => addMaskBrushStroke(selectedMask.id, points)}
+            onRemoveBrushStroke={(index) => removeMaskBrushStroke(selectedMask.id, index)}
           />
         )}
 

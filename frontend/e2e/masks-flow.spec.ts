@@ -141,4 +141,44 @@ test.describe("Masken-Panel", () => {
     const globalExposure = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" }).first();
     await expect(globalExposure).toHaveValue("0");
   });
+
+  test("Pinselmaske: ein Ziehvorgang im Bild malt einen Strich, Entfernen committet erneut", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "+ Pinsel" }).click();
+
+    await expect(page.getByText("Ins Bild klicken und ziehen, um zu malen.")).toBeVisible();
+
+    // Malen: ein kurzer Ziehvorgang neben der Bildmitte (dieselbe Annahme
+    // wie beim Reparatur-Pinsel-Test: Bildmitte == Container-Mitte).
+    const mainBox = await page.getByRole("main").boundingBox();
+    if (!mainBox) throw new Error("Viewer-Container nicht gefunden");
+    const centerX = mainBox.x + mainBox.width / 2;
+    const centerY = mainBox.y + mainBox.height / 2;
+    await page.mouse.move(centerX - 20, centerY - 20);
+    await page.mouse.down();
+    await page.mouse.move(centerX + 20, centerY + 10, { steps: 4 });
+    await page.mouse.up();
+
+    await expect
+      .poll(async () => {
+        const log = await getMockInvokeLog(page);
+        return log.filter((entry) => entry.cmd === "apply_develop_edit").length;
+      })
+      .toBeGreaterThan(1);
+
+    const masks = await lastMasks(page);
+    const strokes = (masks[0] as unknown as { components: Array<{ geometry: { strokes: Array<{ points: Array<{ x: number; y: number }> }> } }> }).components[0]
+      .geometry.strokes;
+    expect(strokes).toHaveLength(1);
+    expect(strokes[0].points.length).toBeGreaterThan(0);
+
+    await page.getByRole("button", { name: "Entfernen", exact: true }).click();
+
+    await expect
+      .poll(async () => {
+        const masks = await lastMasks(page);
+        return (masks[0] as unknown as { components: Array<{ geometry: { strokes: unknown[] } }> }).components[0].geometry.strokes.length;
+      })
+      .toBe(0);
+  });
 });

@@ -1,3 +1,4 @@
+import type { SliderSpec } from "../lib/edl";
 import { BASIC_SLIDER_SPECS, MASK_SLIDER_SPECS, readBasicField } from "../lib/edl";
 import { useAppStore } from "../store";
 import { DevelopSlider } from "./DevelopSlider";
@@ -10,11 +11,16 @@ import { DevelopSlider } from "./DevelopSlider";
 const MASK_BASIC_SLIDER_KEYS = ["exposure_ev", "contrast"];
 const MASK_BASIC_SLIDER_SPECS = BASIC_SLIDER_SPECS.filter((spec) => MASK_BASIC_SLIDER_KEYS.includes(spec.key));
 
+/** Entwurfsregler für den *nächsten* im Viewer gemalten Pinselstrich
+ * (Phase 6 Schritt 4) — analog zu `DevelopPanel.tsx`s
+ * `REPAIR_RADIUS_SPEC`/`REPAIR_FEATHER_SPEC`. */
+const BRUSH_RADIUS_SPEC: SliderSpec = { key: "radius", label: "Pinsel: Radius (% der Bildbreite)", min: 1, max: 50, fineStep: 0.5, coarseStep: 5, neutral: 5 };
+const BRUSH_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Pinsel: Weiche Kante (% der Bildbreite)", min: 0, max: 25, fineStep: 0.5, coarseStep: 2, neutral: 2 };
+
 /**
- * Maskenverwaltung (Phase 6 Schritt 3, siehe `DECISIONS.md` ADR-0032) —
+ * Maskenverwaltung (Phase 6 Schritt 3+4, siehe `DECISIONS.md` ADR-0032) —
  * Liste vorhandener Masken, Anlegen neuer Masken (Linearer/Radialer
- * Verlauf — Pinsel folgt in Schritt 4, sobald seine Viewer-Interaktion
- * existiert), Auswahl zum Bearbeiten, kleine Reglerauswahl für die
+ * Verlauf, Pinsel), Auswahl zum Bearbeiten, kleine Reglerauswahl für die
  * ausgewählte Maske. Wie `DevelopPanel` nur sichtbar, während das
  * Entwickeln-Panel offen ist.
  */
@@ -32,10 +38,15 @@ export function MasksPanel() {
   const commitMaskDrag = useAppStore((s) => s.commitMaskDrag);
   const setMaskBasicField = useAppStore((s) => s.setMaskBasicField);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
+  const maskBrushDraftRadius = useAppStore((s) => s.maskBrushDraftRadius);
+  const maskBrushDraftFeather = useAppStore((s) => s.maskBrushDraftFeather);
+  const setMaskBrushDraftField = useAppStore((s) => s.setMaskBrushDraftField);
+  const removeMaskBrushStroke = useAppStore((s) => s.removeMaskBrushStroke);
 
   if (!open) return null;
 
   const selectedMask = masks.find((m) => m.id === selectedMaskId) ?? null;
+  const selectedMaskGeometry = selectedMask?.components[0]?.geometry;
 
   function handleRename(maskId: string, currentName: string, event: React.MouseEvent) {
     event.stopPropagation();
@@ -63,6 +74,14 @@ export function MasksPanel() {
           className="flex-1 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
           + Radialer Verlauf
+        </button>
+        <button
+          type="button"
+          onClick={() => addMask("Brush")}
+          disabled={!selectedPhotoId}
+          className="flex-1 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          + Pinsel
         </button>
       </div>
 
@@ -106,6 +125,36 @@ export function MasksPanel() {
         ))}
         {masks.length === 0 && <li className="text-xs text-text-muted">Keine Masken vorhanden.</li>}
       </ul>
+
+      {selectedMask && selectedMaskGeometry?.kind === "Brush" && (
+        <div className="flex flex-col gap-2 border-t border-border pt-2">
+          <p className="text-xs text-text-muted">Ins Bild klicken und ziehen, um zu malen.</p>
+          <DevelopSlider
+            spec={BRUSH_RADIUS_SPEC}
+            value={maskBrushDraftRadius * 100}
+            onChange={(value) => setMaskBrushDraftField("radius", value / 100)}
+            onCommit={() => {}}
+          />
+          <DevelopSlider
+            spec={BRUSH_FEATHER_SPEC}
+            value={maskBrushDraftFeather * 100}
+            onChange={(value) => setMaskBrushDraftField("feather", value / 100)}
+            onCommit={() => {}}
+          />
+          {selectedMaskGeometry.strokes.length > 0 && (
+            <ul className="flex flex-col gap-1 text-xs text-text-secondary">
+              {selectedMaskGeometry.strokes.map((_, index) => (
+                <li key={index} className="flex items-center justify-between rounded border border-border px-2 py-1">
+                  <span>Pinselstrich {index + 1}</span>
+                  <button type="button" onClick={() => removeMaskBrushStroke(selectedMask.id, index)} className="text-danger underline">
+                    Entfernen
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {selectedMask && (
         <div className="flex flex-col gap-2 border-t border-border pt-2">

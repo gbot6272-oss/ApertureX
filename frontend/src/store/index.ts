@@ -14,7 +14,7 @@ import {
   WHITE_BALANCE_PRESETS,
   writeBasicField,
 } from "../lib/edl";
-import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, MaskGeometry, PrimaryColorAdjustment, RepairMode, RepairPoint, UprightMode } from "../lib/edl";
+import type { CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairMode, RepairPoint, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import {
   applyConditionsToSubset,
@@ -609,6 +609,19 @@ interface MasksSlice {
   setMaskOpacity: (maskId: string, opacity: number) => void;
   setMaskFeather: (maskId: string, feather: number) => void;
   setMaskBasicField: (maskId: string, key: string, value: number) => void;
+
+  /** Radius/Weichzeichnung für den *nächsten* gemalten Pinselstrich
+   * (Phase 6 Schritt 4) — analog zu `repairDraftRadius`/`repairDraftFeather`:
+   * kein EDL-Feld, sondern reiner Interaktionszustand, der beim Malen in
+   * den neuen `BrushStroke` übernommen wird. */
+  maskBrushDraftRadius: number;
+  maskBrushDraftFeather: number;
+  setMaskBrushDraftField: (key: "radius" | "feather", value: number) => void;
+  /** Hängt einen fertig gemalten Strich (bereits ausgedünnter Zielpfad,
+   * siehe `MaskOverlay.tsx`) an die erste Komponente der Maske an — ein
+   * No-op, falls deren Geometrie kein `Brush` ist. Committet sofort. */
+  addMaskBrushStroke: (maskId: string, points: MaskPoint[]) => void;
+  removeMaskBrushStroke: (maskId: string, strokeIndex: number) => void;
 }
 
 export type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice & LibrarySlice & PresetsSlice & MasksSlice;
@@ -2044,6 +2057,36 @@ export const useAppStore = create<AppStore>()(
         const mask = state.developEdl.masks.find((m) => m.id === maskId);
         if (mask) writeBasicField(mask.adjustments.basic, key, value);
       });
+    },
+
+    maskBrushDraftRadius: 0.05,
+    maskBrushDraftFeather: 0.02,
+
+    setMaskBrushDraftField: (key, value) => {
+      set((state) => {
+        if (key === "radius") state.maskBrushDraftRadius = value;
+        else state.maskBrushDraftFeather = value;
+      });
+    },
+
+    addMaskBrushStroke: (maskId, points) => {
+      if (points.length === 0) return;
+      const { maskBrushDraftRadius, maskBrushDraftFeather } = get();
+      set((state) => {
+        const geometry = state.developEdl.masks.find((m) => m.id === maskId)?.components[0]?.geometry;
+        if (geometry?.kind !== "Brush") return;
+        geometry.strokes.push({ points, radius: maskBrushDraftRadius, feather: maskBrushDraftFeather });
+      });
+      void get().commitDevelopEdit();
+    },
+
+    removeMaskBrushStroke: (maskId, strokeIndex) => {
+      set((state) => {
+        const geometry = state.developEdl.masks.find((m) => m.id === maskId)?.components[0]?.geometry;
+        if (geometry?.kind !== "Brush") return;
+        geometry.strokes.splice(strokeIndex, 1);
+      });
+      void get().commitDevelopEdit();
     },
     };
   }),

@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 
-import type { MaskGeometry } from "../lib/edl";
+import type { MaskGeometry, MaskPoint } from "../lib/edl";
 
 interface MaskOverlayProps {
   /** Position/Größe des angezeigten Bildes in Bildschirm-Pixeln, wie bei
@@ -12,6 +12,36 @@ interface MaskOverlayProps {
   geometry: MaskGeometry;
   onChange: (next: MaskGeometry) => void;
   onCommit: () => void;
+  /** Nur für `geometry.kind === "Brush"` benötigt: ein fertig gemalter
+   * Strich (bereits ausgedünnter Pfad) bzw. das Entfernen eines
+   * bestehenden Strichs. */
+  onPaintBrushStroke?: (points: MaskPoint[]) => void;
+  onRemoveBrushStroke?: (strokeIndex: number) => void;
+}
+
+/** Muss `masks.rs`s Ausdünnungs-Erwartung entsprechen — derselbe Ansatz
+ * wie `RepairOverlay.tsx`s `MAX_TARGET_PATH_POINTS` (dort an
+ * `repair.rs`s `MAX_PATH_POINTS` gebunden; Masken-Pinselstriche haben
+ * keine entsprechende Rust-seitige Obergrenze, aber derselbe Wert hält
+ * das EDL-JSON unabhängig von der Zeigerabtastrate kompakt). */
+const MAX_BRUSH_STROKE_POINTS = 32;
+
+function thinBrushPath(path: MaskPoint[]): MaskPoint[] {
+  if (path.length <= MAX_BRUSH_STROKE_POINTS) return path;
+  const step = (path.length - 1) / (MAX_BRUSH_STROKE_POINTS - 1);
+  const thinned: MaskPoint[] = [];
+  for (let i = 0; i < MAX_BRUSH_STROKE_POINTS; i += 1) {
+    const point = path[Math.round(i * step)];
+    if (point) thinned.push(point);
+  }
+  return thinned;
+}
+
+function brushPointFromEvent(event: { clientX: number; clientY: number }, rect: DOMRect): MaskPoint {
+  return {
+    x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+    y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
+  };
 }
 
 type DragHandle = "start" | "end" | "center" | "radius";
@@ -24,20 +54,36 @@ const HANDLE_CLASS =
   "absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-accent shadow focus:outline focus:outline-2 focus:outline-white";
 
 /**
- * Ziehgriffe für Linearen/Radialen Verlauf (Phase 6 Schritt 3) — analog
- * zu `CropOverlay`s Ecken-Ziehgriffen: `onChange` während des Ziehens
- * (Live-Vorschau, kein Commit), `onCommit` beim Loslassen.
+ * Ziehgriffe für Linearen/Radialen Verlauf (Phase 6 Schritt 3) + Malen für
+ * Pinselmasken (Schritt 4) — analog zu `CropOverlay`s Ecken-Ziehgriffen
+ * bzw. `RepairOverlay`s Pfad-Malen: `onChange`/`onPaintBrushStroke` während
+ * bzw. am Ende der Interaktion, `onCommit` beim Loslassen.
  *
  * **Bewusste Vereinfachung:** der Radialverlauf-Ziehgriff steuert nur
  * einen einzelnen, gemeinsamen Radius (`radius_x == radius_y`, kreisförmig)
  * — unabhängige Achsen und Rotation sind im Datenmodell bereits vorhanden
  * (`MaskGeometry::RadialGradient`), bekommen aber erst in einem späteren
  * Schritt eigene Ziehgriffe (z. B. Ellipsen-Achsen-Handles + Rotations-
- * Handle), um diesen Schritt nicht unnötig aufzublähen.
+ * Handle), um diesen Schritt nicht unnötig aufzublähen. Die Pinsel-
+ * Live-Vorschau ist wie bei `RepairOverlay` rein clientseitig (dieses
+ * SVG), der tatsächliche Pipeline-Effekt erscheint erst nach Loslassen.
  */
-export function MaskOverlay({ imageLeft, imageTop, imageWidth, imageHeight, geometry, onChange, onCommit }: MaskOverlayProps) {
+export function MaskOverlay({
+  imageLeft,
+  imageTop,
+  imageWidth,
+  imageHeight,
+  geometry,
+  onChange,
+  onCommit,
+  onPaintBrushStroke,
+  onRemoveBrushStroke,
+}: MaskOverlayProps) {
   const [dragHandle, setDragHandle] = useState<DragHandle | null>(null);
   const dragStart = useRef<{ x: number; y: number; geometry: MaskGeometry } | null>(null);
+  const [drawingBrushPath, setDrawingBrushPath] = useState<MaskPoint[] | null>(null);
+  const brushPathRef = useRef<MaskPoint[]>([]);
+  const brushPaintingRef = useRef(false);
 
   const startDrag = useCallback(
     (handle: DragHandle, event: React.PointerEvent) => {
@@ -49,8 +95,28 @@ export function MaskOverlay({ imageLeft, imageTop, imageWidth, imageHeight, geom
     [geometry],
   );
 
+  const handleBrushPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (geometry.kind !== "Brush") return;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      const rect = event.currentTarget.getBoundingClientRect();
+      const point = brushPointFromEvent(event, rect);
+      brushPaintingRef.current = true;
+      brushPathRef.current = [point];
+      setDrawingBrushPath(brushPathRef.current);
+    },
+    [geometry.kind],
+  );
+
   const handlePointerMove = useCallback(
-    (event: React.PointerEvent) => {
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (brushPaintingRef.current) {
+        const rect = event.currentTarget.getBoundingClientRect();
+        brushPathRef.current = [...brushPathRef.current, brushPointFromEvent(event, rect)];
+        setDrawingBrushPath(brushPathRef.current);
+        return;
+      }
+
       if (!dragHandle || !dragStart.current || imageWidth <= 0 || imageHeight <= 0) return;
       const dx = (event.clientX - dragStart.current.x) / imageWidth;
       const dy = (event.clientY - dragStart.current.y) / imageHeight;
@@ -78,11 +144,20 @@ export function MaskOverlay({ imageLeft, imageTop, imageWidth, imageHeight, geom
   );
 
   const handlePointerUp = useCallback(() => {
+    if (brushPaintingRef.current) {
+      brushPaintingRef.current = false;
+      const path = brushPathRef.current;
+      brushPathRef.current = [];
+      setDrawingBrushPath(null);
+      if (path.length > 0) onPaintBrushStroke?.(thinBrushPath(path));
+      return;
+    }
+
     if (dragHandle) {
       setDragHandle(null);
       onCommit();
     }
-  }, [dragHandle, onCommit]);
+  }, [dragHandle, onCommit, onPaintBrushStroke]);
 
   const handleKeyDown = useCallback(
     (handle: DragHandle) => (event: React.KeyboardEvent) => {
@@ -117,8 +192,9 @@ export function MaskOverlay({ imageLeft, imageTop, imageWidth, imageHeight, geom
 
   return (
     <div
-      className="absolute"
+      className={`absolute${geometry.kind === "Brush" ? " cursor-crosshair" : ""}`}
       style={{ left: imageLeft, top: imageTop, width: imageWidth, height: imageHeight }}
+      onPointerDown={handleBrushPointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
     >
@@ -192,6 +268,60 @@ export function MaskOverlay({ imageLeft, imageTop, imageWidth, imageHeight, geom
             onPointerDown={(event) => startDrag("radius", event)}
             onKeyDown={handleKeyDown("radius")}
           />
+        </>
+      )}
+
+      {geometry.kind === "Brush" && (
+        <>
+          <svg className="pointer-events-none absolute inset-0 h-full w-full" preserveAspectRatio="none" viewBox="0 0 100 100">
+            {geometry.strokes.map((stroke, index) => (
+              <polyline
+                key={index}
+                points={stroke.points.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")}
+                fill="none"
+                stroke="#4ade80"
+                strokeWidth={Math.max(0.4, stroke.radius * 100)}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity={0.5}
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+            {drawingBrushPath && drawingBrushPath.length > 0 && (
+              // Feste Vorschaubreite statt des Entwurfs-Radius aus dem
+              // Store — dieses Overlay kennt nur die Geometrie, nicht die
+              // draftRadius/-Feather-Werte des Aufrufers; die Live-Linie
+              // dient ohnehin nur der Pfad-Vorschau, nicht der Radiusgröße.
+              <polyline
+                points={drawingBrushPath.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")}
+                fill="none"
+                stroke="white"
+                strokeWidth={1.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+          </svg>
+          {geometry.strokes.map((stroke, index) => {
+            const last = stroke.points[stroke.points.length - 1];
+            if (!last) return null;
+            return (
+              <button
+                key={index}
+                type="button"
+                aria-label={`Pinselstrich ${index + 1} entfernen`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRemoveBrushStroke?.(index);
+                }}
+                className="pointer-events-auto absolute flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-bg-raised/90 text-[10px] leading-none text-text-primary outline-none focus:ring-1 focus:ring-accent"
+                style={{ left: `${last.x * 100}%`, top: `${last.y * 100}%` }}
+              >
+                ×
+              </button>
+            );
+          })}
         </>
       )}
     </div>

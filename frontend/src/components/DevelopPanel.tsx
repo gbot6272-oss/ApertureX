@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 
 import {
   ASPECT_RATIO_PRESETS,
@@ -37,7 +38,8 @@ import {
   type SliderSpec,
 } from "../lib/edl";
 import { PRESET_SECTION_KEYS, PRESET_SECTION_LABELS, type PresetSectionKey } from "../lib/presets";
-import { useAppStore } from "../store";
+import { SOFT_PROOF_INTENT_LABELS, SOFT_PROOF_PROFILE_LABELS, type SoftProofIntent, type SoftProofProfile } from "../lib/softProof";
+import { selectActivePhotos, useAppStore } from "../store";
 import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
@@ -107,6 +109,22 @@ export function DevelopPanel() {
   const restoreSnapshot = useAppStore((s) => s.restoreSnapshot);
   const beforeAfterMode = useAppStore((s) => s.beforeAfterMode);
   const setBeforeAfterMode = useAppStore((s) => s.setBeforeAfterMode);
+  const referenceViewActive = useAppStore((s) => s.referenceViewActive);
+  const toggleReferenceView = useAppStore((s) => s.toggleReferenceView);
+  const referencePhotoId = useAppStore((s) => s.referencePhotoId);
+  const setReferencePhotoId = useAppStore((s) => s.setReferencePhotoId);
+  const softProofActive = useAppStore((s) => s.softProofActive);
+  const toggleSoftProof = useAppStore((s) => s.toggleSoftProof);
+  const softProofProfile = useAppStore((s) => s.softProofProfile);
+  const setSoftProofProfile = useAppStore((s) => s.setSoftProofProfile);
+  const softProofIntent = useAppStore((s) => s.softProofIntent);
+  const setSoftProofIntent = useAppStore((s) => s.setSoftProofIntent);
+  const softProofGamutWarning = useAppStore((s) => s.softProofGamutWarning);
+  const toggleSoftProofGamutWarning = useAppStore((s) => s.toggleSoftProofGamutWarning);
+  const softProofPaperWhite = useAppStore((s) => s.softProofPaperWhite);
+  const toggleSoftProofPaperWhite = useAppStore((s) => s.toggleSoftProofPaperWhite);
+  const activePhotos = useAppStore(useShallow(selectActivePhotos));
+  const otherPhotosForReference = activePhotos.filter((p) => p.id !== selectedPhotoId);
   const copiedEdlSubset = useAppStore((s) => s.copiedEdlSubset);
   const copyDevelopSettings = useAppStore((s) => s.copyDevelopSettings);
   const pasteDevelopSettings = useAppStore((s) => s.pasteDevelopSettings);
@@ -347,6 +365,93 @@ export function DevelopPanel() {
               Geteilt vertikal
             </button>
           </div>
+        </fieldset>
+      )}
+
+      {selectedPhotoId && (
+        <fieldset className="flex flex-col gap-1">
+          <legend className="mb-1 text-xs font-medium text-text-secondary">Referenzansicht</legend>
+          <label className="flex items-center gap-2 text-xs text-text-secondary">
+            Referenzfoto
+            <select
+              aria-label="Referenzfoto"
+              value={referencePhotoId ?? ""}
+              onChange={(event) => setReferencePhotoId(event.target.value || null)}
+              className="flex-1 rounded border border-border bg-bg-panel px-1.5 py-0.5"
+            >
+              <option value="">Foto wählen…</option>
+              {otherPhotosForReference.map((photo) => (
+                <option key={photo.id} value={photo.id}>
+                  {photo.filename}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={toggleReferenceView}
+            disabled={!referencePhotoId}
+            aria-pressed={referenceViewActive}
+            className={`rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${referenceViewActive ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"}`}
+          >
+            Referenzansicht {referenceViewActive ? "ausblenden" : "anzeigen"}
+          </button>
+        </fieldset>
+      )}
+
+      {selectedPhotoId && (
+        <fieldset className="flex flex-col gap-2">
+          <legend className="mb-1 text-xs font-medium text-text-secondary">Soft-Proof</legend>
+          <button
+            type="button"
+            onClick={toggleSoftProof}
+            aria-pressed={softProofActive}
+            className={`rounded border px-2 py-1 text-xs ${softProofActive ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"}`}
+          >
+            Soft-Proof {softProofActive ? "ausschalten" : "einschalten"}
+          </button>
+          {softProofActive && (
+            <>
+              <label className="flex items-center gap-2 text-xs text-text-secondary">
+                Zielprofil
+                <select
+                  aria-label="Soft-Proof-Zielprofil"
+                  value={softProofProfile}
+                  onChange={(event) => setSoftProofProfile(event.target.value as SoftProofProfile)}
+                  className="flex-1 rounded border border-border bg-bg-panel px-1.5 py-0.5"
+                >
+                  {Object.entries(SOFT_PROOF_PROFILE_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-text-secondary">
+                Renderpriorität
+                <select
+                  aria-label="Soft-Proof-Renderpriorität"
+                  value={softProofIntent}
+                  onChange={(event) => setSoftProofIntent(event.target.value as SoftProofIntent)}
+                  className="flex-1 rounded border border-border bg-bg-panel px-1.5 py-0.5"
+                >
+                  {Object.entries(SOFT_PROOF_INTENT_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-text-secondary">
+                <input type="checkbox" checked={softProofGamutWarning} onChange={toggleSoftProofGamutWarning} />
+                Farbumfangswarnung
+              </label>
+              <label className="flex items-center gap-2 text-xs text-text-secondary">
+                <input type="checkbox" checked={softProofPaperWhite} onChange={toggleSoftProofPaperWhite} />
+                Papierweiß-Simulation
+              </label>
+            </>
+          )}
         </fieldset>
       )}
 

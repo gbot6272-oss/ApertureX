@@ -32,6 +32,7 @@ import {
 import type { PresetCondition, PresetConditionPhotoMeta, PresetEdlSubset, PresetSectionKey } from "../lib/presets";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
+import type { SoftProofIntent, SoftProofProfile } from "../lib/softProof";
 import * as api from "../lib/tauri";
 import type {
   CatalogStatusDto,
@@ -54,8 +55,11 @@ import { computeWhiteBalanceShiftFromSample } from "../lib/whiteBalancePicker";
 /** Wandelt eine `HistoryPositionDto` (siehe `lib/tauri.ts`) in ein volles
  * `EdlPayload` um — `Neutral` bedeutet "wie aufgenommen", ein unlesbares
  * `edl_json` fällt (mit einer Konsolen-Warnung) ebenfalls auf neutral
- * zurück statt abzustürzen. */
-function edlFromHistoryPosition(position: HistoryPositionDto): EdlPayload {
+ * zurück statt abzustürzen. Exportiert seit Phase 6 Schritt 10: die
+ * Referenzansicht (`ReferenceView.tsx`) lädt damit den Stand eines
+ * *anderen* Fotos, genau wie `applyPreviousSettings`/`syncSettingsToSelection`
+ * es hier bereits für andere Fotos tun. */
+export function edlFromHistoryPosition(position: HistoryPositionDto): EdlPayload {
   if (position.kind === "Neutral") return neutralEdlPayload();
   const parsed = parseEdlEnvelopeJson(position.edl_json);
   if (!parsed) {
@@ -318,6 +322,33 @@ interface DevelopSlice {
    * aufgenommen), „Nachher" der aktuelle `developEdl`-Stand. */
   beforeAfterMode: "none" | "sideBySide" | "stacked" | "splitVertical" | "splitHorizontal";
   setBeforeAfterMode: (mode: AppStore["beforeAfterMode"]) => void;
+
+  /** Referenzansicht (Phase 6 Schritt 10, `SPEC.md` §3.4/§7:
+   * "Referenzbild links, Arbeitsbild rechts") — ein beliebiges anderes
+   * Foto wird links statisch (letzter committeter Stand) neben dem
+   * rechts live bearbeiteten Arbeitsbild angezeigt, siehe
+   * `ReferenceView.tsx`. Unabhängig vom globalen `zoom`/`panX`/`panY`:
+   * jede Bildhälfte führt ihren eigenen Zoom/Pan-Zustand lokal in der
+   * Komponente (siehe deren Moduldoku zur Begründung). */
+  referenceViewActive: boolean;
+  referencePhotoId: string | null;
+  toggleReferenceView: () => void;
+  setReferencePhotoId: (photoId: string | null) => void;
+
+  /** Soft-Proof-Vorschau (Phase 6 Schritt 10, `SPEC.md` §3.4/§7) — siehe
+   * `lib/softProof.ts`s Moduldoku für die Vereinfachung gegenüber echtem
+   * ICC-Farbmanagement (`DECISIONS.md` ADR-0032 Punkt 6). Reine
+   * Anzeige-Einstellung, nicht Teil des EDL/der Datenbank. */
+  softProofActive: boolean;
+  softProofProfile: SoftProofProfile;
+  softProofIntent: SoftProofIntent;
+  softProofGamutWarning: boolean;
+  softProofPaperWhite: boolean;
+  toggleSoftProof: () => void;
+  setSoftProofProfile: (profile: SoftProofProfile) => void;
+  setSoftProofIntent: (intent: SoftProofIntent) => void;
+  toggleSoftProofGamutWarning: () => void;
+  toggleSoftProofPaperWhite: () => void;
 
   /** Setzt ein einzelnes Grundeinstellungs-Feld (Regler-Zwischenwert beim
    * Ziehen) — siehe `lib/edl.ts`s `SliderSpec.key` für gültige Schlüssel. */
@@ -1254,6 +1285,57 @@ export const useAppStore = create<AppStore>()(
     setBeforeAfterMode: (mode) => {
       set((state) => {
         state.beforeAfterMode = mode;
+      });
+    },
+
+    referenceViewActive: false,
+    referencePhotoId: null,
+
+    toggleReferenceView: () => {
+      set((state) => {
+        state.referenceViewActive = !state.referenceViewActive;
+      });
+    },
+
+    setReferencePhotoId: (photoId) => {
+      set((state) => {
+        state.referencePhotoId = photoId;
+      });
+    },
+
+    softProofActive: false,
+    softProofProfile: "srgb",
+    softProofIntent: "perceptual",
+    softProofGamutWarning: false,
+    softProofPaperWhite: false,
+
+    toggleSoftProof: () => {
+      set((state) => {
+        state.softProofActive = !state.softProofActive;
+      });
+    },
+
+    setSoftProofProfile: (profile) => {
+      set((state) => {
+        state.softProofProfile = profile;
+      });
+    },
+
+    setSoftProofIntent: (intent) => {
+      set((state) => {
+        state.softProofIntent = intent;
+      });
+    },
+
+    toggleSoftProofGamutWarning: () => {
+      set((state) => {
+        state.softProofGamutWarning = !state.softProofGamutWarning;
+      });
+    },
+
+    toggleSoftProofPaperWhite: () => {
+      set((state) => {
+        state.softProofPaperWhite = !state.softProofPaperWhite;
       });
     },
 

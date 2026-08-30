@@ -7,12 +7,14 @@ import { buildEdlEnvelopeJson } from "../lib/edl";
 import { formatShutter } from "../lib/format";
 import { imageUrl, previewUrl } from "../lib/media";
 import { mergeEdlSubset } from "../lib/presets";
+import { applySoftProof } from "../lib/softProof";
 import { clampZoom, computeBaseScale, imageOrigin, nextZoomStep, panForZoomAtCursor } from "../lib/viewerMath";
 import { QuadRenderer } from "../lib/webgl";
 import { useAppStore } from "../store";
 import { BeforeAfterView } from "./BeforeAfterView";
 import { CropOverlay } from "./CropOverlay";
 import { MaskOverlay } from "./MaskOverlay";
+import { ReferenceView } from "./ReferenceView";
 import { RepairOverlay } from "./RepairOverlay";
 
 // Zielkante für die hochauflösende Anzeige: an der Container-Größe
@@ -38,6 +40,12 @@ export function Viewer() {
   const developPanelOpen = useAppStore((s) => s.developPanelOpen);
   const developEdl = useAppStore((s) => s.developEdl);
   const beforeAfterMode = useAppStore((s) => s.beforeAfterMode);
+  const referenceViewActive = useAppStore((s) => s.referenceViewActive);
+  const softProofActive = useAppStore((s) => s.softProofActive);
+  const softProofProfile = useAppStore((s) => s.softProofProfile);
+  const softProofIntent = useAppStore((s) => s.softProofIntent);
+  const softProofGamutWarning = useAppStore((s) => s.softProofGamutWarning);
+  const softProofPaperWhite = useAppStore((s) => s.softProofPaperWhite);
   const hoverPresetSubset = useAppStore((s) => s.hoverPresetSubset);
   const wbPickerActive = useAppStore((s) => s.wbPickerActive);
   const pickWhiteBalanceAt = useAppStore((s) => s.pickWhiteBalanceAt);
@@ -143,7 +151,20 @@ export function Viewer() {
     }
 
     if (developFrame && drawSource === developFrame) {
-      renderer.uploadRgba8(developFrame.width, developFrame.height, developFrame.pixels);
+      // Soft-Proof (Phase 6 Schritt 10) betrifft nur die live entwickelte
+      // Vorschau, nie das rohe Vorschau-/Vollbild-Bitmap (das läuft ja
+      // nicht über die `develop/...`-Route) — siehe `lib/softProof.ts`s
+      // Moduldoku zur bewussten Beschränkung auf eine reine
+      // Anzeige-Nachbearbeitung.
+      const pixels = softProofActive
+        ? applySoftProof(developFrame, {
+            profile: softProofProfile,
+            intent: softProofIntent,
+            gamutWarning: softProofGamutWarning,
+            paperWhite: softProofPaperWhite,
+          })
+        : developFrame.pixels;
+      renderer.uploadRgba8(developFrame.width, developFrame.height, pixels);
     } else if (activeBitmap && drawSource === activeBitmap) {
       renderer.uploadImageBitmap(activeBitmap);
     }
@@ -153,7 +174,24 @@ export function Viewer() {
     // Vergrößerung (PHASE1_PROMPT.md Abschnitt 7).
     renderer.setSmoothing(effectiveScale <= 1);
     renderer.draw(cssWidth, cssHeight, dpr, origin, imgW * effectiveScale, imgH * effectiveScale);
-  }, [drawSource, developFrame, activeBitmap, containerSize.width, containerSize.height, dpr, effectiveScale, imgW, imgH, panX, panY]);
+  }, [
+    drawSource,
+    developFrame,
+    activeBitmap,
+    containerSize.width,
+    containerSize.height,
+    dpr,
+    effectiveScale,
+    imgW,
+    imgH,
+    panX,
+    panY,
+    softProofActive,
+    softProofProfile,
+    softProofIntent,
+    softProofGamutWarning,
+    softProofPaperWhite,
+  ]);
 
   // ---- Maus: Zoom zum Cursor, Pan per Ziehen ---------------------------
 
@@ -325,8 +363,17 @@ export function Viewer() {
 
       <canvas ref={canvasRef} className="pointer-events-none absolute inset-0" />
 
-      {photo && beforeAfterMode !== "none" && (
-        <BeforeAfterView photoId={developPhotoId} afterEdlJson={developEdlJson} maxEdge={containerSize.width > 0 ? targetFullEdge : undefined} />
+      {photo && referenceViewActive ? (
+        <ReferenceView
+          workingPhotoId={developPhotoId}
+          workingEdlJson={developEdlJson}
+          maxEdge={containerSize.width > 0 ? targetFullEdge : undefined}
+        />
+      ) : (
+        photo &&
+        beforeAfterMode !== "none" && (
+          <BeforeAfterView photoId={developPhotoId} afterEdlJson={developEdlJson} maxEdge={containerSize.width > 0 ? targetFullEdge : undefined} />
+        )
       )}
 
       {photo && geometryCropActive && imgW > 0 && imgH > 0 && (

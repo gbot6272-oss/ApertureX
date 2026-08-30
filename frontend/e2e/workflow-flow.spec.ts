@@ -202,3 +202,68 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
     await expect.poll(async () => lastExposureFor(page, PHOTO.id)).toBeCloseTo(-0.3, 2);
   });
 });
+
+/**
+ * Deckt Phase 6 Schritt 10 ab (`DECISIONS.md` ADR-0032, `SPEC.md`
+ * §3.4/§7): Referenzansicht (Referenzbild links, Arbeitsbild rechts) und
+ * Soft-Proof (Zielprofil, Renderpriorität, Farbumfangswarnung,
+ * Papierweiß-Simulation) — beides reine Viewer-/Anzeige-Zustände, ohne
+ * Backend-Commit (siehe `lib/softProof.ts`s Moduldoku).
+ */
+test.describe("Workflow: Referenzansicht + Soft-Proof", () => {
+  test("Referenzansicht zeigt Referenz- und Arbeitsbild nebeneinander an und lässt sich wieder ausblenden", async ({ page }) => {
+    await setUpWithSelectedPhoto(page, [PHOTO_2]);
+
+    await expect(page.getByLabel("Referenzansicht")).toHaveCount(0);
+
+    const showButton = page.getByRole("button", { name: "Referenzansicht anzeigen" });
+    // Ohne gewähltes Referenzfoto bleibt der Knopf deaktiviert.
+    await expect(showButton).toBeDisabled();
+
+    await page.getByRole("combobox", { name: "Referenzfoto" }).selectOption(PHOTO_2.id);
+    await expect(showButton).toBeEnabled();
+    await showButton.click();
+
+    const referenceView = page.getByLabel("Referenzansicht");
+    await expect(referenceView).toBeVisible();
+    await expect(referenceView.getByText("Referenz", { exact: true })).toBeVisible();
+    await expect(referenceView.getByText("Arbeitsbild", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "Referenzansicht ausblenden" }).click();
+    await expect(page.getByLabel("Referenzansicht")).toHaveCount(0);
+  });
+
+  test("Soft-Proof schaltet Zielprofil/Renderpriorität/Warnung/Papierweiß frei, ohne einen Commit auszulösen", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+
+    await expect(page.getByLabel("Soft-Proof-Zielprofil")).toHaveCount(0);
+
+    const logBefore = await getMockInvokeLog(page);
+    const commitsBefore = logBefore.filter((entry) => entry.cmd === "apply_develop_edit").length;
+
+    await page.getByRole("button", { name: "Soft-Proof einschalten" }).click();
+    const profileSelect = page.getByRole("combobox", { name: "Soft-Proof-Zielprofil" });
+    const intentSelect = page.getByRole("combobox", { name: "Soft-Proof-Renderpriorität" });
+    await expect(profileSelect).toBeVisible();
+    await expect(intentSelect).toBeVisible();
+
+    await profileSelect.selectOption("print_sim");
+    await intentSelect.selectOption("relative_colorimetric");
+    await page.getByLabel("Farbumfangswarnung").check();
+    await page.getByLabel("Papierweiß-Simulation").check();
+
+    await expect(profileSelect).toHaveValue("print_sim");
+    await expect(intentSelect).toHaveValue("relative_colorimetric");
+    await expect(page.getByLabel("Farbumfangswarnung")).toBeChecked();
+    await expect(page.getByLabel("Papierweiß-Simulation")).toBeChecked();
+
+    // Soft-Proof ist reine Anzeige-Nachbearbeitung des Vorschau-Puffers
+    // (siehe `lib/softProof.ts`) — keiner der obigen Klicks committet.
+    const logAfter = await getMockInvokeLog(page);
+    const commitsAfter = logAfter.filter((entry) => entry.cmd === "apply_develop_edit").length;
+    expect(commitsAfter).toBe(commitsBefore);
+
+    await page.getByRole("button", { name: "Soft-Proof ausschalten" }).click();
+    await expect(page.getByLabel("Soft-Proof-Zielprofil")).toHaveCount(0);
+  });
+});

@@ -1227,6 +1227,21 @@ Daneben tragen zwei Gruppen von `FEATURES.md`-Zeilen bereits die Marke
    Schnappschuss statt eines Verweises — kein Restore-Sonderweg nötig,
    ihr Anwenden ist derselbe `apply_develop_edit`-Aufruf wie jeder andere
    EDL-Stand.
+
+   **Präzisierung (Schritt 10, beim Bauen entschieden):** Soft-Proof
+   ("kein vollständiges ICC-Farbmanagement-Subsystem", siehe oben) ist
+   als **rein clientseitige Nachbearbeitung** des bereits über die
+   bestehende `develop/...`-Route gerenderten RGBA8-Vorschau-Puffers
+   umgesetzt (`frontend/src/lib/softProof.ts`), nicht als neue
+   Backend-/Pipeline-Stufe — `apx-pipeline` kennt bis heute nur eine
+   feste Kamera→sRGB-Matrix plus Gammakurve, kein ICC-Profil-Laden oder
+   3D-Gamut-Mapping (`crates/apx-pipeline/src/color/mod.rs`), ein neues
+   Backend-Subsystem allein für eine Anzeige-Vorschau wäre unverhältnis-
+   mäßig. Zielprofil/Renderpriorität/Farbumfangswarnung/Papierweiß sind
+   entsprechend Näherungen (Sättigungs-Kompression Richtung Grauwert,
+   Sättigungs-Schwellenwert statt echtem Gamut-Volumen, feste lineare
+   Tonwert-Bereichskompression) — siehe `softProof.ts`s Moduldoku für
+   Details. Betrifft nie den echten Export, nur die Anzeige.
 7. **Bibliotheks-Backlog (Gruppe 2, siehe Kontext) wird explizit auf
    Phase 9 verschoben, nicht in Phase 6 mitgenommen.** Keine ADR hat
    Phase 6 für diese Zeilen je zugesagt; sie parallel zum Maskensystem

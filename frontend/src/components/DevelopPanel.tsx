@@ -1,10 +1,21 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
-import { BASIC_SLIDER_SPECS, readBasicField, WHITE_BALANCE_PRESETS } from "../lib/edl";
+import { BASIC_SLIDER_SPECS, readBasicField, WHITE_BALANCE_PRESETS, type CurvesAdjustment } from "../lib/edl";
 import { useAppStore } from "../store";
+import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
 
 const WHITE_BALANCE_KEYS = new Set(["temp_shift_kelvin", "tint_shift"]);
+
+/** Die fünf Kurven-Kanäle (Phase 4 Schritt 4) — Anzeigereihenfolge wie in
+ * `SPEC.md` §3.2 („RGB-Verbundkurve, R/G/B einzeln, Luminanz-Kurve"). */
+const CURVE_CHANNEL_TABS: ReadonlyArray<{ key: keyof CurvesAdjustment; label: string }> = [
+  { key: "rgb", label: "RGB" },
+  { key: "red", label: "Rot" },
+  { key: "green", label: "Grün" },
+  { key: "blue", label: "Blau" },
+  { key: "luminance", label: "Luminanz" },
+];
 
 /**
  * Das Entwickeln-Panel: die sieben Grundeinstellungs-Regler (Weißabgleich
@@ -34,6 +45,9 @@ export function DevelopPanel() {
   const wbPickerActive = useAppStore((s) => s.wbPickerActive);
   const toggleWbPicker = useAppStore((s) => s.toggleWbPicker);
   const applyWhiteBalancePreset = useAppStore((s) => s.applyWhiteBalancePreset);
+  const curves = useAppStore((s) => s.developEdl.curves);
+  const setCurveChannel = useAppStore((s) => s.setCurveChannel);
+  const [activeCurveChannel, setActiveCurveChannel] = useState<keyof CurvesAdjustment>("rgb");
 
   useEffect(() => {
     if (!open) return;
@@ -156,6 +170,31 @@ export function DevelopPanel() {
               />
             ))}
           </div>
+
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Kurven</legend>
+            <div className="flex flex-wrap gap-1">
+              {CURVE_CHANNEL_TABS.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setActiveCurveChannel(tab.key)}
+                  aria-pressed={activeCurveChannel === tab.key}
+                  className={`rounded border px-2 py-1 text-xs ${
+                    activeCurveChannel === tab.key ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <CurveEditor
+              key={activeCurveChannel}
+              channel={curves[activeCurveChannel]}
+              onChange={(next) => setCurveChannel(activeCurveChannel, next)}
+              onCommit={() => void commitDevelopEdit()}
+            />
+          </fieldset>
         </>
       )}
     </aside>

@@ -96,6 +96,66 @@ export function neutralCurves(): CurvesAdjustment {
   };
 }
 
+/** Die vier Regler der parametrischen Kurve — Reihenfolge/Beschriftung
+ * wie in Lightrooms eigenem Gradationskurven-Werkzeug (Phase 4 Schritt 4). */
+// Beschriftungen bewusst mit "(Kurve)"-Suffix bei den beiden Namen, die
+// sich sonst mit den gleichnamigen Grundeinstellungs-Reglern überschneiden
+// würden (`Lichter`/`Tiefen`) — sowohl für Screenreader-Nutzer als auch
+// für `getByRole("slider", { name })` in Tests eindeutig.
+export const PARAMETRIC_CURVE_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "highlights", label: "Lichter (Kurve)", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "lights", label: "Helle Töne", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "darks", label: "Dunkle Töne", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "shadows", label: "Tiefen (Kurve)", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+] as const;
+
+export interface CurvePreset {
+  key: string;
+  label: string;
+  points: CurvePoint[];
+}
+
+/** Feste Kurven-Presets (`SPEC.md` §3.2 „Kurven ... Presets"), anwendbar
+ * auf jeden der fünf Kanäle. */
+export const CURVE_PRESETS: readonly CurvePreset[] = [
+  {
+    key: "linear",
+    label: "Linear",
+    points: [
+      { input: 0, output: 0 },
+      { input: 1, output: 1 },
+    ],
+  },
+  {
+    key: "medium_contrast",
+    label: "Leichter Kontrast",
+    points: [
+      { input: 0, output: 0 },
+      { input: 0.25, output: 0.2 },
+      { input: 0.75, output: 0.8 },
+      { input: 1, output: 1 },
+    ],
+  },
+  {
+    key: "strong_contrast",
+    label: "Starker Kontrast",
+    points: [
+      { input: 0, output: 0 },
+      { input: 0.25, output: 0.12 },
+      { input: 0.75, output: 0.88 },
+      { input: 1, output: 1 },
+    ],
+  },
+  {
+    key: "linear_negative",
+    label: "Negativ",
+    points: [
+      { input: 0, output: 1 },
+      { input: 1, output: 0 },
+    ],
+  },
+] as const;
+
 // ---- HSL --------------------------------------------------------------------
 
 export interface HslBand {

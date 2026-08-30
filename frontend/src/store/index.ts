@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 
 import { buildEdlEnvelopeJson, neutralEdlPayload, parseEdlEnvelopeJson, WHITE_BALANCE_PRESETS, writeBasicField } from "../lib/edl";
-import type { EdlPayload } from "../lib/edl";
+import type { CurveChannel, CurvesAdjustment, EdlPayload } from "../lib/edl";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
 import * as api from "../lib/tauri";
@@ -225,6 +225,10 @@ interface DevelopSlice {
   /** Setzt den Weißabgleich absolut auf eines der `WHITE_BALANCE_PRESETS`
    * und committet sofort. */
   applyWhiteBalancePreset: (key: string) => void;
+  /** Ersetzt eine der fünf Kurven (Phase 4 Schritt 4, siehe
+   * `components/CurveEditor.tsx`) — Zwischenstand beim Ziehen, committet
+   * wird separat über `commitDevelopEdit()`. */
+  setCurveChannel: (key: keyof CurvesAdjustment, channel: CurveChannel) => void;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
    * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
    * bei jedem Zwischenwert). */
@@ -597,6 +601,12 @@ export const useAppStore = create<AppStore>()(
         state.developEdl.basic.white_balance = { temp_shift_kelvin: preset.temp_shift_kelvin, tint_shift: preset.tint_shift };
       });
       void get().commitDevelopEdit();
+    },
+
+    setCurveChannel: (key, channel) => {
+      set((state) => {
+        state.developEdl.curves[key] = channel;
+      });
     },
 
     commitDevelopEdit: async (label) => {

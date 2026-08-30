@@ -11,6 +11,7 @@
 
 pub mod basic_fused;
 pub mod contrast;
+pub mod curves;
 pub mod exposure;
 pub mod highlights_shadows;
 pub mod local_contrast;

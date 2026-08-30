@@ -371,9 +371,12 @@ Ziel (laut `SPEC.md` §5): Kurven, HSL, Farbmischer, Color Grading, Details, Obj
   - [x] WB-Pipette: neues `lib/whiteBalancePicker.ts` (Klick-Farbwert → additive Temperatur-/Tint-Korrektur, bewusste Vereinfachung auf dem gamma-kodierten Anzeigebild statt linearem Kamera-RGB, siehe Moduldoku), Viewer-Klick-Interaktion (Crosshair-Cursor, Pan währenddessen deaktiviert), Pipette-Umschaltknopf in `DevelopPanel.tsx`
   - Verifiziert: `tsc -b`, `vitest run` (80 Tests), `playwright test` (15/15), `vite build` — alles lokal grün; Rust-Seite unverändert (Schritt 2 hat den Shader/CPU-Teil bereits geliefert)
 
-- [ ] 4. Kurven
-  - [ ] Punktkurve (monotone kubische Spline) + parametrische Kurve, RGB-Verbundkurve + R/G/B einzeln + Luminanz-Kurve, numerische Punkteingabe, Presets
-  - [ ] Neues `frontend/src/components/CurveEditor.tsx`
+- [x] 4. Kurven
+  - [x] Sequenzierungsfrage aus Schritt 2 entschieden: Kurven laufen als CPU-LUT-Nachschritt auf dem fertigen RGBA8-Puffer, nach der Farbraum-Konvertierung — kein GPU-Dispatch nötig (Begründung in `curves.rs`s Moduldoku)
+  - [x] `crates/apx-pipeline/src/stages/curves.rs`: Fritsch-Carlson-monotone-kubische-Spline für Punktkurven, vereinfachtes Gauß-gewichtetes Vier-Zonen-Modell für parametrische Kurven, feste Verkettungsreihenfolge Luminanz→RGB→R/G/B
+  - [x] Neues `frontend/src/lib/curveMath.ts` (TS-Spiegel für die Editor-Vorschau) + `frontend/src/lib/edl.ts`s `PARAMETRIC_CURVE_SLIDER_SPECS`/`CURVE_PRESETS`
+  - [x] Neues `frontend/src/components/CurveEditor.tsx` — SVG statt `<canvas>` (fokussierbare, per Tastatur bedienbare Punkte statt Pixel-Hit-Testing, siehe Moduldoku dort), Punkte-/Parametrisch-Umschalter, numerische Punkteingabe, Presets-Dropdown; in `DevelopPanel.tsx` mit 5 Kanal-Tabs (RGB/Rot/Grün/Blau/Luminanz)
+  - Verifiziert: `cargo fmt/clippy/test --workspace` (244 Rust-Tests), `tsc -b`, `vitest run` (88 Tests), `playwright test` (19/19), `vite build` — alles lokal grün
 
 - [ ] 5. HSL + Farbmischer erweitert
   - [ ] 8-Band-HSL-UI, Farbmischer mit Bild-Klick-Farbaufnahme (teilt Sampling-Code mit WB-Pipette)

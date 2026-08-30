@@ -85,12 +85,12 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Sättigung — Phase 4 — Status: Fertig
 
 ### Gradationskurve
-- [ ] Punktkurve — Phase 4 — Status: Nicht begonnen
-- [ ] Parametrische Kurve — Phase 4 — Status: Nicht begonnen
-- [ ] RGB-Verbundkurve + einzelne Kanäle — Phase 4 — Status: Nicht begonnen
-- [ ] Luminanz-Kurve — Phase 4 — Status: Nicht begonnen
-- [ ] Numerische Punkteingabe — Phase 4 — Status: Nicht begonnen
-- [ ] Kurven-Presets — Phase 4 — Status: Nicht begonnen
+- [x] Punktkurve — Phase 4 — Status: Fertig (monotone kubische Fritsch-Carlson-Spline, siehe `crates/apx-pipeline/src/stages/curves.rs`)
+- [x] Parametrische Kurve — Phase 4 — Status: Fertig (vereinfachtes Gauß-gewichtetes Vier-Zonen-Modell statt echter verschiebbarer Split-Punkte, siehe `curves.rs`)
+- [x] RGB-Verbundkurve + einzelne Kanäle — Phase 4 — Status: Fertig
+- [x] Luminanz-Kurve — Phase 4 — Status: Fertig
+- [x] Numerische Punkteingabe — Phase 4 — Status: Fertig
+- [x] Kurven-Presets — Phase 4 — Status: Fertig (4 feste Presets: Linear/Leichter Kontrast/Starker Kontrast/Negativ)
 
 ### HSL / Farbe
 - [ ] HSL für 8 Standardbereiche — Phase 4 — Status: Nicht begonnen

@@ -160,4 +160,95 @@ test.describe("Entwickeln-Panel", () => {
     const whiteBalance = JSON.parse(edlJson).payload.basic.white_balance as { temp_shift_kelvin: number; tint_shift: number };
     expect(whiteBalance.temp_shift_kelvin).toBeLessThan(0);
   });
+
+  test("Kurven: ein Preset auf einem Kanal wird als Punktkurve committet", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    await page.getByRole("button", { name: "Grün" }).click();
+    await page.getByRole("combobox", { name: "Kurven-Preset" }).selectOption("strong_contrast");
+
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.some((entry) => entry.cmd === "apply_develop_edit");
+    }).toBe(true);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const green = JSON.parse(edlJson).payload.curves.green as { kind: string; points: Array<{ input: number; output: number }> };
+    expect(green.kind).toBe("Points");
+    expect(green.points).toHaveLength(4);
+    expect(green.points[0]).toEqual({ input: 0, output: 0 });
+    expect(green.points[3]).toEqual({ input: 1, output: 1 });
+  });
+
+  test("Kurven: der Parametrisch-Modus committet Regler-Werte statt Punkten", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    await page.getByRole("button", { name: "Rot" }).click();
+    await page.getByRole("button", { name: "Parametrisch" }).click();
+
+    const shadowsInput = page.getByRole("spinbutton", { name: "Tiefen (Kurve) (Zahlenwert)" });
+    await shadowsInput.fill("40");
+    await shadowsInput.blur();
+
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.some((entry) => entry.cmd === "apply_develop_edit");
+    }).toBe(true);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const red = JSON.parse(edlJson).payload.curves.red as { kind: string; shadows: number };
+    expect(red.kind).toBe("Parametric");
+    expect(red.shadows).toBeCloseTo(40);
+  });
+
+  test("Kurven: ein Klick in den Editor fügt einen neuen Kontrollpunkt hinzu", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    // RGB ist standardmäßig aktiv und startet mit der neutralen
+    // Zwei-Punkte-Kurve — ein Klick fernab der beiden Eckpunkte muss einen
+    // dritten Punkt einfügen.
+    await page.getByRole("img", { name: "Kurven-Diagramm" }).click({ position: { x: 80, y: 60 } });
+
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.some((entry) => entry.cmd === "apply_develop_edit");
+    }).toBe(true);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const rgb = JSON.parse(edlJson).payload.curves.rgb as { kind: string; points: Array<{ input: number; output: number }> };
+    expect(rgb.kind).toBe("Points");
+    expect(rgb.points).toHaveLength(3);
+  });
+
+  test("Kurven: die numerische Punkteingabe committet einen exakten Ausgabewert", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    // Erster Endpunkt (Eingabe fest 0) fokussieren, dann per Zahlenfeld
+    // einen exakten Ausgabewert setzen statt zu ziehen.
+    await page.getByRole("slider", { name: "Kurvenpunkt 1" }).focus();
+    const outputInput = page.getByRole("spinbutton", { name: "Kurvenpunkt Ausgabe" });
+    await outputInput.fill("0.3");
+    await outputInput.blur();
+
+    await expect.poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.some((entry) => entry.cmd === "apply_develop_edit");
+    }).toBe(true);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const edlJson = (lastCommit?.args as { edlJson: string }).edlJson;
+    const rgb = JSON.parse(edlJson).payload.curves.rgb as { points: Array<{ input: number; output: number }> };
+    expect(rgb.points[0]).toEqual({ input: 0, output: 0.3 });
+  });
 });

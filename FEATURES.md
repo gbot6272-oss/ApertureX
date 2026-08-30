@@ -159,36 +159,36 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
      (Phase 7, dieselbe apx-ai/ONNX-Runtime-Integration wie der
      Preset-Generator) fallen aus dem Phase-6-Kern heraus. -->
 
-- [ ] Maskentyp Pinsel — Phase 6 — Status: Nicht begonnen
-- [ ] Maskentyp Linearer Verlauf — Phase 6 — Status: Nicht begonnen
-- [ ] Maskentyp Radialer Verlauf — Phase 6 — Status: Nicht begonnen
-- [ ] Maskentyp Farbbereich — Phase 6 — Status: Nicht begonnen
-- [ ] Maskentyp Luminanzbereich — Phase 6 — Status: Nicht begonnen
+- [x] Maskentyp Pinsel — Phase 6 — Status: Fertig
+- [x] Maskentyp Linearer Verlauf — Phase 6 — Status: Fertig
+- [x] Maskentyp Radialer Verlauf — Phase 6 — Status: Fertig — **Teil-Einschränkung:** nur ein einzelner, gemeinsamer Radius (kreisförmig), keine unabhängigen Ellipsen-Achsen/Rotation im Ziehgriff (siehe `PLAN.md` Schritt 3)
+- [x] Maskentyp Farbbereich — Phase 6 — Status: Fertig
+- [x] Maskentyp Luminanzbereich — Phase 6 — Status: Fertig
 - [ ] Maskentyp Tiefenbereich — Später zurückgestellt — Status: Nicht begonnen (siehe ADR-0032: kein Tiefendaten-Zulieferer existiert, keinem Phasenplan-Punkt zugeordnet)
 - [ ] KI-Motiv-Maske — Phase 7 — Status: Nicht begonnen
 - [ ] KI-Himmel-Maske — Phase 7 — Status: Nicht begonnen
 - [ ] KI-Hintergrund-Maske — Phase 7 — Status: Nicht begonnen
 - [ ] KI-Objekte-Maske (Klick-Segmentierung) — Phase 7 — Status: Nicht begonnen
 - [ ] KI-Personen-Maske (Haut, Augen, Brauen, Lippen, Zähne, Haare, Kleidung) — Phase 7 — Status: Nicht begonnen
-- [ ] Masken kombinieren (Hinzufügen/Subtrahieren/Schneiden) — Phase 6 — Status: Nicht begonnen
-- [ ] Pro Maske: alle globalen Regler + Deckkraft/Weichzeichnung/Umkehren/Verfeinern — Phase 6 — Status: Nicht begonnen (wird abweichend auf die ton-/farb-/detailbezogenen Werkzeuge eingegrenzt, siehe ADR-0032 Punkt 2 — Objektivkorrekturen/Effekte/Kalibrierung/Geometrie/Reparatur bleiben global)
-- [ ] Maskengruppen, Umbenennen, Ein-/Ausblenden, Überlagerungsfarbe — Phase 6 — Status: Nicht begonnen
-- [ ] Maske duplizieren / auf anderes Foto übertragen — Phase 6 — Status: Nicht begonnen
-- [ ] Ebenen-Mischmodi pro Maske — Phase 6 — Status: Nicht begonnen
-- [ ] Masken als wiederverwendbare Bausteine speichern — Phase 6 — Status: Nicht begonnen
-- [ ] Maskenkette mit Drag-&-Drop-Sortierung — Phase 6 — Status: Nicht begonnen
+- [x] Masken kombinieren (Hinzufügen/Subtrahieren/Schneiden) — Phase 6 — Status: Fertig — mehrere `MaskComponent`s je Maske, je mit eigenem `MaskCombine` + Invertieren (siehe `PLAN.md` Schritt 6)
+- [x] Pro Maske: alle globalen Regler + Deckkraft/Weichzeichnung/Umkehren/Verfeinern — Phase 6 — Status: Fertig (abweichend, siehe ADR-0032 Punkt 2) — eingegrenzt auf die ton-/farb-/detailbezogenen Werkzeuge (Grundeinstellungen, Kurven, HSL, Farbmischer, Color Grading, Details); Objektivkorrekturen/Effekte/Kalibrierung/Geometrie/Reparatur bleiben bewusst global
+- [x] Maskengruppen, Umbenennen, Ein-/Ausblenden, Überlagerungsfarbe — Phase 6 — Status: Fertig (abweichend) — Gruppen (anlegen/umbenennen/Sichtbarkeit/entfernen) vollständig; Überlagerungsfarbe (`overlay_color`, seit Schritt 1 im EDL) bekommt bewusst keine UI, da sie eine Masken-Flächen-Voransicht im Viewer steuern würde, die es (noch) nicht gibt (siehe `PLAN.md` Schritt 7)
+- [x] Maske duplizieren / auf anderes Foto übertragen — Phase 6 — Status: Fertig
+- [x] Ebenen-Mischmodi pro Maske — Phase 6 — Status: Fertig — alle fünf Modi (Normal/Multiplizieren/Weiches Licht/Farbe/Luminanz), CPU-only (siehe ADR-0032 Punkt 4/Schritt 11 zur GPU-Zurückstellung)
+- [x] Masken als wiederverwendbare Bausteine speichern — Phase 6 — Status: Fertig (abweichend, siehe ADR-0032 Punkt 6) — bewusst nur clientseitig/session-lokal statt über die Presets-Katalog-Infrastruktur (Ordner/Versionen/SQLite) aus Phase 5; ein katalogseitiges Pendant wäre dieselbe Größenordnung an Aufwand wie das gesamte Presets-System
+- [x] Maskenkette mit Drag-&-Drop-Sortierung — Phase 6 — Status: Fertig — die Reihenfolge ist zugleich die Anwendungsreihenfolge in der Pipeline, nicht nur die Anzeige
 
 ## 3.4 Modul ENTWICKELN — Workflow
 
 - [x] Undo/Redo (unbegrenzt, dauerhaft über `edit_history`, überlebt App-Neustart) — Phase 2 — Status: Fertig — **Teil-Einschränkung:** kein sichtbares, klickbares Verlaufs-*Panel* mit benannten Schritten (nur Rückgängig/Wiederholen um je einen Schritt) — siehe `DECISIONS.md` ADR-0018s Korrektur-Notiz; die Backend-Grundlage (`list_edit_history`) für ein solches Panel existiert noch nicht und ist ein möglicher Ausbau für eine spätere Phase
-- [ ] Schnappschüsse — Phase 6 — Status: Nicht begonnen (siehe ADR-0028: `SPEC.md` §5s Phase-4-Satz nennt nur die 10 Werkzeugkategorien, nicht die Workflow-Punkte aus §3.4)
-- [ ] Vorher/Nachher in vier Ansichten — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
-- [ ] Einstellungen kopieren/einfügen (granular) — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
-- [ ] Vorherige übernehmen — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
-- [ ] Synchronisieren über beliebig viele Bilder — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
-- [ ] Auto-Sync-Modus — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
-- [ ] Referenzansicht — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
-- [ ] Soft-Proof (Zielprofil, Renderpriorität, Farbumfangswarnung, Papierweiß) — Phase 6 — Status: Nicht begonnen (siehe ADR-0028)
+- [x] Schnappschüsse — Phase 6 — Status: Fertig — eigene `snapshots`-Tabelle mit unabhängiger EDL-Kopie je Schnappschuss statt eines Verweises auf einen `edit_history`-Stand (Korrektur ggü. der ursprünglichen Plan-Formulierung, siehe `DECISIONS.md` ADR-0032 Punkt 6 Nachtrag)
+- [x] Vorher/Nachher in vier Ansichten — Phase 6 — Status: Fertig — **Teil-Einschränkung:** die Trennlinie der geteilten Modi sitzt fest bei 50 % (kein ziehbarer Regler), siehe `PLAN.md` Schritt 8
+- [x] Einstellungen kopieren/einfügen (granular) — Phase 6 — Status: Fertig
+- [x] Vorherige übernehmen — Phase 6 — Status: Fertig
+- [x] Synchronisieren über beliebig viele Bilder — Phase 6 — Status: Fertig
+- [x] Auto-Sync-Modus — Phase 6 — Status: Fertig (abweichend) — überträgt bewusst immer alle EDL-Sektionen statt der für den manuellen Sync-Knopf verfügbaren granularen Auswahl (siehe `PLAN.md` Schritt 9)
+- [x] Referenzansicht — Phase 6 — Status: Fertig — Referenzbild links (statisch, letzter committeter Stand eines frei wählbaren anderen Fotos) und Arbeitsbild rechts, unabhängiger Zoom/Pan je Hälfte
+- [x] Soft-Proof (Zielprofil, Renderpriorität, Farbumfangswarnung, Papierweiß) — Phase 6 — Status: Fertig (abweichend, siehe ADR-0032 Punkt 6) — rein clientseitige Vorschau-Nachbearbeitung (keine Backend-/ICC-Profilverwaltung); drei simulierte Zielprofile über eine angenäherte Sättigungskompression statt echtem 3D-Gamut-Mapping
 
 ## 3.5 PRESET- UND TEMPLATE-SYSTEM
 <!-- Scope-Präzisierung siehe DECISIONS.md ADR-0031: Preset-Grundlagen

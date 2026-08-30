@@ -670,4 +670,216 @@ mod tests {
             "CPU-Fallback mit allen Phase-4-Stufen ungewöhnlich langsam: {elapsed:?}"
         );
     }
+
+    /// Phase-6-Nachmessung (`PLAN.md` Phase 6 Schritt 11, ADR-0032 Punkt 4
+    /// nannte dies als offenes Risiko): dieselbe Messmethode wie oben, aber
+    /// mit mehreren gleichzeitig sichtbaren, komplexen Masken statt der
+    /// globalen Phase-4-Werkzeuge — jede Maske ist ein eigener sequenzieller
+    /// Pipeline-Durchlauf durch alle sechs Masken-Werkzeuge (siehe
+    /// `stages/masks.rs`), im Gegensatz zum einmaligen globalen Fused-Pass
+    /// oben also die architektonisch teuerste Form dieser Phase. Dieselben
+    /// Ehrlichkeits-Einschränkungen gelten (keine echte Fenster-/IPC-/
+    /// Compositing-Umgebung in dieser Sandbox, generöse Zeitschranke nur als
+    /// Regressionswächter, kein hartes 16-ms-Versprechen).
+    #[test]
+    fn render_rgba8_timing_with_several_masks_active() {
+        use crate::edl::{
+            BlendMode, ColorGradingAdjustment, ColorGradingWheel, ColorMixerAdjustment,
+            ColorMixerRegion, CurveChannel, CurvesAdjustment, DetailsAdjustment, HslAdjustment,
+            HslBand, Mask, MaskAdjustments, MaskCombine, MaskComponent, MaskGeometry,
+        };
+
+        let ctx = GpuContext::new_blocking().ok();
+        if ctx.is_none() {
+            eprintln!("übersprungen: kein GPU-Adapter in dieser Umgebung verfügbar");
+        }
+
+        let width = 2048;
+        let height = 1365;
+        let pixels = crate::test_support::gray_gradient((width * height) as usize);
+        let linear = LinearImage {
+            width,
+            height,
+            pixels,
+            as_shot_wb_coeffs: [1.05, 1.0, 0.9, 1.0],
+            cam_to_srgb: IDENTITY,
+        };
+
+        // Nicht-neutrale Anpassungen über alle sechs Masken-Werkzeuge
+        // hinweg — soll denselben "keine Stufe darf sich per Kurzschluss
+        // selbst überspringen"-Grundsatz wie die Phase-4-Messung oben
+        // erfüllen (siehe `develop.rs`s Moduldoku).
+        fn busy_mask_adjustments() -> MaskAdjustments {
+            MaskAdjustments {
+                basic: BasicAdjustments {
+                    exposure_ev: 0.3,
+                    contrast: 10.0,
+                    ..BasicAdjustments::NEUTRAL
+                },
+                curves: CurvesAdjustment {
+                    rgb: CurveChannel::Parametric {
+                        shadows: 10.0,
+                        darks: 5.0,
+                        lights: -5.0,
+                        highlights: -10.0,
+                    },
+                    ..CurvesAdjustment::neutral()
+                },
+                hsl: HslAdjustment {
+                    red: HslBand {
+                        hue: 10.0,
+                        saturation: 15.0,
+                        luminance: -5.0,
+                    },
+                    ..HslAdjustment::NEUTRAL
+                },
+                color_mixer: ColorMixerAdjustment {
+                    regions: vec![ColorMixerRegion {
+                        target_hue_degrees: 30.0,
+                        bandwidth_degrees: 40.0,
+                        feather: 15.0,
+                        hue_shift: 10.0,
+                        saturation_shift: 10.0,
+                        luminance_shift: 0.0,
+                    }],
+                },
+                color_grading: ColorGradingAdjustment {
+                    shadows: ColorGradingWheel {
+                        hue_degrees: 220.0,
+                        saturation: 20.0,
+                        luminance: -5.0,
+                    },
+                    balance: 10.0,
+                    ..ColorGradingAdjustment::NEUTRAL
+                },
+                details: DetailsAdjustment {
+                    sharpen_amount: 40.0,
+                    sharpen_radius: 1.0,
+                    luminance_nr_amount: 20.0,
+                    color_nr_amount: 20.0,
+                    ..DetailsAdjustment::NEUTRAL
+                },
+            }
+        }
+
+        fn mask_with_geometry(id: &str, geometry: MaskGeometry, blend_mode: BlendMode) -> Mask {
+            Mask {
+                id: id.to_string(),
+                name: id.to_string(),
+                components: vec![MaskComponent {
+                    geometry,
+                    combine: MaskCombine::Add,
+                    invert: false,
+                }],
+                adjustments: busy_mask_adjustments(),
+                opacity: 80.0,
+                feather: 10.0,
+                invert: false,
+                blend_mode,
+                visible: true,
+                group_id: None,
+                overlay_color: crate::edl::OverlayColor::Red,
+            }
+        }
+
+        // Fünf gleichzeitig sichtbare Masken, alle fünf Geometrietypen und
+        // drei der teureren (Ganz-Pixel-)Mischmodi vertreten — der
+        // realistische "viele/komplexe Masken aktiv"-Extremfall, den
+        // ADR-0032 Punkt 4 als offenes Risiko benannt hat.
+        let masks = vec![
+            mask_with_geometry(
+                "brush",
+                MaskGeometry::Brush {
+                    strokes: vec![crate::edl::BrushStroke {
+                        points: vec![
+                            crate::edl::MaskPoint { x: 0.2, y: 0.2 },
+                            crate::edl::MaskPoint { x: 0.4, y: 0.3 },
+                        ],
+                        radius: 0.1,
+                        feather: 0.05,
+                    }],
+                },
+                BlendMode::Multiply,
+            ),
+            mask_with_geometry(
+                "linear_gradient",
+                MaskGeometry::LinearGradient {
+                    x1: 0.0,
+                    y1: 0.0,
+                    x2: 1.0,
+                    y2: 1.0,
+                },
+                BlendMode::SoftLight,
+            ),
+            mask_with_geometry(
+                "radial_gradient",
+                MaskGeometry::RadialGradient {
+                    center_x: 0.5,
+                    center_y: 0.5,
+                    radius_x: 0.3,
+                    radius_y: 0.3,
+                    angle_degrees: 0.0,
+                    feather: 0.2,
+                },
+                BlendMode::Color,
+            ),
+            mask_with_geometry(
+                "color_range",
+                MaskGeometry::ColorRange {
+                    target_r: 0.6,
+                    target_g: 0.4,
+                    target_b: 0.3,
+                    tolerance: 0.2,
+                    feather: 0.1,
+                },
+                BlendMode::Luminosity,
+            ),
+            mask_with_geometry(
+                "luminance_range",
+                MaskGeometry::LuminanceRange {
+                    range_min: 0.3,
+                    range_max: 0.7,
+                    feather: 0.1,
+                },
+                BlendMode::Normal,
+            ),
+        ];
+
+        let edl = EdlV3 {
+            masks,
+            ..EdlV3::neutral()
+        };
+
+        if let Some(ctx) = &ctx {
+            let started = std::time::Instant::now();
+            let _ = render_rgba8(Some(ctx), &linear, &edl).expect("GPU-Rendering");
+            let elapsed = started.elapsed();
+            eprintln!(
+                "render_rgba8 mit fünf aktiven Masken (GPU, {width}x{height}, Adapter '{}'): {:.2} ms",
+                ctx.adapter_info.name,
+                elapsed.as_secs_f64() * 1000.0
+            );
+            // Großzügige Schranke, aus demselben Grund wie bei der
+            // Phase-4-Messung oben (kein GPU-Pfad für die Maskenstufe
+            // selbst — läuft also ohnehin komplett CPU-seitig, egal ob
+            // `ctx` gesetzt ist; die Schranke deckt trotzdem den Fall ab,
+            // in dem ein künftiger GPU-Pfad hinzukommt).
+            assert!(
+                elapsed.as_millis() < 20_000,
+                "GPU-Rendering mit fünf aktiven Masken ungewöhnlich langsam: {elapsed:?}"
+            );
+        }
+
+        let started = std::time::Instant::now();
+        let _ = render_rgba8(None, &linear, &edl);
+        let elapsed = started.elapsed();
+        eprintln!(
+            "render_rgba8 mit fünf aktiven Masken (CPU-Fallback, {width}x{height}): {:.2} ms",
+            elapsed.as_secs_f64() * 1000.0
+        );
+        assert!(
+            elapsed.as_millis() < 20_000,
+            "CPU-Fallback mit fünf aktiven Masken ungewöhnlich langsam: {elapsed:?}"
+        );
+    }
 }

@@ -248,6 +248,63 @@ export const PRESET_CONDITION_OPERATOR_OPTIONS: ReadonlyArray<{ value: PresetCon
   { value: "contains", label: "enthält" },
 ];
 
+// ---- Versionierung + Diff-Ansicht (Phase 5 Schritt 8) -----------------------
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Eine einzelne Abweichung zwischen zwei Preset-Versionen — `path` ist der
+ * Feld-Pfad (z. B. `"basic.exposure_ev"`), `a`/`b` die jeweiligen Werte
+ * (`undefined`, wenn das Feld in dieser Version fehlt, z. B. weil die
+ * Sektion damals nicht ausgewählt war). */
+export interface EdlSubsetDiffEntry {
+  path: string;
+  a: unknown;
+  b: unknown;
+}
+
+/** Vergleicht zwei EDL-Teilmengen feldweise und liefert jeden abweichenden
+ * Blattwert mit Pfad — die Grundlage der kleinen Diff-Ansicht beim
+ * Vergleichen zweier `PresetVersionDto`s. Steigt rekursiv in verschachtelte
+ * Objekte ab (HSL-Bänder, Color-Grading-Farbräder, Weißabgleich-
+ * Unterobjekt …), behandelt Arrays aber als atomaren Wert (Kurvenpunkte,
+ * Farbmischer-Regionen, Objektivkorrektur-Hilfslinien sind strukturierte
+ * Listen, kein sinnvoll feldweise vergleichbarer Wert) — dieselbe
+ * Konvention wie `interpolateValue`s Umgang mit nicht-skalaren
+ * Preset-Bestandteilen. Ein Feld, das nur in einer der beiden Versionen
+ * existiert (z. B. weil eine Sektion damals nicht ausgewählt war), zählt
+ * als Abweichung gegen `undefined`. */
+export function diffEdlSubsets(a: PresetEdlSubset, b: PresetEdlSubset): EdlSubsetDiffEntry[] {
+  const entries: EdlSubsetDiffEntry[] = [];
+
+  function walk(path: string, va: unknown, vb: unknown) {
+    const aIsObject = isPlainObject(va);
+    const bIsObject = isPlainObject(vb);
+    // Auch wenn nur eine Seite ein Objekt ist (die andere `undefined`,
+    // weil eine Sektion in dieser Version gar nicht ausgewählt war) wird
+    // bis auf Blattebene abgestiegen — sonst würde eine ganze fehlende
+    // Sektion nur als ein einziger grober Eintrag erscheinen statt als
+    // die tatsächlich betroffenen Einzelfelder.
+    if (aIsObject || bIsObject) {
+      const keys = new Set([...(aIsObject ? Object.keys(va) : []), ...(bIsObject ? Object.keys(vb) : [])]);
+      for (const key of keys) {
+        walk(`${path}.${key}`, aIsObject ? va[key] : undefined, bIsObject ? vb[key] : undefined);
+      }
+      return;
+    }
+    if (JSON.stringify(va) !== JSON.stringify(vb)) {
+      entries.push({ path, a: va, b: vb });
+    }
+  }
+
+  const topLevelKeys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of topLevelKeys) {
+    walk(key, (a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]);
+  }
+  return entries;
+}
+
 export function parseConditions(json: string): PresetCondition[] {
   try {
     const parsed: unknown = JSON.parse(json);

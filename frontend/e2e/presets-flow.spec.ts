@@ -267,6 +267,46 @@ test.describe("Presets-Panel", () => {
     await expect(page.getByText(/erfüllt die Bedingungen/)).not.toBeVisible();
   });
 
+  test("Versionierung: eine neue Version speichern zeigt einen Diff zur vorherigen an", async ({ page }) => {
+    await setUp(page);
+
+    // Ein frisches Preset anlegen (bekommt Version #1 mit der Sektion
+    // "Grundeinstellungen"), damit — anders als bei der Seed-Fixture, die
+    // keine Version mitbringt — eine erste Version existiert.
+    const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" });
+    await exposureInput.fill("0.3");
+    await exposureInput.blur();
+    await page.getByRole("button", { name: "Preset speichern" }).click();
+    const saveDialog = page.getByRole("dialog", { name: "Preset speichern" });
+    await saveDialog.getByLabel("Name").fill("Versions-Test");
+    for (const label of ["Kurven", "HSL", "Farbmischer", "Color Grading", "Details", "Objektivkorrekturen", "Effekte", "Kalibrierung", "Geometrie"]) {
+      await saveDialog.getByLabel(label).uncheck();
+    }
+    await saveDialog.getByRole("button", { name: "Speichern" }).click();
+    await expect(saveDialog).not.toBeVisible();
+
+    await page.getByRole("button", { name: "Versions-Test: Versionen" }).click();
+    const dialog = page.getByRole("dialog", { name: "Versionen: Versions-Test" });
+    await expect(dialog).toBeVisible();
+
+    // Nur eine Version vorhanden — Version A und B sind identisch, also
+    // zunächst kein Unterschied.
+    await expect(dialog.getByText("Keine Unterschiede zwischen den gewählten Versionen.")).toBeVisible();
+
+    // Regler-Wert ändern, dann eine neue Version aus dem aktuellen Stand
+    // speichern — sie übernimmt dieselbe Sektion (`basic`) wie Version #1.
+    await dialog.getByRole("button", { name: "Schließen" }).click();
+    await exposureInput.fill("0.9");
+    await exposureInput.blur();
+    await page.getByRole("button", { name: "Versions-Test: Versionen" }).click();
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Aktuellen Stand als neue Version speichern" }).click();
+
+    await expect(dialog.getByLabel("Version B").locator("option")).toHaveCount(2);
+    await dialog.getByLabel("Version B").selectOption({ index: 1 });
+    await expect(dialog.getByText("basic.exposure_ev")).toBeVisible();
+  });
+
   test("benennt einen Preset-Ordner über den Dialog um", async ({ page }) => {
     await setUp(page);
 

@@ -496,9 +496,9 @@ Siehe ADR-0028 (plus Nachtrag): Workflow-Punkte (Schnappschüsse, Vorher/Nachher
   - [x] Feste Feldliste (ISO, Blende, Brennweite, Kameramodell, Objektiv — bereits in `photos` vorhanden), Operatoren (`>`, `<`, `=`, „enthält"), UND-verknüpft
   - [x] Kleiner Regel-Editor in `SavePresetDialog.tsx`; Auswertung beim Anwenden gegen die Metadaten des aktuellen Fotos. Jede Regel trägt zusätzlich eine optionale Sektion: „Ganzes Preset" (schlägt sie fehl, wird das komplette Preset nicht angewendet) oder eine einzelne Sektion (schlägt sie fehl, wird nur diese Sektion ausgeschlossen, der Rest des Presets bleibt wirksam) — Erweiterung ggü. der ursprünglichen Formulierung, die nur den sektionsbezogenen Fall nannte, aber der praxisnähere Fall „ganzes Preset nur unter Bedingung X" (z. B. „nur für Teleobjektive") ist mindestens genauso häufig und ließ sich ohne Mehraufwand mitbauen.
 
-- [ ] 8. Versionierung + Diff-Ansicht
-  - [ ] Jede erneute Speicherung über ein bestehendes Preset legt eine neue `preset_versions`-Zeile an (alte bleibt erhalten)
-  - [ ] Kleine Diff-Ansicht: zwei Versionen wählen, Liste der Felder mit unterschiedlichem Wert
+- [x] 8. Versionierung + Diff-Ansicht
+  - [x] Neuer `PresetVersionsDialog.tsx`: „Aktuellen Stand als neue Version speichern" legt eine neue `preset_versions`-Zeile an (alte bleiben erhalten, `add_preset_version` war bereits seit Schritt 2 im Backend vorhanden, aber ungenutzt) — übernimmt dieselben Sektionen wie die bisher aktuellste Version
+  - [x] Kleine Diff-Ansicht: zwei Versionen per Dropdown wählen, `lib/presets.ts`s `diffEdlSubsets` listet jedes abweichende Blattfeld (rekursiv in verschachtelte Objekte, Arrays als atomarer Wert — dieselbe Konvention wie `interpolateValue`)
 
 - [ ] 9. Import-Templates + Umbenennungs-Templates (vorgezogen aus Phase 3, siehe ADR-0031 Punkt 7)
   - [ ] Frontend-Anbindung der bereits bestehenden `list_import_presets`/`save_import_preset`/`delete_import_preset`-Commands im Import-Dialog

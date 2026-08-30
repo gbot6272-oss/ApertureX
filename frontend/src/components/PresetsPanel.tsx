@@ -4,6 +4,7 @@ import { buildChildrenByParent } from "../lib/folderTree";
 import type { PresetDto, PresetFolderDto } from "../lib/tauri";
 import { selectPresetConditionMeta, useAppStore } from "../store";
 import { PresetThumbnail } from "./PresetThumbnail";
+import { PresetVersionsDialog } from "./PresetVersionsDialog";
 
 interface PresetFolderNodeProps {
   folder: PresetFolderDto;
@@ -63,9 +64,10 @@ function PresetFolderNode({ folder, depth, childrenOf }: PresetFolderNodeProps) 
 interface PresetRowProps {
   preset: PresetDto;
   folders: PresetFolderDto[];
+  onOpenVersions: (presetId: string, presetName: string) => void;
 }
 
-function PresetRow({ preset, folders }: PresetRowProps) {
+function PresetRow({ preset, folders, onOpenVersions }: PresetRowProps) {
   const setPresetFavorite = useAppStore((s) => s.setPresetFavorite);
   const renamePreset = useAppStore((s) => s.renamePreset);
   const movePresetToFolder = useAppStore((s) => s.movePresetToFolder);
@@ -131,6 +133,15 @@ function PresetRow({ preset, folders }: PresetRowProps) {
           aria-label={`${preset.name} zum Stapel hinzufügen`}
         >
           ➕
+        </button>
+        <button
+          type="button"
+          onClick={() => onOpenVersions(preset.id, preset.name)}
+          className="shrink-0 text-text-muted hover:text-accent"
+          title="Versionen"
+          aria-label={`${preset.name}: Versionen`}
+        >
+          🕐
         </button>
         <select
           aria-label={`${preset.name}: Ordner`}
@@ -238,6 +249,7 @@ export function PresetsPanel() {
   const refreshPresets = useAppStore((s) => s.refreshPresets);
   const createPresetFolder = useAppStore((s) => s.createPresetFolder);
   const [newFolderName, setNewFolderName] = useState("");
+  const [versionsDialog, setVersionsDialog] = useState<{ presetId: string; presetName: string } | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -299,12 +311,23 @@ export function PresetsPanel() {
 
       <ul className="flex flex-col gap-1">
         {visiblePresets.map((preset) => (
-          <PresetRow key={preset.id} preset={preset} folders={presetFolders} />
+          <PresetRow
+            key={preset.id}
+            preset={preset}
+            folders={presetFolders}
+            onOpenVersions={(presetId, presetName) => setVersionsDialog({ presetId, presetName })}
+          />
         ))}
         {visiblePresets.length === 0 && <li className="text-xs text-text-muted">Keine Presets in diesem Ordner.</li>}
       </ul>
 
       <PresetStackSection />
+
+      <PresetVersionsDialog
+        presetId={versionsDialog?.presetId ?? null}
+        presetName={versionsDialog?.presetName ?? ""}
+        onClose={() => setVersionsDialog(null)}
+      />
     </aside>
   );
 }

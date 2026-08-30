@@ -4,6 +4,7 @@ import { neutralEdlPayload } from "./edl";
 import {
   applyConditionsToSubset,
   buildPresetEdlSubset,
+  diffEdlSubsets,
   evaluateCondition,
   mergeEdlSubset,
   parseConditions,
@@ -242,5 +243,40 @@ describe("applyConditionsToSubset", () => {
   it("treats a null photo (no selection) conservatively — every condition fails", () => {
     const conditions: PresetCondition[] = [{ field: "iso", op: ">", value: "0", section: null }];
     expect(applyConditionsToSubset(subset, conditions, null)).toBeNull();
+  });
+});
+
+describe("diffEdlSubsets", () => {
+  it("returns no entries for identical subsets", () => {
+    const a = edlWithBasic({ exposure_ev: 0.5 });
+    expect(diffEdlSubsets({ basic: a.basic }, { basic: { ...a.basic } })).toEqual([]);
+  });
+
+  it("reports a top-level scalar field that differs", () => {
+    const a = edlWithBasic({ exposure_ev: 0.5 });
+    const b = edlWithBasic({ exposure_ev: 0.8 });
+    const diff = diffEdlSubsets({ basic: a.basic }, { basic: b.basic });
+    expect(diff).toContainEqual({ path: "basic.exposure_ev", a: 0.5, b: 0.8 });
+  });
+
+  it("reports a nested field that differs (e.g. white_balance)", () => {
+    const a = edlWithBasic({ white_balance: { temp_shift_kelvin: 100, tint_shift: 0 } });
+    const b = edlWithBasic({ white_balance: { temp_shift_kelvin: 200, tint_shift: 0 } });
+    const diff = diffEdlSubsets({ basic: a.basic }, { basic: b.basic });
+    expect(diff).toContainEqual({ path: "basic.white_balance.temp_shift_kelvin", a: 100, b: 200 });
+    expect(diff.some((entry) => entry.path === "basic.white_balance.tint_shift")).toBe(false);
+  });
+
+  it("treats an array field as an atomic value instead of diffing elements", () => {
+    const regionA = { target_hue_degrees: 30, bandwidth_degrees: 40, feather: 15, hue_shift: 10, saturation_shift: 10, luminance_shift: 0 };
+    const regionB = { ...regionA, hue_shift: 20 };
+    const diff = diffEdlSubsets({ color_mixer: { regions: [regionA] } }, { color_mixer: { regions: [regionB] } });
+    expect(diff).toEqual([{ path: "color_mixer.regions", a: [regionA], b: [regionB] }]);
+  });
+
+  it("reports a section present in only one of the two subsets as undefined on the other side", () => {
+    const a = edlWithBasic({ exposure_ev: 0.5 });
+    const diff = diffEdlSubsets({ basic: a.basic }, {});
+    expect(diff.some((entry) => entry.path === "basic.exposure_ev" && entry.b === undefined)).toBe(true);
   });
 });

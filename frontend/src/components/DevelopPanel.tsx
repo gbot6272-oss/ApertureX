@@ -5,8 +5,10 @@ import {
   BASIC_SLIDER_SPECS,
   CALIBRATION_PRIMARY_ROWS,
   CAMERA_PROFILE_OPTIONS,
+  COLOR_GRADING_WHEEL_TABS,
   COLOR_MIXER_REGION_SLIDER_SPECS,
   COLOR_NR_SLIDER_SPECS,
+  CURVE_CHANNEL_TABS,
   GRAIN_SLIDER_SPECS,
   GRID_OVERLAY_OPTIONS,
   HSL_BAND_SLIDER_SPECS,
@@ -22,10 +24,9 @@ import {
   SHARPEN_SLIDER_SPECS,
   UPRIGHT_MODE_OPTIONS,
   WHITE_BALANCE_PRESETS,
-  type ColorGradingAdjustment,
   type ColorMixerRegion,
   type CurvesAdjustment,
-  type DetailsAdjustment,
+  type DetailsSliderKey,
   type EffectsAdjustment,
   type GridOverlay,
   type GuidedLine,
@@ -61,28 +62,6 @@ const REPAIR_MODE_OPTIONS: ReadonlyArray<{ value: RepairMode; label: string }> =
 const PRESET_STRENGTH_SPEC: SliderSpec = { key: "strength", label: "Stärke (%)", min: 0, max: 200, fineStep: 1, coarseStep: 10, neutral: 100 };
 
 const WHITE_BALANCE_KEYS = new Set(["temp_shift_kelvin", "tint_shift"]);
-
-/** Die fünf Kurven-Kanäle (Phase 4 Schritt 4) — Anzeigereihenfolge wie in
- * `SPEC.md` §3.2 („RGB-Verbundkurve, R/G/B einzeln, Luminanz-Kurve"). */
-const CURVE_CHANNEL_TABS: ReadonlyArray<{ key: keyof CurvesAdjustment; label: string }> = [
-  { key: "rgb", label: "RGB" },
-  { key: "red", label: "Rot" },
-  { key: "green", label: "Grün" },
-  { key: "blue", label: "Blau" },
-  { key: "luminance", label: "Luminanz" },
-];
-
-/** Die vier Color-Grading-Farbräder (Phase 4 Schritt 6). */
-const COLOR_GRADING_WHEEL_TABS: ReadonlyArray<{ key: keyof Pick<ColorGradingAdjustment, "shadows" | "midtones" | "highlights" | "global">; label: string }> = [
-  { key: "shadows", label: "Schatten" },
-  { key: "midtones", label: "Mitteltöne" },
-  { key: "highlights", label: "Lichter" },
-  { key: "global", label: "Global" },
-];
-
-/** Die zehn numerischen Details-Regler (Phase 4 Schritt 8) — der elfte
- * Feld (`use_deconvolution_sharpen`) ist eine Checkbox, kein Regler. */
-type DetailsSliderKey = keyof Omit<DetailsAdjustment, "use_deconvolution_sharpen">;
 
 /** Die vier numerischen Objektivkorrektur-Regler (Phase 4 Schritt 9,
  * ohne `manual_transform`, `profile_id`, `auto_ca`, `upright_mode`,

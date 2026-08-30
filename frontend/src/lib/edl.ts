@@ -110,6 +110,19 @@ export const PARAMETRIC_CURVE_SLIDER_SPECS: readonly SliderSpec[] = [
   { key: "shadows", label: "Tiefen (Kurve)", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
 ] as const;
 
+/** Die fünf Kurven-Kanäle (Phase 4 Schritt 4) — Anzeigereihenfolge wie in
+ * `SPEC.md` §3.2 („RGB-Verbundkurve, R/G/B einzeln, Luminanz-Kurve").
+ * Von `DevelopPanel.tsx` und `MasksPanel.tsx` (Phase 6 Schritt 7)
+ * gemeinsam genutzt — dieselbe Kanalauswahl-UI für globale wie für
+ * masken-eigene Kurven. */
+export const CURVE_CHANNEL_TABS: ReadonlyArray<{ key: keyof CurvesAdjustment; label: string }> = [
+  { key: "rgb", label: "RGB" },
+  { key: "red", label: "Rot" },
+  { key: "green", label: "Grün" },
+  { key: "blue", label: "Blau" },
+  { key: "luminance", label: "Luminanz" },
+];
+
 export interface CurvePreset {
   key: string;
   label: string;
@@ -280,6 +293,16 @@ export interface ColorGradingAdjustment {
   blending: number;
 }
 
+/** Die vier Color-Grading-Farbräder (Phase 4 Schritt 6) — von
+ * `DevelopPanel.tsx` und `MasksPanel.tsx` (Phase 6 Schritt 7) gemeinsam
+ * genutzt. */
+export const COLOR_GRADING_WHEEL_TABS: ReadonlyArray<{ key: keyof Pick<ColorGradingAdjustment, "shadows" | "midtones" | "highlights" | "global">; label: string }> = [
+  { key: "shadows", label: "Schatten" },
+  { key: "midtones", label: "Mitteltöne" },
+  { key: "highlights", label: "Lichter" },
+  { key: "global", label: "Global" },
+];
+
 export const NEUTRAL_COLOR_GRADING: ColorGradingAdjustment = {
   shadows: NEUTRAL_COLOR_GRADING_WHEEL,
   midtones: NEUTRAL_COLOR_GRADING_WHEEL,
@@ -318,6 +341,12 @@ export const NEUTRAL_DETAILS: DetailsAdjustment = {
   color_nr_detail: 50,
   color_nr_smoothness: 50,
 };
+
+/** Die zehn numerischen Details-Regler (Phase 4 Schritt 8) — der elfte
+ * Feld (`use_deconvolution_sharpen`) ist eine Checkbox, kein Regler. Von
+ * `DevelopPanel.tsx` und `MasksPanel.tsx` (Phase 6 Schritt 7) gemeinsam
+ * genutzt. */
+export type DetailsSliderKey = keyof Omit<DetailsAdjustment, "use_deconvolution_sharpen">;
 
 export const SHARPEN_SLIDER_SPECS: readonly SliderSpec[] = [
   { key: "sharpen_amount", label: "Schärfung: Betrag", min: 0, max: 150, fineStep: 1, coarseStep: 10, neutral: 0 },

@@ -19,16 +19,22 @@ const PHOTO = {
   captured_at: "2024-06-01T10:00:00Z",
   missing: false,
 };
+const PHOTO_2 = { ...PHOTO, id: "01977f4a-0000-7000-8000-000000000102", filename: "IMG_0002.CR3" };
 
-async function setUpWithSelectedPhoto(page: import("@playwright/test").Page) {
+async function setUpWithSelectedPhoto(page: import("@playwright/test").Page, extraPhotos: (typeof PHOTO)[] = []) {
   await installTauriMock(page, {
-    folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }],
-    photosByFolder: { [FOLDER_ID]: [PHOTO] },
+    folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 + extraPhotos.length }],
+    photosByFolder: { [FOLDER_ID]: [PHOTO, ...extraPhotos] },
   });
   await page.goto("/");
   await page.getByRole("button", { name: /Urlaub/ }).click();
   await page.getByRole("img", { name: PHOTO.filename }).click();
   await page.getByRole("button", { name: "Entwickeln" }).click();
+}
+
+async function lastCommitFor(page: import("@playwright/test").Page, photoId: string) {
+  const log = await getMockInvokeLog(page);
+  return [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit" && (entry.args as { photoId: string }).photoId === photoId);
 }
 
 async function lastMasks(page: import("@playwright/test").Page): Promise<Array<{ name: string; visible: boolean }>> {
@@ -287,5 +293,161 @@ test.describe("Masken-Panel", () => {
         return masks[0].components.length;
       })
       .toBe(1);
+  });
+
+  test("Sechs-Sektionen-Regler: HSL-Band, Details-Schärfung und Color-Grading-Balance wirken nur auf die ausgewählte Maske", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "+ Linearer Verlauf" }).click();
+
+    type MaskAdjustments = { hsl: { red: { hue: number } }; details: { sharpen_amount: number }; color_grading: { balance: number } };
+
+    const hueInput = page.getByRole("spinbutton", { name: "Farbton (Zahlenwert)" }).nth(1);
+    await hueInput.fill("30");
+    await hueInput.blur();
+    await expect
+      .poll(async () => {
+        const masks = (await lastMasks(page)) as unknown as Array<{ adjustments: MaskAdjustments }>;
+        return masks[0].adjustments.hsl.red.hue;
+      })
+      .toBeCloseTo(30, 1);
+
+    const sharpenInput = page.getByRole("spinbutton", { name: "Schärfung: Betrag (Zahlenwert)" }).nth(1);
+    await sharpenInput.fill("40");
+    await sharpenInput.blur();
+    await expect
+      .poll(async () => {
+        const masks = (await lastMasks(page)) as unknown as Array<{ adjustments: MaskAdjustments }>;
+        return masks[0].adjustments.details.sharpen_amount;
+      })
+      .toBeCloseTo(40, 1);
+
+    const balanceInput = page.getByRole("spinbutton", { name: "Balance (Zahlenwert)" }).nth(1);
+    await balanceInput.fill("15");
+    await balanceInput.blur();
+    await expect
+      .poll(async () => {
+        const masks = (await lastMasks(page)) as unknown as Array<{ adjustments: MaskAdjustments }>;
+        return masks[0].adjustments.color_grading.balance;
+      })
+      .toBeCloseTo(15, 1);
+
+    // Die globalen Regler bleiben unverändert — nur die Maske hat sich geändert.
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const globalPayload = JSON.parse((lastCommit?.args as { edlJson: string }).edlJson).payload;
+    expect(globalPayload.hsl.red.hue).toBe(0);
+    expect(globalPayload.details.sharpen_amount).toBe(0);
+    expect(globalPayload.color_grading.balance).toBe(0);
+  });
+
+  test("Farbmischer: ein Bildklick legt eine Region an der Maske an, nicht an den globalen Einstellungen", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "+ Linearer Verlauf" }).click();
+
+    const addRegionButton = page.getByRole("button", { name: "Region hinzufügen" }).nth(1);
+    await addRegionButton.click();
+    await page.getByRole("main").click();
+
+    type MaskWithColorMixer = { adjustments: { color_mixer: { regions: unknown[] } } };
+    await expect
+      .poll(async () => {
+        const masks = (await lastMasks(page)) as unknown as MaskWithColorMixer[];
+        return masks[0].adjustments.color_mixer.regions.length;
+      })
+      .toBe(1);
+
+    const log = await getMockInvokeLog(page);
+    const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+    const payload = JSON.parse((lastCommit?.args as { edlJson: string }).edlJson).payload;
+    expect(payload.color_mixer.regions).toHaveLength(0);
+  });
+
+  test("Maskengruppen: Anlegen, Zuordnen, Ausblenden und Entfernen committen jeweils", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "+ Linearer Verlauf" }).click();
+
+    page.once("dialog", (dialog) => void dialog.accept("Vordergrund"));
+    await page.getByRole("button", { name: "+ Neue Gruppe" }).click();
+
+    type MaskWithGroup = { group_id: string | null };
+    type EdlWithGroups = { masks: MaskWithGroup[]; mask_groups: Array<{ id: string; name: string; visible: boolean }> };
+
+    async function lastPayload(): Promise<EdlWithGroups> {
+      const log = await getMockInvokeLog(page);
+      const lastCommit = [...log].reverse().find((entry) => entry.cmd === "apply_develop_edit");
+      return JSON.parse((lastCommit?.args as { edlJson: string }).edlJson).payload;
+    }
+
+    await expect.poll(async () => (await lastPayload()).mask_groups).toHaveLength(1);
+    const groupId = (await lastPayload()).mask_groups[0]!.id;
+
+    await page.getByRole("combobox", { name: /: Gruppe$/ }).selectOption(groupId);
+    await expect.poll(async () => (await lastPayload()).masks[0]!.group_id).toBe(groupId);
+
+    const groupVisibilityButton = page.getByRole("button", { name: "Gruppe Vordergrund ausblenden" });
+    await groupVisibilityButton.click();
+    await expect.poll(async () => (await lastPayload()).mask_groups[0]!.visible).toBe(false);
+
+    await page.getByRole("button", { name: "Gruppe Vordergrund entfernen" }).click();
+    await expect.poll(async () => (await lastPayload()).mask_groups).toHaveLength(0);
+    await expect.poll(async () => (await lastPayload()).masks[0]!.group_id).toBeNull();
+  });
+
+  test("Maske duplizieren legt eine Kopie mit eigener ID an und committet sofort", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "+ Linearer Verlauf" }).click();
+
+    await page.getByTitle("Duplizieren").click();
+
+    const masks = (await lastMasks(page)) as unknown as Array<{ id: string; name: string }>;
+    expect(masks).toHaveLength(2);
+    expect(masks[1]!.name).toContain("(Kopie)");
+    expect(masks[1]!.id).not.toBe(masks[0]!.id);
+  });
+
+  test("Baustein speichern und anwenden legt eine neue Maske mit derselben Geometrie an", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "+ Radialer Verlauf" }).click();
+
+    page.once("dialog", (dialog) => void dialog.accept("Mein Vignette-Baustein"));
+    await page.getByRole("button", { name: "Aktuelle Maske als Baustein speichern" }).click();
+
+    await page.getByRole("button", { name: "Mein Vignette-Baustein", exact: true }).click();
+
+    type MaskWithComponents = { components: Array<{ geometry: { kind: string } }> };
+    await expect
+      .poll(async () => {
+        const masks = (await lastMasks(page)) as unknown as MaskWithComponents[];
+        return masks.length;
+      })
+      .toBe(2);
+    const masks = (await lastMasks(page)) as unknown as MaskWithComponents[];
+    expect(masks[1]!.components[0]!.geometry.kind).toBe("RadialGradient");
+  });
+
+  test("Auf anderes Foto übertragen kopiert die Maske ins EDL des Zielfotos", async ({ page }) => {
+    await setUpWithSelectedPhoto(page, [PHOTO_2]);
+    await page.getByRole("button", { name: "+ Linearer Verlauf" }).click();
+
+    await page.getByRole("combobox", { name: "Zielfoto für Maskenübertragung" }).selectOption(PHOTO_2.id);
+    await page.getByRole("button", { name: "Übertragen" }).click();
+
+    type MaskWithComponents = { components: Array<{ geometry: { kind: string } }> };
+    await expect
+      .poll(async () => {
+        const commit = await lastCommitFor(page, PHOTO_2.id);
+        return commit !== undefined;
+      })
+      .toBe(true);
+
+    const commit = await lastCommitFor(page, PHOTO_2.id);
+    const targetPayload = JSON.parse((commit?.args as { edlJson: string }).edlJson).payload;
+    const targetMasks = targetPayload.masks as MaskWithComponents[];
+    expect(targetMasks).toHaveLength(1);
+    expect(targetMasks[0]!.components[0]!.geometry.kind).toBe("LinearGradient");
+
+    // Das Ursprungsfoto behält seine eigene, unveränderte Maskenliste.
+    const originalMasks = await lastMasks(page);
+    expect(originalMasks).toHaveLength(1);
   });
 });

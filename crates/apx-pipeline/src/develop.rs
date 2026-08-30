@@ -303,6 +303,7 @@ pub fn render_rgba8(
             linear.height,
             linear.as_shot_wb_coeffs,
             &edl.masks,
+            &edl.mask_groups,
         )
     };
 

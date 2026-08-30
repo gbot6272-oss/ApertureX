@@ -59,12 +59,10 @@ pub fn apply_all(
     height: u32,
     as_shot_wb_coeffs: [f32; 4],
     masks: &[Mask],
+    groups: &[MaskGroup],
 ) -> Vec<f32> {
     let mut current = pixels.to_vec();
-    for mask in masks {
-        if !mask.visible {
-            continue;
-        }
+    for mask in visible_masks(masks, groups) {
         current = apply_one(&current, width, height, as_shot_wb_coeffs, mask);
     }
     current
@@ -487,9 +485,12 @@ fn box_blur_1d(src: &[f32], w: usize, h: usize, radius: i32, horizontal: bool) -
         .collect()
 }
 
-/// Ordnet `group_id`s auf ihre Gruppe ab — reine Anzeige-/Organisations-
-/// hilfe, `visible` einer *unsichtbaren* Gruppe blendet aber tatsächlich
-/// alle ihre Masken aus (siehe [`visible_masks`]).
+/// Die Masken, die tatsächlich angewendet werden sollen: `mask.visible`
+/// UND (keine Gruppe zugeordnet ODER die zugeordnete Gruppe ist selbst
+/// sichtbar) — eine Gruppe ist rein organisatorisch (`MaskGroup`s
+/// Moduldoku), ihr `visible` blendet aber tatsächlich alle
+/// zugeordneten Masken aus. Von [`apply_all`] genutzt (Phase 6
+/// Schritt 7 — vorher unbenutzt, seit Schritt 2 nur vorbereitet).
 pub fn visible_masks<'a>(masks: &'a [Mask], groups: &[MaskGroup]) -> Vec<&'a Mask> {
     masks
         .iter()
@@ -565,6 +566,7 @@ mod tests {
             2,
             [1.0, 1.0, 1.0, 1.0],
             std::slice::from_ref(&mask),
+            &[],
         );
 
         let wb_gains =
@@ -589,6 +591,33 @@ mod tests {
             2,
             [1.0, 1.0, 1.0, 1.0],
             std::slice::from_ref(&mask),
+            &[],
+        );
+        assert_eq!(result, pixels);
+    }
+
+    #[test]
+    fn a_mask_in_an_invisible_group_is_excluded_even_though_the_mask_itself_is_visible() {
+        // Phase 6 Schritt 7: `visible_masks` war seit Schritt 2 unbenutzt
+        // (nur vorbereitet) — dieser Test belegt, dass `apply_all` es jetzt
+        // tatsächlich aufruft.
+        let pixels = sample_pixels();
+        let mut mask = full_coverage_mask(MaskAdjustments::neutral());
+        mask.group_id = Some("group-1".to_string());
+        mask.adjustments.basic.exposure_ev = 2.0;
+        let groups = vec![MaskGroup {
+            id: "group-1".to_string(),
+            name: "Testgruppe".to_string(),
+            visible: false,
+        }];
+
+        let result = apply_all(
+            &pixels,
+            2,
+            2,
+            [1.0, 1.0, 1.0, 1.0],
+            std::slice::from_ref(&mask),
+            &groups,
         );
         assert_eq!(result, pixels);
     }
@@ -607,6 +636,7 @@ mod tests {
             2,
             [1.0, 1.0, 1.0, 1.0],
             std::slice::from_ref(&mask),
+            &[],
         );
         for (a, b) in result.iter().zip(pixels.iter()) {
             assert!((a - b).abs() < 1e-5);

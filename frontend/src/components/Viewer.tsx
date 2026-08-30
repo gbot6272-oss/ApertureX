@@ -43,7 +43,9 @@ export function Viewer() {
   const addColorMixerRegionAt = useAppStore((s) => s.addColorMixerRegionAt);
   const maskColorRangePickerActive = useAppStore((s) => s.maskColorRangePickerActive);
   const setMaskColorRangeTargetAt = useAppStore((s) => s.setMaskColorRangeTargetAt);
-  const pickerActive = wbPickerActive || colorMixerPickerActive || maskColorRangePickerActive;
+  const maskColorMixerPickerActive = useAppStore((s) => s.maskColorMixerPickerActive);
+  const addMaskColorMixerRegionAt = useAppStore((s) => s.addMaskColorMixerRegionAt);
+  const pickerActive = wbPickerActive || colorMixerPickerActive || maskColorRangePickerActive || maskColorMixerPickerActive;
   const geometryCropActive = useAppStore((s) => s.geometryCropActive);
   const setGeometryCrop = useAppStore((s) => s.setGeometryCrop);
   const repairActive = useAppStore((s) => s.repairActive);
@@ -246,6 +248,8 @@ export function Viewer() {
         addColorMixerRegionAt(r, g, b);
       } else if (maskColorRangePickerActive && selectedMask) {
         setMaskColorRangeTargetAt(selectedMask.id, r, g, b);
+      } else if (maskColorMixerPickerActive && selectedMask) {
+        addMaskColorMixerRegionAt(selectedMask.id, r, g, b);
       }
     },
     [
@@ -253,6 +257,7 @@ export function Viewer() {
       wbPickerActive,
       colorMixerPickerActive,
       maskColorRangePickerActive,
+      maskColorMixerPickerActive,
       selectedMask,
       developFrame,
       imgW,
@@ -265,6 +270,7 @@ export function Viewer() {
       pickWhiteBalanceAt,
       addColorMixerRegionAt,
       setMaskColorRangeTargetAt,
+      addMaskColorMixerRegionAt,
     ],
   );
 

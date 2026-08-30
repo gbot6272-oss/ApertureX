@@ -16,7 +16,7 @@ import {
   WHITE_BALANCE_PRESETS,
   writeBasicField,
 } from "../lib/edl";
-import type { BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairMode, RepairPoint, UprightMode } from "../lib/edl";
+import type { BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairMode, RepairPoint, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import {
   applyConditionsToSubset,
@@ -680,6 +680,76 @@ interface MasksSlice {
    * display-referred/gamma-kodiert. Für ein interaktives Klick-Werkzeug
    * reicht die Näherung (siehe `MasksPanel.tsx`s Moduldoku). */
   setMaskColorRangeTargetAt: (maskId: string, r: number, g: number, b: number) => void;
+
+  // ---- Schritt 7: volle Sechs-Sektionen-Reglerabdeckung je Maske -----------
+  // Dieselben Setter-Muster wie die globalen Pendants oben (siehe
+  // `setHslBandField`/`setColorGradingWheel`/`setDetailsField` etc.), nur
+  // auf `mask.adjustments.<sektion>` statt `developEdl.<sektion>`
+  // gerichtet. Kontinuierliche Regler committen wie überall über
+  // `commitMaskDrag` (kein eigener Commit hier), diskrete Aktionen
+  // (Farbmischer-Region anlegen/entfernen, Deconvolution-Umschalter)
+  // committen sofort.
+  setMaskCurveChannel: (maskId: string, channel: keyof CurvesAdjustment, next: CurveChannel) => void;
+  setMaskHslBandField: (maskId: string, band: keyof HslAdjustment, field: keyof HslBand, value: number) => void;
+  maskColorMixerPickerActive: boolean;
+  toggleMaskColorMixerPicker: () => void;
+  addMaskColorMixerRegionAt: (maskId: string, r: number, g: number, b: number) => void;
+  removeMaskColorMixerRegion: (maskId: string, regionIndex: number) => void;
+  updateMaskColorMixerRegion: (maskId: string, regionIndex: number, patch: Partial<ColorMixerRegion>) => void;
+  setMaskColorGradingWheel: (maskId: string, key: keyof Pick<ColorGradingAdjustment, "shadows" | "midtones" | "highlights" | "global">, wheel: ColorGradingWheel) => void;
+  setMaskColorGradingBalance: (maskId: string, value: number) => void;
+  setMaskColorGradingBlending: (maskId: string, value: number) => void;
+  setMaskDetailsField: (maskId: string, key: keyof Omit<DetailsAdjustment, "use_deconvolution_sharpen">, value: number) => void;
+  setMaskDetailsUseDeconvolutionSharpen: (maskId: string, value: boolean) => void;
+
+  // ---- Schritt 7: Maskengruppen (`SPEC.md` §3.3) ---------------------------
+  addMaskGroup: (name: string) => void;
+  renameMaskGroup: (groupId: string, name: string) => void;
+  /** Löst die Gruppenzuordnung aller Mitgliedsmasken (setzt ihr `group_id`
+   * auf `null`), statt sie mitzulöschen — eine Gruppe ist rein
+   * organisatorisch (siehe `MaskGroup`s Moduldoku). */
+  removeMaskGroup: (groupId: string) => void;
+  setMaskGroupVisible: (groupId: string, visible: boolean) => void;
+  /** `groupId: null` löst die Zuordnung. */
+  setMaskGroup: (maskId: string, groupId: string | null) => void;
+
+  // ---- Schritt 7: Verwaltung (Duplizieren/Sortieren/Übertragen/Bausteine) -
+  /** Tiefe Kopie mit neuer ID und „(Kopie)"-Namenssuffix, direkt hinter dem
+   * Original eingefügt und ausgewählt. Committet sofort. */
+  duplicateMask: (maskId: string) => void;
+  /** Verschiebt eine Maske an eine neue Position in `developEdl.masks`
+   * (Drag-&-Drop-Umsortierung im Panel) — die Reihenfolge ist zugleich die
+   * Anwendungsreihenfolge (siehe `EdlV3::masks`-Moduldoku), Umsortieren
+   * kann das Ergebnis also tatsächlich verändern, nicht nur die Anzeige.
+   * Committet sofort. */
+  reorderMask: (fromIndex: number, toIndex: number) => void;
+  /** Kopiert eine Maske auf ein anderes, nicht notwendigerweise gerade
+   * geöffnetes Foto — lädt dessen aktuellen Bearbeitungsstand, hängt die
+   * Maske an, speichert ihn zurück. **Bewusste Vereinfachung:** nutzt
+   * denselben `current_develop_edit`/`apply_develop_edit`-Pfad wie
+   * `loadDevelopStateForPhoto` und erbt dessen Alt-Schema-Einschränkung
+   * (ein Zielfoto, dessen letzter Bearbeitungsstand noch nicht auf das
+   * aktuelle EDL-Schema angehoben wurde, bekäme sonst nur die neue Maske
+   * ohne seine sonstigen Anpassungen — in der Praxis nur relevant für
+   * Fotos, die seit einem EDL-Schema-Sprung nie neu bearbeitet wurden). */
+  transferMaskToPhoto: (maskId: string, targetPhotoId: string) => Promise<void>;
+  /** Wiederverwendbare Bausteine (`PLAN.md` Phase 6 Schritt 7): eine
+   * Momentaufnahme aus Geometrie+Anpassungen einer Maske, benannt, um
+   * später als Ausgangspunkt für eine neue Maske zu dienen — nicht die
+   * Maske selbst (die lebt weiter unverändert in `developEdl.masks`).
+   * **Bewusste Vereinfachung ggü. der Presets-Infrastruktur aus Phase 5:**
+   * rein clientseitig im Zustand dieser Sitzung gehalten (kein
+   * Backend-Katalog-Eintrag, keine Ordner/Versionen) — Bausteine
+   * überleben also keinen App-Neustart. Ein katalogseitiges Pendant wäre
+   * dieselbe Größenordnung an Aufwand wie das gesamte Presets-System aus
+   * Phase 5 und würde diesen ohnehin schon großen Schritt sprengen; bei
+   * echtem Bedarf ist das ein eigener späterer Schritt/eigene Phase. */
+  maskBuildingBlocks: Array<{ id: string; name: string; mask: Mask }>;
+  saveMaskAsBuildingBlock: (maskId: string, name: string) => void;
+  /** Legt eine neue Maske aus dem Baustein an (neue ID, Bausteinname als
+   * Startname), wählt sie aus, committet sofort. */
+  applyMaskBuildingBlock: (blockId: string) => void;
+  removeMaskBuildingBlock: (blockId: string) => void;
 }
 
 export type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice & LibrarySlice & PresetsSlice & MasksSlice;
@@ -2219,6 +2289,225 @@ export const useAppStore = create<AppStore>()(
         state.maskColorRangePickerActive = false;
       });
       void get().commitDevelopEdit();
+    },
+
+    setMaskCurveChannel: (maskId, channel, next) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (mask) mask.adjustments.curves[channel] = next;
+      });
+    },
+
+    setMaskHslBandField: (maskId, band, field, value) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (mask) mask.adjustments.hsl[band][field] = value;
+      });
+    },
+
+    maskColorMixerPickerActive: false,
+
+    toggleMaskColorMixerPicker: () => {
+      set((state) => {
+        state.maskColorMixerPickerActive = !state.maskColorMixerPickerActive;
+      });
+    },
+
+    addMaskColorMixerRegionAt: (maskId, r, g, b) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (!mask || mask.adjustments.color_mixer.regions.length >= MAX_COLOR_MIXER_REGIONS) return;
+        mask.adjustments.color_mixer.regions.push(newColorMixerRegion(hueDegreesFromRgbByte(r, g, b)));
+        state.maskColorMixerPickerActive = false;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    removeMaskColorMixerRegion: (maskId, regionIndex) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        mask?.adjustments.color_mixer.regions.splice(regionIndex, 1);
+      });
+      void get().commitDevelopEdit();
+    },
+
+    updateMaskColorMixerRegion: (maskId, regionIndex, patch) => {
+      set((state) => {
+        const region = state.developEdl.masks.find((m) => m.id === maskId)?.adjustments.color_mixer.regions[regionIndex];
+        if (region) Object.assign(region, patch);
+      });
+    },
+
+    setMaskColorGradingWheel: (maskId, key, wheel) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (mask) mask.adjustments.color_grading[key] = wheel;
+      });
+    },
+
+    setMaskColorGradingBalance: (maskId, value) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (mask) mask.adjustments.color_grading.balance = value;
+      });
+    },
+
+    setMaskColorGradingBlending: (maskId, value) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (mask) mask.adjustments.color_grading.blending = value;
+      });
+    },
+
+    setMaskDetailsField: (maskId, key, value) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (mask) mask.adjustments.details[key] = value;
+      });
+    },
+
+    setMaskDetailsUseDeconvolutionSharpen: (maskId, value) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (mask) mask.adjustments.details.use_deconvolution_sharpen = value;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    addMaskGroup: (name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      const id = `mask-group-${crypto.randomUUID()}`;
+      set((state) => {
+        state.developEdl.mask_groups.push({ id, name: trimmed, visible: true });
+      });
+      void get().commitDevelopEdit(`Maskengruppe „${trimmed}" angelegt`);
+    },
+
+    renameMaskGroup: (groupId, name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      set((state) => {
+        const group = state.developEdl.mask_groups.find((g) => g.id === groupId);
+        if (group) group.name = trimmed;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    removeMaskGroup: (groupId) => {
+      set((state) => {
+        const index = state.developEdl.mask_groups.findIndex((g) => g.id === groupId);
+        if (index >= 0) state.developEdl.mask_groups.splice(index, 1);
+        for (const mask of state.developEdl.masks) {
+          if (mask.group_id === groupId) mask.group_id = null;
+        }
+      });
+      void get().commitDevelopEdit();
+    },
+
+    setMaskGroupVisible: (groupId, visible) => {
+      set((state) => {
+        const group = state.developEdl.mask_groups.find((g) => g.id === groupId);
+        if (group) group.visible = visible;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    setMaskGroup: (maskId, groupId) => {
+      set((state) => {
+        const mask = state.developEdl.masks.find((m) => m.id === maskId);
+        if (mask) mask.group_id = groupId;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    duplicateMask: (maskId) => {
+      set((state) => {
+        const index = state.developEdl.masks.findIndex((m) => m.id === maskId);
+        if (index < 0) return;
+        const original = state.developEdl.masks[index];
+        if (!original) return;
+        // Immer-Draft (`original`) lässt sich nicht direkt strukturell
+        // klonen (Proxy) — über JSON in einen Klartext-Wert wandeln, dann
+        // erst kopieren (`Mask` ist rein JSON-serialisierbar).
+        const clone: Mask = JSON.parse(JSON.stringify(original));
+        clone.id = `mask-${crypto.randomUUID()}`;
+        clone.name = `${original.name} (Kopie)`;
+        state.developEdl.masks.splice(index + 1, 0, clone);
+        state.selectedMaskId = clone.id;
+        state.selectedMaskComponentIndex = 0;
+      });
+      void get().commitDevelopEdit("Maske dupliziert");
+    },
+
+    reorderMask: (fromIndex, toIndex) => {
+      set((state) => {
+        const masks = state.developEdl.masks;
+        if (fromIndex < 0 || fromIndex >= masks.length || toIndex < 0 || toIndex >= masks.length || fromIndex === toIndex) return;
+        const [moved] = masks.splice(fromIndex, 1);
+        if (moved) masks.splice(toIndex, 0, moved);
+      });
+      void get().commitDevelopEdit("Maskenreihenfolge geändert");
+    },
+
+    transferMaskToPhoto: async (maskId, targetPhotoId) => {
+      const mask = get().developEdl.masks.find((m) => m.id === maskId);
+      if (!mask) return;
+      const clone: Mask = JSON.parse(JSON.stringify(mask));
+      clone.id = `mask-${crypto.randomUUID()}`;
+      try {
+        const position = await api.currentDevelopEdit(targetPhotoId);
+        const targetPayload = edlFromHistoryPosition(position);
+        targetPayload.masks.push(clone);
+        await api.applyDevelopEdit(targetPhotoId, buildEdlEnvelopeJson(targetPayload), `Maske „${clone.name}" übertragen`);
+        // Ist das Zielfoto gerade selbst im Entwickeln-Modul geöffnet,
+        // dessen Anzeige nachziehen (sonst zeigt es den alten Stand, bis
+        // es erneut ausgewählt wird).
+        if (get().developPhotoId === targetPhotoId) {
+          set((state) => {
+            state.developEdl = targetPayload;
+          });
+        }
+      } catch (err) {
+        console.error("Maske konnte nicht auf das Zielfoto übertragen werden:", err);
+        set((state) => {
+          state.catalogError = "Maske konnte nicht auf das Zielfoto übertragen werden.";
+        });
+      }
+    },
+
+    maskBuildingBlocks: [],
+
+    saveMaskAsBuildingBlock: (maskId, name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      const mask = get().developEdl.masks.find((m) => m.id === maskId);
+      if (!mask) return;
+      const snapshot: Mask = JSON.parse(JSON.stringify(mask));
+      set((state) => {
+        state.maskBuildingBlocks.push({ id: `mask-block-${crypto.randomUUID()}`, name: trimmed, mask: snapshot });
+      });
+    },
+
+    applyMaskBuildingBlock: (blockId) => {
+      const block = get().maskBuildingBlocks.find((b) => b.id === blockId);
+      if (!block) return;
+      const clone: Mask = JSON.parse(JSON.stringify(block.mask));
+      clone.id = `mask-${crypto.randomUUID()}`;
+      clone.name = block.name;
+      set((state) => {
+        state.developEdl.masks.push(clone);
+        state.selectedMaskId = clone.id;
+        state.selectedMaskComponentIndex = 0;
+      });
+      void get().commitDevelopEdit(`Baustein „${block.name}" angewendet`);
+    },
+
+    removeMaskBuildingBlock: (blockId) => {
+      set((state) => {
+        const index = state.maskBuildingBlocks.findIndex((b) => b.id === blockId);
+        if (index >= 0) state.maskBuildingBlocks.splice(index, 1);
+      });
     },
     };
   }),

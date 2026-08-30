@@ -42,6 +42,7 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Flaggen — Phase 3 — Status: Fertig
 - [x] Schlagworte (flache Liste, ohne Hierarchie) — Phase 3 — Status: Fertig
 - [ ] Schlagworthierarchie (Synonyme, Export-Steuerung, Auto-Vervollständigung), Schlagwortvorschläge, Tag-Regeln (bedingte Auto-Tags) — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
+- [ ] Auto-Tagging — Phase 7 — Status: Nicht begonnen (siehe `SPEC.md` §5s Phase-7-Satz; **Nachtrag ADR-0033:** diese Zeile fehlte seit Phase 3 komplett in `FEATURES.md`, hier nachgetragen statt stillschweigend übersprungen — abweichend regelbasiert statt echter Bildklassifikation, siehe ADR-0033 Punkt 6)
 - [x] Metadaten-Panel (Basisfelder lesen, Bewertung/Flagge/Farbe/Schlagworte editieren) — Phase 3 — Status: Fertig
 - [x] Undo/Redo für Bibliotheks-Metadaten (Bewertung/Flagge/Farbe/Schlagworte/Sammlungsmitgliedschaft) — Phase 3 — Status: Fertig (siehe DECISIONS.md ADR-0027; deckt bewusst nicht Sammlung anlegen/umbenennen/löschen ab)
 - [ ] Metadaten-Presets, Stapel-Metadatenbearbeitung, EXIF/IPTC/XMP-Editor (alle Felder), frei definierbare Metadaten-Felder, Sidecar-Export (.xmp) — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)

@@ -1270,3 +1270,141 @@ Abschnitt „Aktuelle Phase: Phase 6" mit feingranularer Schrittfolge,
 analog zu Phase 4/5. `ARCHITECTURE.md` §7s Phase-6-Platzhalterzeile wird
 entsprechend präzisiert (Ebenenmodell statt Fused-Pass, EDL v3, kein
 Tiefenbereich/keine KI-Masken).
+
+## ADR-0033: Phase-7-Scope präzisiert — KI-Funktionen ohne echte ONNX-Runtime-Modellinferenz, echter LLM-Client für den Preset-Generator, neues `apx-ai`-Crate
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §5 nennt für Phase 7 wörtlich „KI-Funktionen.
+Motiv-/Himmel-/Personen-Segmentierung (ONNX-Runtime, Modelle lokal),
+Preset-Generator per LLM, Referenzbild-Matching, Auto-Tagging."
+`ARCHITECTURE.md` §7 reservierte dafür bereits wörtlich „`apx-ai` —
+ONNX-Runtime-Integration ..., LLM-Client für Preset-Generator". Zwei
+Teile dieses Satzes sind in dieser Umgebung nicht wie ursprünglich
+vorgesehen umsetzbar:
+
+1. **Echte ONNX-Runtime-Modellinferenz** würde (a) das Bundling
+   tatsächlicher, lizenzrechtlich einwandfreier Segmentierungs-Modell-
+   gewichte voraussetzen — es gibt in dieser Umgebung keinen legitimen
+   Weg, ein trainiertes Motiv-/Himmel-/Personen-Segmentierungsmodell zu
+   beschaffen und mitzuliefern —, und (b) eine native
+   `onnxruntime`-Bibliothek zur Build-Zeit verlinken, was in dieser
+   Sandbox nicht zuverlässig testbar ist (kein bestätigter Zugriffsweg
+   auf vorkompilierte ONNX-Runtime-Binaries). Ein „Bring-your-own-Model"-
+   Pfad (Nutzer liefert eine `.onnx`-Datei) wäre technisch denkbar, aber
+   ohne jedes mitgelieferte oder in dieser Sandbox verifizierbare Modell
+   nur eine ungetestete Hülle — dieselbe Art vorgetäuschter statt echter
+   Fähigkeit, die dieses Projekt durchgehend vermeidet (siehe z. B.
+   ADR-0032 Punkt 4: „eine genuine, nicht nur vorgetäuschte Fähigkeit").
+2. **Ein echter LLM-Client** ist dagegen sehr wohl echt umsetzbar: ein
+   HTTP-Client gegen die Anthropic-Messages-API (`reqwest`, vom Nutzer
+   selbst hinterlegter API-Schlüssel, genau wie jede andere Desktop-App
+   mit KI-Anbindung) ist eine Handvoll Code, braucht kein mitgeliefertes
+   Modell und lässt sich isoliert testen (Prompt-Aufbau/Antwort-Parsing
+   ohne echten Netzwerkaufruf, analog zum bestehenden „kein GPU-Adapter
+   verfügbar"-Überspringen-Muster für Netzwerk-freie CI-Läufe).
+
+**Entscheidung:**
+1. **Neues `apx-ai`-Crate** (`crates/apx-ai`) bündelt alle in diesem
+   Abschnitt beschriebenen Analyse-/Generator-Bausteine — dieselbe
+   „ein Crate pro fachlicher Domäne"-Konvention wie `apx-catalog`/
+   `apx-pipeline`. Abhängigkeiten: `apx-core`, `apx-raw` (für
+   `LinearImage`), `apx-pipeline` (für EDL-Typen + Rendering, nur beim
+   Referenzbild-Modus gebraucht), `apx-catalog` (für „Preset aus
+   Bearbeitung lernen" + Auto-Tagging, beide lesen bestehende
+   Katalogdaten), `reqwest` (LLM-Client, neue Workspace-Abhängigkeit,
+   `rustls-tls`-Feature statt der systemabhängigen OpenSSL-Variante).
+2. **Die fünf KI-Masken** (Motiv/Himmel/Hintergrund/Objekte/Personen)
+   werden über **klassische, deterministische Bildverarbeitungs-
+   heuristiken statt echter tiefer neuronaler Netze** umgesetzt — jede
+   einzelne ist eine echte, funktionierende, unit-getestete Fähigkeit,
+   kein Platzhalter:
+   - **Motiv:** Sättigungs-/Kontrast-gewichtete Saliency-Karte
+     (Center-Surround-Kontrast, ein reales, jahrzehntealtes klassisches
+     Sichtverfahren) als Vordergrund-Wahrscheinlichkeit, geglättet.
+   - **Himmel:** Farbton-/Helligkeits-/Positions-Heuristik (bläulich,
+     geringer lokaler Kontrast, obere Bildhälfte bevorzugt) — dieselbe
+     Art Heuristik, die vor Verbreitung tiefer Netze in echten
+     Foto-Editoren für „Himmel auswählen" verwendet wurde.
+   - **Hintergrund:** Komplement der Motiv-Maske (`1.0 - alpha`) — kein
+     eigener Algorithmus nötig.
+   - **Objekte (Klick-Segmentierung):** Region-Growing/Flood-Fill ab dem
+     Klickpunkt, farbtoleranz-basiert — dieselbe Toleranz-/Weich-
+     zeichnung-Grundidee wie die bereits bestehende Farbbereich-Maske
+     (Phase 6 Schritt 5), hier aber ausgehend von einem Saatpunkt statt
+     einem global über das ganze Bild verglichenen Zielfarbwert.
+   - **Personen:** Hautton-Erkennung im YCbCr-Farbraum (ein reales,
+     weit verbreitetes klassisches Verfahren) als **eine einzelne
+     zusammenhängende Hautregion** — **bewusste Einschränkung:** die in
+     `SPEC.md` §3.3 genannten Einzelregionen (Augen, Brauen, Lippen,
+     Zähne, Haare, Kleidung) werden **nicht** als eigene, einzeln
+     wählbare Teilmasken umgesetzt — echte Gesichts-/Körper-Landmark-
+     Erkennung für diese Feinheit setzt ein trainiertes Modell voraus
+     (siehe Punkt 1).
+   Jede Heuristik läuft serverseitig (Rust, `apx-ai`), niemals
+   clientseitig — konsistent mit dem gesamten Projekt: jede tatsächliche
+   Pixelanalyse lebt in Rust, das Frontend liest nur schon gerenderte
+   Einzelpixel (WB-Pipette/Farbmischer/Maskenfarbbereich).
+3. **Maskengeometrie-Erweiterung:** ein KI-generiertes Ergebnis ist
+   naturgemäß eine Rasterfläche, kein Parameter-Satz wie die fünf
+   bestehenden Geometrietypen — `MaskGeometry` bekommt eine sechste
+   Variante `AiGenerated { kind, width, height, alpha: Vec<u8> }`: eine
+   niedrig aufgelöste (lange Kante auf 512px begrenzt) Alpha-Bitmap,
+   beim Rendern bilinear auf die tatsächliche Zielauflösung hochskaliert
+   — **bewusste Vereinfachung** ggü. den parametrischen Typen (die bei
+   jeder Auflösung exakt neu berechnet werden): geringerer
+   Speicherbedarf als eine volle Auflösung, aber weniger scharfe Kanten
+   bei starker Vergrößerung. Einmal berechnet, bleibt sie bis zu einer
+   erneuten Generierung unverändert (kein Re-Run bei jedem Regler-Tick).
+4. **Reparatur-Erweiterungen** (aus ADR-0032 Punkt 8 bereits auf Phase 7
+   vorgemerkt): Auto-Quellenfindung und Sensorflecken-Visualisierung
+   sind einmalige Analyse-Befehle in `apx-ai` (Patch-Ähnlichkeitssuche
+   per normierter Kreuzkorrelation bzw. Blob-Erkennung per lokaler
+   Kontrast-Anomalie gegen ein weichgezeichnetes Referenzbild) — beide
+   echte, deterministische, testbare Algorithmen. Inhaltsbasiertes
+   Füllen (`RepairMode::ContentAwareFill`) ist dagegen ein *Render-Zeit*-
+   Vorgang (läuft bei jedem Rendering wie Klonen/Reparieren, nicht nur
+   einmalig) und bleibt deshalb in `apx-pipeline::stages::repair`, nicht
+   in `apx-ai` — umgesetzt als vereinfachtes PatchMatch (Zufallsinit +
+   Propagation + Zufallssuche, wenige Iterationen), eine reale, wenn auch
+   gegenüber der vollen PatchMatch-Veröffentlichung reduzierte Fassung
+   (weniger Iterationen, kein Multi-Skalen-Ansatz).
+5. **Preset-Generator:** LLM-Anfrage nutzt einen echten Anthropic-
+   Messages-API-Client (`apx-ai::llm_client`), der Nutzer hinterlegt
+   seinen eigenen API-Schlüssel in den Einstellungen (`apx-core::Settings`
+   bekommt ein neues `AiSettings`-Feld, exakt demselben Speicher-
+   /Lademuster wie `UiSettings`/`CatalogSettings"). Der Prompt beschreibt
+   dem Modell das EDL-Sektionsschema und bittet um eine JSON-Antwort im
+   selben Format wie eine Preset-EDL-Teilmenge — Parsing/Validierung
+   passiert serverseitig, eine unparsbare Antwort führt zu einem
+   Fehler statt eines stillschweigend übernommenen Unsinns-Presets.
+   Referenzbild-Modus (numerische Optimierung, **kein** LLM):
+   Koordinatenabstieg über eine kleine, feste Teilmenge der
+   Grundeinstellungs-Parameter, Zielfunktion = Histogramm-Distanz
+   zwischen gerendertem aktuellen Bild und Referenzbild — bewusst kein
+   Gradientenverfahren über die volle Pipeline (nicht differenzierbar
+   ohne Autodiff-Infrastruktur), sondern ein einfaches, aber echtes
+   Ableitungsfreies Suchverfahren. Variationen-Generator: deterministisch
+   geseedete kleine Störungen eines Basis-Presets. Preset aus Bearbeitung
+   lernen: Mittelwertbildung der committeten EDL-Werte mehrerer vom
+   Nutzer ausgewählter Fotos je EDL-Sektion.
+6. **Auto-Tagging** wird bewusst **regelbasiert statt echter
+   Bildklassifikation** umgesetzt: leitet aus den KI-Masken-Heuristiken
+   aus Punkt 2 (nennenswerte Himmel-/Hautton-Fläche erkannt) plus
+   bereits vorhandenen EXIF-Feldern (ISO/Blende/Brennweite/Zeitstempel)
+   eine kleine, feste Menge an Schlagwort-Vorschlägen ab (z. B. „Himmel",
+   „Person", „Nachtaufnahme", „Makro") — reuse der bestehenden
+   Schlagwort-Infrastruktur aus Phase 3 (`photo_keywords`), kein neues
+   Schema. **Nachtrag:** „Auto-Tagging" stand im `SPEC.md` §5-Satz für
+   Phase 7, hatte aber bislang **keine** eigene `FEATURES.md`-Zeile — eine
+   echte Dokumentationslücke aus Phase 3, hier nachgetragen (§3.1, Phase
+   7) statt stillschweigend übersprungen.
+
+**Konsequenzen:** `FEATURES.md` §3.3 (fünf KI-Masken-Zeilen) und §3.5
+(Preset-Generator-Zeilen) werden von „Nicht begonnen" auf „Fertig
+(abweichend)" umgetaggt, sobald gebaut, mit Verweis auf diese ADR; §3.1
+bekommt eine neue Auto-Tagging-Zeile. `ARCHITECTURE.md` §7s
+Phase-7-Platzhalter wird durch ein neues Kapitel „Architektur Phase 7"
+ersetzt. `PLAN.md` bekommt einen neuen Abschnitt „Aktuelle Phase: Phase 7"
+mit feingranularer Schrittfolge. Tiefenbereich-Masken (siehe ADR-0032
+Punkt 3) bleiben weiterhin ohne Phasenzuordnung zurückgestellt — kein
+Tiefendaten-Zulieferer existiert, das ändert auch diese ADR nicht.

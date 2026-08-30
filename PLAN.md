@@ -617,3 +617,71 @@ Ebenen-Mischmodus zurückmischen.
 
 ### Nicht in Phase 6 (bewusst zurückgestellt)
 Siehe ADR-0032: Tiefenbereich-Masken (kein Tiefendaten-Zulieferer, ohne Phasenzuordnung); KI-Masken (Motiv/Himmel/Hintergrund/Objekte/Personen) → Phase 7; Reparatur-Erweiterungen (Auto-Quellenfindung, inhaltsbasiertes Füllen, Sensorflecken-Visualisierung) → Phase 7; Bibliotheks-Backlog (Sammlungssätze, Stapel, virtuelle Kopien, erweiterbare Farbmarkierungen, Schlagworthierarchie, Metadaten-Presets/EXIF-IPTC-XMP-Editor, Vergleichs-/Übersichtsansicht, Filter-Presets, Schnellentwicklung im Raster, Vorschau-Cache/Smart Previews) → Phase 9.
+
+## Aktuelle Phase: Phase 7 — KI-Funktionen
+
+`SPEC.md` §5 nennt wörtlich „KI-Funktionen. Motiv-/Himmel-/Personen-
+Segmentierung (ONNX-Runtime, Modelle lokal), Preset-Generator per LLM,
+Referenzbild-Matching, Auto-Tagging." Siehe `DECISIONS.md` ADR-0033 für
+die Scope-Präzisierung: echte ONNX-Runtime-Modellinferenz ist in dieser
+Umgebung nicht seriös umsetzbar (kein legitimer Weg, Modellgewichte zu
+beschaffen/mitzuliefern, kein bestätigter Zugriff auf vorkompilierte
+ONNX-Runtime-Binaries) — die fünf KI-Masken werden stattdessen über
+echte, deterministische, klassische Bildverarbeitungsheuristiken gebaut
+(Saliency/Farbheuristik/Region-Growing/Hautton-Erkennung), jede eine
+genuine statt vorgetäuschte Fähigkeit. Der LLM-Client für den
+Preset-Generator ist dagegen ein echter Anthropic-Messages-API-Client.
+Neues `apx-ai`-Crate bündelt alle Bausteine dieser Phase (Reparatur-
+Erweiterungen, die schon ADR-0032 Punkt 8 hierher vorgemerkt hatte,
+eingeschlossen — außer dem render-zeitlichen Content-Aware-Fill, das in
+`apx-pipeline::stages::repair` bleibt).
+
+**Testdisziplin dieser Phase (Nutzerauftrag):** anders als in Phase 2–6
+wird die volle Playwright-/Vitest-Testabdeckung **nicht** nach jedem
+Schritt neu geschrieben/ausgeführt, sondern erst gebündelt in Schritt 6
+(Dokumentation, Tests, Abnahme) — Zwischenschritte halten `cargo fmt`/
+`clippy`/`test` sowie `tsc -b` grün (schnell, fängt grobe Fehler früh),
+verzichten aber auf neue e2e-Spezifikationen bis zum Schluss. Am Ende
+müssen `cargo test --workspace`, `tsc -b`, `vitest run`, `playwright
+test` und `vite build` alle vollständig grün sein — keine Ausnahme.
+
+- [ ] 0. Scope festzurren
+  - [x] `DECISIONS.md`: neues ADR-0033
+  - [x] `FEATURES.md`: Auto-Tagging-Zeile nachgetragen (§3.1, Phase 7 — fehlte bislang komplett)
+  - [ ] `ARCHITECTURE.md` §7s Phase-7-Platzhalter wird in Schritt 6 durch ein volles Kapitel ersetzt
+  - [x] `PLAN.md`: dieser Abschnitt
+
+- [ ] 1. `apx-ai`-Crate-Grundgerüst + gemeinsame Bildanalyse-Bausteine
+  - Neues Crate `crates/apx-ai`, Workspace-Mitglied, Abhängigkeiten `apx-core`/`apx-raw`/`apx-pipeline`/`apx-catalog`/`reqwest` (rustls-tls)/`serde`/`serde_json`/`rayon`
+  - Gemeinsame Hilfsfunktionen: RGB→YCbCr-Konvertierung, Gauß-Weichzeichnung (falls nicht schon aus `apx-pipeline` wiederverwendbar — prüfen, ob `stages::details` etwas Passendes exportiert, sonst neu, klein gehalten), bilineares Alpha-Upsampling (für die neue `MaskGeometry::AiGenerated`-Variante)
+  - `apx-pipeline/src/edl/v3.rs`: `MaskGeometry::AiGenerated { kind: AiMaskKind, width: u32, height: u32, alpha: Vec<u8> }` + `AiMaskKind`-Enum (Subject/Sky/Background/ClickRegion/Person); `stages/masks.rs` bekommt eine Upsampling-Alpha-Funktion für diesen Fall
+
+- [ ] 2. Die fünf KI-Masken
+  - Motiv (Saliency), Himmel (Farb-/Positionsheuristik), Hintergrund (Komplement von Motiv), Objekte (Klick-Region-Growing), Personen (Hautton-Erkennung, eine Region) — alle in `apx-ai::segmentation`
+  - Neuer Tauri-Command `generate_ai_mask(photo_id, kind, click_x?, click_y?) -> AiMaskAlphaDto` (Base64-kodierte Alpha-Bitmap + Breite/Höhe), nutzt `TileCache::get_or_decode` wie `compute_develop`
+  - Frontend: `MasksPanel.tsx` bekommt einen „KI-Maske hinzufügen"-Abschnitt (fünf Knöpfe, „Objekte" öffnet den Bild-Klick-Picker analog zu den bestehenden Picker-Mustern)
+
+- [ ] 3. Reparatur-Erweiterungen
+  - Auto-Quellenfindung (`apx-ai::repair_analysis::suggest_source_point`, normierte Kreuzkorrelations-Patch-Suche), Sensorflecken-Visualisierung (`apx-ai::repair_analysis::detect_spots`, Blob-Erkennung per lokaler Kontrast-Anomalie) — je ein Tauri-Command, Frontend-Overlay im `RepairOverlay.tsx`
+  - Inhaltsbasiertes Füllen: neuer `RepairMode::ContentAwareFill` in `apx-pipeline::stages::repair.rs` (vereinfachtes PatchMatch: Zufallsinit + Propagation + Zufallssuche, wenige Iterationen), EDL-Feld ergänzt
+
+- [ ] 4. Preset-Generator
+  - `apx-core::Settings`: neues `AiSettings { anthropic_api_key: Option<String> }`-Feld + Frontend-Einstellungen-UI zum Hinterlegen
+  - LLM-Anfrage: `apx-ai::llm_client` (Anthropic Messages API über `reqwest`), Prompt beschreibt EDL-Sektionsschema, erwartet JSON-Antwort im `PresetEdlSubset`-Format, serverseitige Validierung
+  - Referenzbild-Modus: Koordinatenabstieg über eine feste Teilmenge der Grundeinstellungs-Parameter, Histogramm-Distanz als Zielfunktion, kein LLM
+  - Variationen-Generator: deterministisch geseedete kleine Störungen eines Basis-Presets (Kontaktbogen-Vorschau im Frontend)
+  - Preset aus Bearbeitung lernen: Mittelwertbildung committeter EDL-Werte mehrerer ausgewählter Fotos je Sektion
+  - Frontend: neuer Abschnitt in `PresetsPanel.tsx`/`SavePresetDialog.tsx` für alle vier Generator-Modi
+
+- [ ] 5. Auto-Tagging
+  - `apx-ai::tagging`: regelbasierte Schlagwort-Vorschläge aus Segmentierungs-Heuristiken (Himmel-/Hautton-Flächenanteil) + EXIF (ISO/Blende/Brennweite) — reuse der bestehenden `photo_keywords`-Infrastruktur aus Phase 3
+  - Tauri-Command `suggest_tags(photo_id) -> Vec<String>`, Frontend-Knopf im Metadaten-Panel „Vorschläge übernehmen"
+
+- [ ] 6. Dokumentation, Tests, Abnahme
+  - `ARCHITECTURE.md`: neues Kapitel „Architektur Phase 7"
+  - `FEATURES.md`: alle jetzt gebauten §3.1/§3.3/§3.5-Zeilen auf Fertig (abweichend, mit Verweis auf ADR-0033)
+  - Volle, gebündelte Testabdeckung nachgezogen: Rust-Unit-Tests je neuem Algorithmus (falls in Schritt 1–5 nur oberflächlich getestet), neue Playwright-e2e-Spezifikationen für alle Frontend-Flows dieser Phase, volle Kette grün
+  - Commit+Push, CI-Check, ehrlicher Abschlussbericht (inkl. aller ADR-0033-Vereinfachungen: keine echte ONNX-Inferenz, Personen-Maske nur eine Hautton-Region statt Einzelteile, vereinfachtes PatchMatch, Histogramm-Distanz statt echtem Gradientenverfahren)
+
+### Nicht in Phase 7 (bewusst zurückgestellt)
+Tiefenbereich-Masken (siehe ADR-0032 Punkt 3, weiterhin ohne Phasenzuordnung); echte ONNX-Runtime-Modellinferenz (siehe ADR-0033 Punkt 1 — ein „Bring-your-own-Model"-Pfad wäre ohne verifizierbares Modell nur eine ungetestete Hülle); Einzelregionen der Personen-Maske (Augen/Brauen/Lippen/Zähne/Haare/Kleidung einzeln wählbar).

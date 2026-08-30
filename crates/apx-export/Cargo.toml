@@ -1,0 +1,35 @@
+[package]
+name = "apx-export"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Aperture X — Export-Engine (Phase 8, siehe DECISIONS.md ADR-0034): gemeinsamer Renderpfad für Drucken/Diashow/Buch/Web (Formate, Größenbegrenzung, Ausgabeschärfung, ICC-Farbmanagement, Wasserzeichen, Metadaten-Filter, Export-Warteschlange). Hängt von apx-core/apx-raw/apx-pipeline/apx-catalog ab, rendert über apx_pipeline::develop::render_rgba8 — kein zweiter Rendering-Codepfad."
+
+[dependencies]
+apx-core.workspace = true
+apx-raw.workspace = true
+apx-pipeline.workspace = true
+apx-catalog.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rayon.workspace = true
+# WebP (verlustfrei, reines Rust über image-webp) + AVIF (verlustbehaftet
+# über ravif/rav1e, ebenfalls reines Rust) zusätzlich zu den vom Workspace
+# vorgegebenen JPEG/PNG/TIFF-Features — siehe ADR-0034 Punkt 1.
+image = { workspace = true, features = ["webp", "avif"] }
+
+# Die übrigen in ADR-0034 geprüften Abhängigkeiten (lcms2/ab_glyph für
+# Schritt 2, printpdf für Schritt 5, suppaftp/russh für Schritt 6,
+# reverse_geocoder/quick-xml für Schritt 7) werden erst im jeweiligen
+# Schritt ergänzt, nicht schon hier — `printpdf` zieht transitiv einen
+# sehr großen Font-/Layout-Baum (`azul-layout`, `allsorts`, `taffy` …)
+# nach sich, der in dieser Sandbox mit begrenztem Plattenkontingent den
+# Build sonst unnötig aufbläht, solange er noch nicht gebraucht wird.
+
+[dev-dependencies]
+tempfile = "3"
+approx = "0.5"

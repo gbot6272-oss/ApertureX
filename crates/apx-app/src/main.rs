@@ -121,6 +121,7 @@ fn main() {
             commands::generate_preset_variations,
             commands::learn_preset_from_photos,
             commands::suggest_tags,
+            commands::export_photo,
         ])
         .run(tauri::generate_context!())
         .expect("Fehler beim Starten von Aperture X");

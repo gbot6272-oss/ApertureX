@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 
 import { selectFolderDialog } from "../lib/tauri";
 import { useAppStore } from "../store";
+import { ExportDialog } from "./ExportDialog";
 import { ImportDialog } from "./ImportDialog";
 
 export function Header() {
@@ -13,11 +14,17 @@ export function Header() {
   const developPanelOpen = useAppStore((s) => s.developPanelOpen);
   const toggleDevelopPanel = useAppStore((s) => s.toggleDevelopPanel);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
+  const multiSelectedIds = useAppStore((s) => s.multiSelectedIds);
   const centerView = useAppStore((s) => s.centerView);
   const toggleCenterView = useAppStore((s) => s.toggleCenterView);
   const metadataPanelOpen = useAppStore((s) => s.metadataPanelOpen);
   const toggleMetadataPanel = useAppStore((s) => s.toggleMetadataPanel);
+  const exportDialogOpen = useAppStore((s) => s.exportDialogOpen);
+  const openExportDialog = useAppStore((s) => s.openExportDialog);
+  const closeExportDialog = useAppStore((s) => s.closeExportDialog);
   const [importDialogSource, setImportDialogSource] = useState<string | null>(null);
+
+  const exportPhotoIds = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
 
   const handleImportClick = useCallback(async () => {
     const path = await selectFolderDialog();
@@ -119,6 +126,17 @@ export function Header() {
       >
         Entwickeln
       </button>
+
+      <button
+        type="button"
+        onClick={openExportDialog}
+        disabled={exportPhotoIds.length === 0}
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Exportieren…
+      </button>
+
+      <ExportDialog open={exportDialogOpen} photoIds={exportPhotoIds} onClose={closeExportDialog} />
 
       <span className="text-xs text-text-muted">Strg/Cmd+K — Befehlspalette</span>
     </header>

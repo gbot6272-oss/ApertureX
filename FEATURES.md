@@ -24,7 +24,7 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 
 - [x] Import: Ordner scannen, Metadaten lesen, Thumbnails erzeugen (Basisfunktion) — Phase 1 — Status: Fertig
 - [x] Import mit Kopieren/Verschieben/Hinzufügen — Phase 3 — Status: Fertig (Backend seit Phase 3; die damalige Fertig-Markierung war vorschnell — es gab bis Phase 5 Schritt 9 **kein** Frontend dafür, siehe `ARCHITECTURE.md` §9 und `DECISIONS.md` ADR-0031 Punkt 7. Jetzt über `ImportDialog.tsx` erreichbar)
-- [ ] Import mit DNG-Konvertierung — Phase 8 — Status: Nicht begonnen (ADR-0025 taggte diese Zeile ursprünglich „Phase 5 (Export/Publish)", noch bevor `SPEC.md` §5 festlegte, dass Phase 5 tatsächlich das Preset-/Template-System ist, siehe ADR-0031 — Retag auf Phase 8, wo laut `ARCHITECTURE.md` §7 die Export-Engine inkl. DNG-Ausgabeformat tatsächlich gebaut wird)
+- [ ] Import mit DNG-Konvertierung — Phase 8 — Status: Zurückgestellt (siehe ADR-0034 Punkt 1/`apx_export::engine`s Moduldoku: die `dng`-Bibliothek ist in dieser Umgebung reiner Lesezugriff, kein Schreib-/Encodier-Pfad für eigene DNG-Dateien — ohne tragfähige reine-Rust-Alternative bleibt eine Kamera-RAW→DNG-Konvertierung offen, bis eine schreibfähige Bibliothek existiert)
 - [x] Import-Presets — Phase 3 — Status: Fertig (dieselbe Korrektur wie die Zeile darüber: Backend seit Phase 3, Frontend erst Phase 5 Schritt 9)
 - [x] Automatisches Umbenennen mit Token-System — Phase 3 — Status: Fertig (dieselbe Korrektur: der Token-Editor mit Live-Vorschau kam erst mit `ImportDialog.tsx` in Phase 5 Schritt 9 hinzu)
 - [x] Duplikaterkennung per exaktem Hash — Phase 3 — Status: Fertig (siehe ADR-0027: `content_hash`-Spalte existierte bereits seit Phase 1, wird jetzt per Streaming-SHA-256 beim Import befüllt; reine Anzeige, blockiert den Import nicht)
@@ -259,13 +259,13 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [ ] Upload via FTP/SFTP — Phase 8 — Status: Nicht begonnen
 
 ### Export
-- [ ] Formate JPEG/PNG/TIFF/PSD/DNG/WebP/AVIF/HEIF/JPEG XL — Phase 8 — Status: Nicht begonnen
-- [ ] Farbräume sRGB/AdobeRGB/ProPhoto/Display-P3/eigenes ICC — Phase 8 — Status: Nicht begonnen
-- [ ] Bit-Tiefe 8/16 — Phase 8 — Status: Nicht begonnen
-- [ ] Größenbegrenzung (Kante/Megapixel/Dateigröße) — Phase 8 — Status: Nicht begonnen
-- [ ] Ausgabeschärfung nach Medium — Phase 8 — Status: Nicht begonnen
-- [ ] Wasserzeichen, Metadaten-Filter — Phase 8 — Status: Nicht begonnen
-- [ ] Export-Warteschlange (Fortschritt, Pausieren, Priorisieren) — Phase 8 — Status: Nicht begonnen
+- [x] Formate JPEG/PNG/TIFF/PSD/DNG/WebP/AVIF/HEIF/JPEG XL — Phase 8 — Status: Fertig (abweichend, siehe ADR-0034 Punkt 1) — JPEG/PNG/TIFF/WebP(verlustfrei)/AVIF echt umgesetzt (`apx_export::format`); PSD/HEIF/JPEG-XL-Export sowie eine DNG-Konvertierung beim Import bleiben zurückgestellt (keine tragfähige reine-Rust-Bibliothek mit Schreibpfad bzw. Lizenzmauer, siehe `apx_export::engine`s Moduldoku)
+- [ ] Farbräume sRGB/AdobeRGB/ProPhoto/Display-P3/eigenes ICC — Phase 8 — Status: Nicht begonnen (Schritt 2)
+- [x] Bit-Tiefe 8/16 — Phase 8 — Status: Fertig (abweichend, siehe ADR-0034 Punkt 1) — 16-Bit ist für PNG/TIFF eine lineare Streckung des fertigen 8-Bit-Werts auf den vollen 16-Bit-Bereich (Dateiformat-Kompatibilität), keine echte zusätzliche Tonwertpräzision — dafür müsste `apx_pipeline::develop::render_rgba8` durchgehend auf einem `u16`/`f32`-Pfad rendern, siehe `apx_export::format`s Moduldoku
+- [x] Größenbegrenzung (Kante/Megapixel/Dateigröße) — Phase 8 — Status: Fertig (`apx_export::resize`, Dateigröße per iterativer JPEG-Qualitätssuche)
+- [x] Ausgabeschärfung nach Medium — Phase 8 — Status: Fertig (`apx_export::sharpen`, Unsharp-Masking mit Bildschirm-/Matt-/Hochglanz-Voreinstellungen)
+- [ ] Wasserzeichen, Metadaten-Filter — Phase 8 — Status: Nicht begonnen (Schritt 2)
+- [ ] Export-Warteschlange (Fortschritt, Pausieren, Priorisieren) — Phase 8 — Status: Nicht begonnen (Schritt 2; Schritt 1 exportiert bereits mehrere ausgewählte Fotos sequenziell mit sichtbarem Fortschritt, aber ohne Pausieren/Priorisieren/Persistenz über Neustarts)
 
 ### Zusätzliche Module (über Lightroom hinaus)
 - [ ] Node-Editor (Pipeline als Knotengraph) — Phase 9 — Status: Nicht begonnen

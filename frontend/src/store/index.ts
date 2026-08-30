@@ -40,6 +40,8 @@ import type {
   AiSettingsDto,
   CatalogStatusDto,
   CollectionDto,
+  ExportOutcomeDto,
+  ExportPhotoOptions,
   FilterCriteriaDto,
   FolderDto,
   HistoryPositionDto,
@@ -953,7 +955,40 @@ interface AiSlice {
   clearTagSuggestions: () => void;
 }
 
-export type AppStore = CatalogSlice & SelectionSlice & ViewerSlice & JobsSlice & DevelopSlice & LibrarySlice & PresetsSlice & MasksSlice & AiSlice;
+/** Export-Engine-Grundgerüst (Phase 8 Schritt 1, siehe `DECISIONS.md`
+ * ADR-0034 und `apx_export::engine`s Moduldoku). Exportiert eine oder
+ * mehrere Fotos mit ihrem jeweils *aktuellen* committeten Bearbeitungsstand
+ * — dieselbe Quelle, die `Entwickeln` anzeigt. Eine echte Warteschlange
+ * (Fortschritt/Pausieren/Priorisieren über mehrere App-Neustarts hinweg)
+ * kommt erst in Schritt 2 (`ADR-0034` Punkt 1) — hier ein einfacher
+ * sequenzieller Durchlauf mit sichtbarem Fortschritt, kein Persistieren
+ * zwischen Neustarts. */
+interface ExportSlice {
+  exportDialogOpen: boolean;
+  openExportDialog: () => void;
+  closeExportDialog: () => void;
+  exportRunning: boolean;
+  exportProgress: { done: number; total: number } | null;
+  exportError: string | null;
+  exportLastOutcomes: ExportOutcomeDto[];
+  /** Exportiert `photoIds` sequenziell nach `destFolder` mit `options`
+   * (siehe `ExportPhotoOptions`) — bricht bei einem Fehler NICHT den
+   * ganzen Stapel ab, sammelt aber die erste Fehlermeldung in
+   * `exportError`, damit ein einzelnes fehlerhaftes Foto (z. B. fehlende
+   * Quelldatei) nicht die übrigen blockiert. */
+  exportPhotos: (photoIds: string[], destFolder: string, options: ExportPhotoOptions) => Promise<void>;
+}
+
+export type AppStore = CatalogSlice &
+  SelectionSlice &
+  ViewerSlice &
+  JobsSlice &
+  DevelopSlice &
+  LibrarySlice &
+  PresetsSlice &
+  MasksSlice &
+  AiSlice &
+  ExportSlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -3256,6 +3291,55 @@ export const useAppStore = create<AppStore>()(
     clearTagSuggestions: () => {
       set((state) => {
         state.tagSuggestions = [];
+      });
+    },
+
+    // ---- Export (Phase 8 Schritt 1) ---------------------------------
+
+    exportDialogOpen: false,
+    exportRunning: false,
+    exportProgress: null,
+    exportError: null,
+    exportLastOutcomes: [],
+
+    openExportDialog: () => {
+      set((state) => {
+        state.exportDialogOpen = true;
+      });
+    },
+
+    closeExportDialog: () => {
+      set((state) => {
+        state.exportDialogOpen = false;
+      });
+    },
+
+    exportPhotos: async (photoIds, destFolder, options) => {
+      set((state) => {
+        state.exportRunning = true;
+        state.exportError = null;
+        state.exportProgress = { done: 0, total: photoIds.length };
+        state.exportLastOutcomes = [];
+      });
+
+      const outcomes: ExportOutcomeDto[] = [];
+      let firstError: string | null = null;
+      for (const photoId of photoIds) {
+        try {
+          const outcome = await api.exportPhoto(photoId, destFolder, options);
+          outcomes.push(outcome);
+        } catch (err) {
+          firstError ??= err instanceof Error ? err.message : String(err);
+        }
+        set((state) => {
+          state.exportProgress = { done: (state.exportProgress?.done ?? 0) + 1, total: photoIds.length };
+        });
+      }
+
+      set((state) => {
+        state.exportRunning = false;
+        state.exportLastOutcomes = outcomes;
+        state.exportError = firstError;
       });
     },
     };

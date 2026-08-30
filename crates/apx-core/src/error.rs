@@ -73,6 +73,12 @@ pub enum AppError {
     /// LLM-Antwort.
     #[error("KI-Funktion fehlgeschlagen: {message}")]
     Ai { message: String },
+
+    /// Fehler in der Export-Engine (`apx-export`, ab Phase 8, siehe
+    /// `DECISIONS.md` ADR-0034) — nicht unterstütztes Format, ICC-Profil-
+    /// oder Upload-Fehler.
+    #[error("Export fehlgeschlagen: {message}")]
+    Export { message: String },
 }
 
 impl AppError {
@@ -114,6 +120,12 @@ impl AppError {
 
     pub fn ai(message: impl Into<String>) -> Self {
         Self::Ai {
+            message: message.into(),
+        }
+    }
+
+    pub fn export(message: impl Into<String>) -> Self {
+        Self::Export {
             message: message.into(),
         }
     }

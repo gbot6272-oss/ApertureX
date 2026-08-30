@@ -16,6 +16,7 @@ apx-raw.workspace = true
 apx-catalog.workspace = true
 apx-pipeline.workspace = true
 apx-ai.workspace = true
+apx-export.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true

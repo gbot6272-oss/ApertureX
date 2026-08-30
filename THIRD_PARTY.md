@@ -50,6 +50,16 @@ ICC-Farbmanagement existiert.
 |---|---|---|---|
 | `sha2` | MIT OR Apache-2.0 | Streaming-SHA-256-Hash für exakte Duplikaterkennung beim Import | Unkritisch — war schon transitiv im `Cargo.lock` vorhanden (Version 0.10.9), jetzt direkte Abhängigkeit, siehe `DECISIONS.md` ADR-0027 |
 
+## Rust — Phase 8 (Schritt 1, siehe `DECISIONS.md` ADR-0034)
+
+| Crate | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `ravif` | BSD-3-Clause | AVIF-Encoding (`apx-export`) | Unkritisch — Transitive Abhängigkeit über `image`s `avif`-Feature, keine eigene direkte Abhängigkeit |
+| `rav1e` | BSD-2-Clause | AV1-Encoder hinter `ravif` | Unkritisch |
+| `image-webp` | MIT OR Apache-2.0 | WebP-Encoding/-Decoding (verlustfrei) hinter `image`s `webp`-Feature | Unkritisch |
+
+Weitere für Phase 8 geprüfte, aber noch nicht direkt eingebundene Abhängigkeiten (siehe ADR-0034, `PLAN.md`-Vermerk bei Schritt 1: erst im jeweiligen Schritt ergänzt, nicht vorab alle auf einmal — `printpdf`s transitiver Font-/Layout-Baum hat in dieser Sandbox das Plattenkontingent tatsächlich erschöpft): `lcms2` (MIT, „static"-Feature), `ab_glyph` (Apache-2.0), `printpdf` (MIT), `suppaftp` (Apache-2.0), `russh`/`russh-sftp` (Apache-2.0), `reverse_geocoder` (MIT), `quick-xml` (MIT OR Apache-2.0) — keine GPL-Kandidaten, werden bei ihrer jeweiligen Einbindung hier mit vollem Eintrag nachgetragen.
+
 ## Frontend — geplant für Phase 1
 
 | Paket | Lizenz | Zweck | Hinweis |

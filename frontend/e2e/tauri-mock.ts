@@ -67,6 +67,15 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     referenceImageDialogCancelled: false,
     presetVariationCount: 3,
     tagSuggestions: ["Himmel", "Landschaft"] as string[],
+    // Export-Engine (Phase 8 Schritt 1, ADR-0034) — echtes Rendern/Kodieren
+    // läuft nur im Backend; hier ein fest hinterlegtes Ergebnis pro Aufruf.
+    exportPhotoOutcome: { path: "/mock/export/output.jpg", width: 100, height: 80, byte_size: 12345 } as {
+      path: string;
+      width: number;
+      height: number;
+      byte_size: number;
+    },
+    exportPhotoShouldFail: false,
     ...initialFixtures,
   };
   w.__mockInvokeLog = [] as Array<{ cmd: string; args: unknown }>;
@@ -253,6 +262,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       referenceImageDialogCancelled: boolean;
       presetVariationCount: number;
       tagSuggestions: string[];
+      exportPhotoOutcome: { path: string; width: number; height: number; byte_size: number };
+      exportPhotoShouldFail: boolean;
     };
 
     switch (cmd) {
@@ -680,6 +691,13 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return fixtures.presetGeneratorSubsetJson;
       case "suggest_tags":
         return fixtures.tagSuggestions;
+
+      case "export_photo": {
+        if (fixtures.exportPhotoShouldFail) {
+          throw new Error("Test-Stub: Export fehlgeschlagen");
+        }
+        return fixtures.exportPhotoOutcome;
+      }
 
       default:
         throw new Error(`Test-Stub: unbekannter invoke-Befehl "${cmd}"`);

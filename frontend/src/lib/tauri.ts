@@ -497,3 +497,37 @@ export function learnPresetFromPhotos(photoIds: string[], sections: string[]): P
 export function suggestTags(photoId: string): Promise<string[]> {
   return invoke<string[]>("suggest_tags", { photoId });
 }
+
+// ---- Export (Phase 8, siehe DECISIONS.md ADR-0034) -------------------------
+
+export type ExportFormat = "jpeg" | "png" | "tiff" | "webp" | "avif";
+
+export interface ExportPhotoOptions {
+  format: ExportFormat;
+  quality?: number;
+  bitDepth16?: boolean;
+  maxEdge?: number;
+  maxMegapixels?: number;
+  maxFileSizeBytes?: number;
+  sharpenAmount?: number;
+  sharpenRadius?: number;
+  filename?: string;
+}
+
+export interface ExportOutcomeDto {
+  path: string;
+  width: number;
+  height: number;
+  byte_size: number;
+}
+
+/** Exportiert ein Foto mit seinem aktuellen Bearbeitungsstand nach
+ * `destFolder` (siehe `apx_export::engine`) — rendert serverseitig über
+ * denselben Pfad wie die Entwickeln-Vorschau. */
+export function exportPhoto(
+  photoId: string,
+  destFolder: string,
+  options: ExportPhotoOptions,
+): Promise<ExportOutcomeDto> {
+  return invoke<ExportOutcomeDto>("export_photo", { photoId, destFolder, options });
+}

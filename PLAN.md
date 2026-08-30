@@ -725,12 +725,13 @@ Ausnahme von „offline zuerst" in dieser Phase.
   - [ ] `ARCHITECTURE.md` §7s Phase-8-Platzhalter wird im letzten Schritt durch ein volles Kapitel ersetzt
   - [x] `PLAN.md`: dieser Abschnitt
 
-- [ ] 1. Export-Engine-Grundgerüst + Formate
-  - Neues Crate `crates/apx-export` (Workspace-Mitglied), hängt von `apx-core`/`apx-raw`/`apx-pipeline`/`apx-catalog` ab; rendert über den bestehenden `apx_pipeline::develop::render_rgba8`-Pfad, kein zweiter Rendering-Codepfad
-  - Formate: JPEG/PNG/TIFF (vorhandenes `image`-Crate, Schreib-Features aktivieren), WebP + AVIF neu (`ravif` fürs AVIF-Encoding, rein Rust)
-  - Bit-Tiefe 8/16, Größenbegrenzung (Kante/Megapixel/Dateigröße), Ausgabeschärfung nach Medium — Parametrisierung des bestehenden Renderers
-  - Import mit DNG-Konvertierung: `dng`-Bibliothek evaluieren (Reader-only vs. auch Schreibpfad), bei Bedarf zurückstellen statt den Schritt zu blockieren
-  - Tauri-Command(s) + Frontend-Exportdialog-Grundgerüst (Zielordner, Format, Qualität)
+- [x] 1. Export-Engine-Grundgerüst + Formate
+  - [x] Neues Crate `crates/apx-export` (Workspace-Mitglied), hängt von `apx-core`/`apx-raw`/`apx-pipeline`/`apx-catalog` ab; rendert über den bestehenden `apx_pipeline::develop::render_rgba8`-Pfad (`engine::render_and_encode`/`export_to_file`), kein zweiter Rendering-Codepfad
+  - [x] Formate: JPEG/PNG/TIFF (`image`-Crate, wie bisher), WebP (verlustfrei über `image-webp`) + AVIF (verlustbehaftet über `ravif`/`rav1e`) neu, beide zusätzliche `image`-Features statt eigener Abhängigkeiten (`format.rs`) — AVIF-Dekodieren ist damit *nicht* möglich (bräuchte das separate `avif-native`-Feature mit einer C-Systembibliothek), nur Kodieren; als Test stattdessen die ISOBMFF-`ftyp`-Signatur geprüft
+  - [x] Bit-Tiefe 8/16 (`format.rs::BitDepth`), Größenbegrenzung Kante/Megapixel (`resize.rs::SizeConstraint`) + Zieldateigröße per iterativer JPEG-Qualitätssuche (`resize::fit_jpeg_to_max_bytes`), Ausgabeschärfung nach Medium (`sharpen.rs`, Unsharp-Masking mit Bildschirm-/Matt-/Hochglanz-Voreinstellungen) — **16-Bit ist eine lineare Streckung des fertigen 8-Bit-Werts** (`v * 257`), keine echte Präzisionssteigerung, da `render_rgba8` durchgehend 8-Bit quantisiert (siehe `format.rs`s Moduldoku); nur für PNG/TIFF
+  - [x] Import mit DNG-Konvertierung: `dng`-Bibliothek evaluiert — ihr öffentliches API ist reiner Lesezugriff, kein Schreibpfad für eigene DNG-Dateien; damit in dieser Umgebung nicht umsetzbar, zurückgestellt (siehe `engine.rs`s Moduldoku, `FEATURES.md`)
+  - [x] Tauri-Command `export_photo` + Frontend-Exportdialog-Grundgerüst (`ExportDialog.tsx`: Zielordner, Format, Qualität, 16-Bit, Größenbegrenzung, Zieldateigröße, Ausgabeschärfung; „Exportieren…"-Knopf in `Header.tsx`, exportiert Mehrfachauswahl sequenziell)
+  - **Abweichung von der ursprünglichen Schritt-Planung (Disk-Vorsicht):** `apx-export`s `Cargo.toml` deklariert vorerst nur `image` (webp/avif) — `lcms2`/`ab_glyph` (Schritt 2), `printpdf` (Schritt 5), `suppaftp`/`russh` (Schritt 6), `reverse_geocoder`/`quick-xml` (Schritt 7) werden erst im jeweiligen Schritt ergänzt statt alle auf einmal: ein Testlauf in dieser Sandbox mit allen auf einmal deklarierten Abhängigkeiten hat das feste Plattenkontingent der Umgebung tatsächlich erschöpft (`printpdf`→`azul-layout` zieht einen sehr großen Font-/Layout-Baum nach sich) — kein architektonischer Rückschritt, nur eine andere Reihenfolge des Hinzufügens
 
 - [ ] 2. Farbräume/ICC, Wasserzeichen, Export-Warteschlange, Metadaten-Filter
   - `lcms2` (Feature `static`) zurück als echte Abhängigkeit — vier gebündelte Standardprofile (sRGB/Adobe RGB/ProPhoto RGB/Display P3) + Dateiauswahl für „eigenes ICC"; Phase 6s simulierter Soft-Proof bleibt unverändert

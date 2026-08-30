@@ -1736,6 +1736,132 @@ pub fn suggest_tags(state: State<'_, AppState>, photo_id: String) -> Result<Vec<
         .map_err(|err| err.to_string())
 }
 
+// ---- Export (Phase 8, siehe `DECISIONS.md` ADR-0034) ----------------------
+//
+// Reine Verdrahtung: aktuellen EDL-Stand auflösen (dieselbe Logik wie
+// `current_develop_edit`), Foto-Pfad auflösen (wie `resolve_source_path_for_ai`),
+// `apx_export::engine` aufrufen, Ergebnis als DTO zurückreichen. Die
+// eigentliche Render-/Kodier-/Größenlogik lebt komplett in `apx-export`.
+
+/// Der aktuell aktive EDL-Stand eines Fotos, aufgelöst zu `EdlV3` — dieselbe
+/// Quelle wie `current_develop_edit`, nur direkt als Rust-Wert statt als
+/// JSON-DTO (der Export braucht kein IPC-JSON, er rendert serverseitig).
+fn resolve_current_edl(
+    catalog: &apx_catalog::Catalog,
+    photo_id: apx_core::PhotoId,
+) -> Result<apx_pipeline::edl::EdlV3, String> {
+    match catalog
+        .current_edit(photo_id)
+        .map_err(|err| err.to_string())?
+    {
+        apx_catalog::HistoryPosition::Neutral => Ok(apx_pipeline::edl::EdlV3::default()),
+        apx_catalog::HistoryPosition::At(entry) => {
+            apx_pipeline::edl::from_envelope(&entry.edl).map_err(|err| err.to_string())
+        }
+    }
+}
+
+fn parse_export_format(format: &str) -> Result<apx_export::format::ExportFormat, String> {
+    match format {
+        "jpeg" => Ok(apx_export::format::ExportFormat::Jpeg),
+        "png" => Ok(apx_export::format::ExportFormat::Png),
+        "tiff" => Ok(apx_export::format::ExportFormat::Tiff),
+        "webp" => Ok(apx_export::format::ExportFormat::WebP),
+        "avif" => Ok(apx_export::format::ExportFormat::Avif),
+        other => Err(format!("unbekanntes Exportformat '{other}'")),
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportOutcomeDto {
+    pub path: String,
+    pub width: u32,
+    pub height: u32,
+    pub byte_size: usize,
+}
+
+/// Export-Parameter fürs Frontend-Exportdialog-Grundgerüst (Schritt 1).
+/// Größenbegrenzung/Zieldateigröße/Schärfung sind optional — nicht gesetzt
+/// heißt "unverändert lassen" (siehe `apx_export::resize`/`sharpen`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportPhotoOptions {
+    pub format: String,
+    pub quality: Option<u8>,
+    pub bit_depth_16: Option<bool>,
+    pub max_edge: Option<u32>,
+    pub max_megapixels: Option<f32>,
+    pub max_file_size_bytes: Option<u64>,
+    pub sharpen_amount: Option<f32>,
+    pub sharpen_radius: Option<f32>,
+    /// Dateiname ohne Endung — wird um `format`s Endung ergänzt. `None`
+    /// übernimmt den Ausgangsdateinamen (ohne dessen ursprüngliche Endung).
+    pub filename: Option<String>,
+}
+
+/// Exportiert ein einzelnes Foto mit seinem aktuellen Bearbeitungsstand
+/// nach `dest_folder`. Rendert über denselben Pfad wie die Entwickeln-
+/// Vorschau (`apx_pipeline::develop::render_rgba8`, siehe
+/// `apx_export::engine`s Moduldoku) — keine zweite Rendering-Logik.
+#[tauri::command]
+pub fn export_photo(
+    state: State<'_, AppState>,
+    photo_id: String,
+    dest_folder: String,
+    options: ExportPhotoOptions,
+) -> Result<ExportOutcomeDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    let edl = resolve_current_edl(&state.catalog, photo_id)?;
+    let format = parse_export_format(&options.format)?;
+
+    let mut request = apx_export::engine::ExportRequest::new(source_path, edl, format);
+    if let Some(quality) = options.quality {
+        request.quality = quality;
+    }
+    if options.bit_depth_16.unwrap_or(false) {
+        request.bit_depth = apx_export::format::BitDepth::Sixteen;
+    }
+    request.size_constraint = match (options.max_edge, options.max_megapixels) {
+        (Some(edge), _) => apx_export::resize::SizeConstraint::MaxEdge(edge),
+        (None, Some(megapixels)) => apx_export::resize::SizeConstraint::MaxMegapixels(megapixels),
+        (None, None) => apx_export::resize::SizeConstraint::Original,
+    };
+    request.max_file_size_bytes = options.max_file_size_bytes;
+    if let Some(amount) = options.sharpen_amount {
+        if amount > 0.0 {
+            request.sharpen = Some((amount, options.sharpen_radius.unwrap_or(1.0)));
+        }
+    }
+
+    let stem = options.filename.unwrap_or_else(|| {
+        PathBuf::from(&photo.filename)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| photo.filename.clone())
+    });
+    let dest_path = PathBuf::from(dest_folder).join(format!("{stem}.{}", format.extension()));
+
+    let outcome = apx_export::engine::export_to_file(Some(&state.pipeline), &request, &dest_path)
+        .map_err(|err| err.to_string())?;
+
+    Ok(ExportOutcomeDto {
+        path: dest_path.to_string_lossy().to_string(),
+        width: outcome.width,
+        height: outcome.height,
+        byte_size: outcome.bytes.len(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

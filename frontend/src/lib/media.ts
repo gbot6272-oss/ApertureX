@@ -36,3 +36,14 @@ export function developUrl(photoId: string, edlJson: string, maxEdge?: number): 
   const param = maxEdge === undefined ? "full" : String(maxEdge);
   return convertFileSrc(`develop/${photoId}/${param}/${edlJson}`, "apx");
 }
+
+/**
+ * Baut die URL für eine lokale Audiodatei (Diashow-Musiksynchronisation,
+ * Phase 8 Schritt 4) — `absolutePath` kommt aus dem systemeigenen
+ * Datei-Auswahldialog ({@link import("./tauri").pickFilePath}), nicht aus
+ * freier Nutzereingabe (siehe `apx-app`s `protocol::route::ImageRequest::
+ * Music`-Doku für den Vertrauensrahmen).
+ */
+export function musicUrl(absolutePath: string): string {
+  return convertFileSrc(`music/${absolutePath}`, "apx");
+}

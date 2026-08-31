@@ -88,6 +88,16 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       byte_size: number;
     },
     printPhotoShouldFail: false,
+    // Diashow (Phase 8 Schritt 4) — Video-Export über ein simuliertes
+    // System-`ffmpeg`. `ffmpegAvailable` steuert, ob der Export-Knopf im
+    // Dialog überhaupt aktivierbar ist.
+    ffmpegAvailable: true,
+    slideshowVideoOutcome: { path: "/mock/slideshow/Diashow.mp4", frame_count: 250, duration_seconds: 10 } as {
+      path: string;
+      frame_count: number;
+      duration_seconds: number;
+    },
+    slideshowVideoShouldFail: false,
     ...initialFixtures,
   };
   w.__mockInvokeLog = [] as Array<{ cmd: string; args: unknown }>;
@@ -290,6 +300,9 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       pickSaveFilePathResult: string | null;
       printOutcome: { path: string; width: number; height: number; byte_size: number };
       printPhotoShouldFail: boolean;
+      ffmpegAvailable: boolean;
+      slideshowVideoOutcome: { path: string; frame_count: number; duration_seconds: number };
+      slideshowVideoShouldFail: boolean;
     };
 
     switch (cmd) {
@@ -767,6 +780,14 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           throw new Error("Test-Stub: Drucken fehlgeschlagen");
         }
         return fixtures.printOutcome;
+      }
+      case "check_ffmpeg_available":
+        return fixtures.ffmpegAvailable;
+      case "export_slideshow_video": {
+        if (fixtures.slideshowVideoShouldFail) {
+          throw new Error("Test-Stub: Video-Export fehlgeschlagen");
+        }
+        return fixtures.slideshowVideoOutcome;
       }
 
       default:

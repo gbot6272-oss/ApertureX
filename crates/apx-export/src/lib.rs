@@ -4,8 +4,10 @@
 //! Gemeinsamer Unterbau für alle sechs Ausgabe-Module (`SPEC.md` §5):
 //! Export-Engine selbst (`engine`, `format`, `resize`, `sharpen`, `icc`,
 //! `watermark`, `metadata`, `queue`), darauf aufbauend Drucken (`print`),
-//! Diashow (größtenteils Frontend, siehe `ARCHITECTURE.md`), Buch
-//! (`book`), Web (`web`) und Karte (`map`). Rendert ausschließlich über
+//! Diashow (Übergänge/Ken-Burns/Intro-Outro laufen live im Frontend,
+//! `video` bildet dieselbe Zeitachse nur für den MP4-Export in Rust nach —
+//! siehe `video.rs`s Moduldoku), Buch (`book`), Web (`web`) und Karte
+//! (`map`). Rendert ausschließlich über
 //! `apx_pipeline::develop::render_rgba8` — kein zweiter Rendering-
 //! Codepfad (siehe `engine.rs`s Moduldoku).
 //!
@@ -24,7 +26,8 @@ pub mod print;
 pub mod queue;
 pub mod resize;
 pub mod sharpen;
+pub mod video;
 pub mod watermark;
 
-// Schritt 3–8 (Drucken/Diashow/Buch/Web/Karte/Templates) ergänzen hier
-// jeweils ihr eigenes Modul, sobald sie umgesetzt sind (siehe `PLAN.md`).
+// Schritt 5–8 (Buch/Web/Karte/Templates) ergänzen hier jeweils ihr eigenes
+// Modul, sobald sie umgesetzt sind (siehe `PLAN.md`).

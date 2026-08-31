@@ -243,10 +243,10 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [ ] Druckerei-Presets — Phase 8 — Status: Nicht begonnen
 
 ### Diashow
-- [ ] Übergänge, Ken-Burns-Effekt — Phase 8 — Status: Nicht begonnen
-- [ ] Musik-Synchronisation — Phase 8 — Status: Nicht begonnen
-- [ ] Intro/Outro-Screens — Phase 8 — Status: Nicht begonnen
-- [ ] Video-Export (MP4 via ffmpeg) — Phase 8 — Status: Nicht begonnen
+- [x] Übergänge, Ken-Burns-Effekt — Phase 8 — Status: Fertig (abweichend, siehe ADR-0034/PLAN.md Schritt 4) — nur harter Schnitt/Überblendung (kein Wipe/Slide), Live-Wiedergabe komplett im Frontend-`<canvas>` (`lib/slideshow.ts`, `SlideshowPlayer.tsx`)
+- [x] Musik-Synchronisation — Phase 8 — Status: Fertig — Tauri-Webview-`<audio>`-Element über eine neue `apx://music/<pfad>`-Protokollroute, kein Rust-Audio-Crate
+- [x] Intro/Outro-Screens — Phase 8 — Status: Fertig — Text auf Farbfläche, wiederverwendet `watermark::apply_text_watermark`s Glyph-Rasterisierung statt eines zweiten Textpfads
+- [x] Video-Export (MP4 via ffmpeg) — Phase 8 — Status: Fertig — neues `apx_export::video`-Modul rendert Frame für Frame (Ken-Burns-Zuschnitt inkl. Seitenverhältnis-Korrektur, Überblendungs-Mischung) und pipet sie roh in ein System-`ffmpeg`; `ffmpeg_available()` prüft vorab, sonst klare Fehlermeldung statt eines gebündelten Binaries
 
 ### Drucken
 - [x] Einzelbild, Kontaktbogen, Bilderpaket, benutzerdefiniertes Raster — Phase 8 — Status: Fertig (abweichend, siehe ADR-0034/PLAN.md Schritt 3) — Bilderpaket nutzt drei feste Vorlagen statt echtem Bin-Packing beliebiger Formate

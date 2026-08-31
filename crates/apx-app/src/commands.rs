@@ -4,7 +4,7 @@
 //! werden für Phase 1 als `String` an das Frontend gereicht; eine
 //! strukturierte Fehler-DTO kommt bei Bedarf in einer späteren Phase.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
@@ -2300,6 +2300,180 @@ pub fn print_photos(
         width: page_w,
         height: page_h,
         byte_size: bytes.len(),
+    })
+}
+
+// ---- Diashow (Phase 8 Schritt 4) -------------------------------------------
+//
+// Übergänge/Ken-Burns-Effekt/Intro-Outro-Screens/Musik-Synchronisation
+// laufen für die *Live-Wiedergabe* komplett im Frontend (`<canvas>` +
+// `<audio>`, siehe `SlideshowPlayer.tsx`) — hier nur der Video-Export:
+// jedes ausgewählte Foto wird wie beim normalen Export gerendert
+// (`engine::render_to_pixels`), `apx_export::video` bildet daraus + den
+// optionalen Titelkarten dieselbe Zeitachse nach und pipet sie an ein
+// System-`ffmpeg` (siehe `video.rs`s Moduldoku, `DECISIONS.md` ADR-0034).
+
+/// Ob ein aufrufbares `ffmpeg` gefunden wurde — das Frontend blendet den
+/// Video-Export-Knopf danach ein/aus, statt ihn erst beim Fehlschlagen zu
+/// deaktivieren.
+#[tauri::command]
+pub fn check_ffmpeg_available() -> bool {
+    apx_export::video::ffmpeg_available()
+}
+
+fn parse_transition_kind(transition: &str) -> Result<apx_export::video::TransitionKind, String> {
+    match transition {
+        "cut" => Ok(apx_export::video::TransitionKind::Cut),
+        "cross_fade" => Ok(apx_export::video::TransitionKind::CrossFade),
+        other => Err(format!("unbekannter Übergang '{other}'")),
+    }
+}
+
+/// Eine Intro-/Outro-Titelkarte, wie sie das Frontend auch für die
+/// Live-Vorschau verwendet (siehe `slideshow.ts`) — `fontPath` fehlt nur,
+/// wenn `text` leer ist (reine Farbfläche, siehe
+/// `apx_export::video::render_title_card`s Moduldoku).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlideshowTitleCardOptions {
+    pub text: String,
+    pub seconds: f32,
+    pub background_rgb: [u8; 3],
+    pub text_color: [u8; 3],
+    pub font_path: Option<String>,
+    pub font_size: Option<f32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlideshowVideoOptions {
+    pub slide_seconds: f32,
+    pub ken_burns: bool,
+    /// `"cut"`/`"cross_fade"`.
+    pub transition: String,
+    pub transition_seconds: Option<f32>,
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+    pub intro: Option<SlideshowTitleCardOptions>,
+    pub outro: Option<SlideshowTitleCardOptions>,
+    /// Beliebiges von `ffmpeg` unterstütztes Audioformat — `None`
+    /// exportiert stumm.
+    pub music_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SlideshowVideoOutcomeDto {
+    pub path: String,
+    pub frame_count: usize,
+    pub duration_seconds: f32,
+}
+
+fn build_title_slide(
+    card: &SlideshowTitleCardOptions,
+    width: u32,
+    height: u32,
+) -> Result<apx_export::video::TimelineSlide, String> {
+    let font_bytes =
+        match &card.font_path {
+            Some(path) => Some(std::fs::read(path).map_err(|err| {
+                format!("Schriftdatei '{path}' konnte nicht gelesen werden: {err}")
+            })?),
+            None => None,
+        };
+    let rgba = apx_export::video::render_title_card(
+        width,
+        height,
+        card.background_rgb,
+        &card.text,
+        font_bytes.as_deref(),
+        card.font_size.unwrap_or(48.0),
+        card.text_color,
+    )
+    .map_err(|err| err.to_string())?;
+    Ok(apx_export::video::TimelineSlide::Title {
+        width,
+        height,
+        rgba,
+        hold_seconds: card.seconds.max(0.1),
+    })
+}
+
+/// Rendert `photo_ids` (mit ihrem aktuellen Bearbeitungsstand, wie
+/// [`export_photo`]) zu einer Diashow und kodiert sie über ein System-
+/// `ffmpeg` als MP4 nach `dest_path` — siehe `apx_export::video`s
+/// Moduldoku für die Zeitachse (Ken-Burns/Übergänge/Titelkarten) und die
+/// Musik-Synchronisationsregel.
+#[tauri::command]
+pub fn export_slideshow_video(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    dest_path: String,
+    options: SlideshowVideoOptions,
+) -> Result<SlideshowVideoOutcomeDto, String> {
+    if photo_ids.is_empty() {
+        return Err("Keine Fotos für die Diashow ausgewählt".to_string());
+    }
+    let transition = parse_transition_kind(&options.transition)?;
+
+    let mut slides = Vec::new();
+    if let Some(intro) = &options.intro {
+        slides.push(build_title_slide(intro, options.width, options.height)?);
+    }
+
+    for (index, photo_id) in photo_ids.iter().enumerate() {
+        let photo_id = parse_photo_id(photo_id.clone())?;
+        let photo = state
+            .catalog
+            .get_photo(photo_id)
+            .map_err(|err| err.to_string())?;
+        let folder = state
+            .catalog
+            .get_folder(photo.folder_id)
+            .map_err(|err| err.to_string())?;
+        let edl = resolve_current_edl(&state.catalog, photo_id)?;
+
+        let request = apx_export::engine::ExportRequest::new(
+            folder.path.join(&photo.filename),
+            edl,
+            apx_export::format::ExportFormat::Jpeg,
+        );
+        let (width, height, rgba) =
+            apx_export::engine::render_to_pixels(Some(&state.pipeline), &request)
+                .map_err(|err| err.to_string())?;
+        slides.push(apx_export::video::TimelineSlide::Photo {
+            width,
+            height,
+            rgba,
+            ken_burns: apx_export::video::default_ken_burns(index, options.ken_burns),
+            hold_seconds: options.slide_seconds.max(0.1),
+        });
+    }
+
+    if let Some(outro) = &options.outro {
+        slides.push(build_title_slide(outro, options.width, options.height)?);
+    }
+
+    let video_options = apx_export::video::VideoExportOptions {
+        output_width: options.width,
+        output_height: options.height,
+        fps: options.fps,
+        audio_path: options.music_path.as_ref().map(PathBuf::from),
+    };
+
+    let outcome = apx_export::video::export_slideshow_video(
+        &slides,
+        transition,
+        options.transition_seconds.unwrap_or(1.0),
+        &video_options,
+        Path::new(&dest_path),
+    )
+    .map_err(|err| err.to_string())?;
+
+    Ok(SlideshowVideoOutcomeDto {
+        path: dest_path,
+        frame_count: outcome.frame_count,
+        duration_seconds: outcome.duration_seconds,
     })
 }
 

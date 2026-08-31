@@ -632,3 +632,60 @@ export interface PrintLayoutOptions {
 export function printPhotos(photoIds: string[], destPath: string, options: PrintLayoutOptions): Promise<ExportOutcomeDto> {
   return invoke<ExportOutcomeDto>("print_photos", { photoIds, destPath, options });
 }
+
+// ---- Diashow (Phase 8 Schritt 4) -------------------------------------------
+//
+// Übergänge/Ken-Burns-Effekt/Intro-Outro-Screens/Musik-Synchronisation
+// laufen für die Live-Wiedergabe komplett im Frontend (siehe
+// `lib/slideshow.ts`, `SlideshowPlayer.tsx`) — diese Commands decken nur
+// den optionalen Video-Export ab (`apx_export::video`, `DECISIONS.md`
+// ADR-0034).
+
+export type SlideshowTransition = "cut" | "cross_fade";
+
+export interface SlideshowTitleCardOptions {
+  text: string;
+  seconds: number;
+  backgroundRgb: [number, number, number];
+  textColor: [number, number, number];
+  /** Fehlt nur, wenn `text` leer ist (reine Farbfläche). */
+  fontPath?: string;
+  fontSize?: number;
+}
+
+export interface SlideshowVideoOptions {
+  slideSeconds: number;
+  kenBurns: boolean;
+  transition: SlideshowTransition;
+  transitionSeconds?: number;
+  width: number;
+  height: number;
+  fps: number;
+  intro?: SlideshowTitleCardOptions;
+  outro?: SlideshowTitleCardOptions;
+  /** Beliebiges von `ffmpeg` unterstütztes Audioformat. */
+  musicPath?: string;
+}
+
+export interface SlideshowVideoOutcomeDto {
+  path: string;
+  frame_count: number;
+  duration_seconds: number;
+}
+
+/** Ob ein aufrufbares System-`ffmpeg` gefunden wurde — steuert, ob der
+ * Video-Export-Knopf im Diashow-Dialog aktiv ist. */
+export function checkFfmpegAvailable(): Promise<boolean> {
+  return invoke<boolean>("check_ffmpeg_available");
+}
+
+/** Rendert `photoIds` (mit ihrem aktuellen Bearbeitungsstand, wie
+ * {@link exportPhoto}) zu einer Diashow und kodiert sie über ein System-
+ * `ffmpeg` als MP4 nach `destPath`. */
+export function exportSlideshowVideo(
+  photoIds: string[],
+  destPath: string,
+  options: SlideshowVideoOptions,
+): Promise<SlideshowVideoOutcomeDto> {
+  return invoke<SlideshowVideoOutcomeDto>("export_slideshow_video", { photoIds, destPath, options });
+}

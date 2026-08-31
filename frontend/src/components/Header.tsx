@@ -5,6 +5,7 @@ import { useAppStore } from "../store";
 import { ExportDialog } from "./ExportDialog";
 import { ImportDialog } from "./ImportDialog";
 import { PrintDialog } from "./PrintDialog";
+import { SlideshowDialog } from "./SlideshowDialog";
 
 export function Header() {
   const importRunning = useAppStore((s) => s.importRunning);
@@ -26,6 +27,9 @@ export function Header() {
   const printDialogOpen = useAppStore((s) => s.printDialogOpen);
   const openPrintDialog = useAppStore((s) => s.openPrintDialog);
   const closePrintDialog = useAppStore((s) => s.closePrintDialog);
+  const slideshowDialogOpen = useAppStore((s) => s.slideshowDialogOpen);
+  const openSlideshowDialog = useAppStore((s) => s.openSlideshowDialog);
+  const closeSlideshowDialog = useAppStore((s) => s.closeSlideshowDialog);
   const [importDialogSource, setImportDialogSource] = useState<string | null>(null);
 
   const exportPhotoIds = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
@@ -152,6 +156,17 @@ export function Header() {
       </button>
 
       <PrintDialog open={printDialogOpen} photoIds={exportPhotoIds} onClose={closePrintDialog} />
+
+      <button
+        type="button"
+        onClick={openSlideshowDialog}
+        disabled={exportPhotoIds.length === 0}
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Diashow…
+      </button>
+
+      <SlideshowDialog open={slideshowDialogOpen} photoIds={exportPhotoIds} onClose={closeSlideshowDialog} />
 
       <span className="text-xs text-text-muted">Strg/Cmd+K — Befehlspalette</span>
     </header>

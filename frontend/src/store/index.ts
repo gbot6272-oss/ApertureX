@@ -52,6 +52,8 @@ import type {
   PresetDto,
   PresetFolderDto,
   PrintLayoutOptions,
+  SlideshowVideoOptions,
+  SlideshowVideoOutcomeDto,
   SnapshotDto,
   SpotCandidateDto,
 } from "../lib/tauri";
@@ -993,6 +995,24 @@ interface PrintSlice {
   printPhotos: (photoIds: string[], destPath: string, options: PrintLayoutOptions) => Promise<void>;
 }
 
+/** Diashow (Phase 8 Schritt 4) — Übergänge/Ken-Burns-Effekt/Intro-Outro-
+ * Screens/Musik-Synchronisation laufen für die Live-Wiedergabe komplett im
+ * Frontend (`lib/slideshow.ts`, `SlideshowPlayer.tsx`), diese Slice deckt
+ * nur den Dialog-Zustand und den optionalen Video-Export ab (siehe
+ * `apx_export::video`). */
+interface SlideshowSlice {
+  slideshowDialogOpen: boolean;
+  openSlideshowDialog: () => void;
+  closeSlideshowDialog: () => void;
+  /** `null` = noch nicht geprüft. */
+  ffmpegAvailable: boolean | null;
+  checkFfmpegAvailability: () => Promise<void>;
+  videoExportRunning: boolean;
+  videoExportError: string | null;
+  videoExportOutcome: SlideshowVideoOutcomeDto | null;
+  exportSlideshowVideo: (photoIds: string[], destPath: string, options: SlideshowVideoOptions) => Promise<void>;
+}
+
 export type AppStore = CatalogSlice &
   SelectionSlice &
   ViewerSlice &
@@ -1003,7 +1023,8 @@ export type AppStore = CatalogSlice &
   MasksSlice &
   AiSlice &
   ExportSlice &
-  PrintSlice;
+  PrintSlice &
+  SlideshowSlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -3420,6 +3441,54 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.printRunning = false;
+        });
+      }
+    },
+
+    // ---- Diashow (Phase 8 Schritt 4) ---------------------------------
+
+    slideshowDialogOpen: false,
+    ffmpegAvailable: null,
+    videoExportRunning: false,
+    videoExportError: null,
+    videoExportOutcome: null,
+
+    openSlideshowDialog: () => {
+      set((state) => {
+        state.slideshowDialogOpen = true;
+      });
+    },
+
+    closeSlideshowDialog: () => {
+      set((state) => {
+        state.slideshowDialogOpen = false;
+      });
+    },
+
+    checkFfmpegAvailability: async () => {
+      const available = await api.checkFfmpegAvailable();
+      set((state) => {
+        state.ffmpegAvailable = available;
+      });
+    },
+
+    exportSlideshowVideo: async (photoIds, destPath, options) => {
+      set((state) => {
+        state.videoExportRunning = true;
+        state.videoExportError = null;
+      });
+      try {
+        const outcome = await api.exportSlideshowVideo(photoIds, destPath, options);
+        set((state) => {
+          state.videoExportOutcome = outcome;
+        });
+      } catch (err) {
+        set((state) => {
+          state.videoExportError = err instanceof Error ? err.message : String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoExportRunning = false;
         });
       }
     },

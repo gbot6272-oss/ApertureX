@@ -43,6 +43,11 @@ pub enum ExportError {
     #[error("GPX-Import fehlgeschlagen: {message}")]
     Gpx { message: String },
 
+    /// Video-Export (Diashow, Schritt 4) fehlgeschlagen — `ffmpeg` fehlt,
+    /// ließ sich nicht starten oder beendete sich mit einem Fehler.
+    #[error("Video-Export fehlgeschlagen: {message}")]
+    Video { message: String },
+
     /// Ein zugrunde liegender Pipeline-/Katalog-/RAW-Fehler.
     #[error(transparent)]
     App(#[from] AppError),

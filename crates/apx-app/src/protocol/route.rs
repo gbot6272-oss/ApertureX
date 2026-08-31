@@ -22,6 +22,8 @@
 //! bestehende "erst dekodieren, dann an `/` aufteilen"-Reihenfolge bleibt
 //! dadurch für alle drei Anfragearten sicher.
 
+use std::path::PathBuf;
+
 use apx_core::PhotoId;
 use percent_encoding::percent_decode_str;
 
@@ -40,6 +42,18 @@ pub(super) enum ImageRequest {
         max_edge: Option<u32>,
         edl_json: String,
     },
+    /// `music/<absoluter_pfad>` (Phase 8 Schritt 4, Diashow-Musiksynchron-
+    /// isation) — liefert eine vom Nutzer über den systemeigenen
+    /// Datei-Auswahldialog gewählte lokale Audiodatei roh aus, damit sie
+    /// im `<audio>`-Element abspielbar ist. Derselbe Vertrauensrahmen wie
+    /// die bereits bestehenden ICC-Profil-/Wasserzeichen-Schriftdatei-Pfade
+    /// (`apx-app::commands`): ein beliebiger lokaler Pfad, aber nur, weil
+    /// der Nutzer ihn selbst über einen Dialog ausgewählt hat, kein
+    /// generischer Dateisystemzugriff. Anders als bei den übrigen
+    /// Anfragearten wird `<absoluter_pfad>` NICHT an `/` aufgeteilt (ein
+    /// Dateipfad enthält so gut wie immer `/`) — alles nach dem ersten
+    /// `/`-Segment `music` wird wieder zu einem Pfad zusammengefügt.
+    Music { path: PathBuf },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,11 +74,22 @@ pub(super) fn parse(raw_path: &str) -> Result<ImageRequest, RouteError> {
         ["develop", id_str, max_edge_str, edl_json] => {
             parse_develop(id_str, max_edge_str, edl_json)
         }
+        ["music", rest @ ..] if !rest.is_empty() => parse_music(rest),
         _ => Err(RouteError(format!(
-            "unbekannte oder falsch aufgebaute Anfrage (erwartet 'art/id/parameter' oder \
-             'develop/id/max_edge/edl_json'), erhalten: '{decoded}'"
+            "unbekannte oder falsch aufgebaute Anfrage (erwartet 'art/id/parameter', \
+             'develop/id/max_edge/edl_json' oder 'music/absoluter_pfad'), erhalten: '{decoded}'"
         ))),
     }
+}
+
+fn parse_music(rest: &[&str]) -> Result<ImageRequest, RouteError> {
+    let path = rest.join("/");
+    if path.is_empty() {
+        return Err(RouteError("leerer Musikdatei-Pfad".to_string()));
+    }
+    Ok(ImageRequest::Music {
+        path: PathBuf::from(path),
+    })
 }
 
 fn parse_photo_id(id_str: &str) -> Result<PhotoId, RouteError> {
@@ -242,5 +267,22 @@ mod tests {
     fn rejects_develop_request_with_invalid_max_edge() {
         let id = PhotoId::new();
         assert!(parse(&encode(&format!("develop/{id}/not-a-number/{{}}"))).is_err());
+    }
+
+    #[test]
+    fn parses_music_request_with_absolute_path_preserving_slashes() {
+        let raw = encode("music//home/user/Musik/song.mp3");
+        let parsed = parse(&raw).expect("sollte parsen");
+        assert_eq!(
+            parsed,
+            ImageRequest::Music {
+                path: PathBuf::from("/home/user/Musik/song.mp3")
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_music_request_without_a_path() {
+        assert!(parse(&encode("music")).is_err());
     }
 }

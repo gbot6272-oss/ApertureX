@@ -22,6 +22,10 @@
 //!   `255`). Der teure Dekodier-Schritt (`apx_raw::decode_linear`) läuft
 //!   über `apx-pipeline`s `TileCache` (siehe `state`-Modul), damit ein
 //!   Regler-Tick nicht jedes Mal neu demosaicen muss.
+//! - `music/<absoluter_pfad>` (Phase 8 Schritt 4): liest eine vom Nutzer
+//!   selbst über den Datei-Auswahldialog gewählte lokale Audiodatei roh
+//!   von der Platte, für das Diashow-`<audio>`-Element — siehe
+//!   `route::ImageRequest::Music`s Doku für den Vertrauensrahmen.
 //!
 //! Anfragen für denselben Schlüssel werden dedupliziert (`cache`-Modul).
 //! Echtes Abbrechen einer bereits laufenden Dekodierung ist mit den hier
@@ -173,6 +177,30 @@ fn response_meta(request: &ImageRequest) -> (&'static str, String) {
                 format_max_edge(*max_edge)
             ),
         ),
+        ImageRequest::Music { path } => {
+            (audio_mime_type(path), format!("music:{}", path.display()))
+        }
+    }
+}
+
+/// Grober Dateiendungs→MIME-Typ-Rateversuch für Audiodateien — kein
+/// echtes Format-Sniffing (der `<audio>`-Tag entscheidet über
+/// `Content-Type` plus eigene Signaturprüfung selbst, ein falscher Typ bei
+/// einer unbekannten Endung führt höchstens zu keiner Wiedergabe, nicht zu
+/// einem Sicherheitsproblem).
+fn audio_mime_type(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("mp3") => "audio/mpeg",
+        Some("wav") => "audio/wav",
+        Some("ogg") => "audio/ogg",
+        Some("flac") => "audio/flac",
+        Some("m4a") | Some("aac") => "audio/aac",
+        _ => "application/octet-stream",
     }
 }
 
@@ -200,7 +228,17 @@ fn compute(
         } => compute_develop(
             catalog, pipeline, tile_cache, *photo_id, *max_edge, edl_json,
         ),
+        ImageRequest::Music { path } => compute_music(path),
     }
+}
+
+fn compute_music(path: &std::path::Path) -> Result<Vec<u8>, HandlerError> {
+    std::fs::read(path).map_err(|err| {
+        HandlerError::not_found(format!(
+            "Musikdatei '{}' nicht lesbar: {err}",
+            path.display()
+        ))
+    })
 }
 
 fn compute_preview(
@@ -437,6 +475,32 @@ mod tests {
         let catalog = Catalog::open_in_memory().expect("Katalog");
         let result = compute_full_image(&catalog, PhotoId::new(), None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn compute_music_reads_the_requested_file() {
+        let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
+        let path = tmp.path().join("song.mp3");
+        std::fs::write(&path, b"nicht-echte-mp3-daten").expect("sollte schreibbar sein");
+
+        let bytes = compute_music(&path).expect("sollte lesen");
+        assert_eq!(bytes, b"nicht-echte-mp3-daten");
+    }
+
+    #[test]
+    fn compute_music_for_missing_file_is_not_found() {
+        let result = compute_music(std::path::Path::new("/nicht/vorhanden.mp3"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn audio_mime_type_maps_known_extensions() {
+        assert_eq!(audio_mime_type(std::path::Path::new("a.mp3")), "audio/mpeg");
+        assert_eq!(audio_mime_type(std::path::Path::new("a.WAV")), "audio/wav");
+        assert_eq!(
+            audio_mime_type(std::path::Path::new("a.unbekannt")),
+            "application/octet-stream"
+        );
     }
 
     #[test]

@@ -781,3 +781,41 @@ Ausnahme von „offline zuerst" in dieser Phase.
 
 ### Nicht in Phase 8 (bewusst zurückgestellt)
 PSD-/HEIF-/JPEG-XL-Export (siehe ADR-0034 Punkt 1 — keine tragfähige Rust-Bibliothek bzw. Lizenz-/Beschaffungsmauer); System-Druckdialog-/Druckertreiber-Integration (Ausgabe bleibt eine druckfertige Datei); Online-Template-Marktplatz-Hosting (nur die lokale Repo-Struktur); Adobe `.xmp`/`.lrtemplate`-Interop (weiterhin auf „eine spätere Phase" verschoben, siehe ADR-0031 Punkt 3).
+
+## Backlog-Ergänzung für Phase 9 (auf Nutzerwunsch, außerhalb der Reihe)
+
+Nachträglich aufgenommen (nicht aus `SPEC.md`, sondern direkt vom Nutzer
+anhand eines Lightroom-Classic-Screenshots angefragt: Histogramm-Panel
+plus Basic-Panel-Nachbarschaft) — elf UI-nahe Entwickeln-/Anzeige-
+Fähigkeiten, die Lightroom hat und die bei uns bisher nirgends vorkamen,
+weder in `SPEC.md` noch in `FEATURES.md`. Volle Liste mit technischen
+Kurznotizen steht in `FEATURES.md` §3.2, neuer Unterabschnitt
+„Histogramm, Zielwerkzeuge & KI-Verbesserung" (11 neue Zeilen, alle
+`Status: Nicht begonnen`):
+
+1. Live-Histogramm (RGB + Luminanz)
+2. Clipping-Warnungen (Lichter/Tiefen-Dreiecke + Bildüberlagerung)
+3. Punktfarbmesser (RGB-Wert unter dem Mauszeiger)
+4. Zielgerichtetes Anpassungswerkzeug (TAT) für Kurven/HSL
+5. Schwarzweiß-Umwandlung mit eigenem 8-Kanal-Mixer
+6. Auto-Ton / Auto-Weißabgleich per Ein-Klick
+7. Navigator-Miniaturansicht beim Zoomen
+8. KI-Entrauschung über die volle Bildfläche
+9. KI-Hochskalierung / Detailverbesserung
+10. Info-Overlay im Vollbild-Modus
+11. Bearbeitungs-Pins auf dem Bild für lokale Masken
+
+**Vorläufig auf Phase 9 getaggt** (SPEC.md §5s „Fortgeschrittenes" ist
+ohnehin schon der Sammelpunkt für nachträglich verschobene Punkte, siehe
+ADR-0032) — das ist nur eine Einordnung, keine Zusage zur Umsetzungsart.
+Anders als bei den übrigen Phase-8-Schritten oben bekommt dieser Block
+**bewusst noch keine** Schritt-0-Scope-Präzisierung/ADR: Phase 8 ist noch
+nicht abgeschlossen, Phase 9 ist noch nicht die aktuelle Phase (siehe
+Kopfzeile dieser Datei: „hier steht nur der Arbeitsplan für die aktuell
+offene Phase im Detail"). Zwei Punkte (8/9, KI-Entrauschung/-Hochskalierung)
+brauchen wahrscheinlich ein echtes neuronales Modell — dasselbe
+ONNX-Beschaffungsproblem, das in ADR-0033 bereits für Phase 7 dokumentiert
+ist (keine testbare Modell-Datei in dieser Sandbox verfügbar); ob es bis
+zum Start von Phase 9 eine tragfähige Lösung gibt, ist offen und wird
+dann neu geprüft, nicht hier vorweggenommen. Die übrigen neun Punkte sind
+reine UI-/Analyse-Erweiterungen ohne bekannte Blocker.

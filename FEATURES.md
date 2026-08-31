@@ -152,6 +152,28 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Sensorflecken-Visualisierung — Phase 7 — Status: Fertig — `apx-ai::repair_analysis::detect_spots`, Blob-Erkennung per lokaler Kontrast-Anomalie gegen ein weichgezeichnetes Referenzbild; reine Analyse (kein automatisches Committen), „Reparieren" übernimmt einen Fund als `ContentAwareFill`-Strich
 - [x] Inhaltsbasiertes Füllen — Phase 7 — Status: Fertig (abweichend, siehe ADR-0033 Punkt 4) — vereinfachtes PatchMatch (Nächster-Nachbar-Vorbelegung, Zufallsinit, Propagation, Zufallssuche) statt eines vollständigen Multi-Skalen-Verfahrens; bleibt bewusst in `apx_pipeline::stages::repair` als vierter Reparatur-Modus (render-zeitlich, nicht `apx-ai`), da es bei jedem Rendering läuft statt nur einmal auf Knopfdruck
 
+### Histogramm, Zielwerkzeuge & KI-Verbesserung
+<!-- Neu ergänzt auf ausdrücklichen Nutzerwunsch (Screenshot von Lightroom
+     Classics Histogramm-/Basic-Panel als Vorlage): das Live-Histogramm
+     selbst plus zehn weitere Lightroom-Fähigkeiten, die in `SPEC.md`/
+     `FEATURES.md` bisher nirgends vorkamen — keine reine Lücken-Korrektur
+     wie bei den ADR-0011/-0022/-0026-Nachträgen oben, sondern eine echte
+     Scope-Erweiterung. Alle elf Punkte sind noch ungeplant im Detail
+     (keine ADR, kein Unterbau) — Phase 9 als vorläufige Einordnung, siehe
+     `PLAN.md`s neuer Abschnitt „Backlog-Ergänzung für Phase 9 (auf
+     Nutzerwunsch, außerhalb der Reihe)". -->
+- [ ] Live-Histogramm (RGB + Luminanz, aktualisiert sich sofort bei jedem Reglerzug) — Phase 9 — Status: Nicht begonnen (Kanalverteilung lässt sich aus dem bereits vorhandenen `render_rgba8`-Ausgabepuffer client- oder serverseitig zählen, kein neuer Rendering-Pfad nötig)
+- [ ] Clipping-Warnungen (Lichter-/Tiefen-Dreiecke im Histogramm anklickbar, Rot-/Blau-Überlagerung im Bild) — Phase 9 — Status: Nicht begonnen
+- [ ] Punktfarbmesser (RGB-Wert unter dem Mauszeiger live anzeigen, wie ein Densitometer) — Phase 9 — Status: Nicht begonnen
+- [ ] Zielgerichtetes Anpassungswerkzeug (TAT) für Kurven und HSL — im Bild klicken und ziehen verändert direkt den passenden Regler/Kurvenpunkt — Phase 9 — Status: Nicht begonnen
+- [ ] Schwarzweiß-Umwandlung mit eigenem 8-Kanal-Mixer (Treatment-Umschalter Farbe/Schwarzweiß, ein Luminanz-Regler je Farbband) — Phase 9 — Status: Nicht begonnen
+- [ ] Auto-Ton / Auto-Weißabgleich per Ein-Klick (Histogramm-Perzentil-Heuristik statt Regler von Hand setzen, kein LLM) — Phase 9 — Status: Nicht begonnen
+- [ ] Navigator-Miniaturansicht (kleine Übersichtskarte zeigt die Zoom-Ausschnittsposition bei starker Vergrößerung) — Phase 9 — Status: Nicht begonnen
+- [ ] KI-Entrauschung über die volle Bildfläche („Denoise"-artig, mit Vorschau/Fortschrittsanzeige) — Phase 9 — Status: Nicht begonnen (dasselbe ONNX-Beschaffungsproblem wie in ADR-0033 — echtes neuronales Modell vs. Wartezeit/Bündelungsaufwand muss beim Planen dieser Zeile neu geprüft werden)
+- [ ] KI-Hochskalierung / Detailverbesserung („Super Resolution"-artig) — Phase 9 — Status: Nicht begonnen (dasselbe ONNX-Beschaffungsproblem wie oben)
+- [ ] Info-Overlay im Vollbild-Modus (Dateiname/EXIF/Bewertung direkt über dem Bild eingeblendet, umschaltbar) — Phase 9 — Status: Nicht begonnen
+- [ ] Bearbeitungs-Pins auf dem Bild (anklickbarer Kreis-Marker direkt an der Stelle jeder lokalen Maske/jedes Verlaufs, fokussiert beim Klick die zugehörige Maske im Panel) — Phase 9 — Status: Nicht begonnen
+
 ## 3.3 Modul ENTWICKELN — Lokale Anpassungen
 <!-- Scope-Präzisierung siehe DECISIONS.md ADR-0032: SPEC.md §5s
      Phase-6-Satz nennt nur "Pinsel, Verläufe, Bereichsmasken,

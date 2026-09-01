@@ -292,17 +292,17 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Export-Warteschlange (Fortschritt, Pausieren, Priorisieren) — Phase 8 — Status: Fertig (abweichend, siehe ADR-0034) — echte `apx_export::queue::ExportQueue` (Priorisierung, Pausieren, Abbrechen) mit einem Hintergrund-Worker in `apx-app`; Fortschritt per Abfragen (150ms Worker, 250ms Frontend) statt Weck-Benachrichtigung/Tauri-Events, keine Persistenz über App-Neustarts hinweg
 
 ### Zusätzliche Module (über Lightroom hinaus)
-- [ ] Node-Editor (Pipeline als Knotengraph) — Phase 9 — Status: Nicht begonnen
+- [x] Node-Editor (Pipeline als Knotengraph) — Phase 9 — Status: Fertig (abweichend, siehe PLAN.md Schritt 7) — kein `@xyflow/react`-Graph-Canvas (würde eine frei umbaubare Topologie vortäuschen, die es nicht gibt): eine geordnete Liste über die feste `develop::render_rgba8`-Reihenfolge, ein Eintrag je Stufe mit Ein/Aus-Schalter (`EdlV4::stage_enabled`) und Sprung zum zugehörigen Regler-Abschnitt
 - [ ] Stapelverarbeitungs-Konsole (Vorschau, Trockenlauf, Rückgängig) — Phase 9 — Status: Nicht begonnen
 - [ ] Fokus-Stacking — Phase 9 — Status: Nicht begonnen
 - [ ] HDR-Zusammenführung — Phase 9 — Status: Nicht begonnen
 - [ ] Panorama-Zusammenführung (sphärisch/zylindrisch/perspektivisch, Auto-Crop/-Fill) — Phase 9 — Status: Nicht begonnen
 - [ ] Astro-Stacking mit Sternausrichtung — Phase 9 — Status: Nicht begonnen
 - [ ] Tethered Shooting (gphoto2/PTP, Live-View, Auto-Preset) — Phase 9 — Status: Nicht begonnen
-- [ ] Vergleichs-Grid (bis 9 Versionen, sync. Zoom) — Phase 9 — Status: Nicht begonnen
+- [x] Vergleichs-Grid (bis 9 Versionen, sync. Zoom) — Phase 9 — Status: Fertig (siehe PLAN.md Schritt 7) — reused `CompareGridView.tsx` (Phase 9 Schritt 3) mit Quelle+virtuellen Kopien statt eines zweiten Rendering-Pfads; synchronisierter Zoom über einen gemeinsamen Skalierungsfaktor (vier feste Stufen), echtes Pan-Sync zurückgestellt (siehe PLAN.md)
 - [ ] Skript-API (Lua/Rhai) + Plugin-System mit stabilem ABI — Phase 9 — Status: Nicht begonnen
-- [ ] Zeitleisten-Ansicht der Bearbeitungshistorie — Phase 9 — Status: Nicht begonnen
-- [ ] Verlaufs-Vergleich (zwei Schritte gegenüberstellen) — Phase 9 — Status: Nicht begonnen
+- [x] Zeitleisten-Ansicht der Bearbeitungshistorie — Phase 9 — Status: Fertig (siehe PLAN.md Schritt 7) — `HistoryTimelineDialog.tsx`, Punktposition proportional zu `created_at`, Klick springt per neuem `goto_develop_edit`/`repository::edits::goto` direkt zum Stand
+- [x] Verlaufs-Vergleich (zwei Schritte gegenüberstellen) — Phase 9 — Status: Fertig (siehe PLAN.md Schritt 7) — dasselbe Diff-Muster wie `PresetVersionsDialog.tsx` (Phase 5 Schritt 8), derselbe Sektionsumfang wie das Presets-System
 - [ ] Kollaborationsmodus (Katalog-Teilfreigabe, Merge, Konfliktauflösung) — Phase 9 — Status: Nicht begonnen
 - [ ] Barrierefreiheit (Tastatur, Screenreader, Kontrastmodus, UI-Skalierung 75–200 %) — Phase 10 — Status: Nicht begonnen
 

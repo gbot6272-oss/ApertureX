@@ -180,7 +180,11 @@ export function MasksPanel() {
   }
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col gap-3 overflow-y-auto border-l border-border bg-bg-raised p-3" aria-label="Masken">
+    <aside
+      id="stage-masks"
+      className="flex w-64 shrink-0 flex-col gap-3 overflow-y-auto border-l border-border bg-bg-raised p-3"
+      aria-label="Masken"
+    >
       <h2 className="text-sm font-semibold text-text-primary">Masken</h2>
 
       <div className="grid grid-cols-2 gap-1">

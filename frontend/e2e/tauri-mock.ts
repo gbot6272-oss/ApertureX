@@ -351,10 +351,11 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   // Verlaufs-Semantik (neue Bearbeitung nach Rückgängig verwirft die
   // "Zukunft"), nur im Browser statt in SQLite.
   interface EditHistoryState {
-    entries: Array<{ edl_json: string }>;
+    entries: Array<{ edl_json: string; created_at: string; label: string | null }>;
     currentIndex: number; // -1 = neutral (noch nie bearbeitet / bis zum Anfang zurück)
   }
   const editHistories: Record<string, EditHistoryState> = {};
+  let historyCounter = Date.now();
 
   function historyPositionAt(history: EditHistoryState): unknown {
     if (history.currentIndex < 0) return { kind: "Neutral" };
@@ -485,11 +486,18 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "apply_develop_edit": {
         const photoId = args.photoId as string;
         const edlJson = args.edlJson as string;
+        const label = (args.label as string | undefined) ?? null;
         const history = (editHistories[photoId] ??= { entries: [], currentIndex: -1 });
         // Verwirft eine zuvor per Rückgängig erreichte "Zukunft" — siehe
         // `DECISIONS.md` ADR-0014, exakt wie das echte Backend.
         history.entries = history.entries.slice(0, history.currentIndex + 1);
-        history.entries.push({ edl_json: edlJson });
+        // `historyCounter` statt `Date.now()` allein, damit die
+        // Zeitstempel auch bei mehreren Aufrufen innerhalb derselben
+        // Millisekunde (in e2e-Läufen üblich) streng monoton steigen —
+        // die Zeitleiste (Phase 9 Schritt 7) sortiert/positioniert
+        // danach.
+        historyCounter += 1;
+        history.entries.push({ edl_json: edlJson, created_at: new Date(historyCounter).toISOString(), label });
         history.currentIndex = history.entries.length - 1;
         return null;
       }
@@ -507,6 +515,23 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         const history = editHistories[args.photoId as string];
         if (!history || history.currentIndex + 1 >= history.entries.length) return null;
         history.currentIndex += 1;
+        return historyPositionAt(history);
+      }
+      case "list_develop_history": {
+        const history = editHistories[args.photoId as string];
+        if (!history) return [];
+        return history.entries.map((entry, index) => ({
+          sequence: index,
+          label: entry.label,
+          edl_json: entry.edl_json,
+          created_at: entry.created_at,
+        }));
+      }
+      case "goto_develop_edit": {
+        const history = editHistories[args.photoId as string];
+        const sequence = args.sequence as number;
+        if (!history || sequence < 0 || sequence >= history.entries.length) return null;
+        history.currentIndex = sequence;
         return historyPositionAt(history);
       }
 

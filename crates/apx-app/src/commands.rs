@@ -824,6 +824,69 @@ pub fn redo_develop_edit(
     result.map(history_position_to_dto).transpose()
 }
 
+/// Ein Eintrag im vollständigen Bearbeitungsverlauf eines Fotos (Phase 9
+/// Schritt 7, „Zeitleisten-Ansicht"/„Verlaufs-Vergleich" — siehe
+/// `PLAN.md`, `DECISIONS.md` ADR-0035 Punkt 1). Anders als
+/// [`HistoryPositionDto`] (nur der *aktuelle* Stand) trägt dieser DTO
+/// `sequence`/`created_at` mit, die die Zeitleiste zum Anordnen und
+/// Beschriften braucht.
+#[derive(Debug, Clone, Serialize)]
+pub struct EditHistoryEntryDto {
+    pub sequence: i64,
+    pub label: Option<String>,
+    pub edl_json: String,
+    pub created_at: String,
+}
+
+impl TryFrom<apx_catalog::EditHistoryEntry> for EditHistoryEntryDto {
+    type Error = String;
+
+    fn try_from(entry: apx_catalog::EditHistoryEntry) -> Result<Self, String> {
+        Ok(Self {
+            sequence: entry.sequence,
+            label: entry.label,
+            edl_json: entry.edl.to_json_string().map_err(|err| err.to_string())?,
+            created_at: entry
+                .created_at
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_default(),
+        })
+    }
+}
+
+/// Der vollständige Bearbeitungsverlauf eines Fotos, älteste Sequenz
+/// zuerst — Grundlage der Zeitleisten-Ansicht (Phase 9 Schritt 7).
+#[tauri::command]
+pub fn list_develop_history(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<Vec<EditHistoryEntryDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    state
+        .catalog
+        .list_edit_history(photo_id)
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .map(EditHistoryEntryDto::try_from)
+        .collect()
+}
+
+/// Springt direkt zu einer Sequenznummer aus [`list_develop_history`]
+/// (Phase 9 Schritt 7) — `None`, wenn die Sequenz nicht (mehr) existiert.
+#[tauri::command]
+pub fn goto_develop_edit(
+    state: State<'_, AppState>,
+    photo_id: String,
+    sequence: i64,
+) -> Result<Option<HistoryPositionDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let result = state
+        .catalog
+        .goto_edit(photo_id, sequence)
+        .map_err(|err| err.to_string())?;
+    result.map(history_position_to_dto).transpose()
+}
+
 // ---- Schnappschüsse (Phase 6 Schritt 8) ------------------------------------
 //
 // Anders als der lineare Verlauf oben (`apply_develop_edit`/
@@ -1246,7 +1309,7 @@ fn apply_parsed_xmp_develop_settings(
         apx_catalog::HistoryPosition::At(entry) => {
             apx_pipeline::edl::from_envelope(&entry.edl).map_err(|err| err.to_string())?
         }
-        apx_catalog::HistoryPosition::Neutral => apx_pipeline::edl::EdlV3::neutral(),
+        apx_catalog::HistoryPosition::Neutral => apx_pipeline::edl::EdlV4::neutral(),
     };
     if let Some(basic) = parsed.basic {
         edl.basic = basic;
@@ -2410,7 +2473,7 @@ pub fn learn_preset_from_photos(
             .current_edit(photo_id)
             .map_err(|err| err.to_string())?
         {
-            apx_catalog::HistoryPosition::Neutral => apx_pipeline::edl::EdlV3::neutral(),
+            apx_catalog::HistoryPosition::Neutral => apx_pipeline::edl::EdlV4::neutral(),
             apx_catalog::HistoryPosition::At(entry) => {
                 apx_pipeline::edl::from_envelope(&entry.edl).map_err(|err| err.to_string())?
             }
@@ -2519,18 +2582,18 @@ pub async fn pick_save_file_path(
     Ok(picked.map(|p| p.to_string()))
 }
 
-/// Der aktuell aktive EDL-Stand eines Fotos, aufgelöst zu `EdlV3` — dieselbe
+/// Der aktuell aktive EDL-Stand eines Fotos, aufgelöst zu `EdlV4` — dieselbe
 /// Quelle wie `current_develop_edit`, nur direkt als Rust-Wert statt als
 /// JSON-DTO (der Export braucht kein IPC-JSON, er rendert serverseitig).
 fn resolve_current_edl(
     catalog: &apx_catalog::Catalog,
     photo_id: apx_core::PhotoId,
-) -> Result<apx_pipeline::edl::EdlV3, String> {
+) -> Result<apx_pipeline::edl::EdlV4, String> {
     match catalog
         .current_edit(photo_id)
         .map_err(|err| err.to_string())?
     {
-        apx_catalog::HistoryPosition::Neutral => Ok(apx_pipeline::edl::EdlV3::default()),
+        apx_catalog::HistoryPosition::Neutral => Ok(apx_pipeline::edl::EdlV4::default()),
         apx_catalog::HistoryPosition::At(entry) => {
             apx_pipeline::edl::from_envelope(&entry.edl).map_err(|err| err.to_string())
         }
@@ -4007,12 +4070,12 @@ mod tests {
     // beisteuert.
 
     fn sample_envelope(marker: f32) -> apx_core::EdlEnvelope {
-        let edl = apx_pipeline::edl::EdlV3 {
+        let edl = apx_pipeline::edl::EdlV4 {
             basic: apx_pipeline::edl::BasicAdjustments {
                 exposure_ev: marker,
                 ..apx_pipeline::edl::BasicAdjustments::NEUTRAL
             },
-            ..apx_pipeline::edl::EdlV3::neutral()
+            ..apx_pipeline::edl::EdlV4::neutral()
         };
         apx_core::EdlEnvelope::new(
             apx_pipeline::EDL_SCHEMA_VERSION,
@@ -4044,11 +4107,32 @@ mod tests {
                 let roundtripped =
                     apx_core::EdlEnvelope::from_json_str(&edl_json).expect("sollte wieder parsen");
                 let parsed = apx_pipeline::edl::from_envelope(&roundtripped)
-                    .expect("sollte gültiges EdlV3 ergeben");
+                    .expect("sollte gültiges EdlV4 ergeben");
                 assert_eq!(parsed.basic.exposure_ev, 0.7);
             }
             HistoryPositionDto::Neutral => panic!("sollte nicht neutral sein"),
         }
+    }
+
+    #[test]
+    fn edit_history_entry_dto_carries_sequence_and_roundtrips_edl() {
+        let entry = apx_catalog::EditHistoryEntry {
+            id: apx_core::EditHistoryId::new(),
+            photo_id: apx_core::PhotoId::new(),
+            sequence: 3,
+            label: Some("Vor Weißabgleich".to_string()),
+            edl: sample_envelope(0.4),
+            created_at: time::OffsetDateTime::now_utc(),
+        };
+        let dto = EditHistoryEntryDto::try_from(entry).expect("sollte gelingen");
+        assert_eq!(dto.sequence, 3);
+        assert_eq!(dto.label.as_deref(), Some("Vor Weißabgleich"));
+        assert!(!dto.created_at.is_empty());
+        let roundtripped =
+            apx_core::EdlEnvelope::from_json_str(&dto.edl_json).expect("sollte wieder parsen");
+        let parsed =
+            apx_pipeline::edl::from_envelope(&roundtripped).expect("sollte gültiges EdlV4 ergeben");
+        assert_eq!(parsed.basic.exposure_ev, 0.4);
     }
 
     #[test]

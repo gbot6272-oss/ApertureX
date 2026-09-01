@@ -227,6 +227,14 @@ impl Catalog {
         repository::edits::list_history(&conn, photo_id)
     }
 
+    /// Springt direkt zu einer Sequenznummer aus [`list_edit_history`]
+    /// (Phase 9 Schritt 7, Zeitleisten-Ansicht) — `None`, wenn `sequence`
+    /// nicht existiert.
+    pub fn goto_edit(&self, photo_id: PhotoId, sequence: i64) -> Result<Option<HistoryPosition>> {
+        let conn = self.lock()?;
+        repository::edits::goto(&conn, photo_id, sequence)
+    }
+
     // ---- Schnappschüsse (Phase 6 Schritt 8) ------------------------------
     // Anders als der lineare Bearbeitungsverlauf oben: siehe
     // `repository::snapshots`s Moduldoku für die Abgrenzung.

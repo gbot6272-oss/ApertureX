@@ -25,6 +25,7 @@ import {
   POST_VIGNETTE_SLIDER_SPECS,
   readBasicField,
   SHARPEN_SLIDER_SPECS,
+  STAGE_NODE_SPECS,
   UPRIGHT_MODE_OPTIONS,
   WHITE_BALANCE_PRESETS,
   type BlackAndWhiteMixerAdjustment,
@@ -39,6 +40,7 @@ import {
   type ManualTransform,
   type RepairMode,
   type SliderSpec,
+  type StageEnabled,
 } from "../lib/edl";
 import { PRESET_SECTION_KEYS, PRESET_SECTION_LABELS, type PresetSectionKey } from "../lib/presets";
 import { SOFT_PROOF_INTENT_LABELS, SOFT_PROOF_PROFILE_LABELS, type SoftProofIntent, type SoftProofProfile } from "../lib/softProof";
@@ -59,6 +61,38 @@ import { SavePresetDialog } from "./SavePresetDialog";
 const REPAIR_RADIUS_SPEC: SliderSpec = { key: "radius", label: "Radius (% der Bildbreite)", min: 1, max: 50, fineStep: 0.5, coarseStep: 5, neutral: 5 };
 const REPAIR_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Weiche Kante (% der Bildbreite)", min: 0, max: 25, fineStep: 0.5, coarseStep: 2, neutral: 2 };
 const REPAIR_OPACITY_SPEC: SliderSpec = { key: "opacity", label: "Deckkraft (%)", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 100 };
+// ---- Node-Editor (Phase 9 Schritt 7, siehe DECISIONS.md ADR-0035) ---------
+//
+// Kein `@xyflow/react`-Graph-Canvas: die Rendering-Reihenfolge ist fest
+// (siehe `develop.rs`s Moduldoku), ein frei zieh-/verbindbarer Knotengraph
+// würde also nur Fähigkeiten *vortäuschen*, die es nicht gibt (Umsortieren,
+// neue Verbindungen). Diese geordnete Liste zeigt exakt dieselbe
+// Information — ein Knoten je Stufe, feste Reihenfolge, Ein/Aus-Schalter,
+// „Öffnen" springt zum zugehörigen Regler-Abschnitt — ohne diese
+// Erwartung zu wecken (bewusste Vereinfachung gegenüber der ursprünglichen
+// PLAN.md-Formulierung).
+const STAGE_ANCHOR_IDS: Record<keyof StageEnabled, string> = {
+  repair: "stage-repair",
+  calibration: "stage-calibration",
+  basic: "stage-basic",
+  // Textur/Klarheit sind Regler innerhalb desselben Grundeinstellungen-
+  // Reglersatzes wie `basic` (siehe `EdlPayload.basic`) — derselbe Anker.
+  local_contrast: "stage-basic",
+  details: "stage-details",
+  hsl_color_mixer: "stage-hsl_color_mixer",
+  color_grading: "stage-color_grading",
+  lens_corrections: "stage-lens_corrections",
+  effects: "stage-effects",
+  masks: "stage-masks",
+  treatment: "stage-treatment",
+  curves: "stage-curves",
+  geometry: "stage-geometry",
+};
+
+function openStageAnchor(key: keyof StageEnabled): void {
+  document.getElementById(STAGE_ANCHOR_IDS[key])?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 const REPAIR_MODE_OPTIONS: ReadonlyArray<{ value: RepairMode; label: string }> = [
   { value: "Clone", label: "Klonen" },
   { value: "Heal", label: "Reparieren" },
@@ -107,6 +141,7 @@ export function DevelopPanel() {
   const commitDevelopEdit = useAppStore((s) => s.commitDevelopEdit);
   const undoDevelop = useAppStore((s) => s.undoDevelop);
   const redoDevelop = useAppStore((s) => s.redoDevelop);
+  const toggleHistoryDialog = useAppStore((s) => s.toggleHistoryDialog);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
   const lastLatencyMs = useAppStore((s) => s.developLastLatencyMs);
   const snapshots = useAppStore((s) => s.snapshots);
@@ -166,6 +201,8 @@ export function DevelopPanel() {
   const bwMixer = useAppStore((s) => s.developEdl.bw_mixer);
   const setBwMixerField = useAppStore((s) => s.setBwMixerField);
   const [activeBwMixerBand, setActiveBwMixerBand] = useState<keyof BlackAndWhiteMixerAdjustment>("red");
+  const stageEnabled = useAppStore((s) => s.developEdl.stage_enabled);
+  const toggleStage = useAppStore((s) => s.toggleStage);
   const enhanceRunning = useAppStore((s) => s.enhanceRunning);
   const enhanceStatus = useAppStore((s) => s.enhanceStatus);
   const runDenoise = useAppStore((s) => s.runDenoise);
@@ -301,6 +338,15 @@ export function DevelopPanel() {
           >
             ↷
           </button>
+          <button
+            type="button"
+            onClick={toggleHistoryDialog}
+            disabled={!selectedPhotoId}
+            title="Zeitleiste & Verlaufs-Vergleich öffnen (Phase 9 Schritt 7)"
+            className="rounded px-2 py-1 text-xs hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Verlauf
+          </button>
         </div>
       </div>
 
@@ -310,6 +356,29 @@ export function DevelopPanel() {
         <p className="text-xs text-text-muted" title="Ende-zu-Ende-Antwortzeit der letzten Regler-Vorschau (IPC + Dekodierung/Rendern, ohne Neuzeichnen im Browser) — siehe PLAN.md Phase 2 Schritt 7">
           Letztes Rendering: {Math.round(lastLatencyMs)} ms
         </p>
+      )}
+
+      {selectedPhotoId && (
+        <fieldset className="flex flex-col gap-1 rounded border border-border p-2" aria-label="Node-Editor">
+          <legend className="mb-1 px-1 text-xs font-medium text-text-secondary">Node-Editor (Rendering-Stufen)</legend>
+          <p className="mb-1 text-[11px] text-text-muted">
+            Feste Reihenfolge, keine frei verschiebbaren Knoten — jede Stufe lässt sich ein-/ausschalten und öffnet per Klick den zugehörigen Regler-Abschnitt.
+          </p>
+          <ol className="flex flex-col gap-0.5">
+            {STAGE_NODE_SPECS.map((stage, index) => (
+              <li key={stage.key} className="flex items-center gap-2 rounded px-1 py-0.5 text-xs hover:bg-bg-panel">
+                <span className="w-4 text-right text-text-muted">{index + 1}</span>
+                <label className="flex flex-1 items-center gap-1.5">
+                  <input type="checkbox" checked={stageEnabled[stage.key]} onChange={() => toggleStage(stage.key)} aria-label={`${stage.label} aktiv`} />
+                  <span className={stageEnabled[stage.key] ? "text-text-primary" : "text-text-muted line-through"}>{stage.label}</span>
+                </label>
+                <button type="button" onClick={() => openStageAnchor(stage.key)} className="rounded px-1.5 py-0.5 text-[11px] text-text-secondary hover:bg-bg-panel">
+                  Öffnen
+                </button>
+              </li>
+            ))}
+          </ol>
+        </fieldset>
       )}
 
       {selectedPhotoId && (
@@ -597,12 +666,15 @@ export function DevelopPanel() {
             ))}
           </fieldset>
 
-          <fieldset className="flex flex-col gap-3">
+          <fieldset id="stage-basic" className="flex flex-col gap-3">
             {/* Nur für Assistive Technologien / Tests: gruppiert diese
                 Regler unter einem eigenen Namen, damit z. B. "Sättigung"
                 hier eindeutig von der gleichnamigen HSL-Band-Regler
                 unterscheidbar bleibt (beide Abschnitte sind gleichzeitig
-                sichtbar). */}
+                sichtbar). Trägt außerdem den Anker für den Node-Editor
+                (Phase 9 Schritt 7) — Textur/Klarheit leben im selben
+                Regler-Satz wie die übrigen Grundeinstellungen, deshalb
+                zeigt `local_contrast` auf denselben Anker. */}
             <legend className="sr-only">Grundeinstellungen (Ton)</legend>
             {toneSpecs.map((spec) => (
               <DevelopSlider
@@ -615,7 +687,7 @@ export function DevelopPanel() {
             ))}
           </fieldset>
 
-          <fieldset className="flex flex-col gap-2">
+          <fieldset id="stage-curves" className="flex flex-col gap-2">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Kurven</legend>
             <div className="flex flex-wrap gap-1">
               {CURVE_CHANNEL_TABS.map((tab) => (
@@ -640,7 +712,7 @@ export function DevelopPanel() {
             />
           </fieldset>
 
-          <fieldset className="flex flex-col gap-2">
+          <fieldset id="stage-hsl_color_mixer" className="flex flex-col gap-2">
             <legend className="mb-1 text-xs font-medium text-text-secondary">HSL</legend>
             <div className="flex flex-wrap gap-1">
               {HSL_BAND_TABS.map((tab) => (
@@ -673,7 +745,7 @@ export function DevelopPanel() {
             </div>
           </fieldset>
 
-          <fieldset className="flex flex-col gap-2">
+          <fieldset id="stage-treatment" className="flex flex-col gap-2">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Behandlung</legend>
             <div className="flex gap-1" role="group" aria-label="Behandlung">
               <button
@@ -784,7 +856,7 @@ export function DevelopPanel() {
             )}
           </fieldset>
 
-          <fieldset className="flex flex-col gap-2">
+          <fieldset id="stage-color_grading" className="flex flex-col gap-2">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Color Grading</legend>
             <div className="flex flex-wrap justify-center gap-3">
               {COLOR_GRADING_WHEEL_TABS.map((tab) => (
@@ -813,7 +885,7 @@ export function DevelopPanel() {
             </div>
           </fieldset>
 
-          <fieldset className="flex flex-col gap-3">
+          <fieldset id="stage-calibration" className="flex flex-col gap-3">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Kalibrierung</legend>
             {/* Nur `V1` existiert — reiner Vorwärtskompatibilitäts-Platzhalter
                 (siehe `crates/apx-pipeline/src/edl/v2.rs`s Moduldoku),
@@ -861,7 +933,7 @@ export function DevelopPanel() {
             </label>
           </fieldset>
 
-          <fieldset className="flex flex-col gap-3">
+          <fieldset id="stage-details" className="flex flex-col gap-3">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Details</legend>
             <div className="flex flex-col gap-2">
               {SHARPEN_SLIDER_SPECS.map((spec) => (
@@ -906,7 +978,7 @@ export function DevelopPanel() {
             </div>
           </fieldset>
 
-          <fieldset className="flex flex-col gap-3">
+          <fieldset id="stage-lens_corrections" className="flex flex-col gap-3">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Objektivkorrekturen</legend>
 
             <label className="flex items-center gap-2 text-xs text-text-secondary">
@@ -1023,7 +1095,7 @@ export function DevelopPanel() {
             </div>
           </fieldset>
 
-          <fieldset className="flex flex-col gap-3">
+          <fieldset id="stage-effects" className="flex flex-col gap-3">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Effekte</legend>
             <div className="flex flex-col gap-2">
               {POST_VIGNETTE_SLIDER_SPECS.map((spec) => (
@@ -1049,7 +1121,7 @@ export function DevelopPanel() {
             </div>
           </fieldset>
 
-          <fieldset className="flex flex-col gap-3">
+          <fieldset id="stage-geometry" className="flex flex-col gap-3">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Geometrie</legend>
             <button
               type="button"
@@ -1109,7 +1181,7 @@ export function DevelopPanel() {
             </label>
           </fieldset>
 
-          <fieldset className="flex flex-col gap-3">
+          <fieldset id="stage-repair" className="flex flex-col gap-3">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Reparatur (Klonen/Reparieren)</legend>
             <button
               type="button"

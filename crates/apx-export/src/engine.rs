@@ -16,7 +16,7 @@
 
 use std::path::{Path, PathBuf};
 
-use apx_pipeline::edl::EdlV3;
+use apx_pipeline::edl::EdlV4;
 use apx_pipeline::GpuContext;
 
 use crate::error::{ExportError, Result};
@@ -54,14 +54,14 @@ pub enum WatermarkSpec {
 
 /// Alle Parameter für einen einzelnen Foto-Export — von der Auswahl im
 /// Exportdialog bis zur fertigen Datei. Trägt das bereits aufgelöste
-/// `EdlV3` (nicht mehr das opake `EdlEnvelope`-JSON), damit dieses Crate
+/// `EdlV4` (nicht mehr das opake `EdlEnvelope`-JSON), damit dieses Crate
 /// wie `apx-ai` unabhängig von `apx-catalog`s Speicherformat bleibt —
 /// `apx-app`s Commands lösen das EDL genauso auf wie
 /// `protocol::compute_develop` es tut.
 #[derive(Debug, Clone)]
 pub struct ExportRequest {
     pub source_path: PathBuf,
-    pub edl: EdlV3,
+    pub edl: EdlV4,
     pub format: ExportFormat,
     /// `1..=100`, nur für JPEG/AVIF relevant.
     pub quality: u8,
@@ -88,7 +88,7 @@ impl ExportRequest {
     /// Baut eine Anfrage mit vernünftigen Grundwerten (Originalgröße,
     /// Qualität 90, 8-Bit, keine Schärfung) — Aufrufer setzen nur, was sie
     /// abweichend brauchen.
-    pub fn new(source_path: impl Into<PathBuf>, edl: EdlV3, format: ExportFormat) -> Self {
+    pub fn new(source_path: impl Into<PathBuf>, edl: EdlV4, format: ExportFormat) -> Self {
         Self {
             source_path: source_path.into(),
             edl,
@@ -271,7 +271,7 @@ pub fn export_to_file(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use apx_pipeline::edl::EdlV3;
+    use apx_pipeline::edl::EdlV4;
 
     fn write_test_png(dir: &std::path::Path) -> PathBuf {
         let path = dir.join("quelle.png");
@@ -288,7 +288,7 @@ mod tests {
         let source = write_test_png(dir.path());
         let dest = dir.path().join("export.jpg");
 
-        let request = ExportRequest::new(source, EdlV3::default(), ExportFormat::Jpeg);
+        let request = ExportRequest::new(source, EdlV4::default(), ExportFormat::Jpeg);
         let outcome = export_to_file(None, &request, &dest).unwrap();
 
         assert_eq!(outcome.width, 64);
@@ -301,7 +301,7 @@ mod tests {
     fn size_constraint_shrinks_the_output() {
         let dir = tempfile::tempdir().unwrap();
         let source = write_test_png(dir.path());
-        let mut request = ExportRequest::new(source, EdlV3::default(), ExportFormat::Png);
+        let mut request = ExportRequest::new(source, EdlV4::default(), ExportFormat::Png);
         request.size_constraint = SizeConstraint::MaxEdge(32);
 
         let outcome = render_and_encode(None, &request).unwrap();
@@ -312,7 +312,7 @@ mod tests {
     fn max_file_size_overrides_quality_for_jpeg() {
         let dir = tempfile::tempdir().unwrap();
         let source = write_test_png(dir.path());
-        let mut request = ExportRequest::new(source, EdlV3::default(), ExportFormat::Jpeg);
+        let mut request = ExportRequest::new(source, EdlV4::default(), ExportFormat::Jpeg);
         request.max_file_size_bytes = Some(3000);
 
         let outcome = render_and_encode(None, &request).unwrap();
@@ -325,11 +325,11 @@ mod tests {
         let source = write_test_png(dir.path());
         let plain = render_and_encode(
             None,
-            &ExportRequest::new(source.clone(), EdlV3::default(), ExportFormat::Png),
+            &ExportRequest::new(source.clone(), EdlV4::default(), ExportFormat::Png),
         )
         .unwrap();
 
-        let mut with_icc = ExportRequest::new(source.clone(), EdlV3::default(), ExportFormat::Png);
+        let mut with_icc = ExportRequest::new(source.clone(), EdlV4::default(), ExportFormat::Png);
         with_icc.icc_target = Some(crate::icc::IccTarget::Standard(
             crate::icc::StandardIccProfile::AdobeRgb,
         ));
@@ -345,7 +345,7 @@ mod tests {
     fn watermark_is_visibly_composited_into_the_output() {
         let dir = tempfile::tempdir().unwrap();
         let source = write_test_png(dir.path());
-        let mut request = ExportRequest::new(source.clone(), EdlV3::default(), ExportFormat::Png);
+        let mut request = ExportRequest::new(source.clone(), EdlV4::default(), ExportFormat::Png);
         request.watermark = Some(WatermarkSpec::Image {
             width: 4,
             height: 4,
@@ -364,7 +364,7 @@ mod tests {
     fn metadata_filter_embeds_exif_only_for_jpeg() {
         let dir = tempfile::tempdir().unwrap();
         let source = write_test_png(dir.path());
-        let mut request = ExportRequest::new(source.clone(), EdlV3::default(), ExportFormat::Jpeg);
+        let mut request = ExportRequest::new(source.clone(), EdlV4::default(), ExportFormat::Jpeg);
         request.metadata = MetadataFilter {
             make: Some("Canon".to_string()),
             ..Default::default()
@@ -378,7 +378,7 @@ mod tests {
     #[test]
     fn missing_source_file_is_a_clean_error_not_a_panic() {
         let request =
-            ExportRequest::new("/nicht/vorhanden.raw", EdlV3::default(), ExportFormat::Jpeg);
+            ExportRequest::new("/nicht/vorhanden.raw", EdlV4::default(), ExportFormat::Jpeg);
         let err = render_and_encode(None, &request).unwrap_err();
         assert!(matches!(err, ExportError::App(_)));
     }

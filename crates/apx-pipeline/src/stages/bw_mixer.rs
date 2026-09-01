@@ -50,7 +50,7 @@ fn weighted_factor(hue_degrees: f32, mixer: &BlackAndWhiteMixerAdjustment) -> f3
 
 /// Wandelt `pixels` (RGBA8) in Graustufen, jeder Pixel gewichtet nach
 /// seinem ursprünglichen Farbton über die acht Bänder in `mixer`.
-/// Nur aufrufen, wenn `EdlV3::treatment == Treatment::BlackAndWhite` —
+/// Nur aufrufen, wenn `EdlV4::treatment == Treatment::BlackAndWhite` —
 /// bei `Treatment::Color` ist dieser Durchlauf schlicht ein No-Op, den
 /// `develop.rs` deshalb ganz überspringt (Regelfall).
 pub fn apply_rgba8(pixels: &[u8], mixer: &BlackAndWhiteMixerAdjustment) -> Vec<u8> {

@@ -13,7 +13,10 @@ import type { EdlPayload } from "./edl";
 // `repair`/`masks`/`mask_groups` — den Presets-Workflow (Kopieren/
 // Einfügen/Synchronisieren/gespeicherte Presets) um eine zehnte Sektion
 // zu erweitern ist eine spätere, eigene Ausbaustufe.
-export type PresetSectionKey = Exclude<keyof EdlPayload, "repair" | "masks" | "mask_groups" | "treatment" | "bw_mixer">;
+export type PresetSectionKey = Exclude<
+  keyof EdlPayload,
+  "repair" | "masks" | "mask_groups" | "treatment" | "bw_mixer" | "stage_enabled"
+>;
 
 export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [
   "basic",

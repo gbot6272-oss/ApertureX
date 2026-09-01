@@ -271,6 +271,24 @@ export function redoDevelopEdit(photoId: string): Promise<HistoryPositionDto | n
   return invoke<HistoryPositionDto | null>("redo_develop_edit", { photoId });
 }
 
+/** Ein Eintrag im vollständigen Bearbeitungsverlauf (Phase 9 Schritt 7,
+ * „Zeitleisten-Ansicht"/„Verlaufs-Vergleich") — spiegelt
+ * `apx_app::commands::EditHistoryEntryDto`. */
+export interface EditHistoryEntryDto {
+  sequence: number;
+  label: string | null;
+  edl_json: string;
+  created_at: string;
+}
+
+export function listDevelopHistory(photoId: string): Promise<EditHistoryEntryDto[]> {
+  return invoke<EditHistoryEntryDto[]>("list_develop_history", { photoId });
+}
+
+export function gotoDevelopEdit(photoId: string, sequence: number): Promise<HistoryPositionDto | null> {
+  return invoke<HistoryPositionDto | null>("goto_develop_edit", { photoId, sequence });
+}
+
 // ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------------
 // Anders als der lineare Verlauf oben: siehe `crates/apx-app/src/commands.rs`s
 // Moduldoku für die Abgrenzung. Kein eigener "restore"-Aufruf — die

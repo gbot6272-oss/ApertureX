@@ -51,7 +51,7 @@ use crate::edl::v2::{ColorGradingAdjustment, CurvesAdjustment, DetailsAdjustment
 use crate::edl::v3::{BlendMode, Mask, MaskAdjustments, MaskCombine, MaskGeometry, MaskGroup};
 
 /// Wendet alle sichtbaren Masken sequenziell an (`masks`-Reihenfolge ist
-/// die Anwendungsreihenfolge, siehe `EdlV3::masks`-Moduldoku) — jede
+/// die Anwendungsreihenfolge, siehe `EdlV4::masks`-Moduldoku) — jede
 /// Maske sieht das Ergebnis der vorangehenden.
 pub fn apply_all(
     pixels: &[f32],

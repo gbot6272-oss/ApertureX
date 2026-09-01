@@ -49,6 +49,7 @@ export function Header() {
   const [metadataDialogOpen, setMetadataDialogOpen] = useState(false);
   const [statsDialogOpen, setStatsDialogOpen] = useState(false);
   const openCompareView = useAppStore((s) => s.openCompareView);
+  const openVersionsCompareView = useAppStore((s) => s.openVersionsCompareView);
   const openSecondaryDisplay = useAppStore((s) => s.openSecondaryDisplay);
 
   const exportPhotoIds = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
@@ -258,6 +259,16 @@ export function Header() {
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:opacity-40"
       >
         Vergleichen
+      </button>
+
+      <button
+        type="button"
+        onClick={() => void openVersionsCompareView()}
+        disabled={!selectedPhotoId}
+        title="Aktuelles Foto und seine virtuellen Kopien nebeneinander vergleichen (Phase 9 Schritt 7)"
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:opacity-40"
+      >
+        Versionen vergleichen
       </button>
 
       <button

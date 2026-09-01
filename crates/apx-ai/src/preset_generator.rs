@@ -34,7 +34,7 @@
 
 use serde_json::{Map, Value};
 
-use apx_pipeline::edl::EdlV3;
+use apx_pipeline::edl::EdlV4;
 
 use crate::error::{AiError, Result};
 
@@ -111,7 +111,7 @@ struct AnthropicErrorDetail {
 
 /// Beschreibt dem Modell das Zielschema — die zehn Sektionen mit ihren
 /// jeweiligen Feldern in Kurzform (vollständig genug, um plausible Werte
-/// zu erzeugen, ohne den ganzen `EdlV3`-Rust-Quelltext einzubetten).
+/// zu erzeugen, ohne den ganzen `EdlV4`-Rust-Quelltext einzubetten).
 fn system_prompt() -> String {
     "Du bist ein Farbbearbeitungs-Assistent für den RAW-Foto-Editor \"Aperture X\". \
      Der Nutzer beschreibt in Freitext einen gewünschten Bildlook. Antworte AUSSCHLIESSLICH \
@@ -254,7 +254,7 @@ pub fn parse_and_validate_pasted_json(text: &str) -> Result<Value> {
 
 /// Serverseitige Validierung (siehe Moduldoku): nur bekannte
 /// Sektionsschlüssel erlaubt, und das Ergebnis muss — auf ein neutrales
-/// `EdlV3` gemergt — vollständig als `EdlV3` deserialisierbar sein. Ein
+/// `EdlV4` gemergt — vollständig als `EdlV4` deserialisierbar sein. Ein
 /// halluziniertes/falsch geformtes Feld lässt den Aufruf fehlschlagen
 /// statt eine kaputte Teilmenge durchzureichen.
 pub fn validate_preset_subset(subset: &Value) -> Result<()> {
@@ -271,14 +271,14 @@ pub fn validate_preset_subset(subset: &Value) -> Result<()> {
         }
     }
 
-    let mut merged = serde_json::to_value(EdlV3::neutral()).map_err(|source| {
+    let mut merged = serde_json::to_value(EdlV4::neutral()).map_err(|source| {
         AiError::LlmResponseUnparsable {
             message: format!("Neutrales EDL konnte nicht serialisiert werden: {source}"),
         }
     })?;
     merge_json_patch(&mut merged, subset);
 
-    serde_json::from_value::<EdlV3>(merged).map_err(|source| AiError::LlmResponseUnparsable {
+    serde_json::from_value::<EdlV4>(merged).map_err(|source| AiError::LlmResponseUnparsable {
         message: format!("Modellantwort ergibt kein gültiges EDL: {source}"),
     })?;
     Ok(())
@@ -292,7 +292,7 @@ pub fn validate_preset_subset(subset: &Value) -> Result<()> {
 /// Fassung ersetzte jede oberste Sektion (z. B. `"basic"`) komplett
 /// durch die Modellantwort — ein knappes `{"basic": {"exposure_ev": 0.5}}`
 /// ohne die übrigen elf `BasicAdjustments`-Felder scheiterte dadurch an
-/// der anschließenden `EdlV3`-Deserialisierung, obwohl der Wunsch (nur
+/// der anschließenden `EdlV4`-Deserialisierung, obwohl der Wunsch (nur
 /// die Belichtung ändern) eindeutig war. Der rekursive Merge lässt jedes
 /// nicht genannte Unterfeld beim neutralen Wert.
 fn merge_json_patch(base: &mut Value, patch: &Value) {

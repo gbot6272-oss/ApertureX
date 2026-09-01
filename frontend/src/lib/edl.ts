@@ -4,16 +4,16 @@
  * (Schritt 1, `DECISIONS.md` ADR-0028) ist das EDL deutlich größer als
  * die ursprünglichen sieben Phase-2-Regler; seit Phase 6 (Schritt 1,
  * ADR-0032) kommt das Maskensystem (`masks`/`mask_groups`) hinzu. Die
- * hier gespiegelten Typen folgen exakt `apx_pipeline::edl::v3`s Struktur-
+ * hier gespiegelten Typen folgen exakt `apx_pipeline::edl::v4`s Struktur-
  * und Feldnamen (`serde`s Standard-Serialisierung, keine Umbenennungen).
  *
  * Die JSON-Form muss exakt der `serde`-Serialisierung von
- * `apx_pipeline::EdlV3` entsprechen (Feldnamen, Verschachtelung), da
+ * `apx_pipeline::EdlV4` entsprechen (Feldnamen, Verschachtelung), da
  * `crate::edl::migrate::from_envelope` sie strikt gegen die Struktur
  * validiert statt fehlende Felder mit Defaults aufzufüllen.
  */
 
-export const EDL_SCHEMA_VERSION = 3;
+export const EDL_SCHEMA_VERSION = 4;
 
 // ---- Grundeinstellungen (12 Regler: 7 aus Phase 2 + 5 aus Phase 4) --------
 
@@ -872,7 +872,71 @@ export const NEUTRAL_BW_MIXER: BlackAndWhiteMixerAdjustment = {
   magenta: 100,
 };
 
-/** Spiegelt `apx_pipeline::edl::v3::EdlV3` — der komplette Inhalt eines
+/** Aktivieren/Überspringen je Rendering-Stufe (Phase 9 Schritt 7,
+ * Node-Editor) — spiegelt `apx_pipeline::edl::v4::StageEnabled`. Ein
+ * Feld je Knoten, in exakt der Reihenfolge, in der `develop::render_rgba8`
+ * sie anwendet; `false` reicht die Stufe unverändert durch, verschiebt sie
+ * aber nicht in der Kette (siehe `DECISIONS.md` ADR-0035 Punkt 1: fester
+ * Graph, kein frei umbaubarer). */
+export interface StageEnabled {
+  repair: boolean;
+  calibration: boolean;
+  basic: boolean;
+  local_contrast: boolean;
+  details: boolean;
+  hsl_color_mixer: boolean;
+  color_grading: boolean;
+  lens_corrections: boolean;
+  effects: boolean;
+  masks: boolean;
+  treatment: boolean;
+  curves: boolean;
+  geometry: boolean;
+}
+
+export const NEUTRAL_STAGE_ENABLED: StageEnabled = {
+  repair: true,
+  calibration: true,
+  basic: true,
+  local_contrast: true,
+  details: true,
+  hsl_color_mixer: true,
+  color_grading: true,
+  lens_corrections: true,
+  effects: true,
+  masks: true,
+  treatment: true,
+  curves: true,
+  geometry: true,
+};
+
+/** Ein Knoten im Node-Editor — Anzeigereihenfolge identisch zur
+ * tatsächlichen Rendering-Reihenfolge (siehe `develop.rs`s Moduldoku).
+ * `panel` benennt das bereits bestehende Bedienfeld, das ein Klick auf
+ * den Knoten öffnet — kein neues Panel je Knoten, der Node-Editor
+ * navigiert nur zum jeweils zuständigen bestehenden Regler-Abschnitt. */
+export interface StageNodeSpec {
+  key: keyof StageEnabled;
+  label: string;
+}
+
+export const STAGE_NODE_SPECS: readonly StageNodeSpec[] = [
+  { key: "repair", label: "Reparatur" },
+  { key: "calibration", label: "Kalibrierung" },
+  { key: "basic", label: "Grundeinstellungen" },
+  { key: "local_contrast", label: "Textur/Klarheit" },
+  { key: "details", label: "Details" },
+  { key: "hsl_color_mixer", label: "HSL/Farbmischer" },
+  { key: "color_grading", label: "Color Grading" },
+  { key: "lens_corrections", label: "Objektivkorrekturen" },
+  { key: "effects", label: "Effekte" },
+  { key: "masks", label: "Masken" },
+  { key: "treatment", label: "Behandlung (SW-Mixer)" },
+  { key: "curves", label: "Kurven" },
+  { key: "geometry", label: "Geometrie" },
+] as const;
+
+/** Spiegelt `apx_pipeline::edl::v4::EdlV4` — der komplette Inhalt eines
  * `EdlEnvelope.payload`. */
 export interface EdlPayload {
   basic: BasicAdjustments;
@@ -890,6 +954,7 @@ export interface EdlPayload {
   mask_groups: MaskGroup[];
   treatment: Treatment;
   bw_mixer: BlackAndWhiteMixerAdjustment;
+  stage_enabled: StageEnabled;
 }
 
 export function neutralEdlPayload(): EdlPayload {
@@ -909,6 +974,7 @@ export function neutralEdlPayload(): EdlPayload {
     mask_groups: [],
     treatment: "Color",
     bw_mixer: NEUTRAL_BW_MIXER,
+    stage_enabled: NEUTRAL_STAGE_ENABLED,
   };
 }
 

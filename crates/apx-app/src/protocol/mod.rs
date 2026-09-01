@@ -541,7 +541,7 @@ mod tests {
     fn neutral_edl_json() -> String {
         apx_core::EdlEnvelope::new(
             apx_pipeline::EDL_SCHEMA_VERSION,
-            serde_json::to_value(apx_pipeline::edl::EdlV3::neutral()).expect("EDL serialisierbar"),
+            serde_json::to_value(apx_pipeline::edl::EdlV4::neutral()).expect("EDL serialisierbar"),
         )
         .to_json_string()
         .expect("Umschlag serialisierbar")

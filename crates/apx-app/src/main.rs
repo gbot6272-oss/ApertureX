@@ -127,6 +127,8 @@ fn main() {
             commands::current_develop_edit,
             commands::undo_develop_edit,
             commands::redo_develop_edit,
+            commands::list_develop_history,
+            commands::goto_develop_edit,
             commands::create_snapshot,
             commands::list_snapshots,
             commands::rename_snapshot,

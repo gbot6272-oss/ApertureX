@@ -13,7 +13,7 @@ use apx_raw::LinearImage;
 
 use crate::color::linear_camera_rgb_to_srgb_rgba8;
 use crate::edl::{
-    CalibrationAdjustment, ColorGradingAdjustment, CurvesAdjustment, DetailsAdjustment, EdlV3,
+    CalibrationAdjustment, ColorGradingAdjustment, CurvesAdjustment, DetailsAdjustment, EdlV4,
     EffectsAdjustment, GeometryAdjustment, HslAdjustment, Treatment,
 };
 use crate::error::Result;
@@ -78,14 +78,16 @@ pub struct RenderedImage {
 pub fn render_rgba8(
     ctx: Option<&GpuContext>,
     linear: &LinearImage,
-    edl: &EdlV3,
+    edl: &EdlV4,
 ) -> Result<RenderedImage> {
+    let stages = &edl.stage_enabled;
     let basic = &edl.basic;
     let wb_gains = white_balance::compute_gains(linear.as_shot_wb_coeffs, basic.white_balance);
 
-    let repaired: Cow<[f32]> = if edl.repair.is_empty() {
-        // Kein zusätzlicher Durchlauf, wenn keine Reparatur-Striche
-        // vorhanden sind (Regelfall).
+    let repaired: Cow<[f32]> = if !stages.repair || edl.repair.is_empty() {
+        // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
+        // (Node-Editor) oder keine Reparatur-Striche vorhanden sind
+        // (Regelfall).
         Cow::Borrowed(&linear.pixels)
     } else {
         Cow::Owned(match ctx {
@@ -106,9 +108,11 @@ pub fn render_rgba8(
         })
     };
 
-    let calibrated: Cow<[f32]> = if edl.calibration == CalibrationAdjustment::NEUTRAL {
-        // Kein zusätzlicher Durchlauf, wenn Kalibrierung neutral steht
-        // (Regelfall).
+    let calibrated: Cow<[f32]> = if !stages.calibration
+        || edl.calibration == CalibrationAdjustment::NEUTRAL
+    {
+        // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
+        // oder Kalibrierung neutral steht (Regelfall).
         Cow::Borrowed(&repaired)
     } else {
         Cow::Owned(match ctx {
@@ -123,20 +127,29 @@ pub fn render_rgba8(
         })
     };
 
-    let tonal = match ctx {
-        Some(ctx) => match basic_fused::apply_gpu(ctx, &calibrated, wb_gains, basic) {
-            Ok(pixels) => pixels,
-            Err(err) => {
-                tracing::warn!(error = %err, "GPU-Rendering fehlgeschlagen, nutze CPU-Fallback");
-                basic_fused::apply_cpu(&calibrated, wb_gains, basic)
-            }
-        },
-        None => basic_fused::apply_cpu(&calibrated, wb_gains, basic),
+    let tonal = if !stages.basic {
+        // Node-Editor: Stufe deaktiviert — reicht das kalibrierte Bild
+        // unverändert durch, auch der Weißabgleich-Gain wird dann nicht
+        // angewendet (ehrlich „diese Stufe komplett übersprungen", nicht
+        // nur „Regler neutral").
+        calibrated.into_owned()
+    } else {
+        match ctx {
+            Some(ctx) => match basic_fused::apply_gpu(ctx, &calibrated, wb_gains, basic) {
+                Ok(pixels) => pixels,
+                Err(err) => {
+                    tracing::warn!(error = %err, "GPU-Rendering fehlgeschlagen, nutze CPU-Fallback");
+                    basic_fused::apply_cpu(&calibrated, wb_gains, basic)
+                }
+            },
+            None => basic_fused::apply_cpu(&calibrated, wb_gains, basic),
+        }
     };
 
-    let textured = if basic.texture == 0.0 && basic.clarity == 0.0 {
-        // Kein zusätzlicher Durchlauf, wenn beide Regler neutral stehen —
-        // spart den vollen Nachbarschafts-Dispatch im Regelfall.
+    let textured = if !stages.local_contrast || (basic.texture == 0.0 && basic.clarity == 0.0) {
+        // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
+        // oder beide Regler neutral stehen (Regelfall) — spart den vollen
+        // Nachbarschafts-Dispatch.
         tonal
     } else {
         match ctx {
@@ -170,9 +183,10 @@ pub fn render_rgba8(
         }
     };
 
-    let detailed = if edl.details == DetailsAdjustment::NEUTRAL {
-        // Kein zusätzlicher Durchlauf, wenn Details (Schärfung +
-        // Rauschreduzierung) neutral steht (Regelfall).
+    let detailed = if !stages.details || edl.details == DetailsAdjustment::NEUTRAL {
+        // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
+        // oder Details (Schärfung + Rauschreduzierung) neutral steht
+        // (Regelfall).
         textured
     } else {
         match ctx {
@@ -190,9 +204,11 @@ pub fn render_rgba8(
         }
     };
 
-    let hsl_shifted = if edl.hsl == HslAdjustment::NEUTRAL && edl.color_mixer.regions.is_empty() {
-        // Kein zusätzlicher Durchlauf, wenn weder HSL noch Farbmischer
-        // etwas zu tun haben (Regelfall).
+    let hsl_shifted = if !stages.hsl_color_mixer
+        || (edl.hsl == HslAdjustment::NEUTRAL && edl.color_mixer.regions.is_empty())
+    {
+        // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
+        // oder weder HSL noch Farbmischer etwas zu tun haben (Regelfall).
         detailed
     } else {
         match ctx {
@@ -209,9 +225,9 @@ pub fn render_rgba8(
         }
     };
 
-    let graded = if edl.color_grading == ColorGradingAdjustment::NEUTRAL {
-        // Kein zusätzlicher Durchlauf, wenn alle vier Farbräder neutral
-        // stehen (Regelfall).
+    let graded = if !stages.color_grading || edl.color_grading == ColorGradingAdjustment::NEUTRAL {
+        // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
+        // oder alle vier Farbräder neutral stehen (Regelfall).
         hsl_shifted
     } else {
         match ctx {
@@ -232,10 +248,10 @@ pub fn render_rgba8(
             linear.height,
             &edl.lens_corrections,
         );
-        if params.is_identity() {
-            // Kein zusätzlicher Durchlauf, wenn Objektivkorrekturen (nach
-            // Auflösung von Profil/Guided-Linien) keine Wirkung hätten
-            // (Regelfall).
+        if !stages.lens_corrections || params.is_identity() {
+            // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
+            // oder Objektivkorrekturen (nach Auflösung von Profil/Guided-
+            // Linien) keine Wirkung hätten (Regelfall).
             graded
         } else {
             match ctx {
@@ -267,9 +283,10 @@ pub fn render_rgba8(
         }
     };
 
-    let effected = if edl.effects == EffectsAdjustment::NEUTRAL {
-        // Kein zusätzlicher Durchlauf, wenn Vignettierung und Körnung
-        // beide neutral stehen (Regelfall).
+    let effected = if !stages.effects || edl.effects == EffectsAdjustment::NEUTRAL {
+        // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
+        // oder Vignettierung und Körnung beide neutral stehen
+        // (Regelfall).
         lens_corrected
     } else {
         match ctx {
@@ -290,11 +307,12 @@ pub fn render_rgba8(
         }
     };
 
-    let masked = if edl.masks.is_empty() {
-        // Kein zusätzlicher Durchlauf, wenn keine Masken vorhanden sind
-        // (Regelfall) — siehe `stages::masks`s Moduldoku für die
-        // Pipeline-Position (nach `effects`, vor der
-        // Farbraum-Konvertierung, noch im linearen Arbeitsraum).
+    let masked = if !stages.masks || edl.masks.is_empty() {
+        // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
+        // oder keine Masken vorhanden sind (Regelfall) — siehe
+        // `stages::masks`s Moduldoku für die Pipeline-Position (nach
+        // `effects`, vor der Farbraum-Konvertierung, noch im linearen
+        // Arbeitsraum).
         effected
     } else {
         masks::apply_all(
@@ -314,23 +332,26 @@ pub fn render_rgba8(
     // bereits entsättigten Grauwert ergibt dasselbe sichtbare Ergebnis
     // wie auf dem farbigen Original, aber die Reihenfolge erlaubt dem
     // Mixer, noch den vollen Farbton jedes Pixels zu sehen.
-    let treated = if edl.treatment == Treatment::BlackAndWhite {
+    let treated = if stages.treatment && edl.treatment == Treatment::BlackAndWhite {
         bw_mixer::apply_rgba8(&rgba, &edl.bw_mixer)
     } else {
         rgba
     };
 
-    let curved = if edl.curves == CurvesAdjustment::neutral() {
-        // Kein zusätzlicher Durchlauf über den ganzen Puffer, wenn alle
-        // fünf Kurven neutral stehen (Regelfall).
+    let curved = if !stages.curves || edl.curves == CurvesAdjustment::neutral() {
+        // Kein zusätzlicher Durchlauf über den ganzen Puffer, wenn die
+        // Stufe deaktiviert ist oder alle fünf Kurven neutral stehen
+        // (Regelfall).
         treated
     } else {
         curves::apply_rgba8(&treated, &edl.curves)
     };
 
-    let (width, height, pixels) = if edl.geometry == GeometryAdjustment::NEUTRAL {
-        // Kein zusätzlicher Durchlauf, wenn weder Drehung noch Zuschnitt
-        // etwas zu tun haben (Regelfall).
+    let (width, height, pixels) = if !stages.geometry || edl.geometry == GeometryAdjustment::NEUTRAL
+    {
+        // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
+        // oder weder Drehung noch Zuschnitt etwas zu tun haben
+        // (Regelfall).
         (linear.width, linear.height, curved)
     } else {
         geometry::apply(&curved, linear.width, linear.height, &edl.geometry)
@@ -346,7 +367,7 @@ pub fn render_rgba8(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::edl::{BasicAdjustments, EdlV3, WhiteBalanceAdjustment};
+    use crate::edl::{BasicAdjustments, EdlV4, WhiteBalanceAdjustment};
 
     const IDENTITY: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
@@ -360,10 +381,47 @@ mod tests {
         }
     }
 
+    /// Phase 9 Schritt 7 (Node-Editor): eine deaktivierte Stufe muss sich
+    /// nicht auswirken, selbst wenn ihre Regler nicht neutral stehen —
+    /// hier am Beispiel der Belichtungsstufe (`stage_enabled.basic`),
+    /// die als einzige unabhängig vom Kurzschluss-Kommentar in
+    /// `render_rgba8` sonst immer läuft.
+    #[test]
+    fn disabling_the_basic_stage_ignores_its_non_neutral_exposure() {
+        let linear = flat_gray_linear_image(0.5);
+        let exposed_edl = EdlV4 {
+            basic: BasicAdjustments {
+                exposure_ev: -2.0,
+                ..BasicAdjustments::NEUTRAL
+            },
+            ..EdlV4::neutral()
+        };
+        let with_stage_on = render_rgba8(None, &linear, &exposed_edl).expect("rendern");
+
+        let disabled_edl = EdlV4 {
+            stage_enabled: crate::edl::StageEnabled {
+                basic: false,
+                ..crate::edl::StageEnabled::ALL
+            },
+            ..exposed_edl
+        };
+        let with_stage_off = render_rgba8(None, &linear, &disabled_edl).expect("rendern");
+        let neutral = render_rgba8(None, &linear, &EdlV4::neutral()).expect("rendern");
+
+        assert_ne!(
+            with_stage_on.pixels[0], with_stage_off.pixels[0],
+            "die aktive Stufe muss weiterhin abdunkeln"
+        );
+        assert_eq!(
+            with_stage_off.pixels[0], neutral.pixels[0],
+            "eine deaktivierte Stufe darf keine Wirkung mehr haben, egal was ihre Regler sagen"
+        );
+    }
+
     #[test]
     fn neutral_edl_produces_correctly_sized_opaque_output() {
         let linear = flat_gray_linear_image(0.5);
-        let rendered = render_rgba8(None, &linear, &EdlV3::neutral()).expect("sollte rendern");
+        let rendered = render_rgba8(None, &linear, &EdlV4::neutral()).expect("sollte rendern");
         assert_eq!(rendered.width, 2);
         assert_eq!(rendered.height, 2);
         assert_eq!(rendered.pixels.len(), 2 * 2 * 4);
@@ -375,13 +433,13 @@ mod tests {
     #[test]
     fn negative_exposure_darkens_output() {
         let linear = flat_gray_linear_image(0.5);
-        let neutral = render_rgba8(None, &linear, &EdlV3::neutral()).expect("rendern");
-        let darker_edl = EdlV3 {
+        let neutral = render_rgba8(None, &linear, &EdlV4::neutral()).expect("rendern");
+        let darker_edl = EdlV4 {
             basic: BasicAdjustments {
                 exposure_ev: -2.0,
                 ..BasicAdjustments::NEUTRAL
             },
-            ..EdlV3::neutral()
+            ..EdlV4::neutral()
         };
         let darker = render_rgba8(None, &linear, &darker_edl).expect("rendern");
         assert!(
@@ -402,13 +460,13 @@ mod tests {
             }
         };
         let linear = flat_gray_linear_image(0.4);
-        let edl = EdlV3 {
+        let edl = EdlV4 {
             basic: BasicAdjustments {
                 exposure_ev: 0.3,
                 contrast: 15.0,
                 ..BasicAdjustments::NEUTRAL
             },
-            ..EdlV3::neutral()
+            ..EdlV4::neutral()
         };
         let cpu = render_rgba8(None, &linear, &edl).expect("CPU-Rendering");
         let gpu = render_rgba8(Some(&ctx), &linear, &edl).expect("GPU-Rendering");
@@ -449,7 +507,7 @@ mod tests {
             as_shot_wb_coeffs: [1.05, 1.0, 0.9, 1.0],
             cam_to_srgb: IDENTITY,
         };
-        let edl = EdlV3 {
+        let edl = EdlV4 {
             basic: BasicAdjustments {
                 exposure_ev: 0.4,
                 contrast: 15.0,
@@ -463,7 +521,7 @@ mod tests {
                 },
                 ..BasicAdjustments::NEUTRAL
             },
-            ..EdlV3::neutral()
+            ..EdlV4::neutral()
         };
 
         if let Some(ctx) = &ctx {
@@ -532,7 +590,7 @@ mod tests {
             PrimaryColorAdjustment, RepairMode, RepairPoint, RepairStroke,
         };
 
-        let edl = EdlV3 {
+        let edl = EdlV4 {
             basic: BasicAdjustments {
                 exposure_ev: 0.4,
                 contrast: 15.0,
@@ -643,6 +701,7 @@ mod tests {
             mask_groups: Vec::new(),
             treatment: crate::edl::Treatment::Color,
             bw_mixer: crate::edl::BlackAndWhiteMixerAdjustment::NEUTRAL,
+            stage_enabled: crate::edl::StageEnabled::ALL,
         };
 
         if let Some(ctx) = &ctx {
@@ -858,9 +917,9 @@ mod tests {
             ),
         ];
 
-        let edl = EdlV3 {
+        let edl = EdlV4 {
             masks,
-            ..EdlV3::neutral()
+            ..EdlV4::neutral()
         };
 
         if let Some(ctx) = &ctx {

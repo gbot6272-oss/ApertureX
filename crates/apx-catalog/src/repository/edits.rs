@@ -186,6 +186,23 @@ pub(crate) fn redo(conn: &Connection, photo_id: PhotoId) -> Result<Option<Histor
     }
 }
 
+/// Springt direkt zu einer bestimmten Sequenznummer (Phase 9 Schritt 7,
+/// „Zeitleisten-Ansicht"/„Verlaufs-Vergleich" — ein Klick auf einen
+/// beliebigen Verlaufspunkt statt nur Einzelschritt-Undo/Redo). Löscht
+/// dabei nie eine Zeile, bewegt nur den Zeiger wie [`undo`]/[`redo`].
+/// `Ok(None)`, wenn `sequence` nicht existiert.
+pub(crate) fn goto(
+    conn: &Connection,
+    photo_id: PhotoId,
+    sequence: i64,
+) -> Result<Option<HistoryPosition>> {
+    let Some(entry) = entry_at_sequence(conn, photo_id, sequence)? else {
+        return Ok(None);
+    };
+    point_current_to(conn, photo_id, entry.id)?;
+    Ok(Some(HistoryPosition::At(entry)))
+}
+
 /// Der vollständige Verlauf eines Fotos, älteste Sequenz zuerst.
 pub(crate) fn list_history(conn: &Connection, photo_id: PhotoId) -> Result<Vec<EditHistoryEntry>> {
     let mut stmt = conn
@@ -322,6 +339,63 @@ mod tests {
             HistoryPosition::At(entry) => assert_eq!(entry.edl, sample_edl(1.0)),
             HistoryPosition::Neutral => panic!("sollte nicht neutral sein"),
         }
+    }
+
+    #[test]
+    fn goto_jumps_directly_to_an_arbitrary_sequence() {
+        let (conn, photo_id) = setup();
+        commit(
+            &conn,
+            photo_id,
+            &sample_edl(0.1),
+            None,
+            OffsetDateTime::now_utc(),
+        )
+        .expect("commit 0");
+        commit(
+            &conn,
+            photo_id,
+            &sample_edl(0.2),
+            None,
+            OffsetDateTime::now_utc(),
+        )
+        .expect("commit 1");
+        commit(
+            &conn,
+            photo_id,
+            &sample_edl(0.3),
+            None,
+            OffsetDateTime::now_utc(),
+        )
+        .expect("commit 2");
+
+        // Direkt zur ersten Sequenz springen, ohne über die zweite zu
+        // gehen (Einzelschritt-`undo` bräuchte hier zwei Aufrufe).
+        let jumped = goto(&conn, photo_id, 0)
+            .expect("goto")
+            .expect("Sequenz 0 existiert");
+        match &jumped {
+            HistoryPosition::At(entry) => assert_eq!(entry.edl, sample_edl(0.1)),
+            HistoryPosition::Neutral => panic!("sollte nicht neutral sein"),
+        }
+        assert_eq!(current(&conn, photo_id).expect("current"), jumped);
+    }
+
+    #[test]
+    fn goto_an_unknown_sequence_returns_none_without_moving_the_pointer() {
+        let (conn, photo_id) = setup();
+        commit(
+            &conn,
+            photo_id,
+            &sample_edl(0.5),
+            None,
+            OffsetDateTime::now_utc(),
+        )
+        .expect("commit");
+        let before = current(&conn, photo_id).expect("current");
+
+        assert_eq!(goto(&conn, photo_id, 99).expect("goto"), None);
+        assert_eq!(current(&conn, photo_id).expect("current"), before);
     }
 
     #[test]

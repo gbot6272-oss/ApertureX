@@ -45,19 +45,22 @@ impl GalleryTheme {
     }
 }
 
-const LIGHT_CSS: &str = "body{background:#fff;color:#111;font-family:sans-serif;margin:0;padding:2rem}\
+const LIGHT_CSS: &str =
+    "body{background:#fff;color:#111;font-family:sans-serif;margin:0;padding:2rem}\
 h1{font-weight:300}\
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem}\
 .grid img{width:100%;height:auto;display:block;border-radius:4px}\
 figcaption{font-size:.8rem;color:#555;margin-top:.25rem}";
 
-const DARK_CSS: &str = "body{background:#111;color:#eee;font-family:sans-serif;margin:0;padding:2rem}\
+const DARK_CSS: &str =
+    "body{background:#111;color:#eee;font-family:sans-serif;margin:0;padding:2rem}\
 h1{font-weight:300}\
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem}\
 .grid img{width:100%;height:auto;display:block;border-radius:4px}\
 figcaption{font-size:.8rem;color:#aaa;margin-top:.25rem}";
 
-const MINIMAL_CSS: &str = "body{background:#fafafa;color:#000;font-family:Georgia,serif;margin:0;padding:1rem}\
+const MINIMAL_CSS: &str =
+    "body{background:#fafafa;color:#000;font-family:Georgia,serif;margin:0;padding:1rem}\
 h1{font-weight:400;font-size:1.2rem}\
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.25rem}\
 .grid img{width:100%;height:auto;display:block}\
@@ -91,7 +94,10 @@ pub fn generate_gallery_html(title: &str, theme: GalleryTheme, photos: &[Gallery
 }
 
 fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 #[derive(Debug)]
@@ -113,7 +119,9 @@ pub fn export_gallery(
     dest_dir: &Path,
 ) -> Result<GalleryOutcome> {
     if photos.is_empty() {
-        return Err(ExportError::Unsupported("Galerie enthält keine Fotos".to_string()));
+        return Err(ExportError::Unsupported(
+            "Galerie enthält keine Fotos".to_string(),
+        ));
     }
     let photos_dir = dest_dir.join("photos");
     std::fs::create_dir_all(&photos_dir).map_err(|err| ExportError::Io {
@@ -123,9 +131,16 @@ pub fn export_gallery(
 
     let mut gallery_photos = Vec::with_capacity(photos.len());
     for (index, (width, height, rgba, caption)) in photos.iter().enumerate() {
-        let (target_w, target_h) = resize::target_dimensions(*width, *height, SizeConstraint::MaxEdge(max_edge));
+        let (target_w, target_h) =
+            resize::target_dimensions(*width, *height, SizeConstraint::MaxEdge(max_edge));
         let resized = resize::resize_rgba8(*width, *height, rgba, target_w, target_h)?;
-        let bytes = encode_rgba8(target_w, target_h, &resized, ExportFormat::Jpeg, &EncodeOptions::default())?;
+        let bytes = encode_rgba8(
+            target_w,
+            target_h,
+            &resized,
+            ExportFormat::Jpeg,
+            &EncodeOptions::default(),
+        )?;
         let file_name = format!("photos/{:04}.jpg", index + 1);
         let dest_path = dest_dir.join(&file_name);
         std::fs::write(&dest_path, &bytes).map_err(|err| ExportError::Io {
@@ -166,16 +181,26 @@ pub struct FtpTarget {
 /// sowie `photos/*.jpg`) auf einen FTP-Server hoch — gibt die Anzahl
 /// hochgeladener Dateien zurück.
 pub fn upload_via_ftp(local_dir: &Path, target: &FtpTarget) -> Result<usize> {
-    let mut ftp = suppaftp::FtpStream::connect((target.host.as_str(), target.port))
-        .map_err(|err| ExportError::Upload { message: format!("FTP-Verbindung zu '{}:{}' fehlgeschlagen: {err}", target.host, target.port) })?;
+    let mut ftp =
+        suppaftp::FtpStream::connect((target.host.as_str(), target.port)).map_err(|err| {
+            ExportError::Upload {
+                message: format!(
+                    "FTP-Verbindung zu '{}:{}' fehlgeschlagen: {err}",
+                    target.host, target.port
+                ),
+            }
+        })?;
     ftp.login(&target.username, &target.password)
-        .map_err(|err| ExportError::Upload { message: format!("FTP-Anmeldung fehlgeschlagen: {err}") })?;
+        .map_err(|err| ExportError::Upload {
+            message: format!("FTP-Anmeldung fehlgeschlagen: {err}"),
+        })?;
 
     if !target.remote_dir.is_empty() {
         let _ = ftp.mkdir(&target.remote_dir); // existiert ggf. schon — kein Fehler
-        ftp.cwd(&target.remote_dir).map_err(|err| ExportError::Upload {
-            message: format!("Zielordner '{}' nicht erreichbar: {err}", target.remote_dir),
-        })?;
+        ftp.cwd(&target.remote_dir)
+            .map_err(|err| ExportError::Upload {
+                message: format!("Zielordner '{}' nicht erreichbar: {err}", target.remote_dir),
+            })?;
     }
 
     let mut uploaded = 0usize;
@@ -184,7 +209,12 @@ pub fn upload_via_ftp(local_dir: &Path, target: &FtpTarget) -> Result<usize> {
     Ok(uploaded)
 }
 
-fn upload_dir_recursive(ftp: &mut suppaftp::FtpStream, root: &Path, dir: &Path, uploaded: &mut usize) -> Result<()> {
+fn upload_dir_recursive(
+    ftp: &mut suppaftp::FtpStream,
+    root: &Path,
+    dir: &Path,
+    uploaded: &mut usize,
+) -> Result<()> {
     let entries = std::fs::read_dir(dir).map_err(|err| ExportError::Io {
         path: dir.display().to_string(),
         message: err.to_string(),
@@ -195,7 +225,11 @@ fn upload_dir_recursive(ftp: &mut suppaftp::FtpStream, root: &Path, dir: &Path, 
             message: err.to_string(),
         })?;
         let path = entry.path();
-        let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
         if path.is_dir() {
             let _ = ftp.mkdir(&rel);
             upload_dir_recursive(ftp, root, &path, uploaded)?;
@@ -205,7 +239,9 @@ fn upload_dir_recursive(ftp: &mut suppaftp::FtpStream, root: &Path, dir: &Path, 
                 message: err.to_string(),
             })?;
             ftp.put_file(&rel, &mut file)
-                .map_err(|err| ExportError::Upload { message: format!("Hochladen von '{rel}' fehlgeschlagen: {err}") })?;
+                .map_err(|err| ExportError::Upload {
+                    message: format!("Hochladen von '{rel}' fehlgeschlagen: {err}"),
+                })?;
             *uploaded += 1;
         }
     }
@@ -230,7 +266,10 @@ struct AcceptAnyHostKey;
 impl russh::client::Handler for AcceptAnyHostKey {
     type Error = russh::Error;
 
-    async fn check_server_key(&mut self, _server_public_key: &russh::keys::PublicKeyOrCertificate) -> std::result::Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        _server_public_key: &russh::keys::PublicKeyOrCertificate,
+    ) -> std::result::Result<bool, Self::Error> {
         Ok(true)
     }
 }
@@ -240,29 +279,48 @@ impl russh::client::Handler for AcceptAnyHostKey {
 /// Tauri-Commands bereits vorhanden).
 pub async fn upload_via_sftp(local_dir: &Path, target: &SftpTarget) -> Result<usize> {
     let config = std::sync::Arc::new(russh::client::Config::default());
-    let mut session = russh::client::connect(config, (target.host.as_str(), target.port), AcceptAnyHostKey)
-        .await
-        .map_err(|err| ExportError::Upload { message: format!("SFTP-Verbindung zu '{}:{}' fehlgeschlagen: {err}", target.host, target.port) })?;
+    let mut session = russh::client::connect(
+        config,
+        (target.host.as_str(), target.port),
+        AcceptAnyHostKey,
+    )
+    .await
+    .map_err(|err| ExportError::Upload {
+        message: format!(
+            "SFTP-Verbindung zu '{}:{}' fehlgeschlagen: {err}",
+            target.host, target.port
+        ),
+    })?;
 
     let auth = session
         .authenticate_password(&target.username, &target.password)
         .await
-        .map_err(|err| ExportError::Upload { message: format!("SFTP-Anmeldung fehlgeschlagen: {err}") })?;
+        .map_err(|err| ExportError::Upload {
+            message: format!("SFTP-Anmeldung fehlgeschlagen: {err}"),
+        })?;
     if !auth.success() {
-        return Err(ExportError::Upload { message: "SFTP-Anmeldung abgelehnt (Nutzername/Passwort prüfen)".to_string() });
+        return Err(ExportError::Upload {
+            message: "SFTP-Anmeldung abgelehnt (Nutzername/Passwort prüfen)".to_string(),
+        });
     }
 
     let channel = session
         .channel_open_session()
         .await
-        .map_err(|err| ExportError::Upload { message: format!("SFTP-Kanal fehlgeschlagen: {err}") })?;
+        .map_err(|err| ExportError::Upload {
+            message: format!("SFTP-Kanal fehlgeschlagen: {err}"),
+        })?;
     channel
         .request_subsystem(true, "sftp")
         .await
-        .map_err(|err| ExportError::Upload { message: format!("SFTP-Subsystem fehlgeschlagen: {err}") })?;
+        .map_err(|err| ExportError::Upload {
+            message: format!("SFTP-Subsystem fehlgeschlagen: {err}"),
+        })?;
     let sftp = russh_sftp::client::SftpSession::new(channel.into_stream())
         .await
-        .map_err(|err| ExportError::Upload { message: format!("SFTP-Sitzung fehlgeschlagen: {err}") })?;
+        .map_err(|err| ExportError::Upload {
+            message: format!("SFTP-Sitzung fehlgeschlagen: {err}"),
+        })?;
 
     if !target.remote_dir.is_empty() {
         let _ = sftp.create_dir(&target.remote_dir).await; // existiert ggf. schon
@@ -296,7 +354,11 @@ fn upload_dir_shallow_sftp<'a>(
             })?;
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
-            let remote_path = if remote_prefix.is_empty() { name } else { format!("{remote_prefix}/{name}") };
+            let remote_path = if remote_prefix.is_empty() {
+                name
+            } else {
+                format!("{remote_prefix}/{name}")
+            };
 
             if path.is_dir() {
                 let _ = sftp.create_dir(&remote_path).await;
@@ -306,13 +368,17 @@ fn upload_dir_shallow_sftp<'a>(
                     path: path.display().to_string(),
                     message: err.to_string(),
                 })?;
-                let mut file = sftp
-                    .create(&remote_path)
-                    .await
-                    .map_err(|err| ExportError::Upload { message: format!("Hochladen von '{remote_path}' fehlgeschlagen: {err}") })?;
+                let mut file =
+                    sftp.create(&remote_path)
+                        .await
+                        .map_err(|err| ExportError::Upload {
+                            message: format!("Hochladen von '{remote_path}' fehlgeschlagen: {err}"),
+                        })?;
                 file.write_all(&data)
                     .await
-                    .map_err(|err| ExportError::Upload { message: format!("Hochladen von '{remote_path}' fehlgeschlagen: {err}") })?;
+                    .map_err(|err| ExportError::Upload {
+                        message: format!("Hochladen von '{remote_path}' fehlgeschlagen: {err}"),
+                    })?;
                 let _ = file.shutdown().await;
                 *uploaded += 1;
             }
@@ -326,14 +392,22 @@ mod tests {
     use super::*;
 
     fn solid_photo(width: u32, height: u32) -> Vec<u8> {
-        (0..width * height).flat_map(|_| [180u8, 120, 60, 255]).collect()
+        (0..width * height)
+            .flat_map(|_| [180u8, 120, 60, 255])
+            .collect()
     }
 
     #[test]
     fn generate_gallery_html_embeds_title_and_all_figures() {
         let photos = [
-            GalleryPhoto { file_name: "photos/0001.jpg".to_string(), caption: "Berge".to_string() },
-            GalleryPhoto { file_name: "photos/0002.jpg".to_string(), caption: "Wald".to_string() },
+            GalleryPhoto {
+                file_name: "photos/0001.jpg".to_string(),
+                caption: "Berge".to_string(),
+            },
+            GalleryPhoto {
+                file_name: "photos/0002.jpg".to_string(),
+                caption: "Wald".to_string(),
+            },
         ];
         let html = generate_gallery_html("Urlaub 2026", GalleryTheme::Dark, &photos);
         assert!(html.contains("Urlaub 2026"));
@@ -344,7 +418,10 @@ mod tests {
 
     #[test]
     fn generate_gallery_html_escapes_special_characters() {
-        let photos = [GalleryPhoto { file_name: "photos/0001.jpg".to_string(), caption: "<script>".to_string() }];
+        let photos = [GalleryPhoto {
+            file_name: "photos/0001.jpg".to_string(),
+            caption: "<script>".to_string(),
+        }];
         let html = generate_gallery_html("A & B", GalleryTheme::Light, &photos);
         assert!(!html.contains("<script>"));
         assert!(html.contains("&lt;script&gt;"));
@@ -355,7 +432,14 @@ mod tests {
     fn export_gallery_writes_index_and_thumbnail_files() {
         let dir = tempfile::tempdir().unwrap();
         let photos = vec![(8u32, 8u32, solid_photo(8, 8), "Test".to_string())];
-        let outcome = export_gallery(&photos, "Test-Galerie", GalleryTheme::Minimal, 4, dir.path()).unwrap();
+        let outcome = export_gallery(
+            &photos,
+            "Test-Galerie",
+            GalleryTheme::Minimal,
+            4,
+            dir.path(),
+        )
+        .unwrap();
         assert_eq!(outcome.photo_count, 1);
         assert!(dir.path().join("index.html").exists());
         assert!(dir.path().join("photos/0001.jpg").exists());

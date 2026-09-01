@@ -1,22 +1,23 @@
 //! Umwandlung zwischen `apx_core::EdlEnvelope` (dem für `apx-catalog`
 //! undurchsichtigen Umschlag) und der jeweils aktuellen konkreten
-//! EDL-Struktur (`EdlV3`).
+//! EDL-Struktur (`EdlV4`).
 //!
-//! Es gibt jetzt drei bekannte Schema-Versionen: die aktuelle
-//! ([`EDL_SCHEMA_VERSION`], `EdlV3`) sowie die historischen Versionen 1
-//! (`EdlV1`, aus Phase 2) und 2 (`EdlV2`, aus Phase 4) — beide noch in
-//! alten `edit_history`-Zeilen gespeichert. [`from_envelope`] liest alle
-//! drei, zieht ältere Versionen aber sofort auf `EdlV3` hoch (`EdlV2` über
-//! `EdlV3::from_v2`, `EdlV1` über den bereits bestehenden `EdlV2::from_v1`
-//! plus denselben v2→v3-Schritt) — der Aufrufer (`apx-app`) sieht davon
-//! nichts, er ruft immer nur `from_envelope` auf und bekommt die jeweils
-//! aktuelle Struktur zurück. Sobald eine Schema-Version 4 hinzukommt,
-//! wird hier ein weiterer Umwandlungsschritt v3→v4 ergänzt, nach
-//! demselben Muster.
+//! Es gibt jetzt vier bekannte Schema-Versionen: die aktuelle
+//! ([`EDL_SCHEMA_VERSION`], `EdlV4`) sowie die historischen Versionen 1
+//! (`EdlV1`, aus Phase 2), 2 (`EdlV2`, aus Phase 4) und 3 (`EdlV3`, aus
+//! Phase 6) — alle drei noch in alten `edit_history`-Zeilen gespeichert.
+//! [`from_envelope`] liest alle vier, zieht ältere Versionen aber sofort
+//! auf `EdlV4` hoch (`EdlV3` über `EdlV4::from_v3`, `EdlV2` über das
+//! bereits bestehende `EdlV3::from_v2` plus denselben v3→v4-Schritt,
+//! `EdlV1` über `EdlV2::from_v1` plus beide folgenden Schritte) — der
+//! Aufrufer (`apx-app`) sieht davon nichts, er ruft immer nur
+//! `from_envelope` auf und bekommt die jeweils aktuelle Struktur zurück.
+//! Sobald eine Schema-Version 5 hinzukommt, wird hier ein weiterer
+//! Umwandlungsschritt v4→v5 ergänzt, nach demselben Muster.
 
 use apx_core::EdlEnvelope;
 
-use super::{v1::EdlV1, v2::EdlV2, v3::EdlV3, EDL_SCHEMA_VERSION};
+use super::{v1::EdlV1, v2::EdlV2, v3::EdlV3, v4::EdlV4, EDL_SCHEMA_VERSION};
 use crate::error::{PipelineError, Result};
 
 /// Die historische Schema-Version 1 (Phase 2, sieben Grundregler) — nur
@@ -28,7 +29,11 @@ const V1_SCHEMA_VERSION: u32 = 1;
 /// ohne Masken) — dieselbe Lese-only-Rolle wie [`V1_SCHEMA_VERSION`].
 const V2_SCHEMA_VERSION: u32 = 2;
 
-/// Liest die jeweils aktuelle EDL-Struktur (`EdlV3`) aus einem Umschlag.
+/// Die historische Schema-Version 3 (Phase 6, Maskensystem + Phase-9-
+/// Schritt-5-SW-Mixer) — dieselbe Lese-only-Rolle wie oben.
+const V3_SCHEMA_VERSION: u32 = 3;
+
+/// Liest die jeweils aktuelle EDL-Struktur (`EdlV4`) aus einem Umschlag.
 /// Ältere Umschläge werden automatisch hochgezogen; eine unbekannte
 /// Version oder eine kaputte Nutzlast für die jeweilige Version wird
 /// abgelehnt statt stillschweigend repariert (siehe `SPEC.md` §2.1:
@@ -36,7 +41,7 @@ const V2_SCHEMA_VERSION: u32 = 2;
 /// — die Prüfung hier ist die Kehrseite davon: eine *neuere*, noch
 /// unbekannte Version wird explizit abgelehnt statt stillschweigend
 /// falsch interpretiert).
-pub fn from_envelope(envelope: &EdlEnvelope) -> Result<EdlV3> {
+pub fn from_envelope(envelope: &EdlEnvelope) -> Result<EdlV4> {
     if envelope.schema_version == EDL_SCHEMA_VERSION {
         return serde_json::from_value(envelope.payload.clone()).map_err(|source| {
             PipelineError::InvalidEdl {
@@ -47,6 +52,17 @@ pub fn from_envelope(envelope: &EdlEnvelope) -> Result<EdlV3> {
         });
     }
 
+    if envelope.schema_version == V3_SCHEMA_VERSION {
+        let old: EdlV3 = serde_json::from_value(envelope.payload.clone()).map_err(|source| {
+            PipelineError::InvalidEdl {
+                message: format!(
+                    "EDL-Nutzlast entspricht nicht Schema-Version {V3_SCHEMA_VERSION}: {source}"
+                ),
+            }
+        })?;
+        return Ok(EdlV4::from_v3(old));
+    }
+
     if envelope.schema_version == V2_SCHEMA_VERSION {
         let old: EdlV2 = serde_json::from_value(envelope.payload.clone()).map_err(|source| {
             PipelineError::InvalidEdl {
@@ -55,7 +71,7 @@ pub fn from_envelope(envelope: &EdlEnvelope) -> Result<EdlV3> {
                 ),
             }
         })?;
-        return Ok(EdlV3::from_v2(old));
+        return Ok(EdlV4::from_v3(EdlV3::from_v2(old)));
     }
 
     if envelope.schema_version == V1_SCHEMA_VERSION {
@@ -66,23 +82,23 @@ pub fn from_envelope(envelope: &EdlEnvelope) -> Result<EdlV3> {
                 ),
             }
         })?;
-        return Ok(EdlV3::from_v2(EdlV2::from_v1(old)));
+        return Ok(EdlV4::from_v3(EdlV3::from_v2(EdlV2::from_v1(old))));
     }
 
     Err(PipelineError::InvalidEdl {
         message: format!(
             "unbekannte EDL-Schema-Version {} (diese Aperture-X-Version kennt Version \
-             {V1_SCHEMA_VERSION}, {V2_SCHEMA_VERSION} und {EDL_SCHEMA_VERSION})",
+             {V1_SCHEMA_VERSION}, {V2_SCHEMA_VERSION}, {V3_SCHEMA_VERSION} und {EDL_SCHEMA_VERSION})",
             envelope.schema_version
         ),
     })
 }
 
-/// Verpackt ein `EdlV3` in einen Umschlag zum Speichern — immer als
+/// Verpackt ein `EdlV4` in einen Umschlag zum Speichern — immer als
 /// aktuelle Schema-Version. Abwärtskompatibilität ist nur fürs *Lesen*
 /// nötig (siehe [`from_envelope`]), nicht fürs Schreiben: jede neu
-/// committete Bearbeitung landet als Version 3 in `edit_history`.
-pub fn to_envelope(edl: &EdlV3) -> Result<EdlEnvelope> {
+/// committete Bearbeitung landet als Version 4 in `edit_history`.
+pub fn to_envelope(edl: &EdlV4) -> Result<EdlEnvelope> {
     let payload = serde_json::to_value(edl).map_err(|source| PipelineError::InvalidEdl {
         message: format!("EDL konnte nicht serialisiert werden: {source}"),
     })?;
@@ -97,12 +113,12 @@ mod tests {
 
     #[test]
     fn roundtrips_through_envelope() {
-        let edl = EdlV3 {
+        let edl = EdlV4 {
             basic: V2BasicAdjustments {
                 exposure_ev: 0.5,
                 ..V2BasicAdjustments::NEUTRAL
             },
-            ..EdlV3::neutral()
+            ..EdlV4::neutral()
         };
         let envelope = to_envelope(&edl).expect("sollte verpacken");
         assert_eq!(envelope.schema_version, EDL_SCHEMA_VERSION);
@@ -111,7 +127,7 @@ mod tests {
     }
 
     #[test]
-    fn old_v1_envelope_is_upgraded_to_v3() {
+    fn old_v1_envelope_is_upgraded_to_v4() {
         let old = EdlV1 {
             basic: V1BasicAdjustments {
                 exposure_ev: 0.7,
@@ -128,10 +144,11 @@ mod tests {
         assert_eq!(upgraded.basic.texture, 0.0, "neue Felder bleiben neutral");
         assert_eq!(upgraded.repair, Vec::new());
         assert_eq!(upgraded.masks, Vec::new());
+        assert_eq!(upgraded.stage_enabled, crate::edl::StageEnabled::ALL);
     }
 
     #[test]
-    fn old_v2_envelope_is_upgraded_to_v3() {
+    fn old_v2_envelope_is_upgraded_to_v4() {
         let old = EdlV2 {
             basic: V2BasicAdjustments {
                 exposure_ev: -0.3,
@@ -148,6 +165,27 @@ mod tests {
     }
 
     #[test]
+    fn old_v3_envelope_is_upgraded_to_v4() {
+        let old = EdlV3 {
+            basic: V2BasicAdjustments {
+                exposure_ev: 0.2,
+                ..V2BasicAdjustments::NEUTRAL
+            },
+            ..EdlV3::neutral()
+        };
+        let payload = serde_json::to_value(old).expect("sollte serialisieren");
+        let envelope = EdlEnvelope::new(3, payload);
+
+        let upgraded = from_envelope(&envelope).expect("v3 sollte lesbar bleiben");
+        assert_eq!(upgraded.basic.exposure_ev, 0.2);
+        assert_eq!(
+            upgraded.stage_enabled,
+            crate::edl::StageEnabled::ALL,
+            "v3 kannte noch keine Stufen-Aktivierung, startet also überall an"
+        );
+    }
+
+    #[test]
     fn unknown_schema_version_is_rejected() {
         let envelope = EdlEnvelope::new(9999, serde_json::json!({}));
         let result = from_envelope(&envelope);
@@ -155,14 +193,21 @@ mod tests {
     }
 
     #[test]
-    fn malformed_v3_payload_is_rejected() {
-        // Richtige Schema-Version, aber Nutzlast passt nicht zu EdlV3
+    fn malformed_v4_payload_is_rejected() {
+        // Richtige Schema-Version, aber Nutzlast passt nicht zu EdlV4
         // (fehlende Pflichtfelder) — muss als Fehler erkannt werden, nicht
         // stillschweigend mit Default-Werten aufgefüllt werden.
         let envelope = EdlEnvelope::new(
             EDL_SCHEMA_VERSION,
             serde_json::json!({ "unbekanntes_feld": 1 }),
         );
+        let result = from_envelope(&envelope);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn malformed_v3_payload_is_rejected() {
+        let envelope = EdlEnvelope::new(3, serde_json::json!({ "unbekanntes_feld": 1 }));
         let result = from_envelope(&envelope);
         assert!(result.is_err());
     }

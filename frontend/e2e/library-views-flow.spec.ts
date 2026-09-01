@@ -60,7 +60,7 @@ test.describe("Bibliotheks-Ansichten (Phase 9 Schritt 3)", () => {
     await page.getByRole("img", { name: PHOTO_A.filename }).click();
     await page.getByRole("img", { name: PHOTO_B.filename }).click({ modifiers: ["Control"] });
 
-    await page.getByRole("button", { name: "Vergleichen" }).click();
+    await page.getByRole("button", { name: "Vergleichen", exact: true }).click();
 
     await expect(page.getByLabel("Vergleichsansicht").getByText(PHOTO_A.filename)).toBeVisible();
     await expect(page.getByLabel("Vergleichsansicht").getByText(PHOTO_B.filename)).toBeVisible();

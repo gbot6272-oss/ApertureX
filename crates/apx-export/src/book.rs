@@ -24,7 +24,10 @@
 
 use std::path::Path;
 
-use printpdf::{Mm, Op, PdfDocument, PdfPage, PdfSaveOptions, Pt, RawImage, RawImageData, RawImageFormat, XObjectTransform};
+use printpdf::{
+    Mm, Op, PdfDocument, PdfPage, PdfSaveOptions, Pt, RawImage, RawImageData, RawImageFormat,
+    XObjectTransform,
+};
 
 /// Zoll → Millimeter (`printpdf`s `Mm`/`Pt`-Einheiten kennen kein `In`).
 const MM_PER_INCH: f32 = 25.4;
@@ -70,7 +73,12 @@ impl PageTemplate {
         }
     }
 
-    pub fn photo_slots(self, page_width_in: f32, page_height_in: f32, margin_in: f32) -> Vec<PrintSlot> {
+    pub fn photo_slots(
+        self,
+        page_width_in: f32,
+        page_height_in: f32,
+        margin_in: f32,
+    ) -> Vec<PrintSlot> {
         match self {
             PageTemplate::FullBleed => vec![PrintSlot {
                 x_in: 0.0,
@@ -78,8 +86,12 @@ impl PageTemplate {
                 width_in: page_width_in,
                 height_in: page_height_in,
             }],
-            PageTemplate::TwoSideBySide => print::grid_slots(page_width_in, page_height_in, margin_in, margin_in, 2, 1),
-            PageTemplate::Grid2x2 => print::grid_slots(page_width_in, page_height_in, margin_in, margin_in, 2, 2),
+            PageTemplate::TwoSideBySide => {
+                print::grid_slots(page_width_in, page_height_in, margin_in, margin_in, 2, 1)
+            }
+            PageTemplate::Grid2x2 => {
+                print::grid_slots(page_width_in, page_height_in, margin_in, margin_in, 2, 2)
+            }
             PageTemplate::PhotoWithCaption => vec![PrintSlot {
                 x_in: margin_in,
                 y_in: margin_in,
@@ -91,7 +103,12 @@ impl PageTemplate {
     }
 
     /// Textfelder dieses Templates — leer außer bei `PhotoWithCaption`/`TitlePage`.
-    pub fn text_slots(self, page_width_in: f32, page_height_in: f32, margin_in: f32) -> Vec<TextSlot> {
+    pub fn text_slots(
+        self,
+        page_width_in: f32,
+        page_height_in: f32,
+        margin_in: f32,
+    ) -> Vec<TextSlot> {
         match self {
             PageTemplate::PhotoWithCaption => vec![TextSlot {
                 x_in: margin_in,
@@ -119,7 +136,10 @@ pub fn auto_fill_pages(photo_ids: &[String], template: PageTemplate) -> Vec<Vec<
     if per_page == 0 || photo_ids.is_empty() {
         return Vec::new();
     }
-    photo_ids.chunks(per_page).map(|chunk| chunk.to_vec()).collect()
+    photo_ids
+        .chunks(per_page)
+        .map(|chunk| chunk.to_vec())
+        .collect()
 }
 
 /// Ein bereits gerendertes Foto (siehe `engine::render_to_pixels`), analog
@@ -162,11 +182,19 @@ pub fn render_book_page(
         })
         .collect();
 
-    let (page_w, page_h, mut page_pixels) = print::compose_page(page_width_in, page_height_in, dpi, background_rgb, &cells)?;
+    let (page_w, page_h, mut page_pixels) =
+        print::compose_page(page_width_in, page_height_in, dpi, background_rgb, &cells)?;
 
-    if let (Some(text), Some(slot)) = (caption, template.text_slots(page_width_in, page_height_in, margin_in).first()) {
+    if let (Some(text), Some(slot)) = (
+        caption,
+        template
+            .text_slots(page_width_in, page_height_in, margin_in)
+            .first(),
+    ) {
         let font_bytes = font_bytes.ok_or_else(|| {
-            ExportError::Unsupported("Bildunterschrift gesetzt, aber keine Schriftdatei ausgewählt".to_string())
+            ExportError::Unsupported(
+                "Bildunterschrift gesetzt, aber keine Schriftdatei ausgewählt".to_string(),
+            )
         })?;
         let slot_x = (slot.x_in * dpi as f32).round() as i64;
         let slot_y = (slot.y_in * dpi as f32).round() as i64;
@@ -176,7 +204,8 @@ pub fn render_book_page(
         // automatischer Zeilenumbruch — siehe Moduldoku).
         let font_size_px = (slot_h as f32 * 0.5).clamp(8.0, 96.0);
 
-        let (text_w, text_h, _) = watermark::rasterize_text(font_bytes, text, font_size_px, caption_color)?;
+        let (text_w, text_h, _) =
+            watermark::rasterize_text(font_bytes, text, font_size_px, caption_color)?;
         let origin_x = slot_x + ((slot_w as i64 - text_w as i64) / 2).max(0);
         let origin_y = slot_y + ((slot_h as i64 - text_h as i64) / 2).max(0);
         watermark::apply_text_at(
@@ -207,9 +236,24 @@ pub struct PrintShopPreset {
 }
 
 pub const PRINT_SHOP_PRESETS: &[PrintShopPreset] = &[
-    PrintShopPreset { name: "Digitaldruck (Standard, 300 dpi)", bleed_in: 0.125, dpi: 300, background_rgb: [255, 255, 255] },
-    PrintShopPreset { name: "Fotobuch (Premium, 400 dpi)", bleed_in: 0.125, dpi: 400, background_rgb: [255, 255, 255] },
-    PrintShopPreset { name: "Softcover (kein Beschnitt, 250 dpi)", bleed_in: 0.0, dpi: 250, background_rgb: [255, 255, 255] },
+    PrintShopPreset {
+        name: "Digitaldruck (Standard, 300 dpi)",
+        bleed_in: 0.125,
+        dpi: 300,
+        background_rgb: [255, 255, 255],
+    },
+    PrintShopPreset {
+        name: "Fotobuch (Premium, 400 dpi)",
+        bleed_in: 0.125,
+        dpi: 400,
+        background_rgb: [255, 255, 255],
+    },
+    PrintShopPreset {
+        name: "Softcover (kein Beschnitt, 250 dpi)",
+        bleed_in: 0.0,
+        dpi: 250,
+        background_rgb: [255, 255, 255],
+    },
 ];
 
 /// Baut eine mehrseitige PDF-Datei aus bereits gerenderten Seiten
@@ -219,7 +263,9 @@ pub const PRINT_SHOP_PRESETS: &[PrintShopPreset] = &[
 /// Pixelgröße die physische Seitengröße in der PDF-Datei.
 pub fn build_pdf(pages: &[(u32, u32, Vec<u8>)], dpi: u32, dest_path: &Path) -> Result<Vec<u8>> {
     if pages.is_empty() {
-        return Err(ExportError::Unsupported("Buch enthält keine Seiten".to_string()));
+        return Err(ExportError::Unsupported(
+            "Buch enthält keine Seiten".to_string(),
+        ));
     }
 
     let mut doc = PdfDocument::new("Aperture X Fotobuch");
@@ -254,7 +300,9 @@ pub fn build_pdf(pages: &[(u32, u32, Vec<u8>)], dpi: u32, dest_path: &Path) -> R
     }
 
     let mut warnings = Vec::new();
-    let bytes = doc.with_pages(pdf_pages).save(&PdfSaveOptions::default(), &mut warnings);
+    let bytes = doc
+        .with_pages(pdf_pages)
+        .save(&PdfSaveOptions::default(), &mut warnings);
 
     std::fs::write(dest_path, &bytes).map_err(|err| ExportError::Io {
         path: dest_path.display().to_string(),
@@ -268,7 +316,9 @@ mod tests {
     use super::*;
 
     fn solid_photo(width: u32, height: u32, rgb: [u8; 3]) -> Vec<u8> {
-        (0..width * height).flat_map(|_| [rgb[0], rgb[1], rgb[2], 255]).collect()
+        (0..width * height)
+            .flat_map(|_| [rgb[0], rgb[1], rgb[2], 255])
+            .collect()
     }
 
     #[test]
@@ -297,7 +347,11 @@ mod tests {
     #[test]
     fn render_book_page_produces_requested_pixel_dimensions() {
         let rgba = solid_photo(4, 4, [200, 100, 50]);
-        let photos = [BookPagePhoto { width: 4, height: 4, rgba: &rgba }];
+        let photos = [BookPagePhoto {
+            width: 4,
+            height: 4,
+            rgba: &rgba,
+        }];
         let (w, h, _) = render_book_page(
             PageTemplate::FullBleed,
             4.0,

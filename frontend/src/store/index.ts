@@ -19,7 +19,7 @@ import {
   writeBasicField,
   writeBwMixerField,
 } from "../lib/edl";
-import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairMode, RepairPoint, Treatment, UprightMode } from "../lib/edl";
+import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import {
   applyConditionsToSubset,
@@ -390,6 +390,11 @@ interface DevelopSlice {
   /** Setzt Farbe/Schwarzweiß absolut und committet sofort (wie
    * `applyWhiteBalancePreset`). */
   setTreatment: (treatment: Treatment) => void;
+  /** Node-Editor (Phase 9 Schritt 7): schaltet eine einzelne Rendering-
+   * Stufe an/aus und committet sofort (kein Zwischenzustand wie bei den
+   * Reglern — ein Klick ist eine abgeschlossene Aktion, wie
+   * `setTreatment`). */
+  toggleStage: (key: keyof StageEnabled) => void;
   /** Ob die Weißabgleich-Pipette gerade auf einen Klick in den Viewer
    * wartet (Phase 4 Schritt 3, siehe `lib/whiteBalancePicker.ts`). */
   wbPickerActive: boolean;
@@ -534,6 +539,13 @@ interface DevelopSlice {
   commitDevelopEdit: (label?: string, options?: { preservePresetStrengthContext?: boolean }) => Promise<void>;
   undoDevelop: () => Promise<void>;
   redoDevelop: () => Promise<void>;
+  /** Springt direkt zu einer Sequenznummer aus dem vollständigen Verlauf
+   * (Phase 9 Schritt 7, „Zeitleisten-Ansicht") — wie `undoDevelop`/
+   * `redoDevelop`, aber nicht auf einen Einzelschritt beschränkt. */
+  gotoDevelopHistory: (sequence: number) => Promise<void>;
+  /** Ob `HistoryTimelineDialog` gerade offen ist. */
+  historyDialogOpen: boolean;
+  toggleHistoryDialog: () => void;
   /** Zuletzt gemessene Ende-zu-Ende-Antwortzeit der `develop/...`-Route
    * in Millisekunden (siehe `hooks/useDevelopRender`) — nur zur
    * Beobachtung/ehrlichen Dokumentation des 16-ms-Ziels (`PLAN.md` Phase
@@ -1204,6 +1216,18 @@ interface LibraryViewsSlice {
   compareViewPhotoIds: string[];
   openCompareView: (photoIds: string[]) => void;
   closeCompareView: () => void;
+  /** Ein einziger gemeinsamer Zoom-Faktor für alle Kacheln der
+   * Vergleichsansicht (Phase 9 Schritt 7, „synchronisierter Zoom" —
+   * siehe `CompareGridView.tsx`s Moduldoku für die bewusste
+   * Vereinfachung gegenüber echtem Pan-Sync). */
+  compareViewZoom: number;
+  setCompareViewZoom: (zoom: number) => void;
+  /** Öffnet die Vergleichsansicht mit dem aktuellen Foto und all seinen
+   * virtuellen Kopien (Phase 9 Schritt 7 „Vergleichs-Grid" — Versionen
+   * statt beliebiger Fotos wie beim Knopf oben). Löst dabei zuerst zur
+   * Quelle auf, falls das aktuelle Foto selbst schon eine virtuelle
+   * Kopie ist, damit immer die vollständige Geschwisterliste erscheint. */
+  openVersionsCompareView: () => Promise<void>;
 
   /** Öffnet ein zweites Tauri-Fenster mit einem unabhängigen Loupe-
    * Viewer für `photoId` (Sekundäres Display). */
@@ -1758,6 +1782,13 @@ export const useAppStore = create<AppStore>()(
       void get().commitDevelopEdit();
     },
 
+    toggleStage: (key) => {
+      set((state) => {
+        state.developEdl.stage_enabled[key] = !state.developEdl.stage_enabled[key];
+      });
+      void get().commitDevelopEdit();
+    },
+
     wbPickerActive: false,
 
     toggleWbPicker: () => {
@@ -2136,6 +2167,27 @@ export const useAppStore = create<AppStore>()(
       if (!position) return;
       set((state) => {
         state.developEdl = edlFromHistoryPosition(position);
+      });
+    },
+
+    gotoDevelopHistory: async (sequence) => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      const position = await api.gotoDevelopEdit(developPhotoId, sequence).catch((err: unknown) => {
+        console.error("Sprung im Verlauf fehlgeschlagen:", err);
+        return null;
+      });
+      if (!position) return;
+      set((state) => {
+        state.developEdl = edlFromHistoryPosition(position);
+      });
+    },
+
+    historyDialogOpen: false,
+
+    toggleHistoryDialog: () => {
+      set((state) => {
+        state.historyDialogOpen = !state.historyDialogOpen;
       });
     },
 
@@ -4253,7 +4305,31 @@ export const useAppStore = create<AppStore>()(
     closeCompareView: () => {
       set((state) => {
         state.compareViewPhotoIds = [];
+        state.compareViewZoom = 1;
       });
+    },
+
+    compareViewZoom: 1,
+
+    setCompareViewZoom: (zoom) => {
+      set((state) => {
+        state.compareViewZoom = zoom;
+      });
+    },
+
+    openVersionsCompareView: async () => {
+      const { selectedPhotoId, selectedFolderId } = get();
+      if (!selectedPhotoId) return;
+      const photosInFolder = selectedFolderId ? get().photosByFolder[selectedFolderId] : undefined;
+      const currentPhoto = photosInFolder?.find((p) => p.id === selectedPhotoId);
+      const rootId = currentPhoto?.source_photo_id ?? selectedPhotoId;
+      await get().refreshVirtualCopies(rootId);
+      // Stellt sicher, dass neu angelegte virtuelle Kopien bereits im
+      // `photosByFolder`-Cache stehen, den `CompareGridView.tsx` zum
+      // Auflösen der IDs zu Anzeigedaten verwendet.
+      if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
+      const copies = get().virtualCopiesByPhotoId[rootId] ?? [];
+      get().openCompareView([rootId, ...copies.map((copy) => copy.id)]);
     },
 
     openSecondaryDisplay: async (photoId) => {

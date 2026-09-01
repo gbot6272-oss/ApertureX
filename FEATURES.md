@@ -164,13 +164,13 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
      (keine ADR, kein Unterbau) — Phase 9 als vorläufige Einordnung, siehe
      `PLAN.md`s neuer Abschnitt „Backlog-Ergänzung für Phase 9 (auf
      Nutzerwunsch, außerhalb der Reihe)". -->
-- [ ] Live-Histogramm (RGB + Luminanz, aktualisiert sich sofort bei jedem Reglerzug) — Phase 9 — Status: Nicht begonnen (Kanalverteilung lässt sich aus dem bereits vorhandenen `render_rgba8`-Ausgabepuffer client- oder serverseitig zählen, kein neuer Rendering-Pfad nötig)
-- [ ] Clipping-Warnungen (Lichter-/Tiefen-Dreiecke im Histogramm anklickbar, Rot-/Blau-Überlagerung im Bild) — Phase 9 — Status: Nicht begonnen
-- [ ] Punktfarbmesser (RGB-Wert unter dem Mauszeiger live anzeigen, wie ein Densitometer) — Phase 9 — Status: Nicht begonnen
+- [x] Live-Histogramm (RGB + Luminanz, aktualisiert sich sofort bei jedem Reglerzug) — Phase 9 — Status: Fertig (siehe PLAN.md Schritt 4) — `lib/histogram.ts::computeHistogram` zählt die vier Kanäle aus dem bereits vorhandenen `render_rgba8`-Ausgabepuffer (`developFrame`), reiner Frontend-Rechenschritt, kein neuer Rendering-Pfad; Luminanz über Rec.-709-Gewichte, wie `lib/softProof.ts`s Gamut-Warnung
+- [x] Clipping-Warnungen (Lichter-/Tiefen-Dreiecke anklickbar, Rot-/Blau-Überlagerung im Bild) — Phase 9 — Status: Fertig (abweichend, siehe PLAN.md Schritt 4) — die beiden Dreieck-Knöpfe schalten dieselbe Rot-/Blau-Überlagerung um (kein getrenntes Nur-Tiefen-/Nur-Lichter-Umschalten); die Überlagerung selbst ist ein zweites, transparentes 2D-Canvas über dem WebGL-Viewer statt eines Eingriffs in `QuadRenderer`s Zeichenpfad
+- [x] Punktfarbmesser (RGB-Wert unter dem Mauszeiger live anzeigen, wie ein Densitometer) — Phase 9 — Status: Fertig (siehe PLAN.md Schritt 4) — läuft passiv beim Überfahren des Bilds mit, kein eigener Werkzeug-Modus nötig (anders als die klickbasierten Pipetten für Weißabgleich/Farbmischer)
 - [ ] Zielgerichtetes Anpassungswerkzeug (TAT) für Kurven und HSL — im Bild klicken und ziehen verändert direkt den passenden Regler/Kurvenpunkt — Phase 9 — Status: Nicht begonnen
 - [ ] Schwarzweiß-Umwandlung mit eigenem 8-Kanal-Mixer (Treatment-Umschalter Farbe/Schwarzweiß, ein Luminanz-Regler je Farbband) — Phase 9 — Status: Nicht begonnen
 - [ ] Auto-Ton / Auto-Weißabgleich per Ein-Klick (Histogramm-Perzentil-Heuristik statt Regler von Hand setzen, kein LLM) — Phase 9 — Status: Nicht begonnen
-- [ ] Navigator-Miniaturansicht (kleine Übersichtskarte zeigt die Zoom-Ausschnittsposition bei starker Vergrößerung) — Phase 9 — Status: Nicht begonnen
+- [x] Navigator-Miniaturansicht (kleine Übersichtskarte zeigt die Zoom-Ausschnittsposition bei starker Vergrößerung) — Phase 9 — Status: Fertig (siehe PLAN.md Schritt 4) — zeigt die bestehende Thumbnail-Vorschau mit einem Rahmen für den sichtbaren Ausschnitt (Umkehrung von `lib/viewerMath.ts::imageOrigin`), kein eigenes zweites Bild-Rendering
 - [ ] KI-Entrauschung über die volle Bildfläche („Denoise"-artig, mit Vorschau/Fortschrittsanzeige) — Phase 9 — Status: Nicht begonnen (dasselbe ONNX-Beschaffungsproblem wie in ADR-0033 — echtes neuronales Modell vs. Wartezeit/Bündelungsaufwand muss beim Planen dieser Zeile neu geprüft werden)
 - [ ] KI-Hochskalierung / Detailverbesserung („Super Resolution"-artig) — Phase 9 — Status: Nicht begonnen (dasselbe ONNX-Beschaffungsproblem wie oben)
 - [ ] Info-Overlay im Vollbild-Modus (Dateiname/EXIF/Bewertung direkt über dem Bild eingeblendet, umschaltbar) — Phase 9 — Status: Nicht begonnen

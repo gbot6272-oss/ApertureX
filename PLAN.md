@@ -843,9 +843,13 @@ Zulieferer existiert, siehe ADR-0032 Punkt 3).
   - **Zurückgestellt** (siehe `FEATURES.md`): Personenansicht (bräuchte eine neue Hautton-/Kontur-Heuristik in `apx-ai`, eigener Algorithmus-Schritt statt überstürzter Umsetzung), separate Übersichtsansicht (deckt sich inhaltlich mit Rasteransicht + neuer Vergleichsansicht), Schnellentwicklung im Raster, Smart Previews + Offline-Bearbeitung (bräuchte eine Änderung an `apx-pipeline`s Quelldatei-Auflösung — Eingriff in den Rendering-Kernpfad, hier bewusst nicht mitgerissen) — alle vier sind additive Ergänzungen ohne Schema-Änderung, keine Blockade für spätere Schritte
   - Tests (bewusst schlank): 2 neue `stats`-Rust-Unit-Tests in `apx-catalog`, 3 neue Playwright-e2e-Tests in `library-views-flow.spec.ts` (Filter-Preset speichern/anwenden, Statistik-Anzeige, Vergleichsansicht)
 
-- [ ] 4. Entwickeln: Histogramm, Clipping, Punktfarbmesser, Navigator
-  - Reine Analyse/Anzeige über den bestehenden `render_rgba8`-Ausgabepuffer, kein neuer Rendering-Pfad — niedrigstes Risiko, deshalb zuerst
-  - Live-Histogramm (RGB + Luminanz), Clipping-Warnungen (Dreiecke + Bildüberlagerung), Punktfarbmesser, Navigator-Miniaturansicht
+- [x] 4. Entwickeln: Histogramm, Clipping, Punktfarbmesser, Navigator
+  - Reine Analyse/Anzeige über den bestehenden `render_rgba8`-Ausgabepuffer (`Viewer.tsx`s `developFrame`), kein neuer Rendering-Pfad — niedrigstes Risiko, deshalb zuerst
+  - Neues `lib/histogram.ts` (pure, unit-getestete Funktionen): `computeHistogram` (RGB+Luminanz, Rec.-709-Gewichte), `countClipping`/`buildClippingOverlay` (ein Pixel gilt als geclippt, sobald *ein* Kanal den Schwellwert erreicht, Lightroom-Konvention)
+  - Neues `DevelopAnalysisPanel.tsx`: Histogramm-Canvas, zwei Dreieck-Knöpfe (Tiefen/Lichter-Clipping-Anteil als Titel-Tooltip, schalten dieselbe Rot-/Blau-Overlay-Ebene um — ein zweites, transparentes 2D-Canvas über dem WebGL-Viewer statt eines Eingriffs in `QuadRenderer`s Zeichenpfad), Navigator (bestehende Thumbnail-Vorschau + Rahmen für den sichtbaren Ausschnitt, Umkehrung von `imageOrigin`), Punktfarbmesser-Anzeige
+  - Punktfarbmesser läuft passiv beim Überfahren des Bilds mit (`Viewer.tsx`s `handleMouseMove` erweitert um dieselbe Pixel-Sampling-Logik wie `handleImageClick`s Pipetten) — bewusst kein eigener Werkzeug-Modus wie bei den klickbasierten Pipetten, dieselbe Lightroom-Konvention
+  - **Wichtiger Bugfix während der Umsetzung**: das schwebende Panel muss `pointer-events-none` auf dem Container tragen (nur die beiden Knöpfe `pointer-events-auto`) — sonst fängt es in einem schmalen Viewer-Ausschnitt (viele gleichzeitig offene Seitenleisten) Bildklicks für andere Werkzeuge (z. B. den Reparatur-Pinsel) ab; durch den Regressionstest der bestehenden `develop-flow.spec.ts`-Suite gefunden und behoben
+  - Tests (bewusst schlank): 7 neue `histogram.test.ts`-Unit-Tests, 1 neuer Playwright-e2e-Test (`develop-analysis-flow.spec.ts`), volle bestehende `develop-flow.spec.ts`-Suite (23 Tests) erneut grün als Regressionsprobe für den `Viewer.tsx`-Eingriff
 
 - [ ] 5. Entwickeln: TAT, Auto-Ton, Schwarzweiß-Mixer, Info-Overlay, Bearbeitungs-Pins
   - Zielgerichtetes Anpassungswerkzeug (Bildklick+Zug steuert Kurven-/HSL-Regler)

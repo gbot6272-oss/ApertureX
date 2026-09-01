@@ -5,6 +5,7 @@ import { useElementSize } from "../hooks/useElementSize";
 import { useImageBitmap } from "../hooks/useImageBitmap";
 import { buildEdlEnvelopeJson } from "../lib/edl";
 import { formatShutter } from "../lib/format";
+import { buildClippingOverlay } from "../lib/histogram";
 import { imageUrl, previewUrl } from "../lib/media";
 import { mergeEdlSubset } from "../lib/presets";
 import { applySoftProof } from "../lib/softProof";
@@ -13,6 +14,7 @@ import { QuadRenderer } from "../lib/webgl";
 import { useAppStore } from "../store";
 import { BeforeAfterView } from "./BeforeAfterView";
 import { CropOverlay } from "./CropOverlay";
+import { DevelopAnalysisPanel } from "./DevelopAnalysisPanel";
 import { MaskOverlay } from "./MaskOverlay";
 import { ReferenceView } from "./ReferenceView";
 import { RepairOverlay } from "./RepairOverlay";
@@ -205,6 +207,11 @@ export function Viewer() {
   const dragState = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
 
+  // ---- Entwickeln-Analysewerkzeuge (Phase 9 Schritt 4) ------------------
+  const [pointerSample, setPointerSample] = useState<{ r: number; g: number; b: number } | null>(null);
+  const [clippingOverlayEnabled, setClippingOverlayEnabled] = useState(false);
+  const clipCanvasRef = useRef<HTMLCanvasElement>(null);
+
   const handleWheel = useCallback(
     (event: React.WheelEvent<HTMLDivElement>) => {
       if (!photo || imgW <= 0) return;
@@ -240,18 +247,52 @@ export function Viewer() {
     [pickerActive, canPan, panX, panY],
   );
 
+  // Punktfarbmesser (Phase 9 Schritt 4): läuft unabhängig vom Ziehen mit,
+  // solange das Entwickeln-Panel offen ist und ein `developFrame`
+  // vorliegt — anders als die Weißabgleich-/Farbmischer-Pipetten oben
+  // (`handleImageClick`, ausgelöst per Klick) braucht der Punktfarbmesser
+  // keinen eigenen Werkzeug-Modus, er zeigt einfach live an, was gerade
+  // unter dem Mauszeiger liegt (dieselbe Lightroom-Konvention).
   const handleMouseMove = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       const drag = dragState.current;
-      if (!drag) return;
-      setPan(drag.startPanX + (event.clientX - drag.startX), drag.startPanY + (event.clientY - drag.startY));
+      if (drag) {
+        setPan(drag.startPanX + (event.clientX - drag.startX), drag.startPanY + (event.clientY - drag.startY));
+      }
+
+      if (!developPanelOpen || !developFrame || imgW <= 0 || imgH <= 0) {
+        if (pointerSample) setPointerSample(null);
+        return;
+      }
+      const rect = event.currentTarget.getBoundingClientRect();
+      const cursor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      const origin = imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY });
+      const imageX = (cursor.x - origin.x) / effectiveScale;
+      const imageY = (cursor.y - origin.y) / effectiveScale;
+      if (imageX < 0 || imageY < 0 || imageX >= imgW || imageY >= imgH) {
+        if (pointerSample) setPointerSample(null);
+        return;
+      }
+      const sampleX = Math.min(developFrame.width - 1, Math.floor((imageX / imgW) * developFrame.width));
+      const sampleY = Math.min(developFrame.height - 1, Math.floor((imageY / imgH) * developFrame.height));
+      const index = (sampleY * developFrame.width + sampleX) * 4;
+      setPointerSample({
+        r: developFrame.pixels[index] ?? 0,
+        g: developFrame.pixels[index + 1] ?? 0,
+        b: developFrame.pixels[index + 2] ?? 0,
+      });
     },
-    [setPan],
+    [setPan, developPanelOpen, developFrame, imgW, imgH, containerSize.width, containerSize.height, effectiveScale, panX, panY, pointerSample],
   );
 
   const endDrag = useCallback(() => {
     dragState.current = null;
   }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    endDrag();
+    setPointerSample(null);
+  }, [endDrag]);
 
   const handleDoubleClick = useCallback(() => {
     if (fitMode !== "manual") {
@@ -328,6 +369,47 @@ export function Viewer() {
     ],
   );
 
+  // ---- Clipping-Overlay + Navigator-Viewport (Phase 9 Schritt 4) --------
+  // Eigenes, zweites Canvas statt in `QuadRenderer`s WebGL-Zeichenpfad
+  // einzugreifen — die Maske ist ohnehin größtenteils transparent
+  // (`buildClippingOverlay`), ein simples 2D-`putImageData` + CSS-Skalierung
+  // (analog zum WebGL-Canvas darunter) reicht, ohne den bestehenden,
+  // bereits komplexen Rendering-Pfad anzufassen.
+  useEffect(() => {
+    const canvas = clipCanvasRef.current;
+    if (!canvas) return;
+    if (!clippingOverlayEnabled || !developFrame) {
+      canvas.width = 0;
+      canvas.height = 0;
+      return;
+    }
+    canvas.width = developFrame.width;
+    canvas.height = developFrame.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const overlay = buildClippingOverlay(developFrame.pixels, developFrame.width, developFrame.height);
+    // `overlay` ist immer über `new Uint8ClampedArray(n)` angelegt (siehe
+    // `buildClippingOverlay`), landet also nie auf einem `SharedArrayBuffer`
+    // — der Cast räumt nur eine zu strenge TS-Typisierung von `ImageData`
+    // aus dem Weg (`ArrayBufferLike` schließt `SharedArrayBuffer` mit ein).
+    ctx.putImageData(new ImageData(overlay as Uint8ClampedArray<ArrayBuffer>, developFrame.width, developFrame.height), 0, 0);
+  }, [clippingOverlayEnabled, developFrame]);
+
+  const clipOverlayOrigin = imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY });
+
+  // Normierter (0..1) sichtbarer Bildausschnitt für die Navigator-
+  // Miniaturansicht — Umkehrung von `imageOrigin`: Container-Bildschirm-
+  // Ecken zurück in Bildkoordinaten, dann auf 0..1 begrenzt.
+  const navigatorViewport = useMemo(() => {
+    if (imgW <= 0 || imgH <= 0 || effectiveScale <= 0) return null;
+    const origin = imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY });
+    const x0 = Math.max(0, (0 - origin.x) / effectiveScale / imgW);
+    const y0 = Math.max(0, (0 - origin.y) / effectiveScale / imgH);
+    const x1 = Math.min(1, (containerSize.width - origin.x) / effectiveScale / imgW);
+    const y1 = Math.min(1, (containerSize.height - origin.y) / effectiveScale / imgH);
+    return { x: x0, y: y0, width: Math.max(0, x1 - x0), height: Math.max(0, y1 - y0) };
+  }, [imgW, imgH, effectiveScale, containerSize.width, containerSize.height, panX, panY]);
+
   // ---- Tastatur: +/- Zoom, 0 Einpassen, 1 1:1, Leertaste zum Ziehen ------
 
   useEffect(() => {
@@ -368,7 +450,7 @@ export function Viewer() {
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={endDrag}
-      onMouseLeave={endDrag}
+      onMouseLeave={handleMouseLeave}
       onClick={handleImageClick}
       onDoubleClick={handleDoubleClick}
       style={{ cursor: pickerActive ? "crosshair" : canPan ? (dragState.current ? "grabbing" : "grab") : "default" }}
@@ -376,6 +458,20 @@ export function Viewer() {
       {!photo && <p className="pointer-events-none text-sm text-text-muted">Kein Foto ausgewählt.</p>}
 
       <canvas ref={canvasRef} className="pointer-events-none absolute inset-0" />
+
+      {clippingOverlayEnabled && developFrame && imgW > 0 && imgH > 0 && (
+        <canvas
+          ref={clipCanvasRef}
+          className="pointer-events-none absolute"
+          style={{
+            left: clipOverlayOrigin.x,
+            top: clipOverlayOrigin.y,
+            width: imgW * effectiveScale,
+            height: imgH * effectiveScale,
+            imageRendering: effectiveScale > 1 ? "pixelated" : "auto",
+          }}
+        />
+      )}
 
       {photo && referenceViewActive ? (
         <ReferenceView
@@ -463,6 +559,17 @@ export function Viewer() {
             {` · ${Math.round(effectiveScale * 100)} %`}
           </div>
         </div>
+      )}
+
+      {photo && developPanelOpen && developFrame && (
+        <DevelopAnalysisPanel
+          frame={developFrame}
+          pointerSample={pointerSample}
+          clippingOverlayEnabled={clippingOverlayEnabled}
+          onToggleClippingOverlay={() => setClippingOverlayEnabled((v) => !v)}
+          viewport={navigatorViewport}
+          thumbnailUrl={previewUrl(photo.id, 0)}
+        />
       )}
     </main>
   );

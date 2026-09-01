@@ -188,6 +188,46 @@ pub(crate) fn list_duplicate_groups(conn: &Connection) -> Result<Vec<Vec<Photo>>
     Ok(groups)
 }
 
+/// Alle Fotos mit bekannten GPS-Koordinaten, ordnerübergreifend — für die
+/// Kartenansicht (Phase 8 Schritt 7). Sortiert nach Aufnahmezeit (Fotos
+/// ohne Zeitstempel zuletzt), damit eine Reiserouten-Ansicht direkt daraus
+/// eine sinnvolle Reihenfolge ableiten kann, ohne selbst noch einmal zu
+/// sortieren.
+pub(crate) fn list_geotagged(conn: &Connection) -> Result<Vec<Photo>> {
+    let sql = format!(
+        "SELECT {SELECT_COLUMNS} FROM photos \
+         WHERE gps_lat IS NOT NULL AND gps_lon IS NOT NULL \
+         ORDER BY captured_at IS NULL, captured_at"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
+    let rows = stmt.query_map([], row_to_raw).map_err(map_sqlite_err)?;
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(raw_to_photo(row.map_err(map_sqlite_err)?)?);
+    }
+    Ok(result)
+}
+
+/// Setzt oder löscht (`None`) die GPS-Koordinaten eines Fotos von Hand —
+/// z. B. wenn ein Foto auf der Kartenansicht platziert wird, weil es keine
+/// EXIF-GPS-Daten trug.
+pub(crate) fn set_gps(conn: &Connection, id: PhotoId, gps: Option<(f64, f64)>) -> Result<()> {
+    let (lat, lon) = match gps {
+        Some((lat, lon)) => (Some(lat), Some(lon)),
+        None => (None, None),
+    };
+    let changed = conn
+        .execute(
+            "UPDATE photos SET gps_lat = ?2, gps_lon = ?3 WHERE id = ?1",
+            params![id.to_string(), lat, lon],
+        )
+        .map_err(map_sqlite_err)?;
+    if changed == 0 {
+        return Err(AppError::not_found("Foto", id.to_string()));
+    }
+    Ok(())
+}
+
 pub(crate) fn set_missing(conn: &Connection, id: PhotoId, missing: bool) -> Result<()> {
     let changed = conn
         .execute(
@@ -640,5 +680,50 @@ mod tests {
         .expect("Delete darf nicht scheitern");
 
         assert_eq!(count_by_folder(&conn, folder_id).expect("ok"), 0);
+    }
+
+    #[test]
+    fn list_geotagged_only_returns_photos_with_gps() {
+        let (conn, folder_id) = setup();
+        let mtime = OffsetDateTime::now_utc()
+            .replace_nanosecond(0)
+            .expect("gültig");
+
+        let mut with_gps = sample_photo(folder_id, 1000, mtime);
+        with_gps.filename = "IMG_0001.CR2".to_string();
+        upsert(&conn, &with_gps, OffsetDateTime::now_utc()).expect("ok");
+
+        let mut without_gps = sample_photo(folder_id, 2000, mtime);
+        without_gps.filename = "IMG_0002.CR2".to_string();
+        without_gps.gps_lat = None;
+        without_gps.gps_lon = None;
+        upsert(&conn, &without_gps, OffsetDateTime::now_utc()).expect("ok");
+
+        let geotagged = list_geotagged(&conn).expect("ok");
+        assert_eq!(geotagged.len(), 1);
+        assert_eq!(geotagged[0].filename, "IMG_0001.CR2");
+    }
+
+    #[test]
+    fn set_gps_updates_and_clears_coordinates() {
+        let (conn, folder_id) = setup();
+        let mtime = OffsetDateTime::now_utc()
+            .replace_nanosecond(0)
+            .expect("gültig");
+        let mut photo = sample_photo(folder_id, 1000, mtime);
+        photo.gps_lat = None;
+        photo.gps_lon = None;
+        let (id, _) = upsert(&conn, &photo, OffsetDateTime::now_utc()).expect("ok");
+
+        assert!(get(&conn, id).expect("ok").gps_lat.is_none());
+        set_gps(&conn, id, Some((48.1, 11.6))).expect("ok");
+        let fetched = get(&conn, id).expect("ok");
+        assert_eq!(fetched.gps_lat, Some(48.1));
+        assert_eq!(fetched.gps_lon, Some(11.6));
+
+        set_gps(&conn, id, None).expect("ok");
+        assert!(get(&conn, id).expect("ok").gps_lat.is_none());
+
+        assert!(set_gps(&conn, PhotoId::new(), Some((0.0, 0.0))).is_err());
     }
 }

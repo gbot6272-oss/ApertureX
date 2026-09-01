@@ -23,6 +23,8 @@ function photo(id: string): PhotoDto {
     rating: 0,
     flag: 0,
     color_label: null,
+    gps_lat: null,
+    gps_lon: null,
   };
 }
 

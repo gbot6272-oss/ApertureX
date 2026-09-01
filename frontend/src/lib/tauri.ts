@@ -44,6 +44,10 @@ export interface PhotoDto {
   /** Pick/Reject-Flagge: 1 = Pick, -1 = Reject, 0 = keine. */
   flag: number;
   color_label: string | null;
+  /** GPS-Koordinaten aus EXIF oder von Hand über die Kartenansicht gesetzt
+   * (Phase 8 Schritt 7) — `null`, wenn kein Standort bekannt. */
+  gps_lat: number | null;
+  gps_lon: number | null;
 }
 
 export interface KeywordDto {
@@ -54,6 +58,20 @@ export interface KeywordDto {
 export interface CollectionDto {
   id: string;
   name: string;
+}
+
+export interface GeocodedLocationDto {
+  name: string;
+  admin1: string;
+  country_code: string;
+  distance_km: number;
+}
+
+export interface GpxTrackPointDto {
+  lat: number;
+  lon: number;
+  elevation: number | null;
+  time: string | null;
 }
 
 /** Alle Felder optional — ein leeres Objekt liefert alle Fotos (siehe
@@ -763,4 +781,33 @@ export interface WebGalleryOutcomeDto {
  * und lädt sie optional per FTP/SFTP hoch (`apx_export::web`). */
 export function exportWebGallery(photoIds: string[], destDir: string, options: WebGalleryOptions): Promise<WebGalleryOutcomeDto> {
   return invoke<WebGalleryOutcomeDto>("export_web_gallery", { photoIds, destDir, options });
+}
+
+// ---- Karte (Phase 8 Schritt 7) -----------------------------------------
+//
+// GPS-Koordinaten selbst kommen über die normalen Foto-Listen-Aufrufe
+// (`PhotoDto.gps_lat`/`gps_lon`, aus EXIF beim Import gelesen) — die
+// folgenden Commands decken nur die Kartenansicht selbst ab.
+
+/** Alle Fotos mit bekannten GPS-Koordinaten, ordnerübergreifend. */
+export function listGeotaggedPhotos(): Promise<PhotoDto[]> {
+  return invoke<PhotoDto[]>("list_geotagged_photos");
+}
+
+/** Vollständig offline Reverse-Geocoding (kein Netzwerkaufruf), siehe
+ * `apx_export::map`s Moduldoku. */
+export function reverseGeocodeLocation(lat: number, lon: number): Promise<GeocodedLocationDto> {
+  return invoke<GeocodedLocationDto>("reverse_geocode_location", { lat, lon });
+}
+
+/** Liest und parst eine GPX-Datei (Pfad über {@link pickFilePath}) —
+ * gibt alle Trackpunkte für die Reiserouten-Anzeige zurück. */
+export function importGpxTrack(path: string): Promise<GpxTrackPointDto[]> {
+  return invoke<GpxTrackPointDto[]>("import_gpx_track", { path });
+}
+
+/** Setzt oder löscht (beide `null`) die GPS-Koordinaten eines Fotos von
+ * Hand — z. B. per Klick auf die Kartenansicht platziert. */
+export function setPhotoGps(photoId: string, lat: number | null, lon: number | null): Promise<void> {
+  return invoke<void>("set_photo_gps", { photoId, lat, lon });
 }

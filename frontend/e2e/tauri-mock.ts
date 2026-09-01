@@ -112,6 +112,14 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       uploaded_count: number | null;
     },
     webExportShouldFail: false,
+    // Karte (Phase 8 Schritt 7).
+    geocodedLocation: { name: "Berlin", admin1: "Berlin", country_code: "DE", distance_km: 1.2 } as {
+      name: string;
+      admin1: string;
+      country_code: string;
+      distance_km: number;
+    },
+    gpxTrackPoints: [] as Array<{ lat: number; lon: number; elevation: number | null; time: string | null }>,
     ...initialFixtures,
   };
   w.__mockInvokeLog = [] as Array<{ cmd: string; args: unknown }>;
@@ -321,6 +329,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       bookExportShouldFail: boolean;
       webGalleryOutcome: { dest_dir: string; photo_count: number; uploaded_count: number | null };
       webExportShouldFail: boolean;
+      geocodedLocation: { name: string; admin1: string; country_code: string; distance_km: number };
+      gpxTrackPoints: Array<{ lat: number; lon: number; elevation: number | null; time: string | null }>;
     };
 
     switch (cmd) {
@@ -818,6 +828,23 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           throw new Error("Test-Stub: Web-Export fehlgeschlagen");
         }
         return fixtures.webGalleryOutcome;
+      }
+
+      // ---- Karte (Phase 8 Schritt 7) ---------------------------------
+      case "list_geotagged_photos":
+        return allPhotos()
+          .filter((p) => p.gps_lat !== undefined && p.gps_lat !== null)
+          .map((p) => clonePhoto(p));
+      case "reverse_geocode_location":
+        return fixtures.geocodedLocation;
+      case "import_gpx_track":
+        return fixtures.gpxTrackPoints;
+      case "set_photo_gps": {
+        const photo = findPhoto(args.photoId as string);
+        if (!photo) throw new Error(`Test-Stub: Foto '${args.photoId as string}' nicht gefunden`);
+        photo.gps_lat = args.lat as number | null;
+        photo.gps_lon = args.lon as number | null;
+        return null;
       }
 
       default:

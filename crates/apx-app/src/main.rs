@@ -189,6 +189,10 @@ fn main() {
             commands::export_slideshow_video,
             commands::export_book_pdf,
             commands::export_web_gallery,
+            commands::list_geotagged_photos,
+            commands::reverse_geocode_location,
+            commands::import_gpx_track,
+            commands::set_photo_gps,
         ])
         .run(tauri::generate_context!())
         .expect("Fehler beim Starten von Aperture X");

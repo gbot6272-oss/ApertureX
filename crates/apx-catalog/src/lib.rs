@@ -276,6 +276,23 @@ impl Catalog {
         repository::photos::set_color_label(&conn, id, color_label)
     }
 
+    // ---- Karte (Phase 8 Schritt 7) -----------------------------------------
+
+    /// Alle Fotos mit bekannten GPS-Koordinaten, ordnerübergreifend, nach
+    /// Aufnahmezeit sortiert — Grundlage für Kartenansicht und
+    /// Reiserouten-Ansicht.
+    pub fn list_geotagged_photos(&self) -> Result<Vec<Photo>> {
+        let conn = self.lock()?;
+        repository::photos::list_geotagged(&conn)
+    }
+
+    /// Setzt oder löscht (`None`) die GPS-Koordinaten eines Fotos von Hand
+    /// (z. B. per Klick auf die Kartenansicht platziert).
+    pub fn set_photo_gps(&self, id: PhotoId, gps: Option<(f64, f64)>) -> Result<()> {
+        let conn = self.lock()?;
+        repository::photos::set_gps(&conn, id, gps)
+    }
+
     // ---- Schlagworte (ab Phase 3) -----------------------------------------
 
     /// Verknüpft `photo_id` mit dem Schlagwort `name` — legt es bei Bedarf an.

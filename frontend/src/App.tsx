@@ -7,6 +7,7 @@ import { FilterBar } from "./components/FilterBar";
 import { Filmstrip } from "./components/Filmstrip";
 import { GridView } from "./components/GridView";
 import { Header } from "./components/Header";
+import { MapView } from "./components/MapView";
 import { MasksPanel } from "./components/MasksPanel";
 import { MetadataPanel } from "./components/MetadataPanel";
 import { PresetsPanel } from "./components/PresetsPanel";
@@ -121,7 +122,7 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <PresetsPanel />
-        {centerView === "grid" ? <GridView /> : <Viewer />}
+        {centerView === "grid" ? <GridView /> : centerView === "map" ? <MapView /> : <Viewer />}
         <MetadataPanel />
         <DevelopPanel />
         <MasksPanel />

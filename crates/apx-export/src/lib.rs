@@ -22,6 +22,7 @@ pub mod engine;
 pub mod error;
 pub mod format;
 pub mod icc;
+pub mod map;
 pub mod metadata;
 pub mod print;
 pub mod queue;
@@ -31,5 +32,5 @@ pub mod video;
 pub mod watermark;
 pub mod web;
 
-// Schritt 7–8 (Karte/Templates) ergänzen hier jeweils ihr eigenes Modul,
-// sobald sie umgesetzt sind (siehe `PLAN.md`).
+// Schritt 8 (Templates) ergänzt hier sein eigenes Modul, sobald es
+// umgesetzt ist (siehe `PLAN.md`).

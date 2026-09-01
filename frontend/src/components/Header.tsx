@@ -21,6 +21,7 @@ export function Header() {
   const multiSelectedIds = useAppStore((s) => s.multiSelectedIds);
   const centerView = useAppStore((s) => s.centerView);
   const toggleCenterView = useAppStore((s) => s.toggleCenterView);
+  const setCenterView = useAppStore((s) => s.setCenterView);
   const metadataPanelOpen = useAppStore((s) => s.metadataPanelOpen);
   const toggleMetadataPanel = useAppStore((s) => s.toggleMetadataPanel);
   const exportDialogOpen = useAppStore((s) => s.exportDialogOpen);
@@ -117,6 +118,17 @@ export function Header() {
         }`}
       >
         Raster
+      </button>
+
+      <button
+        type="button"
+        onClick={() => setCenterView(centerView === "map" ? "viewer" : "map")}
+        aria-pressed={centerView === "map"}
+        className={`rounded border px-3 py-1 text-sm ${
+          centerView === "map" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
+        }`}
+      >
+        Karte
       </button>
 
       <button

@@ -45,10 +45,13 @@ suppaftp = "11.0.0"
 russh = "0.63.1"
 russh-sftp = "2.4.0"
 tokio = { version = "1.53.1", features = ["io-util"] }
-
-# Die übrigen in ADR-0034 geprüften Abhängigkeiten (suppaftp/russh für
-# Schritt 6, reverse_geocoder/quick-xml für Schritt 7) werden erst im
-# jeweiligen Schritt ergänzt.
+# Vollständig offline Reverse-Geocoding fürs Karte-Modul (Schritt 7) —
+# bündelt einen GeoNames-Auszug (`cities.csv`, ~7.6 MB) direkt im Crate,
+# kein Netzwerkaufruf, kein zusätzlicher Datensatz-Download nötig (anders
+# als bei `printpdf`/`azul-layout` in Schritt 5 unproblematisch klein).
+reverse_geocoder = "4.1.1"
+# GPX-Tracklog-Import (Schritt 7) — reines Rust, kein XML-Systemparser.
+quick-xml = "0.42.0"
 
 [dev-dependencies]
 tempfile = "3"

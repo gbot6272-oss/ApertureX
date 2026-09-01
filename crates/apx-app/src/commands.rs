@@ -62,6 +62,10 @@ pub struct PhotoDto {
     /// Pick/Reject-Flagge: 1 = Pick, -1 = Reject, 0 = keine.
     pub flag: i8,
     pub color_label: Option<String>,
+    /// GPS-Koordinaten aus EXIF oder von Hand über die Kartenansicht
+    /// gesetzt (Phase 8 Schritt 7) — `None`, wenn kein Foto-Standort bekannt.
+    pub gps_lat: Option<f64>,
+    pub gps_lon: Option<f64>,
 }
 
 impl From<apx_catalog::Photo> for PhotoDto {
@@ -87,6 +91,8 @@ impl From<apx_catalog::Photo> for PhotoDto {
             rating: photo.rating,
             flag: photo.flag,
             color_label: photo.color_label,
+            gps_lat: photo.gps_lat,
+            gps_lon: photo.gps_lon,
         }
     }
 }
@@ -2786,6 +2792,91 @@ pub async fn export_web_gallery(
         photo_count: outcome.photo_count,
         uploaded_count,
     })
+}
+
+// ---- Karte (Phase 8 Schritt 7) ---------------------------------------
+//
+// Reine Verdrahtung wie die übrigen Export-Module: GPS-Koordinaten liest
+// bereits der Import (`apx_raw::metadata::extract_gps`) in die
+// `photos`-Tabelle, hier kommt nur die Kartenansicht selbst dazu —
+// geotaggte Fotos auflisten, offline reverse-geocoden, GPX-Tracks
+// importieren, GPS von Hand setzen (`apx_export::map`).
+
+/// Alle Fotos mit bekannten GPS-Koordinaten, ordnerübergreifend, für die
+/// Kartenansicht.
+#[tauri::command]
+pub fn list_geotagged_photos(state: State<'_, AppState>) -> Result<Vec<PhotoDto>, String> {
+    let photos = state
+        .catalog
+        .list_geotagged_photos()
+        .map_err(|err| err.to_string())?;
+    Ok(photos.into_iter().map(PhotoDto::from).collect())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GeocodedLocationDto {
+    pub name: String,
+    pub admin1: String,
+    pub country_code: String,
+    pub distance_km: f64,
+}
+
+/// Vollständig offline Reverse-Geocoding einer Koordinate (kein
+/// Netzwerkaufruf, siehe `apx_export::map`s Moduldoku).
+#[tauri::command]
+pub fn reverse_geocode_location(lat: f64, lon: f64) -> GeocodedLocationDto {
+    let location = apx_export::map::reverse_geocode(lat, lon);
+    GeocodedLocationDto {
+        name: location.name,
+        admin1: location.admin1,
+        country_code: location.country_code,
+        distance_km: location.distance_km,
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GpxTrackPointDto {
+    pub lat: f64,
+    pub lon: f64,
+    pub elevation: Option<f64>,
+    pub time: Option<String>,
+}
+
+/// Liest und parst eine GPX-Datei (Pfad kommt vom bereits vorhandenen
+/// `pick_file_path`-Dialog) — gibt alle Trackpunkte für die
+/// Reiserouten-Anzeige auf der Karte zurück.
+#[tauri::command]
+pub fn import_gpx_track(path: String) -> Result<Vec<GpxTrackPointDto>, String> {
+    let xml = std::fs::read_to_string(&path)
+        .map_err(|err| format!("GPX-Datei '{path}' konnte nicht gelesen werden: {err}"))?;
+    let points = apx_export::map::parse_gpx(&xml).map_err(|err| err.to_string())?;
+    Ok(points
+        .into_iter()
+        .map(|p| GpxTrackPointDto {
+            lat: p.lat,
+            lon: p.lon,
+            elevation: p.elevation,
+            time: p.time,
+        })
+        .collect())
+}
+
+/// Setzt oder löscht (`lat`/`lon` beide `None`) die GPS-Koordinaten eines
+/// Fotos von Hand — z. B. per Klick auf die Kartenansicht platziert, weil
+/// das Foto keine EXIF-GPS-Daten trug.
+#[tauri::command]
+pub fn set_photo_gps(
+    state: State<'_, AppState>,
+    photo_id: String,
+    lat: Option<f64>,
+    lon: Option<f64>,
+) -> Result<(), String> {
+    let id = parse_photo_id(photo_id)?;
+    let gps = match (lat, lon) {
+        (Some(lat), Some(lon)) => Some((lat, lon)),
+        _ => None,
+    };
+    state.catalog.set_photo_gps(id, gps).map_err(|err| err.to_string())
 }
 
 #[cfg(test)]

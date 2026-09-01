@@ -57,6 +57,7 @@ import type {
   SlideshowVideoOptions,
   SlideshowVideoOutcomeDto,
   SnapshotDto,
+  GpxTrackPointDto,
   WebGalleryOptions,
   WebGalleryOutcomeDto,
   SpotCandidateDto,
@@ -512,9 +513,11 @@ interface DevelopSlice {
 
 interface LibrarySlice {
   /** Was in der Mitte statt des Viewers gezeigt wird — `"grid"` ist das
-   * neue Raster (Schritt 6), `"viewer"` der bisherige Einzelbild-Viewer. */
-  centerView: "viewer" | "grid";
+   * neue Raster (Schritt 6), `"viewer"` der bisherige Einzelbild-Viewer,
+   * `"map"` die Kartenansicht (Phase 8 Schritt 7). */
+  centerView: "viewer" | "grid" | "map";
   toggleCenterView: () => void;
+  setCenterView: (view: "viewer" | "grid" | "map") => void;
 
   /** Mehrfachauswahl fürs Stapel-Bearbeiten (Bewertung/Flagge/Sammlung-
    * Hinzufügen) — geteilt zwischen Raster und Filmstreifen. Enthält
@@ -1042,6 +1045,25 @@ interface WebSlice {
   exportWebGallery: (photoIds: string[], destDir: string, options: WebGalleryOptions) => Promise<void>;
 }
 
+/** Karte (Phase 8 Schritt 7) — GPS-Koordinaten selbst kommen aus den
+ * normalen Foto-Listen (`PhotoDto.gps_lat`/`gps_lon`, EXIF beim Import
+ * gelesen); dieser Slice hält nur, was die Kartenansicht selbst zusätzlich
+ * braucht: die geotaggten Fotos, einen optional geladenen GPX-Track und
+ * den "Standort setzen"-Modus fürs Foto-ohne-GPS-Platzieren per Klick. */
+interface MapSlice {
+  geotaggedPhotos: PhotoDto[];
+  refreshGeotaggedPhotos: () => Promise<void>;
+  gpxTrack: GpxTrackPointDto[] | null;
+  loadGpxTrack: (path: string) => Promise<void>;
+  clearGpxTrack: () => void;
+  /** Fotos-ID, für die der nächste Karten-Klick den GPS-Standort setzt —
+   * `null`, wenn der Platzieren-Modus aus ist. */
+  placingGpsForPhotoId: string | null;
+  startPlacingGps: (photoId: string) => void;
+  cancelPlacingGps: () => void;
+  setPhotoGpsFromMapClick: (lat: number, lon: number) => Promise<void>;
+}
+
 export type AppStore = CatalogSlice &
   SelectionSlice &
   ViewerSlice &
@@ -1055,7 +1077,8 @@ export type AppStore = CatalogSlice &
   PrintSlice &
   SlideshowSlice &
   BookSlice &
-  WebSlice;
+  WebSlice &
+  MapSlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -1909,6 +1932,12 @@ export const useAppStore = create<AppStore>()(
     toggleCenterView: () => {
       set((state) => {
         state.centerView = state.centerView === "viewer" ? "grid" : "viewer";
+      });
+    },
+
+    setCenterView: (view) => {
+      set((state) => {
+        state.centerView = view;
       });
     },
 
@@ -3602,6 +3631,54 @@ export const useAppStore = create<AppStore>()(
           state.webExportRunning = false;
         });
       }
+    },
+
+    // ---- Karte (Phase 8 Schritt 7) -------------------------------------
+
+    geotaggedPhotos: [],
+    gpxTrack: null,
+    placingGpsForPhotoId: null,
+
+    refreshGeotaggedPhotos: async () => {
+      const photos = await api.listGeotaggedPhotos();
+      set((state) => {
+        state.geotaggedPhotos = photos;
+      });
+    },
+
+    loadGpxTrack: async (path) => {
+      const points = await api.importGpxTrack(path);
+      set((state) => {
+        state.gpxTrack = points;
+      });
+    },
+
+    clearGpxTrack: () => {
+      set((state) => {
+        state.gpxTrack = null;
+      });
+    },
+
+    startPlacingGps: (photoId) => {
+      set((state) => {
+        state.placingGpsForPhotoId = photoId;
+      });
+    },
+
+    cancelPlacingGps: () => {
+      set((state) => {
+        state.placingGpsForPhotoId = null;
+      });
+    },
+
+    setPhotoGpsFromMapClick: async (lat, lon) => {
+      const photoId = get().placingGpsForPhotoId;
+      if (!photoId) return;
+      await api.setPhotoGps(photoId, lat, lon);
+      set((state) => {
+        state.placingGpsForPhotoId = null;
+      });
+      await get().refreshGeotaggedPhotos();
     },
     };
   }),

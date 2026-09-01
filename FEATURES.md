@@ -252,11 +252,11 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 ## 3.6 Weitere Module
 
 ### Karte
-- [ ] GPS aus EXIF, Kartenansicht — Phase 8 — Status: Nicht begonnen
-- [ ] GPX-Tracklog-Import — Phase 8 — Status: Nicht begonnen
-- [ ] Fotos per Drag auf Karte setzen — Phase 8 — Status: Nicht begonnen
-- [ ] Ortsschlagworte automatisch (Reverse Geocoding) — Phase 8 — Status: Nicht begonnen
-- [ ] Reiserouten-Ansicht — Phase 8 — Status: Nicht begonnen
+- [x] GPS aus EXIF, Kartenansicht — Phase 8 — Status: Fertig — GPS-Lesepfad war schon vorhanden (`apx_raw::metadata`), neu ist `MapView.tsx` (Leaflet + OpenStreetMap-Kacheln, einzige Netzwerk-Abhängigkeit dieser Phase) mit einem Marker je geotaggtem Foto
+- [x] GPX-Tracklog-Import — Phase 8 — Status: Fertig — `apx_export::map::parse_gpx` (nur `<trkpt>`, Streaming-Parser), als eigene Linie auf der Karte überlagerbar
+- [x] Fotos per Drag auf Karte setzen — Phase 8 — Status: Fertig (abweichend, siehe PLAN.md Schritt 7) — Klick-Platzieren-Modus statt echtem HTML5-Drag-and-drop: Standort-Knopf am ausgewählten Foto aktivieren, dann setzt ein Kartenklick die Koordinate
+- [x] Ortsschlagworte automatisch (Reverse Geocoding) — Phase 8 — Status: Fertig (abweichend, siehe PLAN.md Schritt 7) — Reverse-Geocoding ist vollständig offline umgesetzt (`apx_export::map::reverse_geocode`) und zeigt den Ortsnamen im Marker-Popup an; es schreibt noch **keine** Schlagworte automatisch ins Foto (kein Aufruf von `add_photo_keyword` aus der Kartenansicht heraus)
+- [x] Reiserouten-Ansicht — Phase 8 — Status: Fertig — gestrichelte Linie verbindet alle geotaggten Fotos in der ohnehin nach Aufnahmezeit sortierten Reihenfolge (`list_geotagged_photos`)
 
 ### Buch
 - [x] Seitenlayouts, Vorlagen, Text-Stile — Phase 8 — Status: Fertig (abweichend, siehe PLAN.md Schritt 5) — fünf feste Seitenvorlagen (`apx_export::book::PageTemplate`) statt einer frei konfigurierbaren Slot-Engine, ein Text-„Stil" (eine vom Nutzer gewählte Schriftdatei, wie bei den Diashow-Titelkarten) statt wählbarer Schriftfamilien

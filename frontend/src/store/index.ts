@@ -73,6 +73,7 @@ import type {
   WebGalleryOutcomeDto,
   WorkflowTemplatePayload,
   SpotCandidateDto,
+  UiSettingsDto,
 } from "../lib/tauri";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
@@ -963,6 +964,16 @@ interface AiSlice {
    * `ContentAwareFill`-Reparaturstrich (ein einzelner Zielpunkt, Radius
    * aus dem erkannten Fleck übernommen) und committet sofort. */
   applySensorSpotAsRepairStroke: (spot: SpotCandidateDto) => void;
+
+  // -- UI-Einstellungen (Phase 10 Schritt 1) --
+  /** `null` nur vor dem ersten `loadUiSettings()`-Aufruf (siehe App.tsx,
+   * beim Start geladen — anders als `aiSettings`, das erst beim Öffnen des
+   * Presets-Panels lädt, muss Theme/Sprache/Skalierung sofort greifen). */
+  uiSettings: UiSettingsDto | null;
+  loadUiSettings: () => Promise<void>;
+  saveUiSettings: (settings: UiSettingsDto) => Promise<void>;
+  settingsDialogOpen: boolean;
+  setSettingsDialogOpen: (open: boolean) => void;
 
   // -- Preset-Generator (Schritt 4) --
   aiSettings: AiSettingsDto | null;
@@ -3494,6 +3505,41 @@ export const useAppStore = create<AppStore>()(
         state.sensorSpotCandidates = state.sensorSpotCandidates.filter((candidate) => candidate !== spot);
       });
       void get().commitDevelopEdit("Sensorfleck automatisch repariert");
+    },
+
+    uiSettings: null,
+    settingsDialogOpen: false,
+
+    setSettingsDialogOpen: (open) => {
+      set((state) => {
+        state.settingsDialogOpen = open;
+      });
+    },
+
+    loadUiSettings: async () => {
+      try {
+        const settings = await api.getUiSettings();
+        set((state) => {
+          state.uiSettings = settings;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    saveUiSettings: async (settings) => {
+      try {
+        await api.setUiSettings(settings);
+        set((state) => {
+          state.uiSettings = settings;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
     },
 
     aiSettings: null,

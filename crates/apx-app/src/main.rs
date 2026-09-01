@@ -216,6 +216,8 @@ fn main() {
             commands::detect_sensor_spots,
             commands::get_ai_settings,
             commands::set_anthropic_api_key,
+            commands::get_ui_settings,
+            commands::set_ui_settings,
             commands::generate_preset_from_llm,
             commands::build_preset_prompt_text,
             commands::import_preset_json,

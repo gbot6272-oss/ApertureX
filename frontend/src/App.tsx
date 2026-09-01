@@ -13,6 +13,7 @@ import { MapView } from "./components/MapView";
 import { MasksPanel } from "./components/MasksPanel";
 import { MetadataPanel } from "./components/MetadataPanel";
 import { PresetsPanel } from "./components/PresetsPanel";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { Viewer } from "./components/Viewer";
 import { useImportEvents } from "./hooks/useImportEvents";
@@ -39,6 +40,9 @@ export default function App() {
 
   const refreshFolders = useAppStore((s) => s.refreshFolders);
   const refreshCatalogStatus = useAppStore((s) => s.refreshCatalogStatus);
+  const loadUiSettings = useAppStore((s) => s.loadUiSettings);
+  const settingsDialogOpen = useAppStore((s) => s.settingsDialogOpen);
+  const setSettingsDialogOpen = useAppStore((s) => s.setSettingsDialogOpen);
   const stepSelection = useAppStore((s) => s.stepSelection);
   const centerView = useAppStore((s) => s.centerView);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
@@ -52,7 +56,8 @@ export default function App() {
   useEffect(() => {
     void refreshFolders();
     void refreshCatalogStatus();
-  }, [refreshFolders, refreshCatalogStatus]);
+    void loadUiSettings();
+  }, [refreshFolders, refreshCatalogStatus, loadUiSettings]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -133,6 +138,7 @@ export default function App() {
       <CompareGridView />
       <HistoryTimelineDialog />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <SettingsDialog open={settingsDialogOpen} onClose={() => setSettingsDialogOpen(false)} />
     </div>
   );
 }

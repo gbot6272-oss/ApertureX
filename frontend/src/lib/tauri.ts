@@ -686,6 +686,28 @@ export function setAnthropicApiKey(apiKey: string | null): Promise<void> {
   return invoke<void>("set_anthropic_api_key", { apiKey: apiKey || null });
 }
 
+// ---- UI-Einstellungen (Phase 10 Schritt 1) --------------------------------
+
+export type Theme = "dark" | "light";
+
+export interface UiSettingsDto {
+  theme: Theme;
+  accent_color: string | null;
+  locale: string;
+  ui_scale_percent: number;
+  high_contrast: boolean;
+  reduced_motion: boolean;
+  onboarding_seen: boolean;
+}
+
+export function getUiSettings(): Promise<UiSettingsDto> {
+  return invoke<UiSettingsDto>("get_ui_settings");
+}
+
+export function setUiSettings(settings: UiSettingsDto): Promise<void> {
+  return invoke<void>("set_ui_settings", { settings });
+}
+
 /** LLM-Modus des Preset-Generators — liefert die EDL-Teilmenge als
  * JSON-String (`lib/presets.ts::parseEdlSubset`). Braucht einen
  * hinterlegten Anthropic-API-Schlüssel. */

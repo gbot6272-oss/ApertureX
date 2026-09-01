@@ -21,21 +21,36 @@ pub enum Theme {
 #[serde(default)]
 pub struct UiSettings {
     pub theme: Theme,
-    /// Sprachcode, z. B. "de" oder "en". Lokalisierung selbst kommt erst in
-    /// Phase 10, das Feld existiert aber schon, damit spätere Migrationen
-    /// nicht das Schema brechen.
+    /// Benutzerdefinierte Akzentfarbe als `#rrggbb`-Hex-String, `None` =
+    /// Standard-Akzent des jeweiligen Themes (siehe Phase 10 Schritt 7).
+    pub accent_color: Option<String>,
+    /// Sprachcode, "de" oder "en" (Phase 10 Schritt 8).
     pub locale: String,
     /// UI-Skalierung in Prozent, 75–200 laut SPEC.md Abschnitt 3.6
-    /// (Barrierefreiheit). Wird erst in Phase 10 tatsächlich ausgewertet.
+    /// (Barrierefreiheit, Phase 10 Schritt 6).
     pub ui_scale_percent: u16,
+    /// Kontrastmodus (Phase 10 Schritt 6): schaltet auf ein
+    /// High-Contrast-Tokenset im Frontend um.
+    pub high_contrast: bool,
+    /// Reduzierte Bewegung (Phase 10 Schritt 6): deaktiviert nicht
+    /// notwendige CSS-Übergänge/-Animationen im Frontend.
+    pub reduced_motion: bool,
+    /// Ob das Onboarding (Phase 10 Schritt 9) bereits einmal gezeigt wurde
+    /// — steuert nur das automatische Erstanzeigen, nicht die manuelle
+    /// erneute Aufrufbarkeit über die Befehlspalette.
+    pub onboarding_seen: bool,
 }
 
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
             theme: Theme::default(),
+            accent_color: None,
             locale: "de".to_string(),
             ui_scale_percent: 100,
+            high_contrast: false,
+            reduced_motion: false,
+            onboarding_seen: false,
         }
     }
 }

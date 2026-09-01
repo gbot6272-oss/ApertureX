@@ -23,6 +23,7 @@ export function Header() {
   const importResult = useAppStore((s) => s.importResult);
   const startImport = useAppStore((s) => s.startImport);
   const cancelImport = useAppStore((s) => s.cancelImport);
+  const setSettingsDialogOpen = useAppStore((s) => s.setSettingsDialogOpen);
   const developPanelOpen = useAppStore((s) => s.developPanelOpen);
   const toggleDevelopPanel = useAppStore((s) => s.toggleDevelopPanel);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
@@ -338,6 +339,15 @@ export function Header() {
       </button>
 
       <StatsCacheDialog open={statsDialogOpen} onClose={() => setStatsDialogOpen(false)} />
+
+      <button
+        type="button"
+        onClick={() => setSettingsDialogOpen(true)}
+        title="Theme, Sprache, UI-Skalierung, Barrierefreiheit (Phase 10)"
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
+      >
+        Einstellungen…
+      </button>
 
       <span className="text-xs text-text-muted">Strg/Cmd+K — Befehlspalette</span>
     </header>

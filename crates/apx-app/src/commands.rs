@@ -2318,6 +2318,65 @@ pub fn set_anthropic_api_key(
     settings.save(&path).map_err(|err| err.to_string())
 }
 
+// ---- UI: Einstellungen (Phase 10 Schritt 1) --------------------------------
+//
+// Dieselbe Vertrauensgrenze/dasselbe Lade-Muster wie `get_ai_settings`/
+// `set_anthropic_api_key` oben: Einstellungen werden bei jedem Aufruf frisch
+// von der Platte gelesen (kein In-Memory-Cache in `AppState`), es gibt genau
+// eine gemeinsame TOML-Datei für alle Einstellungskategorien.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiSettingsDto {
+    pub theme: apx_core::Theme,
+    pub accent_color: Option<String>,
+    pub locale: String,
+    pub ui_scale_percent: u16,
+    pub high_contrast: bool,
+    pub reduced_motion: bool,
+    pub onboarding_seen: bool,
+}
+
+impl From<apx_core::UiSettings> for UiSettingsDto {
+    fn from(ui: apx_core::UiSettings) -> Self {
+        Self {
+            theme: ui.theme,
+            accent_color: ui.accent_color,
+            locale: ui.locale,
+            ui_scale_percent: ui.ui_scale_percent,
+            high_contrast: ui.high_contrast,
+            reduced_motion: ui.reduced_motion,
+            onboarding_seen: ui.onboarding_seen,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_ui_settings(state: State<'_, AppState>) -> Result<UiSettingsDto, String> {
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    Ok(settings.ui.into())
+}
+
+/// Speichert die komplette `UiSettingsDto` auf einmal (das Frontend hält
+/// bereits den vollständigen Stand im Store, siehe `store/index.ts`s
+/// `uiSettings` — kein granulares Patch-DTO nötig, derselbe Ansatz wie bei
+/// den übrigen Mehrfeld-Einstellungsobjekten dieses Projekts).
+#[tauri::command]
+pub fn set_ui_settings(state: State<'_, AppState>, settings: UiSettingsDto) -> Result<(), String> {
+    let path = state.paths.settings_file();
+    let mut all = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    all.ui = apx_core::UiSettings {
+        theme: settings.theme,
+        accent_color: settings.accent_color.filter(|c| !c.trim().is_empty()),
+        locale: settings.locale,
+        ui_scale_percent: settings.ui_scale_percent.clamp(75, 200),
+        high_contrast: settings.high_contrast,
+        reduced_motion: settings.reduced_motion,
+        onboarding_seen: settings.onboarding_seen,
+    };
+    all.save(&path).map_err(|err| err.to_string())
+}
+
 // ---- KI: Preset-Generator (Phase 7 Schritt 4) ------------------------------
 //
 // Alle vier Erzeugungsarten liefern eine EDL-Teilmenge als JSON-String

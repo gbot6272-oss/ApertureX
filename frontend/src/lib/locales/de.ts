@@ -73,6 +73,20 @@ export const de = {
   "settings.languageDe": "Deutsch",
   "settings.languageEn": "English",
 
+  // OnboardingDialog.tsx
+  "onboarding.title": "Willkommen bei Aperture X",
+  "onboarding.layout.title": "Grundlayout",
+  "onboarding.layout.body": "Kopfzeile oben, Ordner/Presets links, Bild in der Mitte, Metadaten/Entwickeln/Masken rechts, Filmstreifen unten — jede Palette lässt sich per Ziehgriff verbreitern oder über den Pfeil-Knopf einklappen.",
+  "onboarding.import.title": "Fotos importieren",
+  "onboarding.import.body": "„Ordner importieren\" liest einen ganzen Ordner ein; „Import mit Vorlage…\" bietet zusätzlich Kopieren/Verschieben, ein Umbenennungsmuster und Import-Presets.",
+  "onboarding.develop.title": "Entwickeln",
+  "onboarding.develop.body": "Der „Entwickeln\"-Knopf öffnet das Regler-Panel für das ausgewählte Foto — jede Änderung wird sofort committet und ist über Rückgängig/Wiederholen dauerhaft rücknehmbar.",
+  "onboarding.palette.title": "Befehlspalette",
+  "onboarding.palette.body": "Strg/Cmd+K öffnet eine durchsuchbare Palette über alle Funktionen, Presets, Fotos und Ordner.",
+  "onboarding.shortcuts.title": "Tastenkürzel",
+  "onboarding.shortcuts.body": "„?\" zeigt eine vollständige, teils umbelegbare Übersicht aller Tastenkürzel.",
+  "onboarding.start": "Los geht's",
+
   // KeybindingsCheatsheet.tsx
   "cheatsheet.title": "Tastenkürzel",
   "cheatsheet.rebindPrompt": "Taste drücken…",

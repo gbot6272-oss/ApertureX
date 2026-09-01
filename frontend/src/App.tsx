@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { CommandPalette } from "./components/CommandPalette";
 import { CompareGridView } from "./components/CompareGridView";
@@ -13,6 +13,7 @@ import { KeybindingsCheatsheet } from "./components/KeybindingsCheatsheet";
 import { MapView } from "./components/MapView";
 import { MasksPanel } from "./components/MasksPanel";
 import { MetadataPanel } from "./components/MetadataPanel";
+import { OnboardingDialog } from "./components/OnboardingDialog";
 import { PresetsPanel } from "./components/PresetsPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -44,8 +45,13 @@ export default function App() {
   const refreshCatalogStatus = useAppStore((s) => s.refreshCatalogStatus);
   const loadUiSettings = useAppStore((s) => s.loadUiSettings);
   const uiSettings = useAppStore((s) => s.uiSettings);
+  const saveUiSettings = useAppStore((s) => s.saveUiSettings);
   const settingsDialogOpen = useAppStore((s) => s.settingsDialogOpen);
   const setSettingsDialogOpen = useAppStore((s) => s.setSettingsDialogOpen);
+  const pendingCommand = useAppStore((s) => s.pendingCommand);
+  const clearPendingCommand = useAppStore((s) => s.clearPendingCommand);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const onboardingAutoShown = useRef(false);
   const stepSelection = useAppStore((s) => s.stepSelection);
   const centerView = useAppStore((s) => s.centerView);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
@@ -86,6 +92,40 @@ export default function App() {
       root.style.removeProperty("--color-accent");
     }
   }, [uiSettings]);
+
+  // Onboarding (Phase 10 Schritt 9): einmaliges automatisches Erstanzeigen
+  // über uiSettings.onboarding_seen, sobald die Einstellungen tatsächlich
+  // geladen sind (nicht bei jedem Rerender — `onboardingAutoShown` schützt
+  // davor, den Dialog erneut zu öffnen, nachdem der Nutzer ihn geschlossen
+  // hat, obwohl das Backend-Feld erst mit dem Schließen selbst auf `true`
+  // wechselt).
+  useEffect(() => {
+    if (uiSettings && !uiSettings.onboarding_seen && !onboardingAutoShown.current) {
+      onboardingAutoShown.current = true;
+      setOnboardingOpen(true);
+    }
+  }, [uiSettings]);
+
+  function closeOnboarding() {
+    setOnboardingOpen(false);
+    if (uiSettings && !uiSettings.onboarding_seen) {
+      void saveUiSettings({ ...uiSettings, onboarding_seen: true });
+    }
+  }
+
+  // Befehlspalette-Brücke fürs erneute Aufrufen (siehe store/index.ts
+  // pendingCommand-Moduldoku) — Header.tsx ignoriert unbekannte
+  // Befehls-IDs (fällt auf `default: return` ohne `clearPendingCommand()`
+  // zurück), diese Komponente behandelt deshalb nur "onboarding".
+  useEffect(() => {
+    if (pendingCommand === "onboarding") {
+      setOnboardingOpen(true);
+      clearPendingCommand();
+    } else if (pendingCommand === "cheatsheet-overlay") {
+      setCheatsheetOpen(true);
+      clearPendingCommand();
+    }
+  }, [pendingCommand, clearPendingCommand]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -190,6 +230,7 @@ export default function App() {
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <SettingsDialog open={settingsDialogOpen} onClose={() => setSettingsDialogOpen(false)} />
       <KeybindingsCheatsheet open={cheatsheetOpen} onClose={() => setCheatsheetOpen(false)} />
+      <OnboardingDialog open={onboardingOpen} onClose={closeOnboarding} />
     </div>
   );
 }

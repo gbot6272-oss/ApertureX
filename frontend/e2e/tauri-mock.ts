@@ -93,6 +93,19 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     repairSourceSuggestion: { x: 0.2, y: 0.2 },
     sensorSpots: [{ x: 0.4, y: 0.4, radius: 0.03, strength: 0.7 }] as Array<{ x: number; y: number; radius: number; strength: number }>,
     anthropicApiKey: null as string | null,
+    // Phase 10 Schritt 1/9: `onboarding_seen: true` als Testdefault, damit
+    // das automatische Onboarding-Overlay (App.tsx) nicht in jedem
+    // e2e-Test ungefragt aufpoppt — ein Test, der das Onboarding gezielt
+    // prüfen will, überschreibt das per `setMockFixtures`.
+    uiSettings: {
+      theme: "dark" as "dark" | "light",
+      accent_color: null as string | null,
+      locale: "de",
+      ui_scale_percent: 100,
+      high_contrast: false,
+      reduced_motion: false,
+      onboarding_seen: true,
+    },
     presetGeneratorSubsetJson: JSON.stringify({ basic: { exposure_ev: 0.6, contrast: 15 } }),
     referenceImageDialogCancelled: false,
     presetVariationCount: 3,
@@ -480,6 +493,15 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       repairSourceSuggestion: { x: number; y: number };
       sensorSpots: Array<{ x: number; y: number; radius: number; strength: number }>;
       anthropicApiKey: string | null;
+      uiSettings: {
+        theme: "dark" | "light";
+        accent_color: string | null;
+        locale: string;
+        ui_scale_percent: number;
+        high_contrast: boolean;
+        reduced_motion: boolean;
+        onboarding_seen: boolean;
+      };
       presetGeneratorSubsetJson: string;
       referenceImageDialogCancelled: boolean;
       presetVariationCount: number;
@@ -1130,6 +1152,11 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return fixtures.sensorSpots;
       case "get_ai_settings":
         return { anthropic_api_key: fixtures.anthropicApiKey };
+      case "get_ui_settings":
+        return fixtures.uiSettings;
+      case "set_ui_settings":
+        fixtures.uiSettings = args.settings as typeof fixtures.uiSettings;
+        return null;
       case "set_anthropic_api_key": {
         const key = args.apiKey as string | null;
         fixtures.anthropicApiKey = key && key.trim() !== "" ? key : null;

@@ -48,6 +48,9 @@ export interface PhotoDto {
    * (Phase 8 Schritt 7) — `null`, wenn kein Standort bekannt. */
   gps_lat: number | null;
   gps_lon: number | null;
+  /** `null` = echtes Foto. Gesetzt = virtuelle Kopie (Phase 9 Schritt 1)
+   * — teilt sich die Datei mit dem referenzierten Foto. */
+  source_photo_id: string | null;
 }
 
 export interface KeywordDto {
@@ -58,6 +61,34 @@ export interface KeywordDto {
 export interface CollectionDto {
   id: string;
   name: string;
+  /** `null` = Sammlung liegt an der Wurzel (Phase 9 Schritt 1). */
+  folder_id: string | null;
+  is_smart: boolean;
+  /** JSON-String (`FilterCriteriaDto`-Form), nur gesetzt bei `is_smart`. */
+  smart_criteria_json: string | null;
+}
+
+// ---- Bibliotheks-Backlog (Phase 9 Schritt 1, siehe DECISIONS.md ADR-0032/ADR-0035) ----
+
+export interface CollectionFolderDto {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  position: number;
+}
+
+export interface StackDto {
+  id: string;
+  name: string | null;
+  cover_photo_id: string | null;
+  photo_ids: string[];
+}
+
+export interface ColorLabelDefinitionDto {
+  name: string;
+  display_name: string;
+  hex: string;
+  position: number;
 }
 
 export interface GeocodedLocationDto {
@@ -278,10 +309,21 @@ export function listPhotoKeywords(photoId: string): Promise<KeywordDto[]> {
   return invoke<KeywordDto[]>("list_photo_keywords", { photoId });
 }
 
-// ---- Bibliothek: Sammlungen (ab Phase 3) -----------------------------------
+// ---- Bibliothek: Sammlungen (ab Phase 3, Sammlungssätze/intelligente ------
+// Sammlungen ab Phase 9 Schritt 1) -------------------------------------------
 
-export function createCollection(name: string): Promise<string> {
-  return invoke<string>("create_collection", { name });
+export function createCollection(name: string, folderId?: string): Promise<string> {
+  return invoke<string>("create_collection", { name, folderId: folderId ?? null });
+}
+
+/** Siehe `apx_catalog::Catalog::create_smart_collection`s Moduldoku für
+ * die Vereinfachung (flache UND-Verknüpfung statt verschachtelter Regeln). */
+export function createSmartCollection(name: string, folderId: string | undefined, criteria: FilterCriteriaDto): Promise<string> {
+  return invoke<string>("create_smart_collection", { name, folderId: folderId ?? null, criteria });
+}
+
+export function moveCollectionToFolder(collectionId: string, folderId: string | null): Promise<void> {
+  return invoke<void>("move_collection_to_folder", { collectionId, folderId });
 }
 
 export function listCollections(): Promise<CollectionDto[]> {
@@ -298,6 +340,79 @@ export function removeFromCollection(collectionId: string, photoId: string): Pro
 
 export function listPhotosInCollection(collectionId: string): Promise<PhotoDto[]> {
   return invoke<PhotoDto[]>("list_photos_in_collection", { collectionId });
+}
+
+// ---- Bibliothek: Sammlungssätze (Phase 9 Schritt 1) ------------------------
+
+export function createCollectionFolder(name: string, parentId?: string): Promise<string> {
+  return invoke<string>("create_collection_folder", { name, parentId: parentId ?? null });
+}
+
+export function renameCollectionFolder(folderId: string, name: string): Promise<void> {
+  return invoke<void>("rename_collection_folder", { folderId, name });
+}
+
+export function deleteCollectionFolder(folderId: string): Promise<void> {
+  return invoke<void>("delete_collection_folder", { folderId });
+}
+
+export function listCollectionFolders(): Promise<CollectionFolderDto[]> {
+  return invoke<CollectionFolderDto[]>("list_collection_folders");
+}
+
+// ---- Bibliothek: virtuelle Kopien (Phase 9 Schritt 1) ----------------------
+
+export function createVirtualCopy(photoId: string): Promise<PhotoDto> {
+  return invoke<PhotoDto>("create_virtual_copy", { photoId });
+}
+
+export function listVirtualCopies(photoId: string): Promise<PhotoDto[]> {
+  return invoke<PhotoDto[]>("list_virtual_copies", { photoId });
+}
+
+// ---- Bibliothek: Stapel (Phase 9 Schritt 1) --------------------------------
+
+export function createStack(name: string | undefined, photoIds: string[]): Promise<string> {
+  return invoke<string>("create_stack", { name: name ?? null, photoIds });
+}
+
+export function deleteStack(stackId: string): Promise<void> {
+  return invoke<void>("delete_stack", { stackId });
+}
+
+export function setStackCover(stackId: string, coverPhotoId: string): Promise<void> {
+  return invoke<void>("set_stack_cover", { stackId, coverPhotoId });
+}
+
+export function listStacks(): Promise<StackDto[]> {
+  return invoke<StackDto[]>("list_stacks");
+}
+
+/** Siehe `apx_catalog::Catalog::auto_stack_by_time`s Moduldoku. */
+export function autoStackByTime(photoIds: string[], windowSeconds: number): Promise<string[]> {
+  return invoke<string[]>("auto_stack_by_time", { photoIds, windowSeconds });
+}
+
+// ---- Bibliothek: erweiterbare Farbmarkierungen (Phase 9 Schritt 1) --------
+
+export function listColorLabelDefinitions(): Promise<ColorLabelDefinitionDto[]> {
+  return invoke<ColorLabelDefinitionDto[]>("list_color_label_definitions");
+}
+
+export function createColorLabelDefinition(name: string, displayName: string, hex: string): Promise<void> {
+  return invoke<void>("create_color_label_definition", { name, displayName, hex });
+}
+
+export function deleteColorLabelDefinition(name: string): Promise<void> {
+  return invoke<void>("delete_color_label_definition", { name });
+}
+
+// ---- Bibliothek: Perceptual-Hash-Duplikaterkennung (Phase 9 Schritt 1) -----
+
+/** Siehe `apx-app`s `list_perceptual_duplicate_groups`-Command-Moduldoku
+ * für die Vereinfachung (nur bereits generierte Miniaturansichten). */
+export function listPerceptualDuplicateGroups(maxDistance: number): Promise<PhotoDto[][]> {
+  return invoke<PhotoDto[][]>("list_perceptual_duplicate_groups", { maxDistance });
 }
 
 // ---- Presets (ab Phase 5, siehe DECISIONS.md ADR-0031) --------------------

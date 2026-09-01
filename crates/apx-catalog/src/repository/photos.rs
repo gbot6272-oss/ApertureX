@@ -15,7 +15,8 @@ pub(crate) const SELECT_COLUMNS: &str =
      photos.content_hash, photos.width, photos.height, photos.orientation, photos.camera_make, \
      photos.camera_model, photos.lens, photos.iso, photos.shutter, photos.aperture, \
      photos.focal_length, photos.captured_at, photos.gps_lat, photos.gps_lon, \
-     photos.imported_at, photos.missing, photos.rating, photos.flag, photos.color_label";
+     photos.imported_at, photos.missing, photos.rating, photos.flag, photos.color_label, \
+     photos.source_photo_id";
 
 #[allow(clippy::type_complexity)]
 pub(crate) struct PhotoRow {
@@ -43,6 +44,7 @@ pub(crate) struct PhotoRow {
     rating: i64,
     flag: i64,
     color_label: Option<String>,
+    source_photo_id: Option<String>,
 }
 
 pub(crate) fn row_to_raw(row: &rusqlite::Row) -> rusqlite::Result<PhotoRow> {
@@ -71,6 +73,7 @@ pub(crate) fn row_to_raw(row: &rusqlite::Row) -> rusqlite::Result<PhotoRow> {
         rating: row.get(21)?,
         flag: row.get(22)?,
         color_label: row.get(23)?,
+        source_photo_id: row.get(24)?,
     })
 }
 
@@ -100,15 +103,23 @@ pub(crate) fn raw_to_photo(raw: PhotoRow) -> Result<Photo> {
         rating: raw.rating as u8,
         flag: raw.flag as i8,
         color_label: raw.color_label,
+        source_photo_id: raw.source_photo_id.map(|s| s.parse()).transpose()?,
     })
 }
 
+/// Nur "echte" Foto-Zeilen (`source_photo_id IS NULL`) — virtuelle
+/// Kopien dürfen nie vom Import-Upsert getroffen werden, sonst würde ein
+/// erneuter Import derselben Datei die virtuelle Kopie statt des
+/// Quellfotos aktualisieren.
 pub(crate) fn find_by_folder_and_filename(
     conn: &Connection,
     folder_id: FolderId,
     filename: &str,
 ) -> Result<Option<Photo>> {
-    let sql = format!("SELECT {SELECT_COLUMNS} FROM photos WHERE folder_id = ?1 AND filename = ?2");
+    let sql = format!(
+        "SELECT {SELECT_COLUMNS} FROM photos \
+         WHERE folder_id = ?1 AND filename = ?2 AND source_photo_id IS NULL"
+    );
     let raw: Option<PhotoRow> = conn
         .query_row(&sql, params![folder_id.to_string(), filename], row_to_raw)
         .optional()
@@ -228,6 +239,82 @@ pub(crate) fn set_gps(conn: &Connection, id: PhotoId, gps: Option<(f64, f64)>) -
     Ok(())
 }
 
+/// Legt eine virtuelle Kopie von `source_id` an (Phase 9 Schritt 1, siehe
+/// `migrations/0007_library_backlog.sql`s Moduldoku) — eine neue
+/// `photos`-Zeile mit denselben Datei-/Metadaten-Feldern, aber eigener
+/// ID, `rating`/`flag`/`color_label` vom Quellfoto übernommen (nicht
+/// zurückgesetzt, damit sie als sinnvoller Ausgangspunkt zum Abweichen
+/// dient) und `source_photo_id = Some(source_id)`. `edit_history` wird
+/// hier bewusst NICHT kopiert — das übernimmt der Aufrufer (`apx-app`,
+/// der bereits Zugriff auf `commit_edit` hat), damit dieses Modul nicht
+/// von `repository::edits` abhängen muss.
+pub(crate) fn create_virtual_copy(
+    conn: &Connection,
+    source_id: PhotoId,
+    created_at: OffsetDateTime,
+) -> Result<PhotoId> {
+    let source = get(conn, source_id)?;
+    if source.source_photo_id.is_some() {
+        return Err(AppError::validation(
+            "Von einer virtuellen Kopie kann keine weitere virtuelle Kopie angelegt werden"
+                .to_string(),
+        ));
+    }
+    let id = PhotoId::new();
+    conn.execute(
+        "INSERT INTO photos (
+            id, folder_id, filename, file_size, file_mtime, content_hash, width, height,
+            orientation, camera_make, camera_model, lens, iso, shutter, aperture, focal_length,
+            captured_at, gps_lat, gps_lon, imported_at, missing, rating, flag, color_label,
+            source_photo_id
+        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,0,?21,?22,?23,?24)",
+        params![
+            id.to_string(),
+            source.folder_id.to_string(),
+            source.filename,
+            source.file_size as i64,
+            to_unix(source.file_mtime),
+            source.content_hash,
+            source.width.map(|v| v as i64),
+            source.height.map(|v| v as i64),
+            source.orientation as i64,
+            source.camera_make,
+            source.camera_model,
+            source.lens,
+            source.iso.map(|v| v as i64),
+            source.shutter.map(|v| v as f64),
+            source.aperture.map(|v| v as f64),
+            source.focal_length.map(|v| v as f64),
+            to_unix_opt(source.captured_at),
+            source.gps_lat,
+            source.gps_lon,
+            to_unix(created_at),
+            source.rating as i64,
+            source.flag as i64,
+            source.color_label,
+            source_id.to_string(),
+        ],
+    )
+    .map_err(map_sqlite_err)?;
+    Ok(id)
+}
+
+/// Alle virtuellen Kopien eines Quellfotos, nach Anlagezeit sortiert.
+pub(crate) fn list_virtual_copies(conn: &Connection, source_id: PhotoId) -> Result<Vec<Photo>> {
+    let sql = format!(
+        "SELECT {SELECT_COLUMNS} FROM photos WHERE source_photo_id = ?1 ORDER BY imported_at"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
+    let rows = stmt
+        .query_map(params![source_id.to_string()], row_to_raw)
+        .map_err(map_sqlite_err)?;
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(raw_to_photo(row.map_err(map_sqlite_err)?)?);
+    }
+    Ok(result)
+}
+
 pub(crate) fn set_missing(conn: &Connection, id: PhotoId, missing: bool) -> Result<()> {
     let changed = conn
         .execute(
@@ -240,12 +327,6 @@ pub(crate) fn set_missing(conn: &Connection, id: PhotoId, missing: bool) -> Resu
     }
     Ok(())
 }
-
-/// Erlaubte Farbmarkierungen (Lightroom-übliche Palette, siehe
-/// `DECISIONS.md` ADR-0023) — begrenzt bewusst auf eine feste Menge statt
-/// beliebiger Zeichenketten zuzulassen, damit das Frontend keine
-/// unbekannten Farben rendern muss.
-const ALLOWED_COLOR_LABELS: &[&str] = &["red", "yellow", "green", "blue", "purple"];
 
 pub(crate) fn set_rating(conn: &Connection, id: PhotoId, rating: u8) -> Result<()> {
     if rating > 5 {
@@ -283,16 +364,26 @@ pub(crate) fn set_flag(conn: &Connection, id: PhotoId, flag: i8) -> Result<()> {
     Ok(())
 }
 
+/// Erweiterbare Farbmarkierungen (Phase 9 Schritt 1, siehe
+/// `repository::color_labels`) — validiert gegen die dynamische
+/// `color_label_definitions`-Tabelle statt einer fest verdrahteten
+/// Palette (ersetzt die frühere `ALLOWED_COLOR_LABELS`-Konstante).
 pub(crate) fn set_color_label(
     conn: &Connection,
     id: PhotoId,
     color_label: Option<&str>,
 ) -> Result<()> {
     if let Some(color) = color_label {
-        if !ALLOWED_COLOR_LABELS.contains(&color) {
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM color_label_definitions WHERE name = ?1)",
+                params![color],
+                |row| row.get(0),
+            )
+            .map_err(map_sqlite_err)?;
+        if !exists {
             return Err(AppError::validation(format!(
-                "Unbekannte Farbmarkierung '{color}', erlaubt sind: {}",
-                ALLOWED_COLOR_LABELS.join(", ")
+                "Unbekannte Farbmarkierung '{color}' — keine passende Zeile in color_label_definitions"
             )));
         }
     }
@@ -725,5 +816,100 @@ mod tests {
         assert!(get(&conn, id).expect("ok").gps_lat.is_none());
 
         assert!(set_gps(&conn, PhotoId::new(), Some((0.0, 0.0))).is_err());
+    }
+
+    #[test]
+    fn create_virtual_copy_shares_file_but_has_independent_metadata() {
+        let (conn, folder_id) = setup();
+        let mtime = OffsetDateTime::now_utc()
+            .replace_nanosecond(0)
+            .expect("gültig");
+        let (source_id, _) = upsert(
+            &conn,
+            &sample_photo(folder_id, 1000, mtime),
+            OffsetDateTime::now_utc(),
+        )
+        .expect("ok");
+        set_rating(&conn, source_id, 3).expect("ok");
+
+        let copy_id =
+            create_virtual_copy(&conn, source_id, OffsetDateTime::now_utc()).expect("anlegen");
+        assert_ne!(copy_id, source_id);
+
+        let copy = get(&conn, copy_id).expect("ok");
+        assert_eq!(copy.source_photo_id, Some(source_id));
+        assert_eq!(copy.filename, "IMG_0001.CR2");
+        assert_eq!(
+            copy.rating, 3,
+            "startet mit dem Bewertungsstand des Quellfotos"
+        );
+
+        // Unabhängig danach: die virtuelle Kopie ändern beeinflusst das
+        // Original nicht.
+        set_rating(&conn, copy_id, 5).expect("ok");
+        assert_eq!(get(&conn, source_id).expect("ok").rating, 3);
+        assert_eq!(get(&conn, copy_id).expect("ok").rating, 5);
+
+        assert_eq!(
+            list_virtual_copies(&conn, source_id).expect("liste").len(),
+            1
+        );
+    }
+
+    #[test]
+    fn virtual_copy_shares_folder_and_filename_without_violating_uniqueness() {
+        let (conn, folder_id) = setup();
+        let mtime = OffsetDateTime::now_utc()
+            .replace_nanosecond(0)
+            .expect("gültig");
+        let (source_id, _) = upsert(
+            &conn,
+            &sample_photo(folder_id, 1000, mtime),
+            OffsetDateTime::now_utc(),
+        )
+        .expect("ok");
+        // Sollte keinen UNIQUE-Konflikt auslösen — die partielle
+        // Unique-Index gilt nur für source_photo_id IS NULL.
+        create_virtual_copy(&conn, source_id, OffsetDateTime::now_utc()).expect("anlegen");
+        create_virtual_copy(&conn, source_id, OffsetDateTime::now_utc())
+            .expect("zweite Kopie anlegen");
+        assert_eq!(
+            list_virtual_copies(&conn, source_id).expect("liste").len(),
+            2
+        );
+    }
+
+    #[test]
+    fn create_virtual_copy_of_a_virtual_copy_is_rejected() {
+        let (conn, folder_id) = setup();
+        let mtime = OffsetDateTime::now_utc()
+            .replace_nanosecond(0)
+            .expect("gültig");
+        let (source_id, _) = upsert(
+            &conn,
+            &sample_photo(folder_id, 1000, mtime),
+            OffsetDateTime::now_utc(),
+        )
+        .expect("ok");
+        let copy_id =
+            create_virtual_copy(&conn, source_id, OffsetDateTime::now_utc()).expect("anlegen");
+        assert!(create_virtual_copy(&conn, copy_id, OffsetDateTime::now_utc()).is_err());
+    }
+
+    #[test]
+    fn re_importing_the_same_file_never_matches_a_virtual_copy() {
+        let (conn, folder_id) = setup();
+        let mtime = OffsetDateTime::now_utc()
+            .replace_nanosecond(0)
+            .expect("gültig");
+        let photo = sample_photo(folder_id, 1000, mtime);
+        let (source_id, _) = upsert(&conn, &photo, OffsetDateTime::now_utc()).expect("ok");
+        create_virtual_copy(&conn, source_id, OffsetDateTime::now_utc()).expect("anlegen");
+
+        // Ein zweiter Import derselben Datei muss weiterhin das
+        // Quellfoto treffen, nicht die virtuelle Kopie.
+        let (matched_id, changed) = upsert(&conn, &photo, OffsetDateTime::now_utc()).expect("ok");
+        assert_eq!(matched_id, source_id);
+        assert!(!changed);
     }
 }

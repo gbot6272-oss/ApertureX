@@ -5,8 +5,8 @@
 use std::path::PathBuf;
 
 use apx_core::{
-    AppError, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId, PhotoId,
-    PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId, TemplateId,
+    AppError, CollectionFolderId, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId,
+    PhotoId, PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId, StackId, TemplateId,
 };
 use time::OffsetDateTime;
 
@@ -91,9 +91,15 @@ pub struct Photo {
     pub rating: u8,
     /// Pick/Reject-Flagge: 1 = Pick, -1 = Reject, 0 = keine.
     pub flag: i8,
-    /// Farbmarkierung (`"red"`/`"yellow"`/`"green"`/`"blue"`/`"purple"`),
-    /// `None` = keine.
+    /// Farbmarkierung, `None` = keine — Name einer Zeile in
+    /// `color_label_definitions` (Phase 9 Schritt 1, erweiterbar statt
+    /// der früher fest verdrahteten Palette).
     pub color_label: Option<String>,
+    /// `None` = echtes Foto mit eigener Datei. `Some(quelle)` = virtuelle
+    /// Kopie (Phase 9 Schritt 1, `migrations/0007_library_backlog.sql`s
+    /// Moduldoku) — teilt sich Datei/Pfad mit dem Quellfoto, hat aber
+    /// eigene rating/flag/color_label/edit_history/keywords/collections.
+    pub source_photo_id: Option<PhotoId>,
 }
 
 /// Auflösungsstufe eines Vorschaubilds, siehe `PHASE1_PROMPT.md` Abschnitt 5.
@@ -205,6 +211,50 @@ pub struct Collection {
     pub id: CollectionId,
     pub name: String,
     pub created_at: OffsetDateTime,
+    /// `None` = Sammlung liegt an der Wurzel, nicht in einem Sammlungssatz.
+    pub folder_id: Option<CollectionFolderId>,
+    /// Intelligente Sammlung: Mitgliedschaft wird live aus
+    /// `smart_criteria_json` berechnet statt über `collection_photos`
+    /// gepflegt (Phase 9 Schritt 1).
+    pub is_smart: bool,
+    /// Serialisiertes `FilterCriteria` — nur gesetzt, wenn `is_smart`.
+    pub smart_criteria_json: Option<String>,
+}
+
+// ---- Bibliotheks-Backlog (Phase 9 Schritt 1, siehe DECISIONS.md
+// ADR-0032/ADR-0035, migrations/0007_library_backlog.sql) ------------------
+
+/// Ein Ordner in der Sammlungs-Baumhierarchie ("Sammlungssatz") —
+/// strukturell identisch zu `PresetFolder`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CollectionFolder {
+    pub id: CollectionFolderId,
+    pub name: String,
+    pub parent_id: Option<CollectionFolderId>,
+    pub position: i64,
+}
+
+/// Ein Stapel mehrerer Fotos (z. B. eine Serienbild-Sequenz), mit einem
+/// optionalen Titelbild.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Stack {
+    pub id: StackId,
+    pub name: Option<String>,
+    pub cover_photo_id: Option<PhotoId>,
+    pub created_at: OffsetDateTime,
+    /// Foto-IDs in Reihenfolge — wird beim Laden mitgeliefert statt
+    /// separat abgefragt werden zu müssen.
+    pub photo_ids: Vec<PhotoId>,
+}
+
+/// Eine erweiterbare Farbmarkierungs-Definition (ersetzt die frühere
+/// feste `ALLOWED_COLOR_LABELS`-Palette).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColorLabelDefinition {
+    pub name: String,
+    pub display_name: String,
+    pub hex: String,
+    pub position: i64,
 }
 
 // ---- Presets (ab Phase 5, siehe DECISIONS.md ADR-0031) --------------------
@@ -251,7 +301,7 @@ pub struct PresetVersion {
 /// Kombinierbare Filterkriterien für [`crate::Catalog::filter_photos`] —
 /// jedes `None`-Feld wird ignoriert, alle gesetzten Felder werden per UND
 /// verknüpft (siehe `PLAN.md` Phase 3, Schritt 2).
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FilterCriteria {
     /// Nur Fotos mit Bewertung >= diesem Wert.
     pub rating_at_least: Option<u8>,

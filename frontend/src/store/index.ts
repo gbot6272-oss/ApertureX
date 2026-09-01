@@ -57,7 +57,10 @@ import type {
   SlideshowVideoOptions,
   SlideshowVideoOutcomeDto,
   SnapshotDto,
+  ColorLabelDefinitionDto,
+  CollectionFolderDto,
   GpxTrackPointDto,
+  StackDto,
   TemplateDto,
   TemplateKind,
   WebGalleryOptions,
@@ -1092,6 +1095,39 @@ interface TemplatesSlice {
   runWorkflowTemplate: (photoIds: string[], template: WorkflowTemplatePayload, destFolder: string) => Promise<void>;
 }
 
+/** Bibliotheks-Backlog (Phase 9 Schritt 1, siehe DECISIONS.md ADR-0032/
+ * ADR-0035): Sammlungssätze, Stapel, virtuelle Kopien, erweiterbare
+ * Farbmarkierungen, Perceptual-Hash-Duplikat-Assistent. */
+interface LibraryBacklogSlice {
+  collectionFolders: CollectionFolderDto[];
+  refreshCollectionFolders: () => Promise<void>;
+  createCollectionFolder: (name: string, parentId?: string) => Promise<void>;
+  renameCollectionFolder: (folderId: string, name: string) => Promise<void>;
+  deleteCollectionFolder: (folderId: string) => Promise<void>;
+  createSmartCollection: (name: string, folderId: string | undefined, criteria: FilterCriteriaDto) => Promise<void>;
+  moveCollectionToFolder: (collectionId: string, folderId: string | null) => Promise<void>;
+
+  stacks: StackDto[];
+  refreshStacks: () => Promise<void>;
+  createStackFromSelection: (name?: string) => Promise<void>;
+  deleteStack: (stackId: string) => Promise<void>;
+  setStackCover: (stackId: string, coverPhotoId: string) => Promise<void>;
+  autoStackSelectionByTime: (windowSeconds: number) => Promise<void>;
+
+  virtualCopiesByPhotoId: Record<string, PhotoDto[]>;
+  createVirtualCopyForSelected: () => Promise<void>;
+  refreshVirtualCopies: (photoId: string) => Promise<void>;
+
+  colorLabelDefinitions: ColorLabelDefinitionDto[];
+  refreshColorLabelDefinitions: () => Promise<void>;
+  createColorLabelDefinition: (name: string, displayName: string, hex: string) => Promise<void>;
+  deleteColorLabelDefinition: (name: string) => Promise<void>;
+
+  perceptualDuplicateGroups: PhotoDto[][];
+  perceptualDuplicatesRunning: boolean;
+  runPerceptualDuplicateDetection: (maxDistance: number) => Promise<void>;
+}
+
 export type AppStore = CatalogSlice &
   SelectionSlice &
   ViewerSlice &
@@ -1107,7 +1143,8 @@ export type AppStore = CatalogSlice &
   BookSlice &
   WebSlice &
   MapSlice &
-  TemplatesSlice;
+  TemplatesSlice &
+  LibraryBacklogSlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -3765,6 +3802,133 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.workflowRunning = false;
+        });
+      }
+    },
+
+    // ---- Bibliotheks-Backlog (Phase 9 Schritt 1) ------------------------
+
+    collectionFolders: [],
+    stacks: [],
+    virtualCopiesByPhotoId: {},
+    colorLabelDefinitions: [],
+    perceptualDuplicateGroups: [],
+    perceptualDuplicatesRunning: false,
+
+    refreshCollectionFolders: async () => {
+      const folders = await api.listCollectionFolders();
+      set((state) => {
+        state.collectionFolders = folders;
+      });
+    },
+
+    createCollectionFolder: async (name, parentId) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      await api.createCollectionFolder(trimmed, parentId);
+      await get().refreshCollectionFolders();
+    },
+
+    renameCollectionFolder: async (folderId, name) => {
+      await api.renameCollectionFolder(folderId, name);
+      await get().refreshCollectionFolders();
+    },
+
+    deleteCollectionFolder: async (folderId) => {
+      await api.deleteCollectionFolder(folderId);
+      await get().refreshCollectionFolders();
+      await get().refreshCollections();
+    },
+
+    createSmartCollection: async (name, folderId, criteria) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      await api.createSmartCollection(trimmed, folderId, criteria);
+      await get().refreshCollections();
+    },
+
+    moveCollectionToFolder: async (collectionId, folderId) => {
+      await api.moveCollectionToFolder(collectionId, folderId);
+      await get().refreshCollections();
+    },
+
+    refreshStacks: async () => {
+      const stacks = await api.listStacks();
+      set((state) => {
+        state.stacks = stacks;
+      });
+    },
+
+    createStackFromSelection: async (name) => {
+      const { multiSelectedIds, selectedPhotoId } = get();
+      const targets = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
+      if (targets.length < 2) return;
+      await api.createStack(name, targets);
+      await get().refreshStacks();
+    },
+
+    deleteStack: async (stackId) => {
+      await api.deleteStack(stackId);
+      await get().refreshStacks();
+    },
+
+    setStackCover: async (stackId, coverPhotoId) => {
+      await api.setStackCover(stackId, coverPhotoId);
+      await get().refreshStacks();
+    },
+
+    autoStackSelectionByTime: async (windowSeconds) => {
+      const { multiSelectedIds, selectedPhotoId } = get();
+      const targets = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
+      if (targets.length < 2) return;
+      await api.autoStackByTime(targets, windowSeconds);
+      await get().refreshStacks();
+    },
+
+    createVirtualCopyForSelected: async () => {
+      const { selectedPhotoId } = get();
+      if (!selectedPhotoId) return;
+      await api.createVirtualCopy(selectedPhotoId);
+      await get().refreshVirtualCopies(selectedPhotoId);
+      await get().refreshFolders();
+    },
+
+    refreshVirtualCopies: async (photoId) => {
+      const copies = await api.listVirtualCopies(photoId);
+      set((state) => {
+        state.virtualCopiesByPhotoId[photoId] = copies;
+      });
+    },
+
+    refreshColorLabelDefinitions: async () => {
+      const defs = await api.listColorLabelDefinitions();
+      set((state) => {
+        state.colorLabelDefinitions = defs;
+      });
+    },
+
+    createColorLabelDefinition: async (name, displayName, hex) => {
+      await api.createColorLabelDefinition(name, displayName, hex);
+      await get().refreshColorLabelDefinitions();
+    },
+
+    deleteColorLabelDefinition: async (name) => {
+      await api.deleteColorLabelDefinition(name);
+      await get().refreshColorLabelDefinitions();
+    },
+
+    runPerceptualDuplicateDetection: async (maxDistance) => {
+      set((state) => {
+        state.perceptualDuplicatesRunning = true;
+      });
+      try {
+        const groups = await api.listPerceptualDuplicateGroups(maxDistance);
+        set((state) => {
+          state.perceptualDuplicateGroups = groups;
+        });
+      } finally {
+        set((state) => {
+          state.perceptualDuplicatesRunning = false;
         });
       }
     },

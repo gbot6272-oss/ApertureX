@@ -96,6 +96,10 @@ define_id_type!(SnapshotId);
 // Layout-/Workflow-Parametersatz, siehe `apx_catalog::repository::templates`s
 // Moduldoku).
 define_id_type!(TemplateId);
+// Phase 9 Schritt 1: Bibliotheks-Backlog (Sammlungssätze/Stapel, siehe
+// `apx_catalog::repository::{collections,stacks}`s Moduldoku).
+define_id_type!(CollectionFolderId);
+define_id_type!(StackId);
 
 #[cfg(test)]
 mod tests {

@@ -66,6 +66,9 @@ pub struct PhotoDto {
     /// gesetzt (Phase 8 Schritt 7) — `None`, wenn kein Foto-Standort bekannt.
     pub gps_lat: Option<f64>,
     pub gps_lon: Option<f64>,
+    /// `None` = echtes Foto. `Some(quelle)` = virtuelle Kopie (Phase 9
+    /// Schritt 1) — teilt sich die Datei mit dem referenzierten Foto.
+    pub source_photo_id: Option<String>,
 }
 
 impl From<apx_catalog::Photo> for PhotoDto {
@@ -93,6 +96,7 @@ impl From<apx_catalog::Photo> for PhotoDto {
             color_label: photo.color_label,
             gps_lat: photo.gps_lat,
             gps_lon: photo.gps_lon,
+            source_photo_id: photo.source_photo_id.map(|id| id.to_string()),
         }
     }
 }
@@ -116,6 +120,11 @@ impl From<apx_catalog::Keyword> for KeywordDto {
 pub struct CollectionDto {
     pub id: String,
     pub name: String,
+    /// `None` = Sammlung liegt an der Wurzel (Phase 9 Schritt 1).
+    pub folder_id: Option<String>,
+    pub is_smart: bool,
+    /// JSON-String (`FilterCriteriaDto`-Form), nur gesetzt bei `is_smart`.
+    pub smart_criteria_json: Option<String>,
 }
 
 impl From<apx_catalog::Collection> for CollectionDto {
@@ -123,6 +132,66 @@ impl From<apx_catalog::Collection> for CollectionDto {
         Self {
             id: collection.id.to_string(),
             name: collection.name,
+            folder_id: collection.folder_id.map(|id| id.to_string()),
+            is_smart: collection.is_smart,
+            smart_criteria_json: collection.smart_criteria_json,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CollectionFolderDto {
+    pub id: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub position: i64,
+}
+
+impl From<apx_catalog::CollectionFolder> for CollectionFolderDto {
+    fn from(folder: apx_catalog::CollectionFolder) -> Self {
+        Self {
+            id: folder.id.to_string(),
+            name: folder.name,
+            parent_id: folder.parent_id.map(|id| id.to_string()),
+            position: folder.position,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StackDto {
+    pub id: String,
+    pub name: Option<String>,
+    pub cover_photo_id: Option<String>,
+    pub photo_ids: Vec<String>,
+}
+
+impl From<apx_catalog::Stack> for StackDto {
+    fn from(stack: apx_catalog::Stack) -> Self {
+        Self {
+            id: stack.id.to_string(),
+            name: stack.name,
+            cover_photo_id: stack.cover_photo_id.map(|id| id.to_string()),
+            photo_ids: stack.photo_ids.into_iter().map(|id| id.to_string()).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ColorLabelDefinitionDto {
+    pub name: String,
+    pub display_name: String,
+    pub hex: String,
+    pub position: i64,
+}
+
+impl From<apx_catalog::ColorLabelDefinition> for ColorLabelDefinitionDto {
+    fn from(def: apx_catalog::ColorLabelDefinition) -> Self {
+        Self {
+            name: def.name,
+            display_name: def.display_name,
+            hex: def.hex,
+            position: def.position,
         }
     }
 }
@@ -619,6 +688,14 @@ fn parse_collection_id(collection_id: String) -> Result<apx_core::CollectionId, 
         .map_err(|err: apx_core::AppError| err.to_string())
 }
 
+fn parse_collection_folder_id(id: String) -> Result<apx_core::CollectionFolderId, String> {
+    id.parse().map_err(|err: apx_core::AppError| err.to_string())
+}
+
+fn parse_stack_id(id: String) -> Result<apx_core::StackId, String> {
+    id.parse().map_err(|err: apx_core::AppError| err.to_string())
+}
+
 fn parse_preset_folder_id(id: String) -> Result<apx_core::PresetFolderId, String> {
     id.parse()
         .map_err(|err: apx_core::AppError| err.to_string())
@@ -933,12 +1010,203 @@ pub fn list_all_keywords(state: State<'_, AppState>) -> Result<Vec<KeywordDto>, 
 // ---- Bibliothek: Sammlungen (ab Phase 3) -----------------------------------
 
 #[tauri::command]
-pub fn create_collection(state: State<'_, AppState>, name: String) -> Result<String, String> {
+pub fn create_collection(
+    state: State<'_, AppState>,
+    name: String,
+    folder_id: Option<String>,
+) -> Result<String, String> {
+    let folder_id = folder_id.map(parse_collection_folder_id).transpose()?;
     let id = state
         .catalog
-        .create_collection(&name)
+        .create_collection(&name, folder_id)
         .map_err(|err| err.to_string())?;
     Ok(id.to_string())
+}
+
+/// Legt eine intelligente Sammlung an — siehe `Catalog::create_smart_collection`s
+/// Moduldoku.
+#[tauri::command]
+pub fn create_smart_collection(
+    state: State<'_, AppState>,
+    name: String,
+    folder_id: Option<String>,
+    criteria: FilterCriteriaDto,
+) -> Result<String, String> {
+    let folder_id = folder_id.map(parse_collection_folder_id).transpose()?;
+    let id = state
+        .catalog
+        .create_smart_collection(&name, folder_id, &criteria.into())
+        .map_err(|err| err.to_string())?;
+    Ok(id.to_string())
+}
+
+#[tauri::command]
+pub fn move_collection_to_folder(
+    state: State<'_, AppState>,
+    collection_id: String,
+    folder_id: Option<String>,
+) -> Result<(), String> {
+    let collection_id = parse_collection_id(collection_id)?;
+    let folder_id = folder_id.map(parse_collection_folder_id).transpose()?;
+    state
+        .catalog
+        .move_collection_to_folder(collection_id, folder_id)
+        .map_err(|err| err.to_string())
+}
+
+// ---- Sammlungssätze (Phase 9 Schritt 1) ------------------------------------
+
+#[tauri::command]
+pub fn create_collection_folder(
+    state: State<'_, AppState>,
+    name: String,
+    parent_id: Option<String>,
+) -> Result<String, String> {
+    let parent_id = parent_id.map(parse_collection_folder_id).transpose()?;
+    let id = state
+        .catalog
+        .create_collection_folder(&name, parent_id)
+        .map_err(|err| err.to_string())?;
+    Ok(id.to_string())
+}
+
+#[tauri::command]
+pub fn rename_collection_folder(state: State<'_, AppState>, folder_id: String, name: String) -> Result<(), String> {
+    let folder_id = parse_collection_folder_id(folder_id)?;
+    state
+        .catalog
+        .rename_collection_folder(folder_id, &name)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn delete_collection_folder(state: State<'_, AppState>, folder_id: String) -> Result<(), String> {
+    let folder_id = parse_collection_folder_id(folder_id)?;
+    state
+        .catalog
+        .delete_collection_folder(folder_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn list_collection_folders(state: State<'_, AppState>) -> Result<Vec<CollectionFolderDto>, String> {
+    let folders = state.catalog.list_collection_folders().map_err(|err| err.to_string())?;
+    Ok(folders.into_iter().map(CollectionFolderDto::from).collect())
+}
+
+// ---- Virtuelle Kopien (Phase 9 Schritt 1) ----------------------------------
+
+#[tauri::command]
+pub fn create_virtual_copy(state: State<'_, AppState>, photo_id: String) -> Result<PhotoDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let copy_id = state
+        .catalog
+        .create_virtual_copy(photo_id)
+        .map_err(|err| err.to_string())?;
+    let photo = state.catalog.get_photo(copy_id).map_err(|err| err.to_string())?;
+    Ok(PhotoDto::from(photo))
+}
+
+#[tauri::command]
+pub fn list_virtual_copies(state: State<'_, AppState>, photo_id: String) -> Result<Vec<PhotoDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let copies = state
+        .catalog
+        .list_virtual_copies(photo_id)
+        .map_err(|err| err.to_string())?;
+    Ok(copies.into_iter().map(PhotoDto::from).collect())
+}
+
+// ---- Stapel (Phase 9 Schritt 1) --------------------------------------------
+
+#[tauri::command]
+pub fn create_stack(
+    state: State<'_, AppState>,
+    name: Option<String>,
+    photo_ids: Vec<String>,
+) -> Result<String, String> {
+    let photo_ids = photo_ids
+        .into_iter()
+        .map(parse_photo_id)
+        .collect::<Result<Vec<_>, _>>()?;
+    let id = state
+        .catalog
+        .create_stack(name.as_deref(), &photo_ids)
+        .map_err(|err| err.to_string())?;
+    Ok(id.to_string())
+}
+
+#[tauri::command]
+pub fn delete_stack(state: State<'_, AppState>, stack_id: String) -> Result<(), String> {
+    let stack_id = parse_stack_id(stack_id)?;
+    state.catalog.delete_stack(stack_id).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn set_stack_cover(state: State<'_, AppState>, stack_id: String, cover_photo_id: String) -> Result<(), String> {
+    let stack_id = parse_stack_id(stack_id)?;
+    let cover_photo_id = parse_photo_id(cover_photo_id)?;
+    state
+        .catalog
+        .set_stack_cover(stack_id, cover_photo_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn list_stacks(state: State<'_, AppState>) -> Result<Vec<StackDto>, String> {
+    let stacks = state.catalog.list_stacks().map_err(|err| err.to_string())?;
+    Ok(stacks.into_iter().map(StackDto::from).collect())
+}
+
+/// Gruppiert `photo_ids` automatisch nach Aufnahmezeit — siehe
+/// `Catalog::auto_stack_by_time`s Moduldoku.
+#[tauri::command]
+pub fn auto_stack_by_time(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    window_seconds: i64,
+) -> Result<Vec<String>, String> {
+    let photo_ids = photo_ids
+        .into_iter()
+        .map(parse_photo_id)
+        .collect::<Result<Vec<_>, _>>()?;
+    let stack_ids = state
+        .catalog
+        .auto_stack_by_time(&photo_ids, window_seconds)
+        .map_err(|err| err.to_string())?;
+    Ok(stack_ids.into_iter().map(|id| id.to_string()).collect())
+}
+
+// ---- Erweiterbare Farbmarkierungen (Phase 9 Schritt 1) ---------------------
+
+#[tauri::command]
+pub fn list_color_label_definitions(state: State<'_, AppState>) -> Result<Vec<ColorLabelDefinitionDto>, String> {
+    let defs = state
+        .catalog
+        .list_color_label_definitions()
+        .map_err(|err| err.to_string())?;
+    Ok(defs.into_iter().map(ColorLabelDefinitionDto::from).collect())
+}
+
+#[tauri::command]
+pub fn create_color_label_definition(
+    state: State<'_, AppState>,
+    name: String,
+    display_name: String,
+    hex: String,
+) -> Result<(), String> {
+    state
+        .catalog
+        .create_color_label_definition(&name, &display_name, &hex)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn delete_color_label_definition(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    state
+        .catalog
+        .delete_color_label_definition(&name)
+        .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -1352,6 +1620,69 @@ pub fn list_duplicate_photo_groups(
     Ok(groups
         .into_iter()
         .map(|group| group.into_iter().map(PhotoDto::from).collect())
+        .collect())
+}
+
+/// Gruppen ähnlicher (nicht notwendig byte-identischer) Fotos per
+/// Perceptual Hash (Phase 9 Schritt 1, siehe `DECISIONS.md` ADR-0032) —
+/// ergänzt [`list_duplicate_photo_groups`]s exaktem Hash-Vergleich um
+/// nahe Duplikate (z. B. leicht unterschiedlich exportierte/skalierte
+/// Versionen desselben Motivs). **Bewusste Vereinfachung:** hasht die
+/// bereits vorhandene 256px-Miniaturansicht (`PreviewLevel::Thumbnail`)
+/// statt jedes Mal neu von der RAW-Datei zu dekodieren — Fotos ohne
+/// bereits generierte Miniaturansicht werden übersprungen, nicht
+/// erzwungen dekodiert (hält diesen Command schnell, statt bei jedem
+/// Aufruf über den gesamten Katalog neu zu rendern). Gruppierung ist
+/// O(n²) (jedes Foto gegen den ersten Vertreter jeder bereits
+/// gefundenen Gruppe) — für einen auf Abruf gestarteten Assistenten
+/// über einen realistischen Katalogumfang tragbar, kein Hintergrund-Job.
+#[tauri::command]
+pub fn list_perceptual_duplicate_groups(
+    state: State<'_, AppState>,
+    max_distance: u32,
+) -> Result<Vec<Vec<PhotoDto>>, String> {
+    let photos = state
+        .catalog
+        .search_and_filter_photos(None, &apx_catalog::FilterCriteria::default())
+        .map_err(|err| err.to_string())?;
+
+    let hasher = image_hasher::HasherConfig::new().to_hasher();
+    let mut hashed: Vec<(apx_catalog::Photo, image_hasher::ImageHash)> = Vec::new();
+    for photo in photos {
+        let Ok(Some(preview)) = state.catalog.get_preview(photo.id, apx_catalog::PreviewLevel::Thumbnail) else {
+            continue;
+        };
+        let Ok(img) = image::open(&preview.path) else {
+            continue;
+        };
+        let hash = hasher.hash_image(&img);
+        hashed.push((photo, hash));
+    }
+
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for (index, (_, hash)) in hashed.iter().enumerate() {
+        let mut placed = false;
+        for group in groups.iter_mut() {
+            if hashed[group[0]].1.dist(hash) <= max_distance {
+                group.push(index);
+                placed = true;
+                break;
+            }
+        }
+        if !placed {
+            groups.push(vec![index]);
+        }
+    }
+
+    Ok(groups
+        .into_iter()
+        .filter(|group| group.len() >= 2)
+        .map(|group| {
+            group
+                .into_iter()
+                .map(|i| PhotoDto::from(hashed[i].0.clone()))
+                .collect()
+        })
         .collect())
 }
 

@@ -29,15 +29,16 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use apx_core::{
-    AppError, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId, PhotoId,
-    PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId, TemplateId,
+    AppError, CollectionFolderId, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId,
+    PhotoId, PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId, StackId, TemplateId,
 };
 use rusqlite::Connection;
 use time::OffsetDateTime;
 
 pub use models::{
-    Collection, EditHistoryEntry, FilterCriteria, Folder, HistoryPosition, Keyword, NewPhoto,
-    Photo, Preset, PresetFolder, PresetVersion, Preview, PreviewLevel, Snapshot, Template,
+    Collection, CollectionFolder, ColorLabelDefinition, EditHistoryEntry, FilterCriteria, Folder,
+    HistoryPosition, Keyword, NewPhoto, Photo, Preset, PresetFolder, PresetVersion, Preview,
+    PreviewLevel, Snapshot, Stack, Template,
 };
 
 pub struct Catalog {
@@ -318,16 +319,49 @@ impl Catalog {
         repository::keywords::list_all(&conn)
     }
 
-    // ---- Sammlungen (ab Phase 3) -------------------------------------------
+    // ---- Sammlungen (ab Phase 3, Sammlungssätze/intelligente Sammlungen ---
+    // ab Phase 9 Schritt 1, siehe DECISIONS.md ADR-0032/ADR-0035) -----------
 
-    pub fn create_collection(&self, name: &str) -> Result<CollectionId> {
+    pub fn create_collection(
+        &self,
+        name: &str,
+        folder_id: Option<CollectionFolderId>,
+    ) -> Result<CollectionId> {
         let conn = self.lock()?;
-        repository::collections::create(&conn, name, OffsetDateTime::now_utc())
+        repository::collections::create(&conn, name, folder_id, OffsetDateTime::now_utc())
+    }
+
+    /// Legt eine intelligente Sammlung an — siehe
+    /// [`repository::collections::create_smart`] für die
+    /// Vereinfachung gegenüber verschachtelten UND/ODER-Regeln.
+    pub fn create_smart_collection(
+        &self,
+        name: &str,
+        folder_id: Option<CollectionFolderId>,
+        criteria: &FilterCriteria,
+    ) -> Result<CollectionId> {
+        let conn = self.lock()?;
+        repository::collections::create_smart(
+            &conn,
+            name,
+            folder_id,
+            criteria,
+            OffsetDateTime::now_utc(),
+        )
     }
 
     pub fn rename_collection(&self, id: CollectionId, name: &str) -> Result<()> {
         let conn = self.lock()?;
         repository::collections::rename(&conn, id, name)
+    }
+
+    pub fn move_collection_to_folder(
+        &self,
+        id: CollectionId,
+        folder_id: Option<CollectionFolderId>,
+    ) -> Result<()> {
+        let conn = self.lock()?;
+        repository::collections::move_to_folder(&conn, id, folder_id)
     }
 
     pub fn delete_collection(&self, id: CollectionId) -> Result<()> {
@@ -361,10 +395,114 @@ impl Catalog {
         repository::collections::remove_photo(&conn, collection_id, photo_id)
     }
 
-    /// Die Fotos einer Sammlung in ihrer festgelegten Reihenfolge.
+    /// Die Fotos einer Sammlung — bei einer intelligenten Sammlung live
+    /// aus den gespeicherten Kriterien berechnet, sonst die festgelegte
+    /// Reihenfolge.
     pub fn list_photos_in_collection(&self, collection_id: CollectionId) -> Result<Vec<Photo>> {
         let conn = self.lock()?;
         repository::collections::list_photos(&conn, collection_id)
+    }
+
+    // ---- Sammlungssätze (Phase 9 Schritt 1) --------------------------------
+
+    pub fn create_collection_folder(
+        &self,
+        name: &str,
+        parent_id: Option<CollectionFolderId>,
+    ) -> Result<CollectionFolderId> {
+        let conn = self.lock()?;
+        repository::collections::create_folder(&conn, name, parent_id)
+    }
+
+    pub fn rename_collection_folder(&self, id: CollectionFolderId, name: &str) -> Result<()> {
+        let conn = self.lock()?;
+        repository::collections::rename_folder(&conn, id, name)
+    }
+
+    pub fn delete_collection_folder(&self, id: CollectionFolderId) -> Result<()> {
+        let conn = self.lock()?;
+        repository::collections::delete_folder(&conn, id)
+    }
+
+    pub fn list_collection_folders(&self) -> Result<Vec<CollectionFolder>> {
+        let conn = self.lock()?;
+        repository::collections::list_folders(&conn)
+    }
+
+    // ---- Virtuelle Kopien (Phase 9 Schritt 1) ------------------------------
+
+    /// Legt eine virtuelle Kopie an — siehe
+    /// [`repository::photos::create_virtual_copy`]s Moduldoku.
+    pub fn create_virtual_copy(&self, source_id: PhotoId) -> Result<PhotoId> {
+        let conn = self.lock()?;
+        repository::photos::create_virtual_copy(&conn, source_id, OffsetDateTime::now_utc())
+    }
+
+    pub fn list_virtual_copies(&self, source_id: PhotoId) -> Result<Vec<Photo>> {
+        let conn = self.lock()?;
+        repository::photos::list_virtual_copies(&conn, source_id)
+    }
+
+    // ---- Stapel (Phase 9 Schritt 1) ----------------------------------------
+
+    pub fn create_stack(&self, name: Option<&str>, photo_ids: &[PhotoId]) -> Result<StackId> {
+        let conn = self.lock()?;
+        repository::stacks::create(&conn, name, photo_ids, OffsetDateTime::now_utc())
+    }
+
+    pub fn delete_stack(&self, id: StackId) -> Result<()> {
+        let conn = self.lock()?;
+        repository::stacks::delete(&conn, id)
+    }
+
+    pub fn set_stack_cover(&self, id: StackId, cover_photo_id: PhotoId) -> Result<()> {
+        let conn = self.lock()?;
+        repository::stacks::set_cover(&conn, id, cover_photo_id)
+    }
+
+    pub fn list_stacks(&self) -> Result<Vec<Stack>> {
+        let conn = self.lock()?;
+        repository::stacks::list_all(&conn)
+    }
+
+    /// Gruppiert `photo_ids` automatisch in Stapel: aufeinanderfolgende
+    /// Fotos (nach `captured_at` sortiert) innerhalb von `window_seconds`
+    /// landen im selben Stapel. Fotos ohne `captured_at` bleiben
+    /// unverstapelt (siehe [`repository::stacks::auto_stack_by_time`]).
+    pub fn auto_stack_by_time(
+        &self,
+        photo_ids: &[PhotoId],
+        window_seconds: i64,
+    ) -> Result<Vec<StackId>> {
+        let conn = self.lock()?;
+        repository::stacks::auto_stack_by_time(
+            &conn,
+            photo_ids,
+            window_seconds,
+            OffsetDateTime::now_utc(),
+        )
+    }
+
+    // ---- Erweiterbare Farbmarkierungen (Phase 9 Schritt 1) -----------------
+
+    pub fn list_color_label_definitions(&self) -> Result<Vec<ColorLabelDefinition>> {
+        let conn = self.lock()?;
+        repository::color_labels::list_all(&conn)
+    }
+
+    pub fn create_color_label_definition(
+        &self,
+        name: &str,
+        display_name: &str,
+        hex: &str,
+    ) -> Result<()> {
+        let conn = self.lock()?;
+        repository::color_labels::create(&conn, name, display_name, hex)
+    }
+
+    pub fn delete_color_label_definition(&self, name: &str) -> Result<()> {
+        let conn = self.lock()?;
+        repository::color_labels::delete(&conn, name)
     }
 
     // ---- Presets (ab Phase 5, siehe DECISIONS.md ADR-0031) -----------------
@@ -780,7 +918,7 @@ mod tests {
             1
         );
 
-        let collection_id = catalog.create_collection("Favoriten").expect("ok");
+        let collection_id = catalog.create_collection("Favoriten", None).expect("ok");
         catalog
             .add_photo_to_collection(collection_id, photo_id)
             .expect("ok");

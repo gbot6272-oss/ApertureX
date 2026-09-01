@@ -123,6 +123,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // Vorlagen (Phase 8 Schritt 8).
     exportTemplateFilePathResult: "/mock/templates/Vorlage.apxt" as string | null,
     importedTemplateFile: null as { kind: string; name: string; payload_json: string } | null,
+    // Perceptual-Hash-Duplikaterkennung (Phase 9 Schritt 1).
+    perceptualDuplicateGroups: [] as unknown[][],
     ...initialFixtures,
   };
   w.__mockInvokeLog = [] as Array<{ cmd: string; args: unknown }>;
@@ -148,9 +150,50 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   interface MockCollection {
     id: string;
     name: string;
+    folder_id: string | null;
+    is_smart: boolean;
+    smart_criteria_json: string | null;
   }
   const collections: MockCollection[] = [];
   const collectionPhotoIds: Record<string, string[]> = {};
+
+  // Bibliotheks-Backlog (Phase 9 Schritt 1) — einfache In-Memory-
+  // Nachbildung von Sammlungssätzen/Stapeln/virtuellen Kopien/
+  // Farbmarkierungs-Definitionen.
+  interface MockCollectionFolder {
+    id: string;
+    name: string;
+    parent_id: string | null;
+    position: number;
+  }
+  const collectionFolders: MockCollectionFolder[] = [];
+  let nextCollectionFolderId = 1;
+
+  interface MockStack {
+    id: string;
+    name: string | null;
+    cover_photo_id: string | null;
+    photo_ids: string[];
+  }
+  const stacks: MockStack[] = [];
+  let nextStackId = 1;
+
+  const virtualCopiesBySource: Record<string, string[]> = {};
+  let nextVirtualCopyId = 1;
+
+  interface MockColorLabelDefinition {
+    name: string;
+    display_name: string;
+    hex: string;
+    position: number;
+  }
+  const colorLabelDefinitions: MockColorLabelDefinition[] = [
+    { name: "red", display_name: "Rot", hex: "#e53e3e", position: 0 },
+    { name: "yellow", display_name: "Gelb", hex: "#d69e2e", position: 1 },
+    { name: "green", display_name: "Grün", hex: "#38a169", position: 2 },
+    { name: "blue", display_name: "Blau", hex: "#3182ce", position: 3 },
+    { name: "purple", display_name: "Lila", hex: "#805ad5", position: 4 },
+  ];
   const photoKeywords: Record<string, { id: string; name: string }[]> = {};
   let nextCollectionId = 1;
   let nextKeywordId = 1;
@@ -350,6 +393,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       gpxTrackPoints: Array<{ lat: number; lon: number; elevation: number | null; time: string | null }>;
       exportTemplateFilePathResult: string | null;
       importedTemplateFile: { kind: string; name: string; payload_json: string } | null;
+      perceptualDuplicateGroups: unknown[][];
     };
 
     switch (cmd) {
@@ -509,16 +553,52 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return [...seen.values()];
       }
 
-      // ---- Bibliothek: Sammlungen (ab Phase 3) -----------------------------
+      // ---- Bibliothek: Sammlungen (ab Phase 3, Sammlungssätze/intelligente -
+      // Sammlungen ab Phase 9 Schritt 1) --------------------------------------
       case "create_collection": {
         const id = `col-${nextCollectionId++}`;
-        collections.push({ id, name: args.name as string });
+        collections.push({ id, name: args.name as string, folder_id: (args.folderId as string | null) ?? null, is_smart: false, smart_criteria_json: null });
         collectionPhotoIds[id] = [];
         return id;
+      }
+      case "create_smart_collection": {
+        const id = `col-${nextCollectionId++}`;
+        collections.push({
+          id,
+          name: args.name as string,
+          folder_id: (args.folderId as string | null) ?? null,
+          is_smart: true,
+          smart_criteria_json: JSON.stringify(args.criteria),
+        });
+        collectionPhotoIds[id] = [];
+        return id;
+      }
+      case "move_collection_to_folder": {
+        const collection = collections.find((c) => c.id === (args.collectionId as string));
+        if (collection) collection.folder_id = (args.folderId as string | null) ?? null;
+        return null;
       }
       case "list_collections":
         // Kopie, aus demselben Grund wie bei `list_photo_keywords` oben.
         return [...collections];
+      case "create_collection_folder": {
+        const id = `col-folder-${nextCollectionFolderId++}`;
+        collectionFolders.push({ id, name: args.name as string, parent_id: (args.parentId as string | null) ?? null, position: collectionFolders.length });
+        return id;
+      }
+      case "rename_collection_folder": {
+        const folder = collectionFolders.find((f) => f.id === (args.folderId as string));
+        if (folder) folder.name = args.name as string;
+        return null;
+      }
+      case "delete_collection_folder": {
+        const index = collectionFolders.findIndex((f) => f.id === (args.folderId as string));
+        if (index >= 0) collectionFolders.splice(index, 1);
+        for (const c of collections) if (c.folder_id === (args.folderId as string)) c.folder_id = null;
+        return null;
+      }
+      case "list_collection_folders":
+        return [...collectionFolders];
       case "add_to_collection": {
         const collectionId = args.collectionId as string;
         const photoId = args.photoId as string;
@@ -539,6 +619,76 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           .filter((p): p is MockPhoto => p !== undefined)
           .map(clonePhoto);
       }
+
+      // ---- Bibliothek: virtuelle Kopien (Phase 9 Schritt 1) -----------------
+      case "create_virtual_copy": {
+        const source = findPhoto(args.photoId as string);
+        if (!source) throw new Error(`Test-Stub: Foto '${args.photoId as string}' nicht gefunden`);
+        const copyId = `${source.id}-vc${nextVirtualCopyId++}`;
+        const copy: MockPhoto = { ...source, id: copyId };
+        const fixtures = w.__mockFixtures as { photosByFolder: Record<string, MockPhoto[]> };
+        for (const folderId of Object.keys(fixtures.photosByFolder)) {
+          if (fixtures.photosByFolder[folderId].some((p) => p.id === source.id)) {
+            fixtures.photosByFolder[folderId] = [...fixtures.photosByFolder[folderId], copy];
+            break;
+          }
+        }
+        (virtualCopiesBySource[source.id] ??= []).push(copyId);
+        return clonePhoto(copy);
+      }
+      case "list_virtual_copies": {
+        const ids = virtualCopiesBySource[args.photoId as string] ?? [];
+        return ids.map((id) => findPhoto(id)).filter((p): p is MockPhoto => p !== undefined).map(clonePhoto);
+      }
+
+      // ---- Bibliothek: Stapel (Phase 9 Schritt 1) ---------------------------
+      case "create_stack": {
+        const id = `stack-${nextStackId++}`;
+        const photoIds = args.photoIds as string[];
+        stacks.push({ id, name: (args.name as string | null) ?? null, cover_photo_id: photoIds[0] ?? null, photo_ids: photoIds });
+        return id;
+      }
+      case "delete_stack": {
+        const index = stacks.findIndex((s) => s.id === (args.stackId as string));
+        if (index >= 0) stacks.splice(index, 1);
+        return null;
+      }
+      case "set_stack_cover": {
+        const stack = stacks.find((s) => s.id === (args.stackId as string));
+        if (stack) stack.cover_photo_id = args.coverPhotoId as string;
+        return null;
+      }
+      case "list_stacks":
+        return [...stacks];
+      case "auto_stack_by_time": {
+        const photoIds = args.photoIds as string[];
+        if (photoIds.length < 2) return [];
+        const id = `stack-${nextStackId++}`;
+        stacks.push({ id, name: null, cover_photo_id: photoIds[0] ?? null, photo_ids: photoIds });
+        return [id];
+      }
+
+      // ---- Bibliothek: erweiterbare Farbmarkierungen (Phase 9 Schritt 1) ---
+      case "list_color_label_definitions":
+        return [...colorLabelDefinitions];
+      case "create_color_label_definition": {
+        colorLabelDefinitions.push({
+          name: args.name as string,
+          display_name: args.displayName as string,
+          hex: args.hex as string,
+          position: colorLabelDefinitions.length,
+        });
+        return null;
+      }
+      case "delete_color_label_definition": {
+        const index = colorLabelDefinitions.findIndex((d) => d.name === (args.name as string));
+        if (index >= 0) colorLabelDefinitions.splice(index, 1);
+        return null;
+      }
+
+      // ---- Bibliothek: Perceptual-Hash-Duplikaterkennung (Phase 9 Schritt 1) -
+      case "list_perceptual_duplicate_groups":
+        return fixtures.perceptualDuplicateGroups;
 
       // ---- Bibliothek: Suche/Filter (ab Phase 3) ---------------------------
       case "search_photos": {

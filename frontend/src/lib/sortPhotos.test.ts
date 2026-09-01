@@ -23,6 +23,7 @@ function photo(overrides: Partial<PhotoDto> & { id: string }): PhotoDto {
     color_label: null,
     gps_lat: null,
     gps_lon: null,
+    source_photo_id: null,
     ...overrides,
   };
 }

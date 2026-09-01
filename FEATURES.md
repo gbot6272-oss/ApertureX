@@ -28,17 +28,17 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Import-Presets — Phase 3 — Status: Fertig (dieselbe Korrektur wie die Zeile darüber: Backend seit Phase 3, Frontend erst Phase 5 Schritt 9)
 - [x] Automatisches Umbenennen mit Token-System — Phase 3 — Status: Fertig (dieselbe Korrektur: der Token-Editor mit Live-Vorschau kam erst mit `ImportDialog.tsx` in Phase 5 Schritt 9 hinzu)
 - [x] Duplikaterkennung per exaktem Hash — Phase 3 — Status: Fertig (siehe ADR-0027: `content_hash`-Spalte existierte bereits seit Phase 1, wird jetzt per Streaming-SHA-256 beim Import befüllt; reine Anzeige, blockiert den Import nicht)
-- [ ] Duplikaterkennung per Perceptual Hash, Duplikat-Assistent mit Auto-Auswahl bester Version — Phase 9 — Status: Nicht begonnen
+- [x] Duplikaterkennung per Perceptual Hash, Duplikat-Assistent mit Auto-Auswahl bester Version — Phase 9 — Status: Fertig (abweichend, siehe PLAN.md Schritt 1) — hasht die bereits vorhandene 256px-Miniaturansicht (`image_hasher`, in `apx-app`) statt jedes Mal neu zu dekodieren, Fotos ohne generierte Miniaturansicht werden übersprungen; Duplikat-Assistent ist eine reine Heuristik (Auflösung → Dateigröße → Bewertung), keine Inhaltsanalyse
 - [x] Ordnerbaum (Basis-Anzeige, Fotoanzahl je Ordner) — Phase 1 — Status: Fertig (flache Liste, kein Baum — echte Hierarchie/Synchronisation ist Phase 3, siehe Zeile darunter)
 - [x] Ordnerbaum-Synchronisation (echte Hierarchie über `parent_id`) — Phase 3 — Status: Fertig (siehe DECISIONS.md ADR-0027: Import legt jetzt die volle Verzeichniskette bis zum gewählten Import-Ordner bzw. bei Copy/Move bis zum Zielordner an, statt nur den unmittelbaren Elternordner)
 - [x] Ordner fehlend/wiederfinden — Phase 3 — Status: Fertig
 - [x] Sammlungen (manuell, feste Reihenfolge) — Phase 3 — Status: Fertig
-- [ ] Sammlungssätze, intelligente Sammlungen mit verschachtelten UND/ODER-Regeln, Zielsammlung — Phase 9 — Status: Nicht begonnen (siehe ADR-0032: von Phase 6 auf Phase 9 verschoben — keine ADR hatte Phase 6 für diese Zeile je zugesagt)
-- [ ] Stapel (automatisch nach Zeit, manuell) — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
-- [ ] Virtuelle Kopien — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
+- [x] Sammlungssätze, intelligente Sammlungen mit verschachtelten UND/ODER-Regeln, Zielsammlung — Phase 9 — Status: Fertig (abweichend, siehe PLAN.md Schritt 1) — `collection_folders` spiegelt `preset_folders`; intelligente Sammlungen sind eine **flache UND-Verknüpfung** der bestehenden `FilterCriteria`-Felder statt verschachtelter UND/ODER-Regeln, Mitgliedschaft live über `filter_photos` berechnet; „Zielsammlung" (automatisches Hinzufügen neu importierter Fotos) nicht umgesetzt
+- [x] Stapel (automatisch nach Zeit, manuell) — Phase 9 — Status: Fertig — manuell aus der aktuellen Auswahl oder automatisch per Zeitfenster über `captured_at`; kein inline Ein-/Ausklappen im Raster, Verwaltung über den `LibraryOrganizeDialog`
+- [x] Virtuelle Kopien — Phase 9 — Status: Fertig (abweichend, siehe PLAN.md Schritt 1) — `photos.source_photo_id` (nullable Selbstreferenz) statt einer separaten Tabelle, nimmt an edit_history/keywords/collections/snapshots/rating unverändert teil
 - [x] Bewertung 0–5 — Phase 3 — Status: Fertig
 - [x] Farbmarkierungen (fester Grundsatz) — Phase 3 — Status: Fertig (feste Palette aus 5 Farben: rot/gelb/grün/blau/violett)
-- [ ] Farbmarkierungen erweiterbar auf beliebig viele, benannt — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
+- [x] Farbmarkierungen erweiterbar auf beliebig viele, benannt — Phase 9 — Status: Fertig (abweichend, siehe PLAN.md Schritt 1) — neue `color_label_definitions`-Tabelle ersetzt die frühere feste `ALLOWED_COLOR_LABELS`-Konstante, verwaltet über den `LibraryOrganizeDialog`; die bestehende kompakte `ColorLabelPicker`-Auswahl in Raster-Zellen/Metadaten-Panel zeigt weiterhin nur die fünf Standardfarben, neue Farben sind über den Dialog setzbar, aber noch nicht dort wählbar
 - [x] Flaggen — Phase 3 — Status: Fertig
 - [x] Schlagworte (flache Liste, ohne Hierarchie) — Phase 3 — Status: Fertig
 - [ ] Schlagworthierarchie (Synonyme, Export-Steuerung, Auto-Vervollständigung), Schlagwortvorschläge, Tag-Regeln (bedingte Auto-Tags) — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)

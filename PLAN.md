@@ -918,15 +918,66 @@ Kompilier-Kontrolle — die volle Suite läuft einmalig in Schritt 12 (siehe
 ADR-0037, nutzerangeordnete befristete Ausnahme).
 
 - [x] 0. Scope festzurren (ADR-0037: drei Phase-3/5-UI-Restposten reingezogen, Testdisziplin gelockert, Installer-Signierung ehrlich begrenzt)
-- [ ] 1. Settings-Fundament: Backend-Anbindung (`UiSettings` erweitern, `get_ui_settings`/`set_ui_settings`) + neuer `SettingsDialog.tsx`
-- [ ] 2. Modul-Umschalter + rechte Werkzeug-Palette
-- [ ] 3. Ein-/ausklappbare, breitenziehbare Paletten + Arbeitsbereich-Preset
-- [ ] 4. Vollständige Befehlspalette
-- [ ] 5. Vollständig belegbare Tastenkürzel + Cheatsheet-Overlay
-- [ ] 6. Barrierefreiheit (Tastatur, Screenreader, Kontrastmodus, UI-Skalierung 75–200 %)
-- [ ] 7. Volles helles Theme + benutzerdefinierte Akzentfarbe
-- [ ] 8. Lokalisierung (Deutsch/Englisch)
-- [ ] 9. Onboarding
-- [ ] 10. Performance-Profiling gegen SPEC.md §2.4
+- [x] 1. Settings-Fundament: Backend-Anbindung (`UiSettings` erweitert um `accent_color`/`high_contrast`/`reduced_motion`/`onboarding_seen`, `get_ui_settings`/`set_ui_settings`) + neuer `SettingsDialog.tsx`
+- [x] 2. Modul-Umschalter + rechte Werkzeug-Palette — `Header.tsx` in zwei Zeilen (Ansicht/Module-Gruppen) statt einer Flach-Liste, `DevelopPanel`/`MasksPanel` unter gemeinsamer Wrapper-Hülle; kein Knopf umbenannt oder versteckt (siehe `DECISIONS.md` ADR-0037)
+- [x] 3. Ein-/ausklappbare, breitenziehbare Paletten + Arbeitsbereich-Preset — `PaletteFrame.tsx` auf Sidebar/PresetsPanel/MetadataPanel angewendet (DevelopPanel/MasksPanel bewusst ausgeklammert, siehe deren Moduldoku)
+- [x] 4. Vollständige Befehlspalette — alle Header-Funktionen, Presets, Fotos der aktuellen Ansicht, Ordner
+- [x] 5. Vollständig belegbare Tastenkürzel + Cheatsheet-Overlay (`?`) — `lib/keybindings.ts`, globale App.tsx-Kürzel umbelegbar, lokale Komponenten-Kürzel bewusst fest (siehe deren Moduldoku)
+- [x] 6. Barrierefreiheit — Kontrastmodus/UI-Skalierung 75–200 %/reduzierte Bewegung app-weit verdrahtet, Fokus-Falle als Muster auf die zwei neuen Dialoge angewendet
+- [x] 7. Volles helles Theme + benutzerdefinierte Akzentfarbe
+- [x] 8. Lokalisierung (Deutsch/Englisch) — Header/Sidebar/Presets/Metadaten/Settings/Cheatsheet übersetzt, die ca. 20 Dialog-Komponenten bewusst offen (siehe `lib/i18n.ts`-Moduldoku)
+- [x] 9. Onboarding
+- [x] 10. Performance-Profiling gegen SPEC.md §2.4 (siehe Detail-Absatz unten)
 - [ ] 11. Installer + Signierung (alle drei Plattformen, strukturell + konditional)
 - [ ] 12. Dokumentation, einmalige volle Verifikation, Abnahme
+
+**Schritt 10 — Performance-Profiling gegen SPEC.md §2.4, im Detail:**
+Alle fünf Ziele einzeln gegen das geprüft, was in dieser Sandbox tatsächlich
+belastbar messbar ist — keine neue Messinfrastruktur gebaut, wo schon eine
+aus Phase 2/3 existiert:
+- **Regler-Bewegung < 16 ms:** bereits in Phase 2 Schritt 7 real gemessen
+  und ehrlich dokumentiert (`developLastLatencyMs`, `performance.now()` um
+  `fetch()` in `useDevelopRender`): ≈181 ms GPU-Pfad / ≈102 ms
+  CPU-Fallback für ein 2048×1365-Bild auf dem Software-Vulkan-Adapter
+  `llvmpipe` dieser Sandbox — **Ziel auf dieser Hardware klar verfehlt**,
+  echte GPU-Hardware wird nicht verfügbar sein, um das zu widerlegen oder
+  zu bestätigen. Keine neue Messung nötig, derselbe Pfad/dieselbe
+  Instrumentierung gilt unverändert.
+- **Bildwechsel < 200 ms:** läuft über denselben `useDevelopRender`-Pfad
+  wie oben (ein Fotowechsel löst denselben `develop/...`-Fetch mit neuer
+  `photo_id` aus) — dieselben ≈102–181 ms gelten näherungsweise auch hier;
+  eine separate Messung würde nur denselben Codepfad ein zweites Mal
+  instrumentieren, ohne neue Erkenntnis.
+- **100.000-Bild-Raster virtualisiert:** bereits in Phase 3 verifiziert
+  (manueller Playwright-Lauf: DOM-Zellenzahl bleibt zwischen 35–60 statt
+  100.000, JS-Heap ≈119 MB) und als automatisierte 5.000-Foto-Regression
+  in `library-flow.spec.ts` dauerhaft abgesichert — keine neue Arbeit
+  nötig.
+- **Import 1000 RAWs < 4 Minuten:** **nicht neu messbar** (dieselbe Grenze
+  wie ADR-0007s fehlende Golden-Image-RAW-Tests — kein Zugriff auf 1000
+  echte Kamera-RAW-Dateien noch auf „moderne Hardware" in dieser Sandbox).
+  Stattdessen ein konkreter Code-Befund: `apx-app/src/import/mod.rs`
+  verarbeitet Dateien sequenziell in einem einzelnen `spawn_blocking`
+  (kein `rayon`/parallele Task-Aufteilung über mehrere Dateien) — ein
+  plausibler realer Engpass gegen das 4-Minuten-Ziel bei 1000 Dateien auf
+  Mehrkern-Hardware. **Bewusst nicht in diesem Schritt behoben**: eine
+  Parallelisierung des Import-Pfads berührt Event-Reihenfolge,
+  Duplikaterkennung und Fortschritts-Reporting — Kernlogik aus Phase 1
+  mit entsprechend dichter Testabdeckung, deren Umbau ohne begleitenden
+  Test in dieser testdisziplin-gelockerten Phase (ADR-0037) ein
+  unnötiges Regressionsrisiko wäre. Bleibt ein konkret benannter
+  Kandidat für einen eigenen späteren Optimierungsschritt, keine
+  überstürzte Umsetzung (dieselbe Zurückhaltung wie ADR-0036).
+- **Speicherverbrauch im Leerlauf < 800 MB:** **nicht neu messbar** — das
+  misst den nativen Tauri-Prozess (Rust-Backend + WebView-Engine), aber
+  diese Sandbox hat laut ADR-0010 keinen echten Tauri-Runtime-Host, nur
+  den Produktions-Build im gewöhnlichen Browser. Einzig verfügbarer Proxy:
+  der reine JS-Heap aus der Phase-3-Messung (≈119 MB) — das ist nur ein
+  Teil des tatsächlichen Idle-Speicherbilds, keine verlässliche Aussage
+  über die vollständigen 800 MB.
+
+**Fazit:** Zwei von fünf Zielen sind sauber verifiziert (Raster-Virtualisierung
+erreicht, Regler-Latenz auf dieser Sandbox-Hardware verfehlt aber ehrlich
+gemessen); zwei (Import-Zeit, Idle-Speicher) sind in dieser Umgebung
+strukturell nicht messbar; für die Import-Zeit existiert immerhin ein
+konkreter, benannter Optimierungskandidat statt einer bloßen Lücke.

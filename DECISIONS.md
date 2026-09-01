@@ -1771,3 +1771,60 @@ sind mit Schritt 11 vollständig umgesetzt (bzw. mit dokumentierter
 bewusster Vereinfachung, siehe ADR-0035 Punkte 1–8) — Phase 9 gilt mit
 dieser einen, hier explizit benannten und begründeten Ausnahme als
 abgeschlossen.
+
+## ADR-0037: Phase-10-Scope — drei Phase-3/5-UI-Restposten reingezogen, Testdisziplin für diese Phase nutzerangeordnet gelockert, ehrliche Grenzen bei Installer-Signierung
+
+**Status:** Angenommen
+**Kontext:** Der Nutzer hat Phase 10 („Politur", `SPEC.md` §5: Performance-
+Profiling gegen die Ziele aus §2.4, Barrierefreiheit, Lokalisierung DE/EN,
+Onboarding, Installer und Signierung für alle drei Plattformen) angewiesen,
+mit zwei ausdrücklichen Vorgaben: (1) erst ein vollständiger Plan, dann alle
+Schritte ohne Zwischenstopp — dieselbe Disziplin wie Phase 9; (2) Fokus vor
+allem auf die UI, nicht auf weitere Tests, mit nur einer vollen Testsuite
+am Ende statt der sonst pro Schritt üblichen.
+
+**Entscheidung 1 — Scope-Erweiterung um drei UI-Restposten:** Drei
+`FEATURES.md`-Zeilen standen noch auf Phase 3/5, wurden dort aber nie
+angefasst: rechte Werkzeug-Palette/Modul-Umschalter oben (Phase 3),
+ein-/ausklappbare/breitenziehbare Paletten mit Arbeitsbereich-Preset
+(Phase 3), vollständige Befehlspalette (Phase 5, bisher nur
+Ordner+ein Befehl). Alle drei sind reine UI-Arbeit und passen exakt zum
+Auftrag „vor allem UI" — sie werden analog zu ADR-0032 (das
+Bibliotheks-Backlog von Phase 6 nach Phase 9 verschob) in Phase 10 gezogen,
+statt sie ein drittes Mal auf eine noch spätere Phase zu vertagen.
+
+**Entscheidung 2 — Testdisziplin gelockert, nur für diese Phase:**
+`PLAN.md` §6 verlangt normalerweise „Jedes Rust-Modul mit Unit-Tests …
+E2E-Test pro Modul" pro Schritt. Auf ausdrücklichen Nutzerwunsch schreibt
+Phase 10 **pro Schritt keine neue Testdatei** — nur `cargo build`/`tsc -b`
+als Kompilier-Kontrolle. Die volle Suite (`cargo fmt/clippy/test`,
+`tsc -b`, `vitest run`, volle Playwright-Suite) läuft einmalig am Ende
+(Schritt 12) gegen den gesamten in dieser Phase entstandenen Stand. Das ist
+eine bewusste, befristete Ausnahme von der sonst verbindlichen Regel — sie
+gilt nicht rückwirkend für Phase 1–9 und nicht automatisch für Phase 11+,
+falls es eine gibt.
+
+**Entscheidung 3 — Installer/Signierung ehrlich begrenzt:** Diese
+Linux-Sandbox besitzt keine echten Code-Signing-Zertifikate (Apple
+Developer ID + Notarisierungs-Zugangsdaten, Windows-Codesigning-Zertifikat)
+und kann sie nicht beschaffen — dieselbe Beschaffungslage wie
+`libgphoto2` (ADR-0035 Punkt 5) oder die fehlende ONNX-Runtime
+(ADR-0033). Schritt 11 baut die strukturelle Infrastruktur (Tauri-
+Bundler-Konfiguration, `@tauri-apps/cli`, ein neuer CI-`release`-Job auf
+dem bestehenden 3-OS-Matrix, Signierungsfelder aus optionalen
+GitHub-Secrets gespeist, übersprungen statt fehlschlagend, wenn sie
+fehlen) — produziert aber in dieser Umgebung **unsignierte** Installer.
+Echtes Signieren bleibt dem Nutzer vorbehalten, sobald eigene
+Zertifikate/Secrets hinterlegt sind. Cross-Plattform-Bundling
+(macOS-/Windows-Installer von Linux aus) wird nicht lokal versucht — die
+Verifikation läuft ausschließlich über die drei echten nativen CI-Runner.
+
+**Konsequenzen:** `FEATURES.md`s Phase-10-Zeilen wachsen um die drei
+umgetaggten Punkte. Performance-Profiling (Schritt 10) liefert eine
+dokumentierte Einschätzung gegen die in dieser Sandbox tatsächlich
+messbaren Teilziele statt spekulativer Umbauten ohne Befund — dieselbe
+Grenze wie die fehlenden Golden-Image-RAW-Tests (ADR-0007). Lokalisierung
+(Schritt 8) deckt systematisch alle Frontend-Komponenten ab, aber ohne
+einen dafür geschriebenen Coverage-Test ist einzelne übersehene Strings
+nicht mit Sicherheit ausgeschlossen — als offener, dokumentierter Rest
+statt stillschweigend behauptet.

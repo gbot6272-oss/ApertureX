@@ -903,8 +903,30 @@ Zulieferer existiert, siehe ADR-0032 Punkt 3).
   - **Nachtrag**: `THIRD_PARTY.md` fehlten die in Schritt 1/8/9 bereits eingeführten `image_hasher`/`rustfft`/`rhai`/`libloading`-Zeilen entgegen der Datei-eigenen Regel — beim Verifizieren dieses Schritts aufgefallen und zusammen mit `gphoto2` rückwirkend nachgetragen
   - Tests (bewusst schlank): 5 neue `apx-tether`-Rust-Unit-Tests (`FakeBackend`, inkl. eines echten JPEG-Decodier-Rundlaufs), 4 neue `apx-app`-Tests (`resolve_tether_import_settings`-Auflösung mit/ohne/unbekanntem Preset, `new_tether_backend`s Simulations-Kennzeichnung), 1 neuer Playwright-e2e-Test (`tether-flow.spec.ts`); `cargo test -p apx-tether -p apx-core -p apx-app` (5+24+70 Tests) und die volle Vitest-Suite (195 Tests) erneut grün
 
-- [ ] 12. Dokumentation, Tests, Abnahme
+- [x] 12. Dokumentation, Tests, Abnahme
   - `ARCHITECTURE.md`: neues Kapitel „Architektur Phase 9"
   - `FEATURES.md`: alle 38 Phase-9-Zeilen final; Tiefenbereich-Masken bleibt offen
   - Einmalige finale Verifikation (nicht wiederholt nach jedem Teilschritt): `cargo build --workspace`, `tsc -b`, `vitest run`, eine gezielte Playwright-Stichprobe
   - Commit+Push, ehrlicher Abschlussbericht inkl. aller ADR-0035-Vereinfachungen
+
+## Aktuelle Phase: Phase 10 — Politur
+
+Ausführlicher Schritt-für-Schritt-Plan siehe ADR-0037 (Scope-Entscheidungen)
+und die Session-Planungsnotiz; hier die verbindliche Schrittliste. Abweichend
+von §6: **pro Schritt keine neue Testdatei**, nur `cargo build`/`tsc -b` als
+Kompilier-Kontrolle — die volle Suite läuft einmalig in Schritt 12 (siehe
+ADR-0037, nutzerangeordnete befristete Ausnahme).
+
+- [x] 0. Scope festzurren (ADR-0037: drei Phase-3/5-UI-Restposten reingezogen, Testdisziplin gelockert, Installer-Signierung ehrlich begrenzt)
+- [ ] 1. Settings-Fundament: Backend-Anbindung (`UiSettings` erweitern, `get_ui_settings`/`set_ui_settings`) + neuer `SettingsDialog.tsx`
+- [ ] 2. Modul-Umschalter + rechte Werkzeug-Palette
+- [ ] 3. Ein-/ausklappbare, breitenziehbare Paletten + Arbeitsbereich-Preset
+- [ ] 4. Vollständige Befehlspalette
+- [ ] 5. Vollständig belegbare Tastenkürzel + Cheatsheet-Overlay
+- [ ] 6. Barrierefreiheit (Tastatur, Screenreader, Kontrastmodus, UI-Skalierung 75–200 %)
+- [ ] 7. Volles helles Theme + benutzerdefinierte Akzentfarbe
+- [ ] 8. Lokalisierung (Deutsch/Englisch)
+- [ ] 9. Onboarding
+- [ ] 10. Performance-Profiling gegen SPEC.md §2.4
+- [ ] 11. Installer + Signierung (alle drei Plattformen, strukturell + konditional)
+- [ ] 12. Dokumentation, einmalige volle Verifikation, Abnahme

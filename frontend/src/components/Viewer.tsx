@@ -574,6 +574,7 @@ export function Viewer() {
                 selectMask(mask.id);
               }}
               title={mask.name}
+              aria-label={`Bearbeitungs-Pin: ${mask.name}`}
               className={`absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 ${
                 mask.id === selectedMaskId ? "border-accent bg-accent/60" : "border-text-primary/70 bg-bg-raised/70"
               }`}

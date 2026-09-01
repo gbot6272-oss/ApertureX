@@ -132,8 +132,17 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo fmt --all -- --check
 
+      # Bewusst ohne `--all-features`: `apx-tether`s optionales Feature
+      # `tethering` (Phase 9 Schritt 11, siehe DECISIONS.md ADR-0035
+      # Punkt 5) bindet an die Systembibliothek `libgphoto2`, die auf
+      # keinem der drei CI-Runner installiert ist — dasselbe
+      # Beschaffungsproblem wie in dieser Sandbox. `--all-features` würde
+      # das Feature erzwingen und schon beim Kompilieren scheitern, nicht
+      # an einem echten Lint-Befund. Standard-Features decken den Rest
+      # des Workspace vollständig ab (kein zweites optionales Feature
+      # existiert bisher).
       - name: cargo clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used
+        run: cargo clippy --workspace --all-targets -- -D warnings -D clippy::unwrap_used
 
       # `--nocapture` ist hier bewusst gesetzt (nicht nur bei Fehlschlag
       # aktiv): `apx-pipeline`s `gpu_matches_cpu`-artige Tests drucken bei

@@ -77,7 +77,7 @@ export function Header() {
   const percent = importProgress && importProgress.total > 0 ? Math.round((importProgress.done / importProgress.total) * 100) : 0;
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-4 border-b border-border bg-bg-raised px-4">
+    <header className="flex h-12 shrink-0 items-center gap-4 overflow-x-auto border-b border-border bg-bg-raised px-4">
       <span className="font-semibold tracking-wide">Aperture X</span>
 
       <button
@@ -103,10 +103,10 @@ export function Header() {
 
       {importRunning && (
         <>
-          <div className="h-1.5 w-48 overflow-hidden rounded bg-bg-panel">
+          <div className="h-1.5 w-48 shrink-0 overflow-hidden rounded bg-bg-panel">
             <div className="h-full bg-accent transition-[width] duration-150" style={{ width: `${percent}%` }} />
           </div>
-          <span className="max-w-xs truncate text-xs text-text-secondary">
+          <span className="max-w-xs shrink-0 truncate text-xs text-text-secondary">
             {importProgress ? `${importProgress.done} / ${importProgress.total}${importProgress.currentFile ? ` — ${importProgress.currentFile}` : ""}` : ""}
           </span>
           <button

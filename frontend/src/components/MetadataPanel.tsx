@@ -3,6 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 
 import { formatShutter } from "../lib/format";
 import { selectActivePhotos, useAppStore } from "../store";
+import { PaletteFrame } from "./PaletteFrame";
 import { ColorLabelPicker, FlagToggle, RatingStars } from "./RatingFlagColor";
 
 /**
@@ -42,7 +43,7 @@ export function MetadataPanel() {
   }
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border bg-bg-raised p-3" aria-label="Metadaten">
+    <PaletteFrame id="metadata" side="right" defaultWidth={288} label="Metadaten" className="gap-4 border-l border-border bg-bg-raised p-3">
       <h2 className="text-sm font-semibold text-text-primary">Metadaten</h2>
 
       {!photo && <p className="text-xs text-text-muted">Kein Foto ausgewählt.</p>}
@@ -198,6 +199,6 @@ export function MetadataPanel() {
           </dl>
         </>
       )}
-    </aside>
+    </PaletteFrame>
   );
 }

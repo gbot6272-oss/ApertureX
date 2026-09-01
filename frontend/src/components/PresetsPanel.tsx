@@ -4,6 +4,7 @@ import { buildChildrenByParent } from "../lib/folderTree";
 import { buildPresetEdlSubset, PRESET_SECTION_KEYS } from "../lib/presets";
 import type { PresetDto, PresetFolderDto } from "../lib/tauri";
 import { selectPresetConditionMeta, useAppStore } from "../store";
+import { PaletteFrame } from "./PaletteFrame";
 import { PresetThumbnail } from "./PresetThumbnail";
 import { PresetVersionsDialog } from "./PresetVersionsDialog";
 
@@ -508,7 +509,7 @@ export function PresetsPanel() {
   }
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col gap-3 overflow-y-auto border-r border-border bg-bg-raised p-3">
+    <PaletteFrame id="presets" side="left" defaultWidth={256} label="Presets" className="gap-3 border-r border-border bg-bg-raised p-3">
       <h2 className="text-sm font-semibold text-text-primary">Presets</h2>
 
       <ul className="space-y-0.5">
@@ -575,6 +576,6 @@ export function PresetsPanel() {
         presetName={versionsDialog?.presetName ?? ""}
         onClose={() => setVersionsDialog(null)}
       />
-    </aside>
+    </PaletteFrame>
   );
 }

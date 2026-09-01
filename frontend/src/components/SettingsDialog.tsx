@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { UiSettingsDto } from "../lib/tauri";
+import { resetWorkspaceLayout } from "../lib/workspaceLayout";
 import { useAppStore } from "../store";
 
 interface SettingsDialogProps {
@@ -134,6 +135,15 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                   onChange={(event) => update({ reduced_motion: event.target.checked })}
                 />
               </label>
+
+              <button
+                type="button"
+                onClick={() => resetWorkspaceLayout()}
+                title="Setzt Breite und Eingeklappt-Status aller Paletten (Ordner/Presets/Metadaten) zurück"
+                className="self-start rounded border border-border px-3 py-1 text-text-secondary hover:border-accent hover:text-text-primary"
+              >
+                Arbeitsbereich zurücksetzen
+              </button>
             </div>
           ) : (
             <div className="flex flex-col gap-4 text-xs">

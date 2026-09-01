@@ -5,6 +5,7 @@ import { buildChildrenByParent } from "../lib/folderTree";
 import { selectFolderDialog } from "../lib/tauri";
 import type { FolderDto } from "../lib/tauri";
 import { useAppStore } from "../store";
+import { PaletteFrame } from "./PaletteFrame";
 
 interface FolderNodeProps {
   folder: FolderDto;
@@ -171,7 +172,7 @@ export function Sidebar() {
   const { roots, childrenOf } = useMemo(() => buildChildrenByParent(folders), [folders]);
 
   return (
-    <aside className="w-64 shrink-0 overflow-y-auto border-r border-border bg-bg-raised p-2">
+    <PaletteFrame id="sidebar" side="left" defaultWidth={256} label="Ordner" className="border-r border-border bg-bg-raised p-2">
       <h2 className="px-2 pb-2 text-xs font-semibold tracking-wide text-text-secondary uppercase">Ordner</h2>
 
       {folders.length === 0 && <p className="px-2 text-sm text-text-muted">Noch keine Ordner importiert.</p>}
@@ -183,6 +184,6 @@ export function Sidebar() {
       </ul>
 
       <CollectionsSection />
-    </aside>
+    </PaletteFrame>
   );
 }

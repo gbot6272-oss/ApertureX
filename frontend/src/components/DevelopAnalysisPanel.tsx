@@ -18,6 +18,10 @@ interface DevelopAnalysisPanelProps {
   onToggleClippingOverlay: () => void;
   viewport: Viewport | null;
   thumbnailUrl: string | null;
+  /** Auto-Ton (Phase 9 Schritt 5) — bekommt das bereits berechnete
+   * Histogramm übergeben, damit es hier nicht ein zweites Mal berechnet
+   * werden muss. */
+  onAutoTone: (histogram: Histogram) => void;
 }
 
 function HistogramCanvas({ histogram }: { histogram: Histogram }) {
@@ -66,7 +70,7 @@ function HistogramCanvas({ histogram }: { histogram: Histogram }) {
  * Entwickeln-Panel offen ist (`Viewer.tsx` reicht `frame`/`pointerSample`
  * nur dann durch).
  */
-export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnabled, onToggleClippingOverlay, viewport, thumbnailUrl }: DevelopAnalysisPanelProps) {
+export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnabled, onToggleClippingOverlay, viewport, thumbnailUrl, onAutoTone }: DevelopAnalysisPanelProps) {
   if (!frame) return null;
 
   const histogram = computeHistogram(frame.pixels, frame.width, frame.height);
@@ -106,6 +110,14 @@ export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnab
           </div>
         </div>
         <HistogramCanvas histogram={histogram} />
+        <button
+          type="button"
+          onClick={() => onAutoTone(histogram)}
+          className="pointer-events-auto mt-1 w-full rounded border border-border px-1 py-0.5 hover:border-accent"
+          title="Belichtung/Kontrast aus dem Histogramm ableiten (Perzentil-Heuristik, keine KI)"
+        >
+          Auto-Ton
+        </button>
       </div>
 
       {thumbnailUrl && viewport && (

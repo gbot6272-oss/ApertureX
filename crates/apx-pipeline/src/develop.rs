@@ -14,13 +14,13 @@ use apx_raw::LinearImage;
 use crate::color::linear_camera_rgb_to_srgb_rgba8;
 use crate::edl::{
     CalibrationAdjustment, ColorGradingAdjustment, CurvesAdjustment, DetailsAdjustment, EdlV3,
-    EffectsAdjustment, GeometryAdjustment, HslAdjustment,
+    EffectsAdjustment, GeometryAdjustment, HslAdjustment, Treatment,
 };
 use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
-    basic_fused, calibration, color_grading, curves, details, effects, geometry, hsl_color_mixer,
-    lens_corrections, local_contrast, masks, repair, white_balance,
+    basic_fused, bw_mixer, calibration, color_grading, curves, details, effects, geometry,
+    hsl_color_mixer, lens_corrections, local_contrast, masks, repair, white_balance,
 };
 
 /// Das Ergebnis von [`render_rgba8`] — `width`/`height` beschreiben
@@ -309,12 +309,23 @@ pub fn render_rgba8(
 
     let rgba = linear_camera_rgb_to_srgb_rgba8(&masked, linear.cam_to_srgb);
 
+    // Schwarzweiß-Mixer (Phase 9 Schritt 5) — wie `curves` bewusst nach
+    // der Farbraum-Konvertierung, davor: eine Tonwertkurve auf einem
+    // bereits entsättigten Grauwert ergibt dasselbe sichtbare Ergebnis
+    // wie auf dem farbigen Original, aber die Reihenfolge erlaubt dem
+    // Mixer, noch den vollen Farbton jedes Pixels zu sehen.
+    let treated = if edl.treatment == Treatment::BlackAndWhite {
+        bw_mixer::apply_rgba8(&rgba, &edl.bw_mixer)
+    } else {
+        rgba
+    };
+
     let curved = if edl.curves == CurvesAdjustment::neutral() {
         // Kein zusätzlicher Durchlauf über den ganzen Puffer, wenn alle
         // fünf Kurven neutral stehen (Regelfall).
-        rgba
+        treated
     } else {
-        curves::apply_rgba8(&rgba, &edl.curves)
+        curves::apply_rgba8(&treated, &edl.curves)
     };
 
     let (width, height, pixels) = if edl.geometry == GeometryAdjustment::NEUTRAL {
@@ -630,6 +641,8 @@ mod tests {
             }],
             masks: Vec::new(),
             mask_groups: Vec::new(),
+            treatment: crate::edl::Treatment::Color,
+            bw_mixer: crate::edl::BlackAndWhiteMixerAdjustment::NEUTRAL,
         };
 
         if let Some(ctx) = &ctx {

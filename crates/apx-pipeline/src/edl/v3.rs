@@ -288,6 +288,66 @@ pub struct MaskGroup {
     pub visible: bool,
 }
 
+// ---- Schwarzweiß-Mixer (Phase 9 Schritt 5, siehe DECISIONS.md ADR-0035) ----
+//
+// Additiv zu Schema-Version 3 (`#[serde(default)]` auf beiden neuen
+// `EdlV3`-Feldern unten) statt eines eigenen v4-Sprungs — ein
+// gespeichertes v3-EDL ohne diese Felder liest weiterhin einwandfrei
+// (`treatment` wird `Color`, `bw_mixer` neutral), der eigentliche v3→v4-
+// Sprung ist für den Node-Editor in Schritt 7 vorgesehen (`enabled`-Feld
+// pro Rendering-Stufe), wo mehrere neue Felder gemeinsam ankommen.
+
+/// Farbe oder Schwarzweiß — steuert, ob [`EdlV3::bw_mixer`] überhaupt
+/// angewendet wird (`develop.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum Treatment {
+    #[default]
+    Color,
+    BlackAndWhite,
+}
+
+/// Acht Luminanzgewichte, ein Band je Farbton (dieselben acht Bänder wie
+/// [`v2::HslAdjustment`]) — jedes Gewicht ist ein Prozentsatz, `100` =
+/// unverändert (entspricht der reinen Rec.-709-Luminanz für diesen
+/// Farbton), `0` = dieser Farbton trägt nichts zum Grauwert bei, `200` =
+/// doppeltes Gewicht. Nur wirksam, wenn [`EdlV3::treatment`] auf
+/// [`Treatment::BlackAndWhite`] steht.
+///
+/// **Bewusste Vereinfachung**: die Standardwerte sind eine grobe,
+/// selbst gewählte Näherung an ein neutrales Ergebnis, keine
+/// Rekonstruktion von Adobes proprietären Schwarzweiß-Grundwerten (die
+/// nirgends öffentlich als exakte Zahlen dokumentiert sind).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct BlackAndWhiteMixerAdjustment {
+    pub red: f32,
+    pub orange: f32,
+    pub yellow: f32,
+    pub green: f32,
+    pub aqua: f32,
+    pub blue: f32,
+    pub purple: f32,
+    pub magenta: f32,
+}
+
+impl BlackAndWhiteMixerAdjustment {
+    pub const NEUTRAL: Self = Self {
+        red: 100.0,
+        orange: 100.0,
+        yellow: 100.0,
+        green: 100.0,
+        aqua: 100.0,
+        blue: 100.0,
+        purple: 100.0,
+        magenta: 100.0,
+    };
+}
+
+impl Default for BlackAndWhiteMixerAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
 // ---- Der vollständige EDL v3 -----------------------------------------------
 
 /// Die konkrete EDL-Struktur für Schema-Version 3 — siehe
@@ -311,6 +371,12 @@ pub struct EdlV3 {
     /// ADR-0032 Punkt 4).
     pub masks: Vec<Mask>,
     pub mask_groups: Vec<MaskGroup>,
+    /// Schwarzweiß-Mixer (Phase 9 Schritt 5) — additiv, siehe Moduldoku
+    /// oben.
+    #[serde(default)]
+    pub treatment: Treatment,
+    #[serde(default)]
+    pub bw_mixer: BlackAndWhiteMixerAdjustment,
 }
 
 impl EdlV3 {
@@ -331,6 +397,8 @@ impl EdlV3 {
             repair: Vec::new(),
             masks: Vec::new(),
             mask_groups: Vec::new(),
+            treatment: Treatment::Color,
+            bw_mixer: BlackAndWhiteMixerAdjustment::NEUTRAL,
         }
     }
 
@@ -353,6 +421,8 @@ impl EdlV3 {
             repair: old.repair,
             masks: Vec::new(),
             mask_groups: Vec::new(),
+            treatment: Treatment::Color,
+            bw_mixer: BlackAndWhiteMixerAdjustment::NEUTRAL,
         }
     }
 }

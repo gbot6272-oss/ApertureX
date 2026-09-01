@@ -843,6 +843,35 @@ export const MASK_SLIDER_SPECS: readonly SliderSpec[] = [
 
 // ---- Der vollständige EDL-Payload -------------------------------------------
 
+/** Farbe oder Schwarzweiß (Phase 9 Schritt 5) — spiegelt
+ * `apx_pipeline::edl::v3::Treatment`. */
+export type Treatment = "Color" | "BlackAndWhite";
+
+/** Acht Luminanzgewichte je Farbton-Band (dieselben acht Bänder wie
+ * {@link HslAdjustment}), `100` = unverändert. Siehe `bw_mixer.rs`s
+ * Moduldoku für die bewusste Vereinfachung bei den Standardwerten. */
+export interface BlackAndWhiteMixerAdjustment {
+  red: number;
+  orange: number;
+  yellow: number;
+  green: number;
+  aqua: number;
+  blue: number;
+  purple: number;
+  magenta: number;
+}
+
+export const NEUTRAL_BW_MIXER: BlackAndWhiteMixerAdjustment = {
+  red: 100,
+  orange: 100,
+  yellow: 100,
+  green: 100,
+  aqua: 100,
+  blue: 100,
+  purple: 100,
+  magenta: 100,
+};
+
 /** Spiegelt `apx_pipeline::edl::v3::EdlV3` — der komplette Inhalt eines
  * `EdlEnvelope.payload`. */
 export interface EdlPayload {
@@ -859,6 +888,8 @@ export interface EdlPayload {
   repair: RepairStroke[];
   masks: Mask[];
   mask_groups: MaskGroup[];
+  treatment: Treatment;
+  bw_mixer: BlackAndWhiteMixerAdjustment;
 }
 
 export function neutralEdlPayload(): EdlPayload {
@@ -876,6 +907,8 @@ export function neutralEdlPayload(): EdlPayload {
     repair: [],
     masks: [],
     mask_groups: [],
+    treatment: "Color",
+    bw_mixer: NEUTRAL_BW_MIXER,
   };
 }
 
@@ -944,6 +977,27 @@ export const BASIC_SLIDER_SPECS: readonly SliderSpec[] = [
   { key: "vibrance", label: "Dynamik", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
   { key: "saturation", label: "Sättigung", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
 ] as const;
+
+// ---- Schwarzweiß-Mixer (Phase 9 Schritt 5) ----------------------------------
+
+/** Dieselben acht Bänder/Beschriftungen wie {@link HSL_BAND_TABS} — der
+ * Schwarzweiß-Mixer gewichtet nach demselben Farbton-Schema. */
+export const BW_MIXER_BAND_TABS: ReadonlyArray<{ key: keyof BlackAndWhiteMixerAdjustment; label: string }> = [
+  { key: "red", label: "Rot" },
+  { key: "orange", label: "Orange" },
+  { key: "yellow", label: "Gelb" },
+  { key: "green", label: "Grün" },
+  { key: "aqua", label: "Aqua" },
+  { key: "blue", label: "Blau" },
+  { key: "purple", label: "Lila" },
+  { key: "magenta", label: "Magenta" },
+] as const;
+
+export const BW_MIXER_SLIDER_SPEC: SliderSpec = { key: "weight", label: "Gewicht", min: 0, max: 200, fineStep: 1, coarseStep: 10, neutral: 100 };
+
+export function writeBwMixerField(mixer: BlackAndWhiteMixerAdjustment, band: keyof BlackAndWhiteMixerAdjustment, value: number): void {
+  mixer[band] = value;
+}
 
 // ---- Weißabgleich-Pipette + Kamera-Presets (Phase 4 Schritt 3) --------------
 

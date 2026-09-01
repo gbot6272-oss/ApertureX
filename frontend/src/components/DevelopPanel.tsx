@@ -4,6 +4,8 @@ import { useShallow } from "zustand/react/shallow";
 import {
   ASPECT_RATIO_PRESETS,
   BASIC_SLIDER_SPECS,
+  BW_MIXER_BAND_TABS,
+  BW_MIXER_SLIDER_SPEC,
   CALIBRATION_PRIMARY_ROWS,
   CAMERA_PROFILE_OPTIONS,
   COLOR_GRADING_WHEEL_TABS,
@@ -25,6 +27,7 @@ import {
   SHARPEN_SLIDER_SPECS,
   UPRIGHT_MODE_OPTIONS,
   WHITE_BALANCE_PRESETS,
+  type BlackAndWhiteMixerAdjustment,
   type ColorMixerRegion,
   type CurvesAdjustment,
   type DetailsSliderKey,
@@ -158,6 +161,11 @@ export function DevelopPanel() {
   const hsl = useAppStore((s) => s.developEdl.hsl);
   const setHslBandField = useAppStore((s) => s.setHslBandField);
   const [activeHslBand, setActiveHslBand] = useState<keyof HslAdjustment>("red");
+  const treatment = useAppStore((s) => s.developEdl.treatment);
+  const setTreatment = useAppStore((s) => s.setTreatment);
+  const bwMixer = useAppStore((s) => s.developEdl.bw_mixer);
+  const setBwMixerField = useAppStore((s) => s.setBwMixerField);
+  const [activeBwMixerBand, setActiveBwMixerBand] = useState<keyof BlackAndWhiteMixerAdjustment>("red");
   const colorMixer = useAppStore((s) => s.developEdl.color_mixer);
   const colorMixerPickerActive = useAppStore((s) => s.colorMixerPickerActive);
   const toggleColorMixerPicker = useAppStore((s) => s.toggleColorMixerPicker);
@@ -659,6 +667,53 @@ export function DevelopPanel() {
                 );
               })}
             </div>
+          </fieldset>
+
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Behandlung</legend>
+            <div className="flex gap-1" role="group" aria-label="Behandlung">
+              <button
+                type="button"
+                onClick={() => setTreatment("Color")}
+                aria-pressed={treatment === "Color"}
+                className={`flex-1 rounded border px-2 py-1 text-xs ${treatment === "Color" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"}`}
+              >
+                Farbe
+              </button>
+              <button
+                type="button"
+                onClick={() => setTreatment("BlackAndWhite")}
+                aria-pressed={treatment === "BlackAndWhite"}
+                className={`flex-1 rounded border px-2 py-1 text-xs ${treatment === "BlackAndWhite" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"}`}
+              >
+                Schwarzweiß
+              </button>
+            </div>
+            {treatment === "BlackAndWhite" && (
+              <>
+                <div className="flex flex-wrap gap-1">
+                  {BW_MIXER_BAND_TABS.map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => setActiveBwMixerBand(tab.key)}
+                      aria-pressed={activeBwMixerBand === tab.key}
+                      className={`rounded border px-2 py-1 text-xs ${
+                        activeBwMixerBand === tab.key ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+                <DevelopSlider
+                  spec={{ ...BW_MIXER_SLIDER_SPEC, label: BW_MIXER_BAND_TABS.find((t) => t.key === activeBwMixerBand)?.label ?? "" }}
+                  value={bwMixer[activeBwMixerBand]}
+                  onChange={(value) => setBwMixerField(activeBwMixerBand, value)}
+                  onCommit={() => void commitDevelopEdit()}
+                />
+              </>
+            )}
           </fieldset>
 
           <fieldset className="flex flex-col gap-2">

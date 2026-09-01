@@ -3,9 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDevelopRender } from "../hooks/useDevelopRender";
 import { useElementSize } from "../hooks/useElementSize";
 import { useImageBitmap } from "../hooks/useImageBitmap";
+import { computeAutoTone } from "../lib/autoTone";
 import { buildEdlEnvelopeJson } from "../lib/edl";
 import { formatShutter } from "../lib/format";
 import { buildClippingOverlay } from "../lib/histogram";
+import { computeMaskPinPosition } from "../lib/maskPins";
 import { imageUrl, previewUrl } from "../lib/media";
 import { mergeEdlSubset } from "../lib/presets";
 import { applySoftProof } from "../lib/softProof";
@@ -39,6 +41,9 @@ export function Viewer() {
   const setZoom = useAppStore((s) => s.setZoom);
   const setPan = useAppStore((s) => s.setPan);
   const resetView = useAppStore((s) => s.resetView);
+  const infoOverlayVisible = useAppStore((s) => s.infoOverlayVisible);
+  const toggleInfoOverlay = useAppStore((s) => s.toggleInfoOverlay);
+  const applyAutoTone = useAppStore((s) => s.applyAutoTone);
   const developPanelOpen = useAppStore((s) => s.developPanelOpen);
   const developEdl = useAppStore((s) => s.developEdl);
   const beforeAfterMode = useAppStore((s) => s.beforeAfterMode);
@@ -74,6 +79,7 @@ export function Viewer() {
   const addRepairStroke = useAppStore((s) => s.addRepairStroke);
   const selectedMaskId = useAppStore((s) => s.selectedMaskId);
   const selectedMask = useAppStore((s) => s.developEdl.masks.find((m) => m.id === selectedMaskId) ?? null);
+  const selectMask = useAppStore((s) => s.selectMask);
   const selectedMaskComponentIndex = useAppStore((s) => s.selectedMaskComponentIndex);
   const updateMaskGeometry = useAppStore((s) => s.updateMaskGeometry);
   const commitMaskDrag = useAppStore((s) => s.commitMaskDrag);
@@ -428,6 +434,10 @@ export function Viewer() {
       } else if (event.key === "1") {
         setZoom(1, "manual");
         setPan(0, 0);
+      } else if (event.key === "i" || event.key === "I") {
+        // Info-Overlay ein-/ausblenden (Phase 9 Schritt 5) — dieselbe
+        // Taste wie in Lightroom Classic.
+        toggleInfoOverlay();
       }
     }
     function handleKeyUp(event: KeyboardEvent) {
@@ -440,7 +450,7 @@ export function Viewer() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [effectiveScale, fitScale, setZoom, setPan, resetView]);
+  }, [effectiveScale, fitScale, setZoom, setPan, resetView, toggleInfoOverlay]);
 
   return (
     <main
@@ -538,7 +548,41 @@ export function Viewer() {
           />
         )}
 
-      {photo && (
+      {/* Bearbeitungs-Pins (Phase 9 Schritt 5): ein anklickbarer Marker je
+          Maske mit eindeutiger räumlicher Position — fokussiert die
+          zugehörige Maske im `MasksPanel`, reine Anzeige-Überlagerung über
+          die bestehende Maskengeometrie. Nur solange nicht gerade eine
+          andere Bildwerkzeug-Interaktion läuft (sonst würden sich Klicks
+          überschneiden). */}
+      {photo &&
+        developPanelOpen &&
+        !repairActive &&
+        !geometryCropActive &&
+        !pickerActive &&
+        imgW > 0 &&
+        imgH > 0 &&
+        developEdl.masks.map((mask) => {
+          const position = computeMaskPinPosition(mask);
+          if (!position) return null;
+          const origin = imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY });
+          return (
+            <button
+              key={mask.id}
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                selectMask(mask.id);
+              }}
+              title={mask.name}
+              className={`absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 ${
+                mask.id === selectedMaskId ? "border-accent bg-accent/60" : "border-text-primary/70 bg-bg-raised/70"
+              }`}
+              style={{ left: origin.x + position.x * imgW * effectiveScale, top: origin.y + position.y * imgH * effectiveScale }}
+            />
+          );
+        })}
+
+      {photo && infoOverlayVisible && (
         <div className="pointer-events-none absolute right-3 bottom-3 rounded bg-bg-raised/90 px-3 py-2 text-xs text-text-secondary backdrop-blur">
           <div className="font-medium text-text-primary">
             {photo.filename}
@@ -569,6 +613,7 @@ export function Viewer() {
           onToggleClippingOverlay={() => setClippingOverlayEnabled((v) => !v)}
           viewport={navigatorViewport}
           thumbnailUrl={previewUrl(photo.id, 0)}
+          onAutoTone={(histogram) => applyAutoTone(computeAutoTone(histogram))}
         />
       )}
     </main>

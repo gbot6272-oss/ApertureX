@@ -851,11 +851,13 @@ Zulieferer existiert, siehe ADR-0032 Punkt 3).
   - **Wichtiger Bugfix während der Umsetzung**: das schwebende Panel muss `pointer-events-none` auf dem Container tragen (nur die beiden Knöpfe `pointer-events-auto`) — sonst fängt es in einem schmalen Viewer-Ausschnitt (viele gleichzeitig offene Seitenleisten) Bildklicks für andere Werkzeuge (z. B. den Reparatur-Pinsel) ab; durch den Regressionstest der bestehenden `develop-flow.spec.ts`-Suite gefunden und behoben
   - Tests (bewusst schlank): 7 neue `histogram.test.ts`-Unit-Tests, 1 neuer Playwright-e2e-Test (`develop-analysis-flow.spec.ts`), volle bestehende `develop-flow.spec.ts`-Suite (23 Tests) erneut grün als Regressionsprobe für den `Viewer.tsx`-Eingriff
 
-- [ ] 5. Entwickeln: TAT, Auto-Ton, Schwarzweiß-Mixer, Info-Overlay, Bearbeitungs-Pins
-  - Zielgerichtetes Anpassungswerkzeug (Bildklick+Zug steuert Kurven-/HSL-Regler)
-  - Auto-Ton/Auto-Weißabgleich: Histogramm-Perzentil-Heuristik, kein LLM
-  - Schwarzweiß-Mixer: neues `EdlV3`-Feld (8-Kanal-Luminanzgewichte) + Treatment-Umschalter
-  - Info-Overlay Vollbild, Bearbeitungs-Pins (Frontend-Überlagerung über bestehende Maskengeometrie)
+- [x] 5. Entwickeln: TAT, Auto-Ton, Schwarzweiß-Mixer, Info-Overlay, Bearbeitungs-Pins
+  - Info-Overlay: bestehende Datei-/EXIF-Anzeige jetzt mit `infoOverlayVisible`-Umschalter (Taste „I")
+  - Bearbeitungs-Pins: `lib/maskPins.ts::computeMaskPinPosition` (reine Frontend-Überlagerung, kein neues Backend-Feld) — Verlauf/Radial/Pinsel-Masken bekommen einen anklickbaren Marker (fokussiert die Maske über `selectMask`), Farb-/Luminanzbereich-/KI-generierte Masken bewusst nicht (kein eindeutiger Ankerpunkt)
+  - Auto-Ton: `lib/autoTone.ts::computeAutoTone`, reine Histogramm-Perzentil-Heuristik über das bereits vorhandene `computeHistogram` aus Schritt 4 — setzt nur Belichtung (Median → 18 % Grau, über dieselbe `^2.2`-Näherung wie die Weißabgleich-Pipette) und Kontrast (Perzentil-Spanne); Lichter/Tiefen/Weiß/Schwarz bewusst unangetastet (keine algebraische Umkehrung ihrer tonwertkurvenartigen Wirkung ohne zu raten)
+  - Schwarzweiß-Mixer: neues `apx_pipeline::stages::bw_mixer`-Modul, additiv zu `EdlV3` (`treatment`/`bw_mixer`-Felder mit `#[serde(default)]`, **kein** v3→v4-Sprung — der ist für den Node-Editor in Schritt 7 vorgesehen), läuft wie `curves` nach der Farbraum-Konvertierung; wiederverwendet dieselbe Gauß-Bandgewichtung wie `hsl_color_mixer.rs` über `stages::color_math`, dieselben acht Bänder; Standardwerte sind eine grobe eigene Näherung, keine Rekonstruktion von Adobes proprietären Zahlen; bewusst nicht Teil des Presets-Systems (wie `repair`/`masks`)
+  - **Zurückgestellt**: Zielgerichtetes Anpassungswerkzeug (TAT) — welcher Regler an welche Zugrichtung gebunden wird, ist ohne Lightroom 1:1 zu kopieren mehrdeutig; eine eigene UX-Iteration statt einer überstürzten Umsetzung
+  - Tests (bewusst schlank): 4 neue `lib/maskPins.test.ts`, 6 neue `lib/autoTone.test.ts`, 5 neue `stages::bw_mixer`-Rust-Unit-Tests, 1 neuer Playwright-e2e-Test (`bw-mixer-flow.spec.ts`); volle bestehende `develop-flow.spec.ts`-Suite (24 Tests) erneut grün
 
 - [ ] 6. Entwickeln: KI-Entrauschung, KI-Hochskalierung
   - Klassische, deterministische Algorithmen statt Modellinferenz (Bilateral-Filter, kantengerichtete Interpolation) — dieselbe Ehrlichkeitslinie wie ADR-0033 (ADR-0035 Punkt 6), UI-Beschriftung behauptet kein „KI" wo keine Modellinferenz läuft

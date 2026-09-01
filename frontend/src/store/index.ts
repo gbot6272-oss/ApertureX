@@ -17,8 +17,9 @@ import {
   parseEdlEnvelopeJson,
   WHITE_BALANCE_PRESETS,
   writeBasicField,
+  writeBwMixerField,
 } from "../lib/edl";
-import type { AiMaskKind, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairMode, RepairPoint, UprightMode } from "../lib/edl";
+import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairMode, RepairPoint, Treatment, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import {
   applyConditionsToSubset,
@@ -75,6 +76,7 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 import * as undoStackLib from "../lib/undoStack";
 import type { UndoEntry } from "../lib/undoStack";
+import type { AutoToneResult } from "../lib/autoTone";
 import { computeWhiteBalanceShiftFromSample } from "../lib/whiteBalancePicker";
 
 /** Wandelt eine `HistoryPositionDto` (siehe `lib/tauri.ts`) in ein volles
@@ -232,6 +234,10 @@ interface ViewerSlice {
   setZoom: (zoom: number, fitMode?: FitMode) => void;
   setPan: (x: number, y: number) => void;
   resetView: () => void;
+  /** Info-Overlay (Dateiname/EXIF/Bewertung, Phase 9 Schritt 5) —
+   * umschaltbar statt fest eingeblendet, siehe `Viewer.tsx`. */
+  infoOverlayVisible: boolean;
+  toggleInfoOverlay: () => void;
 }
 
 // ---- Jobs-Slice (Import) ---------------------------------------------------
@@ -378,6 +384,12 @@ interface DevelopSlice {
   /** Setzt ein einzelnes Grundeinstellungs-Feld (Regler-Zwischenwert beim
    * Ziehen) — siehe `lib/edl.ts`s `SliderSpec.key` für gültige Schlüssel. */
   setBasicField: (key: string, value: number) => void;
+  /** Schwarzweiß-Mixer (Phase 9 Schritt 5): Regler-Zwischenwert beim
+   * Ziehen, wie `setBasicField`. */
+  setBwMixerField: (band: keyof BlackAndWhiteMixerAdjustment, value: number) => void;
+  /** Setzt Farbe/Schwarzweiß absolut und committet sofort (wie
+   * `applyWhiteBalancePreset`). */
+  setTreatment: (treatment: Treatment) => void;
   /** Ob die Weißabgleich-Pipette gerade auf einen Klick in den Viewer
    * wartet (Phase 4 Schritt 3, siehe `lib/whiteBalancePicker.ts`). */
   wbPickerActive: boolean;
@@ -390,6 +402,11 @@ interface DevelopSlice {
   /** Setzt den Weißabgleich absolut auf eines der `WHITE_BALANCE_PRESETS`
    * und committet sofort. */
   applyWhiteBalancePreset: (key: string) => void;
+  /** Setzt Belichtung/Kontrast absolut auf das Ergebnis von
+   * `lib/autoTone.ts::computeAutoTone` und committet sofort (Phase 9
+   * Schritt 5) — derselbe „Ein-Klick, sofort committen"-Vertrag wie
+   * `applyWhiteBalancePreset`. */
+  applyAutoTone: (result: AutoToneResult) => void;
   /** Ersetzt eine der fünf Kurven (Phase 4 Schritt 4, siehe
    * `components/CurveEditor.tsx`) — Zwischenstand beim Ziehen, committet
    * wird separat über `commitDevelopEdit()`. */
@@ -1368,6 +1385,13 @@ export const useAppStore = create<AppStore>()(
       });
     },
 
+    infoOverlayVisible: true,
+    toggleInfoOverlay: () => {
+      set((state) => {
+        state.infoOverlayVisible = !state.infoOverlayVisible;
+      });
+    },
+
     // Jobs (Import)
     importRunning: false,
     importProgress: null,
@@ -1715,6 +1739,19 @@ export const useAppStore = create<AppStore>()(
       });
     },
 
+    setBwMixerField: (band, value) => {
+      set((state) => {
+        writeBwMixerField(state.developEdl.bw_mixer, band, value);
+      });
+    },
+
+    setTreatment: (treatment) => {
+      set((state) => {
+        state.developEdl.treatment = treatment;
+      });
+      void get().commitDevelopEdit();
+    },
+
     wbPickerActive: false,
 
     toggleWbPicker: () => {
@@ -1736,6 +1773,14 @@ export const useAppStore = create<AppStore>()(
       if (!preset) return;
       set((state) => {
         state.developEdl.basic.white_balance = { temp_shift_kelvin: preset.temp_shift_kelvin, tint_shift: preset.tint_shift };
+      });
+      void get().commitDevelopEdit();
+    },
+
+    applyAutoTone: (result) => {
+      set((state) => {
+        state.developEdl.basic.exposure_ev = result.exposure_ev;
+        state.developEdl.basic.contrast = result.contrast;
       });
       void get().commitDevelopEdit();
     },

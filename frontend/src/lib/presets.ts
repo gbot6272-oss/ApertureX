@@ -9,7 +9,11 @@ import type { EdlPayload } from "./edl";
  * Strich an einer bestimmten Bildposition — sind kein „Look", der auf ein
  * anderes Foto übertragbar wäre; siehe auch `DECISIONS.md` ADR-0032).
  */
-export type PresetSectionKey = Exclude<keyof EdlPayload, "repair" | "masks" | "mask_groups">;
+// `treatment`/`bw_mixer` (Phase 9 Schritt 5) bewusst ausgeschlossen, wie
+// `repair`/`masks`/`mask_groups` — den Presets-Workflow (Kopieren/
+// Einfügen/Synchronisieren/gespeicherte Presets) um eine zehnte Sektion
+// zu erweitern ist eine spätere, eigene Ausbaustufe.
+export type PresetSectionKey = Exclude<keyof EdlPayload, "repair" | "masks" | "mask_groups" | "treatment" | "bw_mixer">;
 
 export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [
   "basic",

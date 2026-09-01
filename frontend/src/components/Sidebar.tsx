@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { folderLabel } from "../lib/format";
 import { buildChildrenByParent } from "../lib/folderTree";
+import { useT } from "../lib/i18n";
 import { selectFolderDialog } from "../lib/tauri";
 import type { FolderDto } from "../lib/tauri";
 import { useAppStore } from "../store";
@@ -168,14 +169,15 @@ function CollectionsSection() {
 }
 
 export function Sidebar() {
+  const t = useT();
   const folders = useAppStore((s) => s.folders);
   const { roots, childrenOf } = useMemo(() => buildChildrenByParent(folders), [folders]);
 
   return (
-    <PaletteFrame id="sidebar" side="left" defaultWidth={256} label="Ordner" className="border-r border-border bg-bg-raised p-2">
-      <h2 className="px-2 pb-2 text-xs font-semibold tracking-wide text-text-secondary uppercase">Ordner</h2>
+    <PaletteFrame id="sidebar" side="left" defaultWidth={256} label={t("sidebar.heading")} className="border-r border-border bg-bg-raised p-2">
+      <h2 className="px-2 pb-2 text-xs font-semibold tracking-wide text-text-secondary uppercase">{t("sidebar.heading")}</h2>
 
-      {folders.length === 0 && <p className="px-2 text-sm text-text-muted">Noch keine Ordner importiert.</p>}
+      {folders.length === 0 && <p className="px-2 text-sm text-text-muted">{t("sidebar.empty")}</p>}
 
       <ul className="space-y-0.5">
         {roots.map((folder) => (

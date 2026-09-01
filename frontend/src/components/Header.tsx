@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { useT } from "../lib/i18n";
 import { selectFolderDialog } from "../lib/tauri";
 import { useAppStore } from "../store";
 import { BookDialog } from "./BookDialog";
@@ -18,6 +19,7 @@ import { MetadataDialog } from "./MetadataDialog";
 import { StatsCacheDialog } from "./StatsCacheDialog";
 
 export function Header() {
+  const t = useT();
   const importRunning = useAppStore((s) => s.importRunning);
   const importProgress = useAppStore((s) => s.importProgress);
   const importResult = useAppStore((s) => s.importResult);
@@ -143,7 +145,7 @@ export function Header() {
         disabled={importRunning}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
       >
-        Ordner importieren
+        {t("header.importFolder")}
       </button>
 
       <button
@@ -151,9 +153,9 @@ export function Header() {
         onClick={() => void handleImportWithTemplateClick()}
         disabled={importRunning}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-        title="Import mit wählbarem Modus (Kopieren/Verschieben), Umbenennungsmuster und Presets"
+        title={t("header.importWithTemplateTitle")}
       >
-        Import mit Vorlage…
+        {t("header.importWithTemplate")}
       </button>
 
       <ImportDialog open={importDialogSource !== null} sourcePath={importDialogSource ?? ""} onClose={() => setImportDialogSource(null)} />
@@ -171,7 +173,7 @@ export function Header() {
             onClick={() => void cancelImport()}
             className="ml-auto shrink-0 rounded border border-danger px-2 py-1 text-xs text-danger hover:bg-danger/10"
           >
-            Abbrechen
+            {t("header.cancelImport")}
           </button>
         </>
       )}
@@ -194,7 +196,7 @@ export function Header() {
           centerView === "grid" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
         }`}
       >
-        Raster
+        {t("header.viewGrid")}
       </button>
 
       <button
@@ -205,7 +207,7 @@ export function Header() {
           centerView === "map" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
         }`}
       >
-        Karte
+        {t("header.viewMap")}
       </button>
 
       <button
@@ -217,7 +219,7 @@ export function Header() {
           metadataPanelOpen ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
         }`}
       >
-        Info
+        {t("header.viewInfo")}
       </button>
 
       <button
@@ -229,7 +231,7 @@ export function Header() {
           developPanelOpen ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
         }`}
       >
-        Entwickeln
+        {t("header.viewDevelop")}
       </button>
       </nav>
       </div>
@@ -237,15 +239,15 @@ export function Header() {
       {/* Zeile 2: übrige Module nach Themen gruppiert (Ausgabe / Vorlagen &
           Organisation / Fortgeschritten / Analyse). */}
       <div className="flex h-11 items-center gap-4 overflow-x-auto border-t border-border px-4">
-      <nav aria-label="Ausgabe" className="flex items-center gap-2">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">Ausgabe</span>
+      <nav aria-label={t("header.group.output")} className="flex items-center gap-2">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">{t("header.group.output")}</span>
       <button
         type="button"
         onClick={openExportDialog}
         disabled={exportPhotoIds.length === 0}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
       >
-        Exportieren…
+        {t("header.export")}
       </button>
 
       <ExportDialog open={exportDialogOpen} photoIds={exportPhotoIds} onClose={closeExportDialog} />
@@ -256,7 +258,7 @@ export function Header() {
         disabled={exportPhotoIds.length === 0}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
       >
-        Drucken…
+        {t("header.print")}
       </button>
 
       <PrintDialog open={printDialogOpen} photoIds={exportPhotoIds} onClose={closePrintDialog} />
@@ -267,7 +269,7 @@ export function Header() {
         disabled={exportPhotoIds.length === 0}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
       >
-        Diashow…
+        {t("header.slideshow")}
       </button>
 
       <SlideshowDialog open={slideshowDialogOpen} photoIds={exportPhotoIds} onClose={closeSlideshowDialog} />
@@ -278,7 +280,7 @@ export function Header() {
         disabled={exportPhotoIds.length === 0}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
       >
-        Buch…
+        {t("header.book")}
       </button>
 
       <BookDialog open={bookDialogOpen} photoIds={exportPhotoIds} onClose={closeBookDialog} />
@@ -289,7 +291,7 @@ export function Header() {
         disabled={exportPhotoIds.length === 0}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
       >
-        Web…
+        {t("header.web")}
       </button>
 
       <WebDialog open={webDialogOpen} photoIds={exportPhotoIds} onClose={closeWebDialog} />
@@ -297,14 +299,14 @@ export function Header() {
 
       <div className="h-6 w-px bg-border" />
 
-      <nav aria-label="Vorlagen und Organisation" className="flex items-center gap-2">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">Vorlagen</span>
+      <nav aria-label={t("header.group.templates")} className="flex items-center gap-2">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">{t("header.group.templates")}</span>
       <button
         type="button"
         onClick={() => setTemplatesDialogOpen(true)}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
       >
-        Vorlagen…
+        {t("header.templates")}
       </button>
 
       <TemplatesDialog open={templatesDialogOpen} photoIds={exportPhotoIds} onClose={() => setTemplatesDialogOpen(false)} />
@@ -314,7 +316,7 @@ export function Header() {
         onClick={() => setOrganizeDialogOpen(true)}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
       >
-        Organisieren…
+        {t("header.organize")}
       </button>
 
       <LibraryOrganizeDialog open={organizeDialogOpen} onClose={() => setOrganizeDialogOpen(false)} />
@@ -324,7 +326,7 @@ export function Header() {
         onClick={() => setMetadataDialogOpen(true)}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
       >
-        Metadaten…
+        {t("header.metadata")}
       </button>
 
       <MetadataDialog open={metadataDialogOpen} onClose={() => setMetadataDialogOpen(false)} />
@@ -332,14 +334,14 @@ export function Header() {
 
       <div className="h-6 w-px bg-border" />
 
-      <nav aria-label="Fortgeschritten" className="flex items-center gap-2">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">Fortgeschritten</span>
+      <nav aria-label={t("header.group.advanced")} className="flex items-center gap-2">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">{t("header.group.advanced")}</span>
       <button
         type="button"
         onClick={() => setStackingDialogOpen(true)}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
       >
-        Stacking…
+        {t("header.stacking")}
       </button>
 
       <StackingDialog open={stackingDialogOpen} onClose={() => setStackingDialogOpen(false)} />
@@ -349,7 +351,7 @@ export function Header() {
         onClick={() => setScriptPluginDialogOpen(true)}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
       >
-        Skript &amp; Plugins…
+        {t("header.scriptPlugin")}
       </button>
 
       <ScriptPluginDialog open={scriptPluginDialogOpen} onClose={() => setScriptPluginDialogOpen(false)} />
@@ -359,7 +361,7 @@ export function Header() {
         onClick={() => setShareDialogOpen(true)}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
       >
-        Kollaboration…
+        {t("header.share")}
       </button>
 
       <ShareDialog open={shareDialogOpen} onClose={() => setShareDialogOpen(false)} />
@@ -369,7 +371,7 @@ export function Header() {
         onClick={() => setTetherDialogOpen(true)}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
       >
-        Tethering…
+        {t("header.tether")}
       </button>
 
       <TetherDialog open={tetherDialogOpen} onClose={() => setTetherDialogOpen(false)} />
@@ -377,36 +379,36 @@ export function Header() {
 
       <div className="h-6 w-px bg-border" />
 
-      <nav aria-label="Analyse" className="flex items-center gap-2">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">Analyse</span>
+      <nav aria-label={t("header.group.analysis")} className="flex items-center gap-2">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">{t("header.group.analysis")}</span>
       <button
         type="button"
         onClick={() => openCompareView(exportPhotoIds)}
         disabled={exportPhotoIds.length < 2}
-        title="Ausgewählte Fotos nebeneinander vergleichen"
+        title={t("header.compareTitle")}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:opacity-40"
       >
-        Vergleichen
+        {t("header.compare")}
       </button>
 
       <button
         type="button"
         onClick={() => void openVersionsCompareView()}
         disabled={!selectedPhotoId}
-        title="Aktuelles Foto und seine virtuellen Kopien nebeneinander vergleichen (Phase 9 Schritt 7)"
+        title={t("header.versionsCompareTitle")}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:opacity-40"
       >
-        Versionen vergleichen
+        {t("header.versionsCompare")}
       </button>
 
       <button
         type="button"
         onClick={() => selectedPhotoId && void openSecondaryDisplay(selectedPhotoId)}
         disabled={!selectedPhotoId}
-        title="Aktuelles Foto in einem zweiten Fenster anzeigen"
+        title={t("header.secondaryDisplayTitle")}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:opacity-40"
       >
-        Zweites Display…
+        {t("header.secondaryDisplay")}
       </button>
 
       <button
@@ -414,7 +416,7 @@ export function Header() {
         onClick={() => setStatsDialogOpen(true)}
         className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
       >
-        Statistik…
+        {t("header.stats")}
       </button>
 
       <StatsCacheDialog open={statsDialogOpen} onClose={() => setStatsDialogOpen(false)} />
@@ -424,13 +426,13 @@ export function Header() {
         <button
           type="button"
           onClick={() => setSettingsDialogOpen(true)}
-          title="Theme, Sprache, UI-Skalierung, Barrierefreiheit (Phase 10)"
+          title={t("header.settingsTitle")}
           className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
         >
-          Einstellungen…
+          {t("header.settings")}
         </button>
 
-        <span className="text-xs text-text-muted">Strg/Cmd+K — Befehlspalette</span>
+        <span className="text-xs text-text-muted">{t("header.paletteHint")}</span>
       </div>
       </div>
     </header>

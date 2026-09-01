@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { buildChildrenByParent } from "../lib/folderTree";
+import { useT } from "../lib/i18n";
 import { buildPresetEdlSubset, PRESET_SECTION_KEYS } from "../lib/presets";
 import type { PresetDto, PresetFolderDto } from "../lib/tauri";
 import { selectPresetConditionMeta, useAppStore } from "../store";
@@ -477,6 +478,7 @@ function AiPresetGeneratorSection() {
  * Wie `DevelopPanel` nur sichtbar, während das Entwickeln-Panel offen ist.
  */
 export function PresetsPanel() {
+  const t = useT();
   const open = useAppStore((s) => s.developPanelOpen);
   const presetFolders = useAppStore((s) => s.presetFolders);
   const presets = useAppStore((s) => s.presets);
@@ -509,8 +511,8 @@ export function PresetsPanel() {
   }
 
   return (
-    <PaletteFrame id="presets" side="left" defaultWidth={256} label="Presets" className="gap-3 border-r border-border bg-bg-raised p-3">
-      <h2 className="text-sm font-semibold text-text-primary">Presets</h2>
+    <PaletteFrame id="presets" side="left" defaultWidth={256} label={t("presets.heading")} className="gap-3 border-r border-border bg-bg-raised p-3">
+      <h2 className="text-sm font-semibold text-text-primary">{t("presets.heading")}</h2>
 
       <ul className="space-y-0.5">
         <li>

@@ -689,3 +689,44 @@ export function exportSlideshowVideo(
 ): Promise<SlideshowVideoOutcomeDto> {
   return invoke<SlideshowVideoOutcomeDto>("export_slideshow_video", { photoIds, destPath, options });
 }
+
+// ---- Buch (Phase 8 Schritt 5) -----------------------------------------
+
+export type BookPageTemplate = "full_bleed" | "two_side_by_side" | "grid_2x2" | "photo_with_caption";
+
+export interface BookOptions {
+  template: BookPageTemplate;
+  pageWidthIn: number;
+  pageHeightIn: number;
+  dpi: number;
+  marginIn?: number;
+  fit?: "contain" | "cover";
+  backgroundRgb?: [number, number, number];
+  /** Name aus {@link PRINT_SHOP_PRESET_NAMES} — überschreibt dpi/backgroundRgb. */
+  printShopPreset?: string;
+  /** Titelseite voranstellen — braucht `fontPath`. */
+  title?: string;
+  /** Für Titelseite und `photo_with_caption`-Bildunterschriften (= Dateiname). */
+  fontPath?: string;
+}
+
+export interface BookOutcomeDto {
+  path: string;
+  page_count: number;
+  byte_size: number;
+}
+
+/** Namen der eingebauten Druckerei-Presets (`apx_export::book::PRINT_SHOP_PRESETS`). */
+export const PRINT_SHOP_PRESET_NAMES = [
+  "Digitaldruck (Standard, 300 dpi)",
+  "Fotobuch (Premium, 400 dpi)",
+  "Softcover (kein Beschnitt, 250 dpi)",
+] as const;
+
+/** Rendert `photoIds` (mit ihrem aktuellen Bearbeitungsstand, wie
+ * {@link exportPhoto}) zu einem Fotobuch — automatische Befüllung gemäß
+ * `options.template` — und schreibt es als mehrseitige PDF-Datei nach
+ * `destPath`. */
+export function exportBookPdf(photoIds: string[], destPath: string, options: BookOptions): Promise<BookOutcomeDto> {
+  return invoke<BookOutcomeDto>("export_book_pdf", { photoIds, destPath, options });
+}

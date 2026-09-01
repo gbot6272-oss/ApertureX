@@ -31,14 +31,20 @@ image = { workspace = true, features = ["webp", "avif"] }
 lcms2 = { version = "6", features = ["static"] }
 # Wasserzeichen-Textrasterisierung (reines Rust, keine Systemschrift-API).
 ab_glyph = "0.2"
+# PDF-Erzeugung fürs Buch-Modul (Schritt 5). **Bewusst ohne
+# Standard-Features** ("html" zieht `azul-layout`/HTML-Textlayout nach
+# sich, "images" einen eigenen Bilddecoder) — eine Buchseite ist bei uns
+# immer schon ein fertig komponiertes RGBA8-Bild (Fotos über
+# `print::compose_page`, Textfelder über `watermark::apply_text_at`,
+# derselbe Renderpfad wie Drucken/Diashow), das `book.rs` direkt als
+# `printpdf::RawImage { pixels: RawImageData::U8(..), .. }` einbettet —
+# kein zweiter Text-/Bild-Rendering-Codepfad nötig, siehe `book.rs`s
+# Moduldoku. Damit bleibt der Abhängigkeitsbaum klein.
+printpdf = { version = "0.12.7", default-features = false }
 
-# Die übrigen in ADR-0034 geprüften Abhängigkeiten (printpdf für
-# Schritt 5, suppaftp/russh für Schritt 6, reverse_geocoder/quick-xml
-# für Schritt 7) werden erst im jeweiligen Schritt ergänzt, nicht schon
-# hier — `printpdf` zieht transitiv einen sehr großen Font-/Layout-Baum
-# (`azul-layout`, `allsorts`, `taffy` …) nach sich, der in dieser
-# Sandbox mit begrenztem Plattenkontingent den Build sonst unnötig
-# aufbläht, solange er noch nicht gebraucht wird.
+# Die übrigen in ADR-0034 geprüften Abhängigkeiten (suppaftp/russh für
+# Schritt 6, reverse_geocoder/quick-xml für Schritt 7) werden erst im
+# jeweiligen Schritt ergänzt.
 
 [dev-dependencies]
 tempfile = "3"

@@ -17,6 +17,7 @@
 
 #![deny(clippy::unwrap_used)]
 
+pub mod book;
 pub mod engine;
 pub mod error;
 pub mod format;

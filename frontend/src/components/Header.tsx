@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 
 import { selectFolderDialog } from "../lib/tauri";
 import { useAppStore } from "../store";
+import { BookDialog } from "./BookDialog";
 import { ExportDialog } from "./ExportDialog";
 import { ImportDialog } from "./ImportDialog";
 import { PrintDialog } from "./PrintDialog";
@@ -30,6 +31,9 @@ export function Header() {
   const slideshowDialogOpen = useAppStore((s) => s.slideshowDialogOpen);
   const openSlideshowDialog = useAppStore((s) => s.openSlideshowDialog);
   const closeSlideshowDialog = useAppStore((s) => s.closeSlideshowDialog);
+  const bookDialogOpen = useAppStore((s) => s.bookDialogOpen);
+  const openBookDialog = useAppStore((s) => s.openBookDialog);
+  const closeBookDialog = useAppStore((s) => s.closeBookDialog);
   const [importDialogSource, setImportDialogSource] = useState<string | null>(null);
 
   const exportPhotoIds = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
@@ -167,6 +171,17 @@ export function Header() {
       </button>
 
       <SlideshowDialog open={slideshowDialogOpen} photoIds={exportPhotoIds} onClose={closeSlideshowDialog} />
+
+      <button
+        type="button"
+        onClick={openBookDialog}
+        disabled={exportPhotoIds.length === 0}
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Buch…
+      </button>
+
+      <BookDialog open={bookDialogOpen} photoIds={exportPhotoIds} onClose={closeBookDialog} />
 
       <span className="text-xs text-text-muted">Strg/Cmd+K — Befehlspalette</span>
     </header>

@@ -98,6 +98,13 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       duration_seconds: number;
     },
     slideshowVideoShouldFail: false,
+    // Buch (Phase 8 Schritt 5) — PDF-Export.
+    bookOutcome: { path: "/mock/book/Fotobuch.pdf", page_count: 2, byte_size: 123456 } as {
+      path: string;
+      page_count: number;
+      byte_size: number;
+    },
+    bookExportShouldFail: false,
     ...initialFixtures,
   };
   w.__mockInvokeLog = [] as Array<{ cmd: string; args: unknown }>;
@@ -303,6 +310,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       ffmpegAvailable: boolean;
       slideshowVideoOutcome: { path: string; frame_count: number; duration_seconds: number };
       slideshowVideoShouldFail: boolean;
+      bookOutcome: { path: string; page_count: number; byte_size: number };
+      bookExportShouldFail: boolean;
     };
 
     switch (cmd) {
@@ -788,6 +797,12 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           throw new Error("Test-Stub: Video-Export fehlgeschlagen");
         }
         return fixtures.slideshowVideoOutcome;
+      }
+      case "export_book_pdf": {
+        if (fixtures.bookExportShouldFail) {
+          throw new Error("Test-Stub: Buch-Export fehlgeschlagen");
+        }
+        return fixtures.bookOutcome;
       }
 
       default:

@@ -259,10 +259,10 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [ ] Reiserouten-Ansicht — Phase 8 — Status: Nicht begonnen
 
 ### Buch
-- [ ] Seitenlayouts, Vorlagen, Text-Stile — Phase 8 — Status: Nicht begonnen
-- [ ] Automatische Befüllung — Phase 8 — Status: Nicht begonnen
-- [ ] PDF-Export — Phase 8 — Status: Nicht begonnen
-- [ ] Druckerei-Presets — Phase 8 — Status: Nicht begonnen
+- [x] Seitenlayouts, Vorlagen, Text-Stile — Phase 8 — Status: Fertig (abweichend, siehe PLAN.md Schritt 5) — fünf feste Seitenvorlagen (`apx_export::book::PageTemplate`) statt einer frei konfigurierbaren Slot-Engine, ein Text-„Stil" (eine vom Nutzer gewählte Schriftdatei, wie bei den Diashow-Titelkarten) statt wählbarer Schriftfamilien
+- [x] Automatische Befüllung — Phase 8 — Status: Fertig — `auto_fill_pages` verteilt die Fotoauswahl reihum auf Seiten, Bildunterschriften sind automatisch der Dateiname
+- [x] PDF-Export — Phase 8 — Status: Fertig — `printpdf`, bewusst ohne dessen Standard-Features (kein `html`/`azul-layout`, keine eigene Bilddekodierung) — jede Seite ist bereits ein fertig komponiertes Bild, wird direkt als `RawImage` eingebettet
+- [x] Druckerei-Presets — Phase 8 — Status: Fertig (abweichend) — drei feste Parametersätze (Beschnitt/Auflösung/Hintergrund), keine anbieterspezifische Validierung
 
 ### Diashow
 - [x] Übergänge, Ken-Burns-Effekt — Phase 8 — Status: Fertig (abweichend, siehe ADR-0034/PLAN.md Schritt 4) — nur harter Schnitt/Überblendung (kein Wipe/Slide), Live-Wiedergabe komplett im Frontend-`<canvas>` (`lib/slideshow.ts`, `SlideshowPlayer.tsx`)

@@ -72,6 +72,45 @@ pub fn apply_image_watermark(
     opacity: f32,
     margin: u32,
 ) -> Result<()> {
+    let (origin_x, origin_y) = origin_for(
+        position,
+        width,
+        height,
+        overlay_width,
+        overlay_height,
+        margin,
+    );
+    apply_image_at(
+        width,
+        height,
+        pixels,
+        overlay_width,
+        overlay_height,
+        overlay_rgba,
+        origin_x,
+        origin_y,
+        opacity,
+    )
+}
+
+/// Wie [`apply_image_watermark`], platziert `overlay_rgba` aber an einem
+/// beliebigen Pixel-Ursprung (`origin_x`/`origin_y`, darf auch negativ
+/// sein oder über den Rand hinausragen — wird wie dort abgeschnitten
+/// statt einen Fehler auszulösen) statt an einer der vier Ecken/der
+/// Mitte. Genutzt vom Buch-Modul (Schritt 5) für Textfelder an frei
+/// platzierten Slot-Positionen statt der festen Wasserzeichen-Ecken.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_image_at(
+    width: u32,
+    height: u32,
+    pixels: &mut [u8],
+    overlay_width: u32,
+    overlay_height: u32,
+    overlay_rgba: &[u8],
+    origin_x: i64,
+    origin_y: i64,
+    opacity: f32,
+) -> Result<()> {
     let expected_len = width as usize * height as usize * 4;
     if pixels.len() != expected_len {
         return Err(ExportError::Unsupported(format!(
@@ -87,14 +126,6 @@ pub fn apply_image_watermark(
         )));
     }
 
-    let (origin_x, origin_y) = origin_for(
-        position,
-        width,
-        height,
-        overlay_width,
-        overlay_height,
-        margin,
-    );
     let opacity = opacity.clamp(0.0, 1.0);
 
     for oy in 0..overlay_height as i64 {
@@ -129,19 +160,17 @@ pub fn apply_image_watermark(
 /// Rasterisiert `text` in `color` mit `font_size_px` (per `ab_glyph`,
 /// `font_bytes` = Inhalt einer `.ttf`/`.otf`-Datei) und komponiert ihn wie
 /// [`apply_image_watermark`] in `pixels` hinein.
-#[allow(clippy::too_many_arguments)]
-pub fn apply_text_watermark(
-    width: u32,
-    height: u32,
-    pixels: &mut [u8],
+/// Rasterisiert `text` in `color` mit `font_size_px` (reines `ab_glyph`,
+/// kein Systemschrift-API) zu einem eigenständigen RGBA8-Overlay —
+/// gemeinsamer Kern für [`apply_text_watermark`] (feste Ecken-/Mitte-
+/// Position) und [`apply_text_at`] (freie Pixel-Position, Buch-Modul
+/// Schritt 5).
+pub fn rasterize_text(
     font_bytes: &[u8],
     text: &str,
     font_size_px: f32,
     color: [u8; 3],
-    position: WatermarkPosition,
-    opacity: f32,
-    margin: u32,
-) -> Result<()> {
+) -> Result<(u32, u32, Vec<u8>)> {
     let font = FontRef::try_from_slice(font_bytes).map_err(|err| {
         ExportError::Unsupported(format!("Schriftdatei konnte nicht gelesen werden: {err}"))
     })?;
@@ -162,8 +191,7 @@ pub fn apply_text_watermark(
     let text_height = (scaled.ascent() - scaled.descent()).ceil().max(1.0) as u32;
 
     // Deckungs-Puffer (nur Alpha) auf Textgröße, dann in ein RGBA8-Overlay
-    // mit `color` gefüllt — dieselbe Kompositions-Funktion wie Bild-
-    // Wasserzeichen wiederverwendbar.
+    // mit `color` gefüllt.
     let mut coverage = vec![0.0f32; text_width as usize * text_height as usize];
     for glyph in glyphs {
         if let Some(outlined) = font.outline_glyph(glyph) {
@@ -190,7 +218,24 @@ pub fn apply_text_watermark(
             ]
         })
         .collect();
+    Ok((text_width, text_height, overlay_rgba))
+}
 
+#[allow(clippy::too_many_arguments)]
+pub fn apply_text_watermark(
+    width: u32,
+    height: u32,
+    pixels: &mut [u8],
+    font_bytes: &[u8],
+    text: &str,
+    font_size_px: f32,
+    color: [u8; 3],
+    position: WatermarkPosition,
+    opacity: f32,
+    margin: u32,
+) -> Result<()> {
+    let (text_width, text_height, overlay_rgba) =
+        rasterize_text(font_bytes, text, font_size_px, color)?;
     apply_image_watermark(
         width,
         height,
@@ -201,6 +246,38 @@ pub fn apply_text_watermark(
         position,
         opacity,
         margin,
+    )
+}
+
+/// Wie [`apply_text_watermark`], platziert den Text aber an einem
+/// beliebigen Pixel-Ursprung statt einer festen Ecke/Mitte — genutzt vom
+/// Buch-Modul für Bildunterschriften/Titel in frei platzierten
+/// Textfeldern (siehe `book.rs`).
+#[allow(clippy::too_many_arguments)]
+pub fn apply_text_at(
+    width: u32,
+    height: u32,
+    pixels: &mut [u8],
+    font_bytes: &[u8],
+    text: &str,
+    font_size_px: f32,
+    color: [u8; 3],
+    origin_x: i64,
+    origin_y: i64,
+    opacity: f32,
+) -> Result<()> {
+    let (text_width, text_height, overlay_rgba) =
+        rasterize_text(font_bytes, text, font_size_px, color)?;
+    apply_image_at(
+        width,
+        height,
+        pixels,
+        text_width,
+        text_height,
+        &overlay_rgba,
+        origin_x,
+        origin_y,
+        opacity,
     )
 }
 

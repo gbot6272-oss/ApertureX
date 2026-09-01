@@ -2477,6 +2477,185 @@ pub fn export_slideshow_video(
     })
 }
 
+// ---- Buch (Phase 8 Schritt 5) -----------------------------------------
+//
+// Wiederverwendet die Export-Engine + `apx_export::print` komplett: pro
+// Foto rendert `engine::render_to_pixels` wie beim normalen Export,
+// `apx_export::book` setzt die Fotos gemäß Seitenvorlage zu Buchseiten
+// zusammen (Bildunterschrift = Dateiname, keine manuelle Eingabe nötig —
+// „automatische Befüllung") und bettet alle Seiten als eine PDF-Datei
+// ein (`printpdf`, siehe `book.rs`s Moduldoku).
+
+fn parse_book_template(template: &str) -> Result<apx_export::book::PageTemplate, String> {
+    use apx_export::book::PageTemplate;
+    match template {
+        "full_bleed" => Ok(PageTemplate::FullBleed),
+        "two_side_by_side" => Ok(PageTemplate::TwoSideBySide),
+        "grid_2x2" => Ok(PageTemplate::Grid2x2),
+        "photo_with_caption" => Ok(PageTemplate::PhotoWithCaption),
+        other => Err(format!("unbekannte Buch-Seitenvorlage '{other}'")),
+    }
+}
+
+fn parse_print_shop_preset(name: &str) -> Result<apx_export::book::PrintShopPreset, String> {
+    apx_export::book::PRINT_SHOP_PRESETS
+        .iter()
+        .find(|preset| preset.name == name)
+        .copied()
+        .ok_or_else(|| format!("unbekanntes Druckerei-Preset '{name}'"))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookOptions {
+    /// `"full_bleed"`/`"two_side_by_side"`/`"grid_2x2"`/`"photo_with_caption"`.
+    pub template: String,
+    pub page_width_in: f32,
+    pub page_height_in: f32,
+    /// Wird durch `print_shop_preset` überschrieben, falls gesetzt.
+    pub dpi: u32,
+    pub margin_in: Option<f32>,
+    /// `"contain"` (Standard) oder `"cover"`.
+    pub fit: Option<String>,
+    pub background_rgb: Option<[u8; 3]>,
+    /// Name aus `apx_export::book::PRINT_SHOP_PRESETS` — überschreibt `dpi`/`backgroundRgb`.
+    pub print_shop_preset: Option<String>,
+    /// Titelseite voranstellen, falls gesetzt — braucht `fontPath`.
+    pub title: Option<String>,
+    /// Für Titelseite und `photo_with_caption`-Bildunterschriften (=
+    /// Dateiname des Fotos).
+    pub font_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BookOutcomeDto {
+    pub path: String,
+    pub page_count: usize,
+    pub byte_size: usize,
+}
+
+/// Rendert `photo_ids` (mit ihrem aktuellen Bearbeitungsstand, wie
+/// [`export_photo`]) zu einem Fotobuch — automatische Befüllung gemäß
+/// `options.template` — und schreibt es als mehrseitige PDF-Datei nach
+/// `dest_path`.
+#[tauri::command]
+pub fn export_book_pdf(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    dest_path: String,
+    options: BookOptions,
+) -> Result<BookOutcomeDto, String> {
+    if photo_ids.is_empty() {
+        return Err("Keine Fotos für das Buch ausgewählt".to_string());
+    }
+    let template = parse_book_template(&options.template)?;
+    let fit = match options.fit.as_deref().unwrap_or("contain") {
+        "contain" => apx_export::print::FitMode::Contain,
+        "cover" => apx_export::print::FitMode::Cover,
+        other => return Err(format!("unbekannter Anpassungsmodus '{other}'")),
+    };
+
+    let (dpi, background_rgb, margin_in) = match &options.print_shop_preset {
+        Some(name) => {
+            let preset = parse_print_shop_preset(name)?;
+            (preset.dpi, preset.background_rgb, preset.bleed_in)
+        }
+        None => (
+            options.dpi,
+            options.background_rgb.unwrap_or([255, 255, 255]),
+            options.margin_in.unwrap_or(0.25),
+        ),
+    };
+
+    let font_bytes = match &options.font_path {
+        Some(path) => Some(
+            std::fs::read(path)
+                .map_err(|err| format!("Schriftdatei '{path}' konnte nicht gelesen werden: {err}"))?,
+        ),
+        None => None,
+    };
+
+    // Jedes Foto genau einmal rendern (dieselben Pixel für die Seite,
+    // auf der es landet — `render_to_pixels` cacht selbst nicht, die
+    // Warteschlange bleibt hier bewusst einfach synchron).
+    let mut rendered: std::collections::HashMap<String, (u32, u32, Vec<u8>, String)> = std::collections::HashMap::new();
+    for photo_id_str in &photo_ids {
+        let photo_id = parse_photo_id(photo_id_str.clone())?;
+        let photo = state.catalog.get_photo(photo_id).map_err(|err| err.to_string())?;
+        let folder = state.catalog.get_folder(photo.folder_id).map_err(|err| err.to_string())?;
+        let edl = resolve_current_edl(&state.catalog, photo_id)?;
+        let request = apx_export::engine::ExportRequest::new(
+            folder.path.join(&photo.filename),
+            edl,
+            apx_export::format::ExportFormat::Jpeg,
+        );
+        let (width, height, rgba) = apx_export::engine::render_to_pixels(Some(&state.pipeline), &request)
+            .map_err(|err| err.to_string())?;
+        rendered.insert(photo_id_str.clone(), (width, height, rgba, photo.filename.clone()));
+    }
+
+    let mut pages: Vec<(u32, u32, Vec<u8>)> = Vec::new();
+
+    if let Some(title) = &options.title {
+        let (w, h, pixels) = apx_export::book::render_book_page(
+            apx_export::book::PageTemplate::TitlePage,
+            options.page_width_in,
+            options.page_height_in,
+            dpi,
+            margin_in,
+            background_rgb,
+            &[],
+            fit,
+            Some(title.as_str()),
+            font_bytes.as_deref(),
+            [0, 0, 0],
+        )
+        .map_err(|err| err.to_string())?;
+        pages.push((w, h, pixels));
+    }
+
+    for group in apx_export::book::auto_fill_pages(&photo_ids, template) {
+        let photos: Vec<apx_export::book::BookPagePhoto> = group
+            .iter()
+            .filter_map(|id| rendered.get(id))
+            .map(|(width, height, rgba, _)| apx_export::book::BookPagePhoto {
+                width: *width,
+                height: *height,
+                rgba,
+            })
+            .collect();
+        let caption = if template == apx_export::book::PageTemplate::PhotoWithCaption {
+            group.first().and_then(|id| rendered.get(id)).map(|(_, _, _, filename)| filename.as_str())
+        } else {
+            None
+        };
+        let (w, h, pixels) = apx_export::book::render_book_page(
+            template,
+            options.page_width_in,
+            options.page_height_in,
+            dpi,
+            margin_in,
+            background_rgb,
+            &photos,
+            fit,
+            caption,
+            font_bytes.as_deref(),
+            [0, 0, 0],
+        )
+        .map_err(|err| err.to_string())?;
+        pages.push((w, h, pixels));
+    }
+
+    let page_count = pages.len();
+    let bytes = apx_export::book::build_pdf(&pages, dpi, Path::new(&dest_path)).map_err(|err| err.to_string())?;
+
+    Ok(BookOutcomeDto {
+        path: dest_path,
+        page_count,
+        byte_size: bytes.len(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

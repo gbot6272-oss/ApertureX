@@ -38,6 +38,8 @@ import type { SoftProofIntent, SoftProofProfile } from "../lib/softProof";
 import * as api from "../lib/tauri";
 import type {
   AiSettingsDto,
+  BookOptions,
+  BookOutcomeDto,
   CatalogStatusDto,
   CollectionDto,
   ExportOutcomeDto,
@@ -1013,6 +1015,19 @@ interface SlideshowSlice {
   exportSlideshowVideo: (photoIds: string[], destPath: string, options: SlideshowVideoOptions) => Promise<void>;
 }
 
+/** Buch (Phase 8 Schritt 5) — wiederverwendet die Export-Engine +
+ * `apx_export::print` komplett (siehe `apx_export::book`s Moduldoku);
+ * das Frontend wählt nur Seitenvorlage/-größe und den Zieldateipfad. */
+interface BookSlice {
+  bookDialogOpen: boolean;
+  openBookDialog: () => void;
+  closeBookDialog: () => void;
+  bookExportRunning: boolean;
+  bookExportError: string | null;
+  bookExportOutcome: BookOutcomeDto | null;
+  exportBookPdf: (photoIds: string[], destPath: string, options: BookOptions) => Promise<void>;
+}
+
 export type AppStore = CatalogSlice &
   SelectionSlice &
   ViewerSlice &
@@ -1024,7 +1039,8 @@ export type AppStore = CatalogSlice &
   AiSlice &
   ExportSlice &
   PrintSlice &
-  SlideshowSlice;
+  SlideshowSlice &
+  BookSlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -3489,6 +3505,46 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.videoExportRunning = false;
+        });
+      }
+    },
+
+    // ---- Buch (Phase 8 Schritt 5) -------------------------------------
+
+    bookDialogOpen: false,
+    bookExportRunning: false,
+    bookExportError: null,
+    bookExportOutcome: null,
+
+    openBookDialog: () => {
+      set((state) => {
+        state.bookDialogOpen = true;
+      });
+    },
+
+    closeBookDialog: () => {
+      set((state) => {
+        state.bookDialogOpen = false;
+      });
+    },
+
+    exportBookPdf: async (photoIds, destPath, options) => {
+      set((state) => {
+        state.bookExportRunning = true;
+        state.bookExportError = null;
+      });
+      try {
+        const outcome = await api.exportBookPdf(photoIds, destPath, options);
+        set((state) => {
+          state.bookExportOutcome = outcome;
+        });
+      } catch (err) {
+        set((state) => {
+          state.bookExportError = err instanceof Error ? err.message : String(err);
+        });
+      } finally {
+        set((state) => {
+          state.bookExportRunning = false;
         });
       }
     },

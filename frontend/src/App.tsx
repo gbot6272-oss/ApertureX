@@ -77,6 +77,14 @@ export default function App() {
     }
     root.classList.toggle("apx-reduce-motion", uiSettings?.reduced_motion ?? false);
     root.style.fontSize = uiSettings ? `${uiSettings.ui_scale_percent}%` : "";
+
+    // Theme + benutzerdefinierte Akzentfarbe (Phase 10 Schritt 7).
+    root.setAttribute("data-theme", uiSettings?.theme ?? "dark");
+    if (uiSettings?.accent_color) {
+      root.style.setProperty("--color-accent", uiSettings.accent_color);
+    } else {
+      root.style.removeProperty("--color-accent");
+    }
   }, [uiSettings]);
 
   useEffect(() => {

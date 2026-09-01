@@ -53,6 +53,26 @@ body {
   border-radius: 5px;
 }
 
+/* Volles helles Theme (Phase 10 Schritt 7, siehe FEATURES.md
+   UI-Anforderungen) — dieselben `@theme`-Variablen wie oben, nur mit
+   hellen Werten; geschaltet über `data-theme="light"` auf `<html>`
+   (App.tsx, aus `uiSettings.theme`). Kombinierbar mit dem Kontrastmodus
+   aus Schritt 6, weil beide unterschiedliche Attribute schalten — bei
+   gleichzeitiger Aktivierung gewinnt der Kontrastmodus (steht in der
+   Kaskade weiter unten). */
+:root[data-theme="light"] {
+  --color-bg-base: #f5f3ee;
+  --color-bg-raised: #ffffff;
+  --color-bg-panel: #ebe8e1;
+  --color-border: #d8d4ca;
+  --color-text-primary: #232019;
+  --color-text-secondary: #5c584e;
+  --color-text-muted: #8a8579;
+  --color-accent: #3d76a8;
+  --color-danger: #c0503a;
+  --color-success: #4f8a4f;
+}
+
 /* Barrierefreiheit (Phase 10 Schritt 6, siehe FEATURES.md UI-Anforderungen)
    — Kontrastmodus: schwarz/weiß-lastiges Tokenset mit deutlich höherem
    Kontrastverhältnis als das Standard-Dark-Theme, geschaltet über

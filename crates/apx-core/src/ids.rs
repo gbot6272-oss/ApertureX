@@ -92,6 +92,10 @@ define_id_type!(PresetVersionId);
 // Makro-Invokation wird von rustdoc nicht übernommen (siehe
 // `unused_doc_comments`-Warnung), deshalb ein normaler Kommentar.
 define_id_type!(SnapshotId);
+// Phase 8 Schritt 8: eine benannte, gespeicherte Vorlage (Export-/
+// Layout-/Workflow-Parametersatz, siehe `apx_catalog::repository::templates`s
+// Moduldoku).
+define_id_type!(TemplateId);
 
 #[cfg(test)]
 mod tests {

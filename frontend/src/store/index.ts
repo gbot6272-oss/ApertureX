@@ -58,8 +58,11 @@ import type {
   SlideshowVideoOutcomeDto,
   SnapshotDto,
   GpxTrackPointDto,
+  TemplateDto,
+  TemplateKind,
   WebGalleryOptions,
   WebGalleryOutcomeDto,
+  WorkflowTemplatePayload,
   SpotCandidateDto,
 } from "../lib/tauri";
 import * as undoStackLib from "../lib/undoStack";
@@ -1064,6 +1067,31 @@ interface MapSlice {
   setPhotoGpsFromMapClick: (lat: number, lon: number) => Promise<void>;
 }
 
+/** Vorlagen (Phase 8 Schritt 8) — eine generische Backend-Tabelle deckt
+ * Export-/Layout-Vorlagen für alle Ausgabemodule ab (siehe
+ * `apx_catalog::Template`s Moduldoku); Workflow-Vorlagen laufen bewusst
+ * hier im Frontend (`runWorkflowTemplate`), weil das EDL-Vorlagen-Mischen
+ * (`mergeEdlSubset`) bislang nur hier existiert — kein zweiter,
+ * serverseitiger Merge-Codepfad. */
+interface TemplatesSlice {
+  templatesByKind: Partial<Record<TemplateKind, TemplateDto[]>>;
+  refreshTemplates: (kind: TemplateKind) => Promise<void>;
+  saveTemplateAction: (kind: TemplateKind, name: string, payload: unknown) => Promise<void>;
+  deleteTemplateAction: (kind: TemplateKind, templateId: string) => Promise<void>;
+  importTemplateFile: () => Promise<void>;
+  /** Läuft die ausgewählten Fotos einmal durch: Preset-EDL-Teilmenge der
+   * Vorlage auf den aktuellen Bearbeitungsstand mischen, committen, dann
+   * mit den Vorlagen-Exportoptionen nach `destFolder` exportieren — das
+   * „Import → Filter → Preset → Export als ein Klick" aus `PLAN.md`
+   * Schritt 8, **bewusst ohne den Filter-Schritt** (läuft auf der
+   * jeweils schon getroffenen Fotoauswahl, wie alle übrigen Phase-8-
+   * Exportdialoge) und ohne Import (setzt bereits importierte Fotos
+   * voraus). */
+  workflowRunning: boolean;
+  workflowProgress: { done: number; total: number; failed: number } | null;
+  runWorkflowTemplate: (photoIds: string[], template: WorkflowTemplatePayload, destFolder: string) => Promise<void>;
+}
+
 export type AppStore = CatalogSlice &
   SelectionSlice &
   ViewerSlice &
@@ -1078,7 +1106,8 @@ export type AppStore = CatalogSlice &
   SlideshowSlice &
   BookSlice &
   WebSlice &
-  MapSlice;
+  MapSlice &
+  TemplatesSlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -3679,6 +3708,65 @@ export const useAppStore = create<AppStore>()(
         state.placingGpsForPhotoId = null;
       });
       await get().refreshGeotaggedPhotos();
+    },
+
+    // ---- Vorlagen (Phase 8 Schritt 8) -----------------------------------
+
+    templatesByKind: {},
+    workflowRunning: false,
+    workflowProgress: null,
+
+    refreshTemplates: async (kind) => {
+      const templates = await api.listTemplates(kind);
+      set((state) => {
+        state.templatesByKind[kind] = templates;
+      });
+    },
+
+    saveTemplateAction: async (kind, name, payload) => {
+      await api.saveTemplate(kind, name, JSON.stringify(payload));
+      await get().refreshTemplates(kind);
+    },
+
+    deleteTemplateAction: async (kind, templateId) => {
+      await api.deleteTemplate(templateId);
+      await get().refreshTemplates(kind);
+    },
+
+    importTemplateFile: async () => {
+      const imported = await api.importTemplateFromFile();
+      if (imported) await get().refreshTemplates(imported.kind as TemplateKind);
+    },
+
+    runWorkflowTemplate: async (photoIds, template, destFolder) => {
+      set((state) => {
+        state.workflowRunning = true;
+        state.workflowProgress = { done: 0, total: photoIds.length, failed: 0 };
+      });
+      try {
+        const version = await api.latestPresetVersion(template.presetId);
+        const subset = parseEdlSubset(version.edl_subset_json);
+        for (const photoId of photoIds) {
+          try {
+            const position = await api.currentDevelopEdit(photoId);
+            const merged = mergeEdlSubset(edlFromHistoryPosition(position), subset);
+            await api.applyDevelopEdit(photoId, buildEdlEnvelopeJson(merged), "Workflow-Vorlage angewendet");
+            await api.exportPhoto(photoId, destFolder, template.exportOptions);
+            set((state) => {
+              if (state.workflowProgress) state.workflowProgress.done += 1;
+            });
+          } catch (err) {
+            console.error(`Workflow für Foto ${photoId} fehlgeschlagen:`, err);
+            set((state) => {
+              if (state.workflowProgress) state.workflowProgress.failed += 1;
+            });
+          }
+        }
+      } finally {
+        set((state) => {
+          state.workflowRunning = false;
+        });
+      }
     },
     };
   }),

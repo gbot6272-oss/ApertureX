@@ -120,6 +120,9 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       distance_km: number;
     },
     gpxTrackPoints: [] as Array<{ lat: number; lon: number; elevation: number | null; time: string | null }>,
+    // Vorlagen (Phase 8 Schritt 8).
+    exportTemplateFilePathResult: "/mock/templates/Vorlage.apxt" as string | null,
+    importedTemplateFile: null as { kind: string; name: string; payload_json: string } | null,
     ...initialFixtures,
   };
   w.__mockInvokeLog = [] as Array<{ cmd: string; args: unknown }>;
@@ -189,7 +192,9 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   // Erstellen-Dialog durchklicken zu müssen.
   const presetFolders: MockPresetFolder[] = [...((initialFixtures.presetFolders as MockPresetFolder[] | undefined) ?? [])];
   const presets: MockPreset[] = [...((initialFixtures.presets as MockPreset[] | undefined) ?? [])];
-  const presetVersions: Record<string, MockPresetVersion[]> = {};
+  const presetVersions: Record<string, MockPresetVersion[]> = {
+    ...((initialFixtures.presetVersions as Record<string, MockPresetVersion[]> | undefined) ?? {}),
+  };
   let nextPresetFolderId = 1;
   let nextPresetId = 1;
   let nextPresetVersionId = 1;
@@ -205,6 +210,18 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   // genug, um Fortschritt/Pausieren/Fehler in e2e-Tests zu beobachten,
   // ohne einen echten Hintergrund-Worker nachzubauen.
   let nextExportJobId = 1;
+
+  // Vorlagen (Phase 8 Schritt 8) — einfache In-Memory-Nachbildung von
+  // `apx-catalog`s generischer `templates`-Tabelle.
+  interface MockTemplate {
+    id: string;
+    kind: string;
+    name: string;
+    payload_json: string;
+    created_at: string;
+  }
+  const templates: MockTemplate[] = [];
+  let nextTemplateId = 1;
   let exportQueuePaused = Boolean(initialFixtures.exportQueueStartsPaused);
   const exportQueueJobs: Array<{ id: number; status: "pending" | "done" | "failed" }> = [];
 
@@ -331,6 +348,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       webExportShouldFail: boolean;
       geocodedLocation: { name: string; admin1: string; country_code: string; distance_km: number };
       gpxTrackPoints: Array<{ lat: number; lon: number; elevation: number | null; time: string | null }>;
+      exportTemplateFilePathResult: string | null;
+      importedTemplateFile: { kind: string; name: string; payload_json: string } | null;
     };
 
     switch (cmd) {
@@ -845,6 +864,39 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         photo.gps_lat = args.lat as number | null;
         photo.gps_lon = args.lon as number | null;
         return null;
+      }
+
+      // ---- Vorlagen (Phase 8 Schritt 8) -------------------------------
+      case "save_template": {
+        const id = `template-${nextTemplateId++}`;
+        templates.push({
+          id,
+          kind: args.kind as string,
+          name: args.name as string,
+          payload_json: args.payloadJson as string,
+          created_at: new Date().toISOString(),
+        });
+        return id;
+      }
+      case "list_templates":
+        return templates
+          .filter((t) => t.kind === (args.kind as string))
+          .slice()
+          .sort((a, b) => a.name.localeCompare(b.name));
+      case "delete_template": {
+        const index = templates.findIndex((t) => t.id === (args.templateId as string));
+        if (index >= 0) templates.splice(index, 1);
+        return null;
+      }
+      case "export_template_to_file":
+        return fixtures.exportTemplateFilePathResult;
+      case "import_template_from_file": {
+        const file = fixtures.importedTemplateFile;
+        if (!file) return null;
+        const id = `template-${nextTemplateId++}`;
+        const created: MockTemplate = { id, kind: file.kind, name: file.name, payload_json: file.payload_json, created_at: new Date().toISOString() };
+        templates.push(created);
+        return created;
       }
 
       default:

@@ -811,3 +811,51 @@ export function importGpxTrack(path: string): Promise<GpxTrackPointDto[]> {
 export function setPhotoGps(photoId: string, lat: number | null, lon: number | null): Promise<void> {
   return invoke<void>("set_photo_gps", { photoId, lat, lon });
 }
+
+// ---- Vorlagen (Phase 8 Schritt 8) --------------------------------------
+//
+// Eine generische Vorlage — `kind` ist eine der Zeichenketten "export"/
+// "print"/"book"/"slideshow"/"web"/"workflow", `payload_json` das
+// jeweilige `*Options`-DTO als JSON (für Export-/Layout-Vorlagen)
+// beziehungsweise `{ presetId, exportOptions }` (für Workflow-Vorlagen,
+// siehe {@link WorkflowTemplatePayload}).
+export type TemplateKind = "export" | "print" | "book" | "slideshow" | "web" | "workflow";
+
+export interface TemplateDto {
+  id: string;
+  kind: string;
+  name: string;
+  payload_json: string;
+  created_at: string;
+}
+
+export interface WorkflowTemplatePayload {
+  presetId: string;
+  exportOptions: ExportPhotoOptions;
+}
+
+export function saveTemplate(kind: TemplateKind, name: string, payloadJson: string): Promise<string> {
+  return invoke<string>("save_template", { kind, name, payloadJson });
+}
+
+export function listTemplates(kind: TemplateKind): Promise<TemplateDto[]> {
+  return invoke<TemplateDto[]>("list_templates", { kind });
+}
+
+export function deleteTemplate(templateId: string): Promise<void> {
+  return invoke<void>("delete_template", { templateId });
+}
+
+/** Öffnet einen Speichern-Dialog und schreibt die Vorlage als `.apxt`-Datei
+ * — das lokale Dateiformat-„Marktplatz"-Format aus `PLAN.md` Schritt 8
+ * (kein Online-Hosting). `null`, wenn der Dialog abgebrochen wurde. */
+export function exportTemplateToFile(templateId: string): Promise<string | null> {
+  return invoke<string | null>("export_template_to_file", { templateId });
+}
+
+/** Öffnet einen Öffnen-Dialog und legt die gewählte `.apxt`-Datei als neue
+ * Vorlage an ("Installation" einer lokal geteilten Vorlage). `null`, wenn
+ * der Dialog abgebrochen wurde. */
+export function importTemplateFromFile(): Promise<TemplateDto | null> {
+  return invoke<TemplateDto | null>("import_template_from_file");
+}

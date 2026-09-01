@@ -193,6 +193,11 @@ fn main() {
             commands::reverse_geocode_location,
             commands::import_gpx_track,
             commands::set_photo_gps,
+            commands::save_template,
+            commands::list_templates,
+            commands::delete_template,
+            commands::export_template_to_file,
+            commands::import_template_from_file,
         ])
         .run(tauri::generate_context!())
         .expect("Fehler beim Starten von Aperture X");

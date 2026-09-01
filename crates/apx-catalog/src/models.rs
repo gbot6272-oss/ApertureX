@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use apx_core::{
     AppError, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId, PhotoId,
-    PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId,
+    PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId, TemplateId,
 };
 use time::OffsetDateTime;
 
@@ -171,6 +171,22 @@ pub struct Snapshot {
     pub photo_id: PhotoId,
     pub name: String,
     pub edl: EdlEnvelope,
+    pub created_at: OffsetDateTime,
+}
+
+/// Eine gespeicherte Vorlage (Phase 8 Schritt 8, siehe
+/// `migrations/0006_templates.sql`s Moduldoku) — ein benannter
+/// Parametersatz für eines der Export-Module oder einen Workflow.
+/// `kind` unterscheidet die Art ("export"/"print"/"book"/"slideshow"/
+/// "web"/"workflow"), `payload_json` ist das jeweilige `*Options`-DTO als
+/// JSON — dieselbe Form, die der zugehörige Dialog ohnehin schon über den
+/// Tauri-IPC schickt.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Template {
+    pub id: TemplateId,
+    pub kind: String,
+    pub name: String,
+    pub payload_json: String,
     pub created_at: OffsetDateTime,
 }
 

@@ -11,3 +11,4 @@ pub(crate) mod presets;
 pub(crate) mod previews;
 pub(crate) mod search;
 pub(crate) mod snapshots;
+pub(crate) mod templates;

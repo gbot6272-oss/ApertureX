@@ -240,14 +240,14 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Referenzbild-Modus (numerische Optimierung, kein LLM) — Phase 7 — Status: Fertig (abweichend, siehe ADR-0033 Punkt 4) — Koordinatenabstieg über die sechs tonwertbezogenen Grundeinstellungs-Parameter, Histogramm-Distanz (Kumulativsummen/Earth-Mover's) als Zielfunktion statt eines vollständigen Gradientenverfahrens über alle Regler
 - [x] Variationen-Generator (Kontaktbogen) — Phase 7 — Status: Fertig — deterministisch geseedete kleine Störungen eines Basis-Presets, reproduzierbar über denselben Seed
 - [x] Preset aus Bearbeitung lernen (Mustererkennung über mehrere Bilder) — Phase 7 — Status: Fertig (abweichend, siehe ADR-0033 Punkt 4) — arithmetisches Mittel der committeten EDL-Werte je Sektion über die ausgewählten Fotos statt echter Mustererkennung; strukturierte Listen (Kurvenpunkte, Farbmischer-Regionen) werden vom ersten Foto übernommen statt zusammengeführt
-- [ ] Export-Templates (Ziel, Format, Qualität, Farbraum, Größe, Schärfung, Metadaten, Wasserzeichen, Mehrfachziel) — Phase 8 — Status: Nicht begonnen
-- [ ] Wasserzeichen-Templates — Phase 8 — Status: Nicht begonnen
-- [ ] Metadaten-Templates (Copyright/Ersteller/Kontakt/IPTC) — Phase 8 — Status: Nicht begonnen
+- [x] Export-Templates (Ziel, Format, Qualität, Farbraum, Größe, Schärfung, Metadaten, Wasserzeichen, Mehrfachziel) — Phase 8 — Status: Fertig (abweichend, siehe PLAN.md Schritt 8) — eine generische `templates`-Tabelle (`kind="export"`) speichert das komplette `ExportPhotoOptions`-JSON als benannte Vorlage; **Mehrfachziel** (ein Export-Vorgang, mehrere Zielordner/-formate gleichzeitig) ist nicht Teil dieser Vorlagen, bleibt offen
+- [x] Wasserzeichen-Templates — Phase 8 — Status: Fertig (abweichend) — Wasserzeichen-Felder sind Teil von `ExportPhotoOptions` und damit bereits in den Export-Vorlagen enthalten, kein eigener Vorlagentyp
+- [x] Metadaten-Templates (Copyright/Ersteller/Kontakt/IPTC) — Phase 8 — Status: Fertig (abweichend) — ebenso Teil von `ExportPhotoOptions`/Export-Vorlagen statt eines eigenen Vorlagentyps
 - [x] Import-Templates — Phase 5 — Status: Fertig (vorgezogen aus Phase 3, siehe ADR-0031 Punkt 7 — Rust-Unterbau existierte bereits seit Phase 3 unbenutzt, Frontend-Anbindung jetzt in Schritt 9 nachgezogen)
 - [x] Umbenennungs-Templates mit Token-Editor — Phase 5 — Status: Fertig (vorgezogen aus Phase 3, siehe ADR-0031 Punkt 7)
-- [ ] Layout-Templates (Druck/Buch/Diashow/Web) — Phase 8 — Status: Nicht begonnen
-- [ ] Workflow-Templates (Import→Filter→Preset→Export als ein Klick) — Phase 8 — Status: Nicht begonnen
-- [ ] Template-Marktplatz-Struktur (lokales Repo-Format, Manifest, Installation) — Phase 8 — Status: Nicht begonnen (siehe ADR-0031: setzt die anderen Template-Bausteine voraus)
+- [x] Layout-Templates (Druck/Buch/Diashow/Web) — Phase 8 — Status: Fertig (abweichend, siehe PLAN.md Schritt 8) — dieselbe generische `templates`-Tabelle (`kind="print"/"book"/"slideshow"/"web"`); Anlegen läuft über eingefügtes JSON im `TemplatesDialog`, noch kein „Aktuelle Einstellungen speichern"-Knopf direkt in den vier Dialogen
+- [x] Workflow-Templates (Import→Filter→Preset→Export als ein Klick) — Phase 8 — Status: Fertig (abweichend, siehe PLAN.md Schritt 8) — echte Ein-Klick-Ausführung (Preset-EDL mischen, committen, exportieren, pro ausgewähltem Foto); ohne den Import-/Filter-Schritt aus der ursprünglichen Formulierung — läuft auf der bereits getroffenen Fotoauswahl, wie alle übrigen Phase-8-Exportdialoge
+- [x] Template-Marktplatz-Struktur (lokales Repo-Format, Manifest, Installation) — Phase 8 — Status: Fertig (abweichend, siehe PLAN.md Schritt 8) — `.apxt`-Dateiformat mit Manifest (`schema_version`/`kind`/`name`), Export/Import über Tauri-Dateidialoge; kein Online-Marktplatz-Hosting, wie geplant
 
 ## 3.6 Weitere Module
 

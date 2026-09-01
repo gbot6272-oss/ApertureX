@@ -30,14 +30,14 @@ use std::sync::{Mutex, MutexGuard};
 
 use apx_core::{
     AppError, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId, PhotoId,
-    PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId,
+    PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId, TemplateId,
 };
 use rusqlite::Connection;
 use time::OffsetDateTime;
 
 pub use models::{
     Collection, EditHistoryEntry, FilterCriteria, Folder, HistoryPosition, Keyword, NewPhoto,
-    Photo, Preset, PresetFolder, PresetVersion, Preview, PreviewLevel, Snapshot,
+    Photo, Preset, PresetFolder, PresetVersion, Preview, PreviewLevel, Snapshot, Template,
 };
 
 pub struct Catalog {
@@ -513,6 +513,37 @@ impl Catalog {
     pub fn list_duplicate_photo_groups(&self) -> Result<Vec<Vec<Photo>>> {
         let conn = self.lock()?;
         repository::photos::list_duplicate_groups(&conn)
+    }
+
+    // ---- Vorlagen (Phase 8 Schritt 8) --------------------------------------
+
+    /// Legt eine neue Vorlage an — `kind` ist eine der Zeichenketten
+    /// "export"/"print"/"book"/"slideshow"/"web"/"workflow",
+    /// `payload_json` das jeweilige `*Options`-DTO als JSON.
+    pub fn create_template(
+        &self,
+        kind: &str,
+        name: &str,
+        payload_json: &str,
+    ) -> Result<TemplateId> {
+        let conn = self.lock()?;
+        repository::templates::create(&conn, kind, name, payload_json, OffsetDateTime::now_utc())
+    }
+
+    /// Alle Vorlagen einer Art, alphabetisch nach Namen.
+    pub fn list_templates(&self, kind: &str) -> Result<Vec<Template>> {
+        let conn = self.lock()?;
+        repository::templates::list_by_kind(&conn, kind)
+    }
+
+    pub fn get_template(&self, id: TemplateId) -> Result<Template> {
+        let conn = self.lock()?;
+        repository::templates::get(&conn, id)
+    }
+
+    pub fn delete_template(&self, id: TemplateId) -> Result<()> {
+        let conn = self.lock()?;
+        repository::templates::delete(&conn, id)
     }
 }
 

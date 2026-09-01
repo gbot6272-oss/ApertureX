@@ -166,6 +166,35 @@ pub struct PresetDto {
     pub created_at: String,
 }
 
+/// Eine gespeicherte Vorlage (Phase 8 Schritt 8, siehe
+/// `apx_catalog::Template`s Moduldoku) — `kind` ist eine der Zeichenketten
+/// "export"/"print"/"book"/"slideshow"/"web"/"workflow", `payload_json`
+/// das jeweilige `*Options`-DTO als JSON (für `apx-app`/`apx-catalog`
+/// opak, wie bei `PresetDto.conditions_json`).
+#[derive(Debug, Clone, Serialize)]
+pub struct TemplateDto {
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    pub payload_json: String,
+    pub created_at: String,
+}
+
+impl From<apx_catalog::Template> for TemplateDto {
+    fn from(template: apx_catalog::Template) -> Self {
+        Self {
+            id: template.id.to_string(),
+            kind: template.kind,
+            name: template.name,
+            payload_json: template.payload_json,
+            created_at: template
+                .created_at
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_default(),
+        }
+    }
+}
+
 impl From<apx_catalog::Preset> for PresetDto {
     fn from(preset: apx_catalog::Preset) -> Self {
         Self {
@@ -237,6 +266,22 @@ fn default_json_array() -> serde_json::Value {
 }
 
 const APX_PRESET_SCHEMA_VERSION: u32 = 1;
+
+/// Eigenes Dateiformat für Vorlagen-Im-/Export (Phase 8 Schritt 8) — das
+/// "lokale Repo-Format mit Manifest" aus `PLAN.md`s Beschreibung: kein
+/// Online-Marktplatz-Server, sondern eine einzelne lesbare `.apxt`-Datei
+/// mit einem kleinen Manifest (`schema_version`/`kind`/`name`) plus dem
+/// eingebetteten Parametersatz (`payload`, dasselbe JSON wie in
+/// `TemplateDto.payload_json`) — spiegelt `ApxPresetFile` oben.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ApxTemplateFile {
+    schema_version: u32,
+    kind: String,
+    name: String,
+    payload: serde_json::Value,
+}
+
+const APX_TEMPLATE_SCHEMA_VERSION: u32 = 1;
 
 /// Eingabe für [`filter_photos`] — spiegelt `apx_catalog::FilterCriteria`,
 /// aber mit `#[serde(default)]`-Feldern, damit das Frontend nur die
@@ -580,6 +625,11 @@ fn parse_preset_folder_id(id: String) -> Result<apx_core::PresetFolderId, String
 }
 
 fn parse_preset_id(id: String) -> Result<apx_core::PresetId, String> {
+    id.parse()
+        .map_err(|err: apx_core::AppError| err.to_string())
+}
+
+fn parse_template_id(id: String) -> Result<apx_core::TemplateId, String> {
     id.parse()
         .map_err(|err: apx_core::AppError| err.to_string())
 }
@@ -2877,6 +2927,111 @@ pub fn set_photo_gps(
         _ => None,
     };
     state.catalog.set_photo_gps(id, gps).map_err(|err| err.to_string())
+}
+
+// ---- Vorlagen (Phase 8 Schritt 8) --------------------------------------
+//
+// Reine Verdrahtung: `apx_catalog::Catalog`s generische Vorlagen-Tabelle
+// (`kind`+`name`+`payload_json`) deckt Export-/Layout-Vorlagen für alle
+// fünf Ausgabemodule ab (dieselben `*Options`-DTOs, die die jeweiligen
+// Dialoge ohnehin schon als JSON schicken) sowie Workflow-Vorlagen — die
+// eigentliche Workflow-Ausführung (Preset anwenden + exportieren über
+// mehrere Fotos) läuft bewusst im Frontend (siehe `store/index.ts`s
+// `runWorkflowTemplate`), weil das EDL-Vorlagen-Mischen
+// (`mergeEdlSubset`) bislang nur dort existiert — kein zweiter,
+// serverseitiger Merge-Codepfad für denselben Vorgang.
+
+/// Legt eine neue Vorlage an.
+#[tauri::command]
+pub fn save_template(state: State<'_, AppState>, kind: String, name: String, payload_json: String) -> Result<String, String> {
+    let id = state
+        .catalog
+        .create_template(&kind, &name, &payload_json)
+        .map_err(|err| err.to_string())?;
+    Ok(id.to_string())
+}
+
+/// Alle Vorlagen einer Art, alphabetisch nach Namen.
+#[tauri::command]
+pub fn list_templates(state: State<'_, AppState>, kind: String) -> Result<Vec<TemplateDto>, String> {
+    let templates = state.catalog.list_templates(&kind).map_err(|err| err.to_string())?;
+    Ok(templates.into_iter().map(TemplateDto::from).collect())
+}
+
+#[tauri::command]
+pub fn delete_template(state: State<'_, AppState>, template_id: String) -> Result<(), String> {
+    let id = parse_template_id(template_id)?;
+    state.catalog.delete_template(id).map_err(|err| err.to_string())
+}
+
+/// Öffnet einen Speichern-Dialog und schreibt die Vorlage als `.apxt`-Datei
+/// (siehe `ApxTemplateFile`s Moduldoku). `None`, wenn der Dialog
+/// abgebrochen wurde.
+#[tauri::command]
+pub async fn export_template_to_file(app: AppHandle, state: State<'_, AppState>, template_id: String) -> Result<Option<String>, String> {
+    let id = parse_template_id(template_id)?;
+    let template = state.catalog.get_template(id).map_err(|err| err.to_string())?;
+    let payload: serde_json::Value = serde_json::from_str(&template.payload_json)
+        .map_err(|err| format!("Vorlagen-Nutzlast ist kein gültiges JSON: {err}"))?;
+    let file = ApxTemplateFile {
+        schema_version: APX_TEMPLATE_SCHEMA_VERSION,
+        kind: template.kind,
+        name: template.name.clone(),
+        payload,
+    };
+    let json = serde_json::to_string_pretty(&file).map_err(|err| format!("Vorlage nicht serialisierbar: {err}"))?;
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("Aperture X Vorlage", &["apxt"])
+        .set_file_name(format!("{}.apxt", template.name))
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx.await.map_err(|err| format!("Speichern-Dialog fehlgeschlagen: {err}"))?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|err| format!("Ungültiger Pfad: {err}"))?;
+    std::fs::write(&path, json).map_err(|err| format!("Datei '{}' nicht schreibbar: {err}", path.display()))?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
+/// Öffnet einen Öffnen-Dialog und legt die gewählte `.apxt`-Datei als neue
+/// Vorlage an. `None`, wenn der Dialog abgebrochen wurde.
+#[tauri::command]
+pub async fn import_template_from_file(app: AppHandle, state: State<'_, AppState>) -> Result<Option<TemplateDto>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("Aperture X Vorlage", &["apxt"])
+        .pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx.await.map_err(|err| format!("Öffnen-Dialog fehlgeschlagen: {err}"))?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|err| format!("Ungültiger Pfad: {err}"))?;
+    let text = std::fs::read_to_string(&path).map_err(|err| format!("Datei '{}' nicht lesbar: {err}", path.display()))?;
+    let file: ApxTemplateFile = serde_json::from_str(&text)
+        .map_err(|err| format!("Datei '{}' ist keine gültige .apxt-Datei: {err}", path.display()))?;
+    if file.schema_version > APX_TEMPLATE_SCHEMA_VERSION {
+        return Err(format!(
+            "Datei '{}' hat Schema-Version {}, diese Aperture-X-Version kennt nur {}",
+            path.display(),
+            file.schema_version,
+            APX_TEMPLATE_SCHEMA_VERSION
+        ));
+    }
+    let payload_json = serde_json::to_string(&file.payload).map_err(|err| format!("Nutzlast nicht serialisierbar: {err}"))?;
+    let id = state
+        .catalog
+        .create_template(&file.kind, &file.name, &payload_json)
+        .map_err(|err| err.to_string())?;
+    let template = state.catalog.get_template(id).map_err(|err| err.to_string())?;
+    Ok(Some(TemplateDto::from(template)))
 }
 
 #[cfg(test)]

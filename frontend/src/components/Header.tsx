@@ -8,6 +8,7 @@ import { ExportDialog } from "./ExportDialog";
 import { ImportDialog } from "./ImportDialog";
 import { PrintDialog } from "./PrintDialog";
 import { SlideshowDialog } from "./SlideshowDialog";
+import { TemplatesDialog } from "./TemplatesDialog";
 
 export function Header() {
   const importRunning = useAppStore((s) => s.importRunning);
@@ -40,6 +41,7 @@ export function Header() {
   const openWebDialog = useAppStore((s) => s.openWebDialog);
   const closeWebDialog = useAppStore((s) => s.closeWebDialog);
   const [importDialogSource, setImportDialogSource] = useState<string | null>(null);
+  const [templatesDialogOpen, setTemplatesDialogOpen] = useState(false);
 
   const exportPhotoIds = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
 
@@ -209,6 +211,16 @@ export function Header() {
       </button>
 
       <WebDialog open={webDialogOpen} photoIds={exportPhotoIds} onClose={closeWebDialog} />
+
+      <button
+        type="button"
+        onClick={() => setTemplatesDialogOpen(true)}
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
+      >
+        Vorlagen…
+      </button>
+
+      <TemplatesDialog open={templatesDialogOpen} photoIds={exportPhotoIds} onClose={() => setTemplatesDialogOpen(false)} />
 
       <span className="text-xs text-text-muted">Strg/Cmd+K — Befehlspalette</span>
     </header>

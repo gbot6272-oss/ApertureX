@@ -353,3 +353,35 @@ Frontend-Klick (fünf Knöpfe, "Objekte" braucht zusätzlich einen Bildklick)
 ```
 
 **Nicht in Phase 7** (bewusst zurückgestellt, siehe `PLAN.md`): echte ONNX-Runtime-Modellinferenz, Einzelregionen der Personen-Maske (Augen/Brauen/Lippen/Zähne/Haare/Kleidung einzeln wählbar), Tiefenbereich-Masken (weiterhin ohne Phasenzuordnung, siehe ADR-0032 Punkt 3).
+
+## 12. Architektur Phase 8 — Export-Engine und sechs Ausgabemodule
+
+Beschreibt den tatsächlich gebauten Stand (siehe `DECISIONS.md` ADR-0034 für die Scope-Entscheidungen — insbesondere die Abhängigkeitsbudget-Disziplin, die diese Phase durchzieht: `printpdf` ohne Standard-Features, `lcms2` mit `static`-Feature statt Systembibliothek, `reverse_geocoder`s gebündelter GeoNames-Auszug bewusst klein gehalten).
+
+**Neues Crate `apx-export`** (`crates/apx-export`, hängt von `apx-core`/`apx-raw`/`apx-pipeline`/`apx-catalog` ab): gemeinsamer Unterbau für alle sechs Ausgabemodule aus `SPEC.md` §5. Zentrales Architekturprinzip, das durch die ganze Phase durchgehalten wird: **jedes Modul rendert ausschließlich über `apx_pipeline::develop::render_rgba8`** (über `engine::render_to_pixels`, aus dem ursprünglichen `render_and_encode` für den Einzelexport herausgezogen) — kein zweiter Rendering-Codepfad, egal ob eine Druckseite, ein Video-Frame, eine Buchseite oder eine Web-Galerie-Miniatur entsteht. Module, die dieselbe geometrische Aufgabe lösen, teilen sich denselben Code statt ihn zu duplizieren: Buch (`book.rs`) nutzt Drucks (`print.rs`) `PrintSlot`/`compose_page`/`grid_slots` unverändert (eine Buchseite ist geometrisch dieselbe Zellen-auf-Seite-Aufgabe wie eine Druckseite), Buch/Diashow-Titelkarten teilen sich `watermark.rs`s Textrasterisierung (`apply_text_at`/`apply_image_at`, aus den vier festen Wasserzeichen-Ecken zu einem freien Pixel-Ursprung verallgemeinert).
+
+**Die sechs Module:**
+- **Export-Engine-Grundgerüst + Formate** (`engine`/`format`/`resize`/`sharpen`/`icc`/`watermark`/`metadata`/`queue`): JPEG/PNG/TIFF/WebP(verlustfrei)/AVIF echt umgesetzt, PSD/HEIF/JPEG-XL zurückgestellt (keine tragfähige reine-Rust-Bibliothek mit Schreibpfad); vier ICC-Standardprofile aus Chromatizitätswerten aufgebaut (`lcms2`) statt mitgelieferter `.icc`-Dateien; Export-Warteschlange als reine, threading-freie `ExportQueue<T>`-Struktur mit Abfrage- statt Weck-Semantik.
+- **Drucken** (`print.rs`): vier Layouts (Einzelbild/Kontaktbogen/Bilderpaket/benutzerdefiniertes Raster) auf eine gemeinsame `PrintSlot`-Liste reduziert; Bilderpaket nutzt drei feste Vorlagen statt echtem Bin-Packing.
+- **Diashow** (`video.rs` + Frontend `lib/slideshow.ts`/`SlideshowPlayer.tsx`): Übergänge/Ken-Burns/Intro-Outro laufen live im Frontend-Canvas, `video.rs` bildet dieselbe Zeitachse für den optionalen MP4-Export über ein gespawntes System-`ffmpeg` nach (rohe RGBA8-Frames über `stdin`) — kein gebündeltes `ffmpeg`-Binary.
+- **Buch** (`book.rs`): fünf feste Seitenvorlagen, `auto_fill_pages` verteilt die Fotoauswahl reihum; PDF-Erzeugung über `printpdf` ohne Standard-Features (jede Seite ist bereits ein fertiges RGBA8-Bild, direkt als `RawImage` eingebettet, keine `printpdf`-eigene Text-/HTML-Engine).
+- **Web** (`web.rs`): statische HTML-Galerie (reines Rust-String-Templating, drei Themes) plus echter FTP/FTPS- (`suppaftp`) und SFTP-Upload (`russh`/`russh-sftp`, reines Rust); SFTP nimmt jeden Server-Schlüssel an (`AcceptAnyHostKey`) statt eines Known-Hosts-Abgleichs.
+- **Karte** (`map.rs` + Frontend `MapView.tsx`): GPS-Lesepfad existierte bereits aus Phase 1/3 (`apx_raw::metadata::extract_gps`); neu sind `apx-catalog`s `list_geotagged_photos`/`set_photo_gps`, vollständig offline Reverse-Geocoding (`reverse_geocoder`, gebündelter GeoNames-Auszug) und GPX-Tracklog-Import (`quick-xml`-Streaming-Parser); die Kartenansicht selbst ist Leaflet direkt (kein `react-leaflet`) mit OpenStreetMap-Kacheln — einzige Netzwerk-Abhängigkeit der ganzen Phase.
+- **Vorlagen** (`apx-catalog`s generische `templates`-Tabelle, kein `apx-export`-Modul): ein `kind`+`name`+`payload_json`-Schema deckt Export-/Layout-Vorlagen für alle fünf Ausgabemodule *und* Workflow-Vorlagen ab, statt fünf fast identischer Tabellen — jede Vorlage ist ohnehin nur der bereits vorhandene `*Options`-JSON-Parametersatz, benannt und gespeichert. `.apxt`-Dateiformat mit Manifest (`schema_version`/`kind`/`name`/`payload`) für den lokalen Austausch, spiegelt das `.apx`-Preset-Format aus Phase 5.
+
+**`apx-app` bleibt reine Verdrahtung** (`crates/apx-app/src/commands.rs`, ein neuer Abschnitt je Modul): Foto-/Katalogdaten auflösen, die passende `apx-export`-Funktion aufrufen, Ergebnis als DTO zurückreichen — dieselbe Konvention wie bei Phase 6/7. Eine Ausnahme von "keine Geschäftslogik in `apx-app`": die Workflow-Vorlagen-*Ausführung* (Preset-EDL-Teilmenge mischen, committen, exportieren, pro Foto) läuft bewusst im Frontend (`store/index.ts::runWorkflowTemplate`) statt in einem Tauri-Command, weil das EDL-Mischen (`mergeEdlSubset`) bislang nur dort existiert — ein serverseitiger Merge-Codepfad hätte dieselbe Logik zweimal bedeutet.
+
+### Datenfluss Phase 8: Foto exportieren (stellvertretend für alle sechs Module)
+
+```
+Frontend-Dialog (Export/Drucken/Diashow/Buch/Web — Fotoauswahl + Options-DTO)
+  -> Tauri-Command (z. B. export_web_gallery)
+       resolve_current_edl (wie beim Einzelexport)
+       -> apx_export::engine::render_to_pixels(pipeline, ExportRequest)
+            = apx_pipeline::develop::render_rgba8 (derselbe Pfad wie die Entwickeln-Vorschau)
+       -> modul-eigene Komposition (compose_page/generate_gallery_html/render_frame/...)
+       -> Kodierung (apx_export::format) + optionaler Upload/PDF-Schreibvorgang
+  <- *OutcomeDto { Pfad(e)/Seitenzahl/Fotoanzahl/... }
+```
+
+**Nicht in Phase 8** (bewusst zurückgestellt, siehe `PLAN.md`/`DECISIONS.md` ADR-0034 sowie die elf per Nutzerwunsch nachgetragenen Lightroom-Vergleichsfunktionen — Histogramm, Zielwerkzeuge, KI-Vollbild-Entrauschung/-Hochskalierung u. a., siehe PLAN.md-Backlog): PSD-/HEIF-/JPEG-XL-Export, echtes Mehrfachziel bei Export-Vorlagen, „Aktuelle Einstellungen als Vorlage speichern"-Knöpfe direkt in den fünf Ausgabedialogen (Vorlagen entstehen im `TemplatesDialog` über eingefügtes JSON), Fotos per echtem Drag-and-drop auf die Karte (ein Klick-Platzieren-Modus ersetzt es), Reverse-Geocoding als automatische Foto-Schlagworte (nur Anzeige im Marker-Popup).

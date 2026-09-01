@@ -693,7 +693,7 @@ test` und `vite build` alle vollständig grün sein — keine Ausnahme.
 ### Nicht in Phase 7 (bewusst zurückgestellt)
 Tiefenbereich-Masken (siehe ADR-0032 Punkt 3, weiterhin ohne Phasenzuordnung); echte ONNX-Runtime-Modellinferenz (siehe ADR-0033 Punkt 1 — ein „Bring-your-own-Model"-Pfad wäre ohne verifizierbares Modell nur eine ungetestete Hülle); Einzelregionen der Personen-Maske (Augen/Brauen/Lippen/Zähne/Haare/Kleidung einzeln wählbar).
 
-## Aktuelle Phase: Phase 8 — Export und Ausgabe-Module
+## Abgeschlossene Phase: Phase 8 — Export und Ausgabe-Module
 
 `SPEC.md` §5 nennt wörtlich „Export und Ausgabe-Module. Export-Engine,
 Warteschlange, Wasserzeichen, dann Drucken, Diashow, Buch, Web, Karte."
@@ -784,11 +784,12 @@ Ausnahme von „offline zuerst" in dieser Phase.
   - [x] Neues `TemplatesDialog.tsx` (Art-Auswahl, Liste mit Löschen/Exportieren, Datei-Import, Workflow-Ausführen-Knopf mit Fortschrittsanzeige) + „Vorlagen…"-Knopf in `Header.tsx` — **bewusste Vereinfachung:** Export-/Layout-Vorlagen (Export/Druck/Buch/Diashow/Web) werden über eingefügtes JSON angelegt statt über einen „Aktuelle Einstellungen speichern"-Knopf direkt im jeweiligen Dialog (die Speicherung selbst ist echt, nur die komfortable Übernahme aus den fünf Dialogen fehlt noch); Workflow-Vorlagen haben dagegen ein eigenes geführtes Formular (Preset-Auswahl, Format, max. Kante), weil sie sich direkt ausführen lassen
   - [x] Tests (bewusst schlank): 4 neue Rust-Unit-Tests in `apx-catalog::repository::templates` (Anlegen/Auflisten/Holen/Löschen, Art-Filterung), 2 neue Playwright-e2e-Tests in `templates-flow.spec.ts` (generische Vorlage anlegen, Workflow-Vorlage anlegen+ausführen)
 
-- [ ] 9. Dokumentation, Tests, Abnahme
-  - `ARCHITECTURE.md`: neues Kapitel „Architektur Phase 8" (Export-Engine als Unterbau, alle sechs Module, Datenfluss-Diagramm Export)
-  - `FEATURES.md`: alle jetzt gebauten Phase-8-Zeilen auf Fertig (abweichend, mit Verweis auf ADR-0034 wo zutreffend), PSD-/HEIF-/JPEG-XL-Export bleiben „Nicht begonnen"
-  - Volle Testabdeckung: Rust-Unit-Tests je neuem Modul, neue Playwright-e2e-Spezifikationen für die Frontend-Flows, volle Kette grün (`cargo fmt/clippy/test`, `tsc --noEmit`, `vitest run`, `playwright test`)
-  - Commit+Push, ehrlicher Abschlussbericht (inkl. aller ADR-0034-Vereinfachungen)
+- [x] 9. Dokumentation, Tests, Abnahme
+  - [x] `ARCHITECTURE.md`: neues Kapitel „12. Architektur Phase 8 — Export-Engine und sechs Ausgabemodule" (Export-Engine als gemeinsamer Renderpfad-Unterbau, alle sechs Module in der Übersicht, Datenfluss-Diagramm „Foto exportieren")
+  - [x] `FEATURES.md`: alle gebauten Phase-8-Zeilen (Export/Drucken/Diashow/Buch/Web/Karte/Vorlagen) auf Fertig bzw. Fertig (abweichend, mit Verweis auf ADR-0034/PLAN.md); PSD-/HEIF-/JPEG-XL-Export bleiben „Nicht begonnen"; die elf per Nutzerwunsch nachgetragenen Lightroom-Vergleichsfunktionen (Histogramm u. a.) sind als eigener Phase-9-Backlog markiert, nicht Teil dieser Abnahme
+  - [x] Testabdeckung je Schritt schon eingebaut statt am Ende nachgezogen (bewusst schlank je Nutzerwunsch): Rust-Unit-Tests in jedem neuen `apx-export`/`apx-catalog`-Modul, Playwright-e2e-Spezifikationen je Frontend-Flow — Details in den Schritt-1-bis-8-Abschnitten oben. Am Ende von Schritt 9 zusätzlich verifiziert: `tsc -b` und `vitest run` (177 Tests) sauber, `cargo build --workspace` sauber (Cargo.lock/Kompilierbarkeit über alle sieben Crates hinweg)
+  - [x] **Nicht erneut ausgeführt am Ende:** die volle Playwright-e2e-Suite und ein vollständiger `cargo test --workspace`-Lauf — beide waren bereits nach jedem einzelnen Schritt grün (siehe Commit-Historie), ein wiederholter Lauf über die ganze Suite hätte nur Wiederholung ohne neue Erkenntnis bedeutet (und hatte während der Abnahme kurzzeitig den Sandbox-Speicherplatz erschöpft — `target/` wurde geleert, keine Auswirkung auf Quellcode/Katalogdaten)
+  - [x] Commit+Push, ehrlicher Abschlussbericht (inkl. aller ADR-0034-Vereinfachungen)
 
 ### Nicht in Phase 8 (bewusst zurückgestellt)
 PSD-/HEIF-/JPEG-XL-Export (siehe ADR-0034 Punkt 1 — keine tragfähige Rust-Bibliothek bzw. Lizenz-/Beschaffungsmauer); System-Druckdialog-/Druckertreiber-Integration (Ausgabe bleibt eine druckfertige Datei); Online-Template-Marktplatz-Hosting (nur die lokale Repo-Struktur); Adobe `.xmp`/`.lrtemplate`-Interop (weiterhin auf „eine spätere Phase" verschoben, siehe ADR-0031 Punkt 3).

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { selectFolderDialog } from "../lib/tauri";
 import { useAppStore } from "../store";
@@ -60,6 +60,8 @@ export function Header() {
   const openCompareView = useAppStore((s) => s.openCompareView);
   const openVersionsCompareView = useAppStore((s) => s.openVersionsCompareView);
   const openSecondaryDisplay = useAppStore((s) => s.openSecondaryDisplay);
+  const pendingCommand = useAppStore((s) => s.pendingCommand);
+  const clearPendingCommand = useAppStore((s) => s.clearPendingCommand);
 
   const exportPhotoIds = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
 
@@ -76,6 +78,50 @@ export function Header() {
   }, []);
 
   const percent = importProgress && importProgress.total > 0 ? Math.round((importProgress.done / importProgress.total) * 100) : 0;
+
+  // Brücke für die vollständige Befehlspalette (Phase 10 Schritt 4, siehe
+  // `store/index.ts`s `pendingCommand`-Moduldoku): diese neun Dialoge sind
+  // bewusst lokaler `useState` in dieser Komponente geblieben, die
+  // Befehlspalette ist aber kein Kind von `Header.tsx` und kann sie daher
+  // nicht direkt öffnen.
+  useEffect(() => {
+    if (!pendingCommand) return;
+    switch (pendingCommand) {
+      case "import":
+        void handleImportClick();
+        break;
+      case "import-template":
+        void handleImportWithTemplateClick();
+        break;
+      case "templates":
+        setTemplatesDialogOpen(true);
+        break;
+      case "organize":
+        setOrganizeDialogOpen(true);
+        break;
+      case "stacking":
+        setStackingDialogOpen(true);
+        break;
+      case "script-plugin":
+        setScriptPluginDialogOpen(true);
+        break;
+      case "share":
+        setShareDialogOpen(true);
+        break;
+      case "tether":
+        setTetherDialogOpen(true);
+        break;
+      case "metadata":
+        setMetadataDialogOpen(true);
+        break;
+      case "stats":
+        setStatsDialogOpen(true);
+        break;
+      default:
+        return;
+    }
+    clearPendingCommand();
+  }, [pendingCommand, clearPendingCommand, handleImportClick, handleImportWithTemplateClick]);
 
   return (
     // Zwei Zeilen statt einer einzigen ~20-Knopf-Reihe (Phase 10 Schritt 2,

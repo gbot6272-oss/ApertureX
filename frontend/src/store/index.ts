@@ -965,6 +965,20 @@ interface AiSlice {
    * aus dem erkannten Fleck übernommen) und committet sofort. */
   applySensorSpotAsRepairStroke: (spot: SpotCandidateDto) => void;
 
+  // -- Befehlspalette: Brücke zu Header.tsx-lokalen Dialog-Zuständen
+  // (Phase 10 Schritt 4) --
+  /** Templates/Organisieren/Stacking/Skript & Plugins/Kollaboration/
+   * Tethering/Metadaten/Statistik/Import-mit-Vorlage sind bewusst
+   * `useState` innerhalb `Header.tsx` geblieben statt vollständiger
+   * eigener Store-Slices (reine Ein/Aus-Flags ohne Async-Logik, anders
+   * als z. B. `exportDialogOpen`) — `pendingCommand` ist die schmale
+   * Brücke, über die `CommandPalette.tsx` (kein Kind von `Header.tsx`)
+   * trotzdem einen dieser Dialoge öffnen kann: `Header.tsx` beobachtet
+   * dieses Feld per `useEffect` und räumt es sofort wieder ab. */
+  pendingCommand: string | null;
+  requestCommand: (id: string) => void;
+  clearPendingCommand: () => void;
+
   // -- UI-Einstellungen (Phase 10 Schritt 1) --
   /** `null` nur vor dem ersten `loadUiSettings()`-Aufruf (siehe App.tsx,
    * beim Start geladen — anders als `aiSettings`, das erst beim Öffnen des
@@ -3505,6 +3519,18 @@ export const useAppStore = create<AppStore>()(
         state.sensorSpotCandidates = state.sensorSpotCandidates.filter((candidate) => candidate !== spot);
       });
       void get().commitDevelopEdit("Sensorfleck automatisch repariert");
+    },
+
+    pendingCommand: null,
+    requestCommand: (id) => {
+      set((state) => {
+        state.pendingCommand = id;
+      });
+    },
+    clearPendingCommand: () => {
+      set((state) => {
+        state.pendingCommand = null;
+      });
     },
 
     uiSettings: null,

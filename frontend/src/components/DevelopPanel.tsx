@@ -166,6 +166,10 @@ export function DevelopPanel() {
   const bwMixer = useAppStore((s) => s.developEdl.bw_mixer);
   const setBwMixerField = useAppStore((s) => s.setBwMixerField);
   const [activeBwMixerBand, setActiveBwMixerBand] = useState<keyof BlackAndWhiteMixerAdjustment>("red");
+  const enhanceRunning = useAppStore((s) => s.enhanceRunning);
+  const enhanceStatus = useAppStore((s) => s.enhanceStatus);
+  const runDenoise = useAppStore((s) => s.runDenoise);
+  const runUpscale = useAppStore((s) => s.runUpscale);
   const colorMixer = useAppStore((s) => s.developEdl.color_mixer);
   const colorMixerPickerActive = useAppStore((s) => s.colorMixerPickerActive);
   const toggleColorMixerPicker = useAppStore((s) => s.toggleColorMixerPicker);
@@ -1230,6 +1234,30 @@ export function DevelopPanel() {
                 ))}
               </ul>
             )}
+          </fieldset>
+
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Entrauschung &amp; Hochskalierung</legend>
+            <p className="text-xs text-text-muted">Klassische Algorithmen (Bilateral-Filter, kantengerichtete Interpolation), keine Modellinferenz — schreiben eine neue Datei neben dem Original, ändern die Bearbeitung nicht.</p>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                disabled={!selectedPhotoId || enhanceRunning !== null}
+                onClick={() => selectedPhotoId && void runDenoise(selectedPhotoId)}
+                className="flex-1 rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {enhanceRunning === "denoise" ? "Entrauscht…" : "Entrauschen"}
+              </button>
+              <button
+                type="button"
+                disabled={!selectedPhotoId || enhanceRunning !== null}
+                onClick={() => selectedPhotoId && void runUpscale(selectedPhotoId)}
+                className="flex-1 rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {enhanceRunning === "upscale" ? "Skaliert…" : "2× hochskalieren"}
+              </button>
+            </div>
+            {enhanceStatus && <p className="text-xs text-text-muted">{enhanceStatus}</p>}
           </fieldset>
         </>
       )}

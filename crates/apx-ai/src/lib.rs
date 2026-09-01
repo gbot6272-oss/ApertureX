@@ -27,10 +27,12 @@
 
 pub mod blur;
 pub mod color;
+pub mod denoise;
 pub mod error;
 pub mod preset_generator;
 pub mod repair_analysis;
 pub mod segmentation;
 pub mod tagging;
+pub mod upscale;
 
 pub use error::{AiError, Result};

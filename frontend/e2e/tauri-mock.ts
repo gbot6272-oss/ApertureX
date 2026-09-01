@@ -139,6 +139,9 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       top_lenses: [],
     } as unknown,
     previewCacheStats: { file_count: 0, total_bytes: 0 } as { file_count: number; total_bytes: number },
+    // Entrauschung/Hochskalierung (Phase 9 Schritt 6).
+    denoisedPhotoPath: "/mock/photos/IMG_0001_entrauscht.png" as string,
+    upscaledPhotoPath: "/mock/photos/IMG_0001_hochskaliert.png" as string,
     ...initialFixtures,
   };
   w.__mockInvokeLog = [] as Array<{ cmd: string; args: unknown }>;
@@ -660,6 +663,10 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "clear_preview_cache":
         fixtures.previewCacheStats = { file_count: 0, total_bytes: 0 };
         return null;
+      case "denoise_photo":
+        return fixtures.denoisedPhotoPath;
+      case "upscale_photo":
+        return fixtures.upscaledPhotoPath;
 
       // ---- Bibliothek: Sammlungen (ab Phase 3, Sammlungssätze/intelligente -
       // Sammlungen ab Phase 9 Schritt 1) --------------------------------------

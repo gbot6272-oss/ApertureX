@@ -3900,6 +3900,98 @@ pub fn clear_preview_cache(state: State<'_, AppState>) -> Result<(), String> {
     clear_dir_contents(&state.paths.preview_cache_dir()).map_err(|err| err.to_string())
 }
 
+// ---- Entwickeln: Entrauschung, Hochskalierung (ab Phase 9 Schritt 6, siehe
+// DECISIONS.md ADR-0035) — klassische, deterministische Algorithmen statt
+// echter Modellinferenz (dasselbe ONNX-Beschaffungsproblem wie ADR-0033),
+// deshalb bewusst nicht als „KI"/„AI" beschriftet. -------------------------
+
+/// Rendert `photo_id` mit seinem aktuellen Bearbeitungsstand in voller
+/// Auflösung — gemeinsame Grundlage für [`denoise_photo`]/[`upscale_photo`],
+/// dieselbe `apx_export::engine`-Rendering-Kette wie ein echter Export
+/// (kein zweiter Rendering-Codepfad).
+fn render_photo_full_resolution(
+    state: &AppState,
+    photo_id: apx_core::PhotoId,
+) -> Result<(PathBuf, u32, u32, Vec<u8>), String> {
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let edl = resolve_current_edl(&state.catalog, photo_id)?;
+    let request = apx_export::engine::ExportRequest::new(
+        source_path.clone(),
+        edl,
+        apx_export::format::ExportFormat::Png,
+    );
+    let (width, height, pixels) =
+        apx_export::engine::render_to_pixels(Some(&state.pipeline), &request)
+            .map_err(|err| err.to_string())?;
+    Ok((source_path, width, height, pixels))
+}
+
+fn write_derived_png(
+    source_path: &std::path::Path,
+    suffix: &str,
+    width: u32,
+    height: u32,
+    pixels: &[u8],
+) -> Result<String, String> {
+    let bytes = apx_export::format::encode_rgba8(
+        width,
+        height,
+        pixels,
+        apx_export::format::ExportFormat::Png,
+        &apx_export::format::EncodeOptions::default(),
+    )
+    .map_err(|err| err.to_string())?;
+    let stem = source_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Foto");
+    let dest_path = source_path.with_file_name(format!("{stem}_{suffix}.png"));
+    std::fs::write(&dest_path, bytes)
+        .map_err(|err| format!("Datei '{}' nicht schreibbar: {err}", dest_path.display()))?;
+    Ok(dest_path.display().to_string())
+}
+
+/// Entrauscht `photo_id` (kantenerhaltender Bilateral-Filter,
+/// `apx_ai::denoise`) und schreibt das Ergebnis als neue PNG-Datei neben
+/// dem Original. `range_sigma` steuert die Stärke (größer = mehr
+/// Glättung) — `None` verwendet einen moderaten Vorgabewert.
+#[tauri::command]
+pub fn denoise_photo(
+    state: State<'_, AppState>,
+    photo_id: String,
+    range_sigma: Option<f32>,
+) -> Result<String, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let (source_path, width, height, pixels) = render_photo_full_resolution(&state, photo_id)?;
+    let denoised = apx_ai::denoise::bilateral_filter_rgba8(
+        &pixels,
+        width,
+        height,
+        apx_ai::denoise::DEFAULT_RADIUS,
+        3.0,
+        range_sigma.unwrap_or(20.0),
+    );
+    write_derived_png(&source_path, "entrauscht", width, height, &denoised)
+}
+
+/// Skaliert `photo_id` auf das Doppelte hoch (kantengerichtete
+/// Interpolation, `apx_ai::upscale`) und schreibt das Ergebnis als neue
+/// PNG-Datei neben dem Original.
+#[tauri::command]
+pub fn upscale_photo(state: State<'_, AppState>, photo_id: String) -> Result<String, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let (source_path, width, height, pixels) = render_photo_full_resolution(&state, photo_id)?;
+    let (out_width, out_height, upscaled) =
+        apx_ai::upscale::edge_directed_upscale_2x_rgba8(&pixels, width, height);
+    write_derived_png(
+        &source_path,
+        "hochskaliert",
+        out_width,
+        out_height,
+        &upscaled,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

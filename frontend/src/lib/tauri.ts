@@ -1098,3 +1098,20 @@ export function previewCacheStats(): Promise<PreviewCacheStatsDto> {
 export function clearPreviewCache(): Promise<void> {
   return invoke<void>("clear_preview_cache");
 }
+
+// ---- Entwickeln: Entrauschung, Hochskalierung (ab Phase 9 Schritt 6, siehe
+// DECISIONS.md ADR-0035) — klassische Algorithmen, keine echte
+// Modellinferenz (dieselbe Ehrlichkeitslinie wie ADR-0033). -----------------
+
+/** Entrauscht (kantenerhaltender Bilateral-Filter) und schreibt eine neue
+ * PNG-Datei neben dem Original, gibt deren Pfad zurück. */
+export function denoisePhoto(photoId: string, rangeSigma?: number): Promise<string> {
+  return invoke<string>("denoise_photo", { photoId, rangeSigma: rangeSigma ?? null });
+}
+
+/** Skaliert auf das Doppelte hoch (kantengerichtete Interpolation) und
+ * schreibt eine neue PNG-Datei neben dem Original, gibt deren Pfad
+ * zurück. */
+export function upscalePhoto(photoId: string): Promise<string> {
+  return invoke<string>("upscale_photo", { photoId });
+}

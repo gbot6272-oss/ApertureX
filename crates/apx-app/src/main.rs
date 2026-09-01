@@ -153,6 +153,8 @@ fn main() {
             commands::catalog_statistics,
             commands::preview_cache_stats,
             commands::clear_preview_cache,
+            commands::denoise_photo,
+            commands::upscale_photo,
             commands::create_collection,
             commands::create_smart_collection,
             commands::move_collection_to_folder,

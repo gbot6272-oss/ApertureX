@@ -407,6 +407,12 @@ interface DevelopSlice {
    * Schritt 5) — derselbe „Ein-Klick, sofort committen"-Vertrag wie
    * `applyWhiteBalancePreset`. */
   applyAutoTone: (result: AutoToneResult) => void;
+  /** Entrauschung/Hochskalierung (Phase 9 Schritt 6) — schreiben eine
+   * neue Datei neben dem Original, ändern die EDL nicht. */
+  enhanceRunning: "denoise" | "upscale" | null;
+  enhanceStatus: string | null;
+  runDenoise: (photoId: string) => Promise<void>;
+  runUpscale: (photoId: string) => Promise<void>;
   /** Ersetzt eine der fünf Kurven (Phase 4 Schritt 4, siehe
    * `components/CurveEditor.tsx`) — Zwischenstand beim Ziehen, committet
    * wird separat über `commitDevelopEdit()`. */
@@ -1783,6 +1789,49 @@ export const useAppStore = create<AppStore>()(
         state.developEdl.basic.contrast = result.contrast;
       });
       void get().commitDevelopEdit();
+    },
+
+    enhanceRunning: null,
+    enhanceStatus: null,
+
+    runDenoise: async (photoId) => {
+      set((state) => {
+        state.enhanceRunning = "denoise";
+      });
+      try {
+        const path = await api.denoisePhoto(photoId);
+        set((state) => {
+          state.enhanceStatus = `Entrauscht: ${path}`;
+        });
+      } catch (err) {
+        set((state) => {
+          state.enhanceStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.enhanceRunning = null;
+        });
+      }
+    },
+
+    runUpscale: async (photoId) => {
+      set((state) => {
+        state.enhanceRunning = "upscale";
+      });
+      try {
+        const path = await api.upscalePhoto(photoId);
+        set((state) => {
+          state.enhanceStatus = `Hochskaliert: ${path}`;
+        });
+      } catch (err) {
+        set((state) => {
+          state.enhanceStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.enhanceRunning = null;
+        });
+      }
     },
 
     setCurveChannel: (key, channel) => {

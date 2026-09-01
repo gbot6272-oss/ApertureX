@@ -794,40 +794,81 @@ Ausnahme von „offline zuerst" in dieser Phase.
 ### Nicht in Phase 8 (bewusst zurückgestellt)
 PSD-/HEIF-/JPEG-XL-Export (siehe ADR-0034 Punkt 1 — keine tragfähige Rust-Bibliothek bzw. Lizenz-/Beschaffungsmauer); System-Druckdialog-/Druckertreiber-Integration (Ausgabe bleibt eine druckfertige Datei); Online-Template-Marktplatz-Hosting (nur die lokale Repo-Struktur); Adobe `.xmp`/`.lrtemplate`-Interop (weiterhin auf „eine spätere Phase" verschoben, siehe ADR-0031 Punkt 3).
 
-## Backlog-Ergänzung für Phase 9 (auf Nutzerwunsch, außerhalb der Reihe)
+## Aktuelle Phase: Phase 9 — Fortgeschrittenes
 
-Nachträglich aufgenommen (nicht aus `SPEC.md`, sondern direkt vom Nutzer
-anhand eines Lightroom-Classic-Screenshots angefragt: Histogramm-Panel
-plus Basic-Panel-Nachbarschaft) — elf UI-nahe Entwickeln-/Anzeige-
-Fähigkeiten, die Lightroom hat und die bei uns bisher nirgends vorkamen,
-weder in `SPEC.md` noch in `FEATURES.md`. Volle Liste mit technischen
-Kurznotizen steht in `FEATURES.md` §3.2, neuer Unterabschnitt
-„Histogramm, Zielwerkzeuge & KI-Verbesserung" (11 neue Zeilen, alle
-`Status: Nicht begonnen`):
+`SPEC.md` §5 nennt für Phase 9 wörtlich „Fortgeschrittenes: Node-Editor,
+Panorama/HDR/Fokus-Stacking, Tethering, Skript-API, Plugin-System"
+(ergänzt um §3.6 „Zusätzliche Module": Astro-Stacking,
+Stapelverarbeitungs-Konsole, Vergleichs-Grid, Zeitleisten-Ansicht,
+Verlaufs-Vergleich, Kollaborationsmodus). Siehe `DECISIONS.md`
+ADR-0035 für die vollständige Scope-Präzisierung: über die Phasen 3–8
+hinweg haben mehrere ADRs zusätzlich das komplette Bibliotheks-Backlog
+(ADR-0032, 14 Punkte) und einen vom Nutzer selbst angefragten
+Histogramm-/Zielwerkzeug-/KI-Verbesserungs-Block (11 Punkte, ursprünglich
+als loser Backlog-Abschnitt hier eingetragen) auf Phase 9 vorgemerkt,
+dazu eine Einzelzeile Adobe-`.xmp`/`.lrtemplate`-Interop. **38 Punkte in
+Summe** — mehr als Phase 6+7+8 zusammen, auf ausdrücklichen Nutzerwunsch
+jetzt vollständig geplant statt weiter aufgeschoben. Maskentyp
+Tiefenbereich bleibt ausdrücklich ausgenommen (kein Tiefendaten-
+Zulieferer existiert, siehe ADR-0032 Punkt 3).
 
-1. Live-Histogramm (RGB + Luminanz)
-2. Clipping-Warnungen (Lichter/Tiefen-Dreiecke + Bildüberlagerung)
-3. Punktfarbmesser (RGB-Wert unter dem Mauszeiger)
-4. Zielgerichtetes Anpassungswerkzeug (TAT) für Kurven/HSL
-5. Schwarzweiß-Umwandlung mit eigenem 8-Kanal-Mixer
-6. Auto-Ton / Auto-Weißabgleich per Ein-Klick
-7. Navigator-Miniaturansicht beim Zoomen
-8. KI-Entrauschung über die volle Bildfläche
-9. KI-Hochskalierung / Detailverbesserung
-10. Info-Overlay im Vollbild-Modus
-11. Bearbeitungs-Pins auf dem Bild für lokale Masken
+- [x] 0. Scope festzurren
+  - [x] `DECISIONS.md`: neues ADR-0035
+  - [x] `FEATURES.md`: bereits vollständig und korrekt auf Phase 9 getaggt — keine Korrektur nötig
+  - [ ] `ARCHITECTURE.md` §7s Phase-9-Platzhalter wird in Schritt 12 durch ein volles Kapitel ersetzt
+  - [x] `PLAN.md`: dieser Abschnitt
 
-**Vorläufig auf Phase 9 getaggt** (SPEC.md §5s „Fortgeschrittenes" ist
-ohnehin schon der Sammelpunkt für nachträglich verschobene Punkte, siehe
-ADR-0032) — das ist nur eine Einordnung, keine Zusage zur Umsetzungsart.
-Anders als bei den übrigen Phase-8-Schritten oben bekommt dieser Block
-**bewusst noch keine** Schritt-0-Scope-Präzisierung/ADR: Phase 8 ist noch
-nicht abgeschlossen, Phase 9 ist noch nicht die aktuelle Phase (siehe
-Kopfzeile dieser Datei: „hier steht nur der Arbeitsplan für die aktuell
-offene Phase im Detail"). Zwei Punkte (8/9, KI-Entrauschung/-Hochskalierung)
-brauchen wahrscheinlich ein echtes neuronales Modell — dasselbe
-ONNX-Beschaffungsproblem, das in ADR-0033 bereits für Phase 7 dokumentiert
-ist (keine testbare Modell-Datei in dieser Sandbox verfügbar); ob es bis
-zum Start von Phase 9 eine tragfähige Lösung gibt, ist offen und wird
-dann neu geprüft, nicht hier vorweggenommen. Die übrigen neun Punkte sind
-reine UI-/Analyse-Erweiterungen ohne bekannte Blocker.
+- [ ] 1. Bibliothek: Duplikate, Sammlungen, Stapel, virtuelle Kopien
+  - Neue `apx-catalog`-Migration: `stacks` (Gruppierung mehrerer Fotos, automatisch nach Aufnahmezeit-Fenster oder manuell), `virtual_copies` (zusätzliche EDL-Historie desselben Quellfotos ohne Datei-Duplikat), erweiterbare `color_labels` (bisher feste Palette, `ALLOWED_COLOR_LABELS` in `repository/photos.rs`), Sammlungssätze (verschachtelte `collections`-Hierarchie), intelligente Sammlungen (gespeicherte `FilterCriteria`, live statt statisch)
+  - Perceptual-Hash-Duplikaterkennung (Crate-Wahl per `cargo add --dry-run` zu Schritt-Beginn verifizieren, z. B. `img_hash`/`image_hasher`) + Duplikat-Assistent (beste Version per Auflösung/Dateigröße/Bewertung vorschlagen)
+  - Frontend: Sammlungssatz-Baum in `Sidebar.tsx`, Stapel-Gruppierung im Raster, virtuelle-Kopie-Knopf
+  - *(Fundament für Schritt 8 — Stacking braucht dieselbe Schema-Erweiterung)*
+
+- [ ] 2. Bibliothek: Metadaten, Schlagworte, Adobe-Interop
+  - Schlagworthierarchie (Eltern/Kind, Synonyme, Auto-Vervollständigung), Tag-Regeln (bedingte Auto-Tags, reused `PresetCondition`-Muster)
+  - Metadaten-Presets (generische `templates`-Tabelle aus Phase 8 Schritt 8, `kind = "metadata"`), Stapel-Metadatenbearbeitung, vollständiger EXIF/IPTC/XMP-Editor (erweitert `apx_export::metadata`), Sidecar-Export (`.xmp`)
+  - Adobe `.xmp`/`.lrtemplate`-Import/-Export: dokumentiertes Mapping `EdlV3` ↔ Adobe-Parameternamen, verlustfreie vs. best-effort-Felder explizit festgehalten (siehe ADR-0035 Punkt 8)
+
+- [ ] 3. Bibliothek: Ansichten, Filter-Presets, Vorschau-Cache, Statistik
+  - Vergleichsansicht (reused `ReferenceView.tsx`-Muster), Übersichtsansicht
+  - Personenansicht: klassische Hautton-/Kontur-Heuristik wie die Phase-7-KI-Masken, keine echte Gesichtserkennungs-Modellinferenz (ADR-0035 Punkt 7)
+  - Filter-Presets (`templates`, `kind = "filter"`), Schnellentwicklung im Raster
+  - Vorschau-Cache-Verwaltung, Smart Previews + Offline-Bearbeitung
+  - Sekundäres Display (Tauri-Multi-Window), Katalog-Statistik-Dashboard
+
+- [ ] 4. Entwickeln: Histogramm, Clipping, Punktfarbmesser, Navigator
+  - Reine Analyse/Anzeige über den bestehenden `render_rgba8`-Ausgabepuffer, kein neuer Rendering-Pfad — niedrigstes Risiko, deshalb zuerst
+  - Live-Histogramm (RGB + Luminanz), Clipping-Warnungen (Dreiecke + Bildüberlagerung), Punktfarbmesser, Navigator-Miniaturansicht
+
+- [ ] 5. Entwickeln: TAT, Auto-Ton, Schwarzweiß-Mixer, Info-Overlay, Bearbeitungs-Pins
+  - Zielgerichtetes Anpassungswerkzeug (Bildklick+Zug steuert Kurven-/HSL-Regler)
+  - Auto-Ton/Auto-Weißabgleich: Histogramm-Perzentil-Heuristik, kein LLM
+  - Schwarzweiß-Mixer: neues `EdlV3`-Feld (8-Kanal-Luminanzgewichte) + Treatment-Umschalter
+  - Info-Overlay Vollbild, Bearbeitungs-Pins (Frontend-Überlagerung über bestehende Maskengeometrie)
+
+- [ ] 6. Entwickeln: KI-Entrauschung, KI-Hochskalierung
+  - Klassische, deterministische Algorithmen statt Modellinferenz (Bilateral-Filter, kantengerichtete Interpolation) — dieselbe Ehrlichkeitslinie wie ADR-0033 (ADR-0035 Punkt 6), UI-Beschriftung behauptet kein „KI" wo keine Modellinferenz läuft
+
+- [ ] 7. Node-Editor, Vergleichs-Grid, Zeitleiste, Verlaufs-Vergleich
+  - Node-Editor: feste Topologie über die bestehende lineare Pipeline (neues `EdlV4`-Feld `enabled: bool` pro Stufe, `v3_to_v4`-Migration, `@xyflow/react`) — keine frei umbaubare Graph-Engine (ADR-0035 Punkt 1)
+  - Vergleichs-Grid (bis 9 Versionen, sync. Zoom), Zeitleisten-Ansicht der Bearbeitungshistorie, Verlaufs-Vergleich (reused `diffEdlSubsets`)
+
+- [ ] 8. Fokus-/HDR-/Panorama-/Astro-Stacking
+  - Neues Crate `apx-stacking`. Fokus-Stacking (Laplacian-Schärfe-Auswahl), HDR-Merge (Debevec-Gewichtung + Reinhard-Tonemap) — beide voll umsetzbar
+  - Panorama/Astro: v1 nur Verschiebungs-Registrierung per Phasenkorrelation (`rustfft`), echtes Homographie-Stitching zurückgestellt (ADR-0035 Punkt 2)
+  - *(braucht die `stacks`/`virtual_copies`-Schema aus Schritt 1)*
+
+- [ ] 9. Skript-API (Rhai) + Plugin-System
+  - Neue Crates `apx-script` (Rhai-Bridge, schmale primitiv-typisierte API) und `apx-plugin-abi` (versionierte `#[repr(C)]`-Funktionstabelle, ein fester Erweiterungspunkt), Plugin-Laden via `libloading` — „stabile ABI" ehrlich begrenzt (ADR-0035 Punkt 3)
+
+- [ ] 10. Kollaborationsmodus
+  - `ApxShareFile` (Manifest + Fotos/EDL/Presets als JSON, keine Pixel-Bytes, reused `.apx`/`.apxt`-Muster), `export_catalog_share`/`import_catalog_share`, Konfliktauflösung (Hash-Match/zuletzt-gewinnt/manueller Regler) — kein Echtzeit-Mehrbenutzer-Modus (ADR-0035 Punkt 4)
+
+- [ ] 11. Tethered Shooting
+  - Neues Crate `apx-tether`, `gphoto2` (LGPL-2.1, `THIRD_PARTY.md`-Ausnahme) hinter Cargo-Feature `tethering` (standardmäßig aus), `TetherBackend`-Trait mit echtem `Gphoto2Backend` + `FakeBackend` für Tests — in dieser Sandbox nie gegen echte Hardware/installierte `libgphoto2` lauffähig, explizit dokumentiert (ADR-0035 Punkt 5)
+
+- [ ] 12. Dokumentation, Tests, Abnahme
+  - `ARCHITECTURE.md`: neues Kapitel „Architektur Phase 9"
+  - `FEATURES.md`: alle 38 Phase-9-Zeilen final; Tiefenbereich-Masken bleibt offen
+  - Einmalige finale Verifikation (nicht wiederholt nach jedem Teilschritt): `cargo build --workspace`, `tsc -b`, `vitest run`, eine gezielte Playwright-Stichprobe
+  - Commit+Push, ehrlicher Abschlussbericht inkl. aller ADR-0035-Vereinfachungen

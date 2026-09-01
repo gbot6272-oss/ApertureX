@@ -1572,3 +1572,156 @@ und korrekt getaggt (inkl. der Export-Warteschlange-Zeile). PSD-/
 HEIF-/JPEG-XL-Export und echte System-Druckdialog-Integration bleiben
 ohne Phasenzuordnung zurückgestellt, bis eine lizenzrechtlich/technisch
 tragfähige Bibliothek verfügbar ist.
+
+## ADR-0035: Phase-9-Scope präzisiert — drei angesammelte Rückstände zusammengeführt, elf „bewusste Vereinfachung"-Grenzen für die technisch schwierigsten Punkte festgelegt, Tiefenbereich-Masken bleiben ausgenommen
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §5 nennt für Phase 9 wörtlich „Fortgeschrittenes:
+Node-Editor, Panorama/HDR/Fokus-Stacking, Tethering, Skript-API,
+Plugin-System" (ergänzt um §3.6 „Zusätzliche Module": Astro-Stacking,
+Stapelverarbeitungs-Konsole, Vergleichs-Grid, Zeitleisten-Ansicht,
+Verlaufs-Vergleich, Kollaborationsmodus — zwölf Punkte in Summe). Über
+die Phasen 3–8 hinweg haben mehrere frühere ADRs zusätzlich einzelne
+`FEATURES.md`-Zeilen ausdrücklich auf Phase 9 vorgemerkt, statt sie in
+der jeweils laufenden Phase mitzubauen:
+
+- **ADR-0032** (Phase-6-Scope) verschob das komplette
+  „Bibliotheks-Backlog" aus `SPEC.md` §3.1 nach Phase 9 — vierzehn
+  Punkte (Perceptual-Hash-Duplikaterkennung/-Assistent,
+  Sammlungssätze/intelligente Sammlungen, Stapel, virtuelle Kopien,
+  erweiterbare Farbmarkierungen, Schlagworthierarchie, Metadaten-
+  Presets/EXIF-IPTC-XMP-Editor/Sidecar-Export, Vergleichs-/
+  Übersichtsansicht, Personenansicht, Filter-Presets, Schnellentwicklung
+  im Raster, Vorschau-Cache/Smart Previews, Sekundäres Display,
+  Katalog-Statistik-Dashboard) — mit der ausdrücklichen Begründung,
+  dass keine ADR diese Punkte je Phase 6 zugesagt hatte und ihre
+  Mitnahme Phase 6 auf etwa das Dreifache von `SPEC.md` §5s tatsächlicher
+  Phase-6-Zeile aufgebläht hätte.
+- **ADR-0031 Punkt 3/5** verschob Adobe-`.xmp`/`.lrtemplate`-Interop
+  sowie Export-/Wasserzeichen-/Metadaten-/Layout-/Workflow-Templates
+  nach Phase 8–9 (Letztere sind mit Phase 8 Schritt 8 bereits erledigt,
+  Erstere bleibt offen — eine Einzelzeile).
+- **Ein expliziter Nutzerwunsch** während Phase 8 (Vergleich mit einem
+  Lightroom-Classic-Screenshot) ergänzte elf weitere UI-nahe
+  Entwickeln-/Anzeige-Fähigkeiten, die weder in `SPEC.md` noch bislang
+  in `FEATURES.md` vorkamen (Live-Histogramm, Clipping-Warnungen,
+  Punktfarbmesser, Zielgerichtetes Anpassungswerkzeug, Schwarzweiß-
+  Mixer, Auto-Ton/Auto-Weißabgleich, Navigator-Miniaturansicht,
+  KI-Entrauschung, KI-Hochskalierung, Info-Overlay, Bearbeitungs-Pins)
+  — bereits als eigener Backlog-Abschnitt in `PLAN.md`/`FEATURES.md`
+  §3.2 vorgemerkt, aber ausdrücklich noch ohne eigene Scope-Präzisierung
+  (siehe dortiger Hinweis: „Phase 9 ist noch nicht die aktuelle Phase").
+
+Macht zusammen **38 Einzelpunkte** — mehr als Phase 6+7+8 zusammen. Der
+Nutzer hat ausdrücklich gebeten, alle 38 jetzt vollständig zu planen und
+umzusetzen, statt weiter aufzuschieben. Diese ADR übernimmt für die
+technisch schwierigsten Punkte dieselbe Prüfungspflicht wie ADR-0033
+(ONNX-Runtime) und ADR-0034 (Formats-/Bibliotheks-Machbarkeit), bevor
+`PLAN.md` die feingranulare Schrittfolge bekommt.
+
+**Vorab durchgeführte Machbarkeitsprüfung** (`cargo add --dry-run`
+gegen den echten crates.io-Index bzw. `npm view` gegen den echten
+npm-Registry-Index, dieselbe Methode wie in ADR-0034): `rhai` (reines
+Rust, sandboxed, aktiv gepflegt), `libloading`, `rustfft`, `imageproc`
+und `gphoto2` (LGPL-2.1, bindet an System-`libgphoto2`) lösen alle
+erfolgreich auf. `@xyflow/react` (React Flow, aktueller Paketname)
+löst im npm-Registry auf. `opencv`-Bindings lösen zwar in Cargo auf,
+brauchen aber eine System-OpenCV-Installation, die in dieser Sandbox
+nicht vorhanden ist — dasselbe Problemmuster wie ONNX Runtime in
+ADR-0033. `libgphoto2` (für Tethering) ist in dieser Sandbox ebenfalls
+nicht installiert, und anders als bei `ffmpeg` (ADR-0034 Punkt 3, wo
+zumindest ein „ist installiert oder nicht"-Laufzeitcheck möglich ist)
+fehlt hier sogar die Systembibliothek zum *Kompilieren* mit aktiviertem
+Feature.
+
+**Entscheidung:** Alle 38 Punkte bleiben Phase-9-Scope, aufgeteilt in
+zwölf Bauschritte (`PLAN.md` Schritt 1–12) plus diesen Scope-Schritt
+(Schritt 0) — Reihenfolge unten richtet sich danach, was aufeinander
+aufbaut (Bibliothek vor Stacking, das dieselbe `stacks`/`virtual_copies`-
+Schema braucht) und was das geringste Risiko trägt (reine
+Analyse-/Anzeige-Erweiterungen zuerst, Architekturrisiko-Punkte
+zuletzt). Für die technisch schwierigsten Punkte gilt je eine bewusste
+Vereinfachung, die hier bindend festgehalten wird (Details/Begründung
+je Punkt in `PLAN.md`s Schritt-Text):
+
+1. **Node-Editor** zeigt und schaltet die bestehende, fest verdrahtete
+   Rendering-Reihenfolge (`apx_pipeline::develop::render_rgba8`) —
+   keine frei umbaubare oder verzweigende Ausführungsgraph-Engine, weil
+   das die Renderpfad-Garantie brechen würde, auf die jedes andere
+   Modul (Viewer, Export, Masken) angewiesen ist. Technisch: neues
+   `EdlV4`-Schema mit einem `enabled: bool`-Feld pro Pipeline-Stufe,
+   `v3_to_v4`-Migration, `@xyflow/react` im Frontend.
+2. **Panorama-/Astro-Stacking** beschränken sich in v1 auf reine
+   Verschiebungs-Registrierung per 2D-Phasenkorrelation (`rustfft`,
+   Stativ-/gleicher-Blickpunkt-Annahme) — echtes merkmalsbasiertes
+   Homographie-Stitching für Freihand-/gedrehte Aufnahmen bleibt
+   zurückgestellt, weil `opencv` eine fehlende Systembibliothek
+   voraussetzt und keine verifizierte, ausgereifte reine-Rust-
+   Merkmalserkennungs-plus-RANSAC-Pipeline existiert. Fokus-Stacking
+   (Laplacian-Schärfe-Auswahl über bereits ausgerichtete Frames) und
+   HDR-Merge (Debevec-Gewichtung + Reinhard-Tonemap) brauchen dagegen
+   keine Ausrichtungs-Bibliothek und werden vollständig gebaut.
+3. **Skript-API + Plugin-System:** „stabile ABI" heißt eine
+   handgepflegte, versionierte `#[repr(C)]`-Funktionszeiger-Tabelle für
+   genau einen festen Erweiterungspunkt (eine Bildoperationsstufe) plus
+   eine schmale, primitiv-typisierte `rhai`-Skript-API — **keine**
+   Zusage, dass beliebige künftige interne Rust-Strukturen dauerhaft
+   binärkompatibel bleiben (Rust selbst hat keine stabile ABI). Eine
+   Versions-Fehlpassung wird beim Laden hart mit klarer Fehlermeldung
+   abgelehnt statt still falsch zu kompilieren.
+4. **Kollaborationsmodus** bleibt ein asynchroner Export→Weitergabe→
+   Import→Konfliktauflösung-Ablauf über eine neue `.apxt`-artige
+   `ApxShareFile` (Metadaten/EDL/Presets, keine Pixel-Bytes) — kein
+   Echtzeit-Mehrbenutzer-Modus (kein Live-Cursor/keine Präsenz/kein
+   CRDT/keine Netzwerksynchronisation), weil sich Letzteres in dieser
+   Sandbox ohne zweiten echten Nutzer und ohne Mehrbenutzer-
+   Serverinfrastruktur nicht verifizieren lässt. `apx-catalog` bleibt
+   dabei unverändert ein einzelner `Mutex<Connection>` (ADR-0008).
+5. **Tethered Shooting:** die `gphoto2`-Anbindung (LGPL-2.1, braucht
+   eine `THIRD_PARTY.md`-Ausnahme wie bereits bei `rawler`) wird hinter
+   einem standardmäßig ausgeschalteten Cargo-Feature `tethering` real
+   geschrieben (`TetherBackend`-Trait, echtes `Gphoto2Backend` plus ein
+   `FakeBackend` für alle normalen Tests) — **über ADR-0034s
+   ffmpeg-Präzedenzfall hinaus bewusst eingeschränkt:** die echten
+   libgphoto2-FFI-Aufrufe sind nie gegen eine echte Kamera oder auch
+   nur eine installierte `libgphoto2`-Bibliothek ausführbar, weil
+   Letztere in dieser Sandbox und im Standard-CI schlicht fehlt — nicht
+   einmal ein „unerreichbarer Server"-Fehlerpfad wie bei FTP/SFTP
+   (ADR-0034 Punkt 5) ist hier testbar. `FEATURES.md` muss diese Lücke
+   explizit benennen, nicht verschweigen.
+6. **KI-Entrauschung/KI-Hochskalierung** verwenden dieselbe
+   Ehrlichkeitslinie wie ADR-0033: klassische, deterministische
+   Algorithmen (kantenerhaltender Bilateral-Filter statt echter
+   neuronaler Entrauschung, kantengerichtete Interpolation statt echter
+   Modell-Superresolution) statt einer vorgetäuschten Modellinferenz —
+   das ungelöste ONNX-Beschaffungsproblem aus ADR-0033 besteht
+   unverändert fort. Die UI-Beschriftung darf an diesen zwei Stellen
+   nicht „KI"/„AI" implizieren, wo keine Modellinferenz läuft.
+7. **Personenansicht (Gesichtserkennung)** nutzt dieselbe Art
+   klassischer Heuristik wie die Phase-7-KI-Masken (Hautton-/
+   Kontur-Erkennung im YCbCr-Raum, grobe Ähnlichkeitsgruppierung) statt
+   echter Gesichts-Embeddings — dieselbe ONNX-Beschaffungslage.
+8. **Adobe-`.xmp`/`.lrtemplate`-Interop** bekommt ein eigenes,
+   dokumentiertes Mapping `EdlV3` ↔ Adobe-Parameternamen; welche Felder
+   verlustfrei und welche nur best-effort übersetzbar sind (Adobes
+   proprietäre Kurven-/Masken-Repräsentation ist nicht vollständig
+   offen dokumentiert), wird bei Umsetzung explizit in `FEATURES.md`
+   festgehalten, nicht stillschweigend als „Fertig" verbucht.
+
+**Explizit ausgenommen:** Maskentyp Tiefenbereich (`FEATURES.md`,
+weiterhin „Später zurückgestellt", siehe ADR-0032 Punkt 3) — kein
+Tiefendaten-Zulieferer existiert irgendwo im Projekt, jede Umsetzung
+wäre erfunden statt real. Bleibt ohne Phasenzuordnung, bis eine
+Tiefendatenquelle auftaucht.
+
+**Konsequenzen:** `PLAN.md` bekommt einen neuen Abschnitt „Aktuelle
+Phase: Phase 9" mit zwölf Bauschritten in der oben begründeten
+Reihenfolge (Bibliothek zuerst als Fundament für Stacking, dann
+Entwickeln-Erweiterungen nach Risiko sortiert, dann die sechs
+SPEC-§5/§3.6-„Fortgeschrittenes"-Themen). `FEATURES.md`s Phase-9-Zeilen
+bleiben bis zur jeweiligen Umsetzung „Nicht begonnen" — keine Korrektur
+nötig, beide Recherchen vor dieser ADR bestätigen, dass sie bereits
+vollständig und korrekt getaggt sind. Jeder Bauschritt wird einzeln
+committet und gepusht, mit schlanken statt erschöpfenden Tests je
+Schritt (Projektkonvention seit Phase 8) — keine wiederholten vollen
+Testsuiten-Läufe zwischen den Schritten.

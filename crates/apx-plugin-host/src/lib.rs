@@ -208,32 +208,30 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    /// `cargo test` führt die Tests dieses Moduls standardmäßig
-    /// parallel in mehreren Threads aus — mehrere gleichzeitige
-    /// `dlopen()`-Aufrufe (drei der vier Tests unten laden dieselbe
-    /// `.so`/`.dylib`) können auf `dlerror()`s **nicht garantiert
-    /// thread-sicherem** globalem Zustand kollidieren: der eigentliche
-    /// `dlopen` gelingt, aber der *Fehlertext* eines anderen, zeitgleich
-    /// fehlschlagenden Aufrufs überschreibt zwischenzeitlich die globale
-    /// `dlerror`-Ablage, sodass `libloading` nur noch das generische
-    /// `DlOpenUnknown` ("dlopen failed") sieht — genau das
-    /// dokumentierte Verhalten von `libloading`s `with_dlerror` bei
-    /// einem `None`-Ergebnis ("possibly in another thread"). In dieser
-    /// Sandbox lief das meist glimpflich durch, auf den CI-Runnern
-    /// (Linux **und** macOS, beide mit demselben Fehlerbild) schlug es
-    /// reproduzierbar fehl. Fix: alle `dlopen`-Aufrufe dieses Moduls
-    /// über einen Mutex serialisieren, statt die Testparallelität
-    /// projektweit abzuschalten.
+    /// Serialisiert die `dlopen`-Aufrufe dieses Testmoduls — bewusst
+    /// defensiv, auch wenn die eigentliche Ursache unten (fehlende
+    /// Datei) etwas anderes war: mehrere gleichzeitige `dlopen`-Aufrufe
+    /// derselben Bibliothek aus parallelen Testthreads können auf
+    /// `dlerror()`s nicht garantiert thread-sicherem globalem Zustand
+    /// kollidieren (`libloading`s eigene Dokumentation nennt genau das).
     static DLOPEN_SERIAL: Mutex<()> = Mutex::new(());
 
-    /// Pfad zur gebauten `apx-plugin-example`-Bibliothek — dieselbe
-    /// Cargo-`target`-Konvention, die `cargo build`/`cargo test` in
-    /// dieser Sandbox tatsächlich verwendet (kein `target-dir`-
-    /// Override). **Nur in dieser Linux-Sandbox verifiziert** — die
-    /// `.dylib`/`.dll`-Zweige unten folgen derselben Konvention für
-    /// macOS/Windows, sind hier aber nie tatsächlich ausgeführt worden
-    /// (ehrlich vermerkt, dieselbe Einschränkung wie an anderer Stelle
-    /// im Projekt bei plattformspezifischem Code).
+    /// Pfad zur gebauten `apx-plugin-example`-Bibliothek. **Beim
+    /// Bauen entdeckte Korrektur**: `apx-plugin-host`s
+    /// `[dev-dependencies]`-Eintrag auf `apx-plugin-example` (siehe
+    /// dessen Cargo.toml-Kommentar) baut zuverlässig nur das `rlib`
+    /// (zum Verlinken der Testbinärdatei) — **nicht** die `cdylib`-
+    /// Ausgabedatei, die dieser Test per `dlopen` laden will, weil
+    /// `dlopen` zur Laufzeit für Cargos Abhängigkeitsgraph unsichtbar
+    /// ist. Reproduzierbar sowohl in dieser Sandbox (`cargo test
+    /// -p apx-plugin-host` mit leerem `target/`, ohne vorherigen
+    /// `cargo build`) als auch auf den CI-Runnern (Linux und macOS,
+    /// wo `cargo test` vor `cargo build` läuft, siehe `ci.yml`) — die
+    /// Datei fehlte in beiden Fällen tatsächlich, nicht nur ein
+    /// irreführender `dlopen`-Fehlertext. Fix: fehlt die Datei, wird
+    /// sie hier einmalig explizit über einen `cargo build`-Unterprozess
+    /// gebaut, statt sich auf eine zufällige Aufrufreihenfolge zu
+    /// verlassen.
     fn example_plugin_path() -> std::path::PathBuf {
         let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -246,7 +244,23 @@ mod tests {
         } else {
             "libapx_plugin_example.so"
         };
-        workspace_root.join("target").join("debug").join(file_name)
+        let path = workspace_root.join("target").join("debug").join(file_name);
+        if !path.exists() {
+            let status = std::process::Command::new(env!("CARGO"))
+                .args(["build", "-p", "apx-plugin-example"])
+                .status()
+                .expect("cargo sollte als Unterprozess startbar sein");
+            assert!(
+                status.success(),
+                "cargo build -p apx-plugin-example (für den dlopen-Testfall) fehlgeschlagen"
+            );
+            assert!(
+                path.exists(),
+                "cargo build -p apx-plugin-example lief durch, aber '{}' fehlt weiterhin",
+                path.display()
+            );
+        }
+        path
     }
 
     fn solid(width: u32, height: u32, r: u8, g: u8, b: u8) -> Vec<u8> {

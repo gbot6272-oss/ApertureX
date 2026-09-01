@@ -78,7 +78,17 @@ export function Header() {
   const percent = importProgress && importProgress.total > 0 ? Math.round((importProgress.done / importProgress.total) * 100) : 0;
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-4 overflow-x-auto border-b border-border bg-bg-raised px-4">
+    // Zwei Zeilen statt einer einzigen ~20-Knopf-Reihe (Phase 10 Schritt 2,
+    // siehe FEATURES.md "Rechte Werkzeug-Palette, Modul-Umschalter oben"):
+    // Zeile 1 sind die Ansichts-Umschalter (Raster/Karte/Info/Entwickeln,
+    // reines `centerView`-/Panel-Umschalten wie bisher), Zeile 2 gruppiert
+    // die übrigen Modul-Dialoge nach Themen. **Bewusste Vereinfachung**:
+    // kein Lightroom-artiger vollständiger Bildschirmwechsel pro Modul —
+    // jeder Knopf öffnet unverändert denselben, bereits getesteten Dialog
+    // wie zuvor, nur sichtbar gruppiert statt als flache Liste; kein Knopf
+    // wurde umbenannt oder hinter einem Menü versteckt.
+    <header className="flex shrink-0 flex-col border-b border-border bg-bg-raised">
+      <div className="flex h-12 items-center gap-4 overflow-x-auto px-4">
       <span className="font-semibold tracking-wide">Aperture X</span>
 
       <button
@@ -129,11 +139,12 @@ export function Header() {
         </span>
       )}
 
+      <nav aria-label="Ansicht" className="ml-auto flex items-center gap-2">
       <button
         type="button"
         onClick={toggleCenterView}
         aria-pressed={centerView === "grid"}
-        className={`ml-auto rounded border px-3 py-1 text-sm ${
+        className={`rounded border px-3 py-1 text-sm ${
           centerView === "grid" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
         }`}
       >
@@ -174,7 +185,14 @@ export function Header() {
       >
         Entwickeln
       </button>
+      </nav>
+      </div>
 
+      {/* Zeile 2: übrige Module nach Themen gruppiert (Ausgabe / Vorlagen &
+          Organisation / Fortgeschritten / Analyse). */}
+      <div className="flex h-11 items-center gap-4 overflow-x-auto border-t border-border px-4">
+      <nav aria-label="Ausgabe" className="flex items-center gap-2">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">Ausgabe</span>
       <button
         type="button"
         onClick={openExportDialog}
@@ -229,7 +247,12 @@ export function Header() {
       </button>
 
       <WebDialog open={webDialogOpen} photoIds={exportPhotoIds} onClose={closeWebDialog} />
+      </nav>
 
+      <div className="h-6 w-px bg-border" />
+
+      <nav aria-label="Vorlagen und Organisation" className="flex items-center gap-2">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">Vorlagen</span>
       <button
         type="button"
         onClick={() => setTemplatesDialogOpen(true)}
@@ -250,6 +273,21 @@ export function Header() {
 
       <LibraryOrganizeDialog open={organizeDialogOpen} onClose={() => setOrganizeDialogOpen(false)} />
 
+      <button
+        type="button"
+        onClick={() => setMetadataDialogOpen(true)}
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
+      >
+        Metadaten…
+      </button>
+
+      <MetadataDialog open={metadataDialogOpen} onClose={() => setMetadataDialogOpen(false)} />
+      </nav>
+
+      <div className="h-6 w-px bg-border" />
+
+      <nav aria-label="Fortgeschritten" className="flex items-center gap-2">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">Fortgeschritten</span>
       <button
         type="button"
         onClick={() => setStackingDialogOpen(true)}
@@ -289,17 +327,12 @@ export function Header() {
       </button>
 
       <TetherDialog open={tetherDialogOpen} onClose={() => setTetherDialogOpen(false)} />
+      </nav>
 
-      <button
-        type="button"
-        onClick={() => setMetadataDialogOpen(true)}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
-      >
-        Metadaten…
-      </button>
+      <div className="h-6 w-px bg-border" />
 
-      <MetadataDialog open={metadataDialogOpen} onClose={() => setMetadataDialogOpen(false)} />
-
+      <nav aria-label="Analyse" className="flex items-center gap-2">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">Analyse</span>
       <button
         type="button"
         onClick={() => openCompareView(exportPhotoIds)}
@@ -339,17 +372,21 @@ export function Header() {
       </button>
 
       <StatsCacheDialog open={statsDialogOpen} onClose={() => setStatsDialogOpen(false)} />
+      </nav>
 
-      <button
-        type="button"
-        onClick={() => setSettingsDialogOpen(true)}
-        title="Theme, Sprache, UI-Skalierung, Barrierefreiheit (Phase 10)"
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
-      >
-        Einstellungen…
-      </button>
+      <div className="ml-auto flex items-center gap-4">
+        <button
+          type="button"
+          onClick={() => setSettingsDialogOpen(true)}
+          title="Theme, Sprache, UI-Skalierung, Barrierefreiheit (Phase 10)"
+          className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
+        >
+          Einstellungen…
+        </button>
 
-      <span className="text-xs text-text-muted">Strg/Cmd+K — Befehlspalette</span>
+        <span className="text-xs text-text-muted">Strg/Cmd+K — Befehlspalette</span>
+      </div>
+      </div>
     </header>
   );
 }

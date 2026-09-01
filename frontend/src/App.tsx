@@ -131,8 +131,16 @@ export default function App() {
         <PresetsPanel />
         {centerView === "grid" ? <GridView /> : centerView === "map" ? <MapView /> : <Viewer />}
         <MetadataPanel />
-        <DevelopPanel />
-        <MasksPanel />
+        {/* Rechte Werkzeug-Palette (Phase 10 Schritt 2): Entwickeln- und
+            Masken-Panel bleiben zwei unabhängig sichtbare/aufklappbare
+            Bereiche (nicht exklusiv verdeckende Reiter — viele bestehende
+            e2e-Tests bedienen Entwickeln- und Maskenregler im selben
+            Ablauf), aber unter einer gemeinsamen visuellen Außenhülle statt
+            zweier lose nebeneinanderstehender <aside>s. */}
+        <div className="flex shrink-0">
+          <DevelopPanel />
+          <MasksPanel />
+        </div>
       </div>
       <Filmstrip />
       <CompareGridView />

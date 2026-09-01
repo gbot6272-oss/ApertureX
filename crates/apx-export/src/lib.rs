@@ -31,6 +31,4 @@ pub mod sharpen;
 pub mod video;
 pub mod watermark;
 pub mod web;
-
-// Schritt 8 (Templates) ergänzt hier sein eigenes Modul, sobald es
-// umgesetzt ist (siehe `PLAN.md`).
+pub mod xmp;

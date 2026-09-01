@@ -16,7 +16,7 @@ pub(crate) const SELECT_COLUMNS: &str =
      photos.camera_model, photos.lens, photos.iso, photos.shutter, photos.aperture, \
      photos.focal_length, photos.captured_at, photos.gps_lat, photos.gps_lon, \
      photos.imported_at, photos.missing, photos.rating, photos.flag, photos.color_label, \
-     photos.source_photo_id";
+     photos.source_photo_id, photos.title, photos.caption, photos.copyright, photos.creator";
 
 #[allow(clippy::type_complexity)]
 pub(crate) struct PhotoRow {
@@ -45,6 +45,10 @@ pub(crate) struct PhotoRow {
     flag: i64,
     color_label: Option<String>,
     source_photo_id: Option<String>,
+    title: Option<String>,
+    caption: Option<String>,
+    copyright: Option<String>,
+    creator: Option<String>,
 }
 
 pub(crate) fn row_to_raw(row: &rusqlite::Row) -> rusqlite::Result<PhotoRow> {
@@ -74,6 +78,10 @@ pub(crate) fn row_to_raw(row: &rusqlite::Row) -> rusqlite::Result<PhotoRow> {
         flag: row.get(22)?,
         color_label: row.get(23)?,
         source_photo_id: row.get(24)?,
+        title: row.get(25)?,
+        caption: row.get(26)?,
+        copyright: row.get(27)?,
+        creator: row.get(28)?,
     })
 }
 
@@ -104,7 +112,31 @@ pub(crate) fn raw_to_photo(raw: PhotoRow) -> Result<Photo> {
         flag: raw.flag as i8,
         color_label: raw.color_label,
         source_photo_id: raw.source_photo_id.map(|s| s.parse()).transpose()?,
+        title: raw.title,
+        caption: raw.caption,
+        copyright: raw.copyright,
+        creator: raw.creator,
     })
+}
+
+/// Aktualisiert die vier IPTC-artigen Metadaten-Überschreibungen (Phase 9
+/// Schritt 2) — `None` löscht das jeweilige Feld, wie bei
+/// `set_color_label`. Deckt auch Stapel-Metadatenbearbeitung ab: der
+/// Aufrufer ruft dies einfach für mehrere `photo_id`s hintereinander auf.
+pub(crate) fn set_metadata(
+    conn: &Connection,
+    photo_id: PhotoId,
+    title: Option<&str>,
+    caption: Option<&str>,
+    copyright: Option<&str>,
+    creator: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE photos SET title = ?2, caption = ?3, copyright = ?4, creator = ?5 WHERE id = ?1",
+        params![photo_id.to_string(), title, caption, copyright, creator],
+    )
+    .map_err(map_sqlite_err)?;
+    Ok(())
 }
 
 /// Nur "echte" Foto-Zeilen (`source_photo_id IS NULL`) — virtuelle

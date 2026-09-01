@@ -24,6 +24,10 @@ function photo(overrides: Partial<PhotoDto> & { id: string }): PhotoDto {
     gps_lat: null,
     gps_lon: null,
     source_photo_id: null,
+    title: null,
+    caption: null,
+    copyright: null,
+    creator: null,
     ...overrides,
   };
 }

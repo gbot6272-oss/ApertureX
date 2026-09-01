@@ -6,7 +6,8 @@ use std::path::PathBuf;
 
 use apx_core::{
     AppError, CollectionFolderId, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId,
-    PhotoId, PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId, StackId, TemplateId,
+    PhotoId, PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId, StackId, TagRuleId,
+    TemplateId,
 };
 use time::OffsetDateTime;
 
@@ -100,6 +101,13 @@ pub struct Photo {
     /// Moduldoku) — teilt sich Datei/Pfad mit dem Quellfoto, hat aber
     /// eigene rating/flag/color_label/edit_history/keywords/collections.
     pub source_photo_id: Option<PhotoId>,
+    /// IPTC-artige Metadaten-Überschreibungen (Phase 9 Schritt 2,
+    /// `migrations/0008_metadata_keywords.sql`) — eigene Spalten statt nur
+    /// im Datei-EXIF, weil RAW-Originale i. d. R. nicht beschreibbar sind.
+    pub title: Option<String>,
+    pub caption: Option<String>,
+    pub copyright: Option<String>,
+    pub creator: Option<String>,
 }
 
 /// Auflösungsstufe eines Vorschaubilds, siehe `PHASE1_PROMPT.md` Abschnitt 5.
@@ -196,12 +204,35 @@ pub struct Template {
     pub created_at: OffsetDateTime,
 }
 
-/// Ein Schlagwort — flache Liste ohne Hierarchie/Synonyme, siehe
-/// `DECISIONS.md` ADR-0022.
+/// Ein Schlagwort — seit Phase 9 Schritt 2 mit optionaler Eltern-Kind-
+/// Hierarchie und Synonymen (`migrations/0008_metadata_keywords.sql`,
+/// `DECISIONS.md` ADR-0022/ADR-0035).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Keyword {
     pub id: KeywordId,
     pub name: String,
+    /// `None` = Wurzel-Schlagwort.
+    pub parent_id: Option<KeywordId>,
+    /// Alternative Bezeichnungen, über die dasselbe Schlagwort ebenfalls
+    /// gefunden werden soll (z. B. Suche/Auto-Vervollständigung im
+    /// Frontend) — reine Anzeige-/Such-Hilfe, keine eigene Verknüpfung.
+    pub synonyms: Vec<String>,
+}
+
+/// Eine bedingte Auto-Schlagwort-Regel (Phase 9 Schritt 2). `conditions`
+/// ist derselbe `PresetCondition[]`-JSON-Vertrag wie bei Import-Presets
+/// (`frontend/src/lib/presets.ts`) — Aperture X wertet ihn bewusst nur im
+/// Frontend aus (eine Implementierung von `evaluateConditions`, nicht
+/// zwei), diese Struktur reicht `conditions_json` deshalb unausgewertet
+/// durch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagRule {
+    pub id: TagRuleId,
+    pub name: String,
+    pub keyword_id: KeywordId,
+    pub conditions_json: String,
+    pub enabled: bool,
+    pub created_at: OffsetDateTime,
 }
 
 /// Eine manuell zusammengestellte Sammlung, siehe `DECISIONS.md` ADR-0023

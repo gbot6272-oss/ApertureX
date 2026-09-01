@@ -61,6 +61,7 @@ import type {
   CollectionFolderDto,
   GpxTrackPointDto,
   StackDto,
+  TagRuleDto,
   TemplateDto,
   TemplateKind,
   WebGalleryOptions,
@@ -1128,6 +1129,33 @@ interface LibraryBacklogSlice {
   runPerceptualDuplicateDetection: (maxDistance: number) => Promise<void>;
 }
 
+/** Metadaten, Schlagworthierarchie, Adobe-Interop (Phase 9 Schritt 2, siehe
+ * DECISIONS.md ADR-0035). */
+interface MetadataSlice {
+  keywords: KeywordDto[];
+  refreshKeywords: () => Promise<void>;
+  setKeywordParent: (keywordId: string, parentId: string | null) => Promise<void>;
+  setKeywordSynonyms: (keywordId: string, synonyms: string[]) => Promise<void>;
+  deleteKeywordEntry: (keywordId: string) => Promise<void>;
+
+  tagRules: TagRuleDto[];
+  refreshTagRules: () => Promise<void>;
+  createTagRule: (name: string, keywordId: string, conditions: PresetCondition[]) => Promise<void>;
+  setTagRuleEnabled: (tagRuleId: string, enabled: boolean) => Promise<void>;
+  deleteTagRule: (tagRuleId: string) => Promise<void>;
+
+  /** Stapel-Metadatenbearbeitung: bei Mehrfachauswahl werden alle
+   * markierten Fotos aktualisiert (dasselbe Muster wie `setPhotoRating`). */
+  updatePhotoMetadata: (
+    photoId: string,
+    fields: { title?: string | null; caption?: string | null; copyright?: string | null; creator?: string | null },
+  ) => Promise<void>;
+
+  xmpStatus: string | null;
+  exportXmpSidecarForSelected: (withDevelopSettings: boolean) => Promise<void>;
+  importXmpSidecarForSelected: () => Promise<void>;
+}
+
 export type AppStore = CatalogSlice &
   SelectionSlice &
   ViewerSlice &
@@ -1144,7 +1172,8 @@ export type AppStore = CatalogSlice &
   WebSlice &
   MapSlice &
   TemplatesSlice &
-  LibraryBacklogSlice;
+  LibraryBacklogSlice &
+  MetadataSlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -3929,6 +3958,108 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.perceptualDuplicatesRunning = false;
+        });
+      }
+    },
+
+    // ---- Metadaten, Schlagworthierarchie, Adobe-Interop (Phase 9 Schritt 2) --
+
+    keywords: [],
+    tagRules: [],
+    xmpStatus: null,
+
+    refreshKeywords: async () => {
+      const keywords = await api.listAllKeywords();
+      set((state) => {
+        state.keywords = keywords;
+      });
+    },
+
+    setKeywordParent: async (keywordId, parentId) => {
+      await api.setKeywordParent(keywordId, parentId);
+      await get().refreshKeywords();
+    },
+
+    setKeywordSynonyms: async (keywordId, synonyms) => {
+      await api.setKeywordSynonyms(keywordId, synonyms);
+      await get().refreshKeywords();
+    },
+
+    deleteKeywordEntry: async (keywordId) => {
+      await api.deleteKeyword(keywordId);
+      await get().refreshKeywords();
+    },
+
+    refreshTagRules: async () => {
+      const tagRules = await api.listTagRules();
+      set((state) => {
+        state.tagRules = tagRules;
+      });
+    },
+
+    createTagRule: async (name, keywordId, conditions) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      await api.createTagRule(trimmed, keywordId, serializeConditions(conditions));
+      await get().refreshTagRules();
+    },
+
+    setTagRuleEnabled: async (tagRuleId, enabled) => {
+      await api.setTagRuleEnabled(tagRuleId, enabled);
+      await get().refreshTagRules();
+    },
+
+    deleteTagRule: async (tagRuleId) => {
+      await api.deleteTagRule(tagRuleId);
+      await get().refreshTagRules();
+    },
+
+    updatePhotoMetadata: async (photoId, fields) => {
+      const { multiSelectedIds } = get();
+      const targets = multiSelectedIds.includes(photoId) && multiSelectedIds.length > 1 ? multiSelectedIds : [photoId];
+      await Promise.all(
+        targets.map((id) => {
+          const current = findPhotoAnywhere(get(), id);
+          return api.setPhotoMetadata(
+            id,
+            fields.title !== undefined ? fields.title : (current?.title ?? null),
+            fields.caption !== undefined ? fields.caption : (current?.caption ?? null),
+            fields.copyright !== undefined ? fields.copyright : (current?.copyright ?? null),
+            fields.creator !== undefined ? fields.creator : (current?.creator ?? null),
+          );
+        }),
+      );
+      set((state) => {
+        for (const id of targets) patchPhotoEverywhere(state, id, fields);
+      });
+    },
+
+    exportXmpSidecarForSelected: async (withDevelopSettings) => {
+      const { selectedPhotoId } = get();
+      if (!selectedPhotoId) return;
+      try {
+        const path = await api.exportXmpSidecar(selectedPhotoId, withDevelopSettings);
+        set((state) => {
+          state.xmpStatus = `Exportiert: ${path}`;
+        });
+      } catch (err) {
+        set((state) => {
+          state.xmpStatus = String(err);
+        });
+      }
+    },
+
+    importXmpSidecarForSelected: async () => {
+      const { selectedPhotoId } = get();
+      if (!selectedPhotoId) return;
+      try {
+        const applied = await api.importXmpSidecarFromFile(selectedPhotoId);
+        set((state) => {
+          state.xmpStatus = applied ? "Entwickeln-Einstellungen importiert" : "Import abgebrochen";
+        });
+      } catch (err) {
+        set((state) => {
+          state.xmpStatus = String(err);
         });
       }
     },

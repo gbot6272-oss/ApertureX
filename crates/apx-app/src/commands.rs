@@ -69,6 +69,11 @@ pub struct PhotoDto {
     /// `None` = echtes Foto. `Some(quelle)` = virtuelle Kopie (Phase 9
     /// Schritt 1) — teilt sich die Datei mit dem referenzierten Foto.
     pub source_photo_id: Option<String>,
+    /// IPTC-artige Metadaten-Überschreibungen (Phase 9 Schritt 2).
+    pub title: Option<String>,
+    pub caption: Option<String>,
+    pub copyright: Option<String>,
+    pub creator: Option<String>,
 }
 
 impl From<apx_catalog::Photo> for PhotoDto {
@@ -97,6 +102,10 @@ impl From<apx_catalog::Photo> for PhotoDto {
             gps_lat: photo.gps_lat,
             gps_lon: photo.gps_lon,
             source_photo_id: photo.source_photo_id.map(|id| id.to_string()),
+            title: photo.title,
+            caption: photo.caption,
+            copyright: photo.copyright,
+            creator: photo.creator,
         }
     }
 }
@@ -105,6 +114,8 @@ impl From<apx_catalog::Photo> for PhotoDto {
 pub struct KeywordDto {
     pub id: String,
     pub name: String,
+    pub parent_id: Option<String>,
+    pub synonyms: Vec<String>,
 }
 
 impl From<apx_catalog::Keyword> for KeywordDto {
@@ -112,6 +123,29 @@ impl From<apx_catalog::Keyword> for KeywordDto {
         Self {
             id: keyword.id.to_string(),
             name: keyword.name,
+            parent_id: keyword.parent_id.map(|id| id.to_string()),
+            synonyms: keyword.synonyms,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TagRuleDto {
+    pub id: String,
+    pub name: String,
+    pub keyword_id: String,
+    pub conditions_json: String,
+    pub enabled: bool,
+}
+
+impl From<apx_catalog::TagRule> for TagRuleDto {
+    fn from(rule: apx_catalog::TagRule) -> Self {
+        Self {
+            id: rule.id.to_string(),
+            name: rule.name,
+            keyword_id: rule.keyword_id.to_string(),
+            conditions_json: rule.conditions_json,
+            enabled: rule.enabled,
         }
     }
 }
@@ -172,7 +206,11 @@ impl From<apx_catalog::Stack> for StackDto {
             id: stack.id.to_string(),
             name: stack.name,
             cover_photo_id: stack.cover_photo_id.map(|id| id.to_string()),
-            photo_ids: stack.photo_ids.into_iter().map(|id| id.to_string()).collect(),
+            photo_ids: stack
+                .photo_ids
+                .into_iter()
+                .map(|id| id.to_string())
+                .collect(),
         }
     }
 }
@@ -689,11 +727,13 @@ fn parse_collection_id(collection_id: String) -> Result<apx_core::CollectionId, 
 }
 
 fn parse_collection_folder_id(id: String) -> Result<apx_core::CollectionFolderId, String> {
-    id.parse().map_err(|err: apx_core::AppError| err.to_string())
+    id.parse()
+        .map_err(|err: apx_core::AppError| err.to_string())
 }
 
 fn parse_stack_id(id: String) -> Result<apx_core::StackId, String> {
-    id.parse().map_err(|err: apx_core::AppError| err.to_string())
+    id.parse()
+        .map_err(|err: apx_core::AppError| err.to_string())
 }
 
 fn parse_preset_folder_id(id: String) -> Result<apx_core::PresetFolderId, String> {
@@ -1007,6 +1047,269 @@ pub fn list_all_keywords(state: State<'_, AppState>) -> Result<Vec<KeywordDto>, 
     Ok(keywords.into_iter().map(KeywordDto::from).collect())
 }
 
+// ---- Bibliothek: Schlagworthierarchie, Tag-Regeln, Metadaten (ab Phase 9
+// Schritt 2, siehe DECISIONS.md ADR-0035) -----------------------------------
+
+#[tauri::command]
+pub fn set_keyword_parent(
+    state: State<'_, AppState>,
+    keyword_id: String,
+    parent_id: Option<String>,
+) -> Result<(), String> {
+    let keyword_id = parse_keyword_id(keyword_id)?;
+    let parent_id = parent_id.map(parse_keyword_id).transpose()?;
+    state
+        .catalog
+        .set_keyword_parent(keyword_id, parent_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn set_keyword_synonyms(
+    state: State<'_, AppState>,
+    keyword_id: String,
+    synonyms: Vec<String>,
+) -> Result<(), String> {
+    let keyword_id = parse_keyword_id(keyword_id)?;
+    state
+        .catalog
+        .set_keyword_synonyms(keyword_id, &synonyms)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn delete_keyword(state: State<'_, AppState>, keyword_id: String) -> Result<(), String> {
+    let keyword_id = parse_keyword_id(keyword_id)?;
+    state
+        .catalog
+        .delete_keyword(keyword_id)
+        .map_err(|err| err.to_string())
+}
+
+fn parse_tag_rule_id(id: String) -> Result<apx_core::TagRuleId, String> {
+    id.parse()
+        .map_err(|err: apx_core::AppError| err.to_string())
+}
+
+#[tauri::command]
+pub fn create_tag_rule(
+    state: State<'_, AppState>,
+    name: String,
+    keyword_id: String,
+    conditions_json: String,
+) -> Result<String, String> {
+    let keyword_id = parse_keyword_id(keyword_id)?;
+    let id = state
+        .catalog
+        .create_tag_rule(&name, keyword_id, &conditions_json)
+        .map_err(|err| err.to_string())?;
+    Ok(id.to_string())
+}
+
+#[tauri::command]
+pub fn set_tag_rule_enabled(
+    state: State<'_, AppState>,
+    tag_rule_id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let id = parse_tag_rule_id(tag_rule_id)?;
+    state
+        .catalog
+        .set_tag_rule_enabled(id, enabled)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn delete_tag_rule(state: State<'_, AppState>, tag_rule_id: String) -> Result<(), String> {
+    let id = parse_tag_rule_id(tag_rule_id)?;
+    state
+        .catalog
+        .delete_tag_rule(id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn list_tag_rules(state: State<'_, AppState>) -> Result<Vec<TagRuleDto>, String> {
+    let rules = state
+        .catalog
+        .list_tag_rules()
+        .map_err(|err| err.to_string())?;
+    Ok(rules.into_iter().map(TagRuleDto::from).collect())
+}
+
+/// Aktualisiert die vier IPTC-artigen Metadaten-Felder für eine oder
+/// mehrere Fotos (Stapel-Metadatenbearbeitung: das Frontend ruft dies
+/// einfach für jede `photo_id` in der Auswahl einzeln auf).
+#[tauri::command]
+pub fn set_photo_metadata(
+    state: State<'_, AppState>,
+    photo_id: String,
+    title: Option<String>,
+    caption: Option<String>,
+    copyright: Option<String>,
+    creator: Option<String>,
+) -> Result<(), String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    state
+        .catalog
+        .set_photo_metadata(
+            photo_id,
+            title.as_deref(),
+            caption.as_deref(),
+            copyright.as_deref(),
+            creator.as_deref(),
+        )
+        .map_err(|err| err.to_string())
+}
+
+/// Exportiert eine `.xmp`-Sidecar-Datei neben dem Original — Metadaten
+/// (Titel/Bildunterschrift/Copyright/Urheber/Schlagworte) plus optional
+/// die Adobe-`crs:`-Entwickeln-Einstellungen (Basic+HSL, siehe
+/// `apx_export::xmp`s Moduldoku). `with_develop_settings=false` schreibt
+/// nur Metadaten.
+#[tauri::command]
+pub fn export_xmp_sidecar(
+    state: State<'_, AppState>,
+    photo_id: String,
+    with_develop_settings: bool,
+) -> Result<String, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let photo_path = folder.path.join(&photo.filename);
+
+    let keywords = state
+        .catalog
+        .list_keywords_for_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    let metadata = apx_export::xmp::XmpSidecarMetadata {
+        title: photo.title.clone(),
+        caption: photo.caption.clone(),
+        copyright: photo.copyright.clone(),
+        creator: photo.creator.clone(),
+        keywords: keywords.into_iter().map(|k| k.name).collect(),
+    };
+
+    let develop = if with_develop_settings {
+        let position = state
+            .catalog
+            .current_edit(photo_id)
+            .map_err(|err| err.to_string())?;
+        match position {
+            apx_catalog::HistoryPosition::At(entry) => {
+                let edl =
+                    apx_pipeline::edl::from_envelope(&entry.edl).map_err(|err| err.to_string())?;
+                Some((edl.basic, edl.hsl))
+            }
+            apx_catalog::HistoryPosition::Neutral => None,
+        }
+    } else {
+        None
+    };
+    let develop_ref = develop.as_ref().map(|(basic, hsl)| (basic, hsl));
+
+    let sidecar_path = apx_export::xmp::write_sidecar(&photo_path, &metadata, develop_ref)
+        .map_err(|err| err.to_string())?;
+    Ok(sidecar_path.display().to_string())
+}
+
+/// Liest die geparsten `crs:`-Entwickeln-Einstellungen auf den aktuellen
+/// Bearbeitungsstand von `photo_id` und committet sie als neuen
+/// Bearbeitungsschritt — dieselbe Merge-Semantik wie ein Preset-Teilsatz
+/// (`lib/presets.ts::mergeEdlSubset`): nur Basic/HSL werden ersetzt, alle
+/// anderen EDL-Felder (Kurven/Masken/Weißabgleich/...) bleiben unverändert.
+/// Gemeinsame Kernlogik für [`import_xmp_develop_settings`] (Inhalt vom
+/// Frontend übergeben) und [`import_xmp_sidecar_from_file`] (nativer
+/// Datei-Dialog, wie `import_template_from_file`s Muster).
+fn apply_parsed_xmp_develop_settings(
+    state: &State<'_, AppState>,
+    photo_id: apx_core::PhotoId,
+    parsed: apx_export::xmp::ParsedDevelopSettings,
+) -> Result<(), String> {
+    if parsed.basic.is_none() && parsed.hsl.is_none() {
+        return Err(
+            "Die XMP-Datei enthält keine unterstützten crs:-Entwickeln-Einstellungen".to_string(),
+        );
+    }
+
+    let position = state
+        .catalog
+        .current_edit(photo_id)
+        .map_err(|err| err.to_string())?;
+    let mut edl = match position {
+        apx_catalog::HistoryPosition::At(entry) => {
+            apx_pipeline::edl::from_envelope(&entry.edl).map_err(|err| err.to_string())?
+        }
+        apx_catalog::HistoryPosition::Neutral => apx_pipeline::edl::EdlV3::neutral(),
+    };
+    if let Some(basic) = parsed.basic {
+        edl.basic = basic;
+    }
+    if let Some(hsl) = parsed.hsl {
+        edl.hsl = hsl;
+    }
+
+    let envelope = apx_pipeline::edl::to_envelope(&edl).map_err(|err| err.to_string())?;
+    state
+        .catalog
+        .commit_edit(photo_id, &envelope, Some("XMP-Import"))
+        .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn import_xmp_develop_settings(
+    state: State<'_, AppState>,
+    photo_id: String,
+    xmp_content: String,
+) -> Result<(), String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let parsed =
+        apx_export::xmp::parse_xmp_develop_settings(&xmp_content).map_err(|err| err.to_string())?;
+    apply_parsed_xmp_develop_settings(&state, photo_id, parsed)
+}
+
+/// Wie [`import_xmp_develop_settings`], liest die Datei aber über einen
+/// nativen Öffnen-Dialog statt vom Frontend übergebenen Inhalt (dasselbe
+/// Muster wie `import_template_from_file`). `Ok(false)` = Dialog wurde
+/// abgebrochen.
+#[tauri::command]
+pub async fn import_xmp_sidecar_from_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<bool, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("XMP-Sidecar", &["xmp"])
+        .pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|err| format!("Öffnen-Dialog fehlgeschlagen: {err}"))?;
+    let Some(picked) = picked else {
+        return Ok(false);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|err| format!("Ungültiger Pfad: {err}"))?;
+    let text = std::fs::read_to_string(&path)
+        .map_err(|err| format!("Datei '{}' nicht lesbar: {err}", path.display()))?;
+    let parsed =
+        apx_export::xmp::parse_xmp_develop_settings(&text).map_err(|err| err.to_string())?;
+    apply_parsed_xmp_develop_settings(&state, photo_id, parsed)?;
+    Ok(true)
+}
+
 // ---- Bibliothek: Sammlungen (ab Phase 3) -----------------------------------
 
 #[tauri::command]
@@ -1071,7 +1374,11 @@ pub fn create_collection_folder(
 }
 
 #[tauri::command]
-pub fn rename_collection_folder(state: State<'_, AppState>, folder_id: String, name: String) -> Result<(), String> {
+pub fn rename_collection_folder(
+    state: State<'_, AppState>,
+    folder_id: String,
+    name: String,
+) -> Result<(), String> {
     let folder_id = parse_collection_folder_id(folder_id)?;
     state
         .catalog
@@ -1080,7 +1387,10 @@ pub fn rename_collection_folder(state: State<'_, AppState>, folder_id: String, n
 }
 
 #[tauri::command]
-pub fn delete_collection_folder(state: State<'_, AppState>, folder_id: String) -> Result<(), String> {
+pub fn delete_collection_folder(
+    state: State<'_, AppState>,
+    folder_id: String,
+) -> Result<(), String> {
     let folder_id = parse_collection_folder_id(folder_id)?;
     state
         .catalog
@@ -1089,26 +1399,40 @@ pub fn delete_collection_folder(state: State<'_, AppState>, folder_id: String) -
 }
 
 #[tauri::command]
-pub fn list_collection_folders(state: State<'_, AppState>) -> Result<Vec<CollectionFolderDto>, String> {
-    let folders = state.catalog.list_collection_folders().map_err(|err| err.to_string())?;
+pub fn list_collection_folders(
+    state: State<'_, AppState>,
+) -> Result<Vec<CollectionFolderDto>, String> {
+    let folders = state
+        .catalog
+        .list_collection_folders()
+        .map_err(|err| err.to_string())?;
     Ok(folders.into_iter().map(CollectionFolderDto::from).collect())
 }
 
 // ---- Virtuelle Kopien (Phase 9 Schritt 1) ----------------------------------
 
 #[tauri::command]
-pub fn create_virtual_copy(state: State<'_, AppState>, photo_id: String) -> Result<PhotoDto, String> {
+pub fn create_virtual_copy(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<PhotoDto, String> {
     let photo_id = parse_photo_id(photo_id)?;
     let copy_id = state
         .catalog
         .create_virtual_copy(photo_id)
         .map_err(|err| err.to_string())?;
-    let photo = state.catalog.get_photo(copy_id).map_err(|err| err.to_string())?;
+    let photo = state
+        .catalog
+        .get_photo(copy_id)
+        .map_err(|err| err.to_string())?;
     Ok(PhotoDto::from(photo))
 }
 
 #[tauri::command]
-pub fn list_virtual_copies(state: State<'_, AppState>, photo_id: String) -> Result<Vec<PhotoDto>, String> {
+pub fn list_virtual_copies(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<Vec<PhotoDto>, String> {
     let photo_id = parse_photo_id(photo_id)?;
     let copies = state
         .catalog
@@ -1139,11 +1463,18 @@ pub fn create_stack(
 #[tauri::command]
 pub fn delete_stack(state: State<'_, AppState>, stack_id: String) -> Result<(), String> {
     let stack_id = parse_stack_id(stack_id)?;
-    state.catalog.delete_stack(stack_id).map_err(|err| err.to_string())
+    state
+        .catalog
+        .delete_stack(stack_id)
+        .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
-pub fn set_stack_cover(state: State<'_, AppState>, stack_id: String, cover_photo_id: String) -> Result<(), String> {
+pub fn set_stack_cover(
+    state: State<'_, AppState>,
+    stack_id: String,
+    cover_photo_id: String,
+) -> Result<(), String> {
     let stack_id = parse_stack_id(stack_id)?;
     let cover_photo_id = parse_photo_id(cover_photo_id)?;
     state
@@ -1180,12 +1511,17 @@ pub fn auto_stack_by_time(
 // ---- Erweiterbare Farbmarkierungen (Phase 9 Schritt 1) ---------------------
 
 #[tauri::command]
-pub fn list_color_label_definitions(state: State<'_, AppState>) -> Result<Vec<ColorLabelDefinitionDto>, String> {
+pub fn list_color_label_definitions(
+    state: State<'_, AppState>,
+) -> Result<Vec<ColorLabelDefinitionDto>, String> {
     let defs = state
         .catalog
         .list_color_label_definitions()
         .map_err(|err| err.to_string())?;
-    Ok(defs.into_iter().map(ColorLabelDefinitionDto::from).collect())
+    Ok(defs
+        .into_iter()
+        .map(ColorLabelDefinitionDto::from)
+        .collect())
 }
 
 #[tauri::command]
@@ -1202,7 +1538,10 @@ pub fn create_color_label_definition(
 }
 
 #[tauri::command]
-pub fn delete_color_label_definition(state: State<'_, AppState>, name: String) -> Result<(), String> {
+pub fn delete_color_label_definition(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
     state
         .catalog
         .delete_color_label_definition(&name)
@@ -1649,7 +1988,10 @@ pub fn list_perceptual_duplicate_groups(
     let hasher = image_hasher::HasherConfig::new().to_hasher();
     let mut hashed: Vec<(apx_catalog::Photo, image_hasher::ImageHash)> = Vec::new();
     for photo in photos {
-        let Ok(Some(preview)) = state.catalog.get_preview(photo.id, apx_catalog::PreviewLevel::Thumbnail) else {
+        let Ok(Some(preview)) = state
+            .catalog
+            .get_preview(photo.id, apx_catalog::PreviewLevel::Thumbnail)
+        else {
             continue;
         };
         let Ok(img) = image::open(&preview.path) else {
@@ -2954,31 +3296,42 @@ pub fn export_book_pdf(
         ),
     };
 
-    let font_bytes = match &options.font_path {
-        Some(path) => Some(
-            std::fs::read(path)
-                .map_err(|err| format!("Schriftdatei '{path}' konnte nicht gelesen werden: {err}"))?,
-        ),
-        None => None,
-    };
+    let font_bytes =
+        match &options.font_path {
+            Some(path) => Some(std::fs::read(path).map_err(|err| {
+                format!("Schriftdatei '{path}' konnte nicht gelesen werden: {err}")
+            })?),
+            None => None,
+        };
 
     // Jedes Foto genau einmal rendern (dieselben Pixel für die Seite,
     // auf der es landet — `render_to_pixels` cacht selbst nicht, die
     // Warteschlange bleibt hier bewusst einfach synchron).
-    let mut rendered: std::collections::HashMap<String, (u32, u32, Vec<u8>, String)> = std::collections::HashMap::new();
+    let mut rendered: std::collections::HashMap<String, (u32, u32, Vec<u8>, String)> =
+        std::collections::HashMap::new();
     for photo_id_str in &photo_ids {
         let photo_id = parse_photo_id(photo_id_str.clone())?;
-        let photo = state.catalog.get_photo(photo_id).map_err(|err| err.to_string())?;
-        let folder = state.catalog.get_folder(photo.folder_id).map_err(|err| err.to_string())?;
+        let photo = state
+            .catalog
+            .get_photo(photo_id)
+            .map_err(|err| err.to_string())?;
+        let folder = state
+            .catalog
+            .get_folder(photo.folder_id)
+            .map_err(|err| err.to_string())?;
         let edl = resolve_current_edl(&state.catalog, photo_id)?;
         let request = apx_export::engine::ExportRequest::new(
             folder.path.join(&photo.filename),
             edl,
             apx_export::format::ExportFormat::Jpeg,
         );
-        let (width, height, rgba) = apx_export::engine::render_to_pixels(Some(&state.pipeline), &request)
-            .map_err(|err| err.to_string())?;
-        rendered.insert(photo_id_str.clone(), (width, height, rgba, photo.filename.clone()));
+        let (width, height, rgba) =
+            apx_export::engine::render_to_pixels(Some(&state.pipeline), &request)
+                .map_err(|err| err.to_string())?;
+        rendered.insert(
+            photo_id_str.clone(),
+            (width, height, rgba, photo.filename.clone()),
+        );
     }
 
     let mut pages: Vec<(u32, u32, Vec<u8>)> = Vec::new();
@@ -3012,7 +3365,10 @@ pub fn export_book_pdf(
             })
             .collect();
         let caption = if template == apx_export::book::PageTemplate::PhotoWithCaption {
-            group.first().and_then(|id| rendered.get(id)).map(|(_, _, _, filename)| filename.as_str())
+            group
+                .first()
+                .and_then(|id| rendered.get(id))
+                .map(|(_, _, _, filename)| filename.as_str())
         } else {
             None
         };
@@ -3034,7 +3390,8 @@ pub fn export_book_pdf(
     }
 
     let page_count = pages.len();
-    let bytes = apx_export::book::build_pdf(&pages, dpi, Path::new(&dest_path)).map_err(|err| err.to_string())?;
+    let bytes = apx_export::book::build_pdf(&pages, dpi, Path::new(&dest_path))
+        .map_err(|err| err.to_string())?;
 
     Ok(BookOutcomeDto {
         path: dest_path,
@@ -3108,16 +3465,23 @@ pub async fn export_web_gallery(
     let mut photos = Vec::with_capacity(photo_ids.len());
     for photo_id_str in &photo_ids {
         let photo_id = parse_photo_id(photo_id_str.clone())?;
-        let photo = state.catalog.get_photo(photo_id).map_err(|err| err.to_string())?;
-        let folder = state.catalog.get_folder(photo.folder_id).map_err(|err| err.to_string())?;
+        let photo = state
+            .catalog
+            .get_photo(photo_id)
+            .map_err(|err| err.to_string())?;
+        let folder = state
+            .catalog
+            .get_folder(photo.folder_id)
+            .map_err(|err| err.to_string())?;
         let edl = resolve_current_edl(&state.catalog, photo_id)?;
         let request = apx_export::engine::ExportRequest::new(
             folder.path.join(&photo.filename),
             edl,
             apx_export::format::ExportFormat::Jpeg,
         );
-        let (width, height, rgba) = apx_export::engine::render_to_pixels(Some(&state.pipeline), &request)
-            .map_err(|err| err.to_string())?;
+        let (width, height, rgba) =
+            apx_export::engine::render_to_pixels(Some(&state.pipeline), &request)
+                .map_err(|err| err.to_string())?;
         let caption = PathBuf::from(&photo.filename)
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
@@ -3147,7 +3511,10 @@ pub async fn export_web_gallery(
                         password: upload.password.clone(),
                         remote_dir,
                     };
-                    Some(apx_export::web::upload_via_ftp(&outcome.dest_dir, &target).map_err(|err| err.to_string())?)
+                    Some(
+                        apx_export::web::upload_via_ftp(&outcome.dest_dir, &target)
+                            .map_err(|err| err.to_string())?,
+                    )
                 }
                 "sftp" => {
                     let target = apx_export::web::SftpTarget {
@@ -3257,7 +3624,10 @@ pub fn set_photo_gps(
         (Some(lat), Some(lon)) => Some((lat, lon)),
         _ => None,
     };
-    state.catalog.set_photo_gps(id, gps).map_err(|err| err.to_string())
+    state
+        .catalog
+        .set_photo_gps(id, gps)
+        .map_err(|err| err.to_string())
 }
 
 // ---- Vorlagen (Phase 8 Schritt 8) --------------------------------------
@@ -3274,7 +3644,12 @@ pub fn set_photo_gps(
 
 /// Legt eine neue Vorlage an.
 #[tauri::command]
-pub fn save_template(state: State<'_, AppState>, kind: String, name: String, payload_json: String) -> Result<String, String> {
+pub fn save_template(
+    state: State<'_, AppState>,
+    kind: String,
+    name: String,
+    payload_json: String,
+) -> Result<String, String> {
     let id = state
         .catalog
         .create_template(&kind, &name, &payload_json)
@@ -3284,24 +3659,40 @@ pub fn save_template(state: State<'_, AppState>, kind: String, name: String, pay
 
 /// Alle Vorlagen einer Art, alphabetisch nach Namen.
 #[tauri::command]
-pub fn list_templates(state: State<'_, AppState>, kind: String) -> Result<Vec<TemplateDto>, String> {
-    let templates = state.catalog.list_templates(&kind).map_err(|err| err.to_string())?;
+pub fn list_templates(
+    state: State<'_, AppState>,
+    kind: String,
+) -> Result<Vec<TemplateDto>, String> {
+    let templates = state
+        .catalog
+        .list_templates(&kind)
+        .map_err(|err| err.to_string())?;
     Ok(templates.into_iter().map(TemplateDto::from).collect())
 }
 
 #[tauri::command]
 pub fn delete_template(state: State<'_, AppState>, template_id: String) -> Result<(), String> {
     let id = parse_template_id(template_id)?;
-    state.catalog.delete_template(id).map_err(|err| err.to_string())
+    state
+        .catalog
+        .delete_template(id)
+        .map_err(|err| err.to_string())
 }
 
 /// Öffnet einen Speichern-Dialog und schreibt die Vorlage als `.apxt`-Datei
 /// (siehe `ApxTemplateFile`s Moduldoku). `None`, wenn der Dialog
 /// abgebrochen wurde.
 #[tauri::command]
-pub async fn export_template_to_file(app: AppHandle, state: State<'_, AppState>, template_id: String) -> Result<Option<String>, String> {
+pub async fn export_template_to_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    template_id: String,
+) -> Result<Option<String>, String> {
     let id = parse_template_id(template_id)?;
-    let template = state.catalog.get_template(id).map_err(|err| err.to_string())?;
+    let template = state
+        .catalog
+        .get_template(id)
+        .map_err(|err| err.to_string())?;
     let payload: serde_json::Value = serde_json::from_str(&template.payload_json)
         .map_err(|err| format!("Vorlagen-Nutzlast ist kein gültiges JSON: {err}"))?;
     let file = ApxTemplateFile {
@@ -3310,7 +3701,8 @@ pub async fn export_template_to_file(app: AppHandle, state: State<'_, AppState>,
         name: template.name.clone(),
         payload,
     };
-    let json = serde_json::to_string_pretty(&file).map_err(|err| format!("Vorlage nicht serialisierbar: {err}"))?;
+    let json = serde_json::to_string_pretty(&file)
+        .map_err(|err| format!("Vorlage nicht serialisierbar: {err}"))?;
 
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog()
@@ -3320,19 +3712,27 @@ pub async fn export_template_to_file(app: AppHandle, state: State<'_, AppState>,
         .save_file(move |path| {
             let _ = tx.send(path);
         });
-    let picked = rx.await.map_err(|err| format!("Speichern-Dialog fehlgeschlagen: {err}"))?;
+    let picked = rx
+        .await
+        .map_err(|err| format!("Speichern-Dialog fehlgeschlagen: {err}"))?;
     let Some(picked) = picked else {
         return Ok(None);
     };
-    let path = picked.into_path().map_err(|err| format!("Ungültiger Pfad: {err}"))?;
-    std::fs::write(&path, json).map_err(|err| format!("Datei '{}' nicht schreibbar: {err}", path.display()))?;
+    let path = picked
+        .into_path()
+        .map_err(|err| format!("Ungültiger Pfad: {err}"))?;
+    std::fs::write(&path, json)
+        .map_err(|err| format!("Datei '{}' nicht schreibbar: {err}", path.display()))?;
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
 /// Öffnet einen Öffnen-Dialog und legt die gewählte `.apxt`-Datei als neue
 /// Vorlage an. `None`, wenn der Dialog abgebrochen wurde.
 #[tauri::command]
-pub async fn import_template_from_file(app: AppHandle, state: State<'_, AppState>) -> Result<Option<TemplateDto>, String> {
+pub async fn import_template_from_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<TemplateDto>, String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog()
         .file()
@@ -3340,14 +3740,23 @@ pub async fn import_template_from_file(app: AppHandle, state: State<'_, AppState
         .pick_file(move |path| {
             let _ = tx.send(path);
         });
-    let picked = rx.await.map_err(|err| format!("Öffnen-Dialog fehlgeschlagen: {err}"))?;
+    let picked = rx
+        .await
+        .map_err(|err| format!("Öffnen-Dialog fehlgeschlagen: {err}"))?;
     let Some(picked) = picked else {
         return Ok(None);
     };
-    let path = picked.into_path().map_err(|err| format!("Ungültiger Pfad: {err}"))?;
-    let text = std::fs::read_to_string(&path).map_err(|err| format!("Datei '{}' nicht lesbar: {err}", path.display()))?;
-    let file: ApxTemplateFile = serde_json::from_str(&text)
-        .map_err(|err| format!("Datei '{}' ist keine gültige .apxt-Datei: {err}", path.display()))?;
+    let path = picked
+        .into_path()
+        .map_err(|err| format!("Ungültiger Pfad: {err}"))?;
+    let text = std::fs::read_to_string(&path)
+        .map_err(|err| format!("Datei '{}' nicht lesbar: {err}", path.display()))?;
+    let file: ApxTemplateFile = serde_json::from_str(&text).map_err(|err| {
+        format!(
+            "Datei '{}' ist keine gültige .apxt-Datei: {err}",
+            path.display()
+        )
+    })?;
     if file.schema_version > APX_TEMPLATE_SCHEMA_VERSION {
         return Err(format!(
             "Datei '{}' hat Schema-Version {}, diese Aperture-X-Version kennt nur {}",
@@ -3356,12 +3765,16 @@ pub async fn import_template_from_file(app: AppHandle, state: State<'_, AppState
             APX_TEMPLATE_SCHEMA_VERSION
         ));
     }
-    let payload_json = serde_json::to_string(&file.payload).map_err(|err| format!("Nutzlast nicht serialisierbar: {err}"))?;
+    let payload_json = serde_json::to_string(&file.payload)
+        .map_err(|err| format!("Nutzlast nicht serialisierbar: {err}"))?;
     let id = state
         .catalog
         .create_template(&file.kind, &file.name, &payload_json)
         .map_err(|err| err.to_string())?;
-    let template = state.catalog.get_template(id).map_err(|err| err.to_string())?;
+    let template = state
+        .catalog
+        .get_template(id)
+        .map_err(|err| err.to_string())?;
     Ok(Some(TemplateDto::from(template)))
 }
 

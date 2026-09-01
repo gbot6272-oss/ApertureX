@@ -19,7 +19,7 @@ pub use edl::EdlEnvelope;
 pub use error::{AppError, Result};
 pub use ids::{
     CatalogId, CollectionFolderId, CollectionId, EditHistoryId, FolderId, KeywordId, PhotoId,
-    PresetFolderId, PresetId, PresetVersionId, SnapshotId, StackId, TemplateId,
+    PresetFolderId, PresetId, PresetVersionId, SnapshotId, StackId, TagRuleId, TemplateId,
 };
 pub use logging::init_logging;
 pub use paths::AppPaths;

@@ -100,6 +100,9 @@ define_id_type!(TemplateId);
 // `apx_catalog::repository::{collections,stacks}`s Moduldoku).
 define_id_type!(CollectionFolderId);
 define_id_type!(StackId);
+// Phase 9 Schritt 2: bedingte Auto-Schlagwort-Regel (siehe
+// `apx_catalog::repository::tag_rules`s Moduldoku).
+define_id_type!(TagRuleId);
 
 #[cfg(test)]
 mod tests {

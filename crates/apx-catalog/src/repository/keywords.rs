@@ -1,12 +1,35 @@
 //! SQL für `keywords`/`photo_keywords` (siehe `migrations/0003_library.sql`,
-//! `DECISIONS.md` ADR-0022) — flache Schlagwort-Liste ohne Hierarchie oder
-//! Synonyme.
+//! `migrations/0008_metadata_keywords.sql`, `DECISIONS.md` ADR-0022/
+//! ADR-0035) — seit Phase 9 Schritt 2 mit Eltern-Kind-Hierarchie
+//! (`parent_id`) und Synonymen (JSON-Array-Text `synonyms`).
 
-use apx_core::{KeywordId, PhotoId, Result};
+use apx_core::{AppError, KeywordId, PhotoId, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::map_sqlite_err;
 use crate::models::Keyword;
+
+const SELECT_COLUMNS: &str = "id, name, parent_id, synonyms";
+
+fn row_to_keyword(
+    row: &rusqlite::Row,
+) -> rusqlite::Result<(String, String, Option<String>, String)> {
+    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+}
+
+fn raw_to_keyword(raw: (String, String, Option<String>, String)) -> Result<Keyword> {
+    let (id, name, parent_id, synonyms_json) = raw;
+    let synonyms: Vec<String> =
+        serde_json::from_str(&synonyms_json).map_err(|err| AppError::Database {
+            message: format!("Schlagwort-Synonyme nicht lesbar: {err}"),
+        })?;
+    Ok(Keyword {
+        id: id.parse()?,
+        name,
+        parent_id: parent_id.map(|p| p.parse()).transpose()?,
+        synonyms,
+    })
+}
 
 fn find_by_name(conn: &Connection, name: &str) -> Result<Option<KeywordId>> {
     let id: Option<String> = conn
@@ -20,17 +43,63 @@ fn find_by_name(conn: &Connection, name: &str) -> Result<Option<KeywordId>> {
     id.map(|id| id.parse()).transpose()
 }
 
-fn find_or_create(conn: &Connection, name: &str) -> Result<KeywordId> {
+pub(crate) fn find_or_create(conn: &Connection, name: &str) -> Result<KeywordId> {
     if let Some(id) = find_by_name(conn, name)? {
         return Ok(id);
     }
     let id = KeywordId::new();
     conn.execute(
-        "INSERT INTO keywords (id, name) VALUES (?1, ?2)",
+        "INSERT INTO keywords (id, name, synonyms) VALUES (?1, ?2, '[]')",
         params![id.to_string(), name],
     )
     .map_err(map_sqlite_err)?;
     Ok(id)
+}
+
+/// Setzt das übergeordnete Schlagwort — `None` macht `keyword_id` wieder
+/// zu einem Wurzel-Schlagwort. Keine Zyklenprüfung (bewusste
+/// Vereinfachung: bei der kleinen, manuell gepflegten Hierarchiegröße
+/// dieses Projekts kein praktisches Risiko, dasselbe Maß an Vertrauen wie
+/// bei `collections.move_to_folder`).
+pub(crate) fn set_parent(
+    conn: &Connection,
+    keyword_id: KeywordId,
+    parent_id: Option<KeywordId>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE keywords SET parent_id = ?2 WHERE id = ?1",
+        params![keyword_id.to_string(), parent_id.map(|p| p.to_string())],
+    )
+    .map_err(map_sqlite_err)?;
+    Ok(())
+}
+
+pub(crate) fn set_synonyms(
+    conn: &Connection,
+    keyword_id: KeywordId,
+    synonyms: &[String],
+) -> Result<()> {
+    let json = serde_json::to_string(synonyms).map_err(|err| AppError::Database {
+        message: format!("Schlagwort-Synonyme nicht serialisierbar: {err}"),
+    })?;
+    conn.execute(
+        "UPDATE keywords SET synonyms = ?2 WHERE id = ?1",
+        params![keyword_id.to_string(), json],
+    )
+    .map_err(map_sqlite_err)?;
+    Ok(())
+}
+
+/// Löscht ein Schlagwort vollständig (kaskadiert auf `photo_keywords` und
+/// `tag_rules`, Kind-Schlagworte werden zu Wurzel-Schlagworten statt
+/// mitgelöscht — `ON DELETE SET NULL` auf `parent_id`).
+pub(crate) fn delete(conn: &Connection, keyword_id: KeywordId) -> Result<()> {
+    conn.execute(
+        "DELETE FROM keywords WHERE id = ?1",
+        params![keyword_id.to_string()],
+    )
+    .map_err(map_sqlite_err)?;
+    Ok(())
 }
 
 /// Verknüpft `photo_id` mit dem Schlagwort `name` — legt das Schlagwort an,
@@ -59,49 +128,27 @@ pub(crate) fn remove(conn: &Connection, photo_id: PhotoId, keyword_id: KeywordId
 }
 
 pub(crate) fn list_for_photo(conn: &Connection, photo_id: PhotoId) -> Result<Vec<Keyword>> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT k.id, k.name FROM keywords k \
-             JOIN photo_keywords pk ON pk.keyword_id = k.id \
-             WHERE pk.photo_id = ?1 ORDER BY k.name",
-        )
-        .map_err(map_sqlite_err)?;
+    let sql = "SELECT k.id, k.name, k.parent_id, k.synonyms FROM keywords k \
+               JOIN photo_keywords pk ON pk.keyword_id = k.id \
+               WHERE pk.photo_id = ?1 ORDER BY k.name";
+    let mut stmt = conn.prepare(sql).map_err(map_sqlite_err)?;
     let rows = stmt
-        .query_map(params![photo_id.to_string()], |row| {
-            let id: String = row.get(0)?;
-            let name: String = row.get(1)?;
-            Ok((id, name))
-        })
+        .query_map(params![photo_id.to_string()], row_to_keyword)
         .map_err(map_sqlite_err)?;
     let mut result = Vec::new();
     for row in rows {
-        let (id, name) = row.map_err(map_sqlite_err)?;
-        result.push(Keyword {
-            id: id.parse()?,
-            name,
-        });
+        result.push(raw_to_keyword(row.map_err(map_sqlite_err)?)?);
     }
     Ok(result)
 }
 
 pub(crate) fn list_all(conn: &Connection) -> Result<Vec<Keyword>> {
-    let mut stmt = conn
-        .prepare("SELECT id, name FROM keywords ORDER BY name")
-        .map_err(map_sqlite_err)?;
-    let rows = stmt
-        .query_map([], |row| {
-            let id: String = row.get(0)?;
-            let name: String = row.get(1)?;
-            Ok((id, name))
-        })
-        .map_err(map_sqlite_err)?;
+    let sql = format!("SELECT {SELECT_COLUMNS} FROM keywords ORDER BY name");
+    let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
+    let rows = stmt.query_map([], row_to_keyword).map_err(map_sqlite_err)?;
     let mut result = Vec::new();
     for row in rows {
-        let (id, name) = row.map_err(map_sqlite_err)?;
-        result.push(Keyword {
-            id: id.parse()?,
-            name,
-        });
+        result.push(raw_to_keyword(row.map_err(map_sqlite_err)?)?);
     }
     Ok(result)
 }

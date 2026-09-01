@@ -30,7 +30,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use apx_core::{
     AppError, CollectionFolderId, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId,
-    PhotoId, PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId, StackId, TemplateId,
+    PhotoId, PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId, StackId, TagRuleId,
+    TemplateId,
 };
 use rusqlite::Connection;
 use time::OffsetDateTime;
@@ -38,7 +39,7 @@ use time::OffsetDateTime;
 pub use models::{
     Collection, CollectionFolder, ColorLabelDefinition, EditHistoryEntry, FilterCriteria, Folder,
     HistoryPosition, Keyword, NewPhoto, Photo, Preset, PresetFolder, PresetVersion, Preview,
-    PreviewLevel, Snapshot, Stack, Template,
+    PreviewLevel, Snapshot, Stack, TagRule, Template,
 };
 
 pub struct Catalog {
@@ -317,6 +318,81 @@ impl Catalog {
     pub fn list_all_keywords(&self) -> Result<Vec<Keyword>> {
         let conn = self.lock()?;
         repository::keywords::list_all(&conn)
+    }
+
+    // ---- Schlagworthierarchie/Tag-Regeln/Metadaten (ab Phase 9 Schritt 2,
+    // siehe DECISIONS.md ADR-0035) -------------------------------------------
+
+    /// Setzt das übergeordnete Schlagwort — `None` macht es zu einem
+    /// Wurzel-Schlagwort.
+    pub fn set_keyword_parent(
+        &self,
+        keyword_id: KeywordId,
+        parent_id: Option<KeywordId>,
+    ) -> Result<()> {
+        let conn = self.lock()?;
+        repository::keywords::set_parent(&conn, keyword_id, parent_id)
+    }
+
+    pub fn set_keyword_synonyms(&self, keyword_id: KeywordId, synonyms: &[String]) -> Result<()> {
+        let conn = self.lock()?;
+        repository::keywords::set_synonyms(&conn, keyword_id, synonyms)
+    }
+
+    pub fn delete_keyword(&self, keyword_id: KeywordId) -> Result<()> {
+        let conn = self.lock()?;
+        repository::keywords::delete(&conn, keyword_id)
+    }
+
+    /// Legt eine bedingte Auto-Schlagwort-Regel an — `conditions_json` ist
+    /// derselbe `PresetCondition[]`-Vertrag wie bei Import-Presets, wird
+    /// hier nur gespeichert, nicht ausgewertet (siehe
+    /// `repository::tag_rules`s Moduldoku).
+    pub fn create_tag_rule(
+        &self,
+        name: &str,
+        keyword_id: KeywordId,
+        conditions_json: &str,
+    ) -> Result<TagRuleId> {
+        let conn = self.lock()?;
+        repository::tag_rules::create(
+            &conn,
+            name,
+            keyword_id,
+            conditions_json,
+            OffsetDateTime::now_utc(),
+        )
+    }
+
+    pub fn set_tag_rule_enabled(&self, id: TagRuleId, enabled: bool) -> Result<()> {
+        let conn = self.lock()?;
+        repository::tag_rules::set_enabled(&conn, id, enabled)
+    }
+
+    pub fn delete_tag_rule(&self, id: TagRuleId) -> Result<()> {
+        let conn = self.lock()?;
+        repository::tag_rules::delete(&conn, id)
+    }
+
+    pub fn list_tag_rules(&self) -> Result<Vec<TagRule>> {
+        let conn = self.lock()?;
+        repository::tag_rules::list_all(&conn)
+    }
+
+    /// Aktualisiert die vier IPTC-artigen Metadaten-Überschreibungen eines
+    /// Fotos — deckt auch Stapel-Metadatenbearbeitung ab (Aufrufer ruft
+    /// dies für jedes ausgewählte Foto einzeln auf).
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_photo_metadata(
+        &self,
+        photo_id: PhotoId,
+        title: Option<&str>,
+        caption: Option<&str>,
+        copyright: Option<&str>,
+        creator: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.lock()?;
+        repository::photos::set_metadata(&conn, photo_id, title, caption, copyright, creator)
     }
 
     // ---- Sammlungen (ab Phase 3, Sammlungssätze/intelligente Sammlungen ---

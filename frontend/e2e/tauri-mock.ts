@@ -125,6 +125,9 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     importedTemplateFile: null as { kind: string; name: string; payload_json: string } | null,
     // Perceptual-Hash-Duplikaterkennung (Phase 9 Schritt 1).
     perceptualDuplicateGroups: [] as unknown[][],
+    // Adobe-XMP-Sidecar (Phase 9 Schritt 2).
+    exportedXmpSidecarPath: "/mock/photos/IMG_0001.xmp" as string,
+    xmpImportApplies: true as boolean,
     ...initialFixtures,
   };
   w.__mockInvokeLog = [] as Array<{ cmd: string; args: unknown }>;
@@ -197,6 +200,24 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   const photoKeywords: Record<string, { id: string; name: string }[]> = {};
   let nextCollectionId = 1;
   let nextKeywordId = 1;
+
+  // Schlagworthierarchie/Tag-Regeln/Metadaten (Phase 9 Schritt 2, siehe
+  // DECISIONS.md ADR-0035) — `keywordMeta` hält parent_id/synonyms separat
+  // von `photoKeywords`, weil dasselbe Schlagwort an mehreren Fotos hängen
+  // kann und die Hierarchie unabhängig von einzelnen Foto-Verknüpfungen ist.
+  const keywordMeta: Record<string, { parent_id: string | null; synonyms: string[] }> = {};
+  function keywordMetaFor(id: string) {
+    return keywordMeta[id] ?? { parent_id: null, synonyms: [] };
+  }
+  interface MockTagRule {
+    id: string;
+    name: string;
+    keyword_id: string;
+    conditions_json: string;
+    enabled: boolean;
+  }
+  const tagRules: MockTagRule[] = [];
+  let nextTagRuleId = 1;
 
   // Presets (ab Phase 5, siehe `DECISIONS.md` ADR-0031) — wie bei
   // Sammlungen: einfache In-Memory-Nachbildung von `apx-catalog`s
@@ -544,14 +565,78 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         // Einlagern in den Store ein, und ein späteres `.push()` hier im
         // Mock schlägt fehl (echtes Tauri-IPC serialisiert ohnehin immer
         // frisch, diese Referenz-Teilung ist ein reines Mock-Artefakt).
-        return [...(photoKeywords[args.photoId as string] ?? [])];
+        return (photoKeywords[args.photoId as string] ?? []).map((k) => ({ ...k, ...keywordMetaFor(k.id) }));
       case "list_all_keywords": {
         const seen = new Map<string, { id: string; name: string }>();
         for (const list of Object.values(photoKeywords)) {
           for (const keyword of list) seen.set(keyword.id, keyword);
         }
-        return [...seen.values()];
+        return [...seen.values()].map((k) => ({ ...k, ...keywordMetaFor(k.id) }));
       }
+
+      // ---- Bibliothek: Schlagworthierarchie/Tag-Regeln/Metadaten (ab Phase 9
+      // Schritt 2, siehe DECISIONS.md ADR-0035) --------------------------------
+      case "set_keyword_parent": {
+        const keywordId = args.keywordId as string;
+        keywordMeta[keywordId] = { ...keywordMetaFor(keywordId), parent_id: (args.parentId as string | null) ?? null };
+        return null;
+      }
+      case "set_keyword_synonyms": {
+        const keywordId = args.keywordId as string;
+        keywordMeta[keywordId] = { ...keywordMetaFor(keywordId), synonyms: [...(args.synonyms as string[])] };
+        return null;
+      }
+      case "delete_keyword": {
+        const keywordId = args.keywordId as string;
+        for (const list of Object.values(photoKeywords)) {
+          const index = list.findIndex((k) => k.id === keywordId);
+          if (index >= 0) list.splice(index, 1);
+        }
+        delete keywordMeta[keywordId];
+        for (const rule of [...tagRules]) {
+          if (rule.keyword_id === keywordId) tagRules.splice(tagRules.indexOf(rule), 1);
+        }
+        return null;
+      }
+      case "create_tag_rule": {
+        const id = `rule-${nextTagRuleId++}`;
+        tagRules.push({
+          id,
+          name: args.name as string,
+          keyword_id: args.keywordId as string,
+          conditions_json: args.conditionsJson as string,
+          enabled: true,
+        });
+        return id;
+      }
+      case "set_tag_rule_enabled": {
+        const rule = tagRules.find((r) => r.id === (args.tagRuleId as string));
+        if (rule) rule.enabled = args.enabled as boolean;
+        return null;
+      }
+      case "delete_tag_rule": {
+        const index = tagRules.findIndex((r) => r.id === (args.tagRuleId as string));
+        if (index >= 0) tagRules.splice(index, 1);
+        return null;
+      }
+      case "list_tag_rules":
+        return [...tagRules];
+      case "set_photo_metadata": {
+        const photo = findPhoto(args.photoId as string);
+        if (photo) {
+          photo.title = args.title as string | null;
+          photo.caption = args.caption as string | null;
+          photo.copyright = args.copyright as string | null;
+          photo.creator = args.creator as string | null;
+        }
+        return null;
+      }
+      case "export_xmp_sidecar":
+        return fixtures.exportedXmpSidecarPath;
+      case "import_xmp_develop_settings":
+        return null;
+      case "import_xmp_sidecar_from_file":
+        return fixtures.xmpImportApplies;
 
       // ---- Bibliothek: Sammlungen (ab Phase 3, Sammlungssätze/intelligente -
       // Sammlungen ab Phase 9 Schritt 1) --------------------------------------

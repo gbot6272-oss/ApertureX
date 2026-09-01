@@ -10,6 +10,7 @@ import { PrintDialog } from "./PrintDialog";
 import { SlideshowDialog } from "./SlideshowDialog";
 import { TemplatesDialog } from "./TemplatesDialog";
 import { LibraryOrganizeDialog } from "./LibraryOrganizeDialog";
+import { MetadataDialog } from "./MetadataDialog";
 
 export function Header() {
   const importRunning = useAppStore((s) => s.importRunning);
@@ -44,6 +45,7 @@ export function Header() {
   const [importDialogSource, setImportDialogSource] = useState<string | null>(null);
   const [templatesDialogOpen, setTemplatesDialogOpen] = useState(false);
   const [organizeDialogOpen, setOrganizeDialogOpen] = useState(false);
+  const [metadataDialogOpen, setMetadataDialogOpen] = useState(false);
 
   const exportPhotoIds = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
 
@@ -233,6 +235,16 @@ export function Header() {
       </button>
 
       <LibraryOrganizeDialog open={organizeDialogOpen} onClose={() => setOrganizeDialogOpen(false)} />
+
+      <button
+        type="button"
+        onClick={() => setMetadataDialogOpen(true)}
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
+      >
+        Metadaten…
+      </button>
+
+      <MetadataDialog open={metadataDialogOpen} onClose={() => setMetadataDialogOpen(false)} />
 
       <span className="text-xs text-text-muted">Strg/Cmd+K — Befehlspalette</span>
     </header>

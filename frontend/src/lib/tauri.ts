@@ -51,11 +51,30 @@ export interface PhotoDto {
   /** `null` = echtes Foto. Gesetzt = virtuelle Kopie (Phase 9 Schritt 1)
    * — teilt sich die Datei mit dem referenzierten Foto. */
   source_photo_id: string | null;
+  /** IPTC-artige Metadaten-Überschreibungen (Phase 9 Schritt 2). */
+  title: string | null;
+  caption: string | null;
+  copyright: string | null;
+  creator: string | null;
 }
 
 export interface KeywordDto {
   id: string;
   name: string;
+  /** `null` = Wurzel-Schlagwort (Phase 9 Schritt 2). */
+  parent_id: string | null;
+  synonyms: string[];
+}
+
+/** Bedingte Auto-Schlagwort-Regel (Phase 9 Schritt 2, siehe
+ * `DECISIONS.md` ADR-0035). `conditions_json` ist derselbe
+ * `PresetCondition[]`-Vertrag wie bei Import-Presets (`lib/presets.ts`). */
+export interface TagRuleDto {
+  id: string;
+  name: string;
+  keyword_id: string;
+  conditions_json: string;
+  enabled: boolean;
 }
 
 export interface CollectionDto {
@@ -307,6 +326,73 @@ export function removePhotoKeyword(photoId: string, keywordId: string): Promise<
 
 export function listPhotoKeywords(photoId: string): Promise<KeywordDto[]> {
   return invoke<KeywordDto[]>("list_photo_keywords", { photoId });
+}
+
+export function listAllKeywords(): Promise<KeywordDto[]> {
+  return invoke<KeywordDto[]>("list_all_keywords");
+}
+
+// ---- Bibliothek: Schlagworthierarchie, Tag-Regeln, Metadaten (ab Phase 9
+// Schritt 2, siehe DECISIONS.md ADR-0035) ------------------------------------
+
+export function setKeywordParent(keywordId: string, parentId: string | null): Promise<void> {
+  return invoke<void>("set_keyword_parent", { keywordId, parentId });
+}
+
+export function setKeywordSynonyms(keywordId: string, synonyms: string[]): Promise<void> {
+  return invoke<void>("set_keyword_synonyms", { keywordId, synonyms });
+}
+
+export function deleteKeyword(keywordId: string): Promise<void> {
+  return invoke<void>("delete_keyword", { keywordId });
+}
+
+export function createTagRule(name: string, keywordId: string, conditionsJson: string): Promise<string> {
+  return invoke<string>("create_tag_rule", { name, keywordId, conditionsJson });
+}
+
+export function setTagRuleEnabled(tagRuleId: string, enabled: boolean): Promise<void> {
+  return invoke<void>("set_tag_rule_enabled", { tagRuleId, enabled });
+}
+
+export function deleteTagRule(tagRuleId: string): Promise<void> {
+  return invoke<void>("delete_tag_rule", { tagRuleId });
+}
+
+export function listTagRules(): Promise<TagRuleDto[]> {
+  return invoke<TagRuleDto[]>("list_tag_rules");
+}
+
+/** Stapel-Metadatenbearbeitung: der Aufrufer ruft dies für jedes Foto in
+ * der Auswahl einzeln auf. */
+export function setPhotoMetadata(
+  photoId: string,
+  title: string | null,
+  caption: string | null,
+  copyright: string | null,
+  creator: string | null,
+): Promise<void> {
+  return invoke<void>("set_photo_metadata", { photoId, title, caption, copyright, creator });
+}
+
+/** Schreibt eine `.xmp`-Sidecar-Datei neben dem Original, gibt deren Pfad
+ * zurück. Siehe `apx_export::xmp`s Moduldoku für den genauen Umfang
+ * (Basic+HSL, kein Weißabgleich/Kurven/Masken). */
+export function exportXmpSidecar(photoId: string, withDevelopSettings: boolean): Promise<string> {
+  return invoke<string>("export_xmp_sidecar", { photoId, withDevelopSettings });
+}
+
+/** Liest die `crs:`-Entwickeln-Einstellungen aus `xmpContent` und
+ * committet sie als neuen Bearbeitungsschritt für `photoId`. */
+export function importXmpDevelopSettings(photoId: string, xmpContent: string): Promise<void> {
+  return invoke<void>("import_xmp_develop_settings", { photoId, xmpContent });
+}
+
+/** Wie {@link importXmpDevelopSettings}, öffnet aber einen nativen
+ * Datei-Dialog statt den Inhalt entgegenzunehmen — `false` = Dialog
+ * abgebrochen. */
+export function importXmpSidecarFromFile(photoId: string): Promise<boolean> {
+  return invoke<boolean>("import_xmp_sidecar_from_file", { photoId });
 }
 
 // ---- Bibliothek: Sammlungen (ab Phase 3, Sammlungssätze/intelligente ------

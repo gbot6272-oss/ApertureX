@@ -1237,3 +1237,28 @@ export function resolveShareConflict(
 ): Promise<void> {
   return invoke<void>("resolve_share_conflict", { photoId, incomingEdlJson, resolution });
 }
+
+// ---- Fortgeschrittenes: Tethered Shooting (Phase 9 Schritt 11, siehe
+// DECISIONS.md ADR-0035 Punkt 5) ---------------------------------------------
+
+export interface CameraInfoDto {
+  model: string;
+  port: string;
+  /** true, wenn dieser Build ohne das `tethering`-Feature läuft (oder keine
+   * echte Kamera gefunden wurde) — zeigt eine Simulation statt echter
+   * Hardware. */
+  simulated: boolean;
+}
+
+/** (Neu-)Verbindet zu einer Kamera und erkennt sie. `null`, wenn keine
+ * gefunden wurde. */
+export function tetherConnect(): Promise<CameraInfoDto | null> {
+  return invoke<CameraInfoDto | null>("tether_connect", {});
+}
+
+/** Löst über die verbundene Kamera aus, lädt herunter und importiert über
+ * den bestehenden Import-Pfad — optional mit einem benannten Import-Preset
+ * (Phase 3/5). `null`, wenn die heruntergeladene Datei nicht neu war. */
+export function tetherCapture(presetName?: string): Promise<PhotoDto | null> {
+  return invoke<PhotoDto | null>("tether_capture", { presetName: presetName ?? null });
+}

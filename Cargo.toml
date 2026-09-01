@@ -12,6 +12,7 @@ members = [
     "crates/apx-plugin-abi",
     "crates/apx-plugin-example",
     "crates/apx-plugin-host",
+    "crates/apx-tether",
     "crates/apx-app",
 ]
 
@@ -38,6 +39,7 @@ apx-script = { path = "crates/apx-script" }
 apx-plugin-abi = { path = "crates/apx-plugin-abi" }
 apx-plugin-example = { path = "crates/apx-plugin-example" }
 apx-plugin-host = { path = "crates/apx-plugin-host" }
+apx-tether = { path = "crates/apx-tether" }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

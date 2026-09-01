@@ -70,6 +70,17 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         incoming_edited_at: string;
       }>;
     } | null,
+    // Tethered Shooting (Phase 9 Schritt 11) — `tetherCameraResult`
+    // simuliert `tether_connect`s Ergebnis (Standard: eine "verbundene"
+    // simulierte Kamera, wie ein Build ohne `tethering`-Feature sie
+    // liefert), `tetherCapturePhoto` das neu "aufgenommene" Foto, das
+    // `tether_capture` zurückgäbe (per Fixture überschreibbar).
+    tetherCameraResult: { model: "Simulierte Kamera", port: "usb:mock,000", simulated: true } as {
+      model: string;
+      port: string;
+      simulated: boolean;
+    } | null,
+    tetherCapturePhoto: null as Record<string, unknown> | null,
     // KI-Funktionen (Phase 7, siehe DECISIONS.md ADR-0033) — feste,
     // per Fixture überschreibbare Antworten statt einer echten
     // Bildanalyse (die läuft nur im echten Backend).
@@ -463,6 +474,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           incoming_edited_at: string;
         }>;
       } | null;
+      tetherCameraResult: { model: string; port: string; simulated: boolean } | null;
+      tetherCapturePhoto: Record<string, unknown> | null;
       aiMaskAlpha: { width: number; height: number; alpha_base64: string };
       repairSourceSuggestion: { x: number; y: number };
       sensorSpots: Array<{ x: number; y: number; radius: number; strength: number }>;
@@ -1101,6 +1114,12 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return fixtures.importShareResult;
       case "resolve_share_conflict":
         return null;
+
+      // ---- Fortgeschrittenes: Tethered Shooting (Phase 9 Schritt 11) -----
+      case "tether_connect":
+        return fixtures.tetherCameraResult;
+      case "tether_capture":
+        return fixtures.tetherCapturePhoto;
 
       // ---- KI-Funktionen (Phase 7, siehe DECISIONS.md ADR-0033) ----------
       case "generate_ai_mask":

@@ -4692,6 +4692,152 @@ pub fn resolve_share_conflict(
     }
 }
 
+// ---- Fortgeschrittenes: Tethered Shooting (Phase 9 Schritt 11, siehe
+// PLAN.md, DECISIONS.md ADR-0035 Punkt 5) ------------------------------------
+//
+// Ablauf: Kamera erkennen (`tether_connect`) → auslösen + herunterladen +
+// automatisches Import-Preset anwenden (`tether_capture`, wiederverwendet
+// `import::run_with_mode` aus Phase 3/5 unverändert). `apx_tether`s
+// `Gphoto2Backend` ist nur mit dem Cargo-Feature `tethering` kompiliert
+// (standardmäßig aus, siehe `THIRD_PARTY.md`) — ohne das Feature (dieser
+// Build) läuft ausschließlich `FakeBackend`, klar als Simulation markiert.
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CameraInfoDto {
+    pub model: String,
+    pub port: String,
+    /// `true`, wenn dieser Build ohne das `tethering`-Feature kompiliert
+    /// wurde (oder — mit Feature — keine echte Kamera gefunden wurde) und
+    /// daher `apx_tether::FakeBackend` statt echter Hardware antwortet.
+    /// Das Frontend zeigt das explizit an, statt eine echte
+    /// Kameraverbindung vorzutäuschen.
+    pub simulated: bool,
+}
+
+#[cfg(feature = "tethering")]
+fn new_tether_backend() -> (Box<dyn apx_tether::TetherBackend>, bool) {
+    match apx_tether::gphoto2_backend::Gphoto2Backend::new() {
+        Ok(backend) => (Box::new(backend), false),
+        Err(_) => (Box::new(apx_tether::FakeBackend::disconnected()), true),
+    }
+}
+
+#[cfg(not(feature = "tethering"))]
+fn new_tether_backend() -> (Box<dyn apx_tether::TetherBackend>, bool) {
+    (
+        Box::new(apx_tether::FakeBackend::connected("Simulierte Kamera")),
+        true,
+    )
+}
+
+/// (Neu-)Verbindet zu einer Kamera und erkennt sie — `None`, wenn keine
+/// gefunden wurde. Speichert das Backend in `AppState::tether`, damit
+/// [`tether_capture`] dieselbe Verbindung (und deren Aufnahmezähler beim
+/// `FakeBackend`) wiederverwendet.
+#[tauri::command]
+pub fn tether_connect(state: State<'_, AppState>) -> Result<Option<CameraInfoDto>, String> {
+    let (mut backend, simulated) = new_tether_backend();
+    let detected = backend.detect_camera().map_err(|err| err.to_string())?;
+    let dto = detected.as_ref().map(|info| CameraInfoDto {
+        model: info.model.clone(),
+        port: info.port.clone(),
+        simulated,
+    });
+    let mut guard = state
+        .tether
+        .lock()
+        .map_err(|_| "Tethering-Status ist blockiert (vergiftete Sperre)".to_string())?;
+    *guard = Some(backend);
+    Ok(dto)
+}
+
+/// Löst den Import-Modus/das Umbenennungsmuster für [`tether_capture`]
+/// auf: `None` (kein Preset gewählt) bleibt beim bisherigen Verhalten
+/// (Datei bleibt im `tether_download_dir`); ein benanntes Preset (Phase 3
+/// Schritt 4/Phase 5 Schritt 9) wählt Kopieren/Verschieben in den dort
+/// hinterlegten Zielordner plus optionales Umbenennungsmuster.
+fn resolve_tether_import_settings(
+    paths: &apx_core::AppPaths,
+    preset_name: Option<&str>,
+) -> Result<(crate::import::ImportMode, Option<String>), String> {
+    let Some(name) = preset_name else {
+        return Ok((crate::import::ImportMode::AddInPlace, None));
+    };
+    let presets = crate::import::presets::load_presets(&paths.import_presets_file())?;
+    let preset = presets
+        .into_iter()
+        .find(|p| p.name == name)
+        .ok_or_else(|| format!("Import-Preset '{name}' nicht gefunden"))?;
+    let mode = match preset.mode {
+        crate::import::presets::PresetMode::AddInPlace => crate::import::ImportMode::AddInPlace,
+        crate::import::presets::PresetMode::Copy { target_dir } => {
+            crate::import::ImportMode::Copy(target_dir)
+        }
+        crate::import::presets::PresetMode::Move { target_dir } => {
+            crate::import::ImportMode::Move(target_dir)
+        }
+    };
+    Ok((mode, preset.rename_pattern))
+}
+
+/// Löst über das verbundene Backend aus, lädt die Aufnahme in
+/// `AppPaths::tether_download_dir` herunter und importiert sie über den
+/// bestehenden Import-Pfad (`import::run_with_mode`, Phase 3/5 —
+/// derselbe Scan-/Metadaten-/Thumbnail-Ablauf wie ein normaler
+/// Ordner-Import, hier auf ein Ein-Datei-Verzeichnis angewandt). Ein
+/// Fehler, wenn zuvor kein [`tether_connect`] mit erkannter Kamera lief.
+#[tauri::command]
+pub async fn tether_capture(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    preset_name: Option<String>,
+) -> Result<Option<PhotoDto>, String> {
+    let dest_dir = state.paths.tether_download_dir();
+    let downloaded_path = {
+        let mut guard = state
+            .tether
+            .lock()
+            .map_err(|_| "Tethering-Status ist blockiert (vergiftete Sperre)".to_string())?;
+        let backend = guard
+            .as_deref_mut()
+            .ok_or_else(|| "Keine Kamera verbunden — zuerst tether_connect aufrufen".to_string())?;
+        backend
+            .capture_and_download(&dest_dir)
+            .map_err(|err| err.to_string())?
+    };
+
+    let (mode, rename_pattern) =
+        resolve_tether_import_settings(&state.paths, preset_name.as_deref())?;
+
+    let catalog = state.catalog.clone();
+    let cache_root = state.paths.preview_cache_dir();
+    let app_for_blocking = app.clone();
+    let dest_dir_for_blocking = dest_dir.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let events = crate::import::TauriEvents(&app_for_blocking);
+        let cancel = tokio_util::sync::CancellationToken::new();
+        crate::import::run_with_mode(
+            &events,
+            &catalog,
+            &cache_root,
+            &dest_dir_for_blocking,
+            &cancel,
+            &mode,
+            rename_pattern.as_deref(),
+        );
+    })
+    .await
+    .map_err(|err| format!("Import-Task ist abgestürzt: {err}"))?;
+
+    let content_hash = crate::import::compute_content_hash(&downloaded_path)?;
+    let photo = state
+        .catalog
+        .find_photo_by_content_hash(&content_hash)
+        .map_err(|err| err.to_string())?;
+    Ok(photo.map(PhotoDto::from))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4809,5 +4955,59 @@ mod tests {
         let parsed: ApxPresetFile = serde_json::from_str(json).expect("sollte parsen");
         assert!(parsed.tags.is_empty());
         assert_eq!(parsed.conditions, serde_json::Value::Array(Vec::new()));
+    }
+
+    // ---- Tethered Shooting (Phase 9 Schritt 11) ----------------------------
+
+    #[test]
+    fn tether_import_settings_default_to_add_in_place_without_a_preset() {
+        let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
+        let paths = apx_core::AppPaths::rooted_at(tmp.path()).expect("sollte anlegen");
+        let (mode, rename_pattern) =
+            resolve_tether_import_settings(&paths, None).expect("sollte auflösen");
+        assert!(matches!(mode, crate::import::ImportMode::AddInPlace));
+        assert_eq!(rename_pattern, None);
+    }
+
+    #[test]
+    fn tether_import_settings_apply_a_named_preset() {
+        let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
+        let paths = apx_core::AppPaths::rooted_at(tmp.path()).expect("sollte anlegen");
+        let target_dir = tmp.path().join("bibliothek");
+        crate::import::presets::upsert_preset(
+            &paths.import_presets_file(),
+            crate::import::presets::ImportPreset {
+                name: "Studio".to_string(),
+                mode: crate::import::presets::PresetMode::Copy {
+                    target_dir: target_dir.clone(),
+                },
+                rename_pattern: Some("{date}_{seq}".to_string()),
+            },
+        )
+        .expect("sollte speichern");
+
+        let (mode, rename_pattern) =
+            resolve_tether_import_settings(&paths, Some("Studio")).expect("sollte auflösen");
+        assert!(matches!(mode, crate::import::ImportMode::Copy(dir) if dir == target_dir));
+        assert_eq!(rename_pattern.as_deref(), Some("{date}_{seq}"));
+    }
+
+    #[test]
+    fn tether_import_settings_reject_an_unknown_preset_name() {
+        let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
+        let paths = apx_core::AppPaths::rooted_at(tmp.path()).expect("sollte anlegen");
+        assert!(resolve_tether_import_settings(&paths, Some("Unbekannt")).is_err());
+    }
+
+    #[test]
+    fn tether_backend_without_the_tethering_feature_is_clearly_marked_simulated() {
+        // Dieser Build hat das `tethering`-Feature nicht aktiv (siehe
+        // apx-app/Cargo.toml — Standard-CI/Sandbox ohne libgphoto2) —
+        // `new_tether_backend` muss das ehrlich als Simulation
+        // kennzeichnen, nicht stillschweigend eine echte Kamera
+        // vortäuschen.
+        let (mut backend, simulated) = new_tether_backend();
+        assert!(simulated);
+        assert!(backend.detect_camera().expect("ok").is_some());
     }
 }

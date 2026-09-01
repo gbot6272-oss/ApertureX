@@ -41,4 +41,10 @@ pub struct AppState {
     /// `pause_export_queue`/… greifen nur lesend/schreibend auf ihren
     /// Zustand zu, ohne selbst zu rendern.
     pub export_queue: Arc<Mutex<ExportQueue<QueuedExport>>>,
+    /// Das aktuell verbundene Tethering-Backend (Phase 9 Schritt 11,
+    /// siehe `DECISIONS.md` ADR-0035 Punkt 5), oder `None` vor dem ersten
+    /// `tether_connect`. Bleibt über mehrere Commands hinweg erhalten,
+    /// damit Kameraverbindung und Aufnahmezähler zwischen "erkennen" und
+    /// mehreren "auslösen"-Aufrufen bestehen bleiben.
+    pub tether: Arc<Mutex<Option<Box<dyn apx_tether::TetherBackend>>>>,
 }

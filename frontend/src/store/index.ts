@@ -63,6 +63,7 @@ import type {
   CollectionFolderDto,
   GpxTrackPointDto,
   CatalogStatisticsDto,
+  CameraInfoDto,
   PreviewCacheStatsDto,
   StackDto,
   TagRuleDto,
@@ -1269,6 +1270,17 @@ interface LibraryViewsSlice {
     incomingEdlJson: string,
     resolution: "mine" | "theirs" | "virtual_copy",
   ) => Promise<void>;
+
+  /** Tethered Shooting (Phase 9 Schritt 11, siehe `DECISIONS.md`
+   * ADR-0035 Punkt 5) — `tetherCamera` bleibt `null`, solange keine
+   * Kamera erkannt wurde; `simulated` an der Kamera zeigt an, dass dieser
+   * Build ohne echte Hardware läuft. */
+  tetherConnecting: boolean;
+  tetherCamera: CameraInfoDto | null;
+  tetherCapturing: boolean;
+  tetherStatus: string | null;
+  connectTetherCamera: () => Promise<void>;
+  captureTetherPhoto: (presetName?: string) => Promise<void>;
 }
 
 export type AppStore = CatalogSlice &
@@ -4584,6 +4596,53 @@ export const useAppStore = create<AppStore>()(
           );
         }
       });
+    },
+
+    tetherConnecting: false,
+    tetherCamera: null,
+    tetherCapturing: false,
+    tetherStatus: null,
+
+    connectTetherCamera: async () => {
+      set((state) => {
+        state.tetherConnecting = true;
+      });
+      try {
+        const camera = await api.tetherConnect();
+        set((state) => {
+          state.tetherCamera = camera;
+          state.tetherStatus = camera ? null : "Keine Kamera gefunden";
+        });
+      } catch (err) {
+        set((state) => {
+          state.tetherStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.tetherConnecting = false;
+        });
+      }
+    },
+
+    captureTetherPhoto: async (presetName) => {
+      set((state) => {
+        state.tetherCapturing = true;
+      });
+      try {
+        const photo = await api.tetherCapture(presetName);
+        set((state) => {
+          state.tetherStatus = photo ? `Aufgenommen: ${photo.filename}` : "Keine neue Aufnahme";
+        });
+        if (photo && get().selectedFolderId) await get().loadPhotosForFolder(get().selectedFolderId!);
+      } catch (err) {
+        set((state) => {
+          state.tetherStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.tetherCapturing = false;
+        });
+      }
     },
     };
   }),

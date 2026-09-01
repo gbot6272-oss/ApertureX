@@ -126,6 +126,17 @@ impl AppPaths {
     pub fn import_presets_file(&self) -> PathBuf {
         self.config_dir.join("import_presets.json")
     }
+
+    /// Zielverzeichnis für Tethered-Shooting-Downloads (Phase 9
+    /// Schritt 11, siehe `apx-tether`) — jede Aufnahme landet zunächst
+    /// hier, bevor sie über den bestehenden Import-Pfad (`import::
+    /// run_with_mode`) katalogisiert wird. Unterhalb von `data_dir`, nicht
+    /// `cache_dir`: die Originaldateien bleiben hier bis der Nutzer sie
+    /// bewusst verschiebt/löscht, sind also keine wegwerfbaren
+    /// Zwischendaten wie ein Cache.
+    pub fn tether_download_dir(&self) -> PathBuf {
+        self.data_dir.join("tether")
+    }
 }
 
 fn create_dir_all(dir: &Path) -> Result<()> {

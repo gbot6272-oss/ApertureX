@@ -97,6 +97,13 @@ pub enum AppError {
     /// Plugin meldet einen Fehlerstatus zurück.
     #[error("Plugin fehlgeschlagen: {message}")]
     Plugin { message: String },
+
+    /// Fehler beim Tethered Shooting (`apx-tether`, ab Phase 9
+    /// Schritt 11, siehe `DECISIONS.md` ADR-0035 Punkt 5) — keine Kamera
+    /// gefunden, Kamerakommunikation fehlgeschlagen, Download
+    /// fehlgeschlagen.
+    #[error("Tethering fehlgeschlagen: {message}")]
+    Tether { message: String },
 }
 
 impl AppError {
@@ -162,6 +169,12 @@ impl AppError {
 
     pub fn plugin(message: impl Into<String>) -> Self {
         Self::Plugin {
+            message: message.into(),
+        }
+    }
+
+    pub fn tether(message: impl Into<String>) -> Self {
+        Self::Tether {
             message: message.into(),
         }
     }

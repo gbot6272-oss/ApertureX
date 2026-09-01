@@ -13,6 +13,7 @@ import { LibraryOrganizeDialog } from "./LibraryOrganizeDialog";
 import { StackingDialog } from "./StackingDialog";
 import { ScriptPluginDialog } from "./ScriptPluginDialog";
 import { ShareDialog } from "./ShareDialog";
+import { TetherDialog } from "./TetherDialog";
 import { MetadataDialog } from "./MetadataDialog";
 import { StatsCacheDialog } from "./StatsCacheDialog";
 
@@ -52,6 +53,7 @@ export function Header() {
   const [stackingDialogOpen, setStackingDialogOpen] = useState(false);
   const [scriptPluginDialogOpen, setScriptPluginDialogOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [tetherDialogOpen, setTetherDialogOpen] = useState(false);
   const [metadataDialogOpen, setMetadataDialogOpen] = useState(false);
   const [statsDialogOpen, setStatsDialogOpen] = useState(false);
   const openCompareView = useAppStore((s) => s.openCompareView);
@@ -276,6 +278,16 @@ export function Header() {
       </button>
 
       <ShareDialog open={shareDialogOpen} onClose={() => setShareDialogOpen(false)} />
+
+      <button
+        type="button"
+        onClick={() => setTetherDialogOpen(true)}
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
+      >
+        Tethering…
+      </button>
+
+      <TetherDialog open={tetherDialogOpen} onClose={() => setTetherDialogOpen(false)} />
 
       <button
         type="button"

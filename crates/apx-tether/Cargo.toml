@@ -1,0 +1,27 @@
+[package]
+name = "apx-tether"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Aperture X — Tethered Shooting (Phase 9 Schritt 11, siehe PLAN.md, DECISIONS.md ADR-0035 Punkt 5): TetherBackend-Trait mit einem echten Gphoto2Backend (hinter dem standardmäßig ausgeschalteten Cargo-Feature `tethering`, siehe THIRD_PARTY.md) und einem FakeBackend für alle normalen Tests."
+
+[dependencies]
+apx-core.workspace = true
+thiserror.workspace = true
+image.workspace = true
+# Optional, nur hinter dem `tethering`-Feature aktiv — bindet an die in
+# dieser Sandbox nicht installierte Systembibliothek libgphoto2 (LGPL-2.1,
+# siehe THIRD_PARTY.md-Ausnahme). Real per `cargo add --dry-run` gegen den
+# echten crates.io-Index verifiziert (siehe DECISIONS.md ADR-0035).
+gphoto2 = { version = "3", optional = true }
+
+[features]
+# Standardmäßig aus: libgphoto2 fehlt in dieser Sandbox und im
+# Standard-CI, das Feature kompiliert daher hier nicht (siehe Moduldoku
+# in src/lib.rs für die vollständige Einschränkung).
+tethering = ["dep:gphoto2"]
+
+[dev-dependencies]
+tempfile = "3"

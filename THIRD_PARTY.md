@@ -68,6 +68,22 @@ ICC-Farbmanagement existiert.
 
 Weitere für Phase 8 geprüfte, aber noch nicht direkt eingebundene Abhängigkeiten (siehe ADR-0034, `PLAN.md`-Vermerk bei Schritt 1: erst im jeweiligen Schritt ergänzt, nicht vorab alle auf einmal — `printpdf`s transitiver Font-/Layout-Baum hat in dieser Sandbox das Plattenkontingent tatsächlich erschöpft): `printpdf` (MIT), `suppaftp` (Apache-2.0), `russh`/`russh-sftp` (Apache-2.0), `reverse_geocoder` (MIT), `quick-xml` (MIT OR Apache-2.0) — keine GPL-Kandidaten, werden bei ihrer jeweiligen Einbindung hier mit vollem Eintrag nachgetragen.
 
+## Rust — Phase 9 (siehe `DECISIONS.md` ADR-0035)
+
+**Nachtrag:** Die ersten vier Zeilen unten (`image_hasher`, `rustfft`,
+`rhai`, `libloading`) wurden bereits in Schritt 1/8/9 eingeführt, aber
+entgegen der oben stehenden Regel nicht sofort hier eingetragen — beim
+Verifizieren von Schritt 11 aufgefallen und rückwirkend nachgetragen,
+statt stillschweigend übergangen.
+
+| Crate | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `image_hasher` | MIT OR Apache-2.0 | Perceptual-Hash-Duplikaterkennung (pHash/dHash, Schritt 1) | Unkritisch |
+| `rustfft` | MIT OR Apache-2.0 | 2D-Phasenkorrelation für Panorama-/Astro-Stacking (`apx-stacking`, Schritt 8) | Unkritisch, reines Rust |
+| `rhai` | MIT OR Apache-2.0 | Skript-API-Engine (`apx-script`, Schritt 9) | Unkritisch, reines Rust, sandboxbar — keine C-Bibliothek wie übliche Lua-Bindings |
+| `libloading` | ISC | Plugin-`cdylib`-Laden (`apx-plugin-host`, Schritt 9) | Unkritisch, ISC ist eine permissive MIT-ähnliche Lizenz |
+| `gphoto2` | MIT | Tethered Shooting (`apx-tether`, Schritt 11), hinter Cargo-Feature `tethering` (standardmäßig aus) | Bindet an System-`libgphoto2`, das selbst **LGPL-2.1** ist — **Ausnahme, siehe `DECISIONS.md` ADR-0035 Punkt 5**, derselbe Präzedenzfall wie `rawler` oben: keine praktikable Alternative für PTP/USB-Kamerasteuerung aus Rust. Die `gphoto2`-Crate selbst ist MIT, nur die dynamisch gelinkte Systembibliothek ist LGPL-2.1 (dynamisches Linken einer LGPL-Bibliothek verlangt keine Lizenzänderung des aufrufenden Codes) |
+
 ## Frontend — geplant für Phase 1
 
 | Paket | Lizenz | Zweck | Hinweis |

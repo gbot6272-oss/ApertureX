@@ -110,6 +110,7 @@ fn main() {
             pipeline,
             tile_cache: Arc::new(apx_pipeline::tile_cache::TileCache::new()),
             export_queue,
+            tether: Arc::new(Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
             commands::select_folder,
@@ -166,6 +167,8 @@ fn main() {
             commands::export_catalog_share,
             commands::import_catalog_share,
             commands::resolve_share_conflict,
+            commands::tether_connect,
+            commands::tether_capture,
             commands::create_collection,
             commands::create_smart_collection,
             commands::move_collection_to_folder,

@@ -502,3 +502,100 @@ jeweiligen Schritte 3/5 entschieden): Übersichtsansicht, Schnellentwicklung
 im Raster, Smart Previews/Offline-Bearbeitung, Zielgerichtetes
 Anpassungswerkzeug (TAT). Tiefenbereich-Masken bleiben weiterhin ohne
 Phasenzuordnung (ADR-0032 Punkt 3).
+
+## 14. Architektur Phase 10 — Politur
+
+Beschreibt den tatsächlich gebauten Stand aller elf Bauschritte (siehe
+`DECISIONS.md` ADR-0037 für die Scope-Entscheidungen: drei
+Phase-3/5-UI-Restposten reingezogen, Testdisziplin für diese Phase
+nutzerangeordnet gelockert, Installer-Signierung ehrlich begrenzt).
+Anders als jede vorherige Phase berührt Phase 10 fast ausschließlich das
+Frontend (`frontend/src/`) plus einen neuen CI-Job — kein neues
+Rust-Crate, keine neue EDL-Schema-Version, keine Katalog-Migration.
+
+**Settings-Fundament** (Schritt 1, trägt alle folgenden Schritte):
+`apx_core::settings::UiSettings` war seit Phase 1 bereits mit
+`theme`/`locale`/`ui_scale_percent` vorbereitet (Kommentare „kommt erst
+in Phase 10"), aber an nichts angebunden — Schritt 1 erweitert sie um
+`accent_color`/`high_contrast`/`reduced_motion`/`onboarding_seen` und
+verdrahtet `get_ui_settings`/`set_ui_settings` (dasselbe Lade-/
+Speicher-Muster wie `get_ai_settings`/`set_anthropic_api_key` aus
+Phase 7 — Einstellungen werden bei jedem Aufruf frisch aus derselben
+TOML-Datei gelesen, kein In-Memory-Cache in `AppState`). Ein neuer
+`SettingsDialog.tsx` ist die einzige Schreib-Oberfläche.
+
+**Frontend-lokale Zustands-Brücke** (`store/index.ts`s
+`pendingCommand`/`requestCommand`/`clearPendingCommand`, Schritt 4/9):
+Neun Dialoge (Vorlagen/Organisieren/Stacking/Skript & Plugins/
+Kollaboration/Tethering/Metadaten/Statistik/Import mit Vorlage) sind seit
+ihrer jeweiligen Einführung in früheren Phasen bewusst lokaler `useState`
+in `Header.tsx` geblieben (reine Ein/Aus-Flags ohne Async-Logik, anders
+als z. B. `exportDialogOpen`). Die jetzt vollständige Befehlspalette
+(Schritt 4) und das Onboarding (Schritt 9) sind aber keine Kinder von
+`Header.tsx` und können diese Dialoge nicht direkt öffnen — `pendingCommand`
+ist die schmale Brücke: ein Store-Feld, das `Header.tsx`/`App.tsx` per
+`useEffect` beobachten und sofort wieder abräumen. Kein bestehender
+Dialog wurde in den Store migriert, um das Regressionsrisiko in dieser
+testdisziplin-gelockerten Phase klein zu halten.
+
+**UI-Effekte zentral in `App.tsx`** (Schritte 6/7): ein einzelner
+`useEffect` auf `uiSettings` setzt `data-contrast`/`data-theme`-Attribute
+und die `apx-reduce-motion`-Klasse auf `<html>` sowie `--color-accent`
+und `font-size` per Inline-Style — bewusst hier statt verteilt in
+`SettingsDialog.tsx`, weil diese Effekte app-weit gelten müssen, nicht
+nur während der Dialog offen ist. `index.css`s `@theme`-Tokens (seit
+Phase 1 absichtlich semantisch benannt, nicht „gray-800") bekommen zwei
+neue Override-Blöcke: `:root[data-theme="light"]` und
+`:root[data-contrast="high"]` — dieselben Variablennamen, nur andere
+Werte, keine neuen Tailwind-Klassen nötig.
+
+**`PaletteFrame.tsx`** (Schritt 3): gemeinsame Außenhülle für
+ein-/ausklappbare, breitenziehbare Paletten (`lib/workspaceLayout.ts`,
+Breite+Eingeklappt-Status in `localStorage` — bewusst nicht in
+`UiSettings`, weil reiner Anzeigezustand des Fensters, nicht App-weit
+gültig wie Theme/Sprache). Angewendet auf `Sidebar.tsx`/
+`PresetsPanel.tsx`/`MetadataPanel.tsx`; `DevelopPanel.tsx`/
+`MasksPanel.tsx` bewusst ausgeklammert (siehe „Ehrlich begrenzt" unten).
+
+**`lib/i18n.ts`** (Schritt 8): flache `t()`-Key-Lookup-Funktion +
+`lib/locales/de.ts`/`en.ts` — kein `react-i18next`. Deutsch ist die
+Schlüsselsprache; jeder Wert ist character-für-character identisch mit
+dem vormals hartkodierten deutschen Text, damit `uiSettings.locale`s
+Standard (`"de"`, dasselbe wie `UiSettings::default()`) jeden
+bestehenden `getByText`/`getByRole(..., { name })`-e2e-Testpfad
+unverändert lässt. `en.ts` ist als `Record<keyof typeof de, string>`
+getippt — ein fehlender Schlüssel ist ein Compile-Fehler.
+
+**`lib/keybindings.ts`** (Schritt 5): zentrale, umbelegbare
+Zuordnungstabelle für die globalen `App.tsx`-Kürzel, ersetzt dessen
+vormals fest verdrahtete `event.key`-Vergleichskette durch
+`matchesBinding()`-Aufrufe (dieselbe Reihenfolge/dieselben Wächter wie
+zuvor). Neubelegung in `localStorage`, Cheatsheet-Overlay bei `?`
+(`KeybindingsCheatsheet.tsx`).
+
+**`lib/a11y.ts`** (`useFocusTrap`, Schritt 6): Tab/Shift+Tab bleibt im
+Dialog gefangen, Fokus springt beim Öffnen aufs erste fokussierbare
+Element und beim Schließen zurück — als Muster auf die zwei in dieser
+Phase neuen Dialoge (`SettingsDialog.tsx`, `KeybindingsCheatsheet.tsx`)
+angewendet.
+
+### Datenfluss Phase 10: Einstellung ändern → app-weit sichtbar
+
+```
+SettingsDialog.tsx (Feld geändert)
+  -> saveUiSettings(patch) [store]
+       -> api.setUiSettings(...) -> set_ui_settings-Command
+            -> UiSettings in derselben TOML-Datei wie ai/catalog gespeichert
+       -> state.uiSettings = patch [optimistisch, kein Reload nötig]
+  -> App.tsx' useEffect (Abhängigkeit: uiSettings)
+       -> document.documentElement: data-theme/data-contrast-Attribute,
+          apx-reduce-motion-Klasse, --color-accent/font-size Inline-Style
+  -> index.css-Kaskade wendet den passenden @theme-Override-Block an
+```
+
+**Ehrlich begrenzt** (ADR-0037):
+1. Lokalisierung deckt die durchgängig sichtbare Navigations-/Rahmen-UI ab (Header, Seitenleiste, Einstellungen, Cheatsheet, Presets-/Metadaten-Panel-Überschriften) — nicht die ca. 20 Dialog-Komponenten, die den Großteil der ~10.700 Frontend-Zeilen tragen.
+2. `PaletteFrame`s Ziehen/Einklappen gilt nicht für `DevelopPanel`/`MasksPanel` — beide sind Fragment-umschlossen mit Geschwister-Dialogen und die am dichtesten e2e-getesteten Dateien im Frontend; ihr bestehendes store-gesteuertes Ein-/Ausblenden über den Header bleibt ihre Form von „ausklappbar".
+3. Fokus-Falle nur als Muster auf die zwei neuen Dialoge angewendet, nicht auf die älteren, bereits e2e-getesteten Dialoge ausgerollt.
+4. Performance-Profiling (Schritt 10, siehe `PLAN.md`) liefert für zwei der fünf SPEC-§2.4-Ziele keine neue Messung (in dieser Sandbox strukturell nicht möglich: 1000 echte RAW-Dateien, ein nativer Tauri-Prozess für Idle-Speicher) — für die Import-Performance immerhin ein konkret benannter Code-Befund (sequenzielle Verarbeitung ohne `rayon`) statt einer bloßen Lücke.
+5. Installer-Signierung ist strukturell vorbereitet (neuer CI-`release`-Job, konditional auf GitHub-Secrets), aber in dieser Sandbox nie mit einem echten Zertifikat ausgeführt/verifiziert — kein Apple-Developer-Konto oder Code-Signing-Zertifikat beschaffbar.

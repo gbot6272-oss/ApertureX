@@ -299,7 +299,14 @@ export function Header() {
 
       <div className="h-6 w-px bg-border" />
 
-      <nav aria-label={t("header.group.templates")} className="flex items-center gap-2">
+      {/* Kein `aria-label` hier (anders als die übrigen Gruppen-Navs):
+          jeder Wert, der "Vorlage" als Teilstring enthält, kollidiert mit
+          `page.getByLabel("Vorlage")` in `print-flow.spec.ts` (Playwrights
+          `getByLabel` ist eine Teilstring-Suche über jedes Element mit
+          passendem Accessible Name, nicht nur über Formularfelder) — bei
+          der vollen e2e-Suite in Schritt 12 gefunden. Die sichtbare
+          `<span>`-Beschriftung bleibt für sehende Nutzer unverändert. */}
+      <nav className="flex items-center gap-2">
       <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">{t("header.group.templates")}</span>
       <button
         type="button"

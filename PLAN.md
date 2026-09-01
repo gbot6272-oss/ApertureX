@@ -929,7 +929,7 @@ ADR-0037, nutzerangeordnete befristete Ausnahme).
 - [x] 9. Onboarding
 - [x] 10. Performance-Profiling gegen SPEC.md §2.4 (siehe Detail-Absatz unten)
 - [ ] 11. Installer + Signierung (alle drei Plattformen, strukturell + konditional)
-- [ ] 12. Dokumentation, einmalige volle Verifikation, Abnahme
+- [x] 12. Dokumentation, einmalige volle Verifikation, Abnahme — `ARCHITECTURE.md` §14, `FEATURES.md` final (inkl. neuem §5 „Phase 10 — Politur" für die vier bisher nur als SPEC.md-§5-Prosa vorhandenen Punkte). Volle Suite: `cargo fmt --check`/`cargo clippy`/`cargo test --workspace` grün, `tsc -b` grün, volle Vitest-Suite (195 Tests) grün, volle Playwright-Suite (127 Tests, nicht nur Stichprobe) — ein echter Regressionsfund dabei: der neue `<nav>`-Gruppenname „Vorlagen" (Header.tsx Schritt 2/8) kollidierte per Teilstring mit `print-flow.spec.ts`s `getByLabel("Vorlage")`, behoben durch Entfernen des `aria-label` auf dieser einen Gruppe (Details siehe Commit)
 
 **Schritt 10 — Performance-Profiling gegen SPEC.md §2.4, im Detail:**
 Alle fünf Ziele einzeln gegen das geprüft, was in dieser Sandbox tatsächlich

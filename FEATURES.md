@@ -49,15 +49,17 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Volltextsuche (FTS5) über Dateiname, Kamera, Objektiv — Phase 3 — Status: Fertig
 - [x] Rasteransicht — Phase 3 — Status: Fertig
 - [x] Lupe/Einzelbildansicht (Basis-Viewer) — Phase 1 — Status: Fertig
-- [ ] Vergleichsansicht, Übersichtsansicht — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
-- [ ] Personenansicht (Gesichtserkennung) — Phase 9 — Status: Nicht begonnen
+- [x] Vergleichsansicht (bis 9 Fotos, Bewertung/Flagge direkt bedienbar) — Phase 9 — Status: Fertig (abweichend, siehe PLAN.md Schritt 3) — `CompareGridView.tsx`, zeigt die Standard-Vorschau statt eines Live-Renders und ohne synchronisierten Zoom/Pan (bewusste Vereinfachung, siehe dessen Moduldoku)
+- [ ] Übersichtsansicht (separater Modus) — Phase 9 — Status: Zurückgestellt (siehe PLAN.md Schritt 3) — deckt sich inhaltlich stark mit der bestehenden Rasteransicht + neuer Vergleichsansicht; kein eigenständiger dritter Anzeigemodus in diesem Schritt
+- [ ] Personenansicht (Gesichtserkennung) — Phase 9 — Status: Zurückgestellt (siehe PLAN.md Schritt 3) — bräuchte eine neue Hautton-/Kontur-Heuristik in `apx-ai` (wie die Phase-7-Masken) für ausreichend Vertrauen in die Gruppierung; als eigener Algorithmus-Schritt zurückgestellt statt überstürzt umgesetzt
 - [x] Filterleiste (Text, Attribut, Metadaten, kombiniert) — Phase 3 — Status: Fertig (siehe DECISIONS.md ADR-0027: Text- und Attributfilter [inkl. Kameramodell] sind jetzt per UND kombinierbar, nicht mehr alternativ wie in ADR-0026)
-- [ ] Filter-Presets — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
+- [x] Filter-Presets — Phase 9 — Status: Fertig (abweichend, siehe PLAN.md Schritt 3) — nutzt die generische `templates`-Tabelle (`kind = "filter"`) aus Phase 8 Schritt 8, keine neue Tabelle nötig
 - [x] Sortierung nach beliebigem Feld — Phase 3 — Status: Fertig (siehe ADR-0027: client-seitig, Dateiname/Aufnahmedatum/Bewertung/Dateigröße/Kameramodell, fehlende Werte immer ans Ende)
-- [ ] Schnellentwicklung im Raster — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
-- [ ] Vorschau-Cache-Verwaltung (Standard, 1:1), Smart Previews, Offline-Bearbeitung über Smart Previews — Phase 9 — Status: Nicht begonnen (siehe ADR-0032)
-- [ ] Sekundäres Display mit unabhängiger Ansicht — Phase 9 — Status: Nicht begonnen
-- [ ] Katalog-Statistiken-Dashboard — Phase 9 — Status: Nicht begonnen
+- [ ] Schnellentwicklung im Raster — Phase 9 — Status: Zurückgestellt (siehe PLAN.md Schritt 3) — reine Frontend-Erweiterung ohne Schema-/Backend-Abhängigkeit, keine Blockade für spätere Schritte
+- [x] Vorschau-Cache-Verwaltung (Größe einsehen, leeren) — Phase 9 — Status: Fertig (abweichend, siehe PLAN.md Schritt 3) — `preview_cache_stats`/`clear_preview_cache` über `AppPaths::preview_cache_dir()`; „1:1"-Cache-Größe separat von der Standard-Vorschau nicht unterschieden (beide liegen im selben Verzeichnis)
+- [ ] Smart Previews, Offline-Bearbeitung über Smart Previews — Phase 9 — Status: Zurückgestellt (siehe PLAN.md Schritt 3) — die Offline-Garantie bräuchte eine Änderung an `apx-pipeline`s Quelldatei-Auflösung (Fallback auf eine kleinere Zwischendatei, wenn das Original nicht erreichbar ist) — ein Eingriff in den Rendering-Kernpfad, den dieser Schritt bewusst nicht überstürzt mitreißt
+- [x] Sekundäres Display mit unabhängiger Ansicht — Phase 9 — Status: Fertig (abweichend, siehe PLAN.md Schritt 3) — eigenes `WebviewWindow` mit `?secondaryPhoto=<id>`, zeigt ein statisches Bild über den bestehenden `image/...`-Protokoll-Handler (kein Live-Sync mit dem Hauptfenster); die Tauri-Fenster-Erstellung selbst ist in dieser Sandbox ohne echten Tauri-Runtime-Host nicht ausführbar getestet (gleiche Einschränkung wie bei anderen Tauri-Fenster-/Dialog-Aufrufen dieses Projekts)
+- [x] Katalog-Statistiken-Dashboard — Phase 9 — Status: Fertig (abweichend, siehe PLAN.md Schritt 3) — `repository::stats`: Gesamtzahl/-größe, Aufnahmezeitraum, Bewertungsverteilung, Top-Kameramodelle/-Objektive (je höchstens 8); schließt virtuelle Kopien konsequent aus
 
 ## 3.2 Modul ENTWICKELN — Globale Werkzeuge
 

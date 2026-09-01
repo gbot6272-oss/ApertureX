@@ -60,6 +60,8 @@ import type {
   ColorLabelDefinitionDto,
   CollectionFolderDto,
   GpxTrackPointDto,
+  CatalogStatisticsDto,
+  PreviewCacheStatsDto,
   StackDto,
   TagRuleDto,
   TemplateDto,
@@ -69,6 +71,8 @@ import type {
   WorkflowTemplatePayload,
   SpotCandidateDto,
 } from "../lib/tauri";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+
 import * as undoStackLib from "../lib/undoStack";
 import type { UndoEntry } from "../lib/undoStack";
 import { computeWhiteBalanceShiftFromSample } from "../lib/whiteBalancePicker";
@@ -1156,6 +1160,33 @@ interface MetadataSlice {
   importXmpSidecarForSelected: () => Promise<void>;
 }
 
+/** Ansichten/Filter-Presets/Vorschau-Cache/Statistik (Phase 9 Schritt 3,
+ * siehe DECISIONS.md ADR-0035). */
+interface LibraryViewsSlice {
+  filterPresets: TemplateDto[];
+  refreshFilterPresets: () => Promise<void>;
+  saveCurrentFilterAsPreset: (name: string) => Promise<void>;
+  applyFilterPreset: (templateId: string) => Promise<void>;
+  deleteFilterPreset: (templateId: string) => Promise<void>;
+
+  catalogStatistics: CatalogStatisticsDto | null;
+  refreshCatalogStatistics: () => Promise<void>;
+
+  previewCacheStats: PreviewCacheStatsDto | null;
+  refreshPreviewCacheStats: () => Promise<void>;
+  clearPreviewCache: () => Promise<void>;
+
+  /** Fotos, die gerade in der Vergleichsansicht (`CompareGridView.tsx`)
+   * nebeneinander gezeigt werden — bis zu 9, siehe dessen Moduldoku. */
+  compareViewPhotoIds: string[];
+  openCompareView: (photoIds: string[]) => void;
+  closeCompareView: () => void;
+
+  /** Öffnet ein zweites Tauri-Fenster mit einem unabhängigen Loupe-
+   * Viewer für `photoId` (Sekundäres Display). */
+  openSecondaryDisplay: (photoId: string) => Promise<void>;
+}
+
 export type AppStore = CatalogSlice &
   SelectionSlice &
   ViewerSlice &
@@ -1173,7 +1204,8 @@ export type AppStore = CatalogSlice &
   MapSlice &
   TemplatesSlice &
   LibraryBacklogSlice &
-  MetadataSlice;
+  MetadataSlice &
+  LibraryViewsSlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -4062,6 +4094,85 @@ export const useAppStore = create<AppStore>()(
           state.xmpStatus = String(err);
         });
       }
+    },
+
+    // ---- Ansichten, Filter-Presets, Vorschau-Cache, Statistik (Phase 9 --
+    // Schritt 3) ------------------------------------------------------------
+
+    filterPresets: [],
+    catalogStatistics: null,
+    previewCacheStats: null,
+    compareViewPhotoIds: [],
+
+    refreshFilterPresets: async () => {
+      const filterPresets = await api.listTemplates("filter");
+      set((state) => {
+        state.filterPresets = filterPresets;
+      });
+    },
+
+    saveCurrentFilterAsPreset: async (name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      await api.saveTemplate("filter", trimmed, JSON.stringify(get().libraryFilter));
+      await get().refreshFilterPresets();
+    },
+
+    applyFilterPreset: async (templateId) => {
+      const preset = get().filterPresets.find((t) => t.id === templateId);
+      if (!preset) return;
+      get().clearLibraryFilters();
+      const criteria = JSON.parse(preset.payload_json) as FilterCriteriaDto;
+      await get().setLibraryFilterChip(criteria);
+    },
+
+    deleteFilterPreset: async (templateId) => {
+      await api.deleteTemplate(templateId);
+      await get().refreshFilterPresets();
+    },
+
+    refreshCatalogStatistics: async () => {
+      const stats = await api.catalogStatistics();
+      set((state) => {
+        state.catalogStatistics = stats;
+      });
+    },
+
+    refreshPreviewCacheStats: async () => {
+      const stats = await api.previewCacheStats();
+      set((state) => {
+        state.previewCacheStats = stats;
+      });
+    },
+
+    clearPreviewCache: async () => {
+      await api.clearPreviewCache();
+      await get().refreshPreviewCacheStats();
+    },
+
+    openCompareView: (photoIds) => {
+      set((state) => {
+        state.compareViewPhotoIds = photoIds.slice(0, 9);
+      });
+    },
+
+    closeCompareView: () => {
+      set((state) => {
+        state.compareViewPhotoIds = [];
+      });
+    },
+
+    openSecondaryDisplay: async (photoId) => {
+      // `new WebviewWindow(...)` löst die Fenster-Erstellung asynchron
+      // über IPC aus, wirft aber selbst nicht synchron — Fehler
+      // (fehlende Berechtigung, ungültiges Label) laufen über dessen
+      // `once("tauri://error", ...)`-Event, hier bewusst nicht
+      // gesondert behandelt (derselbe Vertrauensrahmen wie die übrigen
+      // Tauri-Fenster-Aufrufe dieser App).
+      new WebviewWindow(`secondary-${photoId}`, {
+        url: `index.html?secondaryPhoto=${encodeURIComponent(photoId)}`,
+        title: "Aperture X — Sekundäres Display",
+      });
     },
     };
   }),

@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 import { SORT_FIELDS, sortFieldLabel } from "../lib/sortPhotos";
 import { useAppStore } from "../store";
 import { COLOR_LABELS, COLOR_SWATCH } from "./RatingFlagColor";
@@ -25,6 +27,17 @@ export function FilterBar() {
   const librarySortField = useAppStore((s) => s.librarySortField);
   const librarySortDirection = useAppStore((s) => s.librarySortDirection);
   const setLibrarySort = useAppStore((s) => s.setLibrarySort);
+
+  const filterPresets = useAppStore((s) => s.filterPresets);
+  const refreshFilterPresets = useAppStore((s) => s.refreshFilterPresets);
+  const saveCurrentFilterAsPreset = useAppStore((s) => s.saveCurrentFilterAsPreset);
+  const applyFilterPreset = useAppStore((s) => s.applyFilterPreset);
+  const deleteFilterPreset = useAppStore((s) => s.deleteFilterPreset);
+  const [newPresetName, setNewPresetName] = useState("");
+
+  useEffect(() => {
+    void refreshFilterPresets();
+  }, [refreshFilterPresets]);
 
   const hasActiveFilter = libraryResults !== null;
 
@@ -142,6 +155,60 @@ export function FilterBar() {
           className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:border-accent"
         >
           {librarySortDirection === "asc" ? "↑" : "↓"}
+        </button>
+      </div>
+
+      <div className="flex items-center gap-1" role="group" aria-label="Filter-Presets">
+        <select
+          value=""
+          onChange={(event) => {
+            if (event.target.value) void applyFilterPreset(event.target.value);
+          }}
+          className="rounded border border-border bg-bg-panel px-1 py-1 text-xs"
+          aria-label="Filter-Preset anwenden"
+        >
+          <option value="">Filter-Preset…</option>
+          {filterPresets.map((preset) => (
+            <option key={preset.id} value={preset.id}>
+              {preset.name}
+            </option>
+          ))}
+        </select>
+        {filterPresets.length > 0 && (
+          <select
+            value=""
+            onChange={(event) => {
+              if (event.target.value) void deleteFilterPreset(event.target.value);
+            }}
+            className="rounded border border-border bg-bg-panel px-1 py-1 text-xs"
+            aria-label="Filter-Preset löschen"
+            title="Filter-Preset löschen"
+          >
+            <option value="">Löschen…</option>
+            {filterPresets.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.name}
+              </option>
+            ))}
+          </select>
+        )}
+        <input
+          type="text"
+          value={newPresetName}
+          onChange={(event) => setNewPresetName(event.target.value)}
+          placeholder="Neues Preset…"
+          className="w-28 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+        />
+        <button
+          type="button"
+          onClick={() => {
+            void saveCurrentFilterAsPreset(newPresetName);
+            setNewPresetName("");
+          }}
+          disabled={!newPresetName.trim()}
+          className="rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:opacity-40"
+        >
+          Speichern
         </button>
       </div>
 

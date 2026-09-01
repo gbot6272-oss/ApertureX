@@ -1020,7 +1020,7 @@ export function setPhotoGps(photoId: string, lat: number | null, lon: number | n
 // jeweilige `*Options`-DTO als JSON (für Export-/Layout-Vorlagen)
 // beziehungsweise `{ presetId, exportOptions }` (für Workflow-Vorlagen,
 // siehe {@link WorkflowTemplatePayload}).
-export type TemplateKind = "export" | "print" | "book" | "slideshow" | "web" | "workflow";
+export type TemplateKind = "export" | "print" | "book" | "slideshow" | "web" | "workflow" | "filter";
 
 export interface TemplateDto {
   id: string;
@@ -1059,4 +1059,42 @@ export function exportTemplateToFile(templateId: string): Promise<string | null>
  * der Dialog abgebrochen wurde. */
 export function importTemplateFromFile(): Promise<TemplateDto | null> {
   return invoke<TemplateDto | null>("import_template_from_file");
+}
+
+/** Einzelnes Foto per ID — u. a. für das sekundäre Display, das als
+ * eigenes Fenster keinen Zugriff auf den Store des Hauptfensters hat. */
+export function getPhoto(photoId: string): Promise<PhotoDto> {
+  return invoke<PhotoDto>("get_photo", { photoId });
+}
+
+// ---- Bibliothek: Statistik, Vorschau-Cache (ab Phase 9 Schritt 3, siehe
+// DECISIONS.md ADR-0035) ------------------------------------------------
+
+export interface CatalogStatisticsDto {
+  total_photos: number;
+  total_file_size: number;
+  earliest_captured_at: string | null;
+  latest_captured_at: string | null;
+  rating_distribution: [number, number][];
+  top_camera_models: [string, number][];
+  top_lenses: [string, number][];
+}
+
+export function catalogStatistics(): Promise<CatalogStatisticsDto> {
+  return invoke<CatalogStatisticsDto>("catalog_statistics");
+}
+
+export interface PreviewCacheStatsDto {
+  file_count: number;
+  total_bytes: number;
+}
+
+export function previewCacheStats(): Promise<PreviewCacheStatsDto> {
+  return invoke<PreviewCacheStatsDto>("preview_cache_stats");
+}
+
+/** Leert den Vorschau-Cache — Vorschauen werden bei Bedarf aus dem
+ * Original neu generiert, kein Datenverlust. */
+export function clearPreviewCache(): Promise<void> {
+  return invoke<void>("clear_preview_cache");
 }

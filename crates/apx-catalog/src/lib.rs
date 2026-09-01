@@ -37,9 +37,9 @@ use rusqlite::Connection;
 use time::OffsetDateTime;
 
 pub use models::{
-    Collection, CollectionFolder, ColorLabelDefinition, EditHistoryEntry, FilterCriteria, Folder,
-    HistoryPosition, Keyword, NewPhoto, Photo, Preset, PresetFolder, PresetVersion, Preview,
-    PreviewLevel, Snapshot, Stack, TagRule, Template,
+    CatalogStatistics, Collection, CollectionFolder, ColorLabelDefinition, EditHistoryEntry,
+    FilterCriteria, Folder, HistoryPosition, Keyword, NewPhoto, Photo, Preset, PresetFolder,
+    PresetVersion, Preview, PreviewLevel, Snapshot, Stack, TagRule, Template,
 };
 
 pub struct Catalog {
@@ -393,6 +393,13 @@ impl Catalog {
     ) -> Result<()> {
         let conn = self.lock()?;
         repository::photos::set_metadata(&conn, photo_id, title, caption, copyright, creator)
+    }
+
+    /// Aggregierte Katalog-Statistik (Phase 9 Schritt 3) — siehe
+    /// [`repository::stats`]s Moduldoku.
+    pub fn catalog_statistics(&self) -> Result<CatalogStatistics> {
+        let conn = self.lock()?;
+        repository::stats::compute(&conn)
     }
 
     // ---- Sammlungen (ab Phase 3, Sammlungssätze/intelligente Sammlungen ---

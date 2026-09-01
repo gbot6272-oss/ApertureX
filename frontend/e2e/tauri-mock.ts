@@ -128,6 +128,17 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // Adobe-XMP-Sidecar (Phase 9 Schritt 2).
     exportedXmpSidecarPath: "/mock/photos/IMG_0001.xmp" as string,
     xmpImportApplies: true as boolean,
+    // Statistik/Vorschau-Cache (Phase 9 Schritt 3).
+    catalogStatistics: {
+      total_photos: 0,
+      total_file_size: 0,
+      earliest_captured_at: null,
+      latest_captured_at: null,
+      rating_distribution: [],
+      top_camera_models: [],
+      top_lenses: [],
+    } as unknown,
+    previewCacheStats: { file_count: 0, total_bytes: 0 } as { file_count: number; total_bytes: number },
     ...initialFixtures,
   };
   w.__mockInvokeLog = [] as Array<{ cmd: string; args: unknown }>;
@@ -637,6 +648,18 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return null;
       case "import_xmp_sidecar_from_file":
         return fixtures.xmpImportApplies;
+      case "get_photo": {
+        const photo = findPhoto(args.photoId as string);
+        if (!photo) throw new Error(`Test-Stub: Foto "${args.photoId as string}" nicht gefunden`);
+        return clonePhoto(photo);
+      }
+      case "catalog_statistics":
+        return fixtures.catalogStatistics;
+      case "preview_cache_stats":
+        return fixtures.previewCacheStats;
+      case "clear_preview_cache":
+        fixtures.previewCacheStats = { file_count: 0, total_bytes: 0 };
+        return null;
 
       // ---- Bibliothek: Sammlungen (ab Phase 3, Sammlungssätze/intelligente -
       // Sammlungen ab Phase 9 Schritt 1) --------------------------------------

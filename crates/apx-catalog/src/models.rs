@@ -329,6 +329,21 @@ pub struct PresetVersion {
     pub created_at: OffsetDateTime,
 }
 
+/// Aggregierte Katalog-Statistik (Phase 9 Schritt 3, siehe
+/// `repository::stats`s Moduldoku) — schließt virtuelle Kopien aus.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CatalogStatistics {
+    pub total_photos: u64,
+    pub total_file_size: u64,
+    pub earliest_captured_at: Option<OffsetDateTime>,
+    pub latest_captured_at: Option<OffsetDateTime>,
+    /// `(Sterne, Anzahl)`, aufsteigend nach Sternen sortiert.
+    pub rating_distribution: Vec<(u8, u64)>,
+    /// `(Kameramodell, Anzahl)`, absteigend nach Anzahl, höchstens 8 Einträge.
+    pub top_camera_models: Vec<(String, u64)>,
+    pub top_lenses: Vec<(String, u64)>,
+}
+
 /// Kombinierbare Filterkriterien für [`crate::Catalog::filter_photos`] —
 /// jedes `None`-Feld wird ignoriert, alle gesetzten Felder werden per UND
 /// verknüpft (siehe `PLAN.md` Phase 3, Schritt 2).

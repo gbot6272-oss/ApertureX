@@ -13,5 +13,6 @@ pub(crate) mod previews;
 pub(crate) mod search;
 pub(crate) mod snapshots;
 pub(crate) mod stacks;
+pub(crate) mod stats;
 pub(crate) mod tag_rules;
 pub(crate) mod templates;

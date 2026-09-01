@@ -17,6 +17,11 @@ const KIND_LABELS: Record<TemplateKind, string> = {
   slideshow: "Diashow",
   web: "Web",
   workflow: "Workflow",
+  // Filter-Presets (Phase 9 Schritt 3) haben ihre eigene Verwaltung in
+  // `FilterBar.tsx` — dieser Dialog (Phase 8 Schritt 8) listet sie
+  // bewusst nicht mit auf, der Eintrag hier ist nur für die
+  // `Record<TemplateKind, string>`-Vollständigkeit nötig.
+  filter: "Filter",
 };
 
 /**

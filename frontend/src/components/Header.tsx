@@ -11,6 +11,7 @@ import { SlideshowDialog } from "./SlideshowDialog";
 import { TemplatesDialog } from "./TemplatesDialog";
 import { LibraryOrganizeDialog } from "./LibraryOrganizeDialog";
 import { MetadataDialog } from "./MetadataDialog";
+import { StatsCacheDialog } from "./StatsCacheDialog";
 
 export function Header() {
   const importRunning = useAppStore((s) => s.importRunning);
@@ -46,6 +47,9 @@ export function Header() {
   const [templatesDialogOpen, setTemplatesDialogOpen] = useState(false);
   const [organizeDialogOpen, setOrganizeDialogOpen] = useState(false);
   const [metadataDialogOpen, setMetadataDialogOpen] = useState(false);
+  const [statsDialogOpen, setStatsDialogOpen] = useState(false);
+  const openCompareView = useAppStore((s) => s.openCompareView);
+  const openSecondaryDisplay = useAppStore((s) => s.openSecondaryDisplay);
 
   const exportPhotoIds = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
 
@@ -245,6 +249,36 @@ export function Header() {
       </button>
 
       <MetadataDialog open={metadataDialogOpen} onClose={() => setMetadataDialogOpen(false)} />
+
+      <button
+        type="button"
+        onClick={() => openCompareView(exportPhotoIds)}
+        disabled={exportPhotoIds.length < 2}
+        title="Ausgewählte Fotos nebeneinander vergleichen"
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:opacity-40"
+      >
+        Vergleichen
+      </button>
+
+      <button
+        type="button"
+        onClick={() => selectedPhotoId && void openSecondaryDisplay(selectedPhotoId)}
+        disabled={!selectedPhotoId}
+        title="Aktuelles Foto in einem zweiten Fenster anzeigen"
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:opacity-40"
+      >
+        Zweites Display…
+      </button>
+
+      <button
+        type="button"
+        onClick={() => setStatsDialogOpen(true)}
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
+      >
+        Statistik…
+      </button>
+
+      <StatsCacheDialog open={statsDialogOpen} onClose={() => setStatsDialogOpen(false)} />
 
       <span className="text-xs text-text-muted">Strg/Cmd+K — Befehlspalette</span>
     </header>

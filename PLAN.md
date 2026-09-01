@@ -834,12 +834,14 @@ Zulieferer existiert, siehe ADR-0032 Punkt 3).
   - Neues `MetadataDialog.tsx` (drei Reiter: Schlagworte/Tag-Regeln/Metadaten & XMP) + „Metadaten…"-Knopf in `Header.tsx`, analog zum `LibraryOrganizeDialog.tsx`-Muster aus Schritt 1
   - Tests (bewusst schlank): 3 neue `tag_rules`-Rust-Unit-Tests in `apx-catalog`, 5 neue `apx_export::xmp`-Unit-Tests (Generierung inkl. XML-Escaping, Rundtrip Basic+HSL, Parsen eines echt aussehenden Adobe-XMP-Fragments), 3 neue Playwright-e2e-Tests in `metadata-flow.spec.ts` (IPTC-Feld speichern, Tag-Regel anlegen, XMP-Export-Pfad anzeigen)
 
-- [ ] 3. Bibliothek: Ansichten, Filter-Presets, Vorschau-Cache, Statistik
-  - Vergleichsansicht (reused `ReferenceView.tsx`-Muster), Übersichtsansicht
-  - Personenansicht: klassische Hautton-/Kontur-Heuristik wie die Phase-7-KI-Masken, keine echte Gesichtserkennungs-Modellinferenz (ADR-0035 Punkt 7)
-  - Filter-Presets (`templates`, `kind = "filter"`), Schnellentwicklung im Raster
-  - Vorschau-Cache-Verwaltung, Smart Previews + Offline-Bearbeitung
-  - Sekundäres Display (Tauri-Multi-Window), Katalog-Statistik-Dashboard
+- [x] 3. Bibliothek: Ansichten, Filter-Presets, Vorschau-Cache, Statistik
+  - Vergleichsansicht (`CompareGridView.tsx`, bis 9 Fotos): zeigt die bestehende Standard-Vorschau statt eines Live-Renders und ohne synchronisierten Zoom/Pan (bewusste Vereinfachung — ein echter WebGL-Live-Vergleich wie `ReferenceView.tsx`s Muster wäre ein Mehrfaches der GPU-Kosten, für den Sichtungs-/Culling-Anwendungsfall reicht ein schneller statischer Überblick mit direkter Bewertungs-/Flaggen-Bedienung je Kachel)
+  - Filter-Presets: reine Frontend-Ergänzung über die bereits generische `templates`-Tabelle (`kind = "filter"`), keine Schema-Änderung nötig — kleine Erweiterung in `FilterBar.tsx`
+  - Katalog-Statistik-Dashboard: neues `repository::stats`-Modul (Gesamtzahl/-größe, Aufnahmezeitraum, Bewertungsverteilung, Top-8-Kameramodelle/-Objektive), schließt virtuelle Kopien konsequent aus
+  - Vorschau-Cache-Verwaltung: `preview_cache_stats`/`clear_preview_cache` über `AppPaths::preview_cache_dir()` (rekursiv, reines Dateisystem, keine Katalog-Abfrage)
+  - Sekundäres Display: eigenes `WebviewWindow` mit `?secondaryPhoto=<id>` in der URL, `main.tsx` rendert dafür die neue schlanke `SecondaryDisplay.tsx` statt der vollen `<App/>` — statisches Bild über den bestehenden `image/...`-Protokoll-Handler, kein Live-Sync mit dem Hauptfenster (bewusste Vereinfachung: echte Live-Synchronisation zweier Fenster wäre ein eigener State-Sync-Aufwand); die tatsächliche Fenster-Erstellung selbst ist in dieser Sandbox ohne echten Tauri-Runtime-Host nicht ausführbar getestet, gleiche Einschränkung wie bei anderen nativen Tauri-Dialog-/Fenster-Aufrufen dieses Projekts
+  - **Zurückgestellt** (siehe `FEATURES.md`): Personenansicht (bräuchte eine neue Hautton-/Kontur-Heuristik in `apx-ai`, eigener Algorithmus-Schritt statt überstürzter Umsetzung), separate Übersichtsansicht (deckt sich inhaltlich mit Rasteransicht + neuer Vergleichsansicht), Schnellentwicklung im Raster, Smart Previews + Offline-Bearbeitung (bräuchte eine Änderung an `apx-pipeline`s Quelldatei-Auflösung — Eingriff in den Rendering-Kernpfad, hier bewusst nicht mitgerissen) — alle vier sind additive Ergänzungen ohne Schema-Änderung, keine Blockade für spätere Schritte
+  - Tests (bewusst schlank): 2 neue `stats`-Rust-Unit-Tests in `apx-catalog`, 3 neue Playwright-e2e-Tests in `library-views-flow.spec.ts` (Filter-Preset speichern/anwenden, Statistik-Anzeige, Vergleichsansicht)
 
 - [ ] 4. Entwickeln: Histogramm, Clipping, Punktfarbmesser, Navigator
   - Reine Analyse/Anzeige über den bestehenden `render_rgba8`-Ausgabepuffer, kein neuer Rendering-Pfad — niedrigstes Risiko, deshalb zuerst

@@ -3778,6 +3778,128 @@ pub async fn import_template_from_file(
     Ok(Some(TemplateDto::from(template)))
 }
 
+/// Einzelnes Foto per ID — u. a. für das sekundäre Display (Phase 9
+/// Schritt 3), das als eigenes Fenster/Webview keinen Zugriff auf den
+/// Zustand des Hauptfensters hat und sich sein Foto deshalb selbst holen
+/// muss.
+#[tauri::command]
+pub fn get_photo(state: State<'_, AppState>, photo_id: String) -> Result<PhotoDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    state
+        .catalog
+        .get_photo(photo_id)
+        .map(PhotoDto::from)
+        .map_err(|err| err.to_string())
+}
+
+// ---- Bibliothek: Statistik, Vorschau-Cache (ab Phase 9 Schritt 3, siehe
+// DECISIONS.md ADR-0035) -----------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CatalogStatisticsDto {
+    pub total_photos: u64,
+    pub total_file_size: u64,
+    pub earliest_captured_at: Option<String>,
+    pub latest_captured_at: Option<String>,
+    pub rating_distribution: Vec<(u8, u64)>,
+    pub top_camera_models: Vec<(String, u64)>,
+    pub top_lenses: Vec<(String, u64)>,
+}
+
+fn format_rfc3339(dt: Option<time::OffsetDateTime>) -> Option<String> {
+    dt.and_then(|dt| {
+        dt.format(&time::format_description::well_known::Rfc3339)
+            .ok()
+    })
+}
+
+impl From<apx_catalog::CatalogStatistics> for CatalogStatisticsDto {
+    fn from(stats: apx_catalog::CatalogStatistics) -> Self {
+        Self {
+            total_photos: stats.total_photos,
+            total_file_size: stats.total_file_size,
+            earliest_captured_at: format_rfc3339(stats.earliest_captured_at),
+            latest_captured_at: format_rfc3339(stats.latest_captured_at),
+            rating_distribution: stats.rating_distribution,
+            top_camera_models: stats.top_camera_models,
+            top_lenses: stats.top_lenses,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn catalog_statistics(state: State<'_, AppState>) -> Result<CatalogStatisticsDto, String> {
+    state
+        .catalog
+        .catalog_statistics()
+        .map(CatalogStatisticsDto::from)
+        .map_err(|err| err.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PreviewCacheStatsDto {
+    pub file_count: u64,
+    pub total_bytes: u64,
+}
+
+fn walk_dir_stats(dir: &std::path::Path) -> std::io::Result<(u64, u64)> {
+    let mut file_count = 0u64;
+    let mut total_bytes = 0u64;
+    if !dir.exists() {
+        return Ok((0, 0));
+    }
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let metadata = entry.metadata()?;
+        if metadata.is_dir() {
+            let (sub_count, sub_bytes) = walk_dir_stats(&entry.path())?;
+            file_count += sub_count;
+            total_bytes += sub_bytes;
+        } else {
+            file_count += 1;
+            total_bytes += metadata.len();
+        }
+    }
+    Ok((file_count, total_bytes))
+}
+
+/// Größe des Vorschau-Caches (`AppPaths::preview_cache_dir`) — rekursiv,
+/// da `apx-app` die Dateien beim Import nach den ersten zwei Zeichen der
+/// Foto-ID in Unterordner aufteilt.
+#[tauri::command]
+pub fn preview_cache_stats(state: State<'_, AppState>) -> Result<PreviewCacheStatsDto, String> {
+    let (file_count, total_bytes) =
+        walk_dir_stats(&state.paths.preview_cache_dir()).map_err(|err| err.to_string())?;
+    Ok(PreviewCacheStatsDto {
+        file_count,
+        total_bytes,
+    })
+}
+
+fn clear_dir_contents(dir: &std::path::Path) -> std::io::Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            std::fs::remove_dir_all(&path)?;
+        } else {
+            std::fs::remove_file(&path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Leert den Vorschau-Cache vollständig (Verzeichnis selbst bleibt
+/// bestehen) — Vorschauen werden beim nächsten Zugriff aus dem Original
+/// neu generiert (kein Datenverlust, reiner Cache).
+#[tauri::command]
+pub fn clear_preview_cache(state: State<'_, AppState>) -> Result<(), String> {
+    clear_dir_contents(&state.paths.preview_cache_dir()).map_err(|err| err.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

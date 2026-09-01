@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { CommandPalette } from "./components/CommandPalette";
+import { CompareGridView } from "./components/CompareGridView";
 import { DevelopPanel } from "./components/DevelopPanel";
 import { ErrorBanner } from "./components/ErrorBanner";
 import { FilterBar } from "./components/FilterBar";
@@ -128,6 +129,7 @@ export default function App() {
         <MasksPanel />
       </div>
       <Filmstrip />
+      <CompareGridView />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );

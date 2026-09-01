@@ -206,6 +206,25 @@ impl LoadedPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// `cargo test` führt die Tests dieses Moduls standardmäßig
+    /// parallel in mehreren Threads aus — mehrere gleichzeitige
+    /// `dlopen()`-Aufrufe (drei der vier Tests unten laden dieselbe
+    /// `.so`/`.dylib`) können auf `dlerror()`s **nicht garantiert
+    /// thread-sicherem** globalem Zustand kollidieren: der eigentliche
+    /// `dlopen` gelingt, aber der *Fehlertext* eines anderen, zeitgleich
+    /// fehlschlagenden Aufrufs überschreibt zwischenzeitlich die globale
+    /// `dlerror`-Ablage, sodass `libloading` nur noch das generische
+    /// `DlOpenUnknown` ("dlopen failed") sieht — genau das
+    /// dokumentierte Verhalten von `libloading`s `with_dlerror` bei
+    /// einem `None`-Ergebnis ("possibly in another thread"). In dieser
+    /// Sandbox lief das meist glimpflich durch, auf den CI-Runnern
+    /// (Linux **und** macOS, beide mit demselben Fehlerbild) schlug es
+    /// reproduzierbar fehl. Fix: alle `dlopen`-Aufrufe dieses Moduls
+    /// über einen Mutex serialisieren, statt die Testparallelität
+    /// projektweit abzuschalten.
+    static DLOPEN_SERIAL: Mutex<()> = Mutex::new(());
 
     /// Pfad zur gebauten `apx-plugin-example`-Bibliothek — dieselbe
     /// Cargo-`target`-Konvention, die `cargo build`/`cargo test` in
@@ -243,12 +262,14 @@ mod tests {
 
     #[test]
     fn loads_the_example_plugin_and_reports_its_name() {
+        let _guard = DLOPEN_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let plugin = LoadedPlugin::load(&example_plugin_path()).expect("sollte laden");
         assert!(plugin.name().contains("Beispiel-Plugin"));
     }
 
     #[test]
     fn applies_the_example_plugins_invert_effect_across_the_dlopen_boundary() {
+        let _guard = DLOPEN_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let plugin = LoadedPlugin::load(&example_plugin_path()).expect("sollte laden");
         let mut pixels = solid(2, 2, 10, 20, 30);
         plugin
@@ -259,12 +280,18 @@ mod tests {
 
     #[test]
     fn rejects_a_nonexistent_plugin_file() {
+        // Lädt bewusst keine echte Datei — nimmt trotzdem am selben
+        // Mutex teil, damit ein zeitgleicher `dlopen`-Fehlversuch hier
+        // nicht die `dlerror`-Ablage eines der drei echten Ladevorgänge
+        // oben überschreibt (siehe `DLOPEN_SERIAL`s Moduldoku).
+        let _guard = DLOPEN_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let result = LoadedPlugin::load(Path::new("/nicht/vorhanden.so"));
         assert!(matches!(result, Err(PluginError::Load { .. })));
     }
 
     #[test]
     fn rejects_a_buffer_too_small_for_the_requested_dimensions() {
+        let _guard = DLOPEN_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let plugin = LoadedPlugin::load(&example_plugin_path()).expect("sollte laden");
         let mut too_small = vec![0u8; 4]; // nur 1 Pixel, aber 2x2 angefordert
         let result = plugin.apply_custom_effect_rgba8(&mut too_small, 2, 2, 1.0);

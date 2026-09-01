@@ -1133,3 +1133,40 @@ export function denoisePhoto(photoId: string, rangeSigma?: number): Promise<stri
 export function upscalePhoto(photoId: string): Promise<string> {
   return invoke<string>("upscale_photo", { photoId });
 }
+
+// ---- Fortgeschrittenes: Fokus-/HDR-/Panorama-/Astro-Stacking (Phase 9
+// Schritt 8, siehe DECISIONS.md ADR-0035 Punkt 2) — reine, deterministische
+// Algorithmen in apx-stacking, keine externe Registrierungs-Bibliothek. ----
+
+/** Ergebnis eines Stacking-Commands — spiegelt
+ * `apx_app::commands::StackResultDto`. */
+export interface StackResultDto {
+  photo_id: string;
+  stack_id: string;
+  width: number;
+  height: number;
+}
+
+/** Fokus-Stacking über bereits ausgerichtete Aufnahmen (Laplacian-
+ * Schärfemaß, schärfste Quelle je Pixel). */
+export function stackFocus(photoIds: string[]): Promise<StackResultDto> {
+  return invoke<StackResultDto>("stack_focus", { photoIds });
+}
+
+/** HDR-Zusammenführung über eine Belichtungsreihe (jedes Foto braucht
+ * eine EXIF-Belichtungszeit). */
+export function stackHdr(photoIds: string[]): Promise<StackResultDto> {
+  return invoke<StackResultDto>("stack_hdr", { photoIds });
+}
+
+/** Panorama-Zusammenführung — v1 nur Verschiebungs-Registrierung per
+ * Phasenkorrelation (siehe `apx_stacking::panorama`s Moduldoku). */
+export function stackPanorama(photoIds: string[]): Promise<StackResultDto> {
+  return invoke<StackResultDto>("stack_panorama", { photoIds });
+}
+
+/** Astro-Stacking — Sigma-geclipptes Mittel über viele Kurzbelichtungen,
+ * registriert per Phasenkorrelation. */
+export function stackAstro(photoIds: string[], sigma?: number): Promise<StackResultDto> {
+  return invoke<StackResultDto>("stack_astro", { photoIds, sigma: sigma ?? null });
+}

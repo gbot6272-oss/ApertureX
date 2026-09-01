@@ -7,6 +7,7 @@ members = [
     "crates/apx-pipeline",
     "crates/apx-ai",
     "crates/apx-export",
+    "crates/apx-stacking",
     "crates/apx-app",
 ]
 
@@ -28,6 +29,7 @@ apx-catalog = { path = "crates/apx-catalog" }
 apx-pipeline = { path = "crates/apx-pipeline" }
 apx-ai = { path = "crates/apx-ai" }
 apx-export = { path = "crates/apx-export" }
+apx-stacking = { path = "crates/apx-stacking" }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

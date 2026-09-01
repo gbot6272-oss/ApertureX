@@ -294,10 +294,10 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 ### Zusätzliche Module (über Lightroom hinaus)
 - [x] Node-Editor (Pipeline als Knotengraph) — Phase 9 — Status: Fertig (abweichend, siehe PLAN.md Schritt 7) — kein `@xyflow/react`-Graph-Canvas (würde eine frei umbaubare Topologie vortäuschen, die es nicht gibt): eine geordnete Liste über die feste `develop::render_rgba8`-Reihenfolge, ein Eintrag je Stufe mit Ein/Aus-Schalter (`EdlV4::stage_enabled`) und Sprung zum zugehörigen Regler-Abschnitt
 - [ ] Stapelverarbeitungs-Konsole (Vorschau, Trockenlauf, Rückgängig) — Phase 9 — Status: Nicht begonnen
-- [ ] Fokus-Stacking — Phase 9 — Status: Nicht begonnen
-- [ ] HDR-Zusammenführung — Phase 9 — Status: Nicht begonnen
-- [ ] Panorama-Zusammenführung (sphärisch/zylindrisch/perspektivisch, Auto-Crop/-Fill) — Phase 9 — Status: Nicht begonnen
-- [ ] Astro-Stacking mit Sternausrichtung — Phase 9 — Status: Nicht begonnen
+- [x] Fokus-Stacking — Phase 9 — Status: Fertig (siehe PLAN.md Schritt 8) — Laplacian-Schärfemaß je Pixel, schärfste Quelle gewinnt; setzt bereits ausgerichtete Aufnahmen voraus (keine eigene Registrierung)
+- [x] HDR-Zusammenführung — Phase 9 — Status: Fertig (siehe PLAN.md Schritt 8) — Debevec-artige gewichtete Fusion nach EXIF-Belichtungszeit im linearen Raum + Reinhard-Tonemap; setzt bereits ausgerichtete Aufnahmen voraus
+- [x] Panorama-Zusammenführung — Phase 9 — Status: Fertig (abweichend, siehe PLAN.md Schritt 8) — **v1 nur Verschiebungs-Registrierung** per 2D-Phasenkorrelation (`rustfft`), kein sphärisch/zylindrisch/perspektivisches Homographie-Stitching für Freihandaufnahmen (`opencv` bräuchte eine fehlende Systembibliothek), kein Auto-Crop/-Fill
+- [x] Astro-Stacking — Phase 9 — Status: Fertig (abweichend, siehe PLAN.md Schritt 8) — Sigma-geclipptes Mittel über Kurzbelichtungen, registriert per derselben Phasenkorrelation wie Panorama; echte Sternzentroid-/Dreiecks-Registrierung zurückgestellt
 - [ ] Tethered Shooting (gphoto2/PTP, Live-View, Auto-Preset) — Phase 9 — Status: Nicht begonnen
 - [x] Vergleichs-Grid (bis 9 Versionen, sync. Zoom) — Phase 9 — Status: Fertig (siehe PLAN.md Schritt 7) — reused `CompareGridView.tsx` (Phase 9 Schritt 3) mit Quelle+virtuellen Kopien statt eines zweiten Rendering-Pfads; synchronisierter Zoom über einen gemeinsamen Skalierungsfaktor (vier feste Stufen), echtes Pan-Sync zurückgestellt (siehe PLAN.md)
 - [ ] Skript-API (Lua/Rhai) + Plugin-System mit stabilem ABI — Phase 9 — Status: Nicht begonnen

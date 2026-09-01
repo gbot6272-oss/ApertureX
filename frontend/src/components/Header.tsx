@@ -10,6 +10,7 @@ import { PrintDialog } from "./PrintDialog";
 import { SlideshowDialog } from "./SlideshowDialog";
 import { TemplatesDialog } from "./TemplatesDialog";
 import { LibraryOrganizeDialog } from "./LibraryOrganizeDialog";
+import { StackingDialog } from "./StackingDialog";
 import { MetadataDialog } from "./MetadataDialog";
 import { StatsCacheDialog } from "./StatsCacheDialog";
 
@@ -46,6 +47,7 @@ export function Header() {
   const [importDialogSource, setImportDialogSource] = useState<string | null>(null);
   const [templatesDialogOpen, setTemplatesDialogOpen] = useState(false);
   const [organizeDialogOpen, setOrganizeDialogOpen] = useState(false);
+  const [stackingDialogOpen, setStackingDialogOpen] = useState(false);
   const [metadataDialogOpen, setMetadataDialogOpen] = useState(false);
   const [statsDialogOpen, setStatsDialogOpen] = useState(false);
   const openCompareView = useAppStore((s) => s.openCompareView);
@@ -240,6 +242,16 @@ export function Header() {
       </button>
 
       <LibraryOrganizeDialog open={organizeDialogOpen} onClose={() => setOrganizeDialogOpen(false)} />
+
+      <button
+        type="button"
+        onClick={() => setStackingDialogOpen(true)}
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
+      >
+        Stacking…
+      </button>
+
+      <StackingDialog open={stackingDialogOpen} onClose={() => setStackingDialogOpen(false)} />
 
       <button
         type="button"

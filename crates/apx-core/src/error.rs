@@ -79,6 +79,12 @@ pub enum AppError {
     /// oder Upload-Fehler.
     #[error("Export fehlgeschlagen: {message}")]
     Export { message: String },
+
+    /// Fehler im Stacking-Modul (`apx-stacking`, ab Phase 9 Schritt 8,
+    /// siehe `DECISIONS.md` ADR-0035 Punkt 2) — zu wenige/inkompatible
+    /// Quellbilder, fehlgeschlagene Registrierung.
+    #[error("Stacking fehlgeschlagen: {message}")]
+    Stacking { message: String },
 }
 
 impl AppError {
@@ -126,6 +132,12 @@ impl AppError {
 
     pub fn export(message: impl Into<String>) -> Self {
         Self::Export {
+            message: message.into(),
+        }
+    }
+
+    pub fn stacking(message: impl Into<String>) -> Self {
+        Self::Stacking {
             message: message.into(),
         }
     }

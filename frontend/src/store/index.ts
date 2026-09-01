@@ -1232,6 +1232,17 @@ interface LibraryViewsSlice {
   /** Öffnet ein zweites Tauri-Fenster mit einem unabhängigen Loupe-
    * Viewer für `photoId` (Sekundäres Display). */
   openSecondaryDisplay: (photoId: string) => Promise<void>;
+
+  /** Fokus-/HDR-/Panorama-/Astro-Stacking (Phase 9 Schritt 8, siehe
+   * `DECISIONS.md` ADR-0035 Punkt 2) — jede Aktion nimmt die aktuelle
+   * Mehrfachauswahl (`multiSelectedIds`), schreibt das Ergebnis als
+   * neues Katalogfoto und verknüpft es per Stapel mit den Quellfotos. */
+  stackingRunning: "focus" | "hdr" | "panorama" | "astro" | null;
+  stackingStatus: string | null;
+  runStackFocus: () => Promise<void>;
+  runStackHdr: () => Promise<void>;
+  runStackPanorama: () => Promise<void>;
+  runStackAstro: (sigma?: number) => Promise<void>;
 }
 
 export type AppStore = CatalogSlice &
@@ -4343,6 +4354,101 @@ export const useAppStore = create<AppStore>()(
         url: `index.html?secondaryPhoto=${encodeURIComponent(photoId)}`,
         title: "Aperture X — Sekundäres Display",
       });
+    },
+
+    stackingRunning: null,
+    stackingStatus: null,
+
+    runStackFocus: async () => {
+      const { multiSelectedIds } = get();
+      if (multiSelectedIds.length < 2) return;
+      set((state) => {
+        state.stackingRunning = "focus";
+      });
+      try {
+        const result = await api.stackFocus(multiSelectedIds);
+        set((state) => {
+          state.stackingStatus = `Fokus-Stack fertig: ${result.width}×${result.height}`;
+        });
+        if (get().selectedFolderId) await get().loadPhotosForFolder(get().selectedFolderId!);
+      } catch (err) {
+        set((state) => {
+          state.stackingStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.stackingRunning = null;
+        });
+      }
+    },
+
+    runStackHdr: async () => {
+      const { multiSelectedIds } = get();
+      if (multiSelectedIds.length < 2) return;
+      set((state) => {
+        state.stackingRunning = "hdr";
+      });
+      try {
+        const result = await api.stackHdr(multiSelectedIds);
+        set((state) => {
+          state.stackingStatus = `HDR-Zusammenführung fertig: ${result.width}×${result.height}`;
+        });
+        if (get().selectedFolderId) await get().loadPhotosForFolder(get().selectedFolderId!);
+      } catch (err) {
+        set((state) => {
+          state.stackingStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.stackingRunning = null;
+        });
+      }
+    },
+
+    runStackPanorama: async () => {
+      const { multiSelectedIds } = get();
+      if (multiSelectedIds.length < 2) return;
+      set((state) => {
+        state.stackingRunning = "panorama";
+      });
+      try {
+        const result = await api.stackPanorama(multiSelectedIds);
+        set((state) => {
+          state.stackingStatus = `Panorama fertig: ${result.width}×${result.height}`;
+        });
+        if (get().selectedFolderId) await get().loadPhotosForFolder(get().selectedFolderId!);
+      } catch (err) {
+        set((state) => {
+          state.stackingStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.stackingRunning = null;
+        });
+      }
+    },
+
+    runStackAstro: async (sigma) => {
+      const { multiSelectedIds } = get();
+      if (multiSelectedIds.length < 3) return;
+      set((state) => {
+        state.stackingRunning = "astro";
+      });
+      try {
+        const result = await api.stackAstro(multiSelectedIds, sigma);
+        set((state) => {
+          state.stackingStatus = `Astro-Stack fertig: ${result.width}×${result.height}`;
+        });
+        if (get().selectedFolderId) await get().loadPhotosForFolder(get().selectedFolderId!);
+      } catch (err) {
+        set((state) => {
+          state.stackingStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.stackingRunning = null;
+        });
+      }
     },
     };
   }),

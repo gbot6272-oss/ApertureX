@@ -197,6 +197,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
 
   const virtualCopiesBySource: Record<string, string[]> = {};
   let nextVirtualCopyId = 1;
+  let nextStackResultId = 1;
 
   interface MockColorLabelDefinition {
     name: string;
@@ -314,6 +315,31 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
 
   function findPhoto(photoId: string): MockPhoto | undefined {
     return allPhotos().find((p) => p.id === photoId);
+  }
+
+  /** Mock-Gegenstück zu `apx-app::commands::import_stack_result_photo`
+   * (Phase 9 Schritt 8) — legt ein synthetisches Ergebnisfoto im selben
+   * Ordner wie das erste Quellfoto an und verknüpft es per Stapel mit
+   * allen Quellfotos. Reale Breite/Höhe/Datei-Schreiben/Hash entfallen
+   * im Browser-Mock (siehe `installTauriMock`s Moduldoku für die
+   * grundsätzliche Grenze simulierter Tauri-IPC). */
+  function importStackResultPhoto(photoIds: string[], suffix: string): { photo_id: string; stack_id: string; width: number; height: number } {
+    const first = findPhoto(photoIds[0]!);
+    if (!first) throw new Error(`Test-Stub: Foto '${photoIds[0]}' nicht gefunden`);
+    const width = (first.width as number | undefined) ?? 100;
+    const height = (first.height as number | undefined) ?? 100;
+    const resultId = `${first.id}-${suffix}${nextStackResultId++}`;
+    const result: MockPhoto = { ...first, id: resultId, filename: `${first.filename}_${suffix}.png`, width, height };
+    const fixtures = w.__mockFixtures as { photosByFolder: Record<string, MockPhoto[]> };
+    for (const folderId of Object.keys(fixtures.photosByFolder)) {
+      if (fixtures.photosByFolder[folderId].some((p) => p.id === first.id)) {
+        fixtures.photosByFolder[folderId] = [...fixtures.photosByFolder[folderId], result];
+        break;
+      }
+    }
+    const stackId = `stack-${nextStackId++}`;
+    stacks.push({ id: stackId, name: suffix, cover_photo_id: resultId, photo_ids: [resultId, ...photoIds] });
+    return { photo_id: resultId, stack_id: stackId, width, height };
   }
 
   /** Gemeinsame Kriterien-Prüfung für `filter_photos`/`search_and_filter_photos`
@@ -780,6 +806,16 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         const ids = virtualCopiesBySource[args.photoId as string] ?? [];
         return ids.map((id) => findPhoto(id)).filter((p): p is MockPhoto => p !== undefined).map(clonePhoto);
       }
+
+      // ---- Fortgeschrittenes: Stacking (Phase 9 Schritt 8) ------------------
+      case "stack_focus":
+        return importStackResultPhoto(args.photoIds as string[], "fokus_stack");
+      case "stack_hdr":
+        return importStackResultPhoto(args.photoIds as string[], "hdr");
+      case "stack_panorama":
+        return importStackResultPhoto(args.photoIds as string[], "panorama");
+      case "stack_astro":
+        return importStackResultPhoto(args.photoIds as string[], "astro_stack");
 
       // ---- Bibliothek: Stapel (Phase 9 Schritt 1) ---------------------------
       case "create_stack": {

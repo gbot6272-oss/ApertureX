@@ -4055,6 +4055,297 @@ pub fn upscale_photo(state: State<'_, AppState>, photo_id: String) -> Result<Str
     )
 }
 
+// ---- Fortgeschrittenes: Fokus-/HDR-/Panorama-/Astro-Stacking (Phase 9
+// Schritt 8, siehe PLAN.md, DECISIONS.md ADR-0035 Punkt 2) -----------------
+//
+// Reine, deterministische Algorithmen leben komplett in `apx-stacking`
+// (keine externe Registrierungs-/Stitching-Bibliothek) — diese Commands
+// sind reine Verdrahtung: Quellfotos in voller Auflösung rendern (dieselbe
+// `render_photo_full_resolution` wie Schritt 6, kein zweiter Rendering-
+// Codepfad), Algorithmus aufrufen, Ergebnis als neues Katalogfoto
+// importieren und per Stapel (`Catalog::create_stack`, Phase 9 Schritt 1)
+// mit den Quellbildern verknüpfen.
+
+/// Das Ergebnis eines Stacking-Commands — die neu importierte Foto-ID und
+/// der Stapel, der sie mit den Quellfotos verknüpft.
+#[derive(Debug, Clone, Serialize)]
+pub struct StackResultDto {
+    pub photo_id: String,
+    pub stack_id: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+fn parse_photo_ids(photo_ids: Vec<String>) -> Result<Vec<apx_core::PhotoId>, String> {
+    photo_ids.into_iter().map(parse_photo_id).collect()
+}
+
+/// Rendert jedes Foto in `photo_ids` in voller Auflösung — gemeinsame
+/// Grundlage für alle vier Stacking-Commands unten.
+fn render_photos_full_resolution(
+    state: &AppState,
+    photo_ids: &[apx_core::PhotoId],
+) -> Result<Vec<(u32, u32, Vec<u8>)>, String> {
+    photo_ids
+        .iter()
+        .map(|&id| {
+            let (_, width, height, pixels) = render_photo_full_resolution(state, id)?;
+            Ok((width, height, pixels))
+        })
+        .collect()
+}
+
+/// Importiert ein synthetisiertes Stacking-Ergebnis als neues Katalogfoto
+/// im selben Ordner wie das erste Quellfoto und verknüpft es per Stapel
+/// mit allen Quellfotos — die neue Zeile bekommt selbst kein EDL/keine
+/// EXIF-Aufnahmewerte (ein synthetisiertes Bild wurde nicht fotografiert),
+/// nur Breite/Höhe/Dateigröße/Hash wie jedes andere importierte Foto.
+fn import_stack_result_photo(
+    state: &AppState,
+    source_ids: &[apx_core::PhotoId],
+    stack_name: &str,
+    filename_suffix: &str,
+    width: u32,
+    height: u32,
+    pixels: &[u8],
+) -> Result<StackResultDto, String> {
+    let first_source = source_ids
+        .first()
+        .ok_or_else(|| "Stacking braucht mindestens ein Quellfoto".to_string())?;
+    let first_photo = state
+        .catalog
+        .get_photo(*first_source)
+        .map_err(|err| err.to_string())?;
+    let folder = state
+        .catalog
+        .get_folder(first_photo.folder_id)
+        .map_err(|err| err.to_string())?;
+
+    let bytes = apx_export::format::encode_rgba8(
+        width,
+        height,
+        pixels,
+        apx_export::format::ExportFormat::Png,
+        &apx_export::format::EncodeOptions::default(),
+    )
+    .map_err(|err| err.to_string())?;
+
+    let stem = first_photo
+        .filename
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(first_photo.filename.as_str());
+    let mut dest_path = folder.path.join(format!("{stem}_{filename_suffix}.png"));
+    let mut counter = 1u32;
+    while dest_path.exists() {
+        dest_path = folder
+            .path
+            .join(format!("{stem}_{filename_suffix}_{counter}.png"));
+        counter += 1;
+    }
+    std::fs::write(&dest_path, &bytes)
+        .map_err(|err| format!("Datei '{}' nicht schreibbar: {err}", dest_path.display()))?;
+
+    let content_hash = crate::import::compute_content_hash(&dest_path)?;
+    let file_size = std::fs::metadata(&dest_path)
+        .map_err(|err| err.to_string())?
+        .len();
+    let filename = dest_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Dateiname ist kein gültiges UTF-8".to_string())?
+        .to_string();
+
+    let new_photo = apx_catalog::NewPhoto {
+        folder_id: first_photo.folder_id,
+        filename,
+        file_size,
+        file_mtime: time::OffsetDateTime::now_utc(),
+        content_hash: Some(content_hash),
+        width: Some(width),
+        height: Some(height),
+        orientation: 1,
+        camera_make: None,
+        camera_model: None,
+        lens: None,
+        iso: None,
+        shutter: None,
+        aperture: None,
+        focal_length: None,
+        captured_at: Some(time::OffsetDateTime::now_utc()),
+        gps_lat: None,
+        gps_lon: None,
+    };
+    let (result_photo_id, _) = state
+        .catalog
+        .upsert_photo(&new_photo)
+        .map_err(|err| err.to_string())?;
+
+    let mut stack_photo_ids = vec![result_photo_id];
+    stack_photo_ids.extend_from_slice(source_ids);
+    let stack_id = state
+        .catalog
+        .create_stack(Some(stack_name), &stack_photo_ids)
+        .map_err(|err| err.to_string())?;
+
+    Ok(StackResultDto {
+        photo_id: result_photo_id.to_string(),
+        stack_id: stack_id.to_string(),
+        width,
+        height,
+    })
+}
+
+/// Fokus-Stacking (`apx_stacking::focus`) über bereits ausgerichtete
+/// Aufnahmen — für jeden Pixel wird die schärfste Quelle übernommen.
+#[tauri::command]
+pub fn stack_focus(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+) -> Result<StackResultDto, String> {
+    let ids = parse_photo_ids(photo_ids)?;
+    let rendered = render_photos_full_resolution(&state, &ids)?;
+    let (width, height) = rendered
+        .first()
+        .map(|(w, h, _)| (*w, *h))
+        .ok_or_else(|| "keine Fotos übergeben".to_string())?;
+    let refs: Vec<&[u8]> = rendered.iter().map(|(_, _, px)| px.as_slice()).collect();
+    let stacked = apx_stacking::focus::focus_stack_rgba8(&refs, width, height)
+        .map_err(|err| err.to_string())?;
+    import_stack_result_photo(
+        &state,
+        &ids,
+        "Fokus-Stack",
+        "fokus_stack",
+        width,
+        height,
+        &stacked,
+    )
+}
+
+/// HDR-Zusammenführung (`apx_stacking::hdr`) über eine Belichtungsreihe —
+/// jedes Quellfoto braucht eine EXIF-Belichtungszeit.
+#[tauri::command]
+pub fn stack_hdr(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+) -> Result<StackResultDto, String> {
+    let ids = parse_photo_ids(photo_ids)?;
+    let rendered = render_photos_full_resolution(&state, &ids)?;
+    let (width, height) = rendered
+        .first()
+        .map(|(w, h, _)| (*w, *h))
+        .ok_or_else(|| "keine Fotos übergeben".to_string())?;
+
+    let mut exposure_seconds = Vec::with_capacity(ids.len());
+    for &id in &ids {
+        let photo = state.catalog.get_photo(id).map_err(|err| err.to_string())?;
+        let shutter = photo.shutter.ok_or_else(|| {
+            format!(
+                "Foto '{}' hat keine EXIF-Belichtungszeit — HDR-Zusammenführung braucht sie für jede Aufnahme",
+                photo.filename
+            )
+        })?;
+        exposure_seconds.push(shutter);
+    }
+    let exposures: Vec<apx_stacking::hdr::Exposure> = rendered
+        .iter()
+        .zip(exposure_seconds.iter())
+        .map(|((_, _, px), &seconds)| apx_stacking::hdr::Exposure {
+            pixels: px.as_slice(),
+            exposure_seconds: seconds,
+        })
+        .collect();
+    let merged = apx_stacking::hdr::hdr_merge_rgba8(&exposures, width, height)
+        .map_err(|err| err.to_string())?;
+    import_stack_result_photo(
+        &state,
+        &ids,
+        "HDR-Zusammenführung",
+        "hdr",
+        width,
+        height,
+        &merged,
+    )
+}
+
+/// Panorama-Zusammenführung (`apx_stacking::panorama`) — **v1 nur
+/// Verschiebungs-Registrierung** (siehe dessen Moduldoku), jedes Foto
+/// nach dem ersten wird per Phasenkorrelation gegen das erste
+/// ausgerichtet.
+#[tauri::command]
+pub fn stack_panorama(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+) -> Result<StackResultDto, String> {
+    let ids = parse_photo_ids(photo_ids)?;
+    let rendered = render_photos_full_resolution(&state, &ids)?;
+    let (width, height) = rendered
+        .first()
+        .map(|(w, h, _)| (*w, *h))
+        .ok_or_else(|| "keine Fotos übergeben".to_string())?;
+
+    let reference = rendered[0].2.as_slice();
+    let mut offsets: Vec<(i32, i32)> = vec![(0, 0)];
+    for (_, _, pixels) in rendered.iter().skip(1) {
+        let offset = apx_stacking::panorama::estimate_shift_rgba8(reference, pixels, width, height)
+            .map_err(|err| err.to_string())?;
+        offsets.push(offset);
+    }
+    let images: Vec<apx_stacking::panorama::PositionedImage> = rendered
+        .iter()
+        .zip(offsets.iter())
+        .map(
+            |((_, _, px), &(offset_x, offset_y))| apx_stacking::panorama::PositionedImage {
+                pixels: px.as_slice(),
+                offset_x,
+                offset_y,
+            },
+        )
+        .collect();
+    let (out_width, out_height, stitched) =
+        apx_stacking::panorama::stitch_shift_rgba8(&images, width, height)
+            .map_err(|err| err.to_string())?;
+    import_stack_result_photo(
+        &state, &ids, "Panorama", "panorama", out_width, out_height, &stitched,
+    )
+}
+
+/// Astro-Stacking (`apx_stacking::astro`) — Sigma-geclipptes Mittel über
+/// viele Kurzbelichtungen, registriert per Phasenkorrelation gegen die
+/// erste. `sigma` steuert die Ausreißer-Schwelle (größer = toleranter),
+/// `None` verwendet einen moderaten Vorgabewert.
+#[tauri::command]
+pub fn stack_astro(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    sigma: Option<f32>,
+) -> Result<StackResultDto, String> {
+    let ids = parse_photo_ids(photo_ids)?;
+    let rendered = render_photos_full_resolution(&state, &ids)?;
+    let (width, height) = rendered
+        .first()
+        .map(|(w, h, _)| (*w, *h))
+        .ok_or_else(|| "keine Fotos übergeben".to_string())?;
+    let refs: Vec<&[u8]> = rendered.iter().map(|(_, _, px)| px.as_slice()).collect();
+    let stacked = apx_stacking::astro::register_and_stack_astro_rgba8(
+        &refs,
+        width,
+        height,
+        sigma.unwrap_or(2.5),
+    )
+    .map_err(|err| err.to_string())?;
+    import_stack_result_photo(
+        &state,
+        &ids,
+        "Astro-Stack",
+        "astro_stack",
+        width,
+        height,
+        &stacked,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -218,6 +218,7 @@ dependencies = [
  "apx-export",
  "apx-pipeline",
  "apx-raw",
+ "apx-stacking",
  "base64 0.22.1",
  "image",
  "image_hasher",
@@ -329,6 +330,16 @@ dependencies = [
  "thiserror 2.0.20",
  "time",
  "tracing",
+]
+
+[[package]]
+name = "apx-stacking"
+version = "0.1.0"
+dependencies = [
+ "apx-core",
+ "rayon",
+ "rustfft",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

@@ -298,7 +298,7 @@ fn ensure_folder(
 /// vollständig auf einmal ein, auch nicht bei mehreren hundert MB großen
 /// RAW-Dateien. Grundlage für die exakte Duplikaterkennung (Schritt 8.2,
 /// `DECISIONS.md` ADR-0027).
-fn compute_content_hash(path: &Path) -> Result<String, String> {
+pub(crate) fn compute_content_hash(path: &Path) -> Result<String, String> {
     let file = std::fs::File::open(path)
         .map_err(|err| format!("Datei für Hash-Berechnung nicht lesbar: {err}"))?;
     let mut reader = BufReader::new(file);

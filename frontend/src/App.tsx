@@ -9,6 +9,7 @@ import { FilterBar } from "./components/FilterBar";
 import { Filmstrip } from "./components/Filmstrip";
 import { GridView } from "./components/GridView";
 import { Header } from "./components/Header";
+import { KeybindingsCheatsheet } from "./components/KeybindingsCheatsheet";
 import { MapView } from "./components/MapView";
 import { MasksPanel } from "./components/MasksPanel";
 import { MetadataPanel } from "./components/MetadataPanel";
@@ -17,6 +18,7 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { Viewer } from "./components/Viewer";
 import { useImportEvents } from "./hooks/useImportEvents";
+import { matchesBinding } from "./lib/keybindings";
 import { useAppStore } from "./store";
 
 async function toggleFullscreen(): Promise<void> {
@@ -52,6 +54,7 @@ export default function App() {
   const undoLibraryAction = useAppStore((s) => s.undoLibraryAction);
   const redoLibraryAction = useAppStore((s) => s.redoLibraryAction);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
 
   useEffect(() => {
     void refreshFolders();
@@ -61,7 +64,15 @@ export default function App() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+      // Vollständig belegbare Tastenkürzel (Phase 10 Schritt 5, siehe
+      // `lib/keybindings.ts`) — dieselbe Verzweigung wie zuvor, jetzt über
+      // `matchesBinding` statt fest verdrahteter `event.key`-Vergleiche,
+      // damit jede hier behandelte Aktion im Cheatsheet-Overlay (`?`)
+      // umbelegbar ist. Reihenfolge/Wächter (mod+k vor dem
+      // Editierbar-Ausschluss, Undo/Redo nur bei geschlossenem
+      // Entwickeln-Panel) sind unverändert aus der vorherigen Fassung
+      // übernommen.
+      if (matchesBinding(event, "toggle-palette")) {
         event.preventDefault();
         setPaletteOpen((open) => !open);
         return;
@@ -88,31 +99,37 @@ export default function App() {
       // offen ist: das hat schon seinen eigenen lokalen Ctrl/Cmd+Z-Handler
       // (siehe `DevelopPanel.tsx`), sonst würden beide Aktionen auf
       // denselben Tastendruck reagieren.
-      if (!developPanelOpen && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+      if (!developPanelOpen && matchesBinding(event, "redo")) {
         event.preventDefault();
-        if (event.shiftKey) {
-          void redoLibraryAction();
-        } else {
-          void undoLibraryAction();
-        }
+        void redoLibraryAction();
+        return;
+      }
+      if (!developPanelOpen && matchesBinding(event, "undo")) {
+        event.preventDefault();
+        void undoLibraryAction();
         return;
       }
 
-      if (event.key === "ArrowLeft") {
+      if (matchesBinding(event, "prev-photo")) {
         stepSelection(-1);
-      } else if (event.key === "ArrowRight") {
+      } else if (matchesBinding(event, "next-photo")) {
         stepSelection(1);
-      } else if (event.key === "Escape") {
+      } else if (matchesBinding(event, "cheatsheet")) {
+        setCheatsheetOpen((open) => !open);
+      } else if (matchesBinding(event, "close-overlay")) {
+        setCheatsheetOpen(false);
         setPaletteOpen(false);
-      } else if (event.key.toLowerCase() === "f") {
+      } else if (matchesBinding(event, "fullscreen")) {
         void toggleFullscreen();
       } else if (selectedPhotoId && /^[0-5]$/.test(event.key)) {
         // Bewertungs-Tastenkürzel (Lightroom-Konvention), siehe
-        // `PLAN.md` Phase 3, Schritt 6.
+        // `PLAN.md` Phase 3, Schritt 6 — bewusst nicht Teil von
+        // `lib/keybindings.ts`: eine parametrisierte Ziffernreihe statt
+        // einer einzelnen festen Aktion.
         void setPhotoRating(selectedPhotoId, Number(event.key));
-      } else if (selectedPhotoId && event.key.toLowerCase() === "p") {
+      } else if (selectedPhotoId && matchesBinding(event, "flag-pick")) {
         void setPhotoFlag(selectedPhotoId, 1);
-      } else if (selectedPhotoId && event.key.toLowerCase() === "x") {
+      } else if (selectedPhotoId && matchesBinding(event, "flag-reject")) {
         void setPhotoFlag(selectedPhotoId, -1);
       }
     }
@@ -147,6 +164,7 @@ export default function App() {
       <HistoryTimelineDialog />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <SettingsDialog open={settingsDialogOpen} onClose={() => setSettingsDialogOpen(false)} />
+      <KeybindingsCheatsheet open={cheatsheetOpen} onClose={() => setCheatsheetOpen(false)} />
     </div>
   );
 }

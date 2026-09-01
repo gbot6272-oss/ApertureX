@@ -187,7 +187,8 @@ Diese Abschnitte werden erst gefüllt, wenn die jeweilige Phase beginnt — hier
 
 - **Phase 6:** Maskensystem — vollständig gebaut, siehe § 10 „Architektur Phase 6".
 - **Phase 7:** `apx-ai` — ONNX-Runtime-Integration (Motiv-/Himmel-/Personen-Segmentierung für KI-Masken, siehe ADR-0032 Punkt 3), LLM-Client für Preset-Generator (siehe `DECISIONS.md` ADR-0031 Punkt 1: Referenzbild-Modus/Variationen-Generator/Preset-aus-Bearbeitung-Lernen sind dieselbe CV-/Optimierungs-Kategorie wie die ADR-0028-zurückgestellten Punkte und wandern deshalb ebenfalls hierher), sowie die Reparatur-Erweiterungen aus ADR-0032 Punkt 8 (dieselbe PatchMatch-artige CV-Kategorie).
-- **Phase 8–9:** Export-Engine, Ausgabe-Module, Node-Editor, Stacking, Tethering, Skript-API/Plugins — auch Grundlage für die auf diese Phasen verschobenen Export-/Wasserzeichen-/Metadaten-/Layout-/Workflow-Templates und den Template-Marktplatz (ADR-0031 Punkt 5) sowie Adobe-`.xmp`/`.lrtemplate`-Interop (ADR-0031 Punkt 3).
+- **Phase 8:** Export-Engine, sechs Ausgabe-Module — vollständig gebaut, siehe § 12 „Architektur Phase 8".
+- **Phase 9:** Node-Editor, Stacking, Skript-API/Plugins, Kollaborationsmodus, Tethering, Bibliotheks-Erweiterungen — vollständig gebaut (mit dokumentierten Ausnahmen), siehe § 13 „Architektur Phase 9".
 
 ## 9. Architektur Phase 5 — Preset- und Template-System
 
@@ -385,3 +386,119 @@ Frontend-Dialog (Export/Drucken/Diashow/Buch/Web — Fotoauswahl + Options-DTO)
 ```
 
 **Nicht in Phase 8** (bewusst zurückgestellt, siehe `PLAN.md`/`DECISIONS.md` ADR-0034 sowie die elf per Nutzerwunsch nachgetragenen Lightroom-Vergleichsfunktionen — Histogramm, Zielwerkzeuge, KI-Vollbild-Entrauschung/-Hochskalierung u. a., siehe PLAN.md-Backlog): PSD-/HEIF-/JPEG-XL-Export, echtes Mehrfachziel bei Export-Vorlagen, „Aktuelle Einstellungen als Vorlage speichern"-Knöpfe direkt in den fünf Ausgabedialogen (Vorlagen entstehen im `TemplatesDialog` über eingefügtes JSON), Fotos per echtem Drag-and-drop auf die Karte (ein Klick-Platzieren-Modus ersetzt es), Reverse-Geocoding als automatische Foto-Schlagworte (nur Anzeige im Marker-Popup).
+
+## 13. Architektur Phase 9 — Fortgeschrittenes
+
+Beschreibt den tatsächlich gebauten Stand aller elf Bauschritte (siehe
+`DECISIONS.md` ADR-0035 für die Scope-Entscheidungen und die acht
+„bewusste Vereinfachung"-Grenzen, ADR-0036 für die eine dokumentierte
+Ausnahme). Phase 9 fasst drei zuvor verschobene Rückstände zusammen
+(SPEC.md §5/§3.6, das komplette Bibliotheks-Backlog aus ADR-0032, und
+elf per Nutzerwunsch nachgetragene Lightroom-Vergleichsfunktionen) —
+38 Einzelpunkte in zwölf Bauschritten (0 = Scope, 1–11 = Bau,
+12 = diese Abnahme).
+
+**Vier neue Crates**, alle nach demselben Muster wie `apx-ai`/`apx-export`
+(hängen nur von `apx-core` bzw. den bereits bestehenden Crates ab, keine
+Rückwärts-Abhängigkeit auf `apx-app`):
+- **`apx-stacking`** (Schritt 8): Fokus-/HDR-/Panorama-/Astro-Stacking,
+  reine deterministische Bildverarbeitung, `rustfft` für eine
+  selbstgeschriebene 2D-Phasenkorrelation (Verschiebungs-Registrierung).
+- **`apx-script`** (Schritt 9): `rhai`-Bridge mit einer schmalen,
+  primitiv-typisierten `ScriptEdl`-API auf `EdlV4`s Grundeinstellungen.
+- **`apx-plugin-abi`/`apx-plugin-example`/`apx-plugin-host`**
+  (Schritt 9): eine handgepflegte, versionierte `#[repr(C)]`-
+  Funktionszeigertabelle für einen festen Erweiterungspunkt
+  (Custom-Effekt), `libgphoto2`-artiges Laden per `libloading` mit
+  harter ABI-Versionsprüfung.
+- **`apx-tether`** (Schritt 11): `TetherBackend`-Trait, `FakeBackend`
+  (läuft überall) und `gphoto2_backend::Gphoto2Backend` (echte
+  `libgphoto2`-FFI-Aufrufe, hinter dem standardmäßig ausgeschalteten
+  Cargo-Feature `tethering` — siehe „Ehrlich begrenzt" unten).
+
+**`apx-catalog`-Erweiterungen** (additive Migrationen, Schritt 1/2):
+`stacks`/`virtual_copies` (über `photos.source_photo_id`, keine
+separate Tabelle — eine virtuelle Kopie ist ein Foto mit
+Selbstreferenz und eigener `edit_history`), `color_label_definitions`
+(ersetzt die frühere feste Palette), verschachtelte `collection_folders`,
+Schlagworthierarchie (`keywords.parent_id`/`synonyms`), `tag_rules`.
+Schritt 10 fügt `repository::share::diff_edit`/`ShareDiff` hinzu (reiner
+Vergleich, keine neue Tabelle) und `repository::photos::
+find_by_content_hash` — beide öffentlich über `Catalog`.
+
+**`EdlV4`** (Schritt 5/7, `crates/apx-pipeline/src/edl/v4.rs`): additiver
+Schema-Sprung von v3. Zwei neue Konzepte kommen gemeinsam an: der
+Schwarzweiß-Mixer (acht Luminanzgewichte je Farbband + Treatment-
+Umschalter) und `StageEnabled` (ein `bool`-Feld je Rendering-Stufe in
+exakt `develop::render_rgba8`s fester Reihenfolge, für den Node-Editor).
+`v3_to_v4`-Migration nach demselben Muster wie v1→v2→v3; ältere
+Versionen bleiben reine Lese-only-Historie.
+
+**`apx-app` bleibt reine Verdrahtung** (`commands.rs`, ein neuer
+Abschnitt je Schritt): Stacking/Skript/Plugin/Kollaboration/Tethering
+folgen alle demselben Muster wie Phase 6/7/8 — Foto-/Katalogdaten
+auflösen, die passende Crate-Funktion aufrufen, DTO zurückreichen.
+Tethered Shooting (Schritt 11) ist die einzige Ausnahme mit echter
+Orchestrierung: `tether_capture` ruft nach dem Download den
+**unveränderten** `import::run_with_mode`-Pfad aus Phase 3/5 auf (ein
+Ein-Datei-Verzeichnis-Scan statt eines zweiten Import-Codepfads) und
+findet das neue Foto über `find_by_content_hash` (Schritt 10) wieder.
+
+### Datenfluss Phase 9: Stacking-Ergebnis importieren
+
+```
+Frontend (StackingDialog.tsx, Mehrfachauswahl)
+  -> stack_focus/stack_hdr/stack_panorama/stack_astro(photo_ids)
+       render_photos_full_resolution (je Foto: derselbe
+         apx_export::engine::render_to_pixels-Pfad wie jeder Export)
+       -> apx_stacking::{focus,hdr,panorama,astro}::*_stack_rgba8
+            (Laplacian-Schärfe / Debevec+Reinhard / Phasenkorrelation+
+             Shift-Stitch / Sigma-Clipping, je nach Verfahren)
+       -> apx_export::format::encode_rgba8 (PNG neben dem ersten Quellfoto)
+       -> Catalog::upsert_photo (neue Katalogzeile, keine EXIF-
+            Aufnahmewerte — synthetisiertes Bild)
+       -> Catalog::create_stack (verknüpft mit allen Quellfotos, Schritt 1)
+  <- StackResultDto { photo_id, stack_id, width, height }
+```
+
+### Datenfluss Phase 9: Node-Editor — Stufe deaktivieren
+
+```
+Frontend (DevelopPanel.tsx, Fieldset "Node-Editor (Rendering-Stufen)")
+  -> toggleStage(stage) ändert developEdl.stage_enabled.<stage>
+  -> apply_develop_edit committet EdlV4 wie jede andere Änderung
+  -> compute_develop-Route (Phase 2, unverändert)
+       apx_pipeline::develop::render_rgba8:
+         vor JEDER Stufe (auch Grundeinstellungen/Weißabgleich, die
+         zuvor unbedingt liefen): if !stage_enabled.<stufe> { Eingabe
+         unverändert durchreichen } — Geometrie bleibt einzige Stufe,
+         die die Ausgabegröße ändern *kann*, aber ebenso überspringbar
+  <- gerendertes RGBA8 ohne die deaktivierten Stufen
+```
+
+Kein `@xyflow/react`-Graph-Canvas: eine frei umbaubare Topologie würde
+eine Fähigkeit vortäuschen (Umsortieren, neue Verbindungen), die es
+nicht gibt — die Rendering-Reihenfolge bleibt fest, weil jedes andere
+Modul (Viewer, Export, Masken) sich darauf verlässt (ADR-0035 Punkt 1).
+
+**Ehrlich begrenzt — je Bauschritt, Details in `PLAN.md`/`DECISIONS.md`
+ADR-0035:**
+1. Node-Editor zeigt/schaltet die feste Pipeline, keine Ausführungsgraph-Engine.
+2. Panorama/Astro nur Verschiebungs-Registrierung, kein Homographie-Stitching.
+3. Skript-/Plugin-„stabile ABI" = versionierte Kompatibilität für einen schmalen Erweiterungspunkt, keine unbegrenzte künftige Binärkompatibilität.
+4. Kollaborationsmodus rein asynchron (Export→Import→Konfliktauflösung), kein Echtzeit-Mehrbenutzer-Modus — `apx-catalog` bleibt ein einzelner `Mutex<Connection>` (ADR-0008).
+5. Tethering: `Gphoto2Backend` ist real geschrieben, aber in dieser Sandbox/im Standard-CI nie gegen echte Hardware oder installierte `libgphoto2` ausführbar (nicht mal ein „unerreichbarer Server"-Fehlerpfad ist testbar) — ohne das Cargo-Feature `tethering` läuft ausschließlich die klar gekennzeichnete `FakeBackend`-Simulation.
+6. KI-Entrauschung/-Hochskalierung sind klassische deterministische Algorithmen (Bilateral-Filter, kantengerichtete Interpolation), keine Modellinferenz — dieselbe Ehrlichkeitslinie wie ADR-0033.
+7. Personenansicht bleibt zurückgestellt (Phase-7-artige Heuristik nötig, siehe `FEATURES.md`).
+8. Adobe-`.xmp`/`.lrtemplate`-Interop hat ein dokumentiertes, teils best-effort Mapping — Adobes proprietäre Kurven-/Masken-Repräsentation ist nicht vollständig offen dokumentiert.
+
+**Nicht in Phase 9** (siehe `DECISIONS.md` ADR-0036): Stapelverarbeitungs-
+Konsole — war in ADR-0035s Scope-Aufzählung, bekam aber nie einen
+eigenen Bauschritt zugeteilt; ein ehrliches Rückgängig-Machen der
+gesamten Aktion bräuchte einen neuen, feldübergreifenden Batch-
+Operationen-Log, denselben Umfang wie ein eigener Bauschritt. Ebenfalls
+zurückgestellt (je mit Begründung in `FEATURES.md`, innerhalb ihrer
+jeweiligen Schritte 3/5 entschieden): Übersichtsansicht, Schnellentwicklung
+im Raster, Smart Previews/Offline-Bearbeitung, Zielgerichtetes
+Anpassungswerkzeug (TAT). Tiefenbereich-Masken bleiben weiterhin ohne
+Phasenzuordnung (ADR-0032 Punkt 3).

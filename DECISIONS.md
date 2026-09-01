@@ -1725,3 +1725,49 @@ vollständig und korrekt getaggt sind. Jeder Bauschritt wird einzeln
 committet und gepusht, mit schlanken statt erschöpfenden Tests je
 Schritt (Projektkonvention seit Phase 8) — keine wiederholten vollen
 Testsuiten-Läufe zwischen den Schritten.
+
+## ADR-0036: Phase-9-Abnahme (Schritt 12) — Stapelverarbeitungs-Konsole war in ADR-0035s Scope-Aufzählung, bekam aber nie einen Bauschritt; bleibt explizit zurückgestellt statt nachträglich überstürzt angeflanscht
+
+**Status:** Angenommen
+**Kontext:** Beim Abnahme-Durchgang (`PLAN.md` Schritt 12) fiel auf: Die
+„Stapelverarbeitungs-Konsole" (`SPEC.md` §3.6: „Regeln auf Tausende
+Bilder anwenden, mit Vorschau der betroffenen Menge, Trockenlauf,
+Rückgängig-Machen der gesamten Aktion") steht in ADR-0035s Aufzählung
+der sechs SPEC-§3.6-„Zusätzliche Module" (zusammen mit Astro-Stacking,
+Vergleichs-Grid, Zeitleisten-Ansicht, Verlaufs-Vergleich,
+Kollaborationsmodus) — bekam aber, anders als die anderen fünf, **nie**
+einen eigenen Bauschritt in `PLAN.md`s Schritt-für-Schritt-Plan (Schritt
+1–11). Eine Lücke im Schritt-0-Zuschnitt selbst, kein Ausrutscher bei
+der Umsetzung eines vorhandenen Schritts — dieselbe Kategorie Fehler wie
+die in Schritt 11 nachgetragenen `THIRD_PARTY.md`-Zeilen, nur auf der
+Planungs- statt der Dokumentationsebene.
+
+**Abwägung:** Der Nutzer hat für diese Runde ausdrücklich verlangt, die
+Phase vollständig abzuschließen, nicht abzubrechen. Trotzdem wird diese
+Lücke hier **nicht** durch eine nachträglich in Schritt 12
+hineingequetschte Implementierung geschlossen: Ein ehrliches
+„Rückgängig-Machen der gesamten Aktion" für eine Stapelverarbeitungs-
+Konsole bräuchte einen neuen, feldübergreifenden Batch-Operationen-
+Log (nicht nur `edit_history` je Foto, sondern eine Journalstruktur über
+beliebige Katalogmutationen — Bewertung, Schlagworte, Metadaten,
+Löschen — mit Gruppierung „gehört zu Aktion X" und einem echten
+Undo-Pfad dafür). Das ist derselbe Umfang wie ein eigener Bauschritt,
+kein Dokumentations-Anhängsel — eine überstürzte Version ohne echtes
+Batch-Undo (z. B. nur eine Vorschau-Anzeige ohne Rückgängig-Funktion)
+würde eine Fähigkeit vortäuschen, die nicht vollständig da ist, exakt
+das, was `PLAN.md`/`DECISIONS.md` an anderer Stelle konsequent vermeidet
+(siehe z. B. ADR-0033, ADR-0035 Punkt 6).
+
+**Entscheidung:** Stapelverarbeitungs-Konsole bleibt in `FEATURES.md`
+explizit „Zurückgestellt" (nicht „Nicht begonnen" — das würde die
+fehlende Schrittzuordnung verschleiern), mit Verweis auf diese ADR.
+Kein neuer Bauschritt in dieser Phase; bei Bedarf eigener Schritt in
+einer späteren Phase, sobald ein Batch-Operationen-Log tatsächlich
+gebraucht wird (z. B. wenn ein weiteres Feature eine Undo-fähige
+Gruppierung mehrerer Katalogmutationen voraussetzt).
+
+**Konsequenzen:** Alle anderen 37 der 38 in ADR-0035 aufgezählten Punkte
+sind mit Schritt 11 vollständig umgesetzt (bzw. mit dokumentierter
+bewusster Vereinfachung, siehe ADR-0035 Punkte 1–8) — Phase 9 gilt mit
+dieser einen, hier explizit benannten und begründeten Ausnahme als
+abgeschlossen.

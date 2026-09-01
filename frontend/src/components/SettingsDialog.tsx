@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { useFocusTrap } from "../lib/a11y";
 import type { UiSettingsDto } from "../lib/tauri";
 import { resetWorkspaceLayout } from "../lib/workspaceLayout";
 import { useAppStore } from "../store";
@@ -34,6 +35,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const uiSettings = useAppStore((s) => s.uiSettings);
   const loadUiSettings = useAppStore((s) => s.loadUiSettings);
   const saveUiSettings = useAppStore((s) => s.saveUiSettings);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
 
   useEffect(() => {
     if (open && !uiSettings) void loadUiSettings();
@@ -49,6 +52,10 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Einstellungen"
         className="flex max-h-[80vh] w-full max-w-lg flex-col rounded-lg border border-border bg-bg-raised shadow-xl"
         onClick={(event) => event.stopPropagation()}
       >

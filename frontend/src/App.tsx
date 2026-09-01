@@ -43,6 +43,7 @@ export default function App() {
   const refreshFolders = useAppStore((s) => s.refreshFolders);
   const refreshCatalogStatus = useAppStore((s) => s.refreshCatalogStatus);
   const loadUiSettings = useAppStore((s) => s.loadUiSettings);
+  const uiSettings = useAppStore((s) => s.uiSettings);
   const settingsDialogOpen = useAppStore((s) => s.settingsDialogOpen);
   const setSettingsDialogOpen = useAppStore((s) => s.setSettingsDialogOpen);
   const stepSelection = useAppStore((s) => s.stepSelection);
@@ -61,6 +62,22 @@ export default function App() {
     void refreshCatalogStatus();
     void loadUiSettings();
   }, [refreshFolders, refreshCatalogStatus, loadUiSettings]);
+
+  // Barrierefreiheit (Phase 10 Schritt 6): Kontrastmodus/UI-Skalierung/
+  // reduzierte Bewegung wirken app-weit auf `<html>`, nicht nur innerhalb
+  // dieser Komponente — deshalb hier statt in `SettingsDialog.tsx`
+  // angewendet, das nur die Werte schreibt. Theme (Dark/Hell/Akzentfarbe)
+  // folgt in Schritt 7 nach demselben Muster.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (uiSettings?.high_contrast) {
+      root.setAttribute("data-contrast", "high");
+    } else {
+      root.removeAttribute("data-contrast");
+    }
+    root.classList.toggle("apx-reduce-motion", uiSettings?.reduced_motion ?? false);
+    root.style.fontSize = uiSettings ? `${uiSettings.ui_scale_percent}%` : "";
+  }, [uiSettings]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {

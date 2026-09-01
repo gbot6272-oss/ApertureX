@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
+import { useFocusTrap } from "../lib/a11y";
 import {
   FIXED_LOCAL_SHORTCUTS,
   KEYBINDING_ACTIONS,
@@ -32,6 +33,8 @@ function displayKey(normalized: string): string {
 export function KeybindingsCheatsheet({ open, onClose }: KeybindingsCheatsheetProps) {
   const [rebindingId, setRebindingId] = useState<string | null>(null);
   const [, forceRerender] = useState(0);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
 
   if (!open) return null;
 
@@ -49,6 +52,10 @@ export function KeybindingsCheatsheet({ open, onClose }: KeybindingsCheatsheetPr
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Tastenkürzel"
         className="flex max-h-[80vh] w-full max-w-lg flex-col rounded-lg border border-border bg-bg-raised shadow-xl"
         onClick={(event) => event.stopPropagation()}
       >

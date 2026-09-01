@@ -96,6 +96,7 @@ statt stillschweigend übergangen.
 | `tailwindcss` (4) | MIT | Styling | Unkritisch |
 | `@tanstack/react-virtual` | MIT | Virtualisierter Filmstreifen | Unkritisch |
 | `@tauri-apps/api` | MIT OR Apache-2.0 | Tauri-Frontend-Bindings | Unkritisch |
+| `@tauri-apps/cli` | Apache-2.0 OR MIT | Installer-Bau (`tauri build`), Phase 10 Schritt 11 | Reines Build-Werkzeug (DevDependency), nicht im ausgelieferten App-Bundle enthalten — trotzdem eingetragen (siehe Regel oben: jede hinzugefügte Bibliothek) |
 
 ## Testdaten (`testdata/`)
 

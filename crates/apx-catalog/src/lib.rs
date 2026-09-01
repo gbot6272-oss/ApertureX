@@ -41,6 +41,7 @@ pub use models::{
     FilterCriteria, Folder, HistoryPosition, Keyword, NewPhoto, Photo, Preset, PresetFolder,
     PresetVersion, Preview, PreviewLevel, Snapshot, Stack, TagRule, Template,
 };
+pub use repository::share::ShareDiff;
 
 pub struct Catalog {
     conn: Mutex<Connection>,
@@ -773,6 +774,35 @@ impl Catalog {
     pub fn delete_template(&self, id: TemplateId) -> Result<()> {
         let conn = self.lock()?;
         repository::templates::delete(&conn, id)
+    }
+
+    // ---- Kollaborationsmodus (Phase 9 Schritt 10) --------------------------
+
+    /// Findet ein lokales Foto anhand seines Inhalts-Hashes — der
+    /// Matching-Schlüssel beim Import einer `.apxs`-Freigabedatei (siehe
+    /// [`repository::photos::find_by_content_hash`]s Moduldoku). `None`,
+    /// wenn kein lokales Foto denselben Inhalt hat.
+    pub fn find_photo_by_content_hash(&self, hash: &str) -> Result<Option<Photo>> {
+        let conn = self.lock()?;
+        repository::photos::find_by_content_hash(&conn, hash)
+    }
+
+    /// Vergleicht den lokalen aktuellen Bearbeitungsstand eines Fotos mit
+    /// einem importierten Stand (siehe [`ShareDiff`]) — reiner Vergleich,
+    /// ändert nichts am Katalog.
+    pub fn diff_share_edit(
+        &self,
+        local_edl: &EdlEnvelope,
+        local_created_at: OffsetDateTime,
+        incoming_edl: &EdlEnvelope,
+        incoming_created_at: OffsetDateTime,
+    ) -> ShareDiff {
+        repository::share::diff_edit(
+            local_edl,
+            local_created_at,
+            incoming_edl,
+            incoming_created_at,
+        )
     }
 }
 

@@ -48,6 +48,7 @@ import type {
   FilterCriteriaDto,
   FolderDto,
   HistoryPositionDto,
+  ImportShareResultDto,
   ImportModeDto,
   ImportPresetDto,
   KeywordDto,
@@ -1253,6 +1254,21 @@ interface LibraryViewsSlice {
   pluginRunning: boolean;
   pluginStatus: string | null;
   runPluginOnCurrent: (pluginPath: string, param: number) => Promise<void>;
+
+  /** Kollaborationsmodus (Phase 9 Schritt 10, siehe `DECISIONS.md`
+   * ADR-0035 Punkt 4) — asynchroner Export→Weitergabe→Import→
+   * Konfliktauflösung-Ablauf über `.apxs`-Dateien, kein Echtzeit-
+   * Mehrbenutzer-Modus. */
+  shareRunning: boolean;
+  shareExportStatus: string | null;
+  shareImportResult: ImportShareResultDto | null;
+  exportSelectionAsShare: (photoIds: string[], name: string) => Promise<void>;
+  importShareFile: () => Promise<void>;
+  resolveShareConflictAction: (
+    photoId: string,
+    incomingEdlJson: string,
+    resolution: "mine" | "theirs" | "virtual_copy",
+  ) => Promise<void>;
 }
 
 export type AppStore = CatalogSlice &
@@ -4513,6 +4529,61 @@ export const useAppStore = create<AppStore>()(
           state.pluginRunning = false;
         });
       }
+    },
+
+    shareRunning: false,
+    shareExportStatus: null,
+    shareImportResult: null,
+
+    exportSelectionAsShare: async (photoIds, name) => {
+      set((state) => {
+        state.shareRunning = true;
+      });
+      try {
+        const path = await api.exportCatalogShare(photoIds, name);
+        set((state) => {
+          state.shareExportStatus = path ? `Freigabe geschrieben: ${path}` : null;
+        });
+      } catch (err) {
+        set((state) => {
+          state.shareExportStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.shareRunning = false;
+        });
+      }
+    },
+
+    importShareFile: async () => {
+      set((state) => {
+        state.shareRunning = true;
+      });
+      try {
+        const result = await api.importCatalogShare();
+        set((state) => {
+          if (result) state.shareImportResult = result;
+        });
+      } catch (err) {
+        set((state) => {
+          state.shareExportStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.shareRunning = false;
+        });
+      }
+    },
+
+    resolveShareConflictAction: async (photoId, incomingEdlJson, resolution) => {
+      await api.resolveShareConflict(photoId, incomingEdlJson, resolution);
+      set((state) => {
+        if (state.shareImportResult) {
+          state.shareImportResult.conflicts = state.shareImportResult.conflicts.filter(
+            (conflict) => conflict.photo_id !== photoId,
+          );
+        }
+      });
     },
     };
   }),

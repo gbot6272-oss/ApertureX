@@ -4393,6 +4393,305 @@ pub fn run_plugin_custom_effect(
     write_derived_png(&source_path, "plugin", width, height, &pixels)
 }
 
+// ---- Fortgeschrittenes: Kollaborationsmodus (Phase 9 Schritt 10, siehe
+// PLAN.md, DECISIONS.md ADR-0035 Punkt 4) -----------------------------------
+//
+// Asynchroner Export→Weitergabe→Import→Konfliktauflösung-Ablauf statt
+// Echtzeit-Mehrbenutzer-Modus (kein Live-Cursor/keine Präsenz/kein CRDT) —
+// `apx-catalog` bleibt dabei unverändert ein einzelner `Mutex<Connection>`
+// (ADR-0008). Eine `.apxs`-Datei enthält **keine Pixel-Bytes**, nur den
+// committeten EDL-Stand je Foto, gematcht über den bereits vorhandenen
+// `content_hash` — spiegelt `ApxPresetFile`/`ApxTemplateFile` oben.
+
+/// Ein einzelnes Foto in einer `.apxs`-Freigabedatei — `edl` ist bewusst
+/// eingebettetes JSON (wie `ApxPresetFile::edl_subset`), kein noch einmal
+/// string-kodierter String.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ApxSharePhoto {
+    content_hash: String,
+    filename: String,
+    edl: apx_core::EdlEnvelope,
+    /// RFC3339 — der `edits.created_at`-Zeitstempel des exportierten
+    /// Bearbeitungsstands, Grundlage für die "zuletzt geändert
+    /// gewinnt"-Standardregel beim Import.
+    edited_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ApxShareFile {
+    schema_version: u32,
+    name: String,
+    photos: Vec<ApxSharePhoto>,
+}
+
+const APX_SHARE_SCHEMA_VERSION: u32 = 1;
+
+fn format_share_timestamp(at: time::OffsetDateTime) -> Result<String, String> {
+    at.format(&time::format_description::well_known::Rfc3339)
+        .map_err(|err| format!("Zeitstempel nicht formatierbar: {err}"))
+}
+
+/// Öffnet einen Speichern-Dialog und schreibt die aktuellen Bearbeitungs-
+/// stände von `photo_ids` als `.apxs`-Datei. Fotos ohne `content_hash`
+/// (z. B. vor Schritt 8.2 importiert) können nicht gematcht werden und
+/// werden übersprungen — bleiben am Ende keine übrig, schlägt der Befehl
+/// fehl statt eine leere Datei zu schreiben. `None`, wenn der Dialog
+/// abgebrochen wurde.
+#[tauri::command]
+pub async fn export_catalog_share(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    name: String,
+) -> Result<Option<String>, String> {
+    let ids = parse_photo_ids(photo_ids)?;
+    let mut photos = Vec::new();
+    for id in ids {
+        let photo = state.catalog.get_photo(id).map_err(|err| err.to_string())?;
+        let Some(content_hash) = photo.content_hash.clone() else {
+            continue;
+        };
+        let (edl, edited_at) = match state
+            .catalog
+            .current_edit(id)
+            .map_err(|err| err.to_string())?
+        {
+            apx_catalog::HistoryPosition::Neutral => (
+                apx_pipeline::edl::to_envelope(&apx_pipeline::edl::EdlV4::default())
+                    .map_err(|err| err.to_string())?,
+                time::OffsetDateTime::UNIX_EPOCH,
+            ),
+            apx_catalog::HistoryPosition::At(entry) => (entry.edl, entry.created_at),
+        };
+        photos.push(ApxSharePhoto {
+            content_hash,
+            filename: photo.filename,
+            edl,
+            edited_at: format_share_timestamp(edited_at)?,
+        });
+    }
+    if photos.is_empty() {
+        return Err(
+            "Keines der ausgewählten Fotos hat einen Inhalts-Hash — keine Freigabe möglich"
+                .to_string(),
+        );
+    }
+
+    let file = ApxShareFile {
+        schema_version: APX_SHARE_SCHEMA_VERSION,
+        name: name.clone(),
+        photos,
+    };
+    let json = serde_json::to_string_pretty(&file)
+        .map_err(|err| format!("Freigabe nicht serialisierbar: {err}"))?;
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("Aperture X Freigabe", &["apxs"])
+        .set_file_name(format!("{name}.apxs"))
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|err| format!("Speichern-Dialog fehlgeschlagen: {err}"))?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|err| format!("Ungültiger Pfad: {err}"))?;
+    std::fs::write(&path, json)
+        .map_err(|err| format!("Datei '{}' nicht schreibbar: {err}", path.display()))?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
+/// Ein Foto aus der Freigabedatei, zu dem kein lokales Foto mit demselben
+/// `content_hash` gefunden wurde.
+#[derive(Debug, Clone, Serialize)]
+pub struct UnmatchedSharePhotoDto {
+    pub filename: String,
+    pub content_hash: String,
+}
+
+/// Ein Foto, bei dem der lokale und der importierte Bearbeitungsstand
+/// voneinander abweichen. `incoming_edl_json` wird unverändert an
+/// [`resolve_share_conflict`] zurückgereicht — das Frontend muss den
+/// Inhalt nicht selbst verstehen.
+#[derive(Debug, Clone, Serialize)]
+pub struct ShareConflictDto {
+    pub photo_id: String,
+    pub filename: String,
+    pub incoming_edl_json: String,
+    /// Vorschlag nach der Standardregel „zuletzt geändert gewinnt" — nur
+    /// eine Anzeige-Empfehlung, keine automatische Anwendung.
+    pub prefer_incoming: bool,
+    pub local_edited_at: String,
+    pub incoming_edited_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportShareResultDto {
+    pub name: String,
+    pub unmatched: Vec<UnmatchedSharePhotoDto>,
+    /// Dateinamen mit identischem EDL-Inhalt — kein Konflikt, keine Aktion.
+    pub unchanged: Vec<String>,
+    pub conflicts: Vec<ShareConflictDto>,
+}
+
+/// Öffnet einen Öffnen-Dialog, liest eine `.apxs`-Datei und berechnet den
+/// Abgleich gegen den lokalen Katalog (`Catalog::find_photo_by_content_hash`
+/// + `Catalog::diff_share_edit`) — **schreibt dabei nichts** in den
+/// Katalog. Konflikte müssen einzeln über [`resolve_share_conflict`]
+/// aufgelöst werden. `None`, wenn der Dialog abgebrochen wurde.
+#[tauri::command]
+pub async fn import_catalog_share(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<ImportShareResultDto>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("Aperture X Freigabe", &["apxs"])
+        .pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|err| format!("Öffnen-Dialog fehlgeschlagen: {err}"))?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|err| format!("Ungültiger Pfad: {err}"))?;
+    let text = std::fs::read_to_string(&path)
+        .map_err(|err| format!("Datei '{}' nicht lesbar: {err}", path.display()))?;
+    let file: ApxShareFile = serde_json::from_str(&text).map_err(|err| {
+        format!(
+            "Datei '{}' ist keine gültige .apxs-Datei: {err}",
+            path.display()
+        )
+    })?;
+    if file.schema_version > APX_SHARE_SCHEMA_VERSION {
+        return Err(format!(
+            "Datei '{}' hat Schema-Version {}, diese Aperture-X-Version kennt nur {}",
+            path.display(),
+            file.schema_version,
+            APX_SHARE_SCHEMA_VERSION
+        ));
+    }
+
+    let mut unmatched = Vec::new();
+    let mut unchanged = Vec::new();
+    let mut conflicts = Vec::new();
+    for shared in file.photos {
+        let Some(local) = state
+            .catalog
+            .find_photo_by_content_hash(&shared.content_hash)
+            .map_err(|err| err.to_string())?
+        else {
+            unmatched.push(UnmatchedSharePhotoDto {
+                filename: shared.filename,
+                content_hash: shared.content_hash,
+            });
+            continue;
+        };
+        let (local_edl, local_edited_at) = match state
+            .catalog
+            .current_edit(local.id)
+            .map_err(|err| err.to_string())?
+        {
+            apx_catalog::HistoryPosition::Neutral => (
+                apx_pipeline::edl::to_envelope(&apx_pipeline::edl::EdlV4::default())
+                    .map_err(|err| err.to_string())?,
+                time::OffsetDateTime::UNIX_EPOCH,
+            ),
+            apx_catalog::HistoryPosition::At(entry) => (entry.edl, entry.created_at),
+        };
+        let incoming_edited_at = time::OffsetDateTime::parse(
+            &shared.edited_at,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .map_err(|err| format!("Ungültiger Zeitstempel in Freigabedatei: {err}"))?;
+
+        match state.catalog.diff_share_edit(
+            &local_edl,
+            local_edited_at,
+            &shared.edl,
+            incoming_edited_at,
+        ) {
+            apx_catalog::ShareDiff::Identical => unchanged.push(shared.filename),
+            apx_catalog::ShareDiff::Conflict { prefer_incoming } => {
+                let incoming_edl_json =
+                    shared.edl.to_json_string().map_err(|err| err.to_string())?;
+                conflicts.push(ShareConflictDto {
+                    photo_id: local.id.to_string(),
+                    filename: shared.filename,
+                    incoming_edl_json,
+                    prefer_incoming,
+                    local_edited_at: format_share_timestamp(local_edited_at)?,
+                    incoming_edited_at: format_share_timestamp(incoming_edited_at)?,
+                });
+            }
+        }
+    }
+
+    Ok(Some(ImportShareResultDto {
+        name: file.name,
+        unmatched,
+        unchanged,
+        conflicts,
+    }))
+}
+
+/// Löst einen einzelnen von [`import_catalog_share`] gemeldeten Konflikt
+/// auf. `resolution`: `"mine"` (nichts tun — der lokale Stand bleibt
+/// aktiv), `"theirs"` (den importierten Stand committen, wie jede andere
+/// Entwickeln-Bearbeitung) oder `"virtual_copy"` (eine neue virtuelle
+/// Kopie anlegen — Schritt 1 — und den importierten Stand dort committen,
+/// sodass beide Bearbeitungen erhalten bleiben).
+#[tauri::command]
+pub fn resolve_share_conflict(
+    state: State<'_, AppState>,
+    photo_id: String,
+    incoming_edl_json: String,
+    resolution: String,
+) -> Result<(), String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let envelope =
+        apx_core::EdlEnvelope::from_json_str(&incoming_edl_json).map_err(|err| err.to_string())?;
+    match resolution.as_str() {
+        "mine" => Ok(()),
+        "theirs" => {
+            state
+                .catalog
+                .commit_edit(photo_id, &envelope, Some("Kollaboration: übernommen"))
+                .map_err(|err| err.to_string())?;
+            Ok(())
+        }
+        "virtual_copy" => {
+            let copy_id = state
+                .catalog
+                .create_virtual_copy(photo_id)
+                .map_err(|err| err.to_string())?;
+            state
+                .catalog
+                .commit_edit(
+                    copy_id,
+                    &envelope,
+                    Some("Kollaboration: als virtuelle Kopie"),
+                )
+                .map_err(|err| err.to_string())?;
+            Ok(())
+        }
+        other => Err(format!(
+            "Unbekannte Konfliktauflösung '{other}' — erwartet 'mine'/'theirs'/'virtual_copy'"
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

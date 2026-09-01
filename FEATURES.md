@@ -303,7 +303,7 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Skript-API (Lua/Rhai) + Plugin-System mit stabilem ABI — Phase 9 — Status: Fertig (abweichend, siehe PLAN.md Schritt 9) — Rhai statt Lua (reines Rust, sandboxbar, kein C-Interpreter nötig); Plugin-ABI ehrlich begrenzt (ADR-0035 Punkt 3): versionierte, geprüfte Kompatibilität für **einen** festen Erweiterungspunkt (Custom-Effekt), keine Zusage unbegrenzter künftiger Binärkompatibilität
 - [x] Zeitleisten-Ansicht der Bearbeitungshistorie — Phase 9 — Status: Fertig (siehe PLAN.md Schritt 7) — `HistoryTimelineDialog.tsx`, Punktposition proportional zu `created_at`, Klick springt per neuem `goto_develop_edit`/`repository::edits::goto` direkt zum Stand
 - [x] Verlaufs-Vergleich (zwei Schritte gegenüberstellen) — Phase 9 — Status: Fertig (siehe PLAN.md Schritt 7) — dasselbe Diff-Muster wie `PresetVersionsDialog.tsx` (Phase 5 Schritt 8), derselbe Sektionsumfang wie das Presets-System
-- [ ] Kollaborationsmodus (Katalog-Teilfreigabe, Merge, Konfliktauflösung) — Phase 9 — Status: Nicht begonnen
+- [x] Kollaborationsmodus (Katalog-Teilfreigabe, Merge, Konfliktauflösung) — Phase 9 — Status: Fertig (abweichend, siehe PLAN.md Schritt 10) — asynchroner Export→Weitergabe→Import→Konfliktauflösung-Ablauf über `.apxs`-Dateien (keine Pixel-Bytes, Matching per `content_hash`), kein Echtzeit-Mehrbenutzer-Modus (ADR-0035 Punkt 4)
 - [ ] Barrierefreiheit (Tastatur, Screenreader, Kontrastmodus, UI-Skalierung 75–200 %) — Phase 10 — Status: Nicht begonnen
 
 ## 4. UI-Anforderungen

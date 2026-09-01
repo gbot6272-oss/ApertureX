@@ -1188,3 +1188,52 @@ export function runDevelopScript(photoId: string, script: string): Promise<void>
 export function runPluginCustomEffect(photoId: string, pluginPath: string, param: number): Promise<string> {
   return invoke<string>("run_plugin_custom_effect", { photoId, pluginPath, param });
 }
+
+// ---- Fortgeschrittenes: Kollaborationsmodus (Phase 9 Schritt 10, siehe
+// DECISIONS.md ADR-0035 Punkt 4) ---------------------------------------------
+
+export interface UnmatchedSharePhotoDto {
+  filename: string;
+  content_hash: string;
+}
+
+export interface ShareConflictDto {
+  photo_id: string;
+  filename: string;
+  incoming_edl_json: string;
+  prefer_incoming: boolean;
+  local_edited_at: string;
+  incoming_edited_at: string;
+}
+
+export interface ImportShareResultDto {
+  name: string;
+  unmatched: UnmatchedSharePhotoDto[];
+  unchanged: string[];
+  conflicts: ShareConflictDto[];
+}
+
+/** Öffnet einen Speichern-Dialog und schreibt die aktuellen Bearbeitungs-
+ * stände von `photoIds` als `.apxs`-Datei (keine Pixel-Bytes, Matching über
+ * `content_hash`). `null`, wenn der Dialog abgebrochen wurde. */
+export function exportCatalogShare(photoIds: string[], name: string): Promise<string | null> {
+  return invoke<string | null>("export_catalog_share", { photoIds, name });
+}
+
+/** Öffnet einen Öffnen-Dialog, liest eine `.apxs`-Datei und berechnet den
+ * Abgleich gegen den lokalen Katalog — schreibt dabei nichts. `null`, wenn
+ * der Dialog abgebrochen wurde. */
+export function importCatalogShare(): Promise<ImportShareResultDto | null> {
+  return invoke<ImportShareResultDto | null>("import_catalog_share", {});
+}
+
+/** Löst einen einzelnen Konflikt aus [`ImportShareResultDto.conflicts`]
+ * auf: `"mine"` (nichts tun), `"theirs"` (importierten Stand committen)
+ * oder `"virtual_copy"` (als neue virtuelle Kopie behalten). */
+export function resolveShareConflict(
+  photoId: string,
+  incomingEdlJson: string,
+  resolution: "mine" | "theirs" | "virtual_copy",
+): Promise<void> {
+  return invoke<void>("resolve_share_conflict", { photoId, incomingEdlJson, resolution });
+}

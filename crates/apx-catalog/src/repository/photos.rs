@@ -231,6 +231,25 @@ pub(crate) fn list_duplicate_groups(conn: &Connection) -> Result<Vec<Vec<Photo>>
     Ok(groups)
 }
 
+/// Erstes Foto mit passendem `content_hash`, oder `None`. Das
+/// Matching-Verfahren des Kollaborationsmodus (Phase 9 Schritt 10, siehe
+/// `DECISIONS.md` ADR-0035 Punkt 4) — eine importierte `.apxs`-
+/// Freigabedatei enthält keine Pixel-Bytes, nur den Hash, über den ein
+/// gleiches Foto im lokalen Katalog wiedergefunden wird. Existieren mehrere
+/// lokale Duplikate desselben Inhalts (siehe `list_duplicate_groups`
+/// oben), gewinnt bewusst das erste nach Dateiname — derselbe
+/// „keine feste Anspruchshaltung auf Eindeutigkeit"-Kompromiss wie dort.
+pub(crate) fn find_by_content_hash(conn: &Connection, hash: &str) -> Result<Option<Photo>> {
+    let sql = format!(
+        "SELECT {SELECT_COLUMNS} FROM photos WHERE content_hash = ?1 ORDER BY filename LIMIT 1"
+    );
+    conn.query_row(&sql, params![hash], row_to_raw)
+        .optional()
+        .map_err(map_sqlite_err)?
+        .map(raw_to_photo)
+        .transpose()
+}
+
 /// Alle Fotos mit bekannten GPS-Koordinaten, ordnerübergreifend — für die
 /// Kartenansicht (Phase 8 Schritt 7). Sortiert nach Aufnahmezeit (Fotos
 /// ohne Zeitstempel zuletzt), damit eine Reiserouten-Ansicht direkt daraus
@@ -781,6 +800,33 @@ mod tests {
             vec!["kopie.cr2", "original.cr2"],
             "Gruppe ist nach Dateiname sortiert"
         );
+    }
+
+    #[test]
+    fn find_by_content_hash_returns_the_first_match_by_filename_or_none() {
+        let (conn, folder_id) = setup();
+        let mtime = OffsetDateTime::now_utc()
+            .replace_nanosecond(0)
+            .expect("gültig");
+
+        let mut zebra = sample_photo(folder_id, 1000, mtime);
+        zebra.content_hash = Some("gleicherhash".to_string());
+        zebra.filename = "zebra.cr2".to_string();
+        upsert(&conn, &zebra, OffsetDateTime::now_utc()).expect("ok");
+
+        let mut apfel = sample_photo(folder_id, 1000, mtime);
+        apfel.content_hash = Some("gleicherhash".to_string());
+        apfel.filename = "apfel.cr2".to_string();
+        upsert(&conn, &apfel, OffsetDateTime::now_utc()).expect("ok");
+
+        let found = find_by_content_hash(&conn, "gleicherhash")
+            .expect("ok")
+            .expect("sollte ein Foto finden");
+        assert_eq!(found.filename, "apfel.cr2", "erstes nach Dateiname gewinnt");
+
+        assert!(find_by_content_hash(&conn, "unbekannt")
+            .expect("ok")
+            .is_none());
     }
 
     #[test]

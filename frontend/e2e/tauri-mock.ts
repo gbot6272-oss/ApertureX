@@ -51,6 +51,25 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // `exportPresetToApxFile`/`importPresetFromApxFile`-Tests).
     exportApxPathResult: "/mock/export.apx" as string | null,
     importApxFile: null as { name: string; tags: string[]; conditions_json: string; edl_subset_json: string } | null,
+    // Kollaborationsmodus (Phase 9 Schritt 10) — dieselbe Fixture-Strategie
+    // wie beim `.apx`-Dialog oben: der eigentliche `content_hash`-Abgleich
+    // (`Catalog::find_photo_by_content_hash`/`diff_share_edit`) ist bereits
+    // in `apx-catalog`s Rust-Unit-Tests abgedeckt — hier steuert die
+    // Fixture direkt das Ergebnis, das `import_catalog_share` zurückgäbe.
+    exportSharePathResult: "/mock/export.apxs" as string | null,
+    importShareResult: null as {
+      name: string;
+      unmatched: Array<{ filename: string; content_hash: string }>;
+      unchanged: string[];
+      conflicts: Array<{
+        photo_id: string;
+        filename: string;
+        incoming_edl_json: string;
+        prefer_incoming: boolean;
+        local_edited_at: string;
+        incoming_edited_at: string;
+      }>;
+    } | null,
     // KI-Funktionen (Phase 7, siehe DECISIONS.md ADR-0033) — feste,
     // per Fixture überschreibbare Antworten statt einer echten
     // Bildanalyse (die läuft nur im echten Backend).
@@ -430,6 +449,20 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       photosByFolder: Record<string, unknown[]>;
       exportApxPathResult: string | null;
       importApxFile: { name: string; tags: string[]; conditions_json: string; edl_subset_json: string } | null;
+      exportSharePathResult: string | null;
+      importShareResult: {
+        name: string;
+        unmatched: Array<{ filename: string; content_hash: string }>;
+        unchanged: string[];
+        conflicts: Array<{
+          photo_id: string;
+          filename: string;
+          incoming_edl_json: string;
+          prefer_incoming: boolean;
+          local_edited_at: string;
+          incoming_edited_at: string;
+        }>;
+      } | null;
       aiMaskAlpha: { width: number; height: number; alpha_base64: string };
       repairSourceSuggestion: { x: number; y: number };
       sensorSpots: Array<{ x: number; y: number; radius: number; strength: number }>;
@@ -1060,6 +1093,14 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         presetVersions[presetId] = [{ id: versionId, preset_id: presetId, sequence: 1, edl_subset_json: file.edl_subset_json, created_at: now }];
         return { ...preset, tags: [...preset.tags] };
       }
+
+      // ---- Fortgeschrittenes: Kollaborationsmodus (Phase 9 Schritt 10) ----
+      case "export_catalog_share":
+        return fixtures.exportSharePathResult;
+      case "import_catalog_share":
+        return fixtures.importShareResult;
+      case "resolve_share_conflict":
+        return null;
 
       // ---- KI-Funktionen (Phase 7, siehe DECISIONS.md ADR-0033) ----------
       case "generate_ai_mask":

@@ -2656,6 +2656,138 @@ pub fn export_book_pdf(
     })
 }
 
+// ---- Web (Phase 8 Schritt 6) -------------------------------------------
+//
+// Wiederverwendet die Export-Engine komplett: pro Foto rendert
+// `engine::render_to_pixels` wie beim normalen Export, `apx_export::web`
+// baut daraus eine statische HTML-Galerie (Miniaturbilder + Themes) und
+// lädt sie optional per FTP/SFTP hoch (siehe `web.rs`s Moduldoku für den
+// Vertrauensrahmen — kein Host-Key-Pinning, Nutzername/Passwort statt
+// Schlüsseldatei).
+
+fn parse_gallery_theme(theme: &str) -> Result<apx_export::web::GalleryTheme, String> {
+    match theme {
+        "light" => Ok(apx_export::web::GalleryTheme::Light),
+        "dark" => Ok(apx_export::web::GalleryTheme::Dark),
+        "minimal" => Ok(apx_export::web::GalleryTheme::Minimal),
+        other => Err(format!("unbekanntes Galerie-Theme '{other}'")),
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebUploadOptions {
+    /// `"ftp"`/`"sftp"`.
+    pub protocol: String,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub password: String,
+    pub remote_dir: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebGalleryOptions {
+    pub title: String,
+    /// `"light"`/`"dark"`/`"minimal"`.
+    pub theme: String,
+    pub max_edge: Option<u32>,
+    pub upload: Option<WebUploadOptions>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WebGalleryOutcomeDto {
+    pub dest_dir: String,
+    pub photo_count: usize,
+    pub uploaded_count: Option<usize>,
+}
+
+/// Rendert `photo_ids` (mit ihrem aktuellen Bearbeitungsstand) zu einer
+/// statischen HTML-Galerie unter `dest_dir` und lädt sie optional per
+/// FTP/SFTP hoch.
+#[tauri::command]
+pub async fn export_web_gallery(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    dest_dir: String,
+    options: WebGalleryOptions,
+) -> Result<WebGalleryOutcomeDto, String> {
+    if photo_ids.is_empty() {
+        return Err("Keine Fotos für die Galerie ausgewählt".to_string());
+    }
+    let theme = parse_gallery_theme(&options.theme)?;
+
+    let mut photos = Vec::with_capacity(photo_ids.len());
+    for photo_id_str in &photo_ids {
+        let photo_id = parse_photo_id(photo_id_str.clone())?;
+        let photo = state.catalog.get_photo(photo_id).map_err(|err| err.to_string())?;
+        let folder = state.catalog.get_folder(photo.folder_id).map_err(|err| err.to_string())?;
+        let edl = resolve_current_edl(&state.catalog, photo_id)?;
+        let request = apx_export::engine::ExportRequest::new(
+            folder.path.join(&photo.filename),
+            edl,
+            apx_export::format::ExportFormat::Jpeg,
+        );
+        let (width, height, rgba) = apx_export::engine::render_to_pixels(Some(&state.pipeline), &request)
+            .map_err(|err| err.to_string())?;
+        let caption = PathBuf::from(&photo.filename)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| photo.filename.clone());
+        photos.push((width, height, rgba, caption));
+    }
+
+    let outcome = apx_export::web::export_gallery(
+        &photos,
+        &options.title,
+        theme,
+        options.max_edge.unwrap_or(1600),
+        Path::new(&dest_dir),
+    )
+    .map_err(|err| err.to_string())?;
+
+    let uploaded_count = match &options.upload {
+        None => None,
+        Some(upload) => {
+            let remote_dir = upload.remote_dir.clone().unwrap_or_default();
+            match upload.protocol.as_str() {
+                "ftp" => {
+                    let target = apx_export::web::FtpTarget {
+                        host: upload.host.clone(),
+                        port: upload.port,
+                        username: upload.username.clone(),
+                        password: upload.password.clone(),
+                        remote_dir,
+                    };
+                    Some(apx_export::web::upload_via_ftp(&outcome.dest_dir, &target).map_err(|err| err.to_string())?)
+                }
+                "sftp" => {
+                    let target = apx_export::web::SftpTarget {
+                        host: upload.host.clone(),
+                        port: upload.port,
+                        username: upload.username.clone(),
+                        password: upload.password.clone(),
+                        remote_dir,
+                    };
+                    Some(
+                        apx_export::web::upload_via_sftp(&outcome.dest_dir, &target)
+                            .await
+                            .map_err(|err| err.to_string())?,
+                    )
+                }
+                other => return Err(format!("unbekanntes Upload-Protokoll '{other}'")),
+            }
+        }
+    };
+
+    Ok(WebGalleryOutcomeDto {
+        dest_dir: outcome.dest_dir.to_string_lossy().to_string(),
+        photo_count: outcome.photo_count,
+        uploaded_count,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -41,6 +41,10 @@ ab_glyph = "0.2"
 # kein zweiter Text-/Bild-Rendering-Codepfad nötig, siehe `book.rs`s
 # Moduldoku. Damit bleibt der Abhängigkeitsbaum klein.
 printpdf = { version = "0.12.7", default-features = false }
+suppaftp = "11.0.0"
+russh = "0.63.1"
+russh-sftp = "2.4.0"
+tokio = { version = "1.53.1", features = ["io-util"] }
 
 # Die übrigen in ADR-0034 geprüften Abhängigkeiten (suppaftp/russh für
 # Schritt 6, reverse_geocoder/quick-xml für Schritt 7) werden erst im
@@ -49,3 +53,4 @@ printpdf = { version = "0.12.7", default-features = false }
 [dev-dependencies]
 tempfile = "3"
 approx = "0.5"
+tokio = { version = "1.53.1", features = ["rt", "macros"] }

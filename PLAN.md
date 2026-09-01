@@ -763,9 +763,11 @@ Ausnahme von „offline zuerst" in dieser Phase.
   - [x] Tauri-Command `export_book_pdf` + neues `BookDialog.tsx` (Seitenvorlage, Seitenmaße, Druckerei-Preset, optionale Titelseite mit Schriftdatei-Auswahl) + „Buch…"-Knopf in `Header.tsx`, teilt die Fotoauswahl-Quelle mit den übrigen Export-Dialogen
   - [x] Tests (bewusst schlank statt erschöpfend, siehe Nutzerwunsch): 7 neue Rust-Unit-Tests in `apx-export::book` (Slotanzahl je Vorlage, automatische Befüllung inkl. Titelseiten-Sonderfall, Seiten-Pixelmaße, Bildunterschrift-ohne-Schriftdatei-Fehler, PDF-Signatur/leere-Seitenliste), 3 neue Playwright-e2e-Tests in `book-flow.spec.ts` (Knopf-Aktivierung, Export mit Einstellungen, Fehlerfall) statt der bei Schritt 3/4 üblichen zweistelligen Testzahl
 
-- [ ] 6. Web
-  - HTML-/responsiver Galerie-Generator (serverseitiges Rust-Templating, Miniaturbilder über den bestehenden Import-Thumbnail-Verkleinerungspfad), Themes
-  - Upload via FTP/SFTP: `suppaftp` (FTP/FTPS) + `russh`/`russh-sftp` (reines Rust, keine OpenSSL-/libssh2-Systemabhängigkeit)
+- [x] 6. Web
+  - [x] Neues `apx-export::web`-Modul — `generate_gallery_html` baut eine einzelne statische HTML-Datei (reines Rust-String-Templating, kein Template-Engine-Crate) mit eingebettetem CSS für drei Themes (Hell/Dunkel/Minimal); Fotos werden wie bei Druck/Buch über `engine::render_to_pixels` gerendert und als JPEG-Miniaturbilder neben die HTML-Datei geschrieben — kein zweiter Rendering-Pfad
+  - [x] Upload via FTP/SFTP: `suppaftp` (echtes FTP/FTPS, synchron) + `russh`/`russh-sftp` (echtes SFTP, reines Rust, keine OpenSSL-/libssh2-Systemabhängigkeit) — beide laden den erzeugten Ordner rekursiv hoch; SFTP nimmt zur Host-Key-Prüfung bewusst jeden Server-Schlüssel an (`AcceptAnyHostKey`, wie ein `ssh -o StrictHostKeyChecking=no`) statt eines Known-Hosts-Abgleichs, siehe Moduldoku
+  - [x] Tauri-Command `export_web_gallery` (`async fn`, da der SFTP-Upload asynchron läuft — auf Tauris eigenem Tokio-Runtime, kein verschachtelter Runtime) + neues `WebDialog.tsx` (Titel, Theme, optionaler FTP/SFTP-Direkt-Upload mit Zugangsdaten) + „Web…"-Knopf in `Header.tsx`, teilt die Fotoauswahl-Quelle mit den übrigen Export-Dialogen; Zielordner über den bestehenden `select_folder`-Dialog (Ausgabe ist ein Ordner mit mehreren Dateien, kein Einzeldokument wie bei Buch/Drucken)
+  - [x] Tests (bewusst schlank wie Schritt 5): 6 neue Rust-Unit-Tests in `apx-export::web` (HTML-Escaping, Titel-/Foto-Einbettung, leere Fotoliste, Datei-Schreibvorgang, FTP-/SFTP-Fehlerpfad bei unerreichbarem Server), 3 neue Playwright-e2e-Tests in `web-flow.spec.ts` (Knopf-Aktivierung, Export mit Einstellungen, Fehlerfall)
 
 - [ ] 7. Karte
   - GPS aus EXIF (Erweiterung des bestehenden Metadaten-Pfads, `kamadak-exif`/`rawler` lesen GPS-Tags bereits mit), Kartenansicht im Frontend (Leaflet.js + OpenStreetMap-Kacheln — einzige Netzwerk-Abhängigkeit dieser Phase)

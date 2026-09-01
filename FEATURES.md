@@ -277,8 +277,8 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Speichern als JPEG — Phase 8 — Status: Fertig — kein System-Druckertreiber-Zugriff, Ausgabe ist eine druckfertige JPEG-Datei über einen Speichern-unter-Dialog
 
 ### Web
-- [ ] HTML-/responsive Galerie-Generator, Themes — Phase 8 — Status: Nicht begonnen
-- [ ] Upload via FTP/SFTP — Phase 8 — Status: Nicht begonnen
+- [x] HTML-/responsive Galerie-Generator, Themes — Phase 8 — Status: Fertig — `apx_export::web`, eine statische HTML-Datei mit eingebettetem CSS für drei Themes (Hell/Dunkel/Minimal), Fotos als JPEG-Miniaturbilder über denselben Render-Pfad wie Druck/Buch
+- [x] Upload via FTP/SFTP — Phase 8 — Status: Fertig (abweichend, siehe ADR-0034) — echtes FTP/FTPS (`suppaftp`) und echtes SFTP (`russh`/`russh-sftp`, reines Rust); SFTP nimmt jeden Server-Schlüssel an statt eines Known-Hosts-Abgleichs (`AcceptAnyHostKey`)
 
 ### Export
 - [x] Formate JPEG/PNG/TIFF/PSD/DNG/WebP/AVIF/HEIF/JPEG XL — Phase 8 — Status: Fertig (abweichend, siehe ADR-0034 Punkt 1) — JPEG/PNG/TIFF/WebP(verlustfrei)/AVIF echt umgesetzt (`apx_export::format`); PSD/HEIF/JPEG-XL-Export sowie eine DNG-Konvertierung beim Import bleiben zurückgestellt (keine tragfähige reine-Rust-Bibliothek mit Schreibpfad bzw. Lizenzmauer, siehe `apx_export::engine`s Moduldoku)

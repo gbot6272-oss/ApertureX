@@ -57,6 +57,8 @@ import type {
   SlideshowVideoOptions,
   SlideshowVideoOutcomeDto,
   SnapshotDto,
+  WebGalleryOptions,
+  WebGalleryOutcomeDto,
   SpotCandidateDto,
 } from "../lib/tauri";
 import * as undoStackLib from "../lib/undoStack";
@@ -1028,6 +1030,18 @@ interface BookSlice {
   exportBookPdf: (photoIds: string[], destPath: string, options: BookOptions) => Promise<void>;
 }
 
+/** Web-Galerie (Phase 8 Schritt 6) — rendert eine statische HTML-Galerie
+ * (`apx_export::web`) und lädt sie optional per FTP/SFTP hoch. */
+interface WebSlice {
+  webDialogOpen: boolean;
+  openWebDialog: () => void;
+  closeWebDialog: () => void;
+  webExportRunning: boolean;
+  webExportError: string | null;
+  webExportOutcome: WebGalleryOutcomeDto | null;
+  exportWebGallery: (photoIds: string[], destDir: string, options: WebGalleryOptions) => Promise<void>;
+}
+
 export type AppStore = CatalogSlice &
   SelectionSlice &
   ViewerSlice &
@@ -1040,7 +1054,8 @@ export type AppStore = CatalogSlice &
   ExportSlice &
   PrintSlice &
   SlideshowSlice &
-  BookSlice;
+  BookSlice &
+  WebSlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -3545,6 +3560,46 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.bookExportRunning = false;
+        });
+      }
+    },
+
+    // ---- Web (Phase 8 Schritt 6) --------------------------------------
+
+    webDialogOpen: false,
+    webExportRunning: false,
+    webExportError: null,
+    webExportOutcome: null,
+
+    openWebDialog: () => {
+      set((state) => {
+        state.webDialogOpen = true;
+      });
+    },
+
+    closeWebDialog: () => {
+      set((state) => {
+        state.webDialogOpen = false;
+      });
+    },
+
+    exportWebGallery: async (photoIds, destDir, options) => {
+      set((state) => {
+        state.webExportRunning = true;
+        state.webExportError = null;
+      });
+      try {
+        const outcome = await api.exportWebGallery(photoIds, destDir, options);
+        set((state) => {
+          state.webExportOutcome = outcome;
+        });
+      } catch (err) {
+        set((state) => {
+          state.webExportError = err instanceof Error ? err.message : String(err);
+        });
+      } finally {
+        set((state) => {
+          state.webExportRunning = false;
         });
       }
     },

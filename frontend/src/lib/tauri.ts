@@ -730,3 +730,37 @@ export const PRINT_SHOP_PRESET_NAMES = [
 export function exportBookPdf(photoIds: string[], destPath: string, options: BookOptions): Promise<BookOutcomeDto> {
   return invoke<BookOutcomeDto>("export_book_pdf", { photoIds, destPath, options });
 }
+
+// ---- Web (Phase 8 Schritt 6) -----------------------------------------
+
+export type GalleryTheme = "light" | "dark" | "minimal";
+
+export interface WebUploadOptions {
+  /** `"ftp"`/`"sftp"`. */
+  protocol: "ftp" | "sftp";
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  remoteDir?: string;
+}
+
+export interface WebGalleryOptions {
+  title: string;
+  theme: GalleryTheme;
+  maxEdge?: number;
+  upload?: WebUploadOptions;
+}
+
+export interface WebGalleryOutcomeDto {
+  dest_dir: string;
+  photo_count: number;
+  uploaded_count: number | null;
+}
+
+/** Rendert `photoIds` (mit ihrem aktuellen Bearbeitungsstand, wie
+ * {@link exportPhoto}) zu einer statischen HTML-Galerie unter `destDir`
+ * und lädt sie optional per FTP/SFTP hoch (`apx_export::web`). */
+export function exportWebGallery(photoIds: string[], destDir: string, options: WebGalleryOptions): Promise<WebGalleryOutcomeDto> {
+  return invoke<WebGalleryOutcomeDto>("export_web_gallery", { photoIds, destDir, options });
+}

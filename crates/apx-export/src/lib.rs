@@ -29,6 +29,7 @@ pub mod resize;
 pub mod sharpen;
 pub mod video;
 pub mod watermark;
+pub mod web;
 
-// Schritt 5–8 (Buch/Web/Karte/Templates) ergänzen hier jeweils ihr eigenes
-// Modul, sobald sie umgesetzt sind (siehe `PLAN.md`).
+// Schritt 7–8 (Karte/Templates) ergänzen hier jeweils ihr eigenes Modul,
+// sobald sie umgesetzt sind (siehe `PLAN.md`).

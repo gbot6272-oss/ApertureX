@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { selectFolderDialog } from "../lib/tauri";
 import { useAppStore } from "../store";
 import { BookDialog } from "./BookDialog";
+import { WebDialog } from "./WebDialog";
 import { ExportDialog } from "./ExportDialog";
 import { ImportDialog } from "./ImportDialog";
 import { PrintDialog } from "./PrintDialog";
@@ -34,6 +35,9 @@ export function Header() {
   const bookDialogOpen = useAppStore((s) => s.bookDialogOpen);
   const openBookDialog = useAppStore((s) => s.openBookDialog);
   const closeBookDialog = useAppStore((s) => s.closeBookDialog);
+  const webDialogOpen = useAppStore((s) => s.webDialogOpen);
+  const openWebDialog = useAppStore((s) => s.openWebDialog);
+  const closeWebDialog = useAppStore((s) => s.closeWebDialog);
   const [importDialogSource, setImportDialogSource] = useState<string | null>(null);
 
   const exportPhotoIds = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
@@ -182,6 +186,17 @@ export function Header() {
       </button>
 
       <BookDialog open={bookDialogOpen} photoIds={exportPhotoIds} onClose={closeBookDialog} />
+
+      <button
+        type="button"
+        onClick={openWebDialog}
+        disabled={exportPhotoIds.length === 0}
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Web…
+      </button>
+
+      <WebDialog open={webDialogOpen} photoIds={exportPhotoIds} onClose={closeWebDialog} />
 
       <span className="text-xs text-text-muted">Strg/Cmd+K — Befehlspalette</span>
     </header>

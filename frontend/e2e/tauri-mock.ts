@@ -105,6 +105,13 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       byte_size: number;
     },
     bookExportShouldFail: false,
+    // Web (Phase 8 Schritt 6) — HTML-Galerie-Export.
+    webGalleryOutcome: { dest_dir: "/mock/web/galerie", photo_count: 1, uploaded_count: null } as {
+      dest_dir: string;
+      photo_count: number;
+      uploaded_count: number | null;
+    },
+    webExportShouldFail: false,
     ...initialFixtures,
   };
   w.__mockInvokeLog = [] as Array<{ cmd: string; args: unknown }>;
@@ -312,6 +319,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       slideshowVideoShouldFail: boolean;
       bookOutcome: { path: string; page_count: number; byte_size: number };
       bookExportShouldFail: boolean;
+      webGalleryOutcome: { dest_dir: string; photo_count: number; uploaded_count: number | null };
+      webExportShouldFail: boolean;
     };
 
     switch (cmd) {
@@ -803,6 +812,12 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           throw new Error("Test-Stub: Buch-Export fehlgeschlagen");
         }
         return fixtures.bookOutcome;
+      }
+      case "export_web_gallery": {
+        if (fixtures.webExportShouldFail) {
+          throw new Error("Test-Stub: Web-Export fehlgeschlagen");
+        }
+        return fixtures.webGalleryOutcome;
       }
 
       default:

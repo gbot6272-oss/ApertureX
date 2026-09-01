@@ -1,0 +1,10 @@
+[package]
+name = "apx-plugin-abi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Aperture X — versionierte C-ABI-Funktionstabelle für den einen festen Plugin-Erweiterungspunkt (Phase 9 Schritt 9, siehe PLAN.md, DECISIONS.md ADR-0035 Punkt 3). Keine externen Abhängigkeiten — nur `repr(C)`-Typen, von Plugin und Host gleichermaßen eingebunden."
+
+[dependencies]

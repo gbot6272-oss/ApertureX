@@ -4346,6 +4346,53 @@ pub fn stack_astro(
     )
 }
 
+// ---- Fortgeschrittenes: Skript-API (Rhai) + Plugin-System (Phase 9
+// Schritt 9, siehe PLAN.md, DECISIONS.md ADR-0035 Punkt 3) ------------------
+
+/// Führt ein Rhai-Skript gegen den aktuellen Bearbeitungsstand von
+/// `photo_id` aus (`apx_script::run_script` — schmale, primitiv-
+/// typisierte API auf die Grundeinstellungs-Regler, siehe dessen
+/// Moduldoku) und committet das Ergebnis wie jede andere Entwickeln-
+/// Bearbeitung.
+#[tauri::command]
+pub fn run_develop_script(
+    state: State<'_, AppState>,
+    photo_id: String,
+    script: String,
+) -> Result<(), String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let edl = resolve_current_edl(&state.catalog, photo_id)?;
+    let updated = apx_script::run_script(edl, &script).map_err(|err| err.to_string())?;
+    let envelope = apx_pipeline::edl::to_envelope(&updated).map_err(|err| err.to_string())?;
+    state
+        .catalog
+        .commit_edit(photo_id, &envelope, Some("Skript"))
+        .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+/// Lädt ein Plugin (`apx-plugin-host`, prüft die ABI-Version hart, siehe
+/// dessen Moduldoku) und wendet dessen Custom-Effekt auf `photo_id` in
+/// voller Auflösung an — schreibt das Ergebnis als neue PNG-Datei neben
+/// dem Original (derselbe `write_derived_png`-Mechanismus wie Schritt 6:
+/// EDL/Katalogeintrag des Originalfotos bleiben unverändert).
+#[tauri::command]
+pub fn run_plugin_custom_effect(
+    state: State<'_, AppState>,
+    photo_id: String,
+    plugin_path: String,
+    param: f32,
+) -> Result<String, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let (source_path, width, height, mut pixels) = render_photo_full_resolution(&state, photo_id)?;
+    let plugin = apx_plugin_host::LoadedPlugin::load(std::path::Path::new(&plugin_path))
+        .map_err(|err| err.to_string())?;
+    plugin
+        .apply_custom_effect_rgba8(&mut pixels, width, height, param)
+        .map_err(|err| err.to_string())?;
+    write_derived_png(&source_path, "plugin", width, height, &pixels)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

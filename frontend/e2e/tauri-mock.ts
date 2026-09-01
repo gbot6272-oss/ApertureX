@@ -817,6 +817,22 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "stack_astro":
         return importStackResultPhoto(args.photoIds as string[], "astro_stack");
 
+      // ---- Fortgeschrittenes: Skript-API + Plugin-System (Phase 9 Schritt 9) --
+      case "run_develop_script": {
+        const photoId = args.photoId as string;
+        const history = (editHistories[photoId] ??= { entries: [], currentIndex: -1 });
+        const previousEdlJson = history.currentIndex >= 0 ? history.entries[history.currentIndex].edl_json : "{}";
+        history.entries = history.entries.slice(0, history.currentIndex + 1);
+        historyCounter += 1;
+        history.entries.push({ edl_json: previousEdlJson, created_at: new Date(historyCounter).toISOString(), label: "Skript" });
+        history.currentIndex = history.entries.length - 1;
+        return null;
+      }
+      case "run_plugin_custom_effect": {
+        const photoId = args.photoId as string;
+        return `/mock/derived/${photoId}-plugin.png`;
+      }
+
       // ---- Bibliothek: Stapel (Phase 9 Schritt 1) ---------------------------
       case "create_stack": {
         const id = `stack-${nextStackId++}`;

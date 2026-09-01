@@ -1170,3 +1170,21 @@ export function stackPanorama(photoIds: string[]): Promise<StackResultDto> {
 export function stackAstro(photoIds: string[], sigma?: number): Promise<StackResultDto> {
   return invoke<StackResultDto>("stack_astro", { photoIds, sigma: sigma ?? null });
 }
+
+// ---- Fortgeschrittenes: Skript-API (Rhai) + Plugin-System (Phase 9
+// Schritt 9, siehe DECISIONS.md ADR-0035 Punkt 3) ---------------------------
+
+/** Führt ein Rhai-Skript gegen den aktuellen Bearbeitungsstand aus
+ * (schmale, primitiv-typisierte API — siehe `apx_script`s Moduldoku:
+ * `edl.set_exposure(1.5)` statt ganze EDL-Structs) und committet das
+ * Ergebnis. */
+export function runDevelopScript(photoId: string, script: string): Promise<void> {
+  return invoke<void>("run_develop_script", { photoId, script });
+}
+
+/** Lädt ein Plugin (`.so`/`.dylib`/`.dll`, ABI-Version wird hart geprüft)
+ * und wendet dessen Custom-Effekt auf `photoId` an — schreibt eine neue
+ * PNG-Datei neben dem Original, gibt deren Pfad zurück. */
+export function runPluginCustomEffect(photoId: string, pluginPath: string, param: number): Promise<string> {
+  return invoke<string>("run_plugin_custom_effect", { photoId, pluginPath, param });
+}

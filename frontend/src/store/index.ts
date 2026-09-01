@@ -1243,6 +1243,16 @@ interface LibraryViewsSlice {
   runStackHdr: () => Promise<void>;
   runStackPanorama: () => Promise<void>;
   runStackAstro: (sigma?: number) => Promise<void>;
+
+  /** Skript-API + Plugin-System (Phase 9 Schritt 9, siehe
+   * `DECISIONS.md` ADR-0035 Punkt 3). Beide arbeiten auf `developPhotoId`
+   * (dem im Entwickeln-Panel aktiven Foto). */
+  scriptRunning: boolean;
+  scriptStatus: string | null;
+  runDevelopScriptOnCurrent: (script: string) => Promise<void>;
+  pluginRunning: boolean;
+  pluginStatus: string | null;
+  runPluginOnCurrent: (pluginPath: string, param: number) => Promise<void>;
 }
 
 export type AppStore = CatalogSlice &
@@ -4447,6 +4457,60 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.stackingRunning = null;
+        });
+      }
+    },
+
+    scriptRunning: false,
+    scriptStatus: null,
+
+    runDevelopScriptOnCurrent: async (script) => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.scriptRunning = true;
+      });
+      try {
+        await api.runDevelopScript(developPhotoId, script);
+        // Das Backend committet direkt (siehe `apx_app::commands::
+        // run_develop_script`) — das Panel muss den neu aktiven Stand
+        // erst noch nachladen, wie beim Wechsel auf ein anderes Foto.
+        await get().loadDevelopStateForPhoto(developPhotoId);
+        set((state) => {
+          state.scriptStatus = "Skript angewendet";
+        });
+      } catch (err) {
+        set((state) => {
+          state.scriptStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.scriptRunning = false;
+        });
+      }
+    },
+
+    pluginRunning: false,
+    pluginStatus: null,
+
+    runPluginOnCurrent: async (pluginPath, param) => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.pluginRunning = true;
+      });
+      try {
+        const path = await api.runPluginCustomEffect(developPhotoId, pluginPath, param);
+        set((state) => {
+          state.pluginStatus = `Plugin angewendet: ${path}`;
+        });
+      } catch (err) {
+        set((state) => {
+          state.pluginStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.pluginRunning = false;
         });
       }
     },

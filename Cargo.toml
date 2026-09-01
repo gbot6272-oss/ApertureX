@@ -8,6 +8,10 @@ members = [
     "crates/apx-ai",
     "crates/apx-export",
     "crates/apx-stacking",
+    "crates/apx-script",
+    "crates/apx-plugin-abi",
+    "crates/apx-plugin-example",
+    "crates/apx-plugin-host",
     "crates/apx-app",
 ]
 
@@ -30,6 +34,10 @@ apx-pipeline = { path = "crates/apx-pipeline" }
 apx-ai = { path = "crates/apx-ai" }
 apx-export = { path = "crates/apx-export" }
 apx-stacking = { path = "crates/apx-stacking" }
+apx-script = { path = "crates/apx-script" }
+apx-plugin-abi = { path = "crates/apx-plugin-abi" }
+apx-plugin-example = { path = "crates/apx-plugin-example" }
+apx-plugin-host = { path = "crates/apx-plugin-host" }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

@@ -85,6 +85,18 @@ pub enum AppError {
     /// Quellbilder, fehlgeschlagene Registrierung.
     #[error("Stacking fehlgeschlagen: {message}")]
     Stacking { message: String },
+
+    /// Fehler in der Skript-API (`apx-script`, ab Phase 9 Schritt 9,
+    /// siehe `DECISIONS.md` ADR-0035 Punkt 3) — Rhai-Syntaxfehler,
+    /// Laufzeitfehler im Skript, fehlende `edl`-Variable danach.
+    #[error("Skript fehlgeschlagen: {message}")]
+    Script { message: String },
+
+    /// Fehler beim Laden/Ausführen eines Plugins (`apx-plugin-host`, ab
+    /// Phase 9 Schritt 9) — ABI-Versions-Konflikt, fehlendes Symbol,
+    /// Plugin meldet einen Fehlerstatus zurück.
+    #[error("Plugin fehlgeschlagen: {message}")]
+    Plugin { message: String },
 }
 
 impl AppError {
@@ -138,6 +150,18 @@ impl AppError {
 
     pub fn stacking(message: impl Into<String>) -> Self {
         Self::Stacking {
+            message: message.into(),
+        }
+    }
+
+    pub fn script(message: impl Into<String>) -> Self {
+        Self::Script {
+            message: message.into(),
+        }
+    }
+
+    pub fn plugin(message: impl Into<String>) -> Self {
+        Self::Plugin {
             message: message.into(),
         }
     }

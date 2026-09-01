@@ -161,6 +161,8 @@ fn main() {
             commands::stack_hdr,
             commands::stack_panorama,
             commands::stack_astro,
+            commands::run_develop_script,
+            commands::run_plugin_custom_effect,
             commands::create_collection,
             commands::create_smart_collection,
             commands::move_collection_to_folder,

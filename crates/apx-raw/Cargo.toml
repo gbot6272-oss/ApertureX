@@ -1,0 +1,21 @@
+[package]
+name = "apx-raw"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Aperture X — RAW-Dekodierung, Metadaten, Vorschau-Extraktion. Hängt nur von apx-core ab, nicht von apx-catalog."
+
+[dependencies]
+apx-core.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+time.workspace = true
+image.workspace = true
+# RAW-Formatunterstützung. LGPL-2.1 — bewusste Ausnahme, siehe DECISIONS.md ADR-0002.
+rawler = "0.7"
+kamadak-exif = "0.6"
+
+[dev-dependencies]
+approx = "0.5"

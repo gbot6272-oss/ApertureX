@@ -1,0 +1,59 @@
+[package]
+name = "apx-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Aperture X — Tauri-Binary. Reine Verdrahtung: Commands, IPC-Events, Protokoll-Handler. Keine Geschäftslogik."
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+apx-core.workspace = true
+apx-raw.workspace = true
+apx-catalog.workspace = true
+apx-pipeline.workspace = true
+apx-ai.workspace = true
+apx-export.workspace = true
+apx-stacking.workspace = true
+apx-script.workspace = true
+apx-plugin-host.workspace = true
+apx-tether.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+time.workspace = true
+uuid.workspace = true
+walkdir.workspace = true
+rayon.workspace = true
+image.workspace = true
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
+tokio-util = "0.7"
+# Physische Kernanzahl für die Worker-Pool-Größe beim Thumbnail-Import,
+# siehe PHASE1_PROMPT.md Abschnitt 5 ("Parallelität = Anzahl physischer
+# Kerne minus 1"). std::thread::available_parallelism() liefert logische
+# Kerne, nicht physische — dafür braucht es num_cpus.
+num_cpus = "1"
+# Dekodiert die von `convertFileSrc` prozentkodierten apx://-Pfadsegmente,
+# siehe DECISIONS.md ADR-0009.
+percent-encoding = "2"
+# Duplikaterkennung per exaktem Hash (Phase 3, Schritt 8.2, ADR-0027):
+# SHA-256-Streaming-Hash jeder importierten Datei. Bereits transitiv im
+# Cargo.lock vorhanden (MIT OR Apache-2.0) — kein neues Lizenzrisiko.
+sha2.workspace = true
+# KI-Masken-Alpha-Bitmaps als Base64-String über IPC (Phase 7, ADR-0033).
+base64 = "0.22"
+image_hasher = "3.1.1"
+
+[features]
+# Standardmäßig aus — siehe apx-tether/src/lib.rs Moduldoku und
+# THIRD_PARTY.md: libgphoto2 fehlt in dieser Sandbox und im Standard-CI.
+tethering = ["apx-tether/tethering"]
+
+[dev-dependencies]
+tempfile = "3"

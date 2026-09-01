@@ -1,0 +1,9 @@
+{
+  "id": "generic-wide",
+  "display_name": "Generisches Weitwinkel (typische Tonnenverzeichnung)",
+  "matches": ["16-35", "17-40", "14mm", "wide"],
+  "distortion_k1": -0.12,
+  "vignette_amount": 35.0,
+  "ca_red_cyan": 0.6,
+  "ca_blue_yellow": -0.4
+}

@@ -1,0 +1,32 @@
+[package]
+name = "apx-catalog"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Aperture X — SQLite-Katalog, Migrationen, typisierte Repositories. Hängt nur von apx-core ab, nicht von apx-raw."
+
+[dependencies]
+apx-core.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+time.workspace = true
+uuid.workspace = true
+# Kein "time"-Feature: Zeitspalten sind laut Schema INTEGER (Unix-Sekunden),
+# rusqlites eingebaute OffsetDateTime-Konvertierung würde stattdessen TEXT
+# (RFC 3339) erwarten. Die Umwandlung passiert daher manuell in models.rs.
+rusqlite = { version = "0.32", features = ["bundled"] }
+# Ab Phase 5 auch zur Laufzeit gebraucht: `presets.tags_json` wird als
+# `Vec<String>` (de-)serialisiert (siehe repository/presets.rs) — anders
+# als `edit_history.edl_json`/`presets.conditions_json`/
+# `preset_versions.edl_subset_json`, die für apx-catalog opake Strings
+# bleiben (siehe deren Moduldoku).
+serde_json.workspace = true
+# Phase 9 Schritt 1: `FilterCriteria` wird jetzt auch als
+# `smart_criteria_json` gespeichert (intelligente Sammlungen), braucht
+# dafür `Serialize`/`Deserialize`-Ableitung.
+serde.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

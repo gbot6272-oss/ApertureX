@@ -1,0 +1,9 @@
+{
+  "id": "generic-standard",
+  "display_name": "Generisches Standardzoom (leichte Verzeichnung)",
+  "matches": ["24-70", "24-105", "50mm", "standard", "kit"],
+  "distortion_k1": -0.02,
+  "vignette_amount": 15.0,
+  "ca_red_cyan": 0.2,
+  "ca_blue_yellow": -0.1
+}

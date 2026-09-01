@@ -1,0 +1,29 @@
+[package]
+name = "apx-ai"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Aperture X — KI-Funktionen (Phase 7, siehe DECISIONS.md ADR-0033): klassische Bildanalyse-Heuristiken (KI-Masken, Reparatur-Analyse, Auto-Tagging) statt echter ONNX-Runtime-Modellinferenz, echter Anthropic-LLM-Client für den Preset-Generator. Hängt von apx-core/apx-raw/apx-pipeline/apx-catalog ab."
+
+[dependencies]
+apx-core.workspace = true
+apx-raw.workspace = true
+apx-pipeline.workspace = true
+apx-catalog.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rayon.workspace = true
+# Anthropic-Messages-API-Client für den LLM-Preset-Generator (Schritt 4) —
+# rustls-tls statt der systemabhängigen OpenSSL-Variante, damit alle drei
+# CI-Plattformen ohne zusätzliche Systemabhängigkeiten bauen (dieselbe
+# Begründung wie rusqlites "bundled"-Feature in apx-catalog).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["rt"] }
+base64 = "0.22"
+
+[dev-dependencies]
+tempfile = "3"

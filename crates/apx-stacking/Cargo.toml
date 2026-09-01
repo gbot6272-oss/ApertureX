@@ -1,0 +1,14 @@
+[package]
+name = "apx-stacking"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Aperture X — Fokus-/HDR-/Panorama-/Astro-Stacking (Phase 9 Schritt 8, siehe PLAN.md, DECISIONS.md ADR-0035 Punkt 2): reine, deterministische Bildverarbeitung, keine externe Registrierungs-Bibliothek. Hängt nur von apx-core ab, wie apx-ai/apx-export."
+
+[dependencies]
+apx-core.workspace = true
+thiserror.workspace = true
+rayon.workspace = true
+rustfft = "6"

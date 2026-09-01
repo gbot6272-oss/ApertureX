@@ -1,0 +1,28 @@
+[package]
+name = "apx-pipeline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Aperture X — GPU-Bildbearbeitung (EDL, wgpu-Compute-Kette, Tile-Cache, Farbmanagement). Hängt von apx-core und apx-raw ab, nicht von apx-catalog — siehe ARCHITECTURE.md §5 und DECISIONS.md ADR-0012."
+
+[dependencies]
+apx-core.workspace = true
+apx-raw.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rayon.workspace = true
+# GPU-Zugriff (Vulkan/Metal/DX12/GL je Plattform), siehe DECISIONS.md ADR-0012.
+wgpu = "22"
+# Sicheres Byte-Layout für GPU-Uniform-Puffer (Pod/Zeroable-Derives).
+bytemuck = { version = "1", features = ["derive"] }
+# Blockiert auf wgpus async-API, ohne dem Crate eine eigene Async-Runtime
+# aufzuzwingen (apx-app nutzt Tokio, Tests/andere Aufrufer sollen das nicht müssen).
+pollster = "0.3"
+
+[dev-dependencies]
+approx = "0.5"
+tempfile = "3"

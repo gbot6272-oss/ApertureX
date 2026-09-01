@@ -1,0 +1,23 @@
+[package]
+name = "apx-plugin-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Aperture X — Plugin-Lader (Phase 9 Schritt 9, siehe PLAN.md, DECISIONS.md ADR-0035 Punkt 3): lädt eine Plugin-`cdylib` per `libloading`, prüft die ABI-Version hart (lehnt jede Abweichung ab) und bietet eine sichere Rust-API für den einen unterstützten Erweiterungspunkt (Custom-Effekt)."
+
+[dependencies]
+apx-core.workspace = true
+apx-plugin-abi.workspace = true
+thiserror.workspace = true
+libloading = "0.9"
+
+[dev-dependencies]
+# Nur zum Erzwingen des Builds: `apx-plugin-example` ist als `cdylib`
+# deklariert, wird aber sonst von nichts direkt gelinkt (Plugins werden
+# zur Laufzeit per Dateipfad geladen, nicht zur Kompilierzeit verlinkt).
+# Als Dev-Dependency hier sorgt Cargo dafür, dass `cargo test -p
+# apx-plugin-host` die `.so`/`.dylib`/`.dll`-Datei tatsächlich baut,
+# bevor der Integrationstest unten versucht, sie per `dlopen` zu laden.
+apx-plugin-example.workspace = true

@@ -1,0 +1,59 @@
+[package]
+name = "apx-export"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Aperture X — Export-Engine (Phase 8, siehe DECISIONS.md ADR-0034): gemeinsamer Renderpfad für Drucken/Diashow/Buch/Web (Formate, Größenbegrenzung, Ausgabeschärfung, ICC-Farbmanagement, Wasserzeichen, Metadaten-Filter, Export-Warteschlange). Hängt von apx-core/apx-raw/apx-pipeline/apx-catalog ab, rendert über apx_pipeline::develop::render_rgba8 — kein zweiter Rendering-Codepfad."
+
+[dependencies]
+apx-core.workspace = true
+apx-raw.workspace = true
+apx-pipeline.workspace = true
+apx-catalog.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rayon.workspace = true
+# WebP (verlustfrei, reines Rust über image-webp) + AVIF (verlustbehaftet
+# über ravif/rav1e, ebenfalls reines Rust) zusätzlich zu den vom Workspace
+# vorgegebenen JPEG/PNG/TIFF-Features — siehe ADR-0034 Punkt 1.
+image = { workspace = true, features = ["webp", "avif"] }
+# Echtes ICC-Farbmanagement für den Export (ADR-0034 Punkt 1, Schritt 2)
+# — anders als der frühere, nie verdrahtete Cargo.toml-Eintrag aus
+# Phase 1 (siehe `THIRD_PARTY.md`), diesmal mit echtem Aufrufer:
+# Konvertierung gerenderter sRGB-Pixel in ein Ziel-Ausgabeprofil vor der
+# Kodierung. "static"-Feature bündelt Little-CMS2 als C-Quelle mit,
+# keine Systembibliothek nötig (dieselbe Bevorzugung wie rusqlites
+# "bundled"-Feature).
+lcms2 = { version = "6", features = ["static"] }
+# Wasserzeichen-Textrasterisierung (reines Rust, keine Systemschrift-API).
+ab_glyph = "0.2"
+# PDF-Erzeugung fürs Buch-Modul (Schritt 5). **Bewusst ohne
+# Standard-Features** ("html" zieht `azul-layout`/HTML-Textlayout nach
+# sich, "images" einen eigenen Bilddecoder) — eine Buchseite ist bei uns
+# immer schon ein fertig komponiertes RGBA8-Bild (Fotos über
+# `print::compose_page`, Textfelder über `watermark::apply_text_at`,
+# derselbe Renderpfad wie Drucken/Diashow), das `book.rs` direkt als
+# `printpdf::RawImage { pixels: RawImageData::U8(..), .. }` einbettet —
+# kein zweiter Text-/Bild-Rendering-Codepfad nötig, siehe `book.rs`s
+# Moduldoku. Damit bleibt der Abhängigkeitsbaum klein.
+printpdf = { version = "0.12.7", default-features = false }
+suppaftp = "11.0.0"
+russh = "0.63.1"
+russh-sftp = "2.4.0"
+tokio = { version = "1.53.1", features = ["io-util"] }
+# Vollständig offline Reverse-Geocoding fürs Karte-Modul (Schritt 7) —
+# bündelt einen GeoNames-Auszug (`cities.csv`, ~7.6 MB) direkt im Crate,
+# kein Netzwerkaufruf, kein zusätzlicher Datensatz-Download nötig (anders
+# als bei `printpdf`/`azul-layout` in Schritt 5 unproblematisch klein).
+reverse_geocoder = "4.1.1"
+# GPX-Tracklog-Import (Schritt 7) — reines Rust, kein XML-Systemparser.
+quick-xml = "0.42.0"
+
+[dev-dependencies]
+tempfile = "3"
+approx = "0.5"
+tokio = { version = "1.53.1", features = ["rt", "macros"] }

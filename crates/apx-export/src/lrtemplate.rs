@@ -82,23 +82,49 @@ fn escape_lua_string(text: &str) -> String {
 /// benanntes Preset. `id` wird vom Aufrufer übergeben (die eigene
 /// Preset-ID aus dem Katalog) statt hier zufällig erzeugt — siehe
 /// Moduldoku zur bewussten Vereinfachung.
-pub fn generate_lrtemplate(name: &str, id: &str, basic: &BasicAdjustments, hsl: &HslAdjustment) -> String {
+pub fn generate_lrtemplate(
+    name: &str,
+    id: &str,
+    basic: &BasicAdjustments,
+    hsl: &HslAdjustment,
+) -> String {
     let mut fields: Vec<(String, String)> = vec![
         ("Blacks2012".to_string(), (basic.blacks as i32).to_string()),
-        ("Clarity2012".to_string(), (basic.clarity as i32).to_string()),
-        ("Contrast2012".to_string(), (basic.contrast as i32).to_string()),
+        (
+            "Clarity2012".to_string(),
+            (basic.clarity as i32).to_string(),
+        ),
+        (
+            "Contrast2012".to_string(),
+            (basic.contrast as i32).to_string(),
+        ),
         ("Dehaze".to_string(), (basic.dehaze as i32).to_string()),
-        ("Exposure2012".to_string(), format!("{:.6}", basic.exposure_ev)),
-        ("Highlights2012".to_string(), (basic.highlights as i32).to_string()),
-        ("Saturation".to_string(), (basic.saturation as i32).to_string()),
-        ("Shadows2012".to_string(), (basic.shadows as i32).to_string()),
+        (
+            "Exposure2012".to_string(),
+            format!("{:.6}", basic.exposure_ev),
+        ),
+        (
+            "Highlights2012".to_string(),
+            (basic.highlights as i32).to_string(),
+        ),
+        (
+            "Saturation".to_string(),
+            (basic.saturation as i32).to_string(),
+        ),
+        (
+            "Shadows2012".to_string(),
+            (basic.shadows as i32).to_string(),
+        ),
         ("Texture".to_string(), (basic.texture as i32).to_string()),
         ("Vibrance".to_string(), (basic.vibrance as i32).to_string()),
         ("Whites2012".to_string(), (basic.whites as i32).to_string()),
     ];
     for (band_name, get) in HSL_BANDS {
         let band = get(hsl);
-        fields.push((format!("HueAdjustment{band_name}"), (band.hue as i32).to_string()));
+        fields.push((
+            format!("HueAdjustment{band_name}"),
+            (band.hue as i32).to_string(),
+        ));
         fields.push((
             format!("LuminanceAdjustment{band_name}"),
             (band.luminance as i32).to_string(),

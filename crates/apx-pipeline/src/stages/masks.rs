@@ -490,7 +490,11 @@ fn relative_sharpness_map(pixels: &[f32], w: usize, h: usize) -> Vec<f32> {
         })
         .collect();
 
-    let max_variance = variance_map.iter().copied().fold(0.0f32, f32::max).max(1e-6);
+    let max_variance = variance_map
+        .iter()
+        .copied()
+        .fold(0.0f32, f32::max)
+        .max(1e-6);
     variance_map
         .into_iter()
         .map(|v| (v / max_variance).clamp(0.0, 1.0))
@@ -509,7 +513,13 @@ fn blur_depth_approx_alpha(threshold: f32, pixels: &[f32], w: usize, h: usize) -
     let t = threshold.clamp(0.0, 1.0);
     sharpness
         .into_iter()
-        .map(|s| smoothstep(t - BLUR_DEPTH_APPROX_FEATHER, t + BLUR_DEPTH_APPROX_FEATHER, s))
+        .map(|s| {
+            smoothstep(
+                t - BLUR_DEPTH_APPROX_FEATHER,
+                t + BLUR_DEPTH_APPROX_FEATHER,
+                s,
+            )
+        })
         .collect()
 }
 
@@ -790,7 +800,11 @@ mod tests {
                 // Kontrast → hohe Laplace-Varianz). Rechte Hälfte:
                 // gleichmäßiges Mittelgrau (keine lokale Varianz).
                 let v = if x < w / 2 {
-                    if (x + y) % 2 == 0 { 0.9 } else { 0.1 }
+                    if (x + y) % 2 == 0 {
+                        0.9
+                    } else {
+                        0.1
+                    }
                 } else {
                     0.5
                 };

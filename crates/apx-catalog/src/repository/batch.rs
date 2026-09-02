@@ -60,7 +60,10 @@ struct BatchItem {
 
 /// Fotos, die `criteria` treffen würden — schreibt nichts (Trockenlauf-
 /// Vorschau vor dem eigentlichen Anwenden).
-pub(crate) fn preview_batch_rule(conn: &Connection, criteria: &FilterCriteria) -> Result<Vec<Photo>> {
+pub(crate) fn preview_batch_rule(
+    conn: &Connection,
+    criteria: &FilterCriteria,
+) -> Result<Vec<Photo>> {
     search::search_and_filter_photos(conn, None, criteria)
 }
 
@@ -79,7 +82,11 @@ pub(crate) fn apply_batch_rule(
     let batch_id = BatchOperationId::new();
     conn.execute(
         "INSERT INTO batch_operations (id, kind, created_at, dry_run) VALUES (?1, ?2, ?3, 0)",
-        params![batch_id.to_string(), action.kind_label(), to_unix(created_at)],
+        params![
+            batch_id.to_string(),
+            action.kind_label(),
+            to_unix(created_at)
+        ],
     )
     .map_err(map_sqlite_err)?;
 
@@ -124,7 +131,8 @@ pub(crate) fn apply_batch_rule(
                     // Verknüpfung — die Keyword-ID selbst steht im neuen
                     // Wert, damit `undo` sie ohne Namenssuche wiederfindet.
                     old_value_json: "null".to_string(),
-                    new_value_json: serde_json::to_string(&keyword_id.to_string()).unwrap_or_default(),
+                    new_value_json: serde_json::to_string(&keyword_id.to_string())
+                        .unwrap_or_default(),
                 })
             }
         };

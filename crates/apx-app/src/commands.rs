@@ -1939,8 +1939,12 @@ pub async fn export_preset_to_lrtemplate_file(
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or(apx_pipeline::edl::HslAdjustment::NEUTRAL);
 
-    let content =
-        apx_export::lrtemplate::generate_lrtemplate(&preset.name, &preset_id.to_string(), &basic, &hsl);
+    let content = apx_export::lrtemplate::generate_lrtemplate(
+        &preset.name,
+        &preset_id.to_string(),
+        &basic,
+        &hsl,
+    );
 
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog()
@@ -2127,8 +2131,9 @@ pub fn apply_batch_rule(
 /// Gibt die Zahl tatsächlich rückgängig gemachter Änderungen zurück.
 #[tauri::command]
 pub fn undo_batch_operation(state: State<'_, AppState>, batch_id: String) -> Result<usize, String> {
-    let batch_id: apx_core::BatchOperationId =
-        batch_id.parse().map_err(|err: apx_core::AppError| err.to_string())?;
+    let batch_id: apx_core::BatchOperationId = batch_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
     state
         .catalog
         .undo_batch_operation(batch_id)
@@ -2252,7 +2257,11 @@ pub fn list_people_groups(state: State<'_, AppState>) -> Result<Vec<Vec<PhotoDto
         };
         let rgb = img.to_rgb8();
         let (width, height) = rgb.dimensions();
-        let pixels: Vec<f32> = rgb.into_raw().iter().map(|&v| f32::from(v) / 255.0).collect();
+        let pixels: Vec<f32> = rgb
+            .into_raw()
+            .iter()
+            .map(|&v| f32::from(v) / 255.0)
+            .collect();
         let Ok(regions) = apx_ai::faces::detect_face_regions(&pixels, width, height) else {
             continue;
         };
@@ -2261,7 +2270,10 @@ pub fn list_people_groups(state: State<'_, AppState>) -> Result<Vec<Vec<PhotoDto
         }
         let avg_area: f32 =
             regions.iter().map(|r| r.width * r.height).sum::<f32>() / regions.len() as f32;
-        let key = (regions.len().min(4) as u32, (avg_area * 20.0).round() as u32);
+        let key = (
+            regions.len().min(4) as u32,
+            (avg_area * 20.0).round() as u32,
+        );
         buckets.entry(key).or_default().push(photo);
     }
 
@@ -4253,7 +4265,12 @@ pub fn generate_smart_previews(
         let dest_path = dir.join(format!("{photo_id}.jpg"));
         image
             .save_with_format(&dest_path, image::ImageFormat::Jpeg)
-            .map_err(|err| format!("Smart Preview '{}' nicht schreibbar: {err}", dest_path.display()))?;
+            .map_err(|err| {
+                format!(
+                    "Smart Preview '{}' nicht schreibbar: {err}",
+                    dest_path.display()
+                )
+            })?;
         generated += 1;
     }
     Ok(generated)

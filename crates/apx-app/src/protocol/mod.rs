@@ -555,8 +555,8 @@ mod tests {
         std::fs::create_dir_all(paths.smart_preview_dir()).expect("Smart-Preview-Verzeichnis");
         write_valid_jpeg(&paths.smart_preview_dir().join(format!("{photo_id}.jpg")));
 
-        let bytes =
-            compute_full_image(&catalog, &paths, photo_id, Some(32)).expect("sollte auf Smart Preview zurückfallen");
+        let bytes = compute_full_image(&catalog, &paths, photo_id, Some(32))
+            .expect("sollte auf Smart Preview zurückfallen");
         assert_eq!(
             image::guess_format(&bytes).ok(),
             Some(image::ImageFormat::Png)

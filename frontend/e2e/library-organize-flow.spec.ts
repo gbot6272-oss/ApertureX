@@ -31,7 +31,10 @@ test.describe("Bibliothek organisieren (Phase 9 Schritt 1)", () => {
     await page.getByRole("img", { name: PHOTO_B.filename }).click({ modifiers: ["Control"] });
 
     await page.getByRole("button", { name: "Organisieren…" }).click();
-    await page.getByRole("button", { name: "Stapel" }).click();
+    // `exact: true` (seit Phase 11 Schritt 9 nötig): der Kopfzeilen-Knopf
+    // "Stapelverarbeitung…" enthält "Stapel" als Substring und würde die
+    // standardmäßige Teilstring-Suche sonst mehrdeutig machen.
+    await page.getByRole("button", { name: "Stapel", exact: true }).click();
     await page.getByRole("button", { name: "Aus Auswahl stapeln" }).click();
 
     await expect(page.getByText("Stapel — 2 Fotos")).toBeVisible();

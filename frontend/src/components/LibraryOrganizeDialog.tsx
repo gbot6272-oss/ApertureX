@@ -57,6 +57,10 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
 
   const perceptualDuplicateGroups = useAppStore((s) => s.perceptualDuplicateGroups);
   const perceptualDuplicatesRunning = useAppStore((s) => s.perceptualDuplicatesRunning);
+
+  const smartPreviewsGenerating = useAppStore((s) => s.smartPreviewsGenerating);
+  const smartPreviewsGeneratedCount = useAppStore((s) => s.smartPreviewsGeneratedCount);
+  const generateSmartPreviewsForSelection = useAppStore((s) => s.generateSmartPreviewsForSelection);
   const runPerceptualDuplicateDetection = useAppStore((s) => s.runPerceptualDuplicateDetection);
 
   const [newFolderName, setNewFolderName] = useState("");
@@ -324,7 +328,21 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
           </div>
         )}
 
-        <div className="mt-3 flex justify-end">
+        <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void generateSmartPreviewsForSelection()}
+              disabled={smartPreviewsGenerating}
+              title="Erzeugt verkleinerte Zwischendateien für die aktuelle Auswahl, damit sie später auch ohne erreichbares Original angezeigt werden können (z. B. externe Festplatte getrennt)"
+              className="rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {smartPreviewsGenerating ? "Erzeugt…" : "Smart Previews erzeugen"}
+            </button>
+            {smartPreviewsGeneratedCount !== null && !smartPreviewsGenerating && (
+              <span className="text-xs text-text-muted">{smartPreviewsGeneratedCount} erzeugt</span>
+            )}
+          </div>
           <button type="button" onClick={onClose} className="rounded border border-border px-3 py-1 text-xs hover:border-accent">
             Schließen
           </button>

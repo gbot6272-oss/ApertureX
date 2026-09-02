@@ -469,6 +469,19 @@ export function Viewer() {
 
       <canvas ref={canvasRef} className="pointer-events-none absolute inset-0" />
 
+      {/* Offline-Kennzeichnung (Phase 11 Schritt 4, siehe `DECISIONS.md`
+          ADR-0038): `photo.missing` kommt von der bestehenden Abgleich-
+          Logik (`reconcile.rs`), die es setzt, sobald die Originaldatei
+          nicht mehr gefunden wird — rendert trotzdem etwas (`drawSource`
+          nicht leer), kann das nur das Smart-Preview-Fallback in
+          `resolve_source_path` gewesen sein. Kein eigenes Backend-Signal
+          nötig, siehe dessen Moduldoku. */}
+      {photo?.missing && drawSource && (
+        <div className="pointer-events-none absolute left-3 top-3 rounded bg-bg-raised/90 px-2 py-1 text-xs font-medium text-accent backdrop-blur">
+          Offline (Smart Preview)
+        </div>
+      )}
+
       {clippingOverlayEnabled && developFrame && imgW > 0 && imgH > 0 && (
         <canvas
           ref={clipCanvasRef}

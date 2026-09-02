@@ -4028,6 +4028,56 @@ pub fn clear_preview_cache(state: State<'_, AppState>) -> Result<(), String> {
     clear_dir_contents(&state.paths.preview_cache_dir()).map_err(|err| err.to_string())
 }
 
+/// Feste lange Kante für Smart Previews (Phase 11 Schritt 4, siehe
+/// DECISIONS.md ADR-0038) — deutlich kleiner als ein Original, aber groß
+/// genug für Betrachtung/Grob-Bearbeitung, wenn das Original selbst
+/// nicht erreichbar ist.
+const SMART_PREVIEW_EDGE: u32 = 2560;
+
+/// Erzeugt Smart Previews für `photo_ids`: je eine feste, verkleinerte
+/// JPEG-Zwischendatei in `AppPaths::smart_preview_dir()`, die
+/// `apx-app::protocol::resolve_source_path` als Fallback nutzt, wenn die
+/// Originaldatei nicht erreichbar ist (z. B. eine getrennte externe
+/// Festplatte) — ermöglicht eingeschränktes Weiterarbeiten offline
+/// (Anzeige/Entwickeln-Vorschau, siehe `Viewer.tsx`). Überspringt Fotos,
+/// deren Original selbst schon nicht erreichbar ist (kann daraus kein
+/// Smart Preview erzeugen), statt den ganzen Aufruf abzubrechen — gibt
+/// die Zahl tatsächlich erzeugter Previews zurück.
+#[tauri::command]
+pub fn generate_smart_previews(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+) -> Result<usize, String> {
+    let dir = state.paths.smart_preview_dir();
+    std::fs::create_dir_all(&dir).map_err(|err| {
+        format!(
+            "Smart-Preview-Verzeichnis '{}' nicht anlegbar: {err}",
+            dir.display()
+        )
+    })?;
+
+    let mut generated = 0usize;
+    for raw_id in photo_ids {
+        let photo_id = parse_photo_id(raw_id)?;
+        let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+        if !source_path.exists() {
+            tracing::warn!(photo_id = %photo_id, path = %source_path.display(), "Original nicht erreichbar, überspringe Smart-Preview-Erzeugung");
+            continue;
+        }
+        let decoded = apx_raw::decode(&source_path, Some(SMART_PREVIEW_EDGE))
+            .map_err(|err| err.to_string())?;
+        let image = decoded
+            .into_dynamic_image()
+            .ok_or_else(|| "Dekodiertes Bild hat inkonsistente Maße".to_string())?;
+        let dest_path = dir.join(format!("{photo_id}.jpg"));
+        image
+            .save_with_format(&dest_path, image::ImageFormat::Jpeg)
+            .map_err(|err| format!("Smart Preview '{}' nicht schreibbar: {err}", dest_path.display()))?;
+        generated += 1;
+    }
+    Ok(generated)
+}
+
 // ---- Entwickeln: Entrauschung, Hochskalierung (ab Phase 9 Schritt 6, siehe
 // DECISIONS.md ADR-0035) — klassische, deterministische Algorithmen statt
 // echter Modellinferenz (dasselbe ONNX-Beschaffungsproblem wie ADR-0033),

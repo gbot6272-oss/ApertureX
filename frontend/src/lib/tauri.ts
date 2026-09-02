@@ -1139,6 +1139,17 @@ export function clearPreviewCache(): Promise<void> {
   return invoke<void>("clear_preview_cache");
 }
 
+/** Smart Previews (Phase 11 Schritt 4, siehe `DECISIONS.md` ADR-0038):
+ * erzeugt je Foto eine feste, verkleinerte JPEG-Zwischendatei, die als
+ * Fallback dient, wenn die Originaldatei später nicht erreichbar ist
+ * (z. B. eine getrennte externe Festplatte) — ermöglicht eingeschränktes
+ * Weiterarbeiten offline. Gibt die Zahl tatsächlich erzeugter Previews
+ * zurück (überspringt Fotos, deren Original selbst schon nicht
+ * erreichbar ist). */
+export function generateSmartPreviews(photoIds: string[]): Promise<number> {
+  return invoke<number>("generate_smart_previews", { photoIds });
+}
+
 // ---- Entwickeln: Entrauschung, Hochskalierung (ab Phase 9 Schritt 6, siehe
 // DECISIONS.md ADR-0035) — klassische Algorithmen, keine echte
 // Modellinferenz (dieselbe Ehrlichkeitslinie wie ADR-0033). -----------------

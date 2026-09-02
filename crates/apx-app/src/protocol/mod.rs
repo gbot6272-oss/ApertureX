@@ -131,11 +131,12 @@ fn handle_inner<R: Runtime>(
     let catalog = state.catalog.clone();
     let pipeline = state.pipeline.clone();
     let tile_cache = state.tile_cache.clone();
+    let paths = state.paths.clone();
 
     let (content_type, cache_key) = response_meta(&parsed);
     let bytes = cache
         .get_or_compute(cache_key, move || {
-            compute(&catalog, &pipeline, &tile_cache, &parsed).map_err(|err| err.message)
+            compute(&catalog, &pipeline, &tile_cache, &paths, &parsed).map_err(|err| err.message)
         })
         .map_err(HandlerError::internal)?;
 
@@ -214,19 +215,22 @@ fn compute(
     catalog: &Catalog,
     pipeline: &apx_pipeline::GpuContext,
     tile_cache: &apx_pipeline::tile_cache::TileCache,
+    paths: &apx_core::AppPaths,
     request: &ImageRequest,
 ) -> Result<Vec<u8>, HandlerError> {
     match request {
-        ImageRequest::Preview { photo_id, level } => compute_preview(catalog, *photo_id, *level),
+        ImageRequest::Preview { photo_id, level } => {
+            compute_preview(catalog, paths, *photo_id, *level)
+        }
         ImageRequest::Image { photo_id, max_edge } => {
-            compute_full_image(catalog, *photo_id, *max_edge)
+            compute_full_image(catalog, paths, *photo_id, *max_edge)
         }
         ImageRequest::Develop {
             photo_id,
             max_edge,
             edl_json,
         } => compute_develop(
-            catalog, pipeline, tile_cache, *photo_id, *max_edge, edl_json,
+            catalog, pipeline, tile_cache, paths, *photo_id, *max_edge, edl_json,
         ),
         ImageRequest::Music { path } => compute_music(path),
     }
@@ -243,6 +247,7 @@ fn compute_music(path: &std::path::Path) -> Result<Vec<u8>, HandlerError> {
 
 fn compute_preview(
     catalog: &Catalog,
+    paths: &apx_core::AppPaths,
     photo_id: PhotoId,
     level_num: u8,
 ) -> Result<Vec<u8>, HandlerError> {
@@ -267,7 +272,7 @@ fn compute_preview(
         tracing::warn!(path = %cached.path.display(), "Vorschau-Cache-Eintrag verweist auf fehlende Datei, dekodiere neu");
     }
 
-    let source_path = resolve_source_path(catalog, photo_id)?;
+    let source_path = resolve_source_path(catalog, paths, photo_id)?;
     let max_edge = match level {
         PreviewLevel::Thumbnail => Some(THUMBNAIL_EDGE),
         PreviewLevel::Standard => Some(STANDARD_EDGE),
@@ -279,10 +284,11 @@ fn compute_preview(
 
 fn compute_full_image(
     catalog: &Catalog,
+    paths: &apx_core::AppPaths,
     photo_id: PhotoId,
     max_edge: Option<u32>,
 ) -> Result<Vec<u8>, HandlerError> {
-    let source_path = resolve_source_path(catalog, photo_id)?;
+    let source_path = resolve_source_path(catalog, paths, photo_id)?;
     let image = decode_to_dynamic_image(&source_path, max_edge)?;
     encode(image, image::ImageFormat::Png)
 }
@@ -294,6 +300,7 @@ fn compute_develop(
     catalog: &Catalog,
     pipeline: &apx_pipeline::GpuContext,
     tile_cache: &apx_pipeline::tile_cache::TileCache,
+    paths: &apx_core::AppPaths,
     photo_id: PhotoId,
     max_edge: Option<u32>,
     edl_json: &str,
@@ -301,7 +308,7 @@ fn compute_develop(
     let envelope = apx_core::EdlEnvelope::from_json_str(edl_json)?;
     let edl = apx_pipeline::edl::from_envelope(&envelope).map_err(apx_core::AppError::from)?;
 
-    let source_path = resolve_source_path(catalog, photo_id)?;
+    let source_path = resolve_source_path(catalog, paths, photo_id)?;
 
     // Zwei getrennte Zeitmessungen statt einer gemeinsamen: der teure
     // Dekodier-Schritt läuft (Cache-Treffer vorausgesetzt) nur beim
@@ -340,10 +347,46 @@ fn compute_develop(
     Ok(framed)
 }
 
-fn resolve_source_path(catalog: &Catalog, photo_id: PhotoId) -> Result<PathBuf, HandlerError> {
+/// Löst die Quelldatei für `photo_id` auf — der eine Ort, den jeder
+/// Rendering-Pfad (Vorschau/Vollbild/Entwickeln) durchläuft (siehe
+/// Modul-Doku).
+///
+/// **Smart-Preview-Fallback (Phase 11 Schritt 4, siehe `DECISIONS.md`
+/// ADR-0038):** existiert die Originaldatei nicht (z. B. eine getrennte
+/// externe Festplatte), aber bereits ein per `generate_smart_previews`
+/// erzeugtes Smart Preview (`AppPaths::smart_preview_dir()`), wird dessen
+/// Pfad zurückgegeben statt eines Fehlers — der komplette nachgelagerte
+/// Dekodier-/Kodier-Pfad bleibt unverändert, weil `apx_raw::decode`/
+/// `decode_linear` ein Smart-Preview-JPEG genau wie jede andere
+/// Fallback-Bilddatei (siehe `apx-raw`s `classify`) behandelt. Ohne
+/// erreichbares Original *und* ohne Smart Preview wird weiterhin der
+/// (nicht existierende) Originalpfad zurückgegeben — der bestehende
+/// Dekodier-Fehlerpfad bleibt dadurch unverändert, statt hier einen neuen
+/// Fehlertyp einzuführen.
+///
+/// Bewusst **kein** eigenes Signal an das Frontend, ob ein Smart Preview
+/// verwendet wurde (kein neuer HTTP-Header, kein neues DTO-Feld): das
+/// Frontend kennt `photo.missing` bereits aus der bestehenden
+/// Abgleich-Logik (`reconcile.rs`) — rendert trotz `missing == true`
+/// dennoch etwas, kann das nur das Smart-Preview-Fallback gewesen sein,
+/// siehe `Viewer.tsx`.
+fn resolve_source_path(
+    catalog: &Catalog,
+    paths: &apx_core::AppPaths,
+    photo_id: PhotoId,
+) -> Result<PathBuf, HandlerError> {
     let photo = catalog.get_photo(photo_id)?;
     let folder = catalog.get_folder(photo.folder_id)?;
-    Ok(folder.path.join(photo.filename))
+    let original = folder.path.join(&photo.filename);
+    if original.exists() {
+        return Ok(original);
+    }
+    let smart_preview = paths.smart_preview_dir().join(format!("{photo_id}.jpg"));
+    if smart_preview.exists() {
+        tracing::info!(photo_id = %photo_id, path = %smart_preview.display(), "Original nicht erreichbar, nutze Smart Preview");
+        return Ok(smart_preview);
+    }
+    Ok(original)
 }
 
 fn decode_to_dynamic_image(
@@ -418,13 +461,18 @@ mod tests {
         photo_id
     }
 
+    fn test_paths(tmp: &std::path::Path) -> apx_core::AppPaths {
+        apx_core::AppPaths::rooted_at(tmp.join("_apppaths")).expect("AppPaths anlegbar")
+    }
+
     #[test]
     fn compute_preview_decodes_when_no_cache_entry_exists() {
         let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
         let catalog = Catalog::open_in_memory().expect("Katalog");
         let photo_id = setup_photo(tmp.path(), &catalog);
+        let paths = test_paths(tmp.path());
 
-        let bytes = compute_preview(&catalog, photo_id, 0).expect("sollte dekodieren");
+        let bytes = compute_preview(&catalog, &paths, photo_id, 0).expect("sollte dekodieren");
         assert!(!bytes.is_empty());
         assert_eq!(
             image::guess_format(&bytes).ok(),
@@ -437,6 +485,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
         let catalog = Catalog::open_in_memory().expect("Katalog");
         let photo_id = setup_photo(tmp.path(), &catalog);
+        let paths = test_paths(tmp.path());
 
         let cached_path = tmp.path().join("cached-thumb.jpg");
         write_valid_jpeg(&cached_path);
@@ -444,7 +493,7 @@ mod tests {
             .upsert_preview(photo_id, PreviewLevel::Thumbnail, &cached_path)
             .expect("Preview-Eintrag anlegbar");
 
-        let bytes = compute_preview(&catalog, photo_id, 0).expect("sollte lesen");
+        let bytes = compute_preview(&catalog, &paths, photo_id, 0).expect("sollte lesen");
         assert_eq!(bytes, std::fs::read(&cached_path).expect("Datei lesbar"));
     }
 
@@ -453,8 +502,9 @@ mod tests {
         let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
         let catalog = Catalog::open_in_memory().expect("Katalog");
         let photo_id = setup_photo(tmp.path(), &catalog);
+        let paths = test_paths(tmp.path());
 
-        assert!(compute_preview(&catalog, photo_id, 9).is_err());
+        assert!(compute_preview(&catalog, &paths, photo_id, 9).is_err());
     }
 
     #[test]
@@ -462,8 +512,10 @@ mod tests {
         let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
         let catalog = Catalog::open_in_memory().expect("Katalog");
         let photo_id = setup_photo(tmp.path(), &catalog);
+        let paths = test_paths(tmp.path());
 
-        let bytes = compute_full_image(&catalog, photo_id, Some(32)).expect("sollte dekodieren");
+        let bytes =
+            compute_full_image(&catalog, &paths, photo_id, Some(32)).expect("sollte dekodieren");
         assert_eq!(
             image::guess_format(&bytes).ok(),
             Some(image::ImageFormat::Png)
@@ -472,9 +524,43 @@ mod tests {
 
     #[test]
     fn compute_for_unknown_photo_id_is_not_found() {
+        let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
         let catalog = Catalog::open_in_memory().expect("Katalog");
-        let result = compute_full_image(&catalog, PhotoId::new(), None);
+        let paths = test_paths(tmp.path());
+        let result = compute_full_image(&catalog, &paths, PhotoId::new(), None);
         assert!(result.is_err());
+    }
+
+    /// Phase 11 Schritt 4 (siehe `DECISIONS.md` ADR-0038): fehlt die
+    /// Originaldatei, aber ein Smart Preview existiert bereits im
+    /// `AppPaths::smart_preview_dir()`, liefert `resolve_source_path`
+    /// dessen Pfad statt eines Fehlers — genau der Fallback, den
+    /// `compute_full_image` (und jeder andere Rendering-Pfad) transparent
+    /// mitbekommt, ohne selbst etwas davon zu wissen.
+    #[test]
+    fn compute_full_image_falls_back_to_smart_preview_when_original_is_missing() {
+        let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
+        let catalog = Catalog::open_in_memory().expect("Katalog");
+        let photo_id = setup_photo(tmp.path(), &catalog);
+        let paths = test_paths(tmp.path());
+
+        // Original "verschwindet" (z. B. externe Festplatte getrennt).
+        std::fs::remove_file(tmp.path().join("foto.jpg")).expect("Original löschbar");
+
+        // Ohne Smart Preview bleibt es ein Fehler.
+        assert!(compute_full_image(&catalog, &paths, photo_id, Some(32)).is_err());
+
+        // Smart Preview anlegen — derselbe Dateiname/Ort wie
+        // `generate_smart_previews` ihn schreiben würde.
+        std::fs::create_dir_all(paths.smart_preview_dir()).expect("Smart-Preview-Verzeichnis");
+        write_valid_jpeg(&paths.smart_preview_dir().join(format!("{photo_id}.jpg")));
+
+        let bytes =
+            compute_full_image(&catalog, &paths, photo_id, Some(32)).expect("sollte auf Smart Preview zurückfallen");
+        assert_eq!(
+            image::guess_format(&bytes).ok(),
+            Some(image::ImageFormat::Png)
+        );
     }
 
     #[test]
@@ -552,6 +638,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
         let catalog = Catalog::open_in_memory().expect("Katalog");
         let photo_id = setup_photo(tmp.path(), &catalog);
+        let paths = test_paths(tmp.path());
         let pipeline = apx_pipeline::GpuContext::new_blocking();
         let pipeline = match pipeline {
             Ok(ctx) => ctx,
@@ -566,6 +653,7 @@ mod tests {
             &catalog,
             &pipeline,
             &tile_cache,
+            &paths,
             photo_id,
             Some(32),
             &neutral_edl_json(),
@@ -587,6 +675,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
         let catalog = Catalog::open_in_memory().expect("Katalog");
         let photo_id = setup_photo(tmp.path(), &catalog);
+        let paths = test_paths(tmp.path());
         let pipeline = match apx_pipeline::GpuContext::new_blocking() {
             Ok(ctx) => ctx,
             Err(_) => {
@@ -600,6 +689,7 @@ mod tests {
             &catalog,
             &pipeline,
             &tile_cache,
+            &paths,
             photo_id,
             Some(32),
             "nicht-valides-json",

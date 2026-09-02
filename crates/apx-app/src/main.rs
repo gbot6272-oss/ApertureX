@@ -156,6 +156,7 @@ fn main() {
             commands::catalog_statistics,
             commands::preview_cache_stats,
             commands::clear_preview_cache,
+            commands::generate_smart_previews,
             commands::denoise_photo,
             commands::convert_photo_to_dng,
             commands::upscale_photo,

@@ -1217,6 +1217,14 @@ interface LibraryBacklogSlice {
   perceptualDuplicateGroups: PhotoDto[][];
   perceptualDuplicatesRunning: boolean;
   runPerceptualDuplicateDetection: (maxDistance: number) => Promise<void>;
+
+  /** Smart Previews (Phase 11 Schritt 4, siehe `DECISIONS.md` ADR-0038):
+   * erzeugt für die aktuelle Auswahl (wie `createStackFromSelection`)
+   * verkleinerte Zwischendateien, die der Viewer nutzt, wenn das
+   * Original später nicht erreichbar ist. */
+  smartPreviewsGenerating: boolean;
+  smartPreviewsGeneratedCount: number | null;
+  generateSmartPreviewsForSelection: () => Promise<void>;
 }
 
 /** Metadaten, Schlagworthierarchie, Adobe-Interop (Phase 9 Schritt 2, siehe
@@ -4349,6 +4357,28 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.perceptualDuplicatesRunning = false;
+        });
+      }
+    },
+
+    smartPreviewsGenerating: false,
+    smartPreviewsGeneratedCount: null,
+
+    generateSmartPreviewsForSelection: async () => {
+      const { multiSelectedIds, selectedPhotoId } = get();
+      const targets = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
+      if (targets.length === 0) return;
+      set((state) => {
+        state.smartPreviewsGenerating = true;
+      });
+      try {
+        const count = await api.generateSmartPreviews(targets);
+        set((state) => {
+          state.smartPreviewsGeneratedCount = count;
+        });
+      } finally {
+        set((state) => {
+          state.smartPreviewsGenerating = false;
         });
       }
     },

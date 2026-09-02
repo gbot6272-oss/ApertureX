@@ -1901,3 +1901,18 @@ und echte neuronale Modellinferenz bleiben die bereits in ADR-0033/-0034/
 diesem Plan dokumentierten Grenzen unverändert bestehen — kein
 Software-Trick ersetzt fehlende Hardware, ein fehlendes Zertifikat oder
 ein nicht beschaffbares Modell.
+
+**Nachtrag nach Schritt 4 — Testdisziplin nutzerseitig erneut gelockert:**
+der Nutzer hat nach Abschluss von Schritt 3 angewiesen, ab Schritt 4 nur
+noch maximal einen Test pro Schritt zu schreiben und die vollständige
+Verifikationskette (`cargo fmt/clippy/test --workspace`, `tsc -b`, volle
+Vitest-/Playwright-Suite) nicht mehr nach jedem einzelnen Schritt,
+sondern erst einmalig am Ende in Schritt 12 laufen zu lassen — dieselbe
+Lockerung wie in ADR-0037 für Phase 10, nur diesmal ausdrücklich auch für
+Phase 11 (Schritte 4–11) angeordnet, statt wie oben ursprünglich
+festgehalten strikt auf Phase 10 begrenzt. Schritte 0–3 liefen noch mit
+der vollen, oben beschriebenen Disziplin; ab Schritt 4 gilt: pro Schritt
+ein gezielter Test (Rust-Unit- oder Playwright-Test, je nachdem, welcher
+den Kern der Änderung am direktesten abdeckt) plus ein gezielter
+Kompilier-/Typprüf-Lauf des geänderten Codes (kein vollständiger
+Testlauf) vor Commit+Push.

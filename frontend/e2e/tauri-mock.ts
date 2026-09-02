@@ -784,6 +784,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "clear_preview_cache":
         fixtures.previewCacheStats = { file_count: 0, total_bytes: 0 };
         return null;
+      case "generate_smart_previews":
+        return (args.photoIds as string[]).length;
       case "denoise_photo":
         return fixtures.denoisedPhotoPath;
       case "upscale_photo":

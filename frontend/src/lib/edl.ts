@@ -216,6 +216,44 @@ export const HSL_BAND_TABS: ReadonlyArray<{ key: keyof HslAdjustment; label: str
   { key: "magenta", label: "Magenta" },
 ] as const;
 
+/** Bandzentren in Grad, exakte Reihenfolge/Werte wie
+ * `crates/apx-pipeline/src/stages/hsl_color_mixer.rs`s
+ * `HSL_BAND_CENTERS_DEGREES` — für das zielgerichtete Anpassungswerkzeug
+ * (TAT, Phase 11 Schritt 6): ordnet einen im Viewer gesampelten Farbton
+ * dem nächstgelegenen der acht festen Bänder zu. */
+const HSL_BAND_CENTERS_DEGREES: Record<keyof HslAdjustment, number> = {
+  red: 0,
+  orange: 30,
+  yellow: 60,
+  green: 120,
+  aqua: 180,
+  blue: 240,
+  purple: 270,
+  magenta: 300,
+};
+
+/** Kürzester Kreisabstand zweier Farbtöne in Grad (0..180), wie Rusts
+ * `color_math::circular_distance_degrees`. */
+function circularHueDistanceDegrees(a: number, b: number): number {
+  const diff = Math.abs(a - b) % 360;
+  return diff > 180 ? 360 - diff : diff;
+}
+
+/** Ordnet einen Farbton (Grad) dem nächstgelegenen der acht festen
+ * HSL-Bänder zu — siehe TAT-Moduldoku in `store/index.ts`. */
+export function nearestHslBand(hueDegrees: number): keyof HslAdjustment {
+  let closest: keyof HslAdjustment = "red";
+  let closestDistance = Infinity;
+  for (const tab of HSL_BAND_TABS) {
+    const distance = circularHueDistanceDegrees(hueDegrees, HSL_BAND_CENTERS_DEGREES[tab.key]);
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closest = tab.key;
+    }
+  }
+  return closest;
+}
+
 /** Regler-Spezifikationen für ein einzelnes HSL-Band — dieselben drei
  * Felder für jedes der acht Bänder. */
 export const HSL_BAND_SLIDER_SPECS: readonly SliderSpec[] = [

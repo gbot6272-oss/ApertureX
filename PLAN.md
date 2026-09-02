@@ -995,7 +995,7 @@ Tests + gezielte Playwright-Tests, Commit+Push nach jedem Schritt.
 - [x] 3. Bibliothek: Übersichtsansicht + Schnellentwicklung im Raster
 - [x] 4. Bibliothek: Smart Previews + Offline-Bearbeitung
 - [x] 5. Bibliothek: Personenansicht (Hautton-Heuristik-Clustering)
-- [ ] 6. Entwickeln: Zielgerichtetes Anpassungswerkzeug (TAT)
+- [x] 6. Entwickeln: Zielgerichtetes Anpassungswerkzeug (TAT)
 - [ ] 7. Maskentyp Tiefenbereich — Alternative: Unschärfe-basierte Tiefennäherung
 - [ ] 8. Adobe `.lrtemplate`-Export (best-effort, nur Export)
 - [ ] 9. Stapelverarbeitungs-Konsole (neuer Batch-Operationen-Log, siehe ADR-0036)

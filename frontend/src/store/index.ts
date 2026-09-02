@@ -433,6 +433,21 @@ interface DevelopSlice {
   /** Setzt ein einzelnes Feld eines der acht festen HSL-Bänder (Phase 4
    * Schritt 5) — Zwischenstand beim Ziehen. */
   setHslBandField: (band: keyof HslAdjustment, field: keyof HslBand, value: number) => void;
+  /** Zielgerichtetes Anpassungswerkzeug (TAT, Phase 11 Schritt 6, siehe
+   * `DECISIONS.md` ADR-0038): Klick+Zug im Bild steuert direkt am
+   * Bildpunkt einen vorher gewählten Regler — `"off"` deaktiviert es,
+   * `"curve"` verschiebt den nächstgelegenen Punkt von
+   * `tatCurveChannel` (legt bei Bedarf einen neuen an), `"hsl"`
+   * verschiebt die Luminanz des unter dem Cursor gesampelten
+   * HSL-Bands (siehe `lib/edl.ts`s `nearestHslBand`). Die eigentliche
+   * Zug-Logik lebt in `Viewer.tsx` (dieselbe Stelle wie die
+   * Weißabgleich-/Farbmischer-Pipetten) und ruft `setCurveChannel`/
+   * `setHslBandField` + `commitDevelopEdit` auf — kein neuer
+   * Store-Zustand für den Kurvenpunkt/Bandwert selbst nötig. */
+  tatMode: "off" | "curve" | "hsl";
+  tatCurveChannel: keyof CurvesAdjustment;
+  setTatMode: (mode: "off" | "curve" | "hsl") => void;
+  setTatCurveChannel: (channel: keyof CurvesAdjustment) => void;
   /** Ob der Farbmischer gerade auf einen Klick in den Viewer wartet, um
    * eine neue Region anzulegen (teilt den Sampling-Code im Viewer mit
    * der Weißabgleich-Pipette, siehe `lib/colorSampling.ts`). */
@@ -2010,6 +2025,21 @@ export const useAppStore = create<AppStore>()(
     setHslBandField: (band, field, value) => {
       set((state) => {
         state.developEdl.hsl[band][field] = value;
+      });
+    },
+
+    tatMode: "off",
+    tatCurveChannel: "rgb",
+
+    setTatMode: (mode) => {
+      set((state) => {
+        state.tatMode = mode;
+      });
+    },
+
+    setTatCurveChannel: (channel) => {
+      set((state) => {
+        state.tatCurveChannel = channel;
       });
     },
 

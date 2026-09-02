@@ -1452,3 +1452,42 @@ export function tetherConnect(): Promise<CameraInfoDto | null> {
 export function tetherCapture(presetName?: string): Promise<PhotoDto | null> {
   return invoke<PhotoDto | null>("tether_capture", { presetName: presetName ?? null });
 }
+
+// ---- Direktimport von Speicherkarte/Kamera (Phase 13 Schritt 2) -----------
+
+export interface RemovableVolumeDto {
+  mount_point: string;
+  name: string;
+  /** `true`, wenn ein `DCIM`-Ordner gefunden wurde — das stärkere Signal
+   * für „Speicherkarte" als `is_removable()` allein (siehe Backend-Doku). */
+  has_dcim: boolean;
+}
+
+/** Reine Erkennungs-Bequemlichkeit — der Nutzer bestätigt weiterhin per
+ * Klick, ersetzt keinen bestehenden Import-Weg. */
+export function listRemovableVolumes(): Promise<RemovableVolumeDto[]> {
+  return invoke<RemovableVolumeDto[]>("list_removable_volumes");
+}
+
+export interface CameraFileEntryDto {
+  folder: string;
+  name: string;
+}
+
+/** Listet bereits aufgenommene Dateien auf der über [`tetherConnect`]
+ * verbundenen Kamera — im Unterschied zu [`tetherCapture`], das eine neue
+ * Aufnahme auslöst. */
+export function listCameraFiles(): Promise<CameraFileEntryDto[]> {
+  return invoke<CameraFileEntryDto[]>("list_camera_files");
+}
+
+/** Lädt eine per [`listCameraFiles`] gefundene Datei herunter und
+ * importiert sie über den bestehenden Import-Pfad — optional mit einem
+ * benannten Import-Preset (Phase 3/5). */
+export function importFromCamera(
+  folder: string,
+  name: string,
+  presetName?: string,
+): Promise<PhotoDto | null> {
+  return invoke<PhotoDto | null>("import_from_camera", { folder, name, presetName: presetName ?? null });
+}

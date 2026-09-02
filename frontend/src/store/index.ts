@@ -66,6 +66,8 @@ import type {
   GpxTrackPointDto,
   CatalogStatisticsDto,
   CameraInfoDto,
+  CameraFileEntryDto,
+  RemovableVolumeDto,
   PreviewCacheStatsDto,
   StackDto,
   TagRuleDto,
@@ -1452,6 +1454,22 @@ interface LibraryViewsSlice {
   tetherStatus: string | null;
   connectTetherCamera: () => Promise<void>;
   captureTetherPhoto: (presetName?: string) => Promise<void>;
+
+  /** Direktimport bereits vorhandener Aufnahmen (Phase 13 Schritt 2) —
+   * im Unterschied zu `captureTetherPhoto` (löst eine NEUE Aufnahme aus)
+   * listet dies bereits auf der verbundenen Kamera gespeicherte Dateien. */
+  cameraFiles: CameraFileEntryDto[];
+  cameraFilesLoading: boolean;
+  listCameraFilesAction: () => Promise<void>;
+  /** Importiert einen Eintrag aus `cameraFiles`, entfernt ihn danach aus
+   * der Liste (unabhängig davon, ob er wirklich neu war). */
+  importCameraFile: (entry: CameraFileEntryDto, presetName?: string) => Promise<void>;
+
+  /** Wechseldatenträger-Erkennung für den `ImportDialog.tsx`-Öffnen-
+   * Handler (Phase 13 Schritt 2) — reine Bequemlichkeit, kein neuer
+   * Berechtigungsrahmen. */
+  removableVolumes: RemovableVolumeDto[];
+  loadRemovableVolumes: () => Promise<void>;
 }
 
 export type AppStore = CatalogSlice &
@@ -5253,6 +5271,72 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.tetherCapturing = false;
+        });
+      }
+    },
+
+    cameraFiles: [],
+    cameraFilesLoading: false,
+
+    listCameraFilesAction: async () => {
+      set((state) => {
+        state.cameraFilesLoading = true;
+      });
+      try {
+        const files = await api.listCameraFiles();
+        set((state) => {
+          state.cameraFiles = files;
+          state.tetherStatus = files.length === 0 ? "Keine Dateien auf der Kamera gefunden" : null;
+        });
+      } catch (err) {
+        set((state) => {
+          state.tetherStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.cameraFilesLoading = false;
+        });
+      }
+    },
+
+    importCameraFile: async (entry, presetName) => {
+      set((state) => {
+        state.tetherCapturing = true;
+      });
+      try {
+        const photo = await api.importFromCamera(entry.folder, entry.name, presetName);
+        set((state) => {
+          state.tetherStatus = photo ? `Importiert: ${photo.filename}` : "Datei war nicht neu";
+          state.cameraFiles = state.cameraFiles.filter(
+            (f) => !(f.folder === entry.folder && f.name === entry.name),
+          );
+        });
+        if (photo && get().selectedFolderId) await get().loadPhotosForFolder(get().selectedFolderId!);
+      } catch (err) {
+        set((state) => {
+          state.tetherStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.tetherCapturing = false;
+        });
+      }
+    },
+
+    removableVolumes: [],
+
+    loadRemovableVolumes: async () => {
+      try {
+        const volumes = await api.listRemovableVolumes();
+        set((state) => {
+          state.removableVolumes = volumes;
+        });
+      } catch {
+        // Reine Bequemlichkeit — ein Fehlschlag hier (z. B. keine
+        // Berechtigung auf einer Sandbox-Plattform) darf den normalen
+        // Ordner-Import nicht blockieren, deshalb kein `catalogError`.
+        set((state) => {
+          state.removableVolumes = [];
         });
       }
     },

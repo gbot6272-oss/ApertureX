@@ -83,6 +83,12 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       simulated: boolean;
     } | null,
     tetherCapturePhoto: null as Record<string, unknown> | null,
+    // Direktimport von Speicherkarte/Kamera (Phase 13 Schritt 2) — leere
+    // Listen als Testdefault (kein simuliertes Gerät angeschlossen), per
+    // Fixture überschreibbar.
+    removableVolumes: [] as Array<{ mount_point: string; name: string; has_dcim: boolean }>,
+    cameraFiles: [] as Array<{ folder: string; name: string }>,
+    cameraImportPhoto: null as Record<string, unknown> | null,
     // KI-Funktionen (Phase 7, siehe DECISIONS.md ADR-0033) — feste,
     // per Fixture überschreibbare Antworten statt einer echten
     // Bildanalyse (die läuft nur im echten Backend).
@@ -520,6 +526,9 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       } | null;
       tetherCameraResult: { model: string; port: string; simulated: boolean } | null;
       tetherCapturePhoto: Record<string, unknown> | null;
+      removableVolumes: Array<{ mount_point: string; name: string; has_dcim: boolean }>;
+      cameraFiles: Array<{ folder: string; name: string }>;
+      cameraImportPhoto: Record<string, unknown> | null;
       aiMaskAlpha: { width: number; height: number; alpha_base64: string };
       repairSourceSuggestion: { x: number; y: number };
       sensorSpots: Array<{ x: number; y: number; radius: number; strength: number }>;
@@ -1256,6 +1265,15 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return fixtures.tetherCameraResult;
       case "tether_capture":
         return fixtures.tetherCapturePhoto;
+      case "list_removable_volumes":
+        return fixtures.removableVolumes;
+      case "list_camera_files":
+        return fixtures.cameraFiles;
+      case "import_from_camera":
+        fixtures.cameraFiles = fixtures.cameraFiles.filter(
+          (f) => !(f.folder === args.folder && f.name === args.name),
+        );
+        return fixtures.cameraImportPhoto;
 
       // ---- KI-Funktionen (Phase 7, siehe DECISIONS.md ADR-0033) ----------
       case "generate_ai_mask":

@@ -5521,6 +5521,153 @@ pub async fn tether_capture(
     Ok(photo.map(PhotoDto::from))
 }
 
+// ---- Direktimport von Speicherkarte/Kamera (Phase 13 Schritt 2) -----------
+//
+// Zwei unabhängige Wege: (1) Wechseldatenträger-Erkennung per `sysinfo`
+// (reine Bequemlichkeit — der Nutzer bestätigt weiterhin per Klick, kein
+// neuer Berechtigungsrahmen), (2) bereits auf einer verbundenen Kamera
+// vorhandene Dateien über `apx_tether`s `list_camera_files`/
+// `download_camera_file` (Phase 13 Schritt 2, dieselbe Kamera-Verbindung
+// wie beim Tethering oben, hier zum Abholen bereits aufgenommener Dateien
+// statt Live-Auslösen). Beide münden im bestehenden Import-Pfad
+// (`import::run_with_mode`, Phase 3/5), unverändert.
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RemovableVolumeDto {
+    pub mount_point: String,
+    pub name: String,
+    /// `true`, wenn der Datenträger einen `DCIM`-Ordner (groß- oder
+    /// kleingeschrieben) im Wurzelverzeichnis hat — die übliche
+    /// Speicherkarten-Konvention (DCF, siehe `sysinfo`s
+    /// `is_removable()`-Grenzen: nicht jede Plattform meldet SD-Karten-
+    /// Adapter zuverlässig als Wechseldatenträger, der `DCIM`-Fund ist
+    /// deshalb das stärkere Signal). Das Frontend sortiert/markiert
+    /// danach, filtert aber nicht hart heraus — ein Wechseldatenträger
+    /// ohne `DCIM` bleibt wählbar (z. B. eine bereits sortierte Karte).
+    pub has_dcim: bool,
+}
+
+/// Listet Wechseldatenträger auf (Phase 13 Schritt 2) — reine
+/// Erkennungs-Bequemlichkeit für `ImportDialog.tsx`, ersetzt keinen
+/// bestehenden Import-Weg (der Nutzer kann weiterhin jeden Ordner manuell
+/// wählen). Läuft synchron (`sysinfo::Disks::new_with_refreshed_list` ist
+/// ein schneller, lokaler Systemaufruf, kein Netzwerk/keine große E/A).
+#[tauri::command]
+pub fn list_removable_volumes() -> Vec<RemovableVolumeDto> {
+    let disks = sysinfo::Disks::new_with_refreshed_list();
+    disks
+        .list()
+        .iter()
+        .filter(|disk| disk.is_removable())
+        .map(|disk| {
+            let mount_point = disk.mount_point().to_path_buf();
+            let has_dcim = ["DCIM", "dcim"]
+                .iter()
+                .any(|name| mount_point.join(name).is_dir());
+            RemovableVolumeDto {
+                mount_point: mount_point.to_string_lossy().to_string(),
+                name: disk.name().to_string_lossy().to_string(),
+                has_dcim,
+            }
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CameraFileEntryDto {
+    pub folder: String,
+    pub name: String,
+}
+
+impl From<apx_tether::CameraFileEntry> for CameraFileEntryDto {
+    fn from(entry: apx_tether::CameraFileEntry) -> Self {
+        Self {
+            folder: entry.folder,
+            name: entry.name,
+        }
+    }
+}
+
+/// Listet bereits aufgenommene Dateien auf der über [`tether_connect`]
+/// verbundenen Kamera (Phase 13 Schritt 2) — im Unterschied zu
+/// [`tether_capture`], das eine **neue** Aufnahme auslöst. Ein Fehler,
+/// wenn zuvor kein `tether_connect` mit erkannter Kamera lief.
+#[tauri::command]
+pub fn list_camera_files(state: State<'_, AppState>) -> Result<Vec<CameraFileEntryDto>, String> {
+    let mut guard = state
+        .tether
+        .lock()
+        .map_err(|_| "Tethering-Status ist blockiert (vergiftete Sperre)".to_string())?;
+    let backend = guard
+        .as_deref_mut()
+        .ok_or_else(|| "Keine Kamera verbunden — zuerst tether_connect aufrufen".to_string())?;
+    Ok(backend
+        .list_camera_files()
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .map(CameraFileEntryDto::from)
+        .collect())
+}
+
+/// Lädt eine per [`list_camera_files`] gefundene Datei herunter und
+/// importiert sie über den bestehenden Import-Pfad (`import::
+/// run_with_mode`, Phase 3/5) — derselbe Ablauf wie [`tether_capture`],
+/// nur mit einer bereits vorhandenen statt einer neu ausgelösten Aufnahme.
+#[tauri::command]
+pub async fn import_from_camera(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    folder: String,
+    name: String,
+    preset_name: Option<String>,
+) -> Result<Option<PhotoDto>, String> {
+    let dest_dir = state.paths.tether_download_dir();
+    let entry = apx_tether::CameraFileEntry { folder, name };
+    let downloaded_path = {
+        let mut guard = state
+            .tether
+            .lock()
+            .map_err(|_| "Tethering-Status ist blockiert (vergiftete Sperre)".to_string())?;
+        let backend = guard
+            .as_deref_mut()
+            .ok_or_else(|| "Keine Kamera verbunden — zuerst tether_connect aufrufen".to_string())?;
+        backend
+            .download_camera_file(&entry, &dest_dir)
+            .map_err(|err| err.to_string())?
+    };
+
+    let (mode, rename_pattern) =
+        resolve_tether_import_settings(&state.paths, preset_name.as_deref())?;
+
+    let catalog = state.catalog.clone();
+    let cache_root = state.paths.preview_cache_dir();
+    let app_for_blocking = app.clone();
+    let dest_dir_for_blocking = dest_dir.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let events = crate::import::TauriEvents(&app_for_blocking);
+        let cancel = tokio_util::sync::CancellationToken::new();
+        crate::import::run_with_mode(
+            &events,
+            &catalog,
+            &cache_root,
+            &dest_dir_for_blocking,
+            &cancel,
+            &mode,
+            rename_pattern.as_deref(),
+        );
+    })
+    .await
+    .map_err(|err| format!("Import-Task ist abgestürzt: {err}"))?;
+
+    let content_hash = crate::import::compute_content_hash(&downloaded_path)?;
+    let photo = state
+        .catalog
+        .find_photo_by_content_hash(&content_hash)
+        .map_err(|err| err.to_string())?;
+    Ok(photo.map(PhotoDto::from))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

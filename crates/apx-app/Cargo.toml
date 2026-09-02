@@ -53,6 +53,10 @@ image_hasher = "3.1.1"
 # siehe DECISIONS.md ADR-0040) — dieselbe rustls-tls-Variante wie
 # apx-ais Anthropic-Client (kein systemabhängiges OpenSSL).
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# Wechseldatenträger-Erkennung für den Speicherkarten-Direktimport
+# (Phase 13 Schritt 2) — nur das "disk"-Feature, keine CPU-/Prozess-/
+# Netzwerk-Systeminfo, die dieses Projekt nicht braucht.
+sysinfo = { version = "0.38", default-features = false, features = ["disk"] }
 
 [features]
 # Standardmäßig aus — siehe apx-tether/src/lib.rs Moduldoku und

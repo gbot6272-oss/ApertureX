@@ -168,6 +168,11 @@ export const en: Record<keyof typeof de, string> = {
   "tetherDialog.trigger": "Trigger",
   "tetherDialog.running": "Running…",
   "tetherDialog.close": "Close",
+  // Phase 13 Schritt 2: direct import of files already on the camera.
+  "tetherDialog.existingFiles": "Files already on the camera",
+  "tetherDialog.listFiles": "List files",
+  "tetherDialog.listing": "Searching…",
+  "tetherDialog.importFile": "Import",
 
   // StatsCacheDialog.tsx (Phase 11 Schritt 11)
   "statsCacheDialog.title": "Statistics & preview cache",

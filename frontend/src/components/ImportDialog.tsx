@@ -35,17 +35,27 @@ export function ImportDialog({ open, sourcePath, onClose }: ImportDialogProps) {
   const saveImportPresetEntry = useAppStore((s) => s.saveImportPresetEntry);
   const deleteImportPresetEntry = useAppStore((s) => s.deleteImportPresetEntry);
   const startImportWithMode = useAppStore((s) => s.startImportWithMode);
+  const removableVolumes = useAppStore((s) => s.removableVolumes);
+  const loadRemovableVolumes = useAppStore((s) => s.loadRemovableVolumes);
 
   const [modeChoice, setModeChoice] = useState<ModeChoice>("AddInPlace");
   const [targetDir, setTargetDir] = useState("");
   const [renamePattern, setRenamePattern] = useState("");
   const [presetName, setPresetName] = useState("");
   const [selectedPresetName, setSelectedPresetName] = useState("");
+  // Speicherkarten-Direktimport (Phase 13 Schritt 2): überschreibt die
+  // ursprünglich per Dateidialog gewählte `sourcePath`, solange der Nutzer
+  // hier keinen erkannten Wechseldatenträger wählt, bleibt der normale
+  // Ordner-Import unverändert.
+  const [volumeOverride, setVolumeOverride] = useState<string | null>(null);
+  const effectiveSourcePath = volumeOverride ?? sourcePath;
 
   useEffect(() => {
     if (!open) return;
     void refreshImportPresets();
-  }, [open, refreshImportPresets]);
+    void loadRemovableVolumes();
+    setVolumeOverride(null);
+  }, [open, refreshImportPresets, loadRemovableVolumes]);
 
   if (!open) return null;
 
@@ -81,7 +91,7 @@ export function ImportDialog({ open, sourcePath, onClose }: ImportDialogProps) {
 
   async function handleImport() {
     const mode = importPresetModeToImportModeDto(modeChoiceToPresetMode(modeChoice, targetDir));
-    await startImportWithMode(sourcePath, mode, renamePattern.trim() ? renamePattern.trim() : null);
+    await startImportWithMode(effectiveSourcePath, mode, renamePattern.trim() ? renamePattern.trim() : null);
     onClose();
   }
 
@@ -96,9 +106,39 @@ export function ImportDialog({ open, sourcePath, onClose }: ImportDialogProps) {
         onClick={(event) => event.stopPropagation()}
       >
         <h2 className="mb-1 text-sm font-semibold text-text-primary">Import mit Vorlage</h2>
-        <p className="mb-3 truncate text-xs text-text-muted" title={sourcePath}>
-          Quelle: {sourcePath}
+        <p className="mb-1 truncate text-xs text-text-muted" title={effectiveSourcePath}>
+          Quelle: {effectiveSourcePath}
         </p>
+
+        {/* Speicherkarten-Direktimport (Phase 13 Schritt 2) — reine
+            Erkennungs-Bequemlichkeit über der normalen Ordnerauswahl,
+            ersetzt sie nicht: die ursprünglich gewählte `sourcePath`
+            bleibt wählbar, solange kein Wechseldatenträger angeklickt
+            wurde. */}
+        {removableVolumes.length > 0 && (
+          <div className="mb-3 flex flex-col gap-1 rounded border border-border p-2">
+            <span className="text-xs font-medium text-text-secondary">Erkannte Wechseldatenträger</span>
+            <ul className="flex flex-col gap-1">
+              {removableVolumes.map((volume) => (
+                <li key={volume.mount_point}>
+                  <button
+                    type="button"
+                    onClick={() => setVolumeOverride(volume.mount_point)}
+                    className={`w-full truncate rounded border px-2 py-1 text-left text-xs ${
+                      volumeOverride === volume.mount_point
+                        ? "border-accent bg-accent/10 text-accent"
+                        : "border-border text-text-secondary hover:bg-bg-panel"
+                    }`}
+                    title={volume.mount_point}
+                  >
+                    {volume.name || volume.mount_point}
+                    {volume.has_dcim && <span className="ml-1 text-text-muted">(Speicherkarte)</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {importPresets.length > 0 && (
           <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">

@@ -176,6 +176,11 @@ export const de = {
   "tetherDialog.trigger": "Auslösen",
   "tetherDialog.running": "Läuft…",
   "tetherDialog.close": "Schließen",
+  // Phase 13 Schritt 2: Direktimport bereits vorhandener Aufnahmen.
+  "tetherDialog.existingFiles": "Bereits aufgenommene Dateien",
+  "tetherDialog.listFiles": "Auflisten",
+  "tetherDialog.listing": "Sucht…",
+  "tetherDialog.importFile": "Importieren",
 
   // StatsCacheDialog.tsx (Phase 11 Schritt 11)
   "statsCacheDialog.title": "Statistik & Vorschau-Cache",

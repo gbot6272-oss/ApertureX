@@ -22,6 +22,7 @@ bytemuck = { version = "1", features = ["derive"] }
 # Blockiert auf wgpus async-API, ohne dem Crate eine eigene Async-Runtime
 # aufzuzwingen (apx-app nutzt Tokio, Tests/andere Aufrufer sollen das nicht müssen).
 pollster = "0.3"
+lensfun = "0.7"
 
 [dev-dependencies]
 approx = "0.5"

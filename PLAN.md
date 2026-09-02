@@ -1001,4 +1001,24 @@ Tests + gezielte Playwright-Tests, Commit+Push nach jedem Schritt.
 - [x] 9. Stapelverarbeitungs-Konsole (neuer Batch-Operationen-Log, siehe ADR-0036) — echtes feldübergreifendes Journal (`batch_operations`/`batch_operation_items`), `BatchConsoleDialog.tsx` (Filter-Auswahl, Trockenlauf, Ausführen, Rückgängig), Kopf-Knopf + Befehlspalette verdrahtet
 - [x] 10. Tethering real kompilieren (`libgphoto2-dev` in CI, `--features tethering`) — `libgphoto2-dev` real installiert und gegen die echte Bibliothek gebaut/getestet (nicht nur strukturell); dabei zwei echte API-Abweichungen von der Doku-Annahme gefunden und behoben (`CameraFile::folder()`/`name()` liefern `Cow<str>`, nicht `&str`); Linux-CI-Zweig deckt das Feature jetzt ab, macOS/Windows bleiben ohne `libgphoto2` (Standard-Features)
 - [x] 11. Phase-10-Nachträge (restliche Lokalisierung, PaletteFrame auf DevelopPanel/MasksPanel, lokale Tastenkürzel umbelegbar, Installer-Signierung-Mechanik-Nachweis) — alle vier Teilpunkte umgesetzt, Installer-Signierung-Nachweis dabei enger gefasst als ursprünglich geplant (kein Repository-Secret-Schreibzugriff in dieser Sitzung, siehe DECISIONS.md ADR-0038-Nachtrag)
-- [ ] 12. Dokumentation, volle Verifikation, Abnahme
+- [x] 12. Dokumentation, volle Verifikation, Abnahme
+
+## Aktuelle Phase: Phase 12 — Lightroom-Lückenschluss
+
+Direkter Nachfolger auf den Lightroom-Vergleichs-Artifact („ApertureX vs.
+Lightroom") und ADR-0039: bündelt alle dort gefundenen, tatsächlich
+schließbaren Lücken. Wichtigster Einzelfund: die `lensfun`-Crate (echte
+LensFun-Objektivdatenbank, real geprüft) macht die bisherigen drei
+Platzhalter-Objektivprofile gegenstandslos, ohne das Adobe-DCP/LCP-Format
+selbst zu lösen. Testdisziplin wie in Phase 11 fortgeführt: ein gezielter
+Test pro Schritt, volle Suite einmalig in Schritt 8.
+
+- [x] 0. Scope festzurren, `lensfun`-Crate-Spike (ADR-0039: Crate real per `cargo add` + `cargo build` geprüft, ein Spike-Test liest eine echte Kalibrierung aus der gebündelten Datenbank; Vorzeichen-/Skalierungskonvention weicht ehrlich dokumentiert von den bisherigen Platzhalterprofilen ab)
+- [ ] 1. Live-Masken-Overlay im Viewer
+- [ ] 2. Radialverlauf-Ellipse + Rotation, Auto-Mask beim Pinsel
+- [ ] 3. Objektiv-/Kameraprofile: echte LensFun-Datenbank (Teil A) + Kalibrier-Assistent per Zhang-Methode (Teil B)
+- [ ] 4. Voller EXIF/IPTC-Editor
+- [ ] 5. Mehrfachziel-Export
+- [ ] 6. Freies ICC-Profil beim Soft-Proof
+- [ ] 7. Beobachtete Ordner / Auto-Import
+- [ ] 8. Dokumentation, volle Verifikation, Abnahme (Vergleichs-Artifact mit aktualisierter Lückenliste neu veröffentlichen)

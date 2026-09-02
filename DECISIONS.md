@@ -1999,3 +1999,75 @@ ehrlichen Grenze bei der Installer-Signierung:**
   nie ausgeführt worden — dieselbe Grenze wie in ADR-0037, jetzt nur um
   den zusätzlichen Befund ergänzt, dass auch der Secret-Setzschritt
   selbst außerhalb der Werkzeuge dieser Sitzung liegt.
+
+## ADR-0039: Phase 12 — Lightroom-Lückenschluss; `lensfun`-Crate real geprüft und für Schritt 3 freigegeben
+
+**Status:** Angenommen
+**Kontext:** Der Nutzer hat einen ausführlichen, bidirektionalen
+Funktionsvergleich von ApertureX gegen Adobe Lightroom Classic/CC in
+Auftrag gegeben (veröffentlicht als Artifact „ApertureX vs. Lightroom"),
+jede Zeile aus `FEATURES.md` gegen den echten Lightroom-Funktionsumfang
+geprüft. Direkt im Anschluss wurde angewiesen, für die dort gefundenen
+Lücken einen Plan mit tief recherchierten, echten Lösungen zu schreiben —
+mit ausdrücklichem Fokus auf die Frage, ob der Kamera-/Objektiv-Profil-
+Import über eine „KI-generierte" Lösung tragen könnte.
+
+**Befund zur KI-Frage:** eine echte Modellinferenz für Verzeichnungs-/
+Vignettierungs-Koeffizienten aus einem einzelnen Foto ohne Kalibrierziel
+bräuchte trainierte Gewichte — dieselbe seit ADR-0033 dokumentierte Wand
+wie jede andere „KI"-Funktion in diesem Projekt. Eine LLM-„Schätzung"
+von Objektiv-Koeffizienten ohne echte Kalibrierdatengrundlage wäre reine
+Fabrikation und wird hier bewusst **nicht** vorgeschlagen.
+
+**Stattdessen real gefunden — die `lensfun`-Crate** (crates.io, v0.7.0,
+reines Rust, LGPL-3.0-or-later, Autor David Veszelovszki, Repo
+`github.com/vdavid/lensfun-rs`): ein gegen die C++-Referenzbibliothek
+bit-exakt getesteter Port (laut Projekt-README 1.640 A/B-Testfälle,
+Abweichung 4,88×10⁻⁴ Pixel) der echten, offenen LensFun-Objektivdatenbank.
+`Database::load_bundled()` liefert Tausende real kalibrierte Kamera-/
+Objektiv-Kombinationen direkt eingebettet (~574 KB gzip), ohne
+Laufzeit-Dateisystemzugriff. Das macht den bisherigen 3-Profile-
+Platzhalter (ADR-0028) für Schritt 3 gegenstandslos — **andere
+Datenquelle** (offene LensFun-Datenbank statt Adobe-DCP/LCP), **gleiche
+Wirkung**, ohne das ungelöste Adobe-Format-Problem selbst anzufassen.
+
+**Spike real durchgeführt** (nicht nur `--dry-run`): `cargo add
+lensfun@0.7` in `apx-pipeline`, `cargo build -p apx-pipeline` erfolgreich
+(„Finished dev profile … in 2m 01s"), einzige neue Abhängigkeit ist
+`roxmltree` (reines Rust, DOM-XML-Parser) — keine C-Bindings, kein
+`bindgen`/`libclang`. Ein Test lädt die gebündelte Datenbank, findet
+`Canon EOS 5D Mark III` + `Canon EF 16-35mm f/4L IS USM` real in den
+Daten und liest deren Verzeichnungskalibrierung bei 16mm aus
+(`crates/apx-pipeline/src/lens_profiles.rs`,
+`lensfun_bundled_database_has_plausible_distortion_calibration_for_known_lens`).
+**Ehrlicher Befund dabei:** `lensfun`s Poly3-`k1` (0,0128 für dieses
+Objektiv) folgt einer anderen Vorzeichen-/Skalierungskonvention als
+unser bisheriges `generic-wide`-Profil (`distortion_k1 = -0,12`, eigene
+Konvention seit ADR-0028) — ein direkter Zahlenvergleich zwischen beiden
+Systemen ist nicht aussagekräftig; die echte Umrechnung (inkl.
+`Modifier`s Re-Skalierung auf Bildmaße/Cropfaktor) ist Aufgabe von
+Schritt 3 Teil A. Der Spike verifiziert nur die Grundvoraussetzung:
+die Datenbank liefert für real existierende Objektive nutzbare,
+begrenzte Kalibrierwerte.
+
+**Für Objektive außerhalb der Datenbank** (Teil B, Schritt 3): ein
+Kalibrier-Assistent, der aus vom Nutzer selbst fotografierten
+Schachbrett-Kalibrierbildern per klassischer Zhang-Methode (Ecken-
+erkennung, Homographie-Schätzung, nichtlineare Verfeinerung — reine
+Optimierung, kein gelerntes Modell) ein Profil berechnet. Wird im Dialog
+und in `FEATURES.md` ehrlich als „aus eigenen Kalibrierfotos berechnet"
+beschriftet, nicht als „KI-generiert".
+
+**Entscheidung:** Phase 12 bündelt alle im Lightroom-Vergleichs-Artifact
+gefundenen, tatsächlich schließbaren Lücken in neun Bauschritten (0–8):
+Live-Masken-Overlay, Radialverlauf-Ellipse + Auto-Mask, echte LensFun-
+Datenbank + Kalibrier-Assistent, voller EXIF/IPTC-Editor, Mehrfachziel-
+Export, freies ICC-Profil beim Soft-Proof, beobachtete Ordner/Auto-
+Import. **Bewusst ausgeklammert** (echte Design-Entscheidung oder bereits
+dokumentiertes Beschaffungsproblem ohne neue Datenlage, siehe Vergleichs-
+Artifact): Cloud-Synchronisation/mobile Begleit-App, Mehrfach-Katalog,
+Publish Services, Print-on-Demand-Bestellintegration, Adobe-kompatibles
+Plugin-SDK, generative KI-Bildbearbeitung, HEIF-Export (ADR-0038 bereits
+geprüft, keine neue Datenlage). Testdisziplin wie vom Nutzer für den Rest
+von Phase 11 angeordnet fortgeführt: ein gezielter Test pro Schritt, volle
+Suite einmalig in Schritt 8.

@@ -107,4 +107,52 @@ mod tests {
     fn match_profile_for_lens_string_returns_none_when_nothing_matches() {
         assert!(match_profile_for_lens_string("Unbekanntes Objektiv 999mm").is_none());
     }
+
+    /// Phase 12 Schritt 0 Spike (siehe `DECISIONS.md` ADR-0039): prüft, dass
+    /// die echte, in der `lensfun`-Crate gebündelte LensFun-Datenbank für ein
+    /// real existierendes Weitwinkelobjektiv überhaupt eine Verzeichnungs-
+    /// kalibrierung liefert und dass deren Koeffizient in einer plausiblen,
+    /// begrenzten Größenordnung liegt (kein `NaN`, keine Ausreißer).
+    ///
+    /// **Ehrlicher Befund dieses Spikes:** `lensfun`s Poly3-Koeffizient
+    /// (`k1 = 0.0128` für dieses Objektiv bei 16mm) folgt einer anderen
+    /// Vorzeichen-/Skalierungskonvention als unser bisheriges handgepflegtes
+    /// `generic-wide`-Profil (`distortion_k1 = -0.12`, eigene Konvention seit
+    /// ADR-0028) — ein direkter Zahlenvergleich zwischen beiden ist daher
+    /// **nicht** aussagekräftig. Die echte Umrechnung zwischen den beiden
+    /// Konventionen (inkl. `Modifier`s Re-Skalierung auf Bildmaße/Cropfaktor)
+    /// ist Aufgabe von Schritt 3 Teil A, nicht dieses Spikes. Dieser Test
+    /// verifiziert nur die Grundvoraussetzung dafür: dass die Datenbank für
+    /// ein real existierendes Objektiv überhaupt eine sinnvolle Kalibrierung
+    /// liefert.
+    #[test]
+    fn lensfun_bundled_database_has_plausible_distortion_calibration_for_known_lens() {
+        let db =
+            lensfun::Database::load_bundled().expect("gebündelte LensFun-Datenbank muss laden");
+        let cameras = db.find_cameras(Some("Canon"), "EOS 5D Mark III");
+        let camera = cameras
+            .first()
+            .expect("Canon EOS 5D Mark III sollte in der Datenbank enthalten sein");
+        let lenses = db.find_lenses(Some(camera), "Canon EF 16-35mm f/4L IS USM");
+        let lens = lenses
+            .first()
+            .expect("Canon EF 16-35mm f/4L IS USM sollte in der Datenbank enthalten sein");
+        let calib = lens
+            .interpolate_distortion(16.0)
+            .expect("Verzeichnungskalibrierung bei 16mm sollte existieren");
+        let k1 = match calib.model {
+            lensfun::DistortionModel::Poly3 { k1 } => k1,
+            lensfun::DistortionModel::Ptlens { a, b, c } => a + b + c,
+            other => panic!("unerwartetes Verzeichnungsmodell für dieses Objektiv: {other:?}"),
+        };
+        assert!(
+            k1.is_finite(),
+            "Verzeichnungskoeffizient darf nicht NaN/unendlich sein"
+        );
+        assert!(
+            k1 != 0.0 && k1.abs() < 1.0,
+            "Verzeichnungskoeffizient eines Weitwinkelobjektivs sollte spürbar \
+             aber begrenzt sein (war {k1})"
+        );
+    }
 }

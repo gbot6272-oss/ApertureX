@@ -92,6 +92,12 @@ statt stillschweigend übergangen.
 | `ag-psd` | MIT | Flacher PSD-Export (`apx_export::format::encode_psd`, Schritt 2) | Reines Rust, „from-scratch"-Portierung der gleichnamigen TypeScript-Bibliothek. Fallstrick per Testbau gefunden: `write_psd` **panickt** statt `Result` bei Abmessungen >30000 oder `bits_per_channel != 8` — `encode_psd` prüft die Abmessungen vorab und meldet stattdessen `ExportError::Unsupported` |
 | `gamut-jxl` / `gamut-core` | MIT OR Apache-2.0 | JPEG-XL-Export/-Import (`apx_export::format::encode_jxl`, Schritt 2) | Encoder bindet das echte libjxl (C, BSD-3-Clause, Referenzimplementierung) über `gamut-jxl-sys`, das es per `cmake` zur Kompilierzeit als Quelle vendort (kein reines Rust, ~1-2 Minuten zusätzliche Bauzeit) — kein reifer reiner-Rust-JXL-*Encoder* existiert. Der Decoder-Pfad ist dagegen das reine-Rust `jxl` (jxl-rs, BSD-3-Clause, vom libjxl-Projekt selbst), verifiziert per echtem Encode→Decode-Rundreise-Test (exakte Pixelwerte bei verlustfreier Kodierung) |
 
+## Rust — Phase 12 (siehe `DECISIONS.md` ADR-0039)
+
+| Crate | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `lensfun` | LGPL-3.0-or-later | Echte LensFun-Objektiv-/Kameradatenbank (`apx_pipeline::lens_profiles`, Schritt 0 Spike + Schritt 3) | Reines Rust, bit-exakt gegen die C++-Referenzbibliothek getesteter Port (laut Projekt-README 1.640 A/B-Testfälle, Abweichung 4,88×10⁻⁴ Pixel). Bundelt die echte, offene LensFun-XML-Datenbank (`Database::load_bundled()`, ~574 KB gzip) direkt eingebettet, keine Laufzeit-Dateisystemzugriffe. Einzige neue transitive Abhängigkeit: `roxmltree` (reines Rust, DOM-XML-Parser), keine C-Bindings/`bindgen`. LGPL-3.0-or-later gilt nur für die Bibliothek selbst (kein statisch gelinkter C-Code wie bei `lcms2`/`gamut-jxl`), dynamisches Linken/Aufrufen einer LGPL-Rust-Crate aus einem separaten Crate verlangt keine Lizenzänderung des aufrufenden Codes — analog zum bereits dokumentierten `gphoto2`/`libgphoto2`-Präzedenzfall (Phase 9) |
+
 ## Frontend — geplant für Phase 1
 
 | Paket | Lizenz | Zweck | Hinweis |

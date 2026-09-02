@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { useDevelopRender } from "../hooks/useDevelopRender";
+import { useDevelopPreviewThumbnail, useDevelopRender } from "../hooks/useDevelopRender";
 import { useElementSize } from "../hooks/useElementSize";
 import { useImageBitmap } from "../hooks/useImageBitmap";
 import { computeAutoTone } from "../lib/autoTone";
@@ -12,7 +12,7 @@ import { computeMaskPinPosition } from "../lib/maskPins";
 import { matchesBinding } from "../lib/keybindings";
 import { imageUrl, previewUrl } from "../lib/media";
 import { mergeEdlSubset } from "../lib/presets";
-import { applySoftProof } from "../lib/softProof";
+import { applyPaperWhite, type SoftProofSettings } from "../lib/softProof";
 import { clampZoom, computeBaseScale, imageOrigin, nextZoomStep, panForZoomAtCursor } from "../lib/viewerMath";
 import { QuadRenderer } from "../lib/webgl";
 import { useAppStore } from "../store";
@@ -56,6 +56,7 @@ export function Viewer() {
   const referenceViewActive = useAppStore((s) => s.referenceViewActive);
   const softProofActive = useAppStore((s) => s.softProofActive);
   const softProofProfile = useAppStore((s) => s.softProofProfile);
+  const softProofCustomIccPath = useAppStore((s) => s.softProofCustomIccPath);
   const softProofIntent = useAppStore((s) => s.softProofIntent);
   const softProofGamutWarning = useAppStore((s) => s.softProofGamutWarning);
   const softProofPaperWhite = useAppStore((s) => s.softProofPaperWhite);
@@ -129,7 +130,27 @@ export function Viewer() {
   const renderedEdl = hoverPresetSubset ? mergeEdlSubset(developEdl, hoverPresetSubset) : developEdl;
   const developEdlJson = developPanelOpen && photo ? buildEdlEnvelopeJson(renderedEdl) : null;
   const developPhotoId = developPanelOpen ? (photo?.id ?? null) : null;
-  const developFrame = useDevelopRender(developPhotoId, developEdlJson, photo && containerSize.width > 0 ? targetFullEdge : undefined);
+  const developMaxEdge = photo && containerSize.width > 0 ? targetFullEdge : undefined;
+  const developFrame = useDevelopRender(developPhotoId, developEdlJson, developMaxEdge);
+
+  // Echter Soft-Proof (Phase 12 Schritt 6, siehe `DECISIONS.md`
+  // ADR-0039-Nachtrag II): eine **separate** zweite Anfrage über dieselbe
+  // Route, statt `developFrame` selbst zu ersetzen — Farbaufnehmer (TAT,
+  // Weißabgleich-Pipette, Maskenfarbbereich), das Clipping-Overlay und
+  // der Histogramm-Aufbau lesen `developFrame.pixels` direkt und müssen
+  // dabei immer den echten, nicht soft-proof-verfälschten Entwickeln-
+  // Zustand sehen — nur der tatsächlich gezeichnete Canvas-Inhalt soll
+  // die Proof-Simulation zeigen.
+  const softProofSettings: SoftProofSettings | null = softProofActive
+    ? {
+        profile: softProofProfile,
+        customIccPath: softProofCustomIccPath,
+        intent: softProofIntent,
+        gamutWarning: softProofGamutWarning,
+        paperWhite: softProofPaperWhite,
+      }
+    : null;
+  const softProofFrame = useDevelopPreviewThumbnail(softProofActive ? developPhotoId : null, developEdlJson, developMaxEdge, softProofSettings);
 
   const drawSource = developFrame ?? activeBitmap ?? null;
 
@@ -178,19 +199,16 @@ export function Viewer() {
     }
 
     if (developFrame && drawSource === developFrame) {
-      // Soft-Proof (Phase 6 Schritt 10) betrifft nur die live entwickelte
+      // Soft-Proof (Phase 6 Schritt 10, seit Phase 12 Schritt 6 ein
+      // echter serverseitiger ICC-Transform statt einer Näherung, siehe
+      // `lib/softProof.ts`s Moduldoku) betrifft nur die live entwickelte
       // Vorschau, nie das rohe Vorschau-/Vollbild-Bitmap (das läuft ja
-      // nicht über die `develop/...`-Route) — siehe `lib/softProof.ts`s
-      // Moduldoku zur bewussten Beschränkung auf eine reine
-      // Anzeige-Nachbearbeitung.
-      const pixels = softProofActive
-        ? applySoftProof(developFrame, {
-            profile: softProofProfile,
-            intent: softProofIntent,
-            gamutWarning: softProofGamutWarning,
-            paperWhite: softProofPaperWhite,
-          })
-        : developFrame.pixels;
+      // nicht über die `develop/...`-Route). Solange `softProofFrame`
+      // noch nicht nachgeladen ist (asynchron, eigene Anfrage), bleibt
+      // die unveränderte `developFrame`-Vorschau stehen, statt kurz
+      // etwas Falsches oder Leeres zu zeigen.
+      const proofed = softProofActive ? softProofFrame : null;
+      const pixels = proofed ? (softProofPaperWhite ? applyPaperWhite(proofed) : proofed.pixels) : developFrame.pixels;
       renderer.uploadRgba8(developFrame.width, developFrame.height, pixels);
     } else if (activeBitmap && drawSource === activeBitmap) {
       renderer.uploadImageBitmap(activeBitmap);
@@ -214,9 +232,7 @@ export function Viewer() {
     panX,
     panY,
     softProofActive,
-    softProofProfile,
-    softProofIntent,
-    softProofGamutWarning,
+    softProofFrame,
     softProofPaperWhite,
   ]);
 

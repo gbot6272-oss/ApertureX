@@ -1,5 +1,7 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 
+import { encodeSoftProofSegment, type SoftProofSettings } from "./softProof";
+
 /**
  * Baut die URL für den `apx://`-Custom-Protokoll-Handler (siehe
  * `crates/apx-app/src/protocol` und `DECISIONS.md` ADR-0009).
@@ -31,10 +33,15 @@ export function imageUrl(photoId: string, maxEdge?: number): string {
  * Ziehens eines Reglers (noch nicht committet) live rendern können.
  * Antwort ist kein Bildformat, sondern ein 8-Byte-Breite/Höhe-Header +
  * rohes RGBA8 (siehe `hooks/useDevelopRender`).
+ *
+ * `softProof` (Phase 12 Schritt 6) hängt bei aktivem Soft-Proof ein
+ * zusätzliches, base64url-kodiertes Segment an — der Server rendert dann
+ * bereits farbmanagementkorrekt vor, siehe `lib/softProof.ts`s Moduldoku.
  */
-export function developUrl(photoId: string, edlJson: string, maxEdge?: number): string {
+export function developUrl(photoId: string, edlJson: string, maxEdge?: number, softProof: SoftProofSettings | null = null): string {
   const param = maxEdge === undefined ? "full" : String(maxEdge);
-  return convertFileSrc(`develop/${photoId}/${param}/${edlJson}`, "apx");
+  const softProofSegment = encodeSoftProofSegment(softProof);
+  return convertFileSrc(`develop/${photoId}/${param}/${softProofSegment}/${edlJson}`, "apx");
 }
 
 /**

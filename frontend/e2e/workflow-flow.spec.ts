@@ -247,12 +247,12 @@ test.describe("Workflow: Referenzansicht + Soft-Proof", () => {
     await expect(profileSelect).toBeVisible();
     await expect(intentSelect).toBeVisible();
 
-    await profileSelect.selectOption("print_sim");
+    await profileSelect.selectOption("adobe_rgb");
     await intentSelect.selectOption("relative_colorimetric");
     await page.getByLabel("Farbumfangswarnung").check();
     await page.getByLabel("Papierweiß-Simulation").check();
 
-    await expect(profileSelect).toHaveValue("print_sim");
+    await expect(profileSelect).toHaveValue("adobe_rgb");
     await expect(intentSelect).toHaveValue("relative_colorimetric");
     await expect(page.getByLabel("Farbumfangswarnung")).toBeChecked();
     await expect(page.getByLabel("Papierweiß-Simulation")).toBeChecked();

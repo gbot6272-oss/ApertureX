@@ -7,7 +7,7 @@
 //! aufgeteilt, statt einen echten Query-String zu erwarten.
 //!
 //! Ab Phase 2 (siehe `DECISIONS.md` ADR-0016, ADR-0019) kommt
-//! `convertFileSrc("develop/<id>/<max_edge_oder_'full'>/<edl_json>", "apx")`
+//! `convertFileSrc("develop/<id>/<max_edge_oder_'full'>/<soft_proof>/<edl_json>", "apx")`
 //! hinzu: `edl_json` ist die **vollständige, noch prozentkodierte
 //! JSON-Serialisierung** des aktuell im Frontend aktiven (u. U. noch
 //! nicht committeten) `EdlEnvelope` — bewusst keine reine Prüfsumme
@@ -21,6 +21,20 @@
 //! ausschließlich Zahlen, enthalten also nie ein `/`-Zeichen — die
 //! bestehende "erst dekodieren, dann an `/` aufteilen"-Reihenfolge bleibt
 //! dadurch für alle drei Anfragearten sicher.
+//!
+//! `<soft_proof>` (Phase 12 Schritt 6, siehe `DECISIONS.md`
+//! ADR-0039-Nachtrag II) ist entweder das literale `none` (kein
+//! Soft-Proof, Normalfall) oder eine base64url-kodierte (kein Padding,
+//! kein `/` im Alphabet) kleine JSON-Nutzlast
+//! `{"target":"srgb"|"adobe_rgb"|"pro_photo_rgb"|"display_p3"|"custom",
+//! "custom_path":string|null,"intent":"perceptual"|"relative_colorimetric",
+//! "gamut_warning":bool}` — dieselbe Struktur wie `apx-app::commands::
+//! parse_icc_target`s bestehende ICC-Zielprofil-Parameter für den Export,
+//! hier wiederverwendet. Base64 statt Rohtext, weil `custom_path` (ein
+//! Dateipfad zu einer vom Nutzer gewählten `.icc`-Datei) auf den meisten
+//! Betriebssystemen `/`-Zeichen enthält — die bestehende
+//! "erst dekodieren, dann an `/` aufteilen"-Reihenfolge würde daran sonst
+//! zerbrechen (anders als bei `edl_json`, dessen Zahlenfelder das nie tun).
 
 use std::path::PathBuf;
 
@@ -36,10 +50,11 @@ pub(super) enum ImageRequest {
         photo_id: PhotoId,
         max_edge: Option<u32>,
     },
-    /// `develop/<id>/<max_edge_oder_'full'>/<edl_json>` — siehe Modul-Doku.
+    /// `develop/<id>/<max_edge_oder_'full'>/<soft_proof>/<edl_json>` — siehe Modul-Doku.
     Develop {
         photo_id: PhotoId,
         max_edge: Option<u32>,
+        soft_proof: Option<SoftProofRequest>,
         edl_json: String,
     },
     /// `music/<absoluter_pfad>` (Phase 8 Schritt 4, Diashow-Musiksynchron-
@@ -54,6 +69,14 @@ pub(super) enum ImageRequest {
     /// Dateipfad enthält so gut wie immer `/`) — alles nach dem ersten
     /// `/`-Segment `music` wird wieder zu einem Pfad zusammengefügt.
     Music { path: PathBuf },
+}
+
+/// Geparste `<soft_proof>`-Nutzlast — siehe Modul-Doku.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SoftProofRequest {
+    pub target: apx_export::icc::IccTarget,
+    pub intent: apx_export::icc::ProofingIntent,
+    pub gamut_warning: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,13 +94,13 @@ pub(super) fn parse(raw_path: &str) -> Result<ImageRequest, RouteError> {
         [kind @ ("preview" | "image"), id_str, param] => {
             parse_preview_or_image(kind, id_str, param)
         }
-        ["develop", id_str, max_edge_str, edl_json] => {
-            parse_develop(id_str, max_edge_str, edl_json)
+        ["develop", id_str, max_edge_str, soft_proof_str, edl_json] => {
+            parse_develop(id_str, max_edge_str, soft_proof_str, edl_json)
         }
         ["music", rest @ ..] if !rest.is_empty() => parse_music(rest),
         _ => Err(RouteError(format!(
             "unbekannte oder falsch aufgebaute Anfrage (erwartet 'art/id/parameter', \
-             'develop/id/max_edge/edl_json' oder 'music/absoluter_pfad'), erhalten: '{decoded}'"
+             'develop/id/max_edge/soft_proof/edl_json' oder 'music/absoluter_pfad'), erhalten: '{decoded}'"
         ))),
     }
 }
@@ -135,18 +158,66 @@ fn parse_preview_or_image(
 fn parse_develop(
     id_str: &str,
     max_edge_str: &str,
+    soft_proof_str: &str,
     edl_json: &str,
 ) -> Result<ImageRequest, RouteError> {
     let photo_id = parse_photo_id(id_str)?;
     let max_edge = parse_max_edge(max_edge_str)?;
+    let soft_proof = parse_soft_proof(soft_proof_str)?;
     if edl_json.is_empty() {
         return Err(RouteError("leeres edl_json-Segment".to_string()));
     }
     Ok(ImageRequest::Develop {
         photo_id,
         max_edge,
+        soft_proof,
         edl_json: edl_json.to_string(),
     })
+}
+
+/// Deserialisiert `<soft_proof>` — siehe Modul-Doku für das Format.
+/// `"none"` (Normalfall) ergibt `Ok(None)`, alles andere wird als
+/// base64url-kodiertes JSON interpretiert.
+fn parse_soft_proof(segment: &str) -> Result<Option<SoftProofRequest>, RouteError> {
+    if segment == "none" {
+        return Ok(None);
+    }
+
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+
+    #[derive(serde::Deserialize)]
+    struct RawSoftProof {
+        target: String,
+        custom_path: Option<String>,
+        intent: String,
+        gamut_warning: bool,
+    }
+
+    let json_bytes = URL_SAFE_NO_PAD
+        .decode(segment)
+        .map_err(|err| RouteError(format!("ungültige Soft-Proof-Kodierung: {err}")))?;
+    let json_str = String::from_utf8(json_bytes)
+        .map_err(|err| RouteError(format!("Soft-Proof-Segment ist kein gültiges UTF-8: {err}")))?;
+    let raw: RawSoftProof = serde_json::from_str(&json_str)
+        .map_err(|err| RouteError(format!("Soft-Proof-JSON ungültig: {err}")))?;
+
+    let target = crate::commands::parse_icc_target(&raw.target, raw.custom_path.as_deref())
+        .map_err(RouteError)?;
+    let intent = match raw.intent.as_str() {
+        "perceptual" => apx_export::icc::ProofingIntent::Perceptual,
+        "relative_colorimetric" => apx_export::icc::ProofingIntent::RelativeColorimetric,
+        other => {
+            return Err(RouteError(format!(
+                "unbekannte Soft-Proof-Renderpriorität '{other}'"
+            )))
+        }
+    };
+
+    Ok(Some(SoftProofRequest {
+        target,
+        intent,
+        gamut_warning: raw.gamut_warning,
+    }))
 }
 
 #[cfg(test)]
@@ -222,13 +293,14 @@ mod tests {
     fn parses_develop_request_with_max_edge() {
         let id = PhotoId::new();
         let edl_json = r#"{"schema_version":1,"payload":{}}"#;
-        let raw = encode(&format!("develop/{id}/2048/{edl_json}"));
+        let raw = encode(&format!("develop/{id}/2048/none/{edl_json}"));
         let parsed = parse(&raw).expect("sollte parsen");
         assert_eq!(
             parsed,
             ImageRequest::Develop {
                 photo_id: id,
                 max_edge: Some(2048),
+                soft_proof: None,
                 edl_json: edl_json.to_string(),
             }
         );
@@ -238,13 +310,43 @@ mod tests {
     fn parses_develop_request_full_resolution() {
         let id = PhotoId::new();
         let edl_json = "{}";
-        let raw = encode(&format!("develop/{id}/full/{edl_json}"));
+        let raw = encode(&format!("develop/{id}/full/none/{edl_json}"));
         let parsed = parse(&raw).expect("sollte parsen");
         assert_eq!(
             parsed,
             ImageRequest::Develop {
                 photo_id: id,
                 max_edge: None,
+                soft_proof: None,
+                edl_json: edl_json.to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_develop_request_with_soft_proof() {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+
+        let id = PhotoId::new();
+        let edl_json = "{}";
+        let soft_proof_json = r#"{"target":"adobe_rgb","custom_path":null,"intent":"perceptual","gamut_warning":true}"#;
+        let soft_proof_segment = URL_SAFE_NO_PAD.encode(soft_proof_json);
+        let raw = encode(&format!(
+            "develop/{id}/full/{soft_proof_segment}/{edl_json}"
+        ));
+        let parsed = parse(&raw).expect("sollte parsen");
+        assert_eq!(
+            parsed,
+            ImageRequest::Develop {
+                photo_id: id,
+                max_edge: None,
+                soft_proof: Some(SoftProofRequest {
+                    target: apx_export::icc::IccTarget::Standard(
+                        apx_export::icc::StandardIccProfile::AdobeRgb
+                    ),
+                    intent: apx_export::icc::ProofingIntent::Perceptual,
+                    gamut_warning: true,
+                }),
                 edl_json: edl_json.to_string(),
             }
         );
@@ -253,20 +355,20 @@ mod tests {
     #[test]
     fn rejects_develop_request_with_empty_edl_json() {
         let id = PhotoId::new();
-        assert!(parse(&encode(&format!("develop/{id}/full/"))).is_err());
+        assert!(parse(&encode(&format!("develop/{id}/full/none/"))).is_err());
     }
 
     #[test]
     fn rejects_develop_request_with_wrong_segment_count() {
         let id = PhotoId::new();
         assert!(parse(&encode(&format!("develop/{id}/full"))).is_err());
-        assert!(parse(&encode(&format!("develop/{id}/full/{{}}/extra"))).is_err());
+        assert!(parse(&encode(&format!("develop/{id}/full/none/{{}}/extra"))).is_err());
     }
 
     #[test]
     fn rejects_develop_request_with_invalid_max_edge() {
         let id = PhotoId::new();
-        assert!(parse(&encode(&format!("develop/{id}/not-a-number/{{}}"))).is_err());
+        assert!(parse(&encode(&format!("develop/{id}/not-a-number/none/{{}}"))).is_err());
     }
 
     #[test]

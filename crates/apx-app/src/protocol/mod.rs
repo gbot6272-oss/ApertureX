@@ -165,6 +165,7 @@ fn response_meta(request: &ImageRequest) -> (&'static str, String) {
         ImageRequest::Develop {
             photo_id,
             max_edge,
+            soft_proof,
             edl_json,
         } => (
             // Kein Standard-Bildformat, siehe Modul-Doku: die ersten 8
@@ -172,9 +173,13 @@ fn response_meta(request: &ImageRequest) -> (&'static str, String) {
             // RGBA8. `edl_json` steckt bewusst im Cache-Schlüssel, nicht
             // nur photo_id/max_edge — zwei verschiedene Bearbeitungs-
             // zustände desselben Fotos sind zwei verschiedene Anfragen.
+            // `soft_proof` geht über sein `Debug`-Format ebenfalls in den
+            // Schlüssel ein (Phase 12 Schritt 6) — zwei unterschiedliche
+            // Soft-Proof-Einstellungen desselben Fotos/EDL-Zustands sind
+            // ebenfalls zwei verschiedene, getrennt zu cachende Antworten.
             "application/x-apx-develop-rgba8",
             format!(
-                "develop:{photo_id}:{}:{edl_json}",
+                "develop:{photo_id}:{}:{soft_proof:?}:{edl_json}",
                 format_max_edge(*max_edge)
             ),
         ),
@@ -228,9 +233,10 @@ fn compute(
         ImageRequest::Develop {
             photo_id,
             max_edge,
+            soft_proof,
             edl_json,
         } => compute_develop(
-            catalog, pipeline, tile_cache, paths, *photo_id, *max_edge, edl_json,
+            catalog, pipeline, tile_cache, paths, *photo_id, *max_edge, soft_proof, edl_json,
         ),
         ImageRequest::Music { path } => compute_music(path),
     }
@@ -295,7 +301,11 @@ fn compute_full_image(
 
 /// Rendert `photo_id` live über `apx-pipeline` mit dem in `edl_json`
 /// beschriebenen Bearbeitungszustand — siehe Modul-Doku für das
-/// Antwortformat (8-Byte-Breite/Höhe-Header + rohes RGBA8).
+/// Antwortformat (8-Byte-Breite/Höhe-Header + rohes RGBA8). Acht
+/// voneinander unabhängige Parameter (kein sinnvolles gemeinsames
+/// Gruppierungsobjekt, jeder wird eigenständig verwendet) — Precedent für
+/// dieses bewusste `allow` siehe u. a. `apx-export/src/watermark.rs`.
+#[allow(clippy::too_many_arguments)]
 fn compute_develop(
     catalog: &Catalog,
     pipeline: &apx_pipeline::GpuContext,
@@ -303,6 +313,7 @@ fn compute_develop(
     paths: &apx_core::AppPaths,
     photo_id: PhotoId,
     max_edge: Option<u32>,
+    soft_proof: &Option<route::SoftProofRequest>,
     edl_json: &str,
 ) -> Result<Vec<u8>, HandlerError> {
     let envelope = apx_core::EdlEnvelope::from_json_str(edl_json)?;
@@ -336,14 +347,32 @@ fn compute_develop(
         "compute_develop abgeschlossen"
     );
 
+    // Echter Soft-Proof (Phase 12 Schritt 6, siehe `DECISIONS.md`
+    // ADR-0039-Nachtrag II): läuft über denselben `apx_export::icc`-
+    // `lcms2`-Weg wie der Export, statt einer clientseitigen Näherung —
+    // ersetzt hier die bisherige, rein im Frontend gerechnete
+    // Sättigungs-Näherung aus `frontend/src/lib/softProof.ts`.
+    let pixels = match soft_proof {
+        Some(proof) => apx_export::icc::soft_proof_rgba8(
+            rendered.width,
+            rendered.height,
+            &rendered.pixels,
+            &proof.target,
+            proof.intent,
+            proof.gamut_warning,
+        )
+        .map_err(|err| HandlerError::internal(err.to_string()))?,
+        None => rendered.pixels,
+    };
+
     // `rendered.width`/`.height` beschreiben die tatsächliche Puffergröße
     // (nicht `linear.width`/`.height`) — Geometrie/Zuschnitt (Phase 4
     // Schritt 11) kann sie gegenüber dem dekodierten Bild verkleinern,
     // siehe `apx_pipeline::develop::RenderedImage`s Moduldoku.
-    let mut framed = Vec::with_capacity(8 + rendered.pixels.len());
+    let mut framed = Vec::with_capacity(8 + pixels.len());
     framed.extend_from_slice(&rendered.width.to_le_bytes());
     framed.extend_from_slice(&rendered.height.to_le_bytes());
-    framed.extend_from_slice(&rendered.pixels);
+    framed.extend_from_slice(&pixels);
     Ok(framed)
 }
 
@@ -607,12 +636,26 @@ mod tests {
         let (_, key_develop_neutral) = response_meta(&ImageRequest::Develop {
             photo_id: id,
             max_edge: Some(2560),
+            soft_proof: None,
             edl_json: "{}".to_string(),
         });
         let (_, key_develop_other_edl) = response_meta(&ImageRequest::Develop {
             photo_id: id,
             max_edge: Some(2560),
+            soft_proof: None,
             edl_json: "{\"exposure_ev\":1.0}".to_string(),
+        });
+        let (_, key_develop_soft_proof) = response_meta(&ImageRequest::Develop {
+            photo_id: id,
+            max_edge: Some(2560),
+            soft_proof: Some(route::SoftProofRequest {
+                target: apx_export::icc::IccTarget::Standard(
+                    apx_export::icc::StandardIccProfile::AdobeRgb,
+                ),
+                intent: apx_export::icc::ProofingIntent::Perceptual,
+                gamut_warning: true,
+            }),
+            edl_json: "{}".to_string(),
         });
 
         assert_ne!(key_preview, key_image_full);
@@ -621,6 +664,10 @@ mod tests {
         assert_ne!(
             key_develop_neutral, key_develop_other_edl,
             "zwei verschiedene EDL-Zustände desselben Fotos müssen unterschiedliche Cache-Schlüssel ergeben"
+        );
+        assert_ne!(
+            key_develop_neutral, key_develop_soft_proof,
+            "Soft-Proof-Einstellungen müssen ebenfalls in den Cache-Schlüssel eingehen"
         );
     }
 
@@ -656,6 +703,7 @@ mod tests {
             &paths,
             photo_id,
             Some(32),
+            &None,
             &neutral_edl_json(),
         )
         .expect("sollte rendern");
@@ -692,6 +740,7 @@ mod tests {
             &paths,
             photo_id,
             Some(32),
+            &None,
             "nicht-valides-json",
         );
         assert!(result.is_err());

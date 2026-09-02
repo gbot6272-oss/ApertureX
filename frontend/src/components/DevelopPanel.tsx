@@ -45,6 +45,7 @@ import {
 import { matchesBinding } from "../lib/keybindings";
 import { PRESET_SECTION_KEYS, PRESET_SECTION_LABELS, type PresetSectionKey } from "../lib/presets";
 import { SOFT_PROOF_INTENT_LABELS, SOFT_PROOF_PROFILE_LABELS, type SoftProofIntent, type SoftProofProfile } from "../lib/softProof";
+import { pickFilePath } from "../lib/tauri";
 import { selectActivePhotos, useAppStore } from "../store";
 import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
@@ -162,12 +163,19 @@ export function DevelopPanel() {
   const toggleSoftProof = useAppStore((s) => s.toggleSoftProof);
   const softProofProfile = useAppStore((s) => s.softProofProfile);
   const setSoftProofProfile = useAppStore((s) => s.setSoftProofProfile);
+  const softProofCustomIccPath = useAppStore((s) => s.softProofCustomIccPath);
+  const setSoftProofCustomIccPath = useAppStore((s) => s.setSoftProofCustomIccPath);
   const softProofIntent = useAppStore((s) => s.softProofIntent);
   const setSoftProofIntent = useAppStore((s) => s.setSoftProofIntent);
   const softProofGamutWarning = useAppStore((s) => s.softProofGamutWarning);
   const toggleSoftProofGamutWarning = useAppStore((s) => s.toggleSoftProofGamutWarning);
   const softProofPaperWhite = useAppStore((s) => s.softProofPaperWhite);
   const toggleSoftProofPaperWhite = useAppStore((s) => s.toggleSoftProofPaperWhite);
+
+  async function handlePickSoftProofIccFile() {
+    const path = await pickFilePath("ICC-Profil", ["icc", "icm"]);
+    if (path) setSoftProofCustomIccPath(path);
+  }
   const activePhotos = useAppStore(useShallow(selectActivePhotos));
   const otherPhotosForReference = activePhotos.filter((p) => p.id !== selectedPhotoId);
   const copiedEdlSubset = useAppStore((s) => s.copiedEdlSubset);
@@ -533,6 +541,20 @@ export function DevelopPanel() {
                   ))}
                 </select>
               </label>
+              {softProofProfile === "custom" && (
+                <div className="flex gap-1">
+                  <input
+                    type="text"
+                    readOnly
+                    value={softProofCustomIccPath}
+                    placeholder="ICC-Datei wählen…"
+                    className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+                  />
+                  <button type="button" onClick={() => void handlePickSoftProofIccFile()} className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent">
+                    Wählen…
+                  </button>
+                </div>
+              )}
               <label className="flex items-center gap-2 text-xs text-text-secondary">
                 Renderpriorität
                 <select

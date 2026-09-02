@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { developUrl } from "../lib/media";
+import type { SoftProofSettings } from "../lib/softProof";
 import { useAppStore } from "../store";
 
 export interface DevelopFrame {
@@ -30,9 +31,15 @@ function useDevelopFrameInternal(
   photoId: string | null,
   edlJson: string | null,
   maxEdge: number | undefined,
+  softProof: SoftProofSettings | null,
   onLatency?: (ms: number) => void,
 ): DevelopFrame | null {
   const [frame, setFrame] = useState<DevelopFrame | null>(null);
+  // Stabiler Vergleichswert für den Effekt-Dependency-Array statt der
+  // rohen `softProof`-Objektreferenz (die sich bei jedem Aufrufer-Render
+  // ändern könnte, auch ohne inhaltliche Änderung) — dieselbe Rolle wie
+  // `edlJson` (bereits ein String) für den EDL-Zustand.
+  const softProofKey = JSON.stringify(softProof);
 
   useEffect(() => {
     if (!photoId || !edlJson) {
@@ -41,7 +48,7 @@ function useDevelopFrameInternal(
     }
 
     const controller = new AbortController();
-    const url = developUrl(photoId, edlJson, maxEdge);
+    const url = developUrl(photoId, edlJson, maxEdge, softProof);
 
     const rafId = requestAnimationFrame(() => {
       const startedAt = performance.now();
@@ -67,7 +74,8 @@ function useDevelopFrameInternal(
       cancelAnimationFrame(rafId);
       controller.abort();
     };
-  }, [photoId, edlJson, maxEdge, onLatency]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `softProofKey` steht stellvertretend für `softProof`, siehe Kommentar oben.
+  }, [photoId, edlJson, maxEdge, softProofKey, onLatency]);
 
   return frame;
 }
@@ -97,9 +105,14 @@ function useDevelopFrameInternal(
  * Performance-Dokumentation (diese Zahl misst IPC + Dekodierung/Rendern,
  * nicht das Neuzeichnen im Browser selbst).
  */
-export function useDevelopRender(photoId: string | null, edlJson: string | null, maxEdge: number | undefined): DevelopFrame | null {
+export function useDevelopRender(
+  photoId: string | null,
+  edlJson: string | null,
+  maxEdge: number | undefined,
+  softProof: SoftProofSettings | null = null,
+): DevelopFrame | null {
   const setDevelopLatencyMs = useAppStore((s) => s.setDevelopLatencyMs);
-  return useDevelopFrameInternal(photoId, edlJson, maxEdge, setDevelopLatencyMs);
+  return useDevelopFrameInternal(photoId, edlJson, maxEdge, softProof, setDevelopLatencyMs);
 }
 
 /**
@@ -111,6 +124,11 @@ export function useDevelopRender(photoId: string | null, edlJson: string | null,
  * Haupt-Viewer gedachte Performance-Anzeige (`PLAN.md` Phase 2 Schritt 7)
  * soll nicht mit jedem kleinen Thumbnail-Rendering überschrieben werden.
  */
-export function useDevelopPreviewThumbnail(photoId: string | null, edlJson: string | null, maxEdge: number | undefined): DevelopFrame | null {
-  return useDevelopFrameInternal(photoId, edlJson, maxEdge);
+export function useDevelopPreviewThumbnail(
+  photoId: string | null,
+  edlJson: string | null,
+  maxEdge: number | undefined,
+  softProof: SoftProofSettings | null = null,
+): DevelopFrame | null {
+  return useDevelopFrameInternal(photoId, edlJson, maxEdge, softProof);
 }

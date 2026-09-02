@@ -1828,3 +1828,76 @@ Grenze wie die fehlenden Golden-Image-RAW-Tests (ADR-0007). Lokalisierung
 einen dafür geschriebenen Coverage-Test ist einzelne übersehene Strings
 nicht mit Sicherheit ausgeschlossen — als offener, dokumentierter Rest
 statt stillschweigend behauptet.
+
+## ADR-0038: Phase 11 — Nachträge zu allen zurückgestellten Punkten aus Phase 1–10; vier neu verfügbare Crates real geprüft (drei brauchbar, eine als Fassade entlarvt), `libgphoto2` ist entgegen ADR-0035 tatsächlich per `apt` verfügbar
+
+**Status:** Angenommen
+**Kontext:** Der Nutzer hat angewiesen, alle bisher zurückgestellten Punkte
+aus Phase 1–10 aufzuarbeiten — mit der ausdrücklichen Vorgabe, für jeden
+Punkt neu zu prüfen, ob er inzwischen technisch machbar ist, statt ihn
+unangetastet zu lassen (dieselbe Disziplin, mit der dieses Projekt schon
+mehrfach Crate-Landschaften neu geprüft statt Annahmen fortgeschrieben
+hat). `FEATURES.md` listete zu Beginn dieser Runde neun offene
+Checkbox-Zeilen; dazu kommen vier in der Phase-10-Abnahme selbst benannte
+Lücken.
+
+**Dokumentationsfehler gefunden und korrigiert:** `FEATURES.md` Zeile 239
+führte „Adobe `.xmp`/`.lrtemplate`-Import/Export" noch als „Nicht begonnen",
+obwohl `apx_export::xmp` (`crates/apx-export/src/xmp.rs`, gebaut in Phase 9
+Schritt 2) den `.xmp`-Teil (Adobe `crs:`-Entwickeln-Einstellungen: Basic+HSL,
+echt bidirektional per `generate_xmp`/`parse_xmp_develop_settings`, über
+`import_xmp_develop_settings`/`import_xmp_sidecar_from_file` bis ins
+Frontend verdrahtet) bereits vollständig abdeckt. Nur der separate
+`.lrtemplate`-Teil (Lightrooms eigenes, nicht offiziell dokumentiertes
+Vorlagenformat) war tatsächlich noch offen — die Zeile wurde entsprechend
+präzisiert statt pauschal als „Nicht begonnen" stehen zu lassen.
+
+**Crate-Spikes** (`cargo add --dry-run` + realer Testbau in einem
+Wegwerf-Projekt, kein Produktivcode betroffen):
+1. **`gamut-dng`** (1.0.0, MIT/Apache-2.0) — kompiliert sauber, reines Rust,
+   `DngEncoder`/`DngDecoder` mit vollständiger Builder-API. Zum Zeitpunkt
+   von ADR-0034 (Phase 8) gab es keine schreibfähige DNG-Crate; diese
+   existiert jetzt. **Brauchbar** — siehe Schritt 1.
+2. **`gamut-jxl`** (0.4.0, MIT/Apache-2.0, Encode-Feature) — kompiliert,
+   aber nicht reines Rust: `gamut-jxl-sys` vendort und baut die
+   Referenz-C-Bibliothek `libjxl` (Lizenz BSD-3-Clause) selbst über
+   `cmake`/`cc` zur Bauzeit (kein System-`apt`-Paket nötig, aber ein
+   spürbar schwererer Build, ca. 1,5 Minuten allein für diese eine
+   Abhängigkeit in der Spike-Messung). **Brauchbar, aber teurer** — siehe
+   Schritt 2.
+3. **`ag-psd`** (0.2.0, MIT) — kompiliert sauber, reines Rust, „from-scratch
+   Rust port" der TypeScript-`ag-psd`-Bibliothek, `write_psd(&Psd,
+   &WriteOptions) -> Vec<u8>` als klare Top-Level-API. **Brauchbar** —
+   siehe Schritt 2.
+4. **`heif`** (0.1.0) — laut Beschreibung „A HEIF file decoder and encoder
+   written from scratch", tatsächlich aber ein reserviertes Fassaden-Paket:
+   `src/lib.rs` ist 14 Zeilen lang und enthält ausschließlich `cargo new`s
+   Standard-Vorlage (`pub fn add(left, right) -> u64`). **Nicht brauchbar**
+   — bestätigt, warum dieses Projekt Beschreibungen nie ungeprüft
+   übernimmt. `heif-rs` (26.7.0, „statically-linked libheif") wurde
+   testweise ebenfalls hinzugefügt: zieht über 190 Pakete nach, darunter
+   `bindgen` (braucht `libclang`), einen kompletten `image`-Crate-Formats-
+   Rattenschwanz (`gif`/`exr`/`zip`/…) und `ureq` (HTTP-Client — unklar,
+   wofür ein Bild-Codec Netzwerkzugriff bräuchte) — derselbe Beschaffungs-
+   Risikograd wie ONNX Runtime/`opencv` an anderer Stelle im Projekt, bei
+   nur 6 GB freiem Speicher in dieser Sandbox nicht vertretbar zu bauen.
+   **HEIF-Export bleibt zurückgestellt**, wie schon in ADR-0034.
+5. **`libgphoto2-dev`** ist entgegen der in ADR-0035 getroffenen Annahme
+   („auf keinem der drei CI-Runner installiert") tatsächlich per `apt-get`
+   installierbar (`apt-cache policy` zeigt Version 2.5.31-2.1ubuntu1.1
+   verfügbar) — die ADR-0035-Aussage war für diese Sandbox richtig
+   *behauptet*, aber nie tatsächlich mit `apt-cache policy` verifiziert
+   worden. Siehe Schritt 10: das `tethering`-Feature kann jetzt real
+   kompiliert und sein Verbindungs-Fehlerpfad ohne physische Kamera echt
+   getestet werden.
+
+**Entscheidung:** Phase 11 bündelt alle neun `FEATURES.md`-Zeilen plus die
+vier Phase-10-Lücken plus die eine gefundene Dokumentationskorrektur in
+13 Bauschritten (0–12), mit der normalen, vollen Testdisziplin aus
+`PLAN.md` §6 (die Lockerung aus ADR-0037 galt ausdrücklich nur für
+Phase 10). Für PSD/JPEG-XL/DNG werden die oben real geprüften Crates
+verwendet; für HEIF, echte Zertifikats-Signierung, echte GPU-Performance
+und echte neuronale Modellinferenz bleiben die bereits in ADR-0033/-0034/
+diesem Plan dokumentierten Grenzen unverändert bestehen — kein
+Software-Trick ersetzt fehlende Hardware, ein fehlendes Zertifikat oder
+ein nicht beschaffbares Modell.

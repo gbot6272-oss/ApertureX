@@ -981,3 +981,24 @@ erreicht, Regler-Latenz auf dieser Sandbox-Hardware verfehlt aber ehrlich
 gemessen); zwei (Import-Zeit, Idle-Speicher) sind in dieser Umgebung
 strukturell nicht messbar; für die Import-Zeit existiert immerhin ein
 konkreter, benannter Optimierungskandidat statt einer bloßen Lücke.
+
+## Aktuelle Phase: Phase 11 — Nachträge
+
+Bündelt alle in Phase 1–10 zurückgestellten Punkte (siehe DECISIONS.md
+ADR-0038 für die Crate-Spike-Ergebnisse). Anders als Phase 10 gilt wieder
+die volle Testdisziplin aus §6 — jeder Schritt bekommt eigene Rust-Unit-
+Tests + gezielte Playwright-Tests, Commit+Push nach jedem Schritt.
+
+- [x] 0. Scope festzurren, Crate-Spikes, Dokumentationsfehler beheben (ADR-0038: gamut-dng/gamut-jxl/ag-psd brauchbar, heif als Fassade entlarvt, libgphoto2 tatsächlich per apt verfügbar; FEATURES.md Zeile 239 korrigiert)
+- [ ] 1. Import mit DNG-Konvertierung (gamut-dng)
+- [ ] 2. Export-Formatlücken: PSD (ag-psd), JPEG-XL (gamut-jxl) — HEIF bleibt zurückgestellt
+- [ ] 3. Bibliothek: Übersichtsansicht + Schnellentwicklung im Raster
+- [ ] 4. Bibliothek: Smart Previews + Offline-Bearbeitung
+- [ ] 5. Bibliothek: Personenansicht (Hautton-Heuristik-Clustering)
+- [ ] 6. Entwickeln: Zielgerichtetes Anpassungswerkzeug (TAT)
+- [ ] 7. Maskentyp Tiefenbereich — Alternative: Unschärfe-basierte Tiefennäherung
+- [ ] 8. Adobe `.lrtemplate`-Export (best-effort, nur Export)
+- [ ] 9. Stapelverarbeitungs-Konsole (neuer Batch-Operationen-Log, siehe ADR-0036)
+- [ ] 10. Tethering real kompilieren (`libgphoto2-dev` in CI, `--features tethering`)
+- [ ] 11. Phase-10-Nachträge (restliche Lokalisierung, PaletteFrame auf DevelopPanel/MasksPanel, lokale Tastenkürzel umbelegbar, Installer-Signierung-Mechanik-Nachweis)
+- [ ] 12. Dokumentation, volle Verifikation, Abnahme

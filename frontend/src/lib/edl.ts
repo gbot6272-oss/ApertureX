@@ -796,6 +796,18 @@ export const OVERLAY_COLOR_OPTIONS: ReadonlyArray<{ value: OverlayColor; label: 
   { value: "Magenta", label: "Magenta" },
 ];
 
+/** Kräftige, auf dunklem wie hellem Bildgrund gut sichtbare Werte je
+ * `OverlayColor` — für das Masken-Farbüberlagerung im Viewer (Phase 12
+ * Schritt 1, siehe `DECISIONS.md` ADR-0039), nicht für UI-Chrome (dort
+ * gelten die Theme-Tokens aus `index.css`). */
+export const OVERLAY_COLOR_HEX: Record<OverlayColor, string> = {
+  Red: "#ff3b30",
+  Green: "#34c759",
+  Blue: "#0a84ff",
+  Yellow: "#ffd60a",
+  Magenta: "#ff2d95",
+};
+
 /** Eine lokale Anpassung (`SPEC.md` §3.3) — `id` clientseitig vergeben
  * (Masken leben ausschließlich im opaken EDL-JSON-Blob, nie als eigene
  * Katalogzeile). */
@@ -883,6 +895,21 @@ export interface MaskGroup {
   id: string;
   name: string;
   visible: boolean;
+}
+
+/** Die Masken, die tatsächlich wirken/angezeigt werden sollen: `mask.visible`
+ * UND (keine Gruppe zugeordnet ODER die zugeordnete Gruppe ist selbst
+ * sichtbar) — Spiegelbild von `apx_pipeline::stages::masks::visible_masks`
+ * (siehe dessen Moduldoku), hier für die clientseitige Masken-
+ * Farbüberlagerung (Phase 12 Schritt 1) statt einer Pipeline-Anfrage
+ * genutzt. */
+export function visibleMasks(masks: readonly Mask[], groups: readonly MaskGroup[]): Mask[] {
+  return masks.filter((mask) => {
+    if (!mask.visible) return false;
+    if (mask.group_id === null) return true;
+    const group = groups.find((g) => g.id === mask.group_id);
+    return group ? group.visible : true;
+  });
 }
 
 export const MASK_SLIDER_SPECS: readonly SliderSpec[] = [

@@ -243,6 +243,13 @@ interface ViewerSlice {
    * umschaltbar statt fest eingeblendet, siehe `Viewer.tsx`. */
   infoOverlayVisible: boolean;
   toggleInfoOverlay: () => void;
+  /** Masken-Farbüberlagerung (Phase 12 Schritt 1, siehe `DECISIONS.md`
+   * ADR-0039) — zeigt alle sichtbaren Masken eingefärbt nach ihrer
+   * `overlay_color` im Viewer an, umschaltbar per Taste „O" (Lightroom-
+   * Konvention), unabhängig von der gerade zur Bearbeitung ausgewählten
+   * Maske. */
+  maskOverlayVisible: boolean;
+  toggleMaskOverlay: () => void;
 }
 
 // ---- Jobs-Slice (Import) ---------------------------------------------------
@@ -1574,6 +1581,13 @@ export const useAppStore = create<AppStore>()(
     toggleInfoOverlay: () => {
       set((state) => {
         state.infoOverlayVisible = !state.infoOverlayVisible;
+      });
+    },
+
+    maskOverlayVisible: false,
+    toggleMaskOverlay: () => {
+      set((state) => {
+        state.maskOverlayVisible = !state.maskOverlayVisible;
       });
     },
 

@@ -91,6 +91,8 @@ export function MasksPanel() {
   const maskGroups = useAppStore((s) => s.developEdl.mask_groups);
   const selectedMaskId = useAppStore((s) => s.selectedMaskId);
   const selectMask = useAppStore((s) => s.selectMask);
+  const maskOverlayVisible = useAppStore((s) => s.maskOverlayVisible);
+  const toggleMaskOverlay = useAppStore((s) => s.toggleMaskOverlay);
   const addMask = useAppStore((s) => s.addMask);
   const removeMask = useAppStore((s) => s.removeMask);
   const setMaskVisible = useAppStore((s) => s.setMaskVisible);
@@ -185,7 +187,18 @@ export function MasksPanel() {
 
   return (
     <PaletteFrame id="masks" side="right" defaultWidth={256} label="Masken" className="gap-3 border-l border-border bg-bg-raised p-3">
-      <h2 id="stage-masks" className="text-sm font-semibold text-text-primary">Masken</h2>
+      <div className="flex items-center justify-between">
+        <h2 id="stage-masks" className="text-sm font-semibold text-text-primary">Masken</h2>
+        <button
+          type="button"
+          onClick={toggleMaskOverlay}
+          aria-pressed={maskOverlayVisible}
+          title="Masken-Farbüberlagerung im Viewer ein-/ausblenden (Taste O)"
+          className={`rounded border px-2 py-0.5 text-xs ${maskOverlayVisible ? "border-accent bg-accent/10 text-accent" : "border-border text-text-secondary hover:border-accent"}`}
+        >
+          Überlagerung (O)
+        </button>
+      </div>
 
       <div className="grid grid-cols-2 gap-1">
         <button

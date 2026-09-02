@@ -5,7 +5,7 @@ import { useElementSize } from "../hooks/useElementSize";
 import { useImageBitmap } from "../hooks/useImageBitmap";
 import { computeAutoTone } from "../lib/autoTone";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
-import { buildEdlEnvelopeJson, CURVE_CHANNEL_TABS, nearestHslBand, type CurvesAdjustment, type HslAdjustment } from "../lib/edl";
+import { buildEdlEnvelopeJson, CURVE_CHANNEL_TABS, nearestHslBand, visibleMasks, type CurvesAdjustment, type HslAdjustment } from "../lib/edl";
 import { formatShutter } from "../lib/format";
 import { buildClippingOverlay } from "../lib/histogram";
 import { computeMaskPinPosition } from "../lib/maskPins";
@@ -19,6 +19,7 @@ import { useAppStore } from "../store";
 import { BeforeAfterView } from "./BeforeAfterView";
 import { CropOverlay } from "./CropOverlay";
 import { DevelopAnalysisPanel } from "./DevelopAnalysisPanel";
+import { MaskColorOverlay } from "./MaskColorOverlay";
 import { MaskOverlay } from "./MaskOverlay";
 import { ReferenceView } from "./ReferenceView";
 import { RepairOverlay } from "./RepairOverlay";
@@ -45,6 +46,9 @@ export function Viewer() {
   const resetView = useAppStore((s) => s.resetView);
   const infoOverlayVisible = useAppStore((s) => s.infoOverlayVisible);
   const toggleInfoOverlay = useAppStore((s) => s.toggleInfoOverlay);
+  const maskOverlayVisible = useAppStore((s) => s.maskOverlayVisible);
+  const toggleMaskOverlay = useAppStore((s) => s.toggleMaskOverlay);
+  const maskGroups = useAppStore((s) => s.developEdl.mask_groups);
   const applyAutoTone = useAppStore((s) => s.applyAutoTone);
   const developPanelOpen = useAppStore((s) => s.developPanelOpen);
   const developEdl = useAppStore((s) => s.developEdl);
@@ -584,6 +588,10 @@ export function Viewer() {
         // Info-Overlay ein-/ausblenden (Phase 9 Schritt 5) — dieselbe
         // Taste wie in Lightroom Classic.
         toggleInfoOverlay();
+      } else if (event.key === "o" || event.key === "O") {
+        // Masken-Farbüberlagerung ein-/ausblenden (Phase 12 Schritt 1,
+        // siehe DECISIONS.md ADR-0039) — dieselbe Taste wie in Lightroom.
+        toggleMaskOverlay();
       }
     }
     function handleKeyUp(event: KeyboardEvent) {
@@ -596,7 +604,7 @@ export function Viewer() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [effectiveScale, fitScale, setZoom, setPan, resetView, toggleInfoOverlay]);
+  }, [effectiveScale, fitScale, setZoom, setPan, resetView, toggleInfoOverlay, toggleMaskOverlay]);
 
   return (
     <main
@@ -728,6 +736,21 @@ export function Viewer() {
           autoSourceModeActive={autoSourceModeActive}
           onSuggestSource={(point) => void suggestRepairSourceForTarget(point.x, point.y)}
           spotCandidates={sensorSpotCandidates}
+        />
+      )}
+
+      {/* Masken-Farbüberlagerung (Phase 12 Schritt 1, siehe `DECISIONS.md`
+          ADR-0039) — zeigt alle sichtbaren Masken eingefärbt an, unabhängig
+          von der gerade zur Bearbeitung ausgewählten. Wird vor dem
+          Ziehgriff-Overlay unten gerendert, damit dessen Griffe/Linien
+          weiterhin sichtbar über der Einfärbung liegen. */}
+      {photo && developPanelOpen && maskOverlayVisible && imgW > 0 && imgH > 0 && (
+        <MaskColorOverlay
+          imageLeft={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).x}
+          imageTop={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).y}
+          imageWidth={imgW * effectiveScale}
+          imageHeight={imgH * effectiveScale}
+          masks={visibleMasks(developEdl.masks, maskGroups)}
         />
       )}
 

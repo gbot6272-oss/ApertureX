@@ -1014,7 +1014,7 @@ selbst zu lösen. Testdisziplin wie in Phase 11 fortgeführt: ein gezielter
 Test pro Schritt, volle Suite einmalig in Schritt 8.
 
 - [x] 0. Scope festzurren, `lensfun`-Crate-Spike (ADR-0039: Crate real per `cargo add` + `cargo build` geprüft, ein Spike-Test liest eine echte Kalibrierung aus der gebündelten Datenbank; Vorzeichen-/Skalierungskonvention weicht ehrlich dokumentiert von den bisherigen Platzhalterprofilen ab)
-- [ ] 1. Live-Masken-Overlay im Viewer
+- [x] 1. Live-Masken-Overlay im Viewer (`overlay_color` per Taste „O" umschaltbar sichtbar; clientseitige SVG-Näherung statt echter Pipeline-Alpha, siehe ADR-0039/FEATURES.md)
 - [ ] 2. Radialverlauf-Ellipse + Rotation, Auto-Mask beim Pinsel
 - [ ] 3. Objektiv-/Kameraprofile: echte LensFun-Datenbank (Teil A) + Kalibrier-Assistent per Zhang-Methode (Teil B)
 - [ ] 4. Voller EXIF/IPTC-Editor

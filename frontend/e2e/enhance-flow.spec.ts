@@ -34,3 +34,28 @@ test.describe("Entrauschung & Hochskalierung (Phase 9 Schritt 6)", () => {
     await expect(page.getByText("Hochskaliert: /home/user/Fotos/Urlaub/IMG_0001_hochskaliert.png")).toBeVisible();
   });
 });
+
+/**
+ * Deckt Phase 11 Schritt 1 ab (`PLAN.md`, `DECISIONS.md` ADR-0038): DNG-
+ * Konvertierung im Entwickeln-Panel. Der Encoder selbst
+ * (`apx_export::dng::encode_linear_dng`) ist bereits per Rust-Unit-Tests
+ * abgedeckt — hier bewusst nur ein Frontend-Flow: der Knopf löst den
+ * Aufruf aus und zeigt den Ziel-Pfad an.
+ */
+test.describe("DNG-Konvertierung (Phase 11 Schritt 1)", () => {
+  test("Als DNG konvertieren zeigt den Ziel-Pfad an", async ({ page }) => {
+    await installTauriMock(page, {
+      folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }],
+      photosByFolder: { [FOLDER_ID]: [PHOTO] },
+      convertedDngPath: "/home/user/Fotos/Urlaub/IMG_0001.dng",
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Urlaub/ }).click();
+    await page.getByRole("img", { name: PHOTO.filename }).click();
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    const group = page.getByRole("group", { name: "DNG-Konvertierung" });
+    await group.getByRole("button", { name: "Als DNG konvertieren" }).click();
+    await expect(page.getByText("Als DNG konvertiert: /home/user/Fotos/Urlaub/IMG_0001.dng")).toBeVisible();
+  });
+});

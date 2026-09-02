@@ -4114,6 +4114,36 @@ pub fn upscale_photo(state: State<'_, AppState>, photo_id: String) -> Result<Str
     )
 }
 
+// ---- Import mit DNG-Konvertierung (Phase 11 Schritt 1, siehe
+// DECISIONS.md ADR-0038) — schreibt eine „Linear DNG" (siehe
+// `apx_export::dng`s Moduldoku) aus den unveränderten, kamera-nativen
+// RAW-Daten (nicht dem entwickelten/edierten Rendering wie
+// `render_photo_full_resolution` unten) — echte DNG-Konvertierung
+// bewahrt den unbearbeiteten Ausgangszustand, kein zweiter
+// Rendering-Codepfad nötig, da `apx_raw::decode_linear` bereits der
+// Phase-2-Einstiegspunkt für `apx-pipeline` ist.
+#[tauri::command]
+pub fn convert_photo_to_dng(state: State<'_, AppState>, photo_id: String) -> Result<String, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state.catalog.get_photo(photo_id).map_err(|err| err.to_string())?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+
+    let linear = apx_raw::decode_linear(&source_path, None).map_err(|err| err.to_string())?;
+    let camera_model = match (&photo.camera_make, &photo.camera_model) {
+        (Some(make), Some(model)) => format!("{make} {model}"),
+        (Some(make), None) => make.clone(),
+        (None, Some(model)) => model.clone(),
+        (None, None) => String::new(),
+    };
+    let bytes = apx_export::dng::encode_linear_dng(&linear, &camera_model).map_err(|err| err.to_string())?;
+
+    let stem = source_path.file_stem().and_then(|s| s.to_str()).unwrap_or("Foto");
+    let dest_path = source_path.with_file_name(format!("{stem}.dng"));
+    std::fs::write(&dest_path, bytes)
+        .map_err(|err| format!("Datei '{}' nicht schreibbar: {err}", dest_path.display()))?;
+    Ok(dest_path.display().to_string())
+}
+
 // ---- Fortgeschrittenes: Fokus-/HDR-/Panorama-/Astro-Stacking (Phase 9
 // Schritt 8, siehe PLAN.md, DECISIONS.md ADR-0035 Punkt 2) -----------------
 //

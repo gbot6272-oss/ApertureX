@@ -417,10 +417,15 @@ interface DevelopSlice {
   applyAutoTone: (result: AutoToneResult) => void;
   /** Entrauschung/Hochskalierung (Phase 9 Schritt 6) — schreiben eine
    * neue Datei neben dem Original, ändern die EDL nicht. */
-  enhanceRunning: "denoise" | "upscale" | null;
+  enhanceRunning: "denoise" | "upscale" | "dng" | null;
   enhanceStatus: string | null;
   runDenoise: (photoId: string) => Promise<void>;
   runUpscale: (photoId: string) => Promise<void>;
+  /** DNG-Konvertierung (Phase 11 Schritt 1) — schreibt eine „Linear DNG"
+   * aus den unveränderten, kamera-nativen RAW-Daten (nicht dem
+   * entwickelten Rendering wie Entrauschen/Hochskalieren oben) neben das
+   * Original, ändert die EDL nicht. */
+  runConvertToDng: (photoId: string) => Promise<void>;
   /** Ersetzt eine der fünf Kurven (Phase 4 Schritt 4, siehe
    * `components/CurveEditor.tsx`) — Zwischenstand beim Ziehen, committet
    * wird separat über `commitDevelopEdit()`. */
@@ -1927,6 +1932,26 @@ export const useAppStore = create<AppStore>()(
         const path = await api.upscalePhoto(photoId);
         set((state) => {
           state.enhanceStatus = `Hochskaliert: ${path}`;
+        });
+      } catch (err) {
+        set((state) => {
+          state.enhanceStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.enhanceRunning = null;
+        });
+      }
+    },
+
+    runConvertToDng: async (photoId) => {
+      set((state) => {
+        state.enhanceRunning = "dng";
+      });
+      try {
+        const path = await api.convertPhotoToDng(photoId);
+        set((state) => {
+          state.enhanceStatus = `Als DNG konvertiert: ${path}`;
         });
       } catch (err) {
         set((state) => {

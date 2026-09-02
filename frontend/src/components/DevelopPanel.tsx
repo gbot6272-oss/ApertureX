@@ -207,6 +207,7 @@ export function DevelopPanel() {
   const enhanceStatus = useAppStore((s) => s.enhanceStatus);
   const runDenoise = useAppStore((s) => s.runDenoise);
   const runUpscale = useAppStore((s) => s.runUpscale);
+  const runConvertToDng = useAppStore((s) => s.runConvertToDng);
   const colorMixer = useAppStore((s) => s.developEdl.color_mixer);
   const colorMixerPickerActive = useAppStore((s) => s.colorMixerPickerActive);
   const toggleColorMixerPicker = useAppStore((s) => s.toggleColorMixerPicker);
@@ -1330,6 +1331,23 @@ export function DevelopPanel() {
               </button>
             </div>
             {enhanceStatus && <p className="text-xs text-text-muted">{enhanceStatus}</p>}
+          </fieldset>
+
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">DNG-Konvertierung</legend>
+            <p className="text-xs text-text-muted">
+              Schreibt eine „Linear DNG" aus den unveränderten, kamera-nativen RAW-Daten (nicht dem entwickelten
+              Rendering) neben das Original — ein Rohdatenformat mit demosaicten statt der ursprünglichen
+              Bayer-Mosaik-Daten, siehe Dokumentation.
+            </p>
+            <button
+              type="button"
+              disabled={!selectedPhotoId || enhanceRunning !== null}
+              onClick={() => selectedPhotoId && void runConvertToDng(selectedPhotoId)}
+              className="rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {enhanceRunning === "dng" ? "Konvertiert…" : "Als DNG konvertieren"}
+            </button>
           </fieldset>
         </>
       )}

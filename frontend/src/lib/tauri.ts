@@ -1156,6 +1156,13 @@ export function upscalePhoto(photoId: string): Promise<string> {
   return invoke<string>("upscale_photo", { photoId });
 }
 
+/** DNG-Konvertierung (Phase 11 Schritt 1) — schreibt eine „Linear DNG" aus
+ * den unveränderten, kamera-nativen RAW-Daten neben das Original, gibt
+ * deren Pfad zurück. */
+export function convertPhotoToDng(photoId: string): Promise<string> {
+  return invoke<string>("convert_photo_to_dng", { photoId });
+}
+
 // ---- Fortgeschrittenes: Fokus-/HDR-/Panorama-/Astro-Stacking (Phase 9
 // Schritt 8, siehe DECISIONS.md ADR-0035 Punkt 2) — reine, deterministische
 // Algorithmen in apx-stacking, keine externe Registrierungs-Bibliothek. ----

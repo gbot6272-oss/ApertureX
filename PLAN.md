@@ -990,7 +990,7 @@ die volle Testdisziplin aus §6 — jeder Schritt bekommt eigene Rust-Unit-
 Tests + gezielte Playwright-Tests, Commit+Push nach jedem Schritt.
 
 - [x] 0. Scope festzurren, Crate-Spikes, Dokumentationsfehler beheben (ADR-0038: gamut-dng/gamut-jxl/ag-psd brauchbar, heif als Fassade entlarvt, libgphoto2 tatsächlich per apt verfügbar; FEATURES.md Zeile 239 korrigiert)
-- [ ] 1. Import mit DNG-Konvertierung (gamut-dng)
+- [x] 1. DNG-Konvertierung (gamut-dng) — abweichend von der ursprünglichen Formulierung als Knopf im Entwickeln-Panel statt als Import-Dialog-Checkbox umgesetzt (siehe `commands.rs`s Moduldoku bei `convert_photo_to_dng`): eine „Linear DNG" muss aus den unveränderten RAW-Daten entstehen, nicht aus dem ggf. bereits während des Imports bearbeiteten Ergebnis — das Entwickeln-Panel hat ohnehin schon den Foto-Kontext, der Import-Dialog nicht zwingend
 - [ ] 2. Export-Formatlücken: PSD (ag-psd), JPEG-XL (gamut-jxl) — HEIF bleibt zurückgestellt
 - [ ] 3. Bibliothek: Übersichtsansicht + Schnellentwicklung im Raster
 - [ ] 4. Bibliothek: Smart Previews + Offline-Bearbeitung

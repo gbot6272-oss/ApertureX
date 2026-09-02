@@ -157,6 +157,7 @@ fn main() {
             commands::preview_cache_stats,
             commands::clear_preview_cache,
             commands::denoise_photo,
+            commands::convert_photo_to_dng,
             commands::upscale_photo,
             commands::stack_focus,
             commands::stack_hdr,

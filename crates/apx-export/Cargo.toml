@@ -52,6 +52,11 @@ tokio = { version = "1.53.1", features = ["io-util"] }
 reverse_geocoder = "4.1.1"
 # GPX-Tracklog-Import (Schritt 7) — reines Rust, kein XML-Systemparser.
 quick-xml = "0.42.0"
+# DNG-Schreibpfad (Phase 11 Schritt 1, siehe DECISIONS.md ADR-0038) —
+# reines Rust, `DngEncoder`/`RawImage::new_linear_raw` real per Testbau
+# verifiziert. Zum Zeitpunkt von ADR-0034 (Phase 8) gab es keine
+# schreibfähige DNG-Crate, diese existiert jetzt.
+gamut-dng = "1.0.0"
 
 [dev-dependencies]
 tempfile = "3"

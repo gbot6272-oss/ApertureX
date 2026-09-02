@@ -185,6 +185,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // Entrauschung/Hochskalierung (Phase 9 Schritt 6).
     denoisedPhotoPath: "/mock/photos/IMG_0001_entrauscht.png" as string,
     upscaledPhotoPath: "/mock/photos/IMG_0001_hochskaliert.png" as string,
+    // DNG-Konvertierung (Phase 11 Schritt 1).
+    convertedDngPath: "/mock/photos/IMG_0001.dng" as string,
     ...initialFixtures,
   };
   w.__mockInvokeLog = [] as Array<{ cmd: string; args: unknown }>;
@@ -786,6 +788,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return fixtures.denoisedPhotoPath;
       case "upscale_photo":
         return fixtures.upscaledPhotoPath;
+      case "convert_photo_to_dng":
+        return fixtures.convertedDngPath;
 
       // ---- Bibliothek: Sammlungen (ab Phase 3, Sammlungssätze/intelligente -
       // Sammlungen ab Phase 9 Schritt 1) --------------------------------------

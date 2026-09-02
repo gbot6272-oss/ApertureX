@@ -84,6 +84,12 @@ statt stillschweigend übergangen.
 | `libloading` | ISC | Plugin-`cdylib`-Laden (`apx-plugin-host`, Schritt 9) | Unkritisch, ISC ist eine permissive MIT-ähnliche Lizenz |
 | `gphoto2` | MIT | Tethered Shooting (`apx-tether`, Schritt 11), hinter Cargo-Feature `tethering` (standardmäßig aus) | Bindet an System-`libgphoto2`, das selbst **LGPL-2.1** ist — **Ausnahme, siehe `DECISIONS.md` ADR-0035 Punkt 5**, derselbe Präzedenzfall wie `rawler` oben: keine praktikable Alternative für PTP/USB-Kamerasteuerung aus Rust. Die `gphoto2`-Crate selbst ist MIT, nur die dynamisch gelinkte Systembibliothek ist LGPL-2.1 (dynamisches Linken einer LGPL-Bibliothek verlangt keine Lizenzänderung des aufrufenden Codes) |
 
+## Rust — Phase 11 (siehe `DECISIONS.md` ADR-0038)
+
+| Crate | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `gamut-dng` | MIT OR Apache-2.0 | Schreiben von „Linear DNG"-Dateien aus kamera-nativen, unentwickelten RAW-Daten (`apx_export::dng`, Schritt 1) | Reines Rust, keine Systembibliothek. Zum Zeitpunkt von ADR-0034 (Phase 8) gab es keine schreibfähige DNG-Crate, diese wurde erst danach verfügbar — per Testbau (Encode→Decode-Rundreise) real verifiziert, nicht nur an der Registry-Beschreibung geglaubt |
+
 ## Frontend — geplant für Phase 1
 
 | Paket | Lizenz | Zweck | Hinweis |

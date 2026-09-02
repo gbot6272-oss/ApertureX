@@ -77,6 +77,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ag-psd"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3724167d5fc19ae66b8219fb5791f6338706884b713797116dc620773bfe2260"
+dependencies = [
+ "flate2",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -283,12 +292,15 @@ name = "apx-export"
 version = "0.1.0"
 dependencies = [
  "ab_glyph",
+ "ag-psd",
  "approx",
  "apx-catalog",
  "apx-core",
  "apx-pipeline",
  "apx-raw",
+ "gamut-core",
  "gamut-dng",
+ "gamut-jxl 0.4.0",
  "image",
  "lcms2",
  "printpdf",
@@ -2234,6 +2246,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "gamut-codec-abi"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38704051ac2980276478f6eb9c55a26fb608151f8e42c355f5a699a2f3afde03"
+
+[[package]]
 name = "gamut-core"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2251,7 +2269,7 @@ dependencies = [
  "gamut-bitstream",
  "gamut-core",
  "gamut-ifd",
- "gamut-jxl",
+ "gamut-jxl 0.3.0",
  "miniz_oxide 0.8.9",
 ]
 
@@ -2272,6 +2290,28 @@ checksum = "aeb902868a80069b5896495a66fc3a4ce7e0b85beb8acb008ac5c21f3279b073"
 dependencies = [
  "gamut-core",
  "jxl",
+]
+
+[[package]]
+name = "gamut-jxl"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8449465a694deb302f468edee6b5ed0c49587b03add54298bebebbedd7d02622"
+dependencies = [
+ "gamut-codec-abi",
+ "gamut-core",
+ "gamut-jxl-sys",
+ "jxl",
+]
+
+[[package]]
+name = "gamut-jxl-sys"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9b11d4b466b3f17ab6c7424d9051cff24d03cfd4d00e3170f7311aa7c30ed0d"
+dependencies = [
+ "cmake",
+ "jpegxl-src",
 ]
 
 [[package]]
@@ -3417,6 +3457,15 @@ checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
 dependencies = [
  "getrandom 0.4.3",
  "libc",
+]
+
+[[package]]
+name = "jpegxl-src"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06f56a51e36f688517deebb0b7c10a11c598476936838938495c93764696180a"
+dependencies = [
+ "cmake",
 ]
 
 [[package]]

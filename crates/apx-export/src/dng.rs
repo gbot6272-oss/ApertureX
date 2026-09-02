@@ -154,9 +154,10 @@ pub fn encode_linear_dng(linear: &LinearImage, camera_model: &str) -> Result<Vec
         width: linear.width,
         height: linear.height,
     };
-    let raw = DngRawImage::new_linear_raw(dims, 16, 3, samples).map_err(|err| ExportError::Dng {
-        message: err.to_string(),
-    })?;
+    let raw =
+        DngRawImage::new_linear_raw(dims, 16, 3, samples).map_err(|err| ExportError::Dng {
+            message: err.to_string(),
+        })?;
 
     let mut out = Vec::new();
     DngEncoder::new()
@@ -217,7 +218,10 @@ mod tests {
         let bytes = encode_linear_dng(&sample_linear_image(), "")
             .expect("leerer Kameraname fällt auf einen Platzhalter zurück, statt zu scheitern");
         let decoded = DngDecoder::new().decode(&bytes).expect("Dekodierung");
-        assert_eq!(decoded.profile.unique_camera_model(), "Aperture X Unbekannte Kamera");
+        assert_eq!(
+            decoded.profile.unique_camera_model(),
+            "Aperture X Unbekannte Kamera"
+        );
     }
 
     #[test]

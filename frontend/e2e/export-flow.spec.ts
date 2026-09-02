@@ -121,4 +121,29 @@ test.describe("Export (Phase 8 Schritt 1+2)", () => {
     expect(args.options.watermarkText).toBe("© Aperture X");
     expect(args.options.watermarkFontPath).toBe("/home/user/Schriften/Beispiel.ttf");
   });
+
+  test("PSD und JPEG-XL stehen als Formate zur Auswahl und werden mit exportiert", async ({ page }) => {
+    // Deckt Phase 11 Schritt 2 ab (`DECISIONS.md` ADR-0038): die beiden
+    // neuen Formate müssen in der Auswahl auftauchen und tatsächlich als
+    // `options.format` beim Export-Aufruf ankommen. Der Qualitätsregler
+    // (JXL: 100 = verlustfrei) ist bereits Rust-seitig in
+    // `apx_export::format`s Unit-Tests abgedeckt — hier nur, dass das
+    // Frontend den gewählten Wert überhaupt mitschickt.
+    await setUpWithSelectedPhoto(page, { selectFolderResult: "/home/user/Exporte" });
+    await page.getByRole("button", { name: "Exportieren…" }).click();
+    await page.getByRole("button", { name: "Wählen…" }).click();
+
+    const formatSelect = page.getByLabel("Format");
+    await expect(formatSelect.locator("option", { hasText: "Photoshop (PSD)" })).toHaveCount(1);
+    await expect(formatSelect.locator("option", { hasText: "JPEG XL" })).toHaveCount(1);
+
+    await formatSelect.selectOption("jxl");
+    await page.getByRole("button", { name: "Exportieren", exact: true }).click();
+    await expect(page.getByText("1 Datei(en) geschrieben.")).toBeVisible();
+
+    const log = await getMockInvokeLog(page);
+    const call = log.find((e) => e.cmd === "enqueue_export_photo");
+    const args = call?.args as { options: { format: string } };
+    expect(args.options.format).toBe("jxl");
+  });
 });

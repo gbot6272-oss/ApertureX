@@ -16,6 +16,8 @@ const FORMAT_LABELS: Record<ExportFormat, string> = {
   tiff: "TIFF",
   webp: "WebP (verlustfrei)",
   avif: "AVIF",
+  psd: "Photoshop (PSD)",
+  jxl: "JPEG XL",
 };
 
 const ICC_LABELS: Record<IccProfileChoice, string> = {
@@ -132,7 +134,10 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
   }
 
   const supportsBitDepth16 = format === "png" || format === "tiff";
-  const supportsQuality = format === "jpeg" || format === "avif";
+  // JPEG-XL: Qualität 100 kodiert verlustfrei, darunter verlustbehaftet
+  // (siehe `apx_export::format::encode_jxl`s Moduldoku) — derselbe
+  // 1-100-Regler wie bei JPEG/AVIF steuert also auch hier sinnvoll etwas.
+  const supportsQuality = format === "jpeg" || format === "avif" || format === "jxl";
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16" onClick={onClose}>

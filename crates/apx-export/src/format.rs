@@ -24,6 +24,10 @@
 
 use std::io::Cursor;
 
+use ag_psd::psd::{ColorMode, PixelData, Psd, WriteOptions as PsdWriteOptions};
+use ag_psd::write_psd;
+use gamut_core::{Dimensions as JxlDimensions, EncodeImage, ImageRef, Rgba8 as JxlRgba8};
+use gamut_jxl::{Container as JxlContainer, Distance as JxlDistance, JxlEncoder};
 use image::codecs::avif::AvifEncoder;
 use image::codecs::jpeg::JpegEncoder;
 use image::{DynamicImage, ExtendedColorType, ImageBuffer, ImageEncoder, ImageFormat, Rgba};
@@ -39,6 +43,12 @@ pub enum ExportFormat {
     WebP,
     /// Verlustbehaftet (`ravif`/`rav1e`, reines Rust).
     Avif,
+    /// Adobe Photoshop-Dokument, ein flaches Bild ohne Ebenen (`ag-psd`,
+    /// reines Rust, Phase 11 Schritt 2) — siehe `encode_psd`.
+    Psd,
+    /// JPEG-XL (`gamut-jxl`, Encoder bindet libjxl (C), Decoder ist reines
+    /// Rust, Phase 11 Schritt 2) — siehe `encode_jxl`.
+    Jxl,
 }
 
 impl ExportFormat {
@@ -49,6 +59,8 @@ impl ExportFormat {
             Self::Tiff => "tiff",
             Self::WebP => "webp",
             Self::Avif => "avif",
+            Self::Psd => "psd",
+            Self::Jxl => "jxl",
         }
     }
 
@@ -119,7 +131,71 @@ pub fn encode_rgba8(
         ExportFormat::WebP => {
             encode_via_dynamic(width, height, pixels, options.bit_depth, ImageFormat::WebP)
         }
+        ExportFormat::Psd => encode_psd(width, height, pixels),
+        ExportFormat::Jxl => encode_jxl(width, height, pixels, options.quality),
     }
+}
+
+/// Kodiert als flaches PSD (ein Bild, keine Ebenen) über `ag-psd`.
+///
+/// `ag-psd`s `write_psd` **panickt** statt einen `Result` zurückzugeben,
+/// wenn Breite/Höhe außerhalb `0..=30000` liegen (PSD-Formatgrenze, ab der
+/// stattdessen PSB nötig wäre — hier bewusst nicht unterstützt, siehe
+/// `ExportFormat::extension`) oder `bits_per_channel != 8` ist — Letzteres
+/// kann hier nie passieren (immer fest `8.0`), Ersteres wird vorab geprüft
+/// und als [`ExportError::Unsupported`] statt eines Panics gemeldet.
+fn encode_psd(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>> {
+    if width == 0 || height == 0 || width > 30_000 || height > 30_000 {
+        return Err(ExportError::Unsupported(format!(
+            "PSD unterstützt nur Abmessungen 1..=30000 (angefragt {width}x{height}, siehe PSB für größere Dokumente)"
+        )));
+    }
+    let psd = Psd {
+        width: f64::from(width),
+        height: f64::from(height),
+        channels: Some(4.0),
+        bits_per_channel: Some(8.0),
+        color_mode: Some(ColorMode::Rgb),
+        image_data: Some(PixelData {
+            width,
+            height,
+            data: pixels.to_vec(),
+        }),
+        ..Default::default()
+    };
+    Ok(write_psd(&psd, &PsdWriteOptions::default()))
+}
+
+/// Kodiert als JPEG-XL über `gamut-jxl` (ISO-BMFF-Container statt bloßem
+/// Codestream, damit die Datei ohne zusätzlichen Kontext als eigenständige
+/// `.jxl`-Datei erkennbar ist).
+///
+/// `quality == 100` kodiert verlustfrei ([`JxlEncoder::lossless`]);
+/// darunter wird linear auf eine Butteraugli-[`JxlDistance`] im gültigen
+/// Bereich `(0.0, 15.0]` abgebildet (0 = unsichtbarer Verlust laut
+/// libjxl-Konvention, 15 bewusst als oberes Ende gewählt statt des vollen
+/// `25.0`-Maximums — jenseits von ~15 ist der sichtbare Qualitätsverlust
+/// für einen Foto-Export nicht mehr sinnvoll).
+fn encode_jxl(width: u32, height: u32, pixels: &[u8], quality: u8) -> Result<Vec<u8>> {
+    let dims = JxlDimensions { width, height };
+    let image = ImageRef::<JxlRgba8>::new(pixels, dims).map_err(|err| ExportError::Encode {
+        message: err.to_string(),
+    })?;
+    let encoder = if quality >= 100 {
+        JxlEncoder::lossless()
+    } else {
+        let distance = 0.1 + (100 - quality.min(100)) as f32 / 100.0 * 14.9;
+        let distance = JxlDistance::new(distance).map_err(|err| ExportError::Encode {
+            message: err.to_string(),
+        })?;
+        JxlEncoder::lossy(distance)
+    };
+    encoder
+        .with_container(JxlContainer::IsoBmff)
+        .encode_to_vec(image)
+        .map_err(|err| ExportError::Encode {
+            message: err.to_string(),
+        })
 }
 
 fn encode_jpeg(width: u32, height: u32, pixels: &[u8], quality: u8) -> Result<Vec<u8>> {
@@ -256,6 +332,88 @@ mod tests {
         assert!(bytes.len() > 32);
         assert_eq!(&bytes[4..8], b"ftyp");
         assert_eq!(&bytes[8..12], b"avif");
+    }
+
+    #[test]
+    fn psd_roundtrips_through_ag_psd() {
+        let pixels = checkerboard(4, 4);
+        let bytes =
+            encode_rgba8(4, 4, &pixels, ExportFormat::Psd, &EncodeOptions::default()).unwrap();
+        // Ohne `use_image_data: Some(true)` landet das gelesene Bild in
+        // `Psd::canvas`, nicht `Psd::image_data` — echter Stolperstein beim
+        // Spike, siehe `Cargo.toml`s Kommentar bei `ag-psd`.
+        let read_options = ag_psd::psd::ReadOptions {
+            use_image_data: Some(true),
+            ..ag_psd::psd::ReadOptions::default()
+        };
+        let decoded = ag_psd::read_psd(&bytes, &read_options).unwrap();
+        assert_eq!(decoded.width, 4.0);
+        assert_eq!(decoded.height, 4.0);
+        assert_eq!(decoded.image_data.unwrap().data, pixels);
+    }
+
+    #[test]
+    fn psd_rejects_oversized_dimensions_instead_of_panicking() {
+        let err = encode_rgba8(
+            30_001,
+            1,
+            &[0u8; 4],
+            ExportFormat::Psd,
+            &EncodeOptions::default(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ExportError::Unsupported(_)));
+    }
+
+    #[test]
+    fn jxl_lossless_roundtrips_exact_pixels() {
+        let mut pixels = checkerboard(4, 4);
+        pixels[0] = 37; // ein einzelner Kanalwert zur Präzisionsprüfung
+        let options = EncodeOptions {
+            quality: 100,
+            bit_depth: BitDepth::Eight,
+        };
+        let bytes = encode_rgba8(4, 4, &pixels, ExportFormat::Jxl, &options).unwrap();
+        // ISO-BMFF-Container-Signatur (siehe `encode_jxl`s Moduldoku).
+        assert_eq!(&bytes[4..8], b"JXL ");
+        let dims = JxlDimensions {
+            width: 4,
+            height: 4,
+        };
+        let decoded: gamut_core::ImageBuf<JxlRgba8> =
+            gamut_core::DecodeImage::decode_image(&gamut_jxl::JxlDecoder::new(), &bytes).unwrap();
+        assert_eq!(decoded.dimensions(), dims);
+        assert_eq!(decoded.as_samples(), pixels.as_slice());
+    }
+
+    #[test]
+    fn jxl_lossy_produces_a_smaller_valid_container() {
+        let pixels = checkerboard(16, 16);
+        let lossless_options = EncodeOptions {
+            quality: 100,
+            bit_depth: BitDepth::Eight,
+        };
+        let lossy_options = EncodeOptions {
+            quality: 30,
+            bit_depth: BitDepth::Eight,
+        };
+        let lossless = encode_rgba8(16, 16, &pixels, ExportFormat::Jxl, &lossless_options).unwrap();
+        let lossy = encode_rgba8(16, 16, &pixels, ExportFormat::Jxl, &lossy_options).unwrap();
+        assert_eq!(&lossy[4..8], b"JXL ");
+        let decoded: gamut_core::ImageBuf<JxlRgba8> =
+            gamut_core::DecodeImage::decode_image(&gamut_jxl::JxlDecoder::new(), &lossy).unwrap();
+        assert_eq!(
+            decoded.dimensions(),
+            JxlDimensions {
+                width: 16,
+                height: 16
+            }
+        );
+        // Nicht als Kompressionsgrad-Behauptung gemeint (ein 16x16-Schachbrett
+        // ist zu klein/regelmäßig für eine verlässliche Größenaussage) —
+        // stellt nur sicher, dass der Qualitätsparameter überhaupt einen
+        // anderen Kodierpfad auslöst statt lossless zu ignorieren.
+        assert_ne!(lossless, lossy);
     }
 
     #[test]

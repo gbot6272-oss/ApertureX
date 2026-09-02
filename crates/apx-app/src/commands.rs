@@ -2666,6 +2666,12 @@ fn parse_export_format(format: &str) -> Result<apx_export::format::ExportFormat,
         "tiff" => Ok(apx_export::format::ExportFormat::Tiff),
         "webp" => Ok(apx_export::format::ExportFormat::WebP),
         "avif" => Ok(apx_export::format::ExportFormat::Avif),
+        // Phase 11 Schritt 2 (siehe DECISIONS.md ADR-0038): PSD (ag-psd,
+        // reines Rust) und JPEG-XL (gamut-jxl) — HEIF bleibt zurückgestellt
+        // (`heif` 0.1.0 ist eine Fassade, `heif-rs` zu riskant für das
+        // Plattenkontingent dieser Sandbox, siehe ADR-0038).
+        "psd" => Ok(apx_export::format::ExportFormat::Psd),
+        "jxl" => Ok(apx_export::format::ExportFormat::Jxl),
         other => Err(format!("unbekanntes Exportformat '{other}'")),
     }
 }
@@ -4123,9 +4129,15 @@ pub fn upscale_photo(state: State<'_, AppState>, photo_id: String) -> Result<Str
 // Rendering-Codepfad nötig, da `apx_raw::decode_linear` bereits der
 // Phase-2-Einstiegspunkt für `apx-pipeline` ist.
 #[tauri::command]
-pub fn convert_photo_to_dng(state: State<'_, AppState>, photo_id: String) -> Result<String, String> {
+pub fn convert_photo_to_dng(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<String, String> {
     let photo_id = parse_photo_id(photo_id)?;
-    let photo = state.catalog.get_photo(photo_id).map_err(|err| err.to_string())?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
     let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
 
     let linear = apx_raw::decode_linear(&source_path, None).map_err(|err| err.to_string())?;
@@ -4135,9 +4147,13 @@ pub fn convert_photo_to_dng(state: State<'_, AppState>, photo_id: String) -> Res
         (None, Some(model)) => model.clone(),
         (None, None) => String::new(),
     };
-    let bytes = apx_export::dng::encode_linear_dng(&linear, &camera_model).map_err(|err| err.to_string())?;
+    let bytes = apx_export::dng::encode_linear_dng(&linear, &camera_model)
+        .map_err(|err| err.to_string())?;
 
-    let stem = source_path.file_stem().and_then(|s| s.to_str()).unwrap_or("Foto");
+    let stem = source_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Foto");
     let dest_path = source_path.with_file_name(format!("{stem}.dng"));
     std::fs::write(&dest_path, bytes)
         .map_err(|err| format!("Datei '{}' nicht schreibbar: {err}", dest_path.display()))?;
@@ -5098,5 +5114,30 @@ mod tests {
         let (mut backend, simulated) = new_tether_backend();
         assert!(simulated);
         assert!(backend.detect_camera().expect("ok").is_some());
+    }
+
+    #[test]
+    fn export_format_parses_all_seven_known_strings() {
+        // Phase 11 Schritt 2 (siehe DECISIONS.md ADR-0038): "psd"/"jxl"
+        // kamen hinzu, HEIF bleibt bewusst außen vor.
+        use apx_export::format::ExportFormat;
+        let cases = [
+            ("jpeg", ExportFormat::Jpeg),
+            ("png", ExportFormat::Png),
+            ("tiff", ExportFormat::Tiff),
+            ("webp", ExportFormat::WebP),
+            ("avif", ExportFormat::Avif),
+            ("psd", ExportFormat::Psd),
+            ("jxl", ExportFormat::Jxl),
+        ];
+        for (raw, expected) in cases {
+            assert_eq!(parse_export_format(raw).expect("sollte parsen"), expected);
+        }
+    }
+
+    #[test]
+    fn export_format_rejects_unknown_string() {
+        let err = parse_export_format("heif").expect_err("sollte fehlschlagen");
+        assert!(err.contains("heif"));
     }
 }

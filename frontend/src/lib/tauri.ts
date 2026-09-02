@@ -759,7 +759,7 @@ export function suggestTags(photoId: string): Promise<string[]> {
 
 // ---- Export (Phase 8, siehe DECISIONS.md ADR-0034) -------------------------
 
-export type ExportFormat = "jpeg" | "png" | "tiff" | "webp" | "avif";
+export type ExportFormat = "jpeg" | "png" | "tiff" | "webp" | "avif" | "psd" | "jxl";
 
 export type WatermarkPosition = "top_left" | "top_right" | "bottom_left" | "bottom_right" | "center";
 export type IccProfileChoice = "srgb" | "adobe_rgb" | "pro_photo_rgb" | "display_p3" | "custom";

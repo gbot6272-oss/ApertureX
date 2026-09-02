@@ -89,6 +89,8 @@ statt stillschweigend übergangen.
 | Crate | Lizenz | Zweck | Hinweis |
 |---|---|---|---|
 | `gamut-dng` | MIT OR Apache-2.0 | Schreiben von „Linear DNG"-Dateien aus kamera-nativen, unentwickelten RAW-Daten (`apx_export::dng`, Schritt 1) | Reines Rust, keine Systembibliothek. Zum Zeitpunkt von ADR-0034 (Phase 8) gab es keine schreibfähige DNG-Crate, diese wurde erst danach verfügbar — per Testbau (Encode→Decode-Rundreise) real verifiziert, nicht nur an der Registry-Beschreibung geglaubt |
+| `ag-psd` | MIT | Flacher PSD-Export (`apx_export::format::encode_psd`, Schritt 2) | Reines Rust, „from-scratch"-Portierung der gleichnamigen TypeScript-Bibliothek. Fallstrick per Testbau gefunden: `write_psd` **panickt** statt `Result` bei Abmessungen >30000 oder `bits_per_channel != 8` — `encode_psd` prüft die Abmessungen vorab und meldet stattdessen `ExportError::Unsupported` |
+| `gamut-jxl` / `gamut-core` | MIT OR Apache-2.0 | JPEG-XL-Export/-Import (`apx_export::format::encode_jxl`, Schritt 2) | Encoder bindet das echte libjxl (C, BSD-3-Clause, Referenzimplementierung) über `gamut-jxl-sys`, das es per `cmake` zur Kompilierzeit als Quelle vendort (kein reines Rust, ~1-2 Minuten zusätzliche Bauzeit) — kein reifer reiner-Rust-JXL-*Encoder* existiert. Der Decoder-Pfad ist dagegen das reine-Rust `jxl` (jxl-rs, BSD-3-Clause, vom libjxl-Projekt selbst), verifiziert per echtem Encode→Decode-Rundreise-Test (exakte Pixelwerte bei verlustfreier Kodierung) |
 
 ## Frontend — geplant für Phase 1
 

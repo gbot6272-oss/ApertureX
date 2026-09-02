@@ -95,7 +95,8 @@ jobs:
             wget \
             file \
             libxdo-dev \
-            libssl-dev
+            libssl-dev \
+            libgphoto2-dev
 
       # Installiert automatisch die in `rust-toolchain.toml` gepinnte
       # Version (1.94.1) samt rustfmt/clippy — kein separater
@@ -132,17 +133,27 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo fmt --all -- --check
 
-      # Bewusst ohne `--all-features`: `apx-tether`s optionales Feature
-      # `tethering` (Phase 9 Schritt 11, siehe DECISIONS.md ADR-0035
-      # Punkt 5) bindet an die Systembibliothek `libgphoto2`, die auf
-      # keinem der drei CI-Runner installiert ist — dasselbe
-      # Beschaffungsproblem wie in dieser Sandbox. `--all-features` würde
-      # das Feature erzwingen und schon beim Kompilieren scheitern, nicht
-      # an einem echten Lint-Befund. Standard-Features decken den Rest
-      # des Workspace vollständig ab (kein zweites optionales Feature
-      # existiert bisher).
+      # Bewusst ohne `--all-features` für den restlichen Workspace:
+      # `apx-tether`s optionales Feature `tethering` (Phase 9 Schritt 11,
+      # siehe DECISIONS.md ADR-0035 Punkt 5) bindet an die
+      # Systembibliothek `libgphoto2` — auf macOS/Windows-Runnern nach wie
+      # vor nicht installiert (dasselbe Beschaffungsproblem wie zuvor).
+      # `--all-features` würde das Feature dort erzwingen und schon beim
+      # Kompilieren scheitern, nicht an einem echten Lint-Befund. Der
+      # Linux-Runner installiert `libgphoto2-dev` (oben) und deckt das
+      # Feature separat unten ab (Phase 11 Schritt 10, DECISIONS.md
+      # ADR-0038) — Standard-Features hier decken den Rest des Workspace
+      # auf allen drei Plattformen vollständig ab.
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings -D clippy::unwrap_used
+
+      # `tethering`-Feature nur auf Linux (siehe oben): baut/testet
+      # `apx-tether` echt gegen die installierte `libgphoto2` — die von
+      # ADR-0035 Punkt 5 als nicht testbar bezeichnete Klasse
+      # ("unerreichbarer Server"-Fehlerpfad ohne angeschlossene Kamera).
+      - name: cargo test -p apx-tether --features tethering (Linux)
+        if: runner.os == 'Linux'
+        run: cargo test -p apx-tether --features tethering -- --nocapture
 
       # `--nocapture` ist hier bewusst gesetzt (nicht nur bei Fehlschlag
       # aktiv): `apx-pipeline`s `gpu_matches_cpu`-artige Tests drucken bei

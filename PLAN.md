@@ -999,6 +999,6 @@ Tests + gezielte Playwright-Tests, Commit+Push nach jedem Schritt.
 - [x] 7. Maskentyp Tiefenbereich — Alternative: Unschärfe-basierte Tiefennäherung
 - [x] 8. Adobe `.lrtemplate`-Export (best-effort, nur Export)
 - [x] 9. Stapelverarbeitungs-Konsole (neuer Batch-Operationen-Log, siehe ADR-0036) — echtes feldübergreifendes Journal (`batch_operations`/`batch_operation_items`), `BatchConsoleDialog.tsx` (Filter-Auswahl, Trockenlauf, Ausführen, Rückgängig), Kopf-Knopf + Befehlspalette verdrahtet
-- [ ] 10. Tethering real kompilieren (`libgphoto2-dev` in CI, `--features tethering`)
+- [x] 10. Tethering real kompilieren (`libgphoto2-dev` in CI, `--features tethering`) — `libgphoto2-dev` real installiert und gegen die echte Bibliothek gebaut/getestet (nicht nur strukturell); dabei zwei echte API-Abweichungen von der Doku-Annahme gefunden und behoben (`CameraFile::folder()`/`name()` liefern `Cow<str>`, nicht `&str`); Linux-CI-Zweig deckt das Feature jetzt ab, macOS/Windows bleiben ohne `libgphoto2` (Standard-Features)
 - [ ] 11. Phase-10-Nachträge (restliche Lokalisierung, PaletteFrame auf DevelopPanel/MasksPanel, lokale Tastenkürzel umbelegbar, Installer-Signierung-Mechanik-Nachweis)
 - [ ] 12. Dokumentation, volle Verifikation, Abnahme

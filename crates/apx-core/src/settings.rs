@@ -185,11 +185,9 @@ mod tests {
         assert_eq!(defaults.watched_folder.poll_seconds, 30);
 
         let mut settings = Settings::default();
-        settings.watched_folder = WatchedFolderSettings {
-            path: Some("/home/user/Fotos/Eingang".to_string()),
-            enabled: true,
-            poll_seconds: 60,
-        };
+        settings.watched_folder.path = Some("/home/user/Fotos/Eingang".to_string());
+        settings.watched_folder.enabled = true;
+        settings.watched_folder.poll_seconds = 60;
         settings
             .save(&path)
             .expect("Speichern darf nicht scheitern");

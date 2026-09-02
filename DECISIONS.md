@@ -2206,3 +2206,58 @@ wiederholter Lauf über denselben Ordner ist also von sich aus billig und
 idempotent — kein eigener "bereits gesehen"-Zustand nötig.
 
 **Entscheidung:** `FEATURES.md`/`PLAN.md` sind entsprechend aktualisiert.
+
+## ADR-0040: Phase 13 — echte ONNX-Laufzeit jetzt real verfügbar (korrigiert ADR-0033 Punkt 1); KI-Ausfüllen, Direktimport, DCP-Profile, klassische CV-Lücken
+
+**Status:** Angenommen
+**Kontext:** Aus der aktualisierten Lightroom-Lückenliste (Vergleichs-
+Artifact nach Phase 12) hat der Nutzer sechs Punkte ausgewählt:
+generatives/bearbeitendes KI-Ausfüllen, Import direkt von Speicherkarte/
+Kamera, Adobe-DCP-Farbprofil-Import (fest zugesagt); Perspektive/Upright-
+Kantenerkennung und Panorama-Homografie-Stitching (kostenlos geplant);
+mehrere Kataloge, ein echter UND/ODER-Regelbauer, echte Personen-
+Wiedererkennung ("vielleicht").
+
+**Korrektur an ADR-0033 Punkt 1:** ADR-0033 begründete den Verzicht auf
+echte ONNX-Runtime-Modellinferenz u. a. damit, es gebe "keinen
+bestätigten Zugriffsweg auf vorkompilierte ONNX-Runtime-Binaries" und
+"keinen legitimen Weg, ein trainiertes ... Modell zu beschaffen und
+mitzuliefern". Diese Sitzung hat beides real geprüft und beides ist
+inzwischen falsch:
+
+1. **Die Laufzeit ist real verfügbar** — per `cargo add --dry-run`
+   gegen die echte crates.io-Registry bestätigt: `ort` (2.0.0-rc.13,
+   ONNX-Runtime-Bindings) und `tract-onnx` (0.23.6, reines Rust, keine
+   C++-Abhängigkeit) sind beide echte, gepflegte Crates.
+2. **Für mindestens ein Modell ist auch die Gewichts-Beschaffung
+   real gelöst:** LaMa (Large Mask Inpainting, `advimman/lama`,
+   Apache-2.0-Code) hat ein echtes, als ONNX exportiertes Modell
+   öffentlich auf Hugging Face (`Carve/LaMa-ONNX`, `lama_fp32.onnx`,
+   208 MB, Apache-2.0, trainiert auf Places2/CC-BY-4.0) — real
+   herunterladbar, lizenzgeklärt, gegen einen veröffentlichten Hash
+   verifizierbar. Kein fabriziertes Modell, keine Behauptung ohne
+   Beleg — genau die Art Fund, die ADR-0033 damals nicht hatte.
+
+Für dieselbe klassische CV, aber ohne jedes Modellgewicht (Perspektive/
+Upright, Panorama-Stitching), sind ebenfalls real verfügbare, reine
+Rust-Crates gefunden: `imageproc` (Kantenerkennung/Hough-Transformation),
+sowie das `rust-cv`-Ökosystem `akaze`/`arrsac`/`sample-consensus`/
+`homography`/`eight-point`/`lambda-twist`/`cv-core`/`space`
+(Merkmalserkennung, robuste Homografie-Schätzung) — kein OpenCV nötig.
+Für Speicherkarten-Erkennung: `sysinfo` (0.38.4, plattformübergreifende
+Wechseldatenträger-Liste).
+
+**Für Gesichts-Wiedererkennung bleibt eine echte Lücke offen:** die
+Laufzeit ist dieselbe wie bei LaMa, aber ein gutes vortrainiertes
+Gesichts-Embedding-Modell mit wirklich permissiver Lizenz (nicht nur
+"Forschung, nicht kommerziell", wie viele InsightFace/ArcFace-
+Veröffentlichungen) ist bei dieser Recherche noch nicht bestätigt —
+Phase 13 Schritt 8 behandelt das als eigene, ergebnisoffene Prüfung
+statt es stillschweigend anzunehmen.
+
+**Entscheidung:** ADR-0033 Punkt 1 gilt als durch diesen Nachtrag
+korrigiert (nicht rückwirkend umgeschrieben — der ursprüngliche Text
+bleibt stehen, war zum damaligen Rechercheergebnis ehrlich). Phase 13
+setzt echte ONNX-Inferenz für das KI-Ausfüllen ein (Schritt 1) und
+klassische, gewichtsfreie CV für Perspektive/Panorama (Schritte 4/5).
+Vollständiger Schritt-für-Schritt-Plan in `PLAN.md`.

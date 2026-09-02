@@ -31,6 +31,13 @@ pub enum AiError {
     /// stillschweigend übernommenen Unsinns-Presets behandelt.
     #[error("LLM-Antwort ließ sich nicht als gültiges Preset parsen: {message}")]
     LlmResponseUnparsable { message: String },
+
+    /// Ein ONNX-Modell (Phase 13, siehe `inpaint`-Moduldoku) konnte nicht
+    /// geladen werden oder die Inferenz ist fehlgeschlagen — Laufzeit-
+    /// Bibliothek fehlt, Modelldatei ist keine gültige ONNX-Datei, oder
+    /// die Ein-/Ausgabeform passt nicht zum geladenen Graphen.
+    #[error("ONNX-Modell: {message}")]
+    Model { message: String },
 }
 
 impl From<AiError> for AppError {

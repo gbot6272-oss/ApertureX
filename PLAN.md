@@ -1022,3 +1022,28 @@ Test pro Schritt, volle Suite einmalig in Schritt 8.
 - [x] 6. Freies ICC-Profil beim Soft-Proof (echter `lcms2::Transform::new_proofing`-Transform über ein zusätzliches Segment derselben `develop/...`-Route statt der bisherigen JS-Sättigungsnäherung, gegen die vier Standardprofile ODER eine frei wählbare `.icc`-Datei; nur Papierweiß bleibt clientseitig, siehe DECISIONS.md ADR-0039-Nachtrag II)
 - [x] 7. Beobachtete Ordner / Auto-Import (neuer Hintergrund-Task nach dem Vorbild des bestehenden Export-Queue-Workers, Polling statt Datei-System-Watcher-Crate; teilt sich die Import-Sperre mit einem manuellen Import, siehe DECISIONS.md ADR-0039-Nachtrag III)
 - [x] 8. Dokumentation, volle Verifikation, Abnahme (Vergleichs-Artifact mit aktualisierter Lückenliste neu veröffentlicht) — volle Suite grün: `cargo fmt`/`clippy --workspace` sauber, 672 Rust-Unit-/Doc-Tests, 193 Vitest-, 135 Playwright-Tests, `tsc -b` sauber
+
+## Aktuelle Phase: Phase 13 — KI-Ausfüllen, Direktimport, DCP-Profile, klassische CV-Lücken
+
+Vom Nutzer aus der aktualisierten Lightroom-Lückenliste ausgewählt: drei
+fest zugesagte Punkte (KI-Ausfüllen, Speicherkarten-/Kamera-Direktimport,
+DCP-Farbprofil-Import — echte Open-Source-Lösung bevorzugt, sonst selbst
+nachgebaut), zwei kostenlos geplante klassische CV-Punkte (Perspektive/
+Upright, Panorama-Stitching) und drei „vielleicht"-Punkte (Mehrfach-
+Kataloge, echter Regelbauer, Personen-Wiedererkennung). Wichtigster
+Rechercheergebnis: die `ort`/`tract-onnx`-ONNX-Laufzeiten sind entgegen
+ADR-0033 Punkt 1 real verfügbar, und für LaMa-Inpainting existiert ein
+echtes, Apache-2.0-lizenziertes, herunterladbares Modell — siehe
+DECISIONS.md ADR-0040. Testdisziplin unverändert: ein gezielter Test pro
+Schritt, volle Suite einmalig in Schritt 9.
+
+- [x] 0. Scope festzurren, ADR-0040 + `ort`/LaMa-Crate-Spike (`ort` real per `cargo add`/`cargo build` geprüft — `download-binaries`-Standardfeature scheitert am Proxy dieser Sandbox, `cdn.pyke.io` nicht freigegeben; `load-dynamic` gegen eine per `pip install onnxruntime` beschaffte echte `libonnxruntime.so` funktioniert, Spike-Test lädt ein echtes winziges ONNX-Modell und führt eine echte Inferenz aus, Ergebnis stimmt)
+- [ ] 1. Echtes KI-Ausfüllen (LaMa-Inpainting, opt-in Modell-Download)
+- [ ] 2. Import direkt von Speicherkarte/Kamera
+- [ ] 3. Adobe-DCP-Farbprofil-Import
+- [ ] 4. Perspektive/Upright: echte Kantenerkennung (kostenlos, `imageproc`)
+- [ ] 5. Panorama: Homografie-Stitching für Freihandaufnahmen (kostenlos, `rust-cv`-Ökosystem)
+- [ ] 6. Mehrere Kataloge + Katalog-Wartung
+- [ ] 7. Echter UND/ODER-Regelbauer (bedingte Presets + Intelligente Sammlungen)
+- [ ] 8. Echte Personen-Wiedererkennung (Lizenzprüfung zuerst)
+- [ ] 9. Dokumentation, volle Verifikation, Abnahme

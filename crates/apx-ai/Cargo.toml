@@ -23,7 +23,23 @@ rayon.workspace = true
 # Begründung wie rusqlites "bundled"-Feature in apx-catalog).
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["rt"] }
-base64 = "0.22"
+# ONNX-Laufzeit für echte Modellinferenz (Phase 13, siehe DECISIONS.md
+# ADR-0040 — korrigiert ADR-0033 Punkt 1, das eine echte ONNX-Laufzeit
+# noch für unerreichbar hielt). `download-binaries` (ort-Standard) holt
+# beim Bauen ein vorkompiliertes ONNX-Runtime-Binary von `cdn.pyke.io` —
+# funktioniert auf echten CI-Runnern/Nutzerrechnern, wird aber von dieser
+# Entwicklungs-Sandbox blockiert (Proxy-403, `cdn.pyke.io` steht nicht auf
+# der Freigabeliste dieser Sitzung — kein grundsätzliches Problem, siehe
+# `/root/.ccr/README.md`s "403 / 407"-Abschnitt). `load-dynamic` lädt
+# stattdessen eine vom Nutzer/System bereitgestellte `.so`/`.dll` zur
+# Laufzeit über `ORT_DYLIB_PATH` — funktioniert überall, verlangt aber,
+# dass irgendjemand die Laufzeitbibliothek bereitstellt. Für den
+# Spike-Test hier ist `load-dynamic` die einzige in dieser Sandbox
+# testbare Variante (mit `pip install onnxruntime`s `libonnxruntime.so`
+# als Testbibliothek); welche Strategie die ausgelieferte App tatsächlich
+# nutzt, entscheidet Schritt 1.
+ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "load-dynamic"] }
+ndarray = "0.17"
 
 [dev-dependencies]
 tempfile = "3"

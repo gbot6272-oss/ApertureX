@@ -74,6 +74,10 @@ pub struct PhotoDto {
     pub caption: Option<String>,
     pub copyright: Option<String>,
     pub creator: Option<String>,
+    /// Voller EXIF/IPTC-Editor (Phase 12 Schritt 4, siehe `DECISIONS.md`
+    /// ADR-0039) — frei benannte Zusatzfelder, siehe
+    /// `apx_catalog::Photo::custom_metadata`.
+    pub custom_metadata: std::collections::BTreeMap<String, String>,
 }
 
 impl From<apx_catalog::Photo> for PhotoDto {
@@ -106,6 +110,7 @@ impl From<apx_catalog::Photo> for PhotoDto {
             caption: photo.caption,
             copyright: photo.copyright,
             creator: photo.creator,
+            custom_metadata: photo.custom_metadata,
         }
     }
 }
@@ -1277,6 +1282,34 @@ pub fn set_photo_metadata(
         .map_err(|err| err.to_string())
 }
 
+/// Ersetzt die frei benannten IPTC-Zusatzfelder für eine oder mehrere
+/// Fotos (Phase 12 Schritt 4, voller EXIF/IPTC-Editor, siehe
+/// `DECISIONS.md` ADR-0039) — wie `set_photo_metadata` deckt das auch
+/// Stapel-Metadatenbearbeitung ab.
+#[tauri::command]
+pub fn set_photo_custom_metadata(
+    state: State<'_, AppState>,
+    photo_id: String,
+    metadata: std::collections::BTreeMap<String, String>,
+) -> Result<(), String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    state
+        .catalog
+        .set_photo_custom_metadata(photo_id, &metadata)
+        .map_err(|err| err.to_string())
+}
+
+/// Die wohlbekannten IPTC-Kernfeld-Schlüssel, die das Frontend fest
+/// anbietet (siehe `apx_catalog::iptc::WELL_KNOWN_FIELDS`) — reine
+/// Konstante, kein State-Zugriff nötig.
+#[tauri::command]
+pub fn list_well_known_iptc_fields() -> Vec<(String, String)> {
+    apx_catalog::iptc::WELL_KNOWN_FIELDS
+        .iter()
+        .map(|(key, label)| (key.to_string(), label.to_string()))
+        .collect()
+}
+
 /// Exportiert eine `.xmp`-Sidecar-Datei neben dem Original — Metadaten
 /// (Titel/Bildunterschrift/Copyright/Urheber/Schlagworte) plus optional
 /// die Adobe-`crs:`-Entwickeln-Einstellungen (Basic+HSL, siehe
@@ -1309,6 +1342,7 @@ pub fn export_xmp_sidecar(
         copyright: photo.copyright.clone(),
         creator: photo.creator.clone(),
         keywords: keywords.into_iter().map(|k| k.name).collect(),
+        custom_metadata: photo.custom_metadata.clone(),
     };
 
     let develop = if with_develop_settings {

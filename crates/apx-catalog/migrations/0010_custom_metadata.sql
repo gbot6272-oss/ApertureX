@@ -1,0 +1,15 @@
+-- Migration 10: Voller EXIF/IPTC-Editor (Phase 12 Schritt 4, siehe
+-- PLAN.md/DECISIONS.md ADR-0039). Additiv zu den Migrationen 1-9 —
+-- eine `ALTER TABLE ADD COLUMN`.
+--
+-- Statt einer festen Spalte je IPTC-Feld (wie `title`/`caption`/
+-- `copyright`/`creator` aus Migration 8, die vier häufigsten Felder
+-- ohne Spielraum für weitere) ein generisches Key-Value-JSON-Objekt —
+-- dasselbe Muster wie `conditions_json`/`synonyms` an anderer Stelle in
+-- diesem Katalog (freie JSON-Struktur in einer festen Spalte statt
+-- einer Migration pro neuem Feld). Deckt die üblichen IPTC-Kernfelder
+-- (Headline/Anweisungen/Ort/Ereignis/Genre/Quelle/Auftragskennung usw.,
+-- siehe `apx_catalog::iptc::WELL_KNOWN_FIELDS`) plus frei benannte
+-- Zusatzfelder ab, ohne bei jedem neuen Adobe-Feld eine weitere
+-- Migration zu brauchen.
+ALTER TABLE photos ADD COLUMN custom_metadata_json TEXT NOT NULL DEFAULT '{}';

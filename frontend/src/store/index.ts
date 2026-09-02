@@ -120,25 +120,6 @@ export function resolveSelectionMode(event: { ctrlKey: boolean; metaKey: boolean
  * Ergebnis) — hält Raster/Filmstreifen nach einer Bewertungs-/Flaggen-/
  * Farb-Änderung sofort konsistent, ohne jedes Mal neu vom Backend zu
  * laden. Muss innerhalb eines Immer-`set()`-Producers aufgerufen werden. */
-/** Sucht ein Foto per `id` an jeder Stelle, wo es aktuell im Zustand
- * zwischengespeichert sein könnte — dasselbe Suchmuster wie
- * `patchPhotoEverywhere`, nur lesend statt schreibend. Für Phase 12
- * Schritt 3 Teil A (siehe `DECISIONS.md` ADR-0039) gebraucht: die
- * automatische Objektivprofil-Zuordnung beim ersten Öffnen eines Fotos
- * braucht dessen EXIF-`lens`-Feld, das `loadDevelopStateForPhoto` selbst
- * nicht mitbekommt (nur die `photoId`). */
-function findPhotoById(state: AppStore, photoId: string): PhotoDto | undefined {
-  for (const list of Object.values(state.photosByFolder)) {
-    const found = list.find((p) => p.id === photoId);
-    if (found) return found;
-  }
-  for (const list of Object.values(state.collectionPhotos)) {
-    const found = list.find((p) => p.id === photoId);
-    if (found) return found;
-  }
-  return state.libraryResults?.find((p) => p.id === photoId);
-}
-
 function patchPhotoEverywhere(state: AppStore, photoId: string, patch: Partial<PhotoDto>) {
   for (const list of Object.values(state.photosByFolder)) {
     const target = list.find((p) => p.id === photoId);
@@ -1347,6 +1328,16 @@ interface MetadataSlice {
   xmpStatus: string | null;
   exportXmpSidecarForSelected: (withDevelopSettings: boolean) => Promise<void>;
   importXmpSidecarForSelected: () => Promise<void>;
+
+  /** Voller EXIF/IPTC-Editor (Phase 12 Schritt 4, siehe `DECISIONS.md`
+   * ADR-0039) — dieselbe Stapel-Metadatenbearbeitung wie
+   * `updatePhotoMetadata`, nur für die frei benannten Zusatzfelder;
+   * `metadata` ersetzt die gesamte Map. */
+  updatePhotoCustomMetadata: (photoId: string, metadata: Record<string, string>) => Promise<void>;
+  /** `[Schlüssel, Anzeigename]`-Paare, die der Metadaten-Dialog fest
+   * anbietet — statische Backend-Liste, einmal geladen. */
+  wellKnownIptcFields: Array<[string, string]>;
+  refreshWellKnownIptcFields: () => Promise<void>;
 }
 
 /** Ansichten/Filter-Presets/Vorschau-Cache/Statistik (Phase 9 Schritt 3,
@@ -1790,7 +1781,7 @@ export const useAppStore = create<AppStore>()(
     },
 
     autoApplyLensProfileIfMatched: async (photoId) => {
-      const photo = findPhotoById(get(), photoId);
+      const photo = findPhotoAnywhere(get(), photoId);
       if (!photo?.lens) return;
       let suggestion;
       try {
@@ -1814,7 +1805,7 @@ export const useAppStore = create<AppStore>()(
     manuallyDetectLensProfile: async () => {
       const { developPhotoId } = get();
       if (!developPhotoId) return;
-      const photo = findPhotoById(get(), developPhotoId);
+      const photo = findPhotoAnywhere(get(), developPhotoId);
       if (!photo?.lens) return;
       try {
         const suggestion = await api.resolveLensProfile(photo.lens);
@@ -4720,6 +4711,23 @@ export const useAppStore = create<AppStore>()(
       );
       set((state) => {
         for (const id of targets) patchPhotoEverywhere(state, id, fields);
+      });
+    },
+
+    updatePhotoCustomMetadata: async (photoId, metadata) => {
+      const { multiSelectedIds } = get();
+      const targets = multiSelectedIds.includes(photoId) && multiSelectedIds.length > 1 ? multiSelectedIds : [photoId];
+      await Promise.all(targets.map((id) => api.setPhotoCustomMetadata(id, metadata)));
+      set((state) => {
+        for (const id of targets) patchPhotoEverywhere(state, id, { custom_metadata: metadata });
+      });
+    },
+
+    wellKnownIptcFields: [],
+    refreshWellKnownIptcFields: async () => {
+      const fields = await api.listWellKnownIptcFields();
+      set((state) => {
+        state.wellKnownIptcFields = fields;
       });
     },
 

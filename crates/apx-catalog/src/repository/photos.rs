@@ -16,7 +16,8 @@ pub(crate) const SELECT_COLUMNS: &str =
      photos.camera_model, photos.lens, photos.iso, photos.shutter, photos.aperture, \
      photos.focal_length, photos.captured_at, photos.gps_lat, photos.gps_lon, \
      photos.imported_at, photos.missing, photos.rating, photos.flag, photos.color_label, \
-     photos.source_photo_id, photos.title, photos.caption, photos.copyright, photos.creator";
+     photos.source_photo_id, photos.title, photos.caption, photos.copyright, photos.creator, \
+     photos.custom_metadata_json";
 
 #[allow(clippy::type_complexity)]
 pub(crate) struct PhotoRow {
@@ -49,6 +50,7 @@ pub(crate) struct PhotoRow {
     caption: Option<String>,
     copyright: Option<String>,
     creator: Option<String>,
+    custom_metadata_json: String,
 }
 
 pub(crate) fn row_to_raw(row: &rusqlite::Row) -> rusqlite::Result<PhotoRow> {
@@ -82,6 +84,7 @@ pub(crate) fn row_to_raw(row: &rusqlite::Row) -> rusqlite::Result<PhotoRow> {
         caption: row.get(26)?,
         copyright: row.get(27)?,
         creator: row.get(28)?,
+        custom_metadata_json: row.get(29)?,
     })
 }
 
@@ -116,6 +119,7 @@ pub(crate) fn raw_to_photo(raw: PhotoRow) -> Result<Photo> {
         caption: raw.caption,
         copyright: raw.copyright,
         creator: raw.creator,
+        custom_metadata: serde_json::from_str(&raw.custom_metadata_json).unwrap_or_default(),
     })
 }
 
@@ -134,6 +138,31 @@ pub(crate) fn set_metadata(
     conn.execute(
         "UPDATE photos SET title = ?2, caption = ?3, copyright = ?4, creator = ?5 WHERE id = ?1",
         params![photo_id.to_string(), title, caption, copyright, creator],
+    )
+    .map_err(map_sqlite_err)?;
+    Ok(())
+}
+
+/// Ersetzt das gesamte `custom_metadata_json`-Feld (Phase 12 Schritt 4,
+/// voller EXIF/IPTC-Editor, siehe `DECISIONS.md` ADR-0039) — wie
+/// [`set_metadata`] deckt das auch Stapel-Metadatenbearbeitung ab, der
+/// Aufrufer ruft dies einfach für mehrere `photo_id`s hintereinander auf.
+/// Leere Werte werden vor dem Speichern entfernt statt als leerer String
+/// gehalten (ein im Dialog geleertes Feld verschwindet damit wieder ganz,
+/// statt als „gesetzt, aber leer" liegen zu bleiben).
+pub(crate) fn set_custom_metadata(
+    conn: &Connection,
+    photo_id: PhotoId,
+    metadata: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    let metadata: std::collections::BTreeMap<&String, &String> =
+        metadata.iter().filter(|(_, v)| !v.is_empty()).collect();
+    let json = serde_json::to_string(&metadata).map_err(|source| AppError::Database {
+        message: format!("custom_metadata nicht serialisierbar: {source}"),
+    })?;
+    conn.execute(
+        "UPDATE photos SET custom_metadata_json = ?2 WHERE id = ?1",
+        params![photo_id.to_string(), json],
     )
     .map_err(map_sqlite_err)?;
     Ok(())
@@ -989,5 +1018,35 @@ mod tests {
         let (matched_id, changed) = upsert(&conn, &photo, OffsetDateTime::now_utc()).expect("ok");
         assert_eq!(matched_id, source_id);
         assert!(!changed);
+    }
+
+    /// Phase 12 Schritt 4 (siehe DECISIONS.md ADR-0039): voller
+    /// EXIF/IPTC-Editor — `custom_metadata_json` startet leer und lässt
+    /// sich per `set_custom_metadata` vollständig ersetzen.
+    #[test]
+    fn set_custom_metadata_replaces_the_stored_json_map() {
+        let (conn, folder_id) = setup();
+        let mtime = OffsetDateTime::now_utc()
+            .replace_nanosecond(0)
+            .expect("gültig");
+        let (id, _) = upsert(
+            &conn,
+            &sample_photo(folder_id, 1000, mtime),
+            OffsetDateTime::now_utc(),
+        )
+        .expect("ok");
+
+        assert!(
+            get(&conn, id).expect("gefunden").custom_metadata.is_empty(),
+            "neu importierte Fotos starten ohne Zusatzfelder"
+        );
+
+        let mut metadata = std::collections::BTreeMap::new();
+        metadata.insert("Headline".to_string(), "Bergsee".to_string());
+        metadata.insert("ProjektNummer".to_string(), "2026-042".to_string());
+        set_custom_metadata(&conn, id, &metadata).expect("speichern");
+
+        let fetched = get(&conn, id).expect("gefunden");
+        assert_eq!(fetched.custom_metadata, metadata);
     }
 }

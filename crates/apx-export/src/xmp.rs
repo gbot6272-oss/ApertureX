@@ -44,6 +44,40 @@ pub struct XmpSidecarMetadata {
     pub copyright: Option<String>,
     pub creator: Option<String>,
     pub keywords: Vec<String>,
+    /// Voller EXIF/IPTC-Editor (Phase 12 Schritt 4, siehe `DECISIONS.md`
+    /// ADR-0039) — `apx_catalog::Photo::custom_metadata`. Schlüssel aus
+    /// `apx_catalog::iptc::WELL_KNOWN_FIELDS` werden auf die echte
+    /// entsprechende `photoshop:`/`Iptc4xmpCore:`/`Iptc4xmpExt:`-XMP-
+    /// Eigenschaft abgebildet (siehe [`well_known_xmp_property`]); alle
+    /// übrigen (frei benannten) Schlüssel landen im eigenen `apx:`-
+    /// Namensraum statt eine Adobe-Eigenschaft zu erfinden, die es nicht
+    /// gibt.
+    pub custom_metadata: std::collections::BTreeMap<String, String>,
+}
+
+/// Bildet einen `apx_catalog::iptc::WELL_KNOWN_FIELDS`-Schlüssel auf
+/// `(Namensraum-Präfix, lokaler Eigenschaftsname)` einer echten XMP-
+/// Eigenschaft ab. **Bewusste Vereinfachung:** als einfaches RDF-Attribut
+/// geschrieben, nicht als vollständige Lang-Alt-/Bag-Struktur, wie es der
+/// volle IPTC-Standard für einzelne dieser Felder vorsähe — Adobe selbst
+/// schreibt viele davon in der Praxis ebenfalls als einfachen Text, echte
+/// Werkzeuge, die die vollständige Struktur erwarten, lesen ein solches
+/// Attribut im schlimmsten Fall nicht (kein kaputtes XML, nur ein
+/// übersprungenes Feld).
+fn well_known_xmp_property(key: &str) -> Option<(&'static str, &'static str)> {
+    match key {
+        "Headline" => Some(("photoshop", "Headline")),
+        "Instructions" => Some(("photoshop", "Instructions")),
+        "Source" => Some(("photoshop", "Source")),
+        "TransmissionReference" => Some(("photoshop", "TransmissionReference")),
+        "City" => Some(("photoshop", "City")),
+        "State" => Some(("photoshop", "State")),
+        "Country" => Some(("photoshop", "Country")),
+        "Sublocation" => Some(("Iptc4xmpCore", "Location")),
+        "Event" => Some(("Iptc4xmpExt", "Event")),
+        "Genre" => Some(("Iptc4xmpExt", "Genre")),
+        _ => None,
+    }
 }
 
 fn escape_xml(text: &str) -> String {
@@ -137,13 +171,34 @@ pub fn generate_xmp(
         format!("\n     <dc:subject><rdf:Bag>{items}</rdf:Bag></dc:subject>")
     };
 
+    // Phase 12 Schritt 4 (siehe DECISIONS.md ADR-0039): frei benannte
+    // IPTC-Zusatzfelder — wohlbekannte Schlüssel als echte XMP-Eigenschaft
+    // (siehe well_known_xmp_property), alle übrigen im eigenen
+    // apx:-Namensraum, damit nichts verloren geht, ohne eine nicht
+    // existierende Adobe-Eigenschaft zu erfinden.
+    let mut custom_attrs = String::new();
+    for (key, value) in &metadata.custom_metadata {
+        if value.is_empty() {
+            continue;
+        }
+        let (prefix, property) = well_known_xmp_property(key).unwrap_or(("apx", key.as_str()));
+        custom_attrs.push_str(&format!(
+            "\n   {prefix}:{property}=\"{}\"",
+            escape_xml(value)
+        ));
+    }
+
     format!(
         "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n\
 <x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n\
  <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n\
   <rdf:Description rdf:about=\"\"\n\
    xmlns:dc=\"http://purl.org/dc/elements/1.1/\"\n\
-   xmlns:crs=\"http://ns.adobe.com/camera-raw-settings/1.0/\"{crs_attrs}>{dc_title}{dc_description}{dc_rights}{dc_creator}{dc_subject}\n\
+   xmlns:crs=\"http://ns.adobe.com/camera-raw-settings/1.0/\"\n\
+   xmlns:photoshop=\"http://ns.adobe.com/photoshop/1.0/\"\n\
+   xmlns:Iptc4xmpCore=\"http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/\"\n\
+   xmlns:Iptc4xmpExt=\"http://iptc.org/std/Iptc4xmpExt/2008-02-29/\"\n\
+   xmlns:apx=\"https://aperturex.app/ns/1.0/\"{crs_attrs}{custom_attrs}>{dc_title}{dc_description}{dc_rights}{dc_creator}{dc_subject}\n\
   </rdf:Description>\n\
  </rdf:RDF>\n\
 </x:xmpmeta>\n\
@@ -337,6 +392,7 @@ mod tests {
             copyright: Some("© Test & Co".to_string()),
             creator: Some("Max Mustermann".to_string()),
             keywords: vec!["Natur".to_string(), "Abend".to_string()],
+            custom_metadata: std::collections::BTreeMap::new(),
         };
         let basic = sample_basic();
         let hsl = sample_hsl();
@@ -359,6 +415,41 @@ mod tests {
         let xml = generate_xmp(&metadata, None);
         assert!(!xml.contains("crs:Exposure2012"));
         assert!(xml.contains("Nur Metadaten"));
+    }
+
+    /// Phase 12 Schritt 4 (siehe DECISIONS.md ADR-0039): ein
+    /// wohlbekannter Schlüssel landet auf der echten `photoshop:`-
+    /// Eigenschaft, ein frei benannter im eigenen `apx:`-Namensraum, ein
+    /// leerer Wert wird ganz ausgelassen.
+    #[test]
+    fn generate_xmp_writes_custom_metadata_with_well_known_keys_mapped_and_unknown_keys_namespaced()
+    {
+        let mut custom_metadata = std::collections::BTreeMap::new();
+        custom_metadata.insert(
+            "Headline".to_string(),
+            "Bergsee bei Sonnenaufgang".to_string(),
+        );
+        custom_metadata.insert("ProjektNummer".to_string(), "2026-042".to_string());
+        custom_metadata.insert("LeeresFeld".to_string(), String::new());
+        let metadata = XmpSidecarMetadata {
+            custom_metadata,
+            ..Default::default()
+        };
+
+        let xml = generate_xmp(&metadata, None);
+
+        assert!(
+            xml.contains("photoshop:Headline=\"Bergsee bei Sonnenaufgang\""),
+            "wohlbekannter Schlüssel sollte auf die echte photoshop-Eigenschaft abgebildet werden: {xml}"
+        );
+        assert!(
+            xml.contains("apx:ProjektNummer=\"2026-042\""),
+            "frei benannter Schlüssel sollte im eigenen apx-Namensraum landen: {xml}"
+        );
+        assert!(
+            !xml.contains("LeeresFeld"),
+            "leerer Wert sollte ganz ausgelassen werden: {xml}"
+        );
     }
 
     #[test]

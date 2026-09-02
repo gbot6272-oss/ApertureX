@@ -56,6 +56,10 @@ export interface PhotoDto {
   caption: string | null;
   copyright: string | null;
   creator: string | null;
+  /** Voller EXIF/IPTC-Editor (Phase 12 Schritt 4, siehe `DECISIONS.md`
+   * ADR-0039) — frei benannte Zusatzfelder; bekannte Schlüssel siehe
+   * `listWellKnownIptcFields`. */
+  custom_metadata: Record<string, string>;
 }
 
 export interface KeywordDto {
@@ -416,6 +420,20 @@ export function setPhotoMetadata(
   creator: string | null,
 ): Promise<void> {
   return invoke<void>("set_photo_metadata", { photoId, title, caption, copyright, creator });
+}
+
+/** Ersetzt die frei benannten IPTC-Zusatzfelder (Phase 12 Schritt 4,
+ * voller EXIF/IPTC-Editor, siehe `DECISIONS.md` ADR-0039) — wie
+ * `setPhotoMetadata` deckt das auch Stapel-Metadatenbearbeitung ab. */
+export function setPhotoCustomMetadata(photoId: string, metadata: Record<string, string>): Promise<void> {
+  return invoke<void>("set_photo_custom_metadata", { photoId, metadata });
+}
+
+/** Die wohlbekannten IPTC-Kernfeld-Schlüssel, die der Dialog fest
+ * anbietet (`[Schlüssel, Anzeigename]`-Paare) — statische Liste, wird
+ * beim ersten Öffnen des Dialogs einmal geladen. */
+export function listWellKnownIptcFields(): Promise<Array<[string, string]>> {
+  return invoke<Array<[string, string]>>("list_well_known_iptc_fields");
 }
 
 /** Schreibt eine `.xmp`-Sidecar-Datei neben dem Original, gibt deren Pfad

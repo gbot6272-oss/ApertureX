@@ -21,6 +21,7 @@
 #![deny(clippy::unwrap_used)]
 
 mod error;
+pub mod iptc;
 mod migrations;
 mod models;
 mod repository;
@@ -403,6 +404,19 @@ impl Catalog {
     ) -> Result<()> {
         let conn = self.lock()?;
         repository::photos::set_metadata(&conn, photo_id, title, caption, copyright, creator)
+    }
+
+    /// Ersetzt die frei benannten IPTC-Zusatzfelder eines Fotos (Phase 12
+    /// Schritt 4, voller EXIF/IPTC-Editor, siehe `DECISIONS.md` ADR-0039)
+    /// — wie [`Self::set_photo_metadata`] deckt das auch Stapel-
+    /// Metadatenbearbeitung ab.
+    pub fn set_photo_custom_metadata(
+        &self,
+        photo_id: PhotoId,
+        metadata: &std::collections::BTreeMap<String, String>,
+    ) -> Result<()> {
+        let conn = self.lock()?;
+        repository::photos::set_custom_metadata(&conn, photo_id, metadata)
     }
 
     /// Aggregierte Katalog-Statistik (Phase 9 Schritt 3) — siehe

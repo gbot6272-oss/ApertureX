@@ -249,6 +249,13 @@ export const de = {
   "metadataDialog.includeDevelopSettings": "Entwickeln-Einstellungen (Basic+HSL) mit exportieren",
   "metadataDialog.exportXmp": ".xmp exportieren",
   "metadataDialog.importXmp": ".xmp importieren…",
+  "metadataDialog.iptcFields": "Weitere IPTC-Felder",
+  "metadataDialog.saveIptcFields": "IPTC-Felder speichern",
+  "metadataDialog.customFields": "Eigene Zusatzfelder",
+  "metadataDialog.noCustomFields": "Keine eigenen Zusatzfelder.",
+  "metadataDialog.customFieldKeyPlaceholder": "Feldname",
+  "metadataDialog.customFieldValuePlaceholder": "Wert",
+  "metadataDialog.addCustomField": "Feld hinzufügen",
 
   // PrintDialog.tsx (Phase 11 Schritt 11)
   "printDialog.title": "Drucken",

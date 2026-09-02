@@ -151,6 +151,8 @@ fn main() {
             commands::delete_tag_rule,
             commands::list_tag_rules,
             commands::set_photo_metadata,
+            commands::set_photo_custom_metadata,
+            commands::list_well_known_iptc_fields,
             commands::export_xmp_sidecar,
             commands::import_xmp_develop_settings,
             commands::import_xmp_sidecar_from_file,

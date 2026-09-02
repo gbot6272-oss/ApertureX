@@ -28,6 +28,7 @@ function photo(overrides: Partial<PhotoDto> & { id: string }): PhotoDto {
     caption: null,
     copyright: null,
     creator: null,
+    custom_metadata: {},
     ...overrides,
   };
 }

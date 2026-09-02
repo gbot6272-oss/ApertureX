@@ -241,6 +241,13 @@ export const en: Record<keyof typeof de, string> = {
   "metadataDialog.includeDevelopSettings": "Include develop settings (Basic+HSL) in export",
   "metadataDialog.exportXmp": "Export .xmp",
   "metadataDialog.importXmp": "Import .xmp…",
+  "metadataDialog.iptcFields": "Additional IPTC fields",
+  "metadataDialog.saveIptcFields": "Save IPTC fields",
+  "metadataDialog.customFields": "Custom fields",
+  "metadataDialog.noCustomFields": "No custom fields.",
+  "metadataDialog.customFieldKeyPlaceholder": "Field name",
+  "metadataDialog.customFieldValuePlaceholder": "Value",
+  "metadataDialog.addCustomField": "Add field",
 
   // PrintDialog.tsx (Phase 11 Schritt 11)
   "printDialog.title": "Print",

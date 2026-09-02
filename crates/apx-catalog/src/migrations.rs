@@ -19,6 +19,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0007_library_backlog.sql"),
     include_str!("../migrations/0008_metadata_keywords.sql"),
     include_str!("../migrations/0009_batch_operations.sql"),
+    include_str!("../migrations/0010_custom_metadata.sql"),
 ];
 
 /// Wendet alle noch fehlenden Migrationen auf `conn` an.

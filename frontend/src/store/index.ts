@@ -120,6 +120,25 @@ export function resolveSelectionMode(event: { ctrlKey: boolean; metaKey: boolean
  * Ergebnis) — hält Raster/Filmstreifen nach einer Bewertungs-/Flaggen-/
  * Farb-Änderung sofort konsistent, ohne jedes Mal neu vom Backend zu
  * laden. Muss innerhalb eines Immer-`set()`-Producers aufgerufen werden. */
+/** Sucht ein Foto per `id` an jeder Stelle, wo es aktuell im Zustand
+ * zwischengespeichert sein könnte — dasselbe Suchmuster wie
+ * `patchPhotoEverywhere`, nur lesend statt schreibend. Für Phase 12
+ * Schritt 3 Teil A (siehe `DECISIONS.md` ADR-0039) gebraucht: die
+ * automatische Objektivprofil-Zuordnung beim ersten Öffnen eines Fotos
+ * braucht dessen EXIF-`lens`-Feld, das `loadDevelopStateForPhoto` selbst
+ * nicht mitbekommt (nur die `photoId`). */
+function findPhotoById(state: AppStore, photoId: string): PhotoDto | undefined {
+  for (const list of Object.values(state.photosByFolder)) {
+    const found = list.find((p) => p.id === photoId);
+    if (found) return found;
+  }
+  for (const list of Object.values(state.collectionPhotos)) {
+    const found = list.find((p) => p.id === photoId);
+    if (found) return found;
+  }
+  return state.libraryResults?.find((p) => p.id === photoId);
+}
+
 function patchPhotoEverywhere(state: AppStore, photoId: string, patch: Partial<PhotoDto>) {
   for (const list of Object.values(state.photosByFolder)) {
     const target = list.find((p) => p.id === photoId);
@@ -316,6 +335,15 @@ interface DevelopSlice {
    * (oder neutral, falls noch nie bearbeitet) — aufgerufen beim Öffnen
    * des Panels und bei jedem Fotowechsel, während es offen ist. */
   loadDevelopStateForPhoto: (photoId: string) => Promise<void>;
+  /** Automatische Objektivprofil-Zuordnung (Phase 12 Schritt 3 Teil A,
+   * siehe `DECISIONS.md` ADR-0039) — von `loadDevelopStateForPhoto` nur
+   * bei einem noch nie bearbeiteten Foto aufgerufen, siehe dessen Kommentar. */
+  autoApplyLensProfileIfMatched: (photoId: string) => Promise<void>;
+  /** Manueller „Automatisch erkennen"-Knopf im Entwickeln-Panel — anders
+   * als `autoApplyLensProfileIfMatched` ohne Bedingung an ein noch nie
+   * bearbeitetes Foto, setzt/überschreibt `profile_id` immer, wenn ein
+   * Treffer gefunden wird (Phase 12 Schritt 3 Teil A). */
+  manuallyDetectLensProfile: () => Promise<void>;
 
   // ---- Schritt 9: Einstellungen kopieren/einfügen, Vorherige, Sync --------
   /** Der zuletzt kopierte Ausschnitt (Schritt 9, `SPEC.md` §3.4) —
@@ -509,6 +537,12 @@ interface DevelopSlice {
   /** Setzt das Objektivprofil absolut und committet sofort (wie ein
    * WB-/Kameraprofil-Dropdown-Wechsel). */
   setLensCorrectionProfile: (value: string | null) => void;
+  /** Setzt/entfernt das Ergebnis einer eigenen Kalibrierung (Phase 12
+   * Schritt 3 Teil B, siehe `DECISIONS.md` ADR-0039) — committet sofort,
+   * wie `setLensCorrectionProfile`. */
+  setLensCorrectionCustomDistortionK1: (value: number | null) => void;
+  lensCalibrationDialogOpen: boolean;
+  setLensCalibrationDialogOpen: (open: boolean) => void;
   /** Schaltet die automatische CA-Korrektur um und committet sofort. */
   setLensCorrectionAutoCa: (value: boolean) => void;
   /** Setzt den Perspektive/Upright-Modus absolut und committet sofort. */
@@ -1732,6 +1766,18 @@ export const useAppStore = create<AppStore>()(
           state.developPhotoId = photoId;
           if (previousPhotoId && previousPhotoId !== photoId) state.lastDevelopPhotoId = previousPhotoId;
         });
+        // Phase 12 Schritt 3 Teil A (siehe DECISIONS.md ADR-0039): beim
+        // allerersten Öffnen eines Fotos (kein gespeicherter Bearbeitungs-
+        // stand, `position.kind === "Neutral"`) automatisch ein passendes
+        // Objektivprofil aus dem EXIF-Objektivstring zuordnen — dieselbe
+        // Konvention wie Lightrooms automatische Profilanwendung. Läuft nur
+        // dieses eine Mal: sobald ein erster Edit committet ist (auch dieser
+        // automatische selbst), liefert `current_develop_edit` beim nächsten
+        // Laden `"At"` statt `"Neutral"` — ein späteres bewusstes „Kein
+        // Profil" des Nutzers wird dadurch nie erneut überschrieben.
+        if (position.kind === "Neutral") {
+          void get().autoApplyLensProfileIfMatched(photoId);
+        }
       } catch (err) {
         console.error("Bearbeitungszustand konnte nicht geladen werden:", err);
         set((state) => {
@@ -1741,6 +1787,45 @@ export const useAppStore = create<AppStore>()(
         });
       }
       void get().refreshSnapshots();
+    },
+
+    autoApplyLensProfileIfMatched: async (photoId) => {
+      const photo = findPhotoById(get(), photoId);
+      if (!photo?.lens) return;
+      let suggestion;
+      try {
+        suggestion = await api.resolveLensProfile(photo.lens);
+      } catch (err) {
+        console.error("Automatische Objektivprofil-Erkennung fehlgeschlagen:", err);
+        return;
+      }
+      if (!suggestion) return;
+      // Zwischenzeitlich könnte ein Fotowechsel oder eine manuelle Auswahl
+      // passiert sein (die Auflösung läuft asynchron im Hintergrund) — dann
+      // nicht mehr eingreifen.
+      const state = get();
+      if (state.developPhotoId !== photoId || state.developEdl.lens_corrections.profile_id !== null) return;
+      set((state) => {
+        state.developEdl.lens_corrections.profile_id = suggestion.id;
+      });
+      void get().commitDevelopEdit(`Objektivprofil automatisch erkannt: ${suggestion.display_name}`);
+    },
+
+    manuallyDetectLensProfile: async () => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      const photo = findPhotoById(get(), developPhotoId);
+      if (!photo?.lens) return;
+      try {
+        const suggestion = await api.resolveLensProfile(photo.lens);
+        if (!suggestion) return;
+        set((state) => {
+          state.developEdl.lens_corrections.profile_id = suggestion.id;
+        });
+        void get().commitDevelopEdit(`Objektivprofil erkannt: ${suggestion.display_name}`);
+      } catch (err) {
+        console.error("Objektivprofil-Erkennung fehlgeschlagen:", err);
+      }
     },
 
     copiedEdlSubset: null,
@@ -2153,6 +2238,20 @@ export const useAppStore = create<AppStore>()(
         state.developEdl.lens_corrections.profile_id = value;
       });
       void get().commitDevelopEdit();
+    },
+
+    setLensCorrectionCustomDistortionK1: (value) => {
+      set((state) => {
+        state.developEdl.lens_corrections.custom_distortion_k1 = value;
+      });
+      void get().commitDevelopEdit(value === null ? "Eigene Objektiv-Kalibrierung entfernt" : "Eigene Objektiv-Kalibrierung angewendet");
+    },
+
+    lensCalibrationDialogOpen: false,
+    setLensCalibrationDialogOpen: (open) => {
+      set((state) => {
+        state.lensCalibrationDialogOpen = open;
+      });
     },
 
     setLensCorrectionAutoCa: (value) => {

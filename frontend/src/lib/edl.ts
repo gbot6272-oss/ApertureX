@@ -438,8 +438,10 @@ export const NEUTRAL_MANUAL_TRANSFORM: ManualTransform = {
 };
 
 export interface LensCorrectionAdjustment {
-  /** Referenz auf ein Profil in der eingebauten Mini-Profildatenbank
-   * (siehe `DECISIONS.md` ADR-0028), `null` = kein Profil zugeordnet. */
+  /** Referenz auf ein Profil — eines der drei Alt-Beispielprofile
+   * (ADR-0028) oder ein echter LensFun-Datenbankeintrag (seit Phase 12
+   * Schritt 3, siehe `DECISIONS.md` ADR-0039), `null` = kein Profil
+   * zugeordnet. */
   profile_id: string | null;
   ca_red_cyan: number;
   ca_blue_yellow: number;
@@ -449,6 +451,10 @@ export interface LensCorrectionAdjustment {
   upright_mode: UprightMode;
   guided_lines: GuidedLine[];
   manual_transform: ManualTransform;
+  /** Ergebnis einer eigenen Kalibrierung aus markierten geraden Linien
+   * (Phase 12 Schritt 3 Teil B, siehe `DECISIONS.md` ADR-0039) — hat
+   * Vorrang vor `profile_id`s Verzeichnungswert, wenn gesetzt. */
+  custom_distortion_k1: number | null;
 }
 
 export function neutralLensCorrections(): LensCorrectionAdjustment {
@@ -462,6 +468,7 @@ export function neutralLensCorrections(): LensCorrectionAdjustment {
     upright_mode: "Off",
     guided_lines: [],
     manual_transform: NEUTRAL_MANUAL_TRANSFORM,
+    custom_distortion_k1: null,
   };
 }
 

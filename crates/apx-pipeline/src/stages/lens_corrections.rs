@@ -67,10 +67,18 @@ const SHEAR_STRENGTH: f32 = 0.5;
 const MANUAL_K1_SCALE: f32 = 0.3;
 /// Maximale relative Radiusverschiebung je Farbkanal bei CA-Reglern von
 /// `±100`.
-const CA_STRENGTH: f32 = 0.02;
+///
+/// `pub(crate)`, nicht nur intern: `lens_profiles.rs`s LensFun-Rückrechnung
+/// (Phase 12 Schritt 3 Teil A, siehe `DECISIONS.md` ADR-0039) braucht
+/// exakt dieselbe Konstante, um aus einer real von LensFun gemessenen
+/// Eckpixel-Verschiebung einen zu diesem Shader passenden `ca_red_cyan`/
+/// `ca_blue_yellow`-Wert zurückzurechnen.
+pub(crate) const CA_STRENGTH: f32 = 0.02;
 /// Vignette-Korrekturstärke: bei `vignette_amount = 100` wird der
 /// Bildrand (`r_ziel² ≈ 1`) um `VIGNETTE_STRENGTH · 100 %` aufgehellt.
-const VIGNETTE_STRENGTH: f32 = 0.01;
+///
+/// `pub(crate)` aus demselben Grund wie [`CA_STRENGTH`].
+pub(crate) const VIGNETTE_STRENGTH: f32 = 0.01;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -111,7 +119,14 @@ impl LensCorrectionParams {
             .as_deref()
             .and_then(lens_profiles::find_profile);
 
-        let profile_k1 = profile.as_ref().map_or(0.0, |p| p.distortion_k1);
+        // Eigene Kalibrierung (Phase 12 Schritt 3 Teil B, siehe
+        // DECISIONS.md ADR-0039) geht vor dem Profilwert — Vignette/CA
+        // unten bleiben unverändert profilbasiert, die Kalibrierung
+        // deckt bewusst nur die Verzeichnung ab (siehe
+        // apx_ai::lens_calibration's Moduldoku).
+        let profile_k1 = adjustment
+            .custom_distortion_k1
+            .unwrap_or_else(|| profile.as_ref().map_or(0.0, |p| p.distortion_k1));
         let profile_vignette = profile.as_ref().map_or(0.0, |p| p.vignette_amount);
         let (ca_red_cyan, ca_blue_yellow) = if adjustment.auto_ca {
             profile
@@ -568,6 +583,7 @@ mod tests {
                 offset_y: -5.0,
             },
             profile_id: None,
+            custom_distortion_k1: None,
         };
         let pixels = marked_gray_image(24, 12, 12, [0.8, 0.4, 0.2]);
         let cpu = apply_cpu(&pixels, 24, 24, &adjustment);

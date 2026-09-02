@@ -399,8 +399,10 @@ impl ManualTransform {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LensCorrectionAdjustment {
-    /// Referenz auf ein Profil in der eingebauten Mini-Profildatenbank
-    /// (siehe `DECISIONS.md` ADR-0028), `None` = kein Profil zugeordnet.
+    /// Referenz auf ein Profil — entweder eines der drei Alt-Beispiel-
+    /// profile (ADR-0028) oder ein echter LensFun-Datenbankeintrag
+    /// (`lensfun:{maker}|{model}`, seit Phase 12 Schritt 3, siehe
+    /// `DECISIONS.md` ADR-0039), `None` = kein Profil zugeordnet.
     pub profile_id: Option<String>,
     pub ca_red_cyan: f32,
     pub ca_blue_yellow: f32,
@@ -410,6 +412,17 @@ pub struct LensCorrectionAdjustment {
     pub upright_mode: UprightMode,
     pub guided_lines: Vec<GuidedLine>,
     pub manual_transform: ManualTransform,
+    /// Ergebnis einer eigenen Kalibrierung aus vom Nutzer markierten,
+    /// in der Realität geraden Linien (Phase 12 Schritt 3 Teil B, siehe
+    /// `DECISIONS.md` ADR-0039 und `apx_ai::lens_calibration`) — hat
+    /// Vorrang vor `profile_id`s Verzeichnungswert, wenn gesetzt (die
+    /// übrigen drei Profilwerte, Vignette/CA, bleiben unberührt, siehe
+    /// `apx_ai::lens_calibration`s Moduldoku zur bewussten Beschränkung
+    /// auf Verzeichnung). Additiv per `#[serde(default)]` statt eines
+    /// Schema-Version-Sprungs — dieselbe Konvention wie `BrushStroke::
+    /// auto_mask` in Phase 12 Schritt 2.
+    #[serde(default)]
+    pub custom_distortion_k1: Option<f32>,
 }
 
 impl LensCorrectionAdjustment {
@@ -423,6 +436,7 @@ impl LensCorrectionAdjustment {
         upright_mode: UprightMode::Off,
         guided_lines: Vec::new(),
         manual_transform: ManualTransform::NEUTRAL,
+        custom_distortion_k1: None,
     };
 
     pub fn neutral() -> Self {

@@ -289,6 +289,31 @@ export function gotoDevelopEdit(photoId: string, sequence: number): Promise<Hist
   return invoke<HistoryPositionDto | null>("goto_develop_edit", { photoId, sequence });
 }
 
+/** Ein automatisch gefundenes Objektivprofil (Phase 12 Schritt 3 Teil A,
+ * siehe `DECISIONS.md` ADR-0039) — spiegelt `apx_app::commands::
+ * LensProfileSuggestionDto`. */
+export interface LensProfileSuggestionDto {
+  id: string;
+  display_name: string;
+}
+
+/** Ordnet einen EXIF-Objektiv-String automatisch einem Objektivprofil aus
+ * der echten LensFun-Datenbank zu (Fallback: die drei Alt-Profile) —
+ * `null`, wenn nichts passt. */
+export function resolveLensProfile(lens: string | null): Promise<LensProfileSuggestionDto | null> {
+  return invoke<LensProfileSuggestionDto | null>("resolve_lens_profile", { lens });
+}
+
+/** Kalibrier-Assistent (Phase 12 Schritt 3 Teil B, siehe `DECISIONS.md`
+ * ADR-0039): `lines` sind je eine Liste normierter (`0..1`) Bildpunkte
+ * entlang einer in der Realität geraden Linie — mindestens eine Linie
+ * mit mindestens drei Punkten. Liefert den gefundenen
+ * Verzeichnungskoeffizienten (direkt kompatibel mit
+ * `LensCorrectionAdjustment.custom_distortion_k1`). */
+export function calibrateLensDistortion(lines: Array<Array<{ x: number; y: number }>>): Promise<number> {
+  return invoke<number>("calibrate_lens_distortion", { lines });
+}
+
 // ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------------
 // Anders als der lineare Verlauf oben: siehe `crates/apx-app/src/commands.rs`s
 // Moduldoku für die Abgrenzung. Kein eigener "restore"-Aufruf — die

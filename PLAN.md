@@ -1016,7 +1016,7 @@ Test pro Schritt, volle Suite einmalig in Schritt 8.
 - [x] 0. Scope festzurren, `lensfun`-Crate-Spike (ADR-0039: Crate real per `cargo add` + `cargo build` geprüft, ein Spike-Test liest eine echte Kalibrierung aus der gebündelten Datenbank; Vorzeichen-/Skalierungskonvention weicht ehrlich dokumentiert von den bisherigen Platzhalterprofilen ab)
 - [x] 1. Live-Masken-Overlay im Viewer (`overlay_color` per Taste „O" umschaltbar sichtbar; clientseitige SVG-Näherung statt echter Pipeline-Alpha, siehe ADR-0039/FEATURES.md)
 - [x] 2. Radialverlauf-Ellipse + Rotation, Auto-Mask beim Pinsel (Ellipse/Rotation waren in Datenmodell+Pipeline schon vorhanden, nur der Ziehgriff fehlte; Auto-Mask nutzt die bestehende Laplace-Varianz-Kantenerkennung aus `BlurDepthApprox` wieder — kein Schema-Version-Sprung nötig, siehe DECISIONS.md ADR-0039)
-- [ ] 3. Objektiv-/Kameraprofile: echte LensFun-Datenbank (Teil A) + Kalibrier-Assistent per Zhang-Methode (Teil B)
+- [x] 3. Objektiv-/Kameraprofile: echte LensFun-Datenbank (Teil A, automatische Anwendung + ehrliche Ecken-Rückrechnung statt 1:1-Koeffizienten-Import) + vereinfachter Kalibrier-Assistent (Teil B, Linien-Geradheit statt vollem Zhang-Verfahren, siehe DECISIONS.md ADR-0039)
 - [ ] 4. Voller EXIF/IPTC-Editor
 - [ ] 5. Mehrfachziel-Export
 - [ ] 6. Freies ICC-Profil beim Soft-Proof

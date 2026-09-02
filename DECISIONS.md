@@ -2071,3 +2071,67 @@ Plugin-SDK, generative KI-Bildbearbeitung, HEIF-Export (ADR-0038 bereits
 geprüft, keine neue Datenlage). Testdisziplin wie vom Nutzer für den Rest
 von Phase 11 angeordnet fortgeführt: ein gezielter Test pro Schritt, volle
 Suite einmalig in Schritt 8.
+
+## ADR-0039-Nachtrag: Schritt 3 real umgesetzt — echte Ecken-Rückrechnung statt Koeffizienten-Übernahme, vereinfachter Kalibrier-Assistent statt vollem Zhang-Verfahren
+
+**Status:** Angenommen
+**Kontext:** Schritt 3 Teil A/B wurden umgesetzt. Zwei Stellen weichen
+ehrlich vom ursprünglichen ADR-0039-Text ab — beide Male, weil die
+Recherche beim Bauen mehr Klarheit brachte als beim Planen.
+
+**Teil A — Befund, der die geplante Schema-Migration gegenstandslos
+machte:** `radius_x`/`radius_y`/`angle_degrees` (Schritt 2) UND die
+Grundannahme für Schritt 3 wurden geprüft, bevor Code geschrieben wurde
+— dabei stellte sich heraus, dass `LensCorrectionAdjustment`s einzige
+wirkliche Lücke die *Datenquelle* für `distortion_k1`/`vignette_amount`/
+`ca_red_cyan`/`ca_blue_yellow` war, nicht das Feldschema selbst. Die
+eigentliche Herausforderung: `lensfun`s eigene Modelle (Poly3/Poly5/
+PTLens für Verzeichnung, mehrgliedrige TCA-/Vignettierungs-Polynome)
+sind reichhaltiger als unser Ein-Wert-r²-Modell — ein LensFun-
+Koeffizient lässt sich nicht 1:1 übernehmen, selbst mit korrekter
+Einheiten-Umrechnung, weil die Kurvenform selbst eine andere ist (exakt
+die Lücke, die der Schritt-0-Spike als „Aufgabe von Schritt 3" benannt
+hatte). Gelöst über eine an LensFuns *eigener* `Modifier`-Pixel-
+mathematik verankerte Rückrechnung: die reale, mehrparametrige Korrektur
+wird an der Ecke eines repräsentativen 3:2-Referenzbilds ausgewertet
+(`apply_geometry_distortion`/`apply_color_modification_f32`/
+`apply_subpixel_distortion` — dieselben Funktionen, die ein Foto real
+korrigieren würden), und daraus ein einzelner Koeffizient gesucht, der
+in unserem Modell an derselben Stelle dieselbe Wirkung erzeugt (siehe
+`crates/apx-pipeline/src/lens_profiles.rs`s
+`derive_lens_correction_values`). Eine echte, nachvollziehbare Näherung
+— keine geratene Zahl —, mit der ehrlichen Grenze, dass sie nur an der
+Bildecke exakt stimmt.
+
+**Teil B — bewusst kein Zhang-Verfahren:** der ursprüngliche Plantext
+nannte „Eckenerkennung per Harris-artigem Detektor + Homografie-
+Schätzung + nichtlineare Verfeinerung". Eine robuste automatische
+Schachbrett-Eckenerkennung plus volle Mehrparameter-Kamerakalibrierung
+ist ein eigenständiges, fehleranfälliges Computer-Vision-Projekt für
+sich — für unser Ein-Wert-Verzeichnungsmodell überdimensioniert und in
+diesem Umfang nicht seriös umsetzbar. Stattdessen implementiert
+`apx-ai::lens_calibration` eine bewusst schmalere, aber ebenso reale
+Methode: der Nutzer markiert selbst mehrere Punkte entlang einer in der
+Realität geraden Linie (direkt auf einer Bildvorschau im neuen Dialog
+„Objektiv kalibrieren", `LensCalibrationDialog.tsx`), und
+`calibrate_distortion_k1` sucht per Rasterverfeinerung den einen
+Verzeichnungskoeffizienten, der alle markierten Linien nach der
+Entzerrung gemeinsam am geradesten macht (totale Kleinste-Quadrate für
+die Geradheit, klassische 1-D-Optimierung für die Suche — kein
+gelerntes Modell). Ein Test mit synthetisch verzeichneten Linien
+bestätigt, dass ein bekannter Koeffizient wiedergefunden wird
+(Abweichung < 0,01). Ergebnis lebt direkt im EDL
+(`LensCorrectionAdjustment::custom_distortion_k1`, additiv per
+`#[serde(default)]`) statt in einer neuen Profildatenbank/-datei —
+Wiederverwendung auf andere Fotos über die seit Phase 5 vorhandene
+Einstellungen-kopieren-Funktion, kein neuer Persistenzmechanismus nötig.
+Bewusst nur Verzeichnung (Vignette/CA bräuchten andere Messungen –
+Helligkeits- bzw. Kanal-Registrierung statt Geradheit – nicht Teil
+dieses Umfangs).
+
+**Entscheidung:** Beide Abweichungen sind Umfangs-Präzisierungen, keine
+Kürzungen am eigentlichen Nutzen — Teil A liefert weiterhin eine echte,
+Datenbank-gestützte Objektiv-Zuordnung (jetzt sogar automatisch beim
+Fotowechsel), Teil B weiterhin eine echte, aus eigenen Fotos berechnete
+Kalibrierung für Objektive außerhalb der Datenbank. `FEATURES.md` und
+`PLAN.md` sind entsprechend präzisiert.

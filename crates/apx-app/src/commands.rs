@@ -793,6 +793,58 @@ pub fn current_develop_edit(
     history_position_to_dto(position)
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct LensProfileSuggestionDto {
+    id: String,
+    display_name: String,
+}
+
+/// Ordnet einen EXIF-Objektiv-String automatisch einem Objektivprofil zu
+/// (Phase 12 Schritt 3 Teil A, siehe `DECISIONS.md` ADR-0039) — dünner
+/// Wrapper um `apx_pipeline::lens_profiles::match_profile_for_lens_string`,
+/// das jetzt gegen die echte LensFun-Datenbank sucht statt gegen drei
+/// handgepflegte Beispielprofile. Kein DB-/State-Zugriff nötig, reine
+/// Funktionsauswertung.
+#[tauri::command]
+pub fn resolve_lens_profile(lens: Option<String>) -> Option<LensProfileSuggestionDto> {
+    let lens = lens?;
+    let lens = lens.trim();
+    if lens.is_empty() {
+        return None;
+    }
+    apx_pipeline::lens_profiles::match_profile_for_lens_string(lens).map(|profile| {
+        LensProfileSuggestionDto {
+            id: profile.id,
+            display_name: profile.display_name,
+        }
+    })
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CalibrationPointDto {
+    x: f32,
+    y: f32,
+}
+
+/// Berechnet aus vom Nutzer markierten, in der Realität geraden Linien
+/// einen Verzeichnungskoeffizienten (Phase 12 Schritt 3 Teil B, siehe
+/// `DECISIONS.md` ADR-0039) — dünner Wrapper um
+/// `apx_ai::lens_calibration::calibrate_distortion_k1`. Direkt als
+/// `LensCorrectionAdjustment::custom_distortion_k1` im EDL speicherbar,
+/// keine separate Profildatenbank/-datei nötig.
+#[tauri::command]
+pub fn calibrate_lens_distortion(lines: Vec<Vec<CalibrationPointDto>>) -> Result<f32, String> {
+    let lines: Vec<Vec<apx_ai::lens_calibration::StraightLinePoint>> = lines
+        .into_iter()
+        .map(|line| {
+            line.into_iter()
+                .map(|p| apx_ai::lens_calibration::StraightLinePoint { x: p.x, y: p.y })
+                .collect()
+        })
+        .collect();
+    apx_ai::lens_calibration::calibrate_distortion_k1(&lines).map_err(|err| err.to_string())
+}
+
 /// Geht einen Bearbeitungsschritt zurück. `None`, wenn schon am
 /// Ausgangszustand (kein Rückgängig möglich) — kein Fehler, siehe
 /// `apx_catalog::Catalog::undo_edit`.

@@ -49,6 +49,7 @@ import { selectActivePhotos, useAppStore } from "../store";
 import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
+import { LensCalibrationDialog } from "./LensCalibrationDialog";
 import { PaletteFrame } from "./PaletteFrame";
 import { SavePresetDialog } from "./SavePresetDialog";
 
@@ -237,6 +238,9 @@ export function DevelopPanel() {
   const setLensCorrectionField = useAppStore((s) => s.setLensCorrectionField);
   const setLensCorrectionManualTransformField = useAppStore((s) => s.setLensCorrectionManualTransformField);
   const setLensCorrectionProfile = useAppStore((s) => s.setLensCorrectionProfile);
+  const manuallyDetectLensProfile = useAppStore((s) => s.manuallyDetectLensProfile);
+  const setLensCorrectionCustomDistortionK1 = useAppStore((s) => s.setLensCorrectionCustomDistortionK1);
+  const setLensCalibrationDialogOpen = useAppStore((s) => s.setLensCalibrationDialogOpen);
   const setLensCorrectionAutoCa = useAppStore((s) => s.setLensCorrectionAutoCa);
   const setLensCorrectionUprightMode = useAppStore((s) => s.setLensCorrectionUprightMode);
   const setLensCorrectionGuidedLineField = useAppStore((s) => s.setLensCorrectionGuidedLineField);
@@ -989,21 +993,50 @@ export function DevelopPanel() {
           <fieldset id="stage-lens_corrections" className="flex flex-col gap-3">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Objektivkorrekturen</legend>
 
-            <label className="flex items-center gap-2 text-xs text-text-secondary">
-              Objektivprofil
-              <select
-                aria-label="Objektivprofil"
-                value={lensCorrections.profile_id ?? ""}
-                onChange={(event) => setLensCorrectionProfile(event.target.value || null)}
-                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+            <div className="flex items-center gap-2">
+              <label className="flex flex-1 items-center gap-2 text-xs text-text-secondary">
+                Objektivprofil
+                <select
+                  aria-label="Objektivprofil"
+                  value={lensCorrections.profile_id ?? ""}
+                  onChange={(event) => setLensCorrectionProfile(event.target.value || null)}
+                  className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+                >
+                  {LENS_PROFILE_OPTIONS.map((option) => (
+                    <option key={option.label} value={option.value ?? ""}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => void manuallyDetectLensProfile()}
+                title="Objektivprofil aus dem EXIF-Objektivstring des Fotos erkennen (Phase 12 Schritt 3, siehe DECISIONS.md ADR-0039)"
+                className="shrink-0 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:border-accent"
               >
-                {LENS_PROFILE_OPTIONS.map((option) => (
-                  <option key={option.label} value={option.value ?? ""}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+                Automatisch erkennen
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setLensCalibrationDialogOpen(true)}
+                title="Objektiv aus eigenen Kalibrierfotos vermessen (Phase 12 Schritt 3 Teil B, siehe DECISIONS.md ADR-0039)"
+                className="rounded border border-border px-2 py-1 text-text-secondary hover:border-accent"
+              >
+                Objektiv kalibrieren…
+              </button>
+              {lensCorrections.custom_distortion_k1 !== null && (
+                <span className="flex items-center gap-1 text-text-secondary">
+                  Eigene Kalibrierung aktiv (k1 = {lensCorrections.custom_distortion_k1.toFixed(4)})
+                  <button type="button" onClick={() => setLensCorrectionCustomDistortionK1(null)} className="text-danger underline">
+                    Entfernen
+                  </button>
+                </span>
+              )}
+            </div>
 
             <label className="flex items-center gap-2 text-xs text-text-secondary">
               <input
@@ -1360,6 +1393,7 @@ export function DevelopPanel() {
       )}
     </PaletteFrame>
     <SavePresetDialog open={savePresetOpen} onClose={() => setSavePresetOpen(false)} />
+    <LensCalibrationDialog />
     </>
   );
 }

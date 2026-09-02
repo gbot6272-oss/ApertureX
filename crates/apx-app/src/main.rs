@@ -126,6 +126,8 @@ fn main() {
             commands::list_photos_in_folder,
             commands::apply_develop_edit,
             commands::current_develop_edit,
+            commands::resolve_lens_profile,
+            commands::calibrate_lens_distortion,
             commands::undo_develop_edit,
             commands::redo_develop_edit,
             commands::list_develop_history,

@@ -869,6 +869,7 @@ mod tests {
                         ],
                         radius: 0.1,
                         feather: 0.05,
+                        auto_mask: false,
                     }],
                 },
                 BlendMode::Multiply,

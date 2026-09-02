@@ -682,6 +682,12 @@ export interface BrushStroke {
   points: MaskPoint[];
   radius: number;
   feather: number;
+  /** Auto-Mask (Phase 12 Schritt 2, siehe `DECISIONS.md` ADR-0039):
+   * dämpft die Deckkraft dieses Strichs an starken lokalen Bildkanten
+   * (`masks.rs`s `relative_sharpness_map`), damit der Pinsel nicht über
+   * scharfe Kanten hinweg "ausblutet" — wie Lightrooms gleichnamige
+   * Option. */
+  auto_mask: boolean;
 }
 
 /** Die fünf KI-Masken-Heuristiken (Phase 7, siehe `DECISIONS.md`
@@ -875,6 +881,57 @@ export function defaultRadialGradientGeometry(): MaskGeometry {
  * eine sichtbare, aber nicht das ganze Bild abdeckende Fläche zeigt. */
 export function defaultColorRangeGeometry(): MaskGeometry {
   return { kind: "ColorRange", target_r: 0.5, target_g: 0.5, target_b: 0.5, tolerance: 0.15, feather: 0.1 };
+}
+
+export type RadialGradientGeometry = Extract<MaskGeometry, { kind: "RadialGradient" }>;
+
+/** Randpunkte der (ggf. rotierten) Radialverlauf-Ellipse in Bild-
+ * Bruchteil-Koordinaten (Phase 12 Schritt 2, siehe `DECISIONS.md`
+ * ADR-0039) — exakte Umkehrung von `masks.rs`s `radial_gradient_alpha`-
+ * Rotationsformel, damit `MaskOverlay`/`MaskColorOverlay` dieselbe Form
+ * zeichnen, die die Pipeline tatsächlich berechnet.
+ *
+ * **Wichtig:** das ist eine Rotation im *Bruchteilsraum* (x/y je eigener
+ * Kantenlänge normiert, wie die gesamte Maskengeometrie in diesem
+ * Projekt), keine physische Bildschirm-Rotation — bei einem nicht-
+ * quadratischen Foto unterscheiden sich beide sichtbar. Das ist keine
+ * Vereinfachung dieser Funktion, sondern spiegelt exakt, wie
+ * `radial_gradient_alpha` selbst rechnet. */
+export function radialGradientBoundaryPoints(geometry: RadialGradientGeometry, steps = 48): MaskPoint[] {
+  const angle = (geometry.angle_degrees * Math.PI) / 180;
+  const cosA = Math.cos(angle);
+  const sinA = Math.sin(angle);
+  const points: MaskPoint[] = [];
+  for (let i = 0; i < steps; i += 1) {
+    const t = (i / steps) * Math.PI * 2;
+    const localX = geometry.radius_x * Math.cos(t);
+    const localY = geometry.radius_y * Math.sin(t);
+    points.push({
+      x: geometry.center_x + localX * cosA - localY * sinA,
+      y: geometry.center_y + localX * sinA + localY * cosA,
+    });
+  }
+  return points;
+}
+
+/** Ziehgriff-Positionen für die unabhängigen Radius-Achsen + den
+ * Rotations-Griff (Phase 12 Schritt 2) — dieselbe Parametrisierung wie
+ * [`radialGradientBoundaryPoints`] an den Stellen `t=0`/`t=π/2`, der
+ * Rotations-Griff sitzt etwas weiter außen auf dem `t=0`-Strahl. */
+export function radialGradientAxisHandlePositions(geometry: RadialGradientGeometry): {
+  radiusX: MaskPoint;
+  radiusY: MaskPoint;
+  rotation: MaskPoint;
+} {
+  const angle = (geometry.angle_degrees * Math.PI) / 180;
+  const cosA = Math.cos(angle);
+  const sinA = Math.sin(angle);
+  const rotationDist = geometry.radius_x + 0.06;
+  return {
+    radiusX: { x: geometry.center_x + geometry.radius_x * cosA, y: geometry.center_y + geometry.radius_x * sinA },
+    radiusY: { x: geometry.center_x - geometry.radius_y * sinA, y: geometry.center_y + geometry.radius_y * cosA },
+    rotation: { x: geometry.center_x + rotationDist * cosA, y: geometry.center_y + rotationDist * sinA },
+  };
 }
 
 /** Obere Tonwerthälfte (Lichter) als plausibler Startzustand — dieselbe

@@ -1,4 +1,4 @@
-import { OVERLAY_COLOR_HEX, type Mask } from "../lib/edl";
+import { OVERLAY_COLOR_HEX, radialGradientBoundaryPoints, type Mask } from "../lib/edl";
 
 interface MaskColorOverlayProps {
   /** Position/Größe des angezeigten Bildes in Bildschirm-Pixeln, wie bei
@@ -72,27 +72,28 @@ export function MaskColorOverlay({ imageLeft, imageTop, imageWidth, imageHeight,
               }
 
               if (geometry.kind === "RadialGradient") {
+                // Phase 12 Schritt 2 (siehe DECISIONS.md ADR-0039): die
+                // Randform kommt jetzt aus `radialGradientBoundaryPoints`
+                // (exakt dieselbe rotierte Ellipse wie `MaskOverlay`s
+                // Ziehgriff-Kontur und `masks.rs`s `radial_gradient_alpha`),
+                // statt einer achsenparallelen `<ellipse>`, die `angle_degrees`
+                // ignoriert hätte. Der Verlauf selbst bleibt
+                // `objectBoundingBox` auf dem Polygon — bei starker Rotation
+                // ist sein Zentrum/seine Ausdehnung eine Näherung an die
+                // eigentliche Bounding-Box statt exakt an die Ellipse
+                // angepasst, für eine reine Vorschau-Einfärbung ausreichend.
+                const boundary = radialGradientBoundaryPoints(geometry);
                 return (
                   <g key={index}>
                     <defs>
-                      {/* `gradientUnits="objectBoundingBox"` (SVG-Vorgabe) füllt
-                          das Verlaufsraster in die eigene Bounding-Box der
-                          nachfolgenden `<ellipse>` ein — die Standard-Mitte/-
-                          Radius (0.5/0.5/0.5) ergibt dadurch automatisch einen
-                          elliptischen statt kreisförmigen Verlauf, ganz ohne
-                          eigene `radius_x`/`radius_y`-Umrechnung. */}
                       <radialGradient id={gradId}>
                         <stop offset="0%" stopColor={hex} stopOpacity={0.55} />
                         <stop offset="100%" stopColor={hex} stopOpacity={0} />
                       </radialGradient>
                     </defs>
-                    <ellipse
-                      cx={`${geometry.center_x * 100}%`}
-                      cy={`${geometry.center_y * 100}%`}
-                      rx={`${geometry.radius_x * 100}%`}
-                      ry={`${geometry.radius_y * 100}%`}
-                      fill={`url(#${gradId})`}
-                    />
+                    <svg width="100%" height="100%" preserveAspectRatio="none" viewBox="0 0 100 100">
+                      <polygon points={boundary.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")} fill={`url(#${gradId})`} />
+                    </svg>
                   </g>
                 );
               }

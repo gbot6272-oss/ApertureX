@@ -41,11 +41,23 @@ pub struct MaskPoint {
 /// — mehrere Striche akkumulieren ihre Deckung (Maximum je Pixel, nicht
 /// Summe, sonst würde mehrfaches Übermalen unbeabsichtigt über 100 %
 /// Deckkraft hinaus verstärken).
+///
+/// `auto_mask` (Phase 12 Schritt 2, siehe `DECISIONS.md` ADR-0039):
+/// Lightrooms „Auto Mask" — dämpft die Deckkraft dieses Strichs an
+/// lokal detailreichen/kontrastreichen Bildstellen (`masks.rs`s
+/// `relative_sharpness_map`, dieselbe Laplace-Varianz-Heuristik wie
+/// `BlurDepthApprox`), damit der Pinsel nicht über scharfe Kanten hinweg
+/// "ausblutet". `#[serde(default)]` statt Schema-Version-Sprung — additiv
+/// zu Version 3 wie schon der Schwarzweiß-Mixer in Phase 9 (siehe dessen
+/// Kommentar weiter unten in dieser Datei); ein gespeicherter Strich ohne
+/// dieses Feld liest weiterhin als `false` (altes Verhalten unverändert).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BrushStroke {
     pub points: Vec<MaskPoint>,
     pub radius: f32,
     pub feather: f32,
+    #[serde(default)]
+    pub auto_mask: bool,
 }
 
 /// Wie eine Maskenkomponente ihre räumliche Ausdehnung bestimmt — die

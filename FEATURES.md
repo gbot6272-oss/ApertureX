@@ -184,9 +184,9 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
      (Phase 7, dieselbe apx-ai/ONNX-Runtime-Integration wie der
      Preset-Generator) fallen aus dem Phase-6-Kern heraus. -->
 
-- [x] Maskentyp Pinsel — Phase 6 — Status: Fertig
+- [x] Maskentyp Pinsel — Phase 6, Auto-Mask Phase 12 Schritt 2 — Status: Fertig (abweichend, siehe DECISIONS.md ADR-0039) — Auto-Mask dämpft die Deckkraft eines Strichs an starken lokalen Bildkanten (wiederverwendet `masks.rs`s Laplace-Varianz-Kantenmaß aus `BlurDepthApprox`, keine eigene neue Heuristik nötig), als Umschalter im MasksPanel für den *nächsten* gemalten Strich
 - [x] Maskentyp Linearer Verlauf — Phase 6 — Status: Fertig
-- [x] Maskentyp Radialer Verlauf — Phase 6 — Status: Fertig — **Teil-Einschränkung:** nur ein einzelner, gemeinsamer Radius (kreisförmig), keine unabhängigen Ellipsen-Achsen/Rotation im Ziehgriff (siehe `PLAN.md` Schritt 3)
+- [x] Maskentyp Radialer Verlauf — Phase 6, Ellipse+Rotation Phase 12 Schritt 2 — Status: Fertig — unabhängige `radius_x`/`radius_y`-Achsen und `angle_degrees`-Rotation waren im Datenmodell/in der Pipeline (`masks.rs`s `radial_gradient_alpha`) schon vorhanden, jetzt auch per Ziehgriff im Viewer erreichbar (drei eigene Griffe statt eines gemeinsamen Radius, siehe DECISIONS.md ADR-0039)
 - [x] Maskentyp Farbbereich — Phase 6 — Status: Fertig
 - [x] Maskentyp Luminanzbereich — Phase 6 — Status: Fertig
 - [x] Maskentyp Tiefenbereich — in Phase 11 Schritt 7 als Alternative nachgerüstet — Status: Fertig (abweichend, siehe DECISIONS.md ADR-0038) — kein echter Tiefendaten-Zulieferer existiert weiterhin (ADR-0032 bleibt in der Sache richtig), stattdessen neuer Maskentyp `BlurDepthApprox`: Laplace-Varianz-Schärfeheuristik in einem gleitenden 5×5-Fenster (`apx-pipeline::stages::masks::relative_sharpness_map`), trennt grob Vordergrund/Hintergrund bei echtem Schärfentiefe-Effekt (offene Blende) — versagt bei durchgehend scharfen Aufnahmen. UI-Beschriftung bewusst „Unschärfe-basierte Tiefennäherung", nicht „Tiefenbereich"

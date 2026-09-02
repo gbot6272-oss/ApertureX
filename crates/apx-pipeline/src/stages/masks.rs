@@ -260,7 +260,7 @@ fn compose_mask_alpha(mask: &Mask, pixels: &[f32], width: u32, height: u32) -> V
 
 fn geometry_alpha(geometry: &MaskGeometry, pixels: &[f32], w: usize, h: usize) -> Vec<f32> {
     match geometry {
-        MaskGeometry::Brush { strokes } => brush_alpha(strokes, w, h),
+        MaskGeometry::Brush { strokes } => brush_alpha(strokes, pixels, w, h),
         MaskGeometry::LinearGradient { x1, y1, x2, y2 } => {
             linear_gradient_alpha(*x1, *y1, *x2, *y2, w, h)
         }
@@ -543,10 +543,33 @@ fn distance_to_stroke(points: &[crate::edl::v3::MaskPoint], u: f32, v: f32) -> f
 
 /// Mehrere Striche akkumulieren ihre Deckung per Maximum (nicht Summe),
 /// siehe `v3.rs`s `BrushStroke`-Moduldoku.
-fn brush_alpha(strokes: &[crate::edl::v3::BrushStroke], w: usize, h: usize) -> Vec<f32> {
+/// Wie stark Auto-Mask (siehe `BrushStroke::auto_mask`s Moduldoku) die
+/// Deckkraft an starken lokalen Kanten dämpft — `1.0` würde eine Kante
+/// vollständig blockieren (zu hart, ein Strich mittendrin auf einer
+/// Kante verschwände dann ganz), `0.85` lässt einen Rest Deckkraft, wie
+/// Lightrooms eigenes Auto-Mask ebenfalls keine perfekte Blockade ist.
+const AUTO_MASK_EDGE_DAMPING: f32 = 0.85;
+
+fn brush_alpha(
+    strokes: &[crate::edl::v3::BrushStroke],
+    pixels: &[f32],
+    w: usize,
+    h: usize,
+) -> Vec<f32> {
     if strokes.is_empty() {
         return vec![0.0; w * h];
     }
+    // Nur berechnen, wenn mindestens ein Strich Auto-Mask nutzt — dieselbe
+    // Laplace-Varianz-Karte wie `BlurDepthApprox` (siehe
+    // `relative_sharpness_map`s Moduldoku zur bewussten Wiederverwendung
+    // statt einer `apx-ai`-Abhängigkeit), hier als „lokale
+    // Gradientenschwelle" zur Kantenerkennung zweckentfremdet: hohe
+    // lokale Laplace-Varianz heißt hohe lokale Kantenaktivität.
+    let edge_strength: Option<Vec<f32>> = strokes
+        .iter()
+        .any(|s| s.auto_mask)
+        .then(|| relative_sharpness_map(pixels, w, h));
+
     (0..w * h)
         .into_par_iter()
         .map(|index| {
@@ -561,7 +584,12 @@ fn brush_alpha(strokes: &[crate::edl::v3::BrushStroke], w: usize, h: usize) -> V
                 let dist = distance_to_stroke(&stroke.points, u, v);
                 let inner = (stroke.radius * (1.0 - stroke.feather.clamp(0.0, 1.0))).max(0.0);
                 let outer = stroke.radius.max(inner + 1e-4);
-                let a = 1.0 - smoothstep(inner, outer, dist);
+                let mut a = 1.0 - smoothstep(inner, outer, dist);
+                if stroke.auto_mask {
+                    if let Some(edges) = &edge_strength {
+                        a *= 1.0 - AUTO_MASK_EDGE_DAMPING * edges[index];
+                    }
+                }
                 coverage = coverage.max(a);
             }
             coverage
@@ -850,8 +878,10 @@ mod tests {
             points: vec![crate::edl::v3::MaskPoint { x: 0.5, y: 0.5 }],
             radius: 0.1,
             feather: 0.5,
+            auto_mask: false,
         }];
-        let alpha = brush_alpha(&strokes, 3, 3);
+        let pixels = vec![0.5f32; 3 * 3 * 3];
+        let alpha = brush_alpha(&strokes, &pixels, 3, 3);
         // Mittleres Pixel (1,1) liegt exakt auf dem Stützpunkt.
         assert!(
             alpha[4] > 0.9,
@@ -860,6 +890,62 @@ mod tests {
         );
         // Eckpixel (0,0) ist weit außerhalb des Radius.
         assert!(alpha[0] < 0.1, "Ecke sollte ungedeckt sein: {}", alpha[0]);
+    }
+
+    /// Phase 12 Schritt 2 (siehe `DECISIONS.md` ADR-0039): Auto-Mask
+    /// dämpft die Deckkraft eines Strichs an starken lokalen Kanten,
+    /// lässt sie in flachen Bereichen aber unverändert.
+    #[test]
+    fn brush_alpha_with_auto_mask_is_dampened_at_a_strong_edge_but_not_in_flat_areas() {
+        // Scharfe vertikale Kante bei Spalte 6: linke Hälfte dunkel, rechte hell.
+        let (w, h) = (12usize, 12usize);
+        let mut pixels = vec![0.0f32; w * h * 3];
+        for y in 0..h {
+            for x in 0..w {
+                let v = if x < w / 2 { 0.1 } else { 0.9 };
+                let i = (y * w + x) * 3;
+                pixels[i] = v;
+                pixels[i + 1] = v;
+                pixels[i + 2] = v;
+            }
+        }
+        // Ein einzelner Strich über die Bildmitte, hart (kein Feather),
+        // deckt sowohl die Kante (x=6) als auch eine flache Stelle (x=10) ab.
+        let base_stroke = crate::edl::v3::MaskPoint { x: 0.5, y: 0.5 };
+        let edge_index = 6 * w + 6; // Pixel direkt auf der Kante.
+        let flat_index = 6 * w + 10; // Pixel deutlich in der flachen rechten Hälfte.
+
+        let without_auto_mask = vec![crate::edl::v3::BrushStroke {
+            points: vec![base_stroke],
+            radius: 0.45,
+            feather: 0.0,
+            auto_mask: false,
+        }];
+        let alpha_plain = brush_alpha(&without_auto_mask, &pixels, w, h);
+        assert!(
+            alpha_plain[edge_index] > 0.9 && alpha_plain[flat_index] > 0.9,
+            "ohne Auto-Mask sollte die Deckkraft überall im Radius voll sein: Kante={}, flach={}",
+            alpha_plain[edge_index],
+            alpha_plain[flat_index]
+        );
+
+        let with_auto_mask = vec![crate::edl::v3::BrushStroke {
+            points: vec![base_stroke],
+            radius: 0.45,
+            feather: 0.0,
+            auto_mask: true,
+        }];
+        let alpha_auto = brush_alpha(&with_auto_mask, &pixels, w, h);
+        assert!(
+            alpha_auto[edge_index] < 0.5,
+            "Auto-Mask sollte die Deckkraft auf der scharfen Kante deutlich dämpfen: {}",
+            alpha_auto[edge_index]
+        );
+        assert!(
+            alpha_auto[flat_index] > 0.8,
+            "Auto-Mask sollte die Deckkraft in der flachen Zone kaum verändern: {}",
+            alpha_auto[flat_index]
+        );
     }
 
     #[test]

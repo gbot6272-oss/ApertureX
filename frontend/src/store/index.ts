@@ -883,6 +883,11 @@ interface MasksSlice {
   maskBrushDraftRadius: number;
   maskBrushDraftFeather: number;
   setMaskBrushDraftField: (key: "radius" | "feather", value: number) => void;
+  /** Auto-Mask für den *nächsten* gemalten Pinselstrich (Phase 12
+   * Schritt 2, siehe `DECISIONS.md` ADR-0039) — derselbe Draft-Zustand
+   * wie `maskBrushDraftRadius`/`-Feather`, kein EDL-Feld für sich. */
+  maskBrushDraftAutoMask: boolean;
+  toggleMaskBrushDraftAutoMask: () => void;
   /** Hängt einen fertig gemalten Strich (bereits ausgedünnter Zielpfad,
    * siehe `MaskOverlay.tsx`) an die *aktive* Komponente der Maske
    * (`selectedMaskComponentIndex`) an — ein No-op, falls deren Geometrie
@@ -3316,6 +3321,7 @@ export const useAppStore = create<AppStore>()(
 
     maskBrushDraftRadius: 0.05,
     maskBrushDraftFeather: 0.02,
+    maskBrushDraftAutoMask: false,
 
     setMaskBrushDraftField: (key, value) => {
       set((state) => {
@@ -3324,13 +3330,19 @@ export const useAppStore = create<AppStore>()(
       });
     },
 
+    toggleMaskBrushDraftAutoMask: () => {
+      set((state) => {
+        state.maskBrushDraftAutoMask = !state.maskBrushDraftAutoMask;
+      });
+    },
+
     addMaskBrushStroke: (maskId, points) => {
       if (points.length === 0) return;
-      const { maskBrushDraftRadius, maskBrushDraftFeather } = get();
+      const { maskBrushDraftRadius, maskBrushDraftFeather, maskBrushDraftAutoMask } = get();
       set((state) => {
         const geometry = state.developEdl.masks.find((m) => m.id === maskId)?.components[state.selectedMaskComponentIndex]?.geometry;
         if (geometry?.kind !== "Brush") return;
-        geometry.strokes.push({ points, radius: maskBrushDraftRadius, feather: maskBrushDraftFeather });
+        geometry.strokes.push({ points, radius: maskBrushDraftRadius, feather: maskBrushDraftFeather, auto_mask: maskBrushDraftAutoMask });
       });
       void get().commitDevelopEdit();
     },

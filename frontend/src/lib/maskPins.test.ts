@@ -25,8 +25,8 @@ describe("computeMaskPinPosition", () => {
     const mask = maskWith({
       kind: "Brush",
       strokes: [
-        { points: [{ x: 0, y: 0 }, { x: 1, y: 0 }], radius: 0.1, feather: 0.5 },
-        { points: [{ x: 0, y: 1 }], radius: 0.1, feather: 0.5 },
+        { points: [{ x: 0, y: 0 }, { x: 1, y: 0 }], radius: 0.1, feather: 0.5, auto_mask: false },
+        { points: [{ x: 0, y: 1 }], radius: 0.1, feather: 0.5, auto_mask: false },
       ],
     });
     expect(computeMaskPinPosition(mask)).toEqual({ x: 1 / 3, y: 1 / 3 });

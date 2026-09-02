@@ -106,6 +106,8 @@ export function MasksPanel() {
   const maskBrushDraftRadius = useAppStore((s) => s.maskBrushDraftRadius);
   const maskBrushDraftFeather = useAppStore((s) => s.maskBrushDraftFeather);
   const setMaskBrushDraftField = useAppStore((s) => s.setMaskBrushDraftField);
+  const maskBrushDraftAutoMask = useAppStore((s) => s.maskBrushDraftAutoMask);
+  const toggleMaskBrushDraftAutoMask = useAppStore((s) => s.toggleMaskBrushDraftAutoMask);
   const removeMaskBrushStroke = useAppStore((s) => s.removeMaskBrushStroke);
   const updateMaskGeometry = useAppStore((s) => s.updateMaskGeometry);
   const maskColorRangePickerActive = useAppStore((s) => s.maskColorRangePickerActive);
@@ -542,6 +544,10 @@ export function MasksPanel() {
             onChange={(value) => setMaskBrushDraftField("feather", value / 100)}
             onCommit={() => {}}
           />
+          <label className="flex items-center gap-2 text-xs text-text-secondary" title="Dämpft die Deckkraft des nächsten Strichs an starken Bildkanten (Phase 12 Schritt 2), wie Lightrooms Auto Mask">
+            <input type="checkbox" aria-label="Auto-Mask für den nächsten Pinselstrich" checked={maskBrushDraftAutoMask} onChange={toggleMaskBrushDraftAutoMask} />
+            Auto-Mask (nächster Strich)
+          </label>
           {selectedMaskGeometry.strokes.length > 0 && (
             <ul className="flex flex-col gap-1 text-xs text-text-secondary">
               {selectedMaskGeometry.strokes.map((_, index) => (

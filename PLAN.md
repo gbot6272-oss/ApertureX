@@ -1018,7 +1018,7 @@ Test pro Schritt, volle Suite einmalig in Schritt 8.
 - [x] 2. Radialverlauf-Ellipse + Rotation, Auto-Mask beim Pinsel (Ellipse/Rotation waren in Datenmodell+Pipeline schon vorhanden, nur der Ziehgriff fehlte; Auto-Mask nutzt die bestehende Laplace-Varianz-Kantenerkennung aus `BlurDepthApprox` wieder — kein Schema-Version-Sprung nötig, siehe DECISIONS.md ADR-0039)
 - [x] 3. Objektiv-/Kameraprofile: echte LensFun-Datenbank (Teil A, automatische Anwendung + ehrliche Ecken-Rückrechnung statt 1:1-Koeffizienten-Import) + vereinfachter Kalibrier-Assistent (Teil B, Linien-Geradheit statt vollem Zhang-Verfahren, siehe DECISIONS.md ADR-0039)
 - [x] 4. Voller EXIF/IPTC-Editor (generisches `custom_metadata_json`-Feld statt fester Spalten, wohlbekannte IPTC-Kernfelder + frei benannte Zusatzfelder, XMP-Sidecar-Export erweitert, siehe DECISIONS.md ADR-0039)
-- [ ] 5. Mehrfachziel-Export
+- [x] 5. Mehrfachziel-Export (reine Frontend-Schleife über den bestehenden enqueue_export_photo-Befehl, kein neuer Backend-Mechanismus, siehe DECISIONS.md ADR-0039)
 - [ ] 6. Freies ICC-Profil beim Soft-Proof
 - [ ] 7. Beobachtete Ordner / Auto-Import
 - [ ] 8. Dokumentation, volle Verifikation, Abnahme (Vergleichs-Artifact mit aktualisierter Lückenliste neu veröffentlichen)

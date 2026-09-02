@@ -14,6 +14,19 @@ interface ExportDialogProps {
 type SizeMode = "original" | "edge" | "megapixels";
 type WatermarkMode = "none" | "text" | "image";
 
+/** Ein Eintrag im Mehrfachziel-Export (Phase 12 Schritt 5, siehe
+ * `DECISIONS.md` ADR-0039) — eine vollständige Momentaufnahme des
+ * Formularzustands (Zielordner + alle Optionen) zum Zeitpunkt des
+ * Hinzufügens; spätere Änderungen am Formular wirken sich nicht mehr auf
+ * bereits hinzugefügte Ziele aus. */
+interface ExportDestination {
+  id: string;
+  destFolder: string;
+  format: ExportFormat;
+  label: string;
+  options: ExportPhotoOptions;
+}
+
 /**
  * Export-Exportdialog (Phase 8 Schritt 1+2, siehe `DECISIONS.md` ADR-0034
  * und `apx_export::engine`s Moduldoku). Exportiert `photoIds` mit ihrem
@@ -28,6 +41,7 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
   const exportError = useAppStore((s) => s.exportError);
   const exportQueuePaused = useAppStore((s) => s.exportQueuePaused);
   const exportPhotos = useAppStore((s) => s.exportPhotos);
+  const exportPhotosToDestinations = useAppStore((s) => s.exportPhotosToDestinations);
   const toggleExportQueuePause = useAppStore((s) => s.toggleExportQueuePause);
 
   const FORMAT_LABELS: Record<ExportFormat, string> = {
@@ -57,6 +71,7 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
   };
 
   const [destFolder, setDestFolder] = useState("");
+  const [destinations, setDestinations] = useState<ExportDestination[]>([]);
   const [format, setFormat] = useState<ExportFormat>("jpeg");
   const [quality, setQuality] = useState(90);
   const [bitDepth16, setBitDepth16] = useState(false);
@@ -99,8 +114,11 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
     if (path) setWatermarkImagePath(path);
   }
 
-  async function handleExport() {
-    if (!destFolder || photoIds.length === 0) return;
+  // Phase 12 Schritt 5 (siehe DECISIONS.md ADR-0039): aus `handleExport`
+  // herausgezogen, damit sowohl der einzelne Export als auch "als Ziel
+  // hinzufügen" (Mehrfachziel-Export) dieselbe Options-Zusammenstellung
+  // aus dem aktuellen Formularzustand nutzen.
+  function buildCurrentOptions(): ExportPhotoOptions {
     const options: ExportPhotoOptions = {
       format,
       quality,
@@ -131,8 +149,32 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
       if (metadataMake) options.metadataMake = metadataMake;
       if (metadataCopyright) options.metadataCopyright = metadataCopyright;
     }
+    return options;
+  }
 
-    await exportPhotos(photoIds, destFolder, options);
+  async function handleExport() {
+    if (!destFolder || photoIds.length === 0) return;
+    await exportPhotos(photoIds, destFolder, buildCurrentOptions());
+  }
+
+  function addCurrentAsDestination() {
+    if (!destFolder) return;
+    setDestinations((prev) => [
+      ...prev,
+      { id: `${Date.now()}-${prev.length}`, destFolder, format, label: `${FORMAT_LABELS[format]} → ${destFolder}`, options: buildCurrentOptions() },
+    ]);
+  }
+
+  function removeDestination(id: string) {
+    setDestinations((prev) => prev.filter((d) => d.id !== id));
+  }
+
+  async function handleExportAllDestinations() {
+    if (destinations.length === 0 || photoIds.length === 0) return;
+    await exportPhotosToDestinations(
+      photoIds,
+      destinations.map((d) => ({ destFolder: d.destFolder, options: d.options })),
+    );
   }
 
   const supportsBitDepth16 = format === "png" || format === "tiff";
@@ -171,6 +213,37 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
             </button>
           </div>
         </label>
+
+        {/* Mehrfachziel-Export (Phase 12 Schritt 5, siehe DECISIONS.md
+            ADR-0039) — jedes Formular unten gilt für den aktuellen
+            Zielordner; "+ Weiteres Ziel hinzufügen" merkt sich eine
+            Momentaufnahme davon, "Alle Ziele exportieren" reicht photoIds
+            an jedes gemerkte Ziel einzeln weiter. */}
+        {destinations.length > 0 && (
+          <div className="mb-3 flex flex-col gap-1 rounded border border-border p-2">
+            <p className="text-xs font-semibold text-text-secondary">{t("exportDialog.destinations")}</p>
+            <ul className="flex flex-col gap-1">
+              {destinations.map((d) => (
+                <li key={d.id} className="flex items-center justify-between gap-2 rounded border border-border px-2 py-1 text-xs">
+                  <span className="min-w-0 flex-1 truncate" title={d.label}>
+                    {d.label}
+                  </span>
+                  <button type="button" onClick={() => removeDestination(d.id)} className="shrink-0 rounded border border-border px-1.5 py-0.5 hover:border-danger">
+                    {t("exportDialog.removeDestination")}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={addCurrentAsDestination}
+          disabled={!destFolder}
+          className="mb-3 w-full rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {t("exportDialog.addDestination")}
+        </button>
 
         <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
           {t("exportDialog.format")}
@@ -413,6 +486,16 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
           <button type="button" onClick={onClose} className="rounded border border-border px-3 py-1 text-xs hover:border-accent">
             {t("exportDialog.close")}
           </button>
+          {destinations.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void handleExportAllDestinations()}
+              disabled={photoIds.length === 0 || exportRunning}
+              className="rounded border border-accent bg-accent/10 px-3 py-1 text-xs text-accent disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {exportRunning ? t("exportDialog.exporting") : t("exportDialog.exportAllDestinations", { count: destinations.length })}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void handleExport()}

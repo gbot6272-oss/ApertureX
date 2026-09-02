@@ -1138,6 +1138,11 @@ interface ExportSlice {
    * Fortschritt bis alle abgeschlossen sind (egal ob erfolgreich oder
    * fehlgeschlagen). */
   exportPhotos: (photoIds: string[], destFolder: string, options: ExportPhotoOptions) => Promise<void>;
+  /** Mehrfachziel-Export (Phase 12 Schritt 5, siehe `DECISIONS.md`
+   * ADR-0039) — reicht `photoIds` nacheinander an jedes `destination` in
+   * `destinations` weiter (Schleife über das bestehende `exportPhotos`,
+   * kein neues Warteschlangen-Konzept). */
+  exportPhotosToDestinations: (photoIds: string[], destinations: Array<{ destFolder: string; options: ExportPhotoOptions }>) => Promise<void>;
   toggleExportQueuePause: () => Promise<void>;
 }
 
@@ -4135,6 +4140,12 @@ export const useAppStore = create<AppStore>()(
         state.exportError = firstError;
       });
       await api.clearFinishedExportJobs();
+    },
+
+    exportPhotosToDestinations: async (photoIds, destinations) => {
+      for (const destination of destinations) {
+        await get().exportPhotos(photoIds, destination.destFolder, destination.options);
+      }
     },
 
     toggleExportQueuePause: async () => {

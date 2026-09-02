@@ -146,4 +146,30 @@ test.describe("Export (Phase 8 Schritt 1+2)", () => {
     const args = call?.args as { options: { format: string } };
     expect(args.options.format).toBe("jxl");
   });
+
+  test("Mehrfachziel-Export reicht das Foto an jedes hinzugefügte Ziel weiter (Phase 12 Schritt 5)", async ({ page }) => {
+    await setUpWithSelectedPhoto(page, { selectFolderResult: "/home/user/Exporte" });
+    await page.getByRole("button", { name: "Exportieren…" }).click();
+    await page.getByRole("button", { name: "Wählen…" }).click();
+
+    // Erstes Ziel: Standard-Format (JPEG) im gewählten Ordner.
+    await page.getByRole("button", { name: "+ Weiteres Ziel hinzufügen" }).click();
+
+    // Zweites Ziel: PNG statt JPEG, derselbe Ordner (der Mock liefert
+    // immer denselben Pfad zurück) — reicht, um zu zeigen, dass jedes
+    // Ziel seine eigene Options-Momentaufnahme behält.
+    await page.getByLabel("Format").selectOption("png");
+    await page.getByRole("button", { name: "+ Weiteres Ziel hinzufügen" }).click();
+
+    await expect(page.getByText("Alle 2 Ziele exportieren")).toBeVisible();
+    await page.getByRole("button", { name: "Alle 2 Ziele exportieren" }).click();
+
+    await expect(page.getByText("1 Datei(en) geschrieben.")).toBeVisible();
+
+    const log = await getMockInvokeLog(page);
+    const calls = log.filter((e) => e.cmd === "enqueue_export_photo");
+    expect(calls).toHaveLength(2);
+    const formats = calls.map((c) => (c.args as { options: { format: string } }).options.format);
+    expect(formats.sort()).toEqual(["jpeg", "png"]);
+  });
 });

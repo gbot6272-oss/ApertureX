@@ -10,6 +10,7 @@ export const de = {
   "header.importWithTemplateTitle": "Import mit wählbarem Modus (Kopieren/Verschieben), Umbenennungsmuster und Presets",
   "header.cancelImport": "Abbrechen",
   "header.viewGrid": "Raster",
+  "header.viewOverview": "Übersicht",
   "header.viewMap": "Karte",
   "header.viewInfo": "Info",
   "header.viewDevelop": "Entwickeln",

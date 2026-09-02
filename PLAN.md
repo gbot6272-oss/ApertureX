@@ -992,7 +992,7 @@ Tests + gezielte Playwright-Tests, Commit+Push nach jedem Schritt.
 - [x] 0. Scope festzurren, Crate-Spikes, Dokumentationsfehler beheben (ADR-0038: gamut-dng/gamut-jxl/ag-psd brauchbar, heif als Fassade entlarvt, libgphoto2 tatsächlich per apt verfügbar; FEATURES.md Zeile 239 korrigiert)
 - [x] 1. DNG-Konvertierung (gamut-dng) — abweichend von der ursprünglichen Formulierung als Knopf im Entwickeln-Panel statt als Import-Dialog-Checkbox umgesetzt (siehe `commands.rs`s Moduldoku bei `convert_photo_to_dng`): eine „Linear DNG" muss aus den unveränderten RAW-Daten entstehen, nicht aus dem ggf. bereits während des Imports bearbeiteten Ergebnis — das Entwickeln-Panel hat ohnehin schon den Foto-Kontext, der Import-Dialog nicht zwingend
 - [x] 2. Export-Formatlücken: PSD (ag-psd, flach), JPEG-XL (gamut-jxl, verlustfrei ab Qualität 100) — HEIF bleibt zurückgestellt (siehe ADR-0038: `heif` 0.1.0 ist eine Fassade, `heif-rs` zu riskant für das Plattenkontingent dieser Sandbox)
-- [ ] 3. Bibliothek: Übersichtsansicht + Schnellentwicklung im Raster
+- [x] 3. Bibliothek: Übersichtsansicht + Schnellentwicklung im Raster
 - [ ] 4. Bibliothek: Smart Previews + Offline-Bearbeitung
 - [ ] 5. Bibliothek: Personenansicht (Hautton-Heuristik-Clustering)
 - [ ] 6. Entwickeln: Zielgerichtetes Anpassungswerkzeug (TAT)

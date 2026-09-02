@@ -9,6 +9,7 @@ export const en: Record<keyof typeof de, string> = {
   "header.importWithTemplateTitle": "Import with a selectable mode (copy/move), renaming pattern and presets",
   "header.cancelImport": "Cancel",
   "header.viewGrid": "Grid",
+  "header.viewOverview": "Overview",
   "header.viewMap": "Map",
   "header.viewInfo": "Info",
   "header.viewDevelop": "Develop",

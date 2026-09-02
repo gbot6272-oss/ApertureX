@@ -207,11 +207,19 @@ export default function App() {
     <div className="flex h-screen flex-col bg-bg-base text-text-primary">
       <Header />
       <ErrorBanner />
-      {centerView === "grid" && <FilterBar />}
+      {(centerView === "grid" || centerView === "overview") && <FilterBar />}
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <PresetsPanel />
-        {centerView === "grid" ? <GridView /> : centerView === "map" ? <MapView /> : <Viewer />}
+        {centerView === "grid" ? (
+          <GridView />
+        ) : centerView === "overview" ? (
+          <GridView variant="overview" />
+        ) : centerView === "map" ? (
+          <MapView />
+        ) : (
+          <Viewer />
+        )}
         <MetadataPanel />
         {/* Rechte Werkzeug-Palette (Phase 10 Schritt 2): Entwickeln- und
             Masken-Panel bleiben zwei unabhängig sichtbare/aufklappbare

@@ -568,16 +568,35 @@ interface DevelopSlice {
 interface LibrarySlice {
   /** Was in der Mitte statt des Viewers gezeigt wird — `"grid"` ist das
    * neue Raster (Schritt 6), `"viewer"` der bisherige Einzelbild-Viewer,
-   * `"map"` die Kartenansicht (Phase 8 Schritt 7). */
-  centerView: "viewer" | "grid" | "map";
+   * `"map"` die Kartenansicht (Phase 8 Schritt 7), `"overview"` die
+   * Übersichtsansicht (Phase 11 Schritt 3, siehe `DECISIONS.md`
+   * ADR-0038): größere Kacheln, reduzierte Metadaten-Overlays, kein
+   * Mehrfachauswahl-Raster wie das normale Raster — eher ein
+   * Sichtungsmodus mit Schnellentwicklung statt Stapel-Bearbeitung. */
+  centerView: "viewer" | "grid" | "map" | "overview";
   toggleCenterView: () => void;
-  setCenterView: (view: "viewer" | "grid" | "map") => void;
+  setCenterView: (view: "viewer" | "grid" | "map" | "overview") => void;
 
   /** Mehrfachauswahl fürs Stapel-Bearbeiten (Bewertung/Flagge/Sammlung-
    * Hinzufügen) — geteilt zwischen Raster und Filmstreifen. Enthält
    * `selectedPhotoId`, sobald eines gesetzt ist. */
   multiSelectedIds: string[];
   togglePhotoSelection: (photoId: string, mode: SelectionMode) => void;
+
+  /** Schnellentwicklung im Raster (Phase 11 Schritt 3): pro Kachel bei
+   * Hover/Auswahl ein kompaktes Overlay mit den sieben Phase-2-
+   * Basisreglern (Belichtung/Kontrast/Lichter/Tiefen/Weiß/Schwarz/
+   * Sättigung), committet über den bestehenden `apply_develop_edit`-Pfad.
+   * Bewusst **eigener** Zustand statt Wiederverwendung von
+   * `developEdl`/`developPhotoId`: die Kachel kann ein anderes Foto
+   * betreffen als das im Entwickeln-Panel gerade offene — ein geteilter
+   * Zustand würde dessen Bearbeitungsstand überschreiben. */
+  quickDevelopPhotoId: string | null;
+  quickDevelopEdl: EdlPayload | null;
+  loadQuickDevelopStateForPhoto: (photoId: string) => Promise<void>;
+  setQuickDevelopBasicField: (key: string, value: number) => void;
+  commitQuickDevelopEdit: () => Promise<void>;
+  clearQuickDevelopState: () => void;
 
   metadataPanelOpen: boolean;
   toggleMetadataPanel: () => void;
@@ -2310,6 +2329,54 @@ export const useAppStore = create<AppStore>()(
     setCenterView: (view) => {
       set((state) => {
         state.centerView = view;
+      });
+    },
+
+    // Schnellentwicklung im Raster (Phase 11 Schritt 3)
+    quickDevelopPhotoId: null,
+    quickDevelopEdl: null,
+
+    loadQuickDevelopStateForPhoto: async (photoId) => {
+      const position = await api.currentDevelopEdit(photoId).catch((err: unknown) => {
+        console.error("Schnellentwicklung: Bearbeitungsstand konnte nicht geladen werden:", err);
+        return null;
+      });
+      if (!position) return;
+      set((state) => {
+        state.quickDevelopPhotoId = photoId;
+        state.quickDevelopEdl = edlFromHistoryPosition(position);
+      });
+    },
+
+    setQuickDevelopBasicField: (key, value) => {
+      set((state) => {
+        if (!state.quickDevelopEdl) return;
+        writeBasicField(state.quickDevelopEdl.basic, key, value);
+      });
+    },
+
+    commitQuickDevelopEdit: async () => {
+      const { quickDevelopPhotoId, quickDevelopEdl } = get();
+      if (!quickDevelopPhotoId || !quickDevelopEdl) return;
+      try {
+        await api.applyDevelopEdit(quickDevelopPhotoId, buildEdlEnvelopeJson(quickDevelopEdl), "Schnellentwicklung (Raster)");
+      } catch (err) {
+        console.error("Schnellentwicklung konnte nicht gespeichert werden:", err);
+      }
+      // Ist im Entwickeln-Panel gerade dasselbe Foto offen, dessen
+      // Zustand mit übernehmen, statt dass er dort veraltet erscheint,
+      // bis das Panel das Foto das nächste Mal neu lädt.
+      if (get().developPhotoId === quickDevelopPhotoId) {
+        set((state) => {
+          state.developEdl = quickDevelopEdl;
+        });
+      }
+    },
+
+    clearQuickDevelopState: () => {
+      set((state) => {
+        state.quickDevelopPhotoId = null;
+        state.quickDevelopEdl = null;
       });
     },
 

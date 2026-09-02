@@ -201,6 +201,17 @@ export function Header() {
 
       <button
         type="button"
+        onClick={() => setCenterView(centerView === "overview" ? "viewer" : "overview")}
+        aria-pressed={centerView === "overview"}
+        className={`rounded border px-3 py-1 text-sm ${
+          centerView === "overview" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
+        }`}
+      >
+        {t("header.viewOverview")}
+      </button>
+
+      <button
+        type="button"
         onClick={() => setCenterView(centerView === "map" ? "viewer" : "map")}
         aria-pressed={centerView === "map"}
         className={`rounded border px-3 py-1 text-sm ${

@@ -23,6 +23,7 @@ pub mod engine;
 pub mod error;
 pub mod format;
 pub mod icc;
+pub mod lrtemplate;
 pub mod map;
 pub mod metadata;
 pub mod print;

@@ -50,6 +50,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // hinterlegte Ergebnisse, per Fixture steuerbar (siehe
     // `exportPresetToApxFile`/`importPresetFromApxFile`-Tests).
     exportApxPathResult: "/mock/export.apx" as string | null,
+    // Adobe .lrtemplate-Export (Phase 11 Schritt 8).
+    exportLrtemplatePathResult: "/mock/export.lrtemplate" as string | null,
     importApxFile: null as { name: string; tags: string[]; conditions_json: string; edl_subset_json: string } | null,
     // Kollaborationsmodus (Phase 9 Schritt 10) — dieselbe Fixture-Strategie
     // wie beim `.apx`-Dialog oben: der eigentliche `content_hash`-Abgleich
@@ -476,6 +478,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       folders: unknown[];
       photosByFolder: Record<string, unknown[]>;
       exportApxPathResult: string | null;
+      exportLrtemplatePathResult: string | null;
       importApxFile: { name: string; tags: string[]; conditions_json: string; edl_subset_json: string } | null;
       exportSharePathResult: string | null;
       importShareResult: {
@@ -1120,6 +1123,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       // einem erfolgreichen Import).
       case "export_preset_to_apx_file":
         return fixtures.exportApxPathResult;
+      case "export_preset_to_lrtemplate_file":
+        return fixtures.exportLrtemplatePathResult;
       case "import_preset_from_apx_file": {
         const file = fixtures.importApxFile;
         if (!file) return null;

@@ -997,7 +997,7 @@ Tests + gezielte Playwright-Tests, Commit+Push nach jedem Schritt.
 - [x] 5. Bibliothek: Personenansicht (Hautton-Heuristik-Clustering)
 - [x] 6. Entwickeln: Zielgerichtetes Anpassungswerkzeug (TAT)
 - [x] 7. Maskentyp Tiefenbereich — Alternative: Unschärfe-basierte Tiefennäherung
-- [ ] 8. Adobe `.lrtemplate`-Export (best-effort, nur Export)
+- [x] 8. Adobe `.lrtemplate`-Export (best-effort, nur Export)
 - [ ] 9. Stapelverarbeitungs-Konsole (neuer Batch-Operationen-Log, siehe ADR-0036)
 - [ ] 10. Tethering real kompilieren (`libgphoto2-dev` in CI, `--features tethering`)
 - [ ] 11. Phase-10-Nachträge (restliche Lokalisierung, PaletteFrame auf DevelopPanel/MasksPanel, lokale Tastenkürzel umbelegbar, Installer-Signierung-Mechanik-Nachweis)

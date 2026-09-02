@@ -709,6 +709,10 @@ interface PresetsSlice {
    * Format (`SPEC.md` §3.5: „Import/Export .apx") — no-op (kein Fehler),
    * wenn der Dialog abgebrochen wird. */
   exportPresetAsApxFile: (presetId: string) => Promise<void>;
+  /** Adobe `.lrtemplate`-Export (Phase 11 Schritt 8, siehe `DECISIONS.md`
+   * ADR-0038) — nur Export, siehe `apx-app`s `export_preset_to_
+   * lrtemplate_file`-Moduldoku für die abgedeckte Teilmenge. */
+  exportPresetAsLrtemplateFile: (presetId: string) => Promise<void>;
   /** Öffnet den nativen Öffnen-Dialog, liest eine `.apx`-Datei und legt
    * daraus ein neues Preset in `folderId` an. */
   importPresetFromApxFile: (folderId: string | null) => Promise<void>;
@@ -2963,6 +2967,16 @@ export const useAppStore = create<AppStore>()(
     exportPresetAsApxFile: async (presetId) => {
       try {
         await api.exportPresetToApxFile(presetId);
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    exportPresetAsLrtemplateFile: async (presetId) => {
+      try {
+        await api.exportPresetToLrtemplateFile(presetId);
       } catch (err) {
         set((state) => {
           state.catalogError = String(err);

@@ -1899,6 +1899,71 @@ pub async fn export_preset_to_apx_file(
     Ok(Some(path.display().to_string()))
 }
 
+/// Adobe `.lrtemplate`-Export für ein Preset (Phase 11 Schritt 8, siehe
+/// `DECISIONS.md` ADR-0038) — deckt dieselbe Teilmenge wie der bereits
+/// vorhandene `.xmp`-`crs:`-Export ab (Basic ohne Weißabgleich + HSL,
+/// siehe `apx_export::lrtemplate`s Moduldoku). Fehlt eine dieser beiden
+/// Sektionen im Preset (`edl_subset_json` enthält sie nicht, weil das
+/// Preset z. B. nur Kurven anpasst), wird sie als neutral exportiert —
+/// Lightroom kennt für diese Felder kein „nicht gesetzt", jede
+/// `.lrtemplate`-Datei trägt immer einen vollständigen Absolutwert je
+/// Feld. Nur Export, siehe Moduldoku zum Grund. `Ok(None)`, wenn der
+/// Dateidialog abgebrochen wurde.
+#[tauri::command]
+pub async fn export_preset_to_lrtemplate_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    preset_id: String,
+) -> Result<Option<String>, String> {
+    let preset_id = parse_preset_id(preset_id)?;
+    let preset = state
+        .catalog
+        .list_presets()
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .find(|p| p.id == preset_id)
+        .ok_or_else(|| "Preset nicht gefunden".to_string())?;
+    let version = state
+        .catalog
+        .latest_preset_version(preset_id)
+        .map_err(|err| err.to_string())?;
+
+    let subset: serde_json::Value = serde_json::from_str(&version.edl_subset_json)
+        .map_err(|err| format!("Preset-EDL-Teilmenge ist kein gültiges JSON: {err}"))?;
+    let basic: apx_pipeline::edl::BasicAdjustments = subset
+        .get("basic")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or(apx_pipeline::edl::BasicAdjustments::NEUTRAL);
+    let hsl: apx_pipeline::edl::HslAdjustment = subset
+        .get("hsl")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or(apx_pipeline::edl::HslAdjustment::NEUTRAL);
+
+    let content =
+        apx_export::lrtemplate::generate_lrtemplate(&preset.name, &preset_id.to_string(), &basic, &hsl);
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("Lightroom-Vorlage", &["lrtemplate"])
+        .set_file_name(format!("{}.lrtemplate", preset.name))
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|err| format!("Speichern-Dialog fehlgeschlagen: {err}"))?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|err| format!("Ungültiger Pfad: {err}"))?;
+    std::fs::write(&path, content)
+        .map_err(|err| format!("Datei '{}' nicht schreibbar: {err}", path.display()))?;
+    Ok(Some(path.display().to_string()))
+}
+
 /// Liest eine `.apx`-Datei und legt sie als neues Preset in `folder_id`
 /// an. `Ok(None)`, wenn der Dateidialog abgebrochen wurde.
 #[tauri::command]

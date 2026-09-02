@@ -207,6 +207,7 @@ fn main() {
             commands::list_preset_versions,
             commands::latest_preset_version,
             commands::export_preset_to_apx_file,
+            commands::export_preset_to_lrtemplate_file,
             commands::import_preset_from_apx_file,
             commands::search_photos,
             commands::filter_photos,

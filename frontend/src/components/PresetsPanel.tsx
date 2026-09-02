@@ -83,6 +83,7 @@ function PresetRow({ preset, folders, onOpenVersions }: PresetRowProps) {
   const clearPresetHoverPreview = useAppStore((s) => s.clearPresetHoverPreview);
   const photoMeta = useAppStore(selectPresetConditionMeta);
   const exportPresetAsApxFile = useAppStore((s) => s.exportPresetAsApxFile);
+  const exportPresetAsLrtemplateFile = useAppStore((s) => s.exportPresetAsLrtemplateFile);
 
   function handleRename(event: React.MouseEvent) {
     event.stopPropagation();
@@ -155,6 +156,15 @@ function PresetRow({ preset, folders, onOpenVersions }: PresetRowProps) {
           aria-label={`${preset.name} als .apx exportieren`}
         >
           ⬇
+        </button>
+        <button
+          type="button"
+          onClick={() => void exportPresetAsLrtemplateFile(preset.id)}
+          className="shrink-0 text-text-muted hover:text-accent"
+          title="Als Adobe .lrtemplate exportieren (nur Basic + HSL, siehe DECISIONS.md ADR-0038)"
+          aria-label={`${preset.name} als .lrtemplate exportieren`}
+        >
+          ⬇LR
         </button>
         <select
           aria-label={`${preset.name}: Ordner`}

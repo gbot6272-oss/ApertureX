@@ -597,6 +597,15 @@ export function exportPresetToApxFile(presetId: string): Promise<string | null> 
   return invoke<string | null>("export_preset_to_apx_file", { presetId });
 }
 
+/** Adobe `.lrtemplate`-Export (Phase 11 Schritt 8, siehe `DECISIONS.md`
+ * ADR-0038) — siehe `apx-app`s `export_preset_to_lrtemplate_file`-
+ * Moduldoku für die abgedeckte Teilmenge (Basic ohne Weißabgleich + HSL)
+ * und die Nur-Export-Einschränkung. `null`, wenn der Dialog abgebrochen
+ * wurde. */
+export function exportPresetToLrtemplateFile(presetId: string): Promise<string | null> {
+  return invoke<string | null>("export_preset_to_lrtemplate_file", { presetId });
+}
+
 /** Öffnet einen Öffnen-Dialog und legt die gewählte `.apx`-Datei als neues
  * Preset an. `null`, wenn der Dialog abgebrochen wurde. */
 export function importPresetFromApxFile(folderId: string | null): Promise<PresetDto | null> {

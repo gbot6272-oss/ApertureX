@@ -1,3 +1,4 @@
+import { useT } from "../lib/i18n";
 import { useAppStore } from "../store";
 
 interface StackingDialogProps {
@@ -21,6 +22,7 @@ interface StackingDialogProps {
  * `apx_stacking::panorama`s Moduldoku).
  */
 export function StackingDialog({ open, onClose }: StackingDialogProps) {
+  const t = useT();
   const multiSelectedIds = useAppStore((s) => s.multiSelectedIds);
   const stackingRunning = useAppStore((s) => s.stackingRunning);
   const stackingStatus = useAppStore((s) => s.stackingStatus);
@@ -38,13 +40,13 @@ export function StackingDialog({ open, onClose }: StackingDialogProps) {
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-24" onClick={onClose}>
       <div
         role="dialog"
-        aria-label="Stacking"
+        aria-label={t("stackingDialog.title")}
         className="w-full max-w-md rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 className="mb-1 text-sm font-semibold text-text-primary">Stacking</h2>
+        <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("stackingDialog.title")}</h2>
         <p className="mb-3 text-xs text-text-muted">
-          {count} {count === 1 ? "Foto" : "Fotos"} ausgewählt — alle vier Verfahren setzen bereits ausgerichtete Aufnahmen voraus.
+          {t("stackingDialog.selectedCount", { count, noun: count === 1 ? t("stackingDialog.photoSingular") : t("stackingDialog.photoPlural") })}
         </p>
 
         <div className="flex flex-col gap-2">
@@ -52,46 +54,46 @@ export function StackingDialog({ open, onClose }: StackingDialogProps) {
             type="button"
             onClick={() => void runStackFocus()}
             disabled={busy || count < 2}
-            title="Laplacian-Schärfemaß, schärfste Quelle je Pixel — mindestens 2 Fotos"
+            title={t("stackingDialog.focusTitle")}
             className="rounded border border-border px-3 py-1.5 text-left text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Fokus-Stacking
+            {t("stackingDialog.focus")}
           </button>
           <button
             type="button"
             onClick={() => void runStackHdr()}
             disabled={busy || count < 2}
-            title="Belichtungsreihe fusionieren (jedes Foto braucht eine EXIF-Belichtungszeit) — mindestens 2 Fotos"
+            title={t("stackingDialog.hdrTitle")}
             className="rounded border border-border px-3 py-1.5 text-left text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
           >
-            HDR-Zusammenführung
+            {t("stackingDialog.hdr")}
           </button>
           <button
             type="button"
             onClick={() => void runStackPanorama()}
             disabled={busy || count < 2}
-            title="Nur Verschiebungs-Registrierung (Stativ-/gleicher-Blickpunkt-Aufnahmen) — mindestens 2 Fotos"
+            title={t("stackingDialog.panoramaTitle")}
             className="rounded border border-border px-3 py-1.5 text-left text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Panorama-Zusammenführung
+            {t("stackingDialog.panorama")}
           </button>
           <button
             type="button"
             onClick={() => void runStackAstro()}
             disabled={busy || count < 3}
-            title="Sigma-geclipptes Mittel über Kurzbelichtungen — mindestens 3 Fotos"
+            title={t("stackingDialog.astroTitle")}
             className="rounded border border-border px-3 py-1.5 text-left text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Astro-Stacking
+            {t("stackingDialog.astro")}
           </button>
         </div>
 
-        {busy && <p className="mt-3 text-xs text-text-muted">Läuft…</p>}
+        {busy && <p className="mt-3 text-xs text-text-muted">{t("stackingDialog.running")}</p>}
         {stackingStatus && !busy && <p className="mt-3 text-xs text-text-secondary">{stackingStatus}</p>}
 
         <div className="mt-3 flex justify-end">
           <button type="button" onClick={onClose} className="rounded border border-border px-3 py-1 text-xs text-text-secondary hover:bg-bg-panel">
-            Schließen
+            {t("stackingDialog.close")}
           </button>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { useT } from "../lib/i18n";
 import { useAppStore } from "../store";
 
 interface ScriptPluginDialogProps {
@@ -24,6 +25,7 @@ interface ScriptPluginDialogProps {
  * unverändert (derselbe Mechanismus wie die KI-Filter aus Schritt 6).
  */
 export function ScriptPluginDialog({ open, onClose }: ScriptPluginDialogProps) {
+  const t = useT();
   const [tab, setTab] = useState<"script" | "plugin">("script");
   const [scriptText, setScriptText] = useState("edl.set_exposure(edl.get_exposure() + 0.5);");
   const [pluginPath, setPluginPath] = useState("");
@@ -45,15 +47,13 @@ export function ScriptPluginDialog({ open, onClose }: ScriptPluginDialogProps) {
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-24" onClick={onClose}>
       <div
         role="dialog"
-        aria-label="Skript &amp; Plugins"
+        aria-label={t("scriptPluginDialog.title")}
         className="w-full max-w-lg rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 className="mb-1 text-sm font-semibold text-text-primary">Skript &amp; Plugins</h2>
+        <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("scriptPluginDialog.title")}</h2>
         <p className="mb-3 text-xs text-text-muted">
-          {noPhoto
-            ? "Kein Foto im Entwickeln-Panel aktiv."
-            : "Wirkt auf das aktuell im Entwickeln-Panel geöffnete Foto."}
+          {noPhoto ? t("scriptPluginDialog.noPhoto") : t("scriptPluginDialog.activePhoto")}
         </p>
 
         <div className="mb-3 flex gap-1 border-b border-border">
@@ -64,7 +64,7 @@ export function ScriptPluginDialog({ open, onClose }: ScriptPluginDialogProps) {
               tab === "script" ? "border-b-2 border-accent text-text-primary" : "text-text-muted"
             }`}
           >
-            Skript
+            {t("scriptPluginDialog.tabScript")}
           </button>
           <button
             type="button"
@@ -73,7 +73,7 @@ export function ScriptPluginDialog({ open, onClose }: ScriptPluginDialogProps) {
               tab === "plugin" ? "border-b-2 border-accent text-text-primary" : "text-text-muted"
             }`}
           >
-            Plugin
+            {t("scriptPluginDialog.tabPlugin")}
           </button>
         </div>
 
@@ -87,11 +87,7 @@ export function ScriptPluginDialog({ open, onClose }: ScriptPluginDialogProps) {
               placeholder="edl.set_exposure(edl.get_exposure() + 0.5);"
               className="w-full rounded border border-border bg-bg-panel p-2 font-mono text-xs text-text-primary"
             />
-            <p className="text-[11px] text-text-muted">
-              Nur die Grundeinstellungen sind erreichbar (Belichtung, Kontrast, Weiß/Schwarz,
-              Lichter/Tiefen, Klarheit, Dynamik/Sättigung, Farbe/Schwarzweiß-Umschalter) — kein
-              Zugriff auf Kurven/HSL/Masken/Objektivkorrekturen.
-            </p>
+            <p className="text-[11px] text-text-muted">{t("scriptPluginDialog.scriptScopeNote")}</p>
             <div className="flex justify-end">
               <button
                 type="button"
@@ -99,16 +95,16 @@ export function ScriptPluginDialog({ open, onClose }: ScriptPluginDialogProps) {
                 disabled={noPhoto || scriptRunning || scriptText.trim() === ""}
                 className="rounded border border-border px-3 py-1.5 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Ausführen
+                {t("scriptPluginDialog.run")}
               </button>
             </div>
-            {scriptRunning && <p className="text-xs text-text-muted">Läuft…</p>}
+            {scriptRunning && <p className="text-xs text-text-muted">{t("scriptPluginDialog.running")}</p>}
             {scriptStatus && !scriptRunning && <p className="text-xs text-text-secondary">{scriptStatus}</p>}
           </div>
         ) : (
           <div className="flex flex-col gap-2">
             <label className="text-xs text-text-secondary">
-              Plugin-Datei (.so/.dylib/.dll)
+              {t("scriptPluginDialog.pluginFile")}
               <input
                 type="text"
                 value={pluginPath}
@@ -118,7 +114,7 @@ export function ScriptPluginDialog({ open, onClose }: ScriptPluginDialogProps) {
               />
             </label>
             <label className="text-xs text-text-secondary">
-              Parameter
+              {t("scriptPluginDialog.parameter")}
               <input
                 type="number"
                 step="0.1"
@@ -127,11 +123,7 @@ export function ScriptPluginDialog({ open, onClose }: ScriptPluginDialogProps) {
                 className="mt-1 w-full rounded border border-border bg-bg-panel px-2 py-1 text-xs text-text-primary"
               />
             </label>
-            <p className="text-[11px] text-text-muted">
-              Die ABI-Version des Plugins wird beim Laden hart geprüft — bei Abweichung wird das
-              Plugin abgelehnt statt geraten geladen. Ergebnis wird als neue Datei neben dem
-              Original gespeichert, das Katalogfoto bleibt unverändert.
-            </p>
+            <p className="text-[11px] text-text-muted">{t("scriptPluginDialog.pluginAbiNote")}</p>
             <div className="flex justify-end">
               <button
                 type="button"
@@ -139,10 +131,10 @@ export function ScriptPluginDialog({ open, onClose }: ScriptPluginDialogProps) {
                 disabled={noPhoto || pluginRunning || pluginPath.trim() === ""}
                 className="rounded border border-border px-3 py-1.5 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Anwenden
+                {t("scriptPluginDialog.apply")}
               </button>
             </div>
-            {pluginRunning && <p className="text-xs text-text-muted">Läuft…</p>}
+            {pluginRunning && <p className="text-xs text-text-muted">{t("scriptPluginDialog.running")}</p>}
             {pluginStatus && !pluginRunning && <p className="text-xs text-text-secondary">{pluginStatus}</p>}
           </div>
         )}
@@ -153,7 +145,7 @@ export function ScriptPluginDialog({ open, onClose }: ScriptPluginDialogProps) {
             onClick={onClose}
             className="rounded border border-border px-3 py-1 text-xs text-text-secondary hover:bg-bg-panel"
           >
-            Schließen
+            {t("scriptPluginDialog.close")}
           </button>
         </div>
       </div>

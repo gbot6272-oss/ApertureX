@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { useT } from "../lib/i18n";
 import { suggestBestPhoto } from "../lib/duplicates";
 import type { FilterCriteriaDto } from "../lib/tauri";
 import { useAppStore } from "../store";
@@ -11,14 +12,6 @@ interface LibraryOrganizeDialogProps {
 
 type Tab = "sets" | "stacks" | "copies" | "colors" | "duplicates";
 
-const TAB_LABELS: Record<Tab, string> = {
-  sets: "Sammlungssätze",
-  stacks: "Stapel",
-  copies: "Virtuelle Kopien",
-  colors: "Farbmarkierungen",
-  duplicates: "Duplikate",
-};
-
 /**
  * Bibliotheks-Backlog-Dialog (Phase 9 Schritt 1, siehe `PLAN.md`/
  * `DECISIONS.md` ADR-0032/ADR-0035) — ein Dialog für alle fünf neuen
@@ -27,7 +20,16 @@ const TAB_LABELS: Record<Tab, string> = {
  * Assistent), analog zum `TemplatesDialog.tsx`-Muster aus Phase 8.
  */
 export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogProps) {
+  const t = useT();
   const [tab, setTab] = useState<Tab>("sets");
+
+  const TAB_LABELS: Record<Tab, string> = {
+    sets: t("libraryOrganizeDialog.tabSets"),
+    stacks: t("libraryOrganizeDialog.tabStacks"),
+    copies: t("libraryOrganizeDialog.tabCopies"),
+    colors: t("libraryOrganizeDialog.tabColors"),
+    duplicates: t("libraryOrganizeDialog.tabDuplicates"),
+  };
 
   const collectionFolders = useAppStore((s) => s.collectionFolders);
   const refreshCollectionFolders = useAppStore((s) => s.refreshCollectionFolders);
@@ -109,18 +111,18 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
         onClick={(e) => e.stopPropagation()}
         className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
       >
-        <h2 className="mb-1 text-sm font-semibold text-text-primary">Bibliothek organisieren</h2>
-        <p className="mb-3 text-xs text-text-muted">Sammlungssätze, Stapel, virtuelle Kopien, Farbmarkierungen, Duplikat-Assistent</p>
+        <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("libraryOrganizeDialog.title")}</h2>
+        <p className="mb-3 text-xs text-text-muted">{t("libraryOrganizeDialog.subtitle")}</p>
 
         <div className="mb-3 flex gap-1 border-b border-border pb-2">
-          {(Object.keys(TAB_LABELS) as Tab[]).map((t) => (
+          {(Object.keys(TAB_LABELS) as Tab[]).map((key) => (
             <button
-              key={t}
+              key={key}
               type="button"
-              onClick={() => setTab(t)}
-              className={`rounded px-2 py-1 text-xs ${tab === t ? "border border-accent bg-accent/10 text-accent" : "border border-border hover:border-accent"}`}
+              onClick={() => setTab(key)}
+              className={`rounded px-2 py-1 text-xs ${tab === key ? "border border-accent bg-accent/10 text-accent" : "border border-border hover:border-accent"}`}
             >
-              {TAB_LABELS[t]}
+              {TAB_LABELS[key]}
             </button>
           ))}
         </div>
@@ -128,40 +130,40 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
         {tab === "sets" && (
           <div className="flex flex-col gap-3">
             <div>
-              <p className="mb-1 text-xs font-semibold text-text-secondary">Sammlungssätze</p>
+              <p className="mb-1 text-xs font-semibold text-text-secondary">{t("libraryOrganizeDialog.collectionSets")}</p>
               <ul className="mb-2 flex flex-col gap-1">
                 {collectionFolders.map((f) => (
                   <li key={f.id} className="flex items-center justify-between rounded border border-border px-2 py-1 text-xs">
                     <span>{f.name}</span>
                     <button type="button" onClick={() => void deleteCollectionFolder(f.id)} className="rounded border border-border px-1.5 py-0.5 hover:border-danger">
-                      Löschen
+                      {t("libraryOrganizeDialog.delete")}
                     </button>
                   </li>
                 ))}
-                {collectionFolders.length === 0 && <li className="text-xs text-text-muted">Keine Sammlungssätze</li>}
+                {collectionFolders.length === 0 && <li className="text-xs text-text-muted">{t("libraryOrganizeDialog.noCollectionSets")}</li>}
               </ul>
               <div className="flex gap-1">
-                <input type="text" value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)} placeholder="Neuer Sammlungssatz" className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs" />
+                <input type="text" value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)} placeholder={t("libraryOrganizeDialog.newCollectionSet")} className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs" />
                 <button type="button" onClick={() => void handleCreateFolder()} className="shrink-0 rounded border border-accent bg-accent/10 px-2 py-1 text-xs text-accent">
-                  Anlegen
+                  {t("libraryOrganizeDialog.create")}
                 </button>
               </div>
             </div>
 
             <div>
-              <p className="mb-1 text-xs font-semibold text-text-secondary">Sammlungen</p>
+              <p className="mb-1 text-xs font-semibold text-text-secondary">{t("libraryOrganizeDialog.collections")}</p>
               <ul className="mb-2 flex flex-col gap-1">
                 {collections.map((c) => (
                   <li key={c.id} className="flex items-center justify-between rounded border border-border px-2 py-1 text-xs">
                     <span>
-                      {c.name} {c.is_smart && <span className="text-text-muted">(intelligent)</span>}
+                      {c.name} {c.is_smart && <span className="text-text-muted">{t("libraryOrganizeDialog.smartSuffix")}</span>}
                     </span>
                     <select
                       value={c.folder_id ?? ""}
                       onChange={(e) => void moveCollectionToFolder(c.id, e.target.value || null)}
                       className="rounded border border-border bg-bg-panel px-1 py-0.5 text-xs"
                     >
-                      <option value="">Wurzel</option>
+                      <option value="">{t("libraryOrganizeDialog.root")}</option>
                       {collectionFolders.map((f) => (
                         <option key={f.id} value={f.id}>
                           {f.name}
@@ -174,20 +176,20 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
             </div>
 
             <div className="rounded border border-border p-2">
-              <p className="mb-2 text-xs font-semibold text-text-secondary">Neue intelligente Sammlung</p>
-              <input type="text" value={newSmartName} onChange={(e) => setNewSmartName(e.target.value)} placeholder="Name" className="mb-2 w-full rounded border border-border bg-bg-panel px-2 py-1 text-xs" />
+              <p className="mb-2 text-xs font-semibold text-text-secondary">{t("libraryOrganizeDialog.newSmartCollection")}</p>
+              <input type="text" value={newSmartName} onChange={(e) => setNewSmartName(e.target.value)} placeholder={t("libraryOrganizeDialog.name")} className="mb-2 w-full rounded border border-border bg-bg-panel px-2 py-1 text-xs" />
               <div className="mb-2 flex gap-2">
                 <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
-                  Bewertung mind.
+                  {t("libraryOrganizeDialog.ratingAtLeast")}
                   <input type="number" min={0} max={5} value={smartRatingAtLeast} onChange={(e) => setSmartRatingAtLeast(e.target.value === "" ? "" : Number(e.target.value))} className="rounded border border-border bg-bg-panel px-2 py-1" />
                 </label>
                 <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
-                  Farbmarkierung
-                  <input type="text" value={smartColorLabel} onChange={(e) => setSmartColorLabel(e.target.value)} placeholder="z. B. red" className="rounded border border-border bg-bg-panel px-2 py-1" />
+                  {t("libraryOrganizeDialog.colorLabel")}
+                  <input type="text" value={smartColorLabel} onChange={(e) => setSmartColorLabel(e.target.value)} placeholder={t("libraryOrganizeDialog.colorLabelPlaceholder")} className="rounded border border-border bg-bg-panel px-2 py-1" />
                 </label>
               </div>
               <button type="button" onClick={() => void handleCreateSmartCollection()} className="w-full rounded border border-accent bg-accent/10 px-2 py-1 text-xs text-accent">
-                Intelligente Sammlung anlegen
+                {t("libraryOrganizeDialog.createSmartCollection")}
               </button>
             </div>
           </div>
@@ -196,32 +198,32 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
         {tab === "stacks" && (
           <div className="flex flex-col gap-3">
             <div className="flex gap-2">
-              <input type="text" value={newStackName} onChange={(e) => setNewStackName(e.target.value)} placeholder="Stapel-Name (optional)" className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs" />
+              <input type="text" value={newStackName} onChange={(e) => setNewStackName(e.target.value)} placeholder={t("libraryOrganizeDialog.stackNamePlaceholder")} className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs" />
               <button type="button" onClick={() => void createStackFromSelection(newStackName || undefined)} className="shrink-0 rounded border border-accent bg-accent/10 px-2 py-1 text-xs text-accent">
-                Aus Auswahl stapeln
+                {t("libraryOrganizeDialog.stackFromSelection")}
               </button>
             </div>
             <div className="flex gap-2">
               <label className="flex items-center gap-1 text-xs text-text-secondary">
-                Zeitfenster (s)
+                {t("libraryOrganizeDialog.timeWindow")}
                 <input type="number" min={1} value={autoStackWindow} onChange={(e) => setAutoStackWindow(Number(e.target.value))} className="w-20 rounded border border-border bg-bg-panel px-2 py-1" />
               </label>
               <button type="button" onClick={() => void autoStackSelectionByTime(autoStackWindow)} className="rounded border border-border px-2 py-1 text-xs hover:border-accent">
-                Auswahl automatisch stapeln
+                {t("libraryOrganizeDialog.autoStackSelection")}
               </button>
             </div>
             <ul className="flex flex-col gap-1">
               {stacks.map((s) => (
                 <li key={s.id} className="flex items-center justify-between rounded border border-border px-2 py-1 text-xs">
                   <span>
-                    {s.name ?? "Stapel"} — {s.photo_ids.length} Fotos
+                    {s.name ?? t("libraryOrganizeDialog.stackFallbackName")} — {t("libraryOrganizeDialog.photoCount", { count: s.photo_ids.length })}
                   </span>
                   <button type="button" onClick={() => void deleteStack(s.id)} className="rounded border border-border px-1.5 py-0.5 hover:border-danger">
-                    Löschen
+                    {t("libraryOrganizeDialog.delete")}
                   </button>
                 </li>
               ))}
-              {stacks.length === 0 && <li className="text-xs text-text-muted">Keine Stapel</li>}
+              {stacks.length === 0 && <li className="text-xs text-text-muted">{t("libraryOrganizeDialog.noStacks")}</li>}
             </ul>
           </div>
         )}
@@ -234,15 +236,15 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
               disabled={!selectedPhotoId}
               className="w-full rounded border border-accent bg-accent/10 px-2 py-1 text-xs text-accent disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Virtuelle Kopie vom ausgewählten Foto erstellen
+              {t("libraryOrganizeDialog.createVirtualCopy")}
             </button>
-            {!selectedPhotoId && <p className="text-xs text-text-muted">Kein Foto ausgewählt</p>}
+            {!selectedPhotoId && <p className="text-xs text-text-muted">{t("libraryOrganizeDialog.noPhotoSelected")}</p>}
             <ul className="flex flex-col gap-1">
               {virtualCopies.map((copy) => (
                 <li key={copy.id} className="flex items-center justify-between rounded border border-border px-2 py-1 text-xs">
                   <span>{copy.filename} — {copy.rating}★</span>
                   <button type="button" onClick={() => selectPhoto(copy.id)} className="rounded border border-border px-1.5 py-0.5 hover:border-accent">
-                    Öffnen
+                    {t("libraryOrganizeDialog.open")}
                   </button>
                 </li>
               ))}
@@ -260,16 +262,16 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
                     {def.display_name} ({def.name})
                   </span>
                   <button type="button" onClick={() => void deleteColorLabelDefinition(def.name)} className="rounded border border-border px-1.5 py-0.5 hover:border-danger">
-                    Löschen
+                    {t("libraryOrganizeDialog.delete")}
                   </button>
                 </li>
               ))}
             </ul>
             <div className="rounded border border-border p-2">
-              <p className="mb-2 text-xs font-semibold text-text-secondary">Neue Farbmarkierung</p>
+              <p className="mb-2 text-xs font-semibold text-text-secondary">{t("libraryOrganizeDialog.newColorLabel")}</p>
               <div className="mb-2 flex gap-2">
-                <input type="text" value={newLabelName} onChange={(e) => setNewLabelName(e.target.value)} placeholder="interner Name (z. B. orange)" className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs" />
-                <input type="text" value={newLabelDisplayName} onChange={(e) => setNewLabelDisplayName(e.target.value)} placeholder="Anzeigename" className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs" />
+                <input type="text" value={newLabelName} onChange={(e) => setNewLabelName(e.target.value)} placeholder={t("libraryOrganizeDialog.internalNamePlaceholder")} className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs" />
+                <input type="text" value={newLabelDisplayName} onChange={(e) => setNewLabelDisplayName(e.target.value)} placeholder={t("libraryOrganizeDialog.displayNamePlaceholder")} className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs" />
                 <input type="color" value={newLabelHex} onChange={(e) => setNewLabelHex(e.target.value)} className="h-7 w-10 shrink-0 rounded border border-border bg-bg-panel" />
               </div>
               <button
@@ -282,7 +284,7 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
                 disabled={!newLabelName.trim() || !newLabelDisplayName.trim()}
                 className="w-full rounded border border-accent bg-accent/10 px-2 py-1 text-xs text-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Anlegen
+                {t("libraryOrganizeDialog.create")}
               </button>
             </div>
           </div>
@@ -292,7 +294,7 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
           <div className="flex flex-col gap-3">
             <div className="flex gap-2">
               <label className="flex items-center gap-1 text-xs text-text-secondary">
-                Ähnlichkeitsschwelle
+                {t("libraryOrganizeDialog.similarityThreshold")}
                 <input type="number" min={0} max={64} value={maxDistance} onChange={(e) => setMaxDistance(Number(e.target.value))} className="w-16 rounded border border-border bg-bg-panel px-2 py-1" />
               </label>
               <button
@@ -301,23 +303,23 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
                 disabled={perceptualDuplicatesRunning}
                 className="rounded border border-accent bg-accent/10 px-2 py-1 text-xs text-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {perceptualDuplicatesRunning ? "Suche läuft…" : "Duplikate suchen"}
+                {perceptualDuplicatesRunning ? t("libraryOrganizeDialog.searching") : t("libraryOrganizeDialog.searchDuplicates")}
               </button>
             </div>
-            {perceptualDuplicateGroups.length === 0 && !perceptualDuplicatesRunning && <p className="text-xs text-text-muted">Keine Gruppen gefunden (oder noch nicht gesucht)</p>}
+            {perceptualDuplicateGroups.length === 0 && !perceptualDuplicatesRunning && <p className="text-xs text-text-muted">{t("libraryOrganizeDialog.noGroupsFound")}</p>}
             <ul className="flex flex-col gap-2">
               {perceptualDuplicateGroups.map((group, index) => {
                 const best = suggestBestPhoto(group);
                 return (
                   <li key={index} className="rounded border border-border p-2 text-xs">
-                    <p className="mb-1 text-text-muted">Gruppe {index + 1} ({group.length} Fotos)</p>
+                    <p className="mb-1 text-text-muted">{t("libraryOrganizeDialog.groupLabel", { index: index + 1, count: group.length })}</p>
                     {group.map((photo) => (
                       <div key={photo.id} className="flex items-center justify-between py-0.5">
                         <span>
-                          {photo.filename} {best?.id === photo.id && <span className="text-accent">— Vorschlag</span>}
+                          {photo.filename} {best?.id === photo.id && <span className="text-accent">{t("libraryOrganizeDialog.suggestionSuffix")}</span>}
                         </span>
                         <button type="button" onClick={() => selectPhoto(photo.id)} className="rounded border border-border px-1.5 py-0.5 hover:border-accent">
-                          Öffnen
+                          {t("libraryOrganizeDialog.open")}
                         </button>
                       </div>
                     ))}
@@ -334,17 +336,17 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
               type="button"
               onClick={() => void generateSmartPreviewsForSelection()}
               disabled={smartPreviewsGenerating}
-              title="Erzeugt verkleinerte Zwischendateien für die aktuelle Auswahl, damit sie später auch ohne erreichbares Original angezeigt werden können (z. B. externe Festplatte getrennt)"
+              title={t("libraryOrganizeDialog.smartPreviewsTitle")}
               className="rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {smartPreviewsGenerating ? "Erzeugt…" : "Smart Previews erzeugen"}
+              {smartPreviewsGenerating ? t("libraryOrganizeDialog.generating") : t("libraryOrganizeDialog.generateSmartPreviews")}
             </button>
             {smartPreviewsGeneratedCount !== null && !smartPreviewsGenerating && (
-              <span className="text-xs text-text-muted">{smartPreviewsGeneratedCount} erzeugt</span>
+              <span className="text-xs text-text-muted">{t("libraryOrganizeDialog.generatedCount", { count: smartPreviewsGeneratedCount })}</span>
             )}
           </div>
           <button type="button" onClick={onClose} className="rounded border border-border px-3 py-1 text-xs hover:border-accent">
-            Schließen
+            {t("libraryOrganizeDialog.close")}
           </button>
         </div>
       </div>

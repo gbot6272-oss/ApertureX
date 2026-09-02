@@ -1930,3 +1930,72 @@ BlurDepthApprox { threshold: f32 }` wird wie `ColorRange`/
 gebackene Alpha-Bitmap (anders als `AiGenerated`) — deshalb passt die
 Eigenständigkeit in `apx-pipeline` auch inhaltlich besser als ein
 Umweg über `apx-ai`.
+
+**Nachtrag nach Schritt 11 — Phase-10-Nachträge, mit einer weiteren
+ehrlichen Grenze bei der Installer-Signierung:**
+- **Lokalisierung**: die 13 in der Phase-10-Abnahme namentlich als
+  unübersetzt benannten Dialog-Komponenten (Export/Druck/Diashow/Buch/
+  Web/Vorlagen/Organisieren/Stacking/Skript & Plugins/Kollaboration/
+  Tethering/Metadaten-Editor/Statistik) sind jetzt vollständig über
+  `lib/i18n.ts`s `t()`-Muster übersetzt (de.ts/en.ts). `SlideshowPlayer.tsx`
+  (die separate Vollbild-Wiedergabekomponente, die `SlideshowDialog.tsx`
+  bei „Abspielen" öffnet) bleibt bewusst außerhalb dieses Schritts —
+  ehrlich als offene Ausbaustufe stehen gelassen statt stillschweigend
+  mitgezählt, ebenso die von `MetadataDialog.tsx` wiederverwendeten
+  `PRESET_CONDITION_FIELD_OPTIONS`/`PRESET_CONDITION_OPERATOR_OPTIONS`-
+  Labels aus `lib/presets.ts` (gemeinsam mit `SavePresetDialog.tsx`
+  genutzt, eigener Schritt nötig).
+- **`PaletteFrame`-Ausrollung**: `DevelopPanel.tsx`/`MasksPanel.tsx` sind
+  jetzt in `PaletteFrame` gewrappt (Ziehen/Einklappen wie die übrigen vier
+  Paletten). `MasksPanel.tsx`s `id="stage-masks"`-Sprunganker (von
+  `DevelopPanel.tsx`s Node-Editor „Öffnen"-Link genutzt) wandert dabei auf
+  die `<h2>`-Überschrift innerhalb des neuen `PaletteFrame`, weil dieser
+  selbst kein durchgereichtes `id`-Attribut auf sein `<aside>` anbietet —
+  funktional identisch (`scrollIntoView` scrollt denselben Container).
+  Direkt danach volle `develop-flow.spec.ts`/`masks-flow.spec.ts`-Regression
+  gefahren (40 Tests grün) — dieselbe Vorsicht, die Phase 10 Schritt 3
+  zurückgestellt hatte, jetzt mit Testnetz.
+- **Umbelegbare lokale Tastenkürzel**: `Viewer.tsx`s Zoom-Zifferntasten
+  (neu: `zoom-fit`/`zoom-100`) und `DevelopPanel.tsx`s eigener Ctrl/Cmd+Z-
+  Handler laufen jetzt über `lib/keybindings.ts`s `matchesBinding` statt
+  fest verdrahteter `event.key`-Vergleiche. Der Entwickeln-Panel-Handler
+  nutzt bewusst dieselben `"undo"`/`"redo"`-IDs wie `App.tsx`s Bibliotheks-
+  Metadaten-Undo (statt eigener neuer IDs), weil sich beide Kontexte
+  gegenseitig ausschließen (`App.tsx` reicht Ctrl/Cmd+Z nur weiter, wenn
+  das Entwickeln-Panel geschlossen ist) — ein Nutzer, der „Rückgängig"
+  umbelegt, bekommt eine konsistente neue Taste in beiden Kontexten.
+  Bewusst weiterhin fest: Kurven-/Masken-Editoren mit
+  `role="slider"`-Pfeiltasten-Feinjustierung und die Bewertungs-
+  Zifferntasten 0–5 (parametrisierte Ziffernreihe, keine einzelne feste
+  Aktion). Ein neuer Playwright-Test (max. 1 pro Schritt, siehe oben)
+  deckt beides ab: Ctrl+Z/Ctrl+Shift+Z committen jetzt tatsächlich über
+  den Tastatur-Pfad im Entwickeln-Panel (die bestehende
+  `develop-flow.spec.ts`-Suite deckte bislang nur den Rückgängig-Knopf ab,
+  nicht die Taste), und eine Neu-Belegung im Cheatsheet-Overlay steuert
+  Ctrl+Z tatsächlich um.
+- **Installer-Signierung — Mechanik-Nachweis, weiter eingeschränkt als
+  im Plan vorgesehen**: der Plan sah vor, ein selbstsigniertes Test-
+  Zertifikat einmalig als echtes GitHub-Actions-Secret zu setzen und
+  dadurch `ci.yml`s `release`-Job (Windows-Zertifikatsimport/
+  Fingerabdruck-Ermittlung/`--config`-Override) real durchlaufen zu
+  lassen. **Diese Sitzung hat kein Werkzeug, um Repository-Secrets zu
+  schreiben** (kein Admin-API-Zugriff über die verfügbaren GitHub-Tools),
+  und keinen Windows-/macOS-Ausführungskontext (reine Linux-Sandbox) —
+  ein echter CI-Lauf des `release`-Jobs war damit nicht möglich, ohne
+  einen Menschen um das Setzen des Secrets zu bitten (außerhalb des
+  Scopes dieser Sitzung). Stattdessen lokal verifiziert, **nur der
+  betriebssystemunabhängige Teil der Mechanik**: ein selbstsigniertes
+  Test-Zertifikat wurde per `openssl` erzeugt, zu einem PFX/P12-Bundle
+  gepackt (dasselbe Format wie `WINDOWS_CERTIFICATE`/`APPLE_CERTIFICATE`),
+  Base64-kodiert und wieder dekodiert (exakt der Schritt, den `ci.yml`s
+  `[Convert]::FromBase64String` beim echten Secret durchführt) —
+  Byte-für-Byte identisch zum Original bestätigt — und sein SHA1-
+  Fingerabdruck ermittelt (dieselbe Kennzahl, die Windows unter
+  `$cert.Thumbprint` liefert, nur von `openssl x509 -fingerprint -sha1`
+  anders formatiert ausgegeben). Zertifikat/Schlüssel/PFX wurden direkt
+  danach gelöscht, nichts committet. **Bleibt offen**: der eigentliche
+  `Import-PfxCertificate`-Aufruf in einen Windows-Zertifikatspeicher und
+  ein echter `tauri build`-Lauf mit `--config`-Override sind weiterhin
+  nie ausgeführt worden — dieselbe Grenze wie in ADR-0037, jetzt nur um
+  den zusätzlichen Befund ergänzt, dass auch der Secret-Setzschritt
+  selbst außerhalb der Werkzeuge dieser Sitzung liegt.

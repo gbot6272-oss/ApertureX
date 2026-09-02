@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { useT } from "../lib/i18n";
 import { useAppStore } from "../store";
 
 interface ShareDialogProps {
@@ -28,8 +29,9 @@ interface ShareDialogProps {
  * asynchronen Datei-Austausch ab.
  */
 export function ShareDialog({ open, onClose }: ShareDialogProps) {
+  const t = useT();
   const [tab, setTab] = useState<"export" | "import">("export");
-  const [shareName, setShareName] = useState("Freigabe");
+  const [shareName, setShareName] = useState(t("shareDialog.defaultName"));
 
   const multiSelectedIds = useAppStore((s) => s.multiSelectedIds);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
@@ -48,14 +50,12 @@ export function ShareDialog({ open, onClose }: ShareDialogProps) {
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-24" onClick={onClose}>
       <div
         role="dialog"
-        aria-label="Kollaboration"
+        aria-label={t("shareDialog.title")}
         className="w-full max-w-lg rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 className="mb-1 text-sm font-semibold text-text-primary">Kollaboration</h2>
-        <p className="mb-3 text-xs text-text-muted">
-          Asynchroner Austausch über .apxs-Dateien — keine Pixel-Bytes, kein Echtzeit-Modus.
-        </p>
+        <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("shareDialog.title")}</h2>
+        <p className="mb-3 text-xs text-text-muted">{t("shareDialog.subtitle")}</p>
 
         <div className="mb-3 flex gap-1 border-b border-border">
           <button
@@ -65,7 +65,7 @@ export function ShareDialog({ open, onClose }: ShareDialogProps) {
               tab === "export" ? "border-b-2 border-accent text-text-primary" : "text-text-muted"
             }`}
           >
-            Exportieren
+            {t("shareDialog.tabExport")}
           </button>
           <button
             type="button"
@@ -74,17 +74,17 @@ export function ShareDialog({ open, onClose }: ShareDialogProps) {
               tab === "import" ? "border-b-2 border-accent text-text-primary" : "text-text-muted"
             }`}
           >
-            Importieren
+            {t("shareDialog.tabImport")}
           </button>
         </div>
 
         {tab === "export" ? (
           <div className="flex flex-col gap-2">
             <p className="text-xs text-text-muted">
-              {exportIds.length} {exportIds.length === 1 ? "Foto" : "Fotos"} ausgewählt.
+              {t("shareDialog.selectedCount", { count: exportIds.length, noun: exportIds.length === 1 ? t("shareDialog.photoSingular") : t("shareDialog.photoPlural") })}
             </p>
             <label className="text-xs text-text-secondary">
-              Bezeichnung
+              {t("shareDialog.label")}
               <input
                 type="text"
                 value={shareName}
@@ -99,10 +99,10 @@ export function ShareDialog({ open, onClose }: ShareDialogProps) {
                 disabled={shareRunning || exportIds.length === 0 || shareName.trim() === ""}
                 className="rounded border border-border px-3 py-1.5 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Als .apxs speichern…
+                {t("shareDialog.saveAsApxs")}
               </button>
             </div>
-            {shareRunning && <p className="text-xs text-text-muted">Läuft…</p>}
+            {shareRunning && <p className="text-xs text-text-muted">{t("shareDialog.running")}</p>}
             {shareExportStatus && !shareRunning && <p className="text-xs text-text-secondary">{shareExportStatus}</p>}
           </div>
         ) : (
@@ -114,10 +114,10 @@ export function ShareDialog({ open, onClose }: ShareDialogProps) {
                 disabled={shareRunning}
                 className="rounded border border-border px-3 py-1.5 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
-                .apxs öffnen…
+                {t("shareDialog.openApxs")}
               </button>
             </div>
-            {shareRunning && <p className="text-xs text-text-muted">Läuft…</p>}
+            {shareRunning && <p className="text-xs text-text-muted">{t("shareDialog.running")}</p>}
 
             {shareImportResult && (
               <div className="flex flex-col gap-3">
@@ -125,26 +125,25 @@ export function ShareDialog({ open, onClose }: ShareDialogProps) {
 
                 {shareImportResult.unchanged.length > 0 && (
                   <p className="text-[11px] text-text-muted">
-                    {shareImportResult.unchanged.length} unverändert (identischer Bearbeitungsstand).
+                    {t("shareDialog.unchangedCount", { count: shareImportResult.unchanged.length })}
                   </p>
                 )}
                 {shareImportResult.unmatched.length > 0 && (
                   <p className="text-[11px] text-text-muted">
-                    {shareImportResult.unmatched.length} ohne lokale Entsprechung: {" "}
+                    {t("shareDialog.unmatchedCount", { count: shareImportResult.unmatched.length })}{" "}
                     {shareImportResult.unmatched.map((u) => u.filename).join(", ")}
                   </p>
                 )}
 
                 {shareImportResult.conflicts.length === 0 ? (
-                  <p className="text-xs text-text-secondary">Keine offenen Konflikte.</p>
+                  <p className="text-xs text-text-secondary">{t("shareDialog.noConflicts")}</p>
                 ) : (
                   <ul className="flex flex-col gap-2">
                     {shareImportResult.conflicts.map((conflict) => (
                       <li key={conflict.photo_id} className="rounded border border-border p-2">
                         <p className="mb-1 text-xs text-text-primary">{conflict.filename}</p>
                         <p className="mb-2 text-[11px] text-text-muted">
-                          Vorschlag: {conflict.prefer_incoming ? "übernehmen" : "meins behalten"} (zuletzt geändert
-                          gewinnt)
+                          {t("shareDialog.suggestion", { action: conflict.prefer_incoming ? t("shareDialog.takeIncoming") : t("shareDialog.keepMine") })}
                         </p>
                         <div className="flex gap-1">
                           <button
@@ -154,7 +153,7 @@ export function ShareDialog({ open, onClose }: ShareDialogProps) {
                             }
                             className="rounded border border-border px-2 py-1 text-[11px] hover:border-accent"
                           >
-                            Meins behalten
+                            {t("shareDialog.keepMineButton")}
                           </button>
                           <button
                             type="button"
@@ -167,7 +166,7 @@ export function ShareDialog({ open, onClose }: ShareDialogProps) {
                             }
                             className="rounded border border-border px-2 py-1 text-[11px] hover:border-accent"
                           >
-                            Übernehmen
+                            {t("shareDialog.takeIncomingButton")}
                           </button>
                           <button
                             type="button"
@@ -180,7 +179,7 @@ export function ShareDialog({ open, onClose }: ShareDialogProps) {
                             }
                             className="rounded border border-border px-2 py-1 text-[11px] hover:border-accent"
                           >
-                            Als virtuelle Kopie
+                            {t("shareDialog.asVirtualCopy")}
                           </button>
                         </div>
                       </li>
@@ -198,7 +197,7 @@ export function ShareDialog({ open, onClose }: ShareDialogProps) {
             onClick={onClose}
             className="rounded border border-border px-3 py-1 text-xs text-text-secondary hover:bg-bg-panel"
           >
-            Schließen
+            {t("shareDialog.close")}
           </button>
         </div>
       </div>

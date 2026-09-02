@@ -42,12 +42,14 @@ import {
   type SliderSpec,
   type StageEnabled,
 } from "../lib/edl";
+import { matchesBinding } from "../lib/keybindings";
 import { PRESET_SECTION_KEYS, PRESET_SECTION_LABELS, type PresetSectionKey } from "../lib/presets";
 import { SOFT_PROOF_INTENT_LABELS, SOFT_PROOF_PROFILE_LABELS, type SoftProofIntent, type SoftProofProfile } from "../lib/softProof";
 import { selectActivePhotos, useAppStore } from "../store";
 import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
+import { PaletteFrame } from "./PaletteFrame";
 import { SavePresetDialog } from "./SavePresetDialog";
 
 // ---- Reparatur (Klonen/Reparieren) — Phase 4 Schritt 12 --------------------
@@ -284,12 +286,17 @@ export function DevelopPanel() {
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") return;
 
-      event.preventDefault();
-      if (event.shiftKey) {
+      // Umbelegbar über `lib/keybindings.ts` (Phase 11 Schritt 11, siehe
+      // DECISIONS.md ADR-0038) — dieselben "undo"/"redo"-IDs wie
+      // `App.tsx`s Bibliotheks-Metadaten-Undo, weil sich beide Kontexte
+      // gegenseitig ausschließen (`App.tsx` reicht Ctrl/Cmd+Z nur weiter,
+      // wenn dieses Panel geschlossen ist).
+      if (matchesBinding(event, "redo")) {
+        event.preventDefault();
         void redoDevelop();
-      } else {
+      } else if (matchesBinding(event, "undo")) {
+        event.preventDefault();
         void undoDevelop();
       }
     }
@@ -305,7 +312,7 @@ export function DevelopPanel() {
 
   return (
     <>
-    <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border bg-bg-raised p-3" aria-label="Entwickeln">
+    <PaletteFrame id="develop" side="right" defaultWidth={288} label="Entwickeln" className="gap-4 border-l border-border bg-bg-raised p-3">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-text-primary">Entwickeln</h2>
         <div className="flex gap-1">
@@ -1351,7 +1358,7 @@ export function DevelopPanel() {
           </fieldset>
         </>
       )}
-    </aside>
+    </PaletteFrame>
     <SavePresetDialog open={savePresetOpen} onClose={() => setSavePresetOpen(false)} />
     </>
   );

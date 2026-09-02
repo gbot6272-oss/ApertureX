@@ -27,6 +27,7 @@ import { MASK_KIND_LABEL, useAppStore } from "../store";
 import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
+import { PaletteFrame } from "./PaletteFrame";
 
 /** Die sechs Maskentypen, in derselben Reihenfolge wie die „+ …"-Knöpfe
  * oben im Panel — wiederverwendet für „+ Komponente hinzufügen". */
@@ -183,12 +184,8 @@ export function MasksPanel() {
   }
 
   return (
-    <aside
-      id="stage-masks"
-      className="flex w-64 shrink-0 flex-col gap-3 overflow-y-auto border-l border-border bg-bg-raised p-3"
-      aria-label="Masken"
-    >
-      <h2 className="text-sm font-semibold text-text-primary">Masken</h2>
+    <PaletteFrame id="masks" side="right" defaultWidth={256} label="Masken" className="gap-3 border-l border-border bg-bg-raised p-3">
+      <h2 id="stage-masks" className="text-sm font-semibold text-text-primary">Masken</h2>
 
       <div className="grid grid-cols-2 gap-1">
         <button
@@ -856,6 +853,6 @@ export function MasksPanel() {
           </div>
         </fieldset>
       )}
-    </aside>
+    </PaletteFrame>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { useT } from "../lib/i18n";
 import type { PresetCondition, PresetConditionField, PresetConditionOperator } from "../lib/presets";
 import { PRESET_CONDITION_FIELD_OPTIONS, PRESET_CONDITION_OPERATOR_OPTIONS } from "../lib/presets";
 import { useAppStore } from "../store";
@@ -11,12 +12,6 @@ interface MetadataDialogProps {
 
 type Tab = "keywords" | "rules" | "fields";
 
-const TAB_LABELS: Record<Tab, string> = {
-  keywords: "Schlagworte",
-  rules: "Tag-Regeln",
-  fields: "Metadaten & XMP",
-};
-
 /**
  * Metadaten-Dialog (Phase 9 Schritt 2, siehe `PLAN.md`/`DECISIONS.md`
  * ADR-0035) — Schlagworthierarchie/Synonyme, bedingte Auto-Tag-Regeln,
@@ -24,7 +19,14 @@ const TAB_LABELS: Record<Tab, string> = {
  * analog zum `LibraryOrganizeDialog.tsx`-Muster aus Schritt 1.
  */
 export function MetadataDialog({ open, onClose }: MetadataDialogProps) {
+  const t = useT();
   const [tab, setTab] = useState<Tab>("keywords");
+
+  const TAB_LABELS: Record<Tab, string> = {
+    keywords: t("metadataDialog.tabKeywords"),
+    rules: t("metadataDialog.tabRules"),
+    fields: t("metadataDialog.tabFields"),
+  };
 
   const keywords = useAppStore((s) => s.keywords);
   const refreshKeywords = useAppStore((s) => s.refreshKeywords);
@@ -100,41 +102,41 @@ export function MetadataDialog({ open, onClose }: MetadataDialogProps) {
         onClick={(e) => e.stopPropagation()}
         className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
       >
-        <h2 className="mb-1 text-sm font-semibold text-text-primary">Metadaten</h2>
-        <p className="mb-3 text-xs text-text-muted">Schlagworthierarchie, Auto-Tag-Regeln, IPTC-Felder, Adobe-XMP-Sidecar</p>
+        <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("metadataDialog.title")}</h2>
+        <p className="mb-3 text-xs text-text-muted">{t("metadataDialog.subtitle")}</p>
 
         <div className="mb-3 flex gap-1 border-b border-border pb-2">
-          {(Object.keys(TAB_LABELS) as Tab[]).map((t) => (
+          {(Object.keys(TAB_LABELS) as Tab[]).map((key) => (
             <button
-              key={t}
+              key={key}
               type="button"
-              onClick={() => setTab(t)}
-              className={`rounded px-2 py-1 text-xs ${tab === t ? "border border-accent bg-accent/10 text-accent" : "border border-border hover:border-accent"}`}
+              onClick={() => setTab(key)}
+              className={`rounded px-2 py-1 text-xs ${tab === key ? "border border-accent bg-accent/10 text-accent" : "border border-border hover:border-accent"}`}
             >
-              {TAB_LABELS[t]}
+              {TAB_LABELS[key]}
             </button>
           ))}
         </div>
 
         {tab === "keywords" && (
           <div className="flex flex-col gap-2">
-            {keywords.length === 0 && <p className="text-xs text-text-muted">Keine Schlagworte — erst einem Foto zuweisen.</p>}
+            {keywords.length === 0 && <p className="text-xs text-text-muted">{t("metadataDialog.noKeywords")}</p>}
             {keywords.map((k) => (
               <div key={k.id} className="rounded border border-border p-2 text-xs">
                 <div className="mb-1 flex items-center justify-between">
                   <span className="font-medium">{k.name}</span>
                   <button type="button" onClick={() => void deleteKeywordEntry(k.id)} className="rounded border border-border px-1.5 py-0.5 hover:border-danger">
-                    Löschen
+                    {t("metadataDialog.delete")}
                   </button>
                 </div>
                 <label className="mb-1 flex items-center gap-2 text-text-secondary">
-                  Übergeordnet:
+                  {t("metadataDialog.parentKeyword")}
                   <select
                     value={k.parent_id ?? ""}
                     onChange={(e) => void setKeywordParent(k.id, e.target.value || null)}
                     className="rounded border border-border bg-bg-panel px-1 py-0.5"
                   >
-                    <option value="">Wurzel-Schlagwort</option>
+                    <option value="">{t("metadataDialog.rootKeyword")}</option>
                     {keywords
                       .filter((other) => other.id !== k.id)
                       .map((other) => (
@@ -145,7 +147,7 @@ export function MetadataDialog({ open, onClose }: MetadataDialogProps) {
                   </select>
                 </label>
                 <label className="flex items-center gap-2 text-text-secondary">
-                  Synonyme (Komma-getrennt):
+                  {t("metadataDialog.synonyms")}
                   <input
                     type="text"
                     value={synonymDrafts[k.id] ?? k.synonyms.join(", ")}
@@ -172,24 +174,24 @@ export function MetadataDialog({ open, onClose }: MetadataDialogProps) {
                     {r.name}
                   </label>
                   <button type="button" onClick={() => void deleteTagRule(r.id)} className="rounded border border-border px-1.5 py-0.5 hover:border-danger">
-                    Löschen
+                    {t("metadataDialog.delete")}
                   </button>
                 </li>
               ))}
-              {tagRules.length === 0 && <li className="text-xs text-text-muted">Keine Tag-Regeln</li>}
+              {tagRules.length === 0 && <li className="text-xs text-text-muted">{t("metadataDialog.noRules")}</li>}
             </ul>
 
             <div className="rounded border border-border p-2">
-              <p className="mb-2 text-xs font-semibold text-text-secondary">Neue Regel</p>
+              <p className="mb-2 text-xs font-semibold text-text-secondary">{t("metadataDialog.newRule")}</p>
               <input
                 type="text"
                 value={ruleName}
                 onChange={(e) => setRuleName(e.target.value)}
-                placeholder="Name der Regel"
+                placeholder={t("metadataDialog.ruleNamePlaceholder")}
                 className="mb-2 w-full rounded border border-border bg-bg-panel px-2 py-1 text-xs"
               />
               <select value={ruleKeywordId} onChange={(e) => setRuleKeywordId(e.target.value)} className="mb-2 w-full rounded border border-border bg-bg-panel px-2 py-1 text-xs">
-                <option value="">Ziel-Schlagwort wählen…</option>
+                <option value="">{t("metadataDialog.chooseTargetKeyword")}</option>
                 {keywords.map((k) => (
                   <option key={k.id} value={k.id}>
                     {k.name}
@@ -211,10 +213,10 @@ export function MetadataDialog({ open, onClose }: MetadataDialogProps) {
                     </option>
                   ))}
                 </select>
-                <input type="text" value={ruleValue} onChange={(e) => setRuleValue(e.target.value)} placeholder="Wert" className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs" />
+                <input type="text" value={ruleValue} onChange={(e) => setRuleValue(e.target.value)} placeholder={t("metadataDialog.valuePlaceholder")} className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs" />
               </div>
               <button type="button" onClick={() => void handleCreateRule()} className="w-full rounded border border-accent bg-accent/10 px-2 py-1 text-xs text-accent">
-                Regel anlegen
+                {t("metadataDialog.createRule")}
               </button>
             </div>
           </div>
@@ -222,41 +224,41 @@ export function MetadataDialog({ open, onClose }: MetadataDialogProps) {
 
         {tab === "fields" && (
           <div className="flex flex-col gap-3">
-            {!selectedPhoto && <p className="text-xs text-text-muted">Kein Foto ausgewählt.</p>}
+            {!selectedPhoto && <p className="text-xs text-text-muted">{t("metadataDialog.noPhotoSelected")}</p>}
             {selectedPhoto && (
               <>
                 <label className="flex flex-col gap-1 text-xs text-text-secondary">
-                  Titel
+                  {t("metadataDialog.fieldTitle")}
                   <input type="text" value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)} className="rounded border border-border bg-bg-panel px-2 py-1" />
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-text-secondary">
-                  Bildunterschrift
+                  {t("metadataDialog.fieldCaption")}
                   <input type="text" value={captionDraft} onChange={(e) => setCaptionDraft(e.target.value)} className="rounded border border-border bg-bg-panel px-2 py-1" />
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-text-secondary">
-                  Copyright
+                  {t("metadataDialog.fieldCopyright")}
                   <input type="text" value={copyrightDraft} onChange={(e) => setCopyrightDraft(e.target.value)} className="rounded border border-border bg-bg-panel px-2 py-1" />
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-text-secondary">
-                  Urheber
+                  {t("metadataDialog.fieldCreator")}
                   <input type="text" value={creatorDraft} onChange={(e) => setCreatorDraft(e.target.value)} className="rounded border border-border bg-bg-panel px-2 py-1" />
                 </label>
                 <button type="button" onClick={() => void handleSaveFields()} className="w-full rounded border border-accent bg-accent/10 px-2 py-1 text-xs text-accent">
-                  Metadaten speichern
+                  {t("metadataDialog.saveMetadata")}
                 </button>
 
                 <div className="rounded border border-border p-2">
-                  <p className="mb-2 text-xs font-semibold text-text-secondary">Adobe-XMP-Sidecar</p>
+                  <p className="mb-2 text-xs font-semibold text-text-secondary">{t("metadataDialog.xmpSidecar")}</p>
                   <label className="mb-2 flex items-center gap-2 text-xs text-text-secondary">
                     <input type="checkbox" checked={withDevelopSettings} onChange={(e) => setWithDevelopSettings(e.target.checked)} />
-                    Entwickeln-Einstellungen (Basic+HSL) mit exportieren
+                    {t("metadataDialog.includeDevelopSettings")}
                   </label>
                   <div className="flex gap-2">
                     <button type="button" onClick={() => void exportXmpSidecarForSelected(withDevelopSettings)} className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs hover:border-accent">
-                      .xmp exportieren
+                      {t("metadataDialog.exportXmp")}
                     </button>
                     <button type="button" onClick={() => void importXmpSidecarForSelected()} className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs hover:border-accent">
-                      .xmp importieren…
+                      {t("metadataDialog.importXmp")}
                     </button>
                   </div>
                   {xmpStatus && <p className="mt-2 text-xs text-text-muted">{xmpStatus}</p>}

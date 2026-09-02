@@ -9,6 +9,7 @@ import { buildEdlEnvelopeJson, CURVE_CHANNEL_TABS, nearestHslBand, type CurvesAd
 import { formatShutter } from "../lib/format";
 import { buildClippingOverlay } from "../lib/histogram";
 import { computeMaskPinPosition } from "../lib/maskPins";
+import { matchesBinding } from "../lib/keybindings";
 import { imageUrl, previewUrl } from "../lib/media";
 import { mergeEdlSubset } from "../lib/presets";
 import { applySoftProof } from "../lib/softProof";
@@ -574,9 +575,9 @@ export function Viewer() {
         setZoom(nextZoomStep(effectiveScale, 1, fitScale), "manual");
       } else if (event.key === "-") {
         setZoom(nextZoomStep(effectiveScale, -1, fitScale), "manual");
-      } else if (event.key === "0") {
+      } else if (matchesBinding(event, "zoom-fit")) {
         resetView();
-      } else if (event.key === "1") {
+      } else if (matchesBinding(event, "zoom-100")) {
         setZoom(1, "manual");
         setPan(0, 0);
       } else if (event.key === "i" || event.key === "I") {

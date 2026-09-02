@@ -5,14 +5,22 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
  * UI-Anforderungen — vorher nur "grundlegende Tastenkürzel"). Deckt die
  * globalen, App-weiten Kürzel ab, die bisher als feste `if`-Kette in
  * `App.tsx` verdrahtet waren (Bildwechsel/Undo-Redo/Vollbild/Flaggen/
- * Palette/Escape) — **bewusst nicht** die lokalen Kürzel innerhalb
- * einzelner Komponenten (z. B. `Viewer.tsx`s Zoom-Zifferntasten,
- * `DevelopPanel.tsx`s eigener Ctrl/Cmd+Z-Handler, Kurven-/Masken-Editoren
- * mit `role="slider"`-Pfeiltasten-Feinjustierung): diese sind mit die am
- * dichtesten getesteten Pfade im Frontend, und diese Phase schreibt
- * bewusst keine neuen Tests, um Regressionen dort sofort abzufangen
- * (siehe `DECISIONS.md` ADR-0037) — sie bleiben fest, das Cheatsheet-
- * Overlay listet sie trotzdem informativ mit auf.
+ * Palette/Escape).
+ *
+ * **Nachtrag Phase 11 Schritt 11** (siehe `DECISIONS.md` ADR-0038): die in
+ * Phase 10 Schritt 5 bewusst zurückgestellten lokalen Kürzel — `Viewer.tsx`s
+ * Zoom-Zifferntasten (`zoom-fit`/`zoom-100`) und `DevelopPanel.tsx`s eigener
+ * Ctrl/Cmd+Z-Handler (wiederverwendet dieselben `undo`/`redo`-IDs wie die
+ * Bibliotheks-Metadaten, da beide Kontexte sich gegenseitig ausschließen —
+ * `App.tsx` reicht Ctrl/Cmd+Z nur weiter, wenn das Entwickeln-Panel
+ * geschlossen ist) sind jetzt ebenfalls über `matchesBinding` umbelegbar.
+ * **Weiterhin bewusst fest** (Kurven-/Masken-Editoren mit
+ * `role="slider"`-Pfeiltasten-Feinjustierung, die Bewertungs-Zifferntasten
+ * 0–5, die eine parametrisierte Ziffernreihe statt einer einzelnen festen
+ * Aktion sind): diese bleiben die am dichtesten getesteten Pfade im
+ * Frontend und sind laut Nutzervorgabe für diese Phase auf maximal einen
+ * neuen Test pro Schritt beschränkt (siehe `DECISIONS.md` ADR-0038-
+ * Nachtrag) — das Cheatsheet-Overlay listet sie weiterhin informativ mit.
  */
 
 export interface KeyBindingAction {
@@ -29,11 +37,13 @@ export const KEYBINDING_ACTIONS: KeyBindingAction[] = [
   { id: "toggle-palette", label: "Befehlspalette öffnen/schließen", defaultKey: "mod+k" },
   { id: "cheatsheet", label: "Tastenkürzel-Übersicht anzeigen", defaultKey: "?" },
   { id: "close-overlay", label: "Palette/Overlay schließen", defaultKey: "escape" },
-  { id: "undo", label: "Rückgängig (Bibliotheks-Metadaten)", defaultKey: "mod+z" },
-  { id: "redo", label: "Wiederholen (Bibliotheks-Metadaten)", defaultKey: "mod+shift+z" },
+  { id: "undo", label: "Rückgängig (Bibliotheks-Metadaten, oder Entwickeln bei geöffnetem Panel)", defaultKey: "mod+z" },
+  { id: "redo", label: "Wiederholen (Bibliotheks-Metadaten, oder Entwickeln bei geöffnetem Panel)", defaultKey: "mod+shift+z" },
   { id: "fullscreen", label: "Vollbild umschalten", defaultKey: "f" },
   { id: "flag-pick", label: "Als Favorit markieren", defaultKey: "p" },
   { id: "flag-reject", label: "Ablehnen markieren", defaultKey: "x" },
+  { id: "zoom-fit", label: "Zoom einpassen (im Viewer)", defaultKey: "0" },
+  { id: "zoom-100", label: "Zoom 100 % (im Viewer)", defaultKey: "1" },
 ];
 
 /** Rein informativ im Cheatsheet mit aufgeführt, hier fest (siehe
@@ -41,8 +51,6 @@ export const KEYBINDING_ACTIONS: KeyBindingAction[] = [
  * weil diese nicht über `matchesBinding` umbelegbar sind. */
 export const FIXED_LOCAL_SHORTCUTS: { label: string; key: string }[] = [
   { label: "Bewertung 0–5 setzen", key: "0–5" },
-  { label: "Zoom 100 % (im Viewer)", key: "1" },
-  { label: "Rückgängig/Wiederholen (im Entwickeln-Panel)", key: "Strg/Cmd+Z, Strg/Cmd+Shift+Z" },
   { label: "Feinjustierung an Reglern/Kurvenpunkten", key: "Pfeiltasten (Shift = grob)" },
 ];
 

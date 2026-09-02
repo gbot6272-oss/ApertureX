@@ -29,6 +29,7 @@ pub mod blur;
 pub mod color;
 pub mod denoise;
 pub mod error;
+pub mod faces;
 pub mod preset_generator;
 pub mod repair_analysis;
 pub mod segmentation;

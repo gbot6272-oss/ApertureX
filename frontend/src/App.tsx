@@ -14,6 +14,7 @@ import { MapView } from "./components/MapView";
 import { MasksPanel } from "./components/MasksPanel";
 import { MetadataPanel } from "./components/MetadataPanel";
 import { OnboardingDialog } from "./components/OnboardingDialog";
+import { PeopleView } from "./components/PeopleView";
 import { PresetsPanel } from "./components/PresetsPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -217,6 +218,8 @@ export default function App() {
           <GridView variant="overview" />
         ) : centerView === "map" ? (
           <MapView />
+        ) : centerView === "people" ? (
+          <PeopleView />
         ) : (
           <Viewer />
         )}

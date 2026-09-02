@@ -519,6 +519,16 @@ export function listPerceptualDuplicateGroups(maxDistance: number): Promise<Phot
   return invoke<PhotoDto[][]>("list_perceptual_duplicate_groups", { maxDistance });
 }
 
+// ---- Bibliothek: Personenansicht (Phase 11 Schritt 5, siehe
+// DECISIONS.md ADR-0038) -----------------------------------------------
+
+/** Siehe `apx-app`s `list_people_groups`-Command-Moduldoku für die
+ * Einschränkung (grobe Vorsortierung nach Blob-Anzahl/-Fläche, keine
+ * echte Personen-Identifizierung). */
+export function listPeopleGroups(): Promise<PhotoDto[][]> {
+  return invoke<PhotoDto[][]>("list_people_groups");
+}
+
 // ---- Presets (ab Phase 5, siehe DECISIONS.md ADR-0031) --------------------
 
 export function createPresetFolder(name: string, parentId: string | null): Promise<string> {

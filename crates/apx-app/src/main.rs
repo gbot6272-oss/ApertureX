@@ -213,6 +213,7 @@ fn main() {
             commands::search_and_filter_photos,
             commands::list_duplicate_photo_groups,
             commands::list_perceptual_duplicate_groups,
+            commands::list_people_groups,
             commands::generate_ai_mask,
             commands::suggest_repair_source,
             commands::detect_sensor_spots,

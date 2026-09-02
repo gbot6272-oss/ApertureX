@@ -12,6 +12,7 @@ export const de = {
   "header.viewGrid": "Raster",
   "header.viewOverview": "Übersicht",
   "header.viewMap": "Karte",
+  "header.viewPeople": "Personen",
   "header.viewInfo": "Info",
   "header.viewDevelop": "Entwickeln",
 

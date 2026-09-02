@@ -572,10 +572,13 @@ interface LibrarySlice {
    * Übersichtsansicht (Phase 11 Schritt 3, siehe `DECISIONS.md`
    * ADR-0038): größere Kacheln, reduzierte Metadaten-Overlays, kein
    * Mehrfachauswahl-Raster wie das normale Raster — eher ein
-   * Sichtungsmodus mit Schnellentwicklung statt Stapel-Bearbeitung. */
-  centerView: "viewer" | "grid" | "map" | "overview";
+   * Sichtungsmodus mit Schnellentwicklung statt Stapel-Bearbeitung.
+   * `"people"` die Personenansicht (Phase 11 Schritt 5, siehe
+   * `PeopleView.tsx`): grobe, nach Blob-Anzahl/-Fläche vorsortierte
+   * Gruppen statt echter Personen-Identifizierung. */
+  centerView: "viewer" | "grid" | "map" | "overview" | "people";
   toggleCenterView: () => void;
-  setCenterView: (view: "viewer" | "grid" | "map" | "overview") => void;
+  setCenterView: (view: "viewer" | "grid" | "map" | "overview" | "people") => void;
 
   /** Mehrfachauswahl fürs Stapel-Bearbeiten (Bewertung/Flagge/Sammlung-
    * Hinzufügen) — geteilt zwischen Raster und Filmstreifen. Enthält
@@ -1217,6 +1220,13 @@ interface LibraryBacklogSlice {
   perceptualDuplicateGroups: PhotoDto[][];
   perceptualDuplicatesRunning: boolean;
   runPerceptualDuplicateDetection: (maxDistance: number) => Promise<void>;
+
+  /** Personenansicht (Phase 11 Schritt 5, siehe `DECISIONS.md` ADR-0038)
+   * — dieselbe „bereits vorhandene Miniaturansicht statt Neudekodierung"-
+   * Vereinfachung wie `perceptualDuplicateGroups`. */
+  peopleGroups: PhotoDto[][];
+  peopleGroupsLoading: boolean;
+  loadPeopleGroups: () => Promise<void>;
 
   /** Smart Previews (Phase 11 Schritt 4, siehe `DECISIONS.md` ADR-0038):
    * erzeugt für die aktuelle Auswahl (wie `createStackFromSelection`)
@@ -4357,6 +4367,25 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.perceptualDuplicatesRunning = false;
+        });
+      }
+    },
+
+    peopleGroups: [],
+    peopleGroupsLoading: false,
+
+    loadPeopleGroups: async () => {
+      set((state) => {
+        state.peopleGroupsLoading = true;
+      });
+      try {
+        const groups = await api.listPeopleGroups();
+        set((state) => {
+          state.peopleGroups = groups;
+        });
+      } finally {
+        set((state) => {
+          state.peopleGroupsLoading = false;
         });
       }
     },

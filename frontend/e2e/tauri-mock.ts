@@ -168,6 +168,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     importedTemplateFile: null as { kind: string; name: string; payload_json: string } | null,
     // Perceptual-Hash-Duplikaterkennung (Phase 9 Schritt 1).
     perceptualDuplicateGroups: [] as unknown[][],
+    // Personenansicht (Phase 11 Schritt 5).
+    peopleGroups: [] as unknown[][],
     // Adobe-XMP-Sidecar (Phase 9 Schritt 2).
     exportedXmpSidecarPath: "/mock/photos/IMG_0001.xmp" as string,
     xmpImportApplies: true as boolean,
@@ -526,6 +528,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       exportTemplateFilePathResult: string | null;
       importedTemplateFile: { kind: string; name: string; payload_json: string } | null;
       perceptualDuplicateGroups: unknown[][];
+      peopleGroups: unknown[][];
     };
 
     switch (cmd) {
@@ -955,6 +958,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       // ---- Bibliothek: Perceptual-Hash-Duplikaterkennung (Phase 9 Schritt 1) -
       case "list_perceptual_duplicate_groups":
         return fixtures.perceptualDuplicateGroups;
+      case "list_people_groups":
+        return fixtures.peopleGroups;
 
       // ---- Bibliothek: Suche/Filter (ab Phase 3) ---------------------------
       case "search_photos": {

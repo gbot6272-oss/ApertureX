@@ -11,6 +11,7 @@ export const en: Record<keyof typeof de, string> = {
   "header.viewGrid": "Grid",
   "header.viewOverview": "Overview",
   "header.viewMap": "Map",
+  "header.viewPeople": "People",
   "header.viewInfo": "Info",
   "header.viewDevelop": "Develop",
 

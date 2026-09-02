@@ -223,6 +223,17 @@ export function Header() {
 
       <button
         type="button"
+        onClick={() => setCenterView(centerView === "people" ? "viewer" : "people")}
+        aria-pressed={centerView === "people"}
+        className={`rounded border px-3 py-1 text-sm ${
+          centerView === "people" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
+        }`}
+      >
+        {t("header.viewPeople")}
+      </button>
+
+      <button
+        type="button"
         onClick={toggleMetadataPanel}
         disabled={!selectedPhotoId && !metadataPanelOpen}
         aria-pressed={metadataPanelOpen}

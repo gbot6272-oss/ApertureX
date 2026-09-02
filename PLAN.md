@@ -994,7 +994,7 @@ Tests + gezielte Playwright-Tests, Commit+Push nach jedem Schritt.
 - [x] 2. Export-Formatlücken: PSD (ag-psd, flach), JPEG-XL (gamut-jxl, verlustfrei ab Qualität 100) — HEIF bleibt zurückgestellt (siehe ADR-0038: `heif` 0.1.0 ist eine Fassade, `heif-rs` zu riskant für das Plattenkontingent dieser Sandbox)
 - [x] 3. Bibliothek: Übersichtsansicht + Schnellentwicklung im Raster
 - [x] 4. Bibliothek: Smart Previews + Offline-Bearbeitung
-- [ ] 5. Bibliothek: Personenansicht (Hautton-Heuristik-Clustering)
+- [x] 5. Bibliothek: Personenansicht (Hautton-Heuristik-Clustering)
 - [ ] 6. Entwickeln: Zielgerichtetes Anpassungswerkzeug (TAT)
 - [ ] 7. Maskentyp Tiefenbereich — Alternative: Unschärfe-basierte Tiefennäherung
 - [ ] 8. Adobe `.lrtemplate`-Export (best-effort, nur Export)

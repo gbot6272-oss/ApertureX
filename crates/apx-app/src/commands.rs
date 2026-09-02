@@ -2091,6 +2091,58 @@ pub fn list_perceptual_duplicate_groups(
         .collect())
 }
 
+/// Personenansicht (Phase 11 Schritt 5, siehe `DECISIONS.md` ADR-0038):
+/// grobe Vorsortierung von Fotos mit erkannten Gesichtsregionen nach
+/// Ähnlichkeit (Blob-Anzahl/-Fläche als grobe „Signatur") — **keine
+/// echte Personen-Identifizierung**, siehe `apx_ai::faces`s Moduldoku.
+/// Arbeitet wie [`list_perceptual_duplicate_groups`] auf dem bereits
+/// vorhandenen Thumbnail-Vorschau-Cache statt jedes Foto neu zu
+/// dekodieren (dieselbe Begründung: schnell genug für die ganze
+/// Bibliothek, kein zweiter teurer RAW-Dekodier-Durchlauf).
+#[tauri::command]
+pub fn list_people_groups(state: State<'_, AppState>) -> Result<Vec<Vec<PhotoDto>>, String> {
+    let photos = state
+        .catalog
+        .search_and_filter_photos(None, &apx_catalog::FilterCriteria::default())
+        .map_err(|err| err.to_string())?;
+
+    // Signatur-Schlüssel: (Blob-Anzahl, bei 4 gekappt) × (grob gebuckete
+    // durchschnittliche Blob-Fläche) — bewusst grob, siehe Moduldoku.
+    let mut buckets: std::collections::BTreeMap<(u32, u32), Vec<apx_catalog::Photo>> =
+        std::collections::BTreeMap::new();
+
+    for photo in photos {
+        let Ok(Some(preview)) = state
+            .catalog
+            .get_preview(photo.id, apx_catalog::PreviewLevel::Thumbnail)
+        else {
+            continue;
+        };
+        let Ok(img) = image::open(&preview.path) else {
+            continue;
+        };
+        let rgb = img.to_rgb8();
+        let (width, height) = rgb.dimensions();
+        let pixels: Vec<f32> = rgb.into_raw().iter().map(|&v| f32::from(v) / 255.0).collect();
+        let Ok(regions) = apx_ai::faces::detect_face_regions(&pixels, width, height) else {
+            continue;
+        };
+        if regions.is_empty() {
+            continue;
+        }
+        let avg_area: f32 =
+            regions.iter().map(|r| r.width * r.height).sum::<f32>() / regions.len() as f32;
+        let key = (regions.len().min(4) as u32, (avg_area * 20.0).round() as u32);
+        buckets.entry(key).or_default().push(photo);
+    }
+
+    Ok(buckets
+        .into_values()
+        .filter(|group| group.len() >= 2)
+        .map(|group| group.into_iter().map(PhotoDto::from).collect())
+        .collect())
+}
+
 // ---- KI-Funktionen (Phase 7, siehe `DECISIONS.md` ADR-0033) ---------------
 //
 // Alle Analyse-Algorithmen selbst leben in `apx-ai` (klassische

@@ -76,6 +76,7 @@ import type {
   WorkflowTemplatePayload,
   SpotCandidateDto,
   UiSettingsDto,
+  WatchedFolderSettingsDto,
 } from "../lib/tauri";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
@@ -387,17 +388,20 @@ interface DevelopSlice {
   toggleReferenceView: () => void;
   setReferencePhotoId: (photoId: string | null) => void;
 
-  /** Soft-Proof-Vorschau (Phase 6 Schritt 10, `SPEC.md` §3.4/§7) — siehe
-   * `lib/softProof.ts`s Moduldoku für die Vereinfachung gegenüber echtem
-   * ICC-Farbmanagement (`DECISIONS.md` ADR-0032 Punkt 6). Reine
-   * Anzeige-Einstellung, nicht Teil des EDL/der Datenbank. */
+  /** Soft-Proof-Vorschau (Phase 6 Schritt 10, `SPEC.md` §3.4/§7) — seit
+   * Phase 12 Schritt 6 ein echter serverseitiger ICC-Transform, siehe
+   * `lib/softProof.ts`s Moduldoku. Reine Anzeige-Einstellung, nicht Teil
+   * des EDL/der Datenbank. */
   softProofActive: boolean;
   softProofProfile: SoftProofProfile;
+  /** Nur bei `softProofProfile === "custom"` gelesen. */
+  softProofCustomIccPath: string;
   softProofIntent: SoftProofIntent;
   softProofGamutWarning: boolean;
   softProofPaperWhite: boolean;
   toggleSoftProof: () => void;
   setSoftProofProfile: (profile: SoftProofProfile) => void;
+  setSoftProofCustomIccPath: (path: string) => void;
   setSoftProofIntent: (intent: SoftProofIntent) => void;
   toggleSoftProofGamutWarning: () => void;
   toggleSoftProofPaperWhite: () => void;
@@ -1067,6 +1071,11 @@ interface AiSlice {
   saveUiSettings: (settings: UiSettingsDto) => Promise<void>;
   settingsDialogOpen: boolean;
   setSettingsDialogOpen: (open: boolean) => void;
+
+  // -- Beobachteter Ordner / Auto-Import (Phase 12 Schritt 7) --
+  watchedFolderSettings: WatchedFolderSettingsDto | null;
+  loadWatchedFolderSettings: () => Promise<void>;
+  saveWatchedFolderSettings: (settings: WatchedFolderSettingsDto) => Promise<void>;
 
   // -- Preset-Generator (Schritt 4) --
   aiSettings: AiSettingsDto | null;
@@ -1984,6 +1993,7 @@ export const useAppStore = create<AppStore>()(
 
     softProofActive: false,
     softProofProfile: "srgb",
+    softProofCustomIccPath: "",
     softProofIntent: "perceptual",
     softProofGamutWarning: false,
     softProofPaperWhite: false,
@@ -1997,6 +2007,12 @@ export const useAppStore = create<AppStore>()(
     setSoftProofProfile: (profile) => {
       set((state) => {
         state.softProofProfile = profile;
+      });
+    },
+
+    setSoftProofCustomIccPath: (path) => {
+      set((state) => {
+        state.softProofCustomIccPath = path;
       });
     },
 
@@ -3855,6 +3871,34 @@ export const useAppStore = create<AppStore>()(
         await api.setUiSettings(settings);
         set((state) => {
           state.uiSettings = settings;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    watchedFolderSettings: null,
+
+    loadWatchedFolderSettings: async () => {
+      try {
+        const settings = await api.getWatchedFolderSettings();
+        set((state) => {
+          state.watchedFolderSettings = settings;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    saveWatchedFolderSettings: async (settings) => {
+      try {
+        await api.setWatchedFolderSettings(settings);
+        set((state) => {
+          state.watchedFolderSettings = settings;
         });
       } catch (err) {
         set((state) => {

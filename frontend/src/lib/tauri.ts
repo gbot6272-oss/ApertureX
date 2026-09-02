@@ -799,6 +799,22 @@ export function setUiSettings(settings: UiSettingsDto): Promise<void> {
   return invoke<void>("set_ui_settings", { settings });
 }
 
+// ---- Beobachteter Ordner / Auto-Import (Phase 12 Schritt 7) ---------------
+
+export interface WatchedFolderSettingsDto {
+  path: string | null;
+  enabled: boolean;
+  poll_seconds: number;
+}
+
+export function getWatchedFolderSettings(): Promise<WatchedFolderSettingsDto> {
+  return invoke<WatchedFolderSettingsDto>("get_watched_folder_settings");
+}
+
+export function setWatchedFolderSettings(settings: WatchedFolderSettingsDto): Promise<void> {
+  return invoke<void>("set_watched_folder_settings", { settings });
+}
+
 /** LLM-Modus des Preset-Generators — liefert die EDL-Teilmenge als
  * JSON-String (`lib/presets.ts::parseEdlSubset`). Braucht einen
  * hinterlegten Anthropic-API-Schlüssel. */

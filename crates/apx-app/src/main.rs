@@ -63,6 +63,86 @@ async fn export_queue_worker(
     }
 }
 
+/// Beobachteter Ordner (Phase 12 Schritt 7, siehe `DECISIONS.md`
+/// ADR-0039-Nachtrag III): pollt alle `poll_seconds` (aus den
+/// Einstellungen, live bei jedem Durchlauf neu gelesen, damit ein
+/// Umschalten in den Einstellungen ohne Neustart wirkt) den konfigurierten
+/// Ordner und stößt bei Fund denselben `import::run_with_mode`-Pfad an wie
+/// ein manueller Import — **kein** natives Datei-System-Watcher-Crate
+/// nötig, Polling ist für dieses Projekt an anderer Stelle schon der
+/// bewusst gewählte einfache Weg (siehe `export_queue_worker` oben).
+/// `run_with_mode` überspringt bereits katalogisierte Dateien von selbst
+/// (`SingleFileOutcome::Unchanged`, siehe `import`-Moduldoku) — ein
+/// wiederholter Lauf über denselben Ordner ist daher von sich aus billig
+/// und idempotent, kein eigener "bereits gesehen"-Zustand nötig. Teilt
+/// sich `active_import` mit den Tauri-Commands (`start_import`), damit ein
+/// manueller und ein automatischer Import sich nie überschneiden.
+async fn watched_folder_worker(
+    app: tauri::AppHandle,
+    catalog: Arc<Catalog>,
+    paths: AppPaths,
+    active_import: Arc<Mutex<Option<tokio_util::sync::CancellationToken>>>,
+) {
+    loop {
+        let settings = apx_core::Settings::load_or_default(&paths.settings_file())
+            .unwrap_or_else(|err| {
+                tracing::warn!(%err, "Einstellungen für den beobachteten Ordner nicht lesbar, überspringe diesen Durchlauf");
+                apx_core::Settings::default()
+            });
+        let watched = settings.watched_folder;
+        let poll_seconds = watched.poll_seconds.max(5) as u64;
+
+        let folder = watched
+            .enabled
+            .then_some(watched.path)
+            .flatten()
+            .filter(|p| !p.trim().is_empty())
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_dir());
+
+        if let Some(folder) = folder {
+            let token = {
+                let mut guard = active_import
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if guard.is_some() {
+                    None // Ein manueller (oder ein vorheriger automatischer) Import läuft bereits.
+                } else {
+                    let token = tokio_util::sync::CancellationToken::new();
+                    *guard = Some(token.clone());
+                    Some(token)
+                }
+            };
+            if let Some(token) = token {
+                let catalog = catalog.clone();
+                let cache_root = paths.preview_cache_dir();
+                let app_for_blocking = app.clone();
+                let join_result = tokio::task::spawn_blocking(move || {
+                    let events = crate::import::TauriEvents(&app_for_blocking);
+                    crate::import::run_with_mode(
+                        &events,
+                        &catalog,
+                        &cache_root,
+                        &folder,
+                        &token,
+                        &crate::import::ImportMode::AddInPlace,
+                        None,
+                    );
+                })
+                .await;
+                if let Ok(mut guard) = active_import.lock() {
+                    *guard = None;
+                }
+                if let Err(join_err) = join_result {
+                    tracing::error!(error = %join_err, "Automatischer Import (beobachteter Ordner) ist abgestürzt");
+                }
+            }
+        }
+
+        tokio::time::sleep(Duration::from_secs(poll_seconds)).await;
+    }
+}
+
 fn main() {
     // Fehler beim Ermitteln der Systempfade, beim Initialisieren des
     // Loggings oder beim Öffnen des Katalogs sind an dieser Stelle
@@ -92,21 +172,32 @@ fn main() {
 
     let builder = protocol::register(tauri::Builder::default());
 
+    let catalog = Arc::new(catalog);
+    let active_import = Arc::new(Mutex::new(None));
     let pipeline = Arc::new(pipeline);
     let export_queue = Arc::new(Mutex::new(apx_export::queue::ExportQueue::new()));
     let worker_pipeline = pipeline.clone();
     let worker_queue = export_queue.clone();
+    let watched_folder_catalog = catalog.clone();
+    let watched_folder_paths = paths.clone();
+    let watched_folder_active_import = active_import.clone();
 
     builder
         .plugin(tauri_plugin_dialog::init())
-        .setup(move |_app| {
+        .setup(move |app| {
             tauri::async_runtime::spawn(export_queue_worker(worker_pipeline, worker_queue));
+            tauri::async_runtime::spawn(watched_folder_worker(
+                app.handle().clone(),
+                watched_folder_catalog,
+                watched_folder_paths,
+                watched_folder_active_import,
+            ));
             Ok(())
         })
         .manage(AppState {
             paths,
-            catalog: Arc::new(catalog),
-            active_import: Arc::new(Mutex::new(None)),
+            catalog,
+            active_import,
             pipeline,
             tile_cache: Arc::new(apx_pipeline::tile_cache::TileCache::new()),
             export_queue,
@@ -229,6 +320,8 @@ fn main() {
             commands::set_anthropic_api_key,
             commands::get_ui_settings,
             commands::set_ui_settings,
+            commands::get_watched_folder_settings,
+            commands::set_watched_folder_settings,
             commands::generate_preset_from_llm,
             commands::build_preset_prompt_text,
             commands::import_preset_json,

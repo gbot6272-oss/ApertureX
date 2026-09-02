@@ -24,4 +24,6 @@ pub use ids::{
 };
 pub use logging::init_logging;
 pub use paths::AppPaths;
-pub use settings::{AiSettings, CatalogSettings, Settings, Theme, UiSettings};
+pub use settings::{
+    AiSettings, CatalogSettings, Settings, Theme, UiSettings, WatchedFolderSettings,
+};

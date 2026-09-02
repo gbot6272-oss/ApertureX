@@ -1019,6 +1019,6 @@ Test pro Schritt, volle Suite einmalig in Schritt 8.
 - [x] 3. Objektiv-/Kameraprofile: echte LensFun-Datenbank (Teil A, automatische Anwendung + ehrliche Ecken-Rückrechnung statt 1:1-Koeffizienten-Import) + vereinfachter Kalibrier-Assistent (Teil B, Linien-Geradheit statt vollem Zhang-Verfahren, siehe DECISIONS.md ADR-0039)
 - [x] 4. Voller EXIF/IPTC-Editor (generisches `custom_metadata_json`-Feld statt fester Spalten, wohlbekannte IPTC-Kernfelder + frei benannte Zusatzfelder, XMP-Sidecar-Export erweitert, siehe DECISIONS.md ADR-0039)
 - [x] 5. Mehrfachziel-Export (reine Frontend-Schleife über den bestehenden enqueue_export_photo-Befehl, kein neuer Backend-Mechanismus, siehe DECISIONS.md ADR-0039)
-- [ ] 6. Freies ICC-Profil beim Soft-Proof
-- [ ] 7. Beobachtete Ordner / Auto-Import
+- [x] 6. Freies ICC-Profil beim Soft-Proof (echter `lcms2::Transform::new_proofing`-Transform über ein zusätzliches Segment derselben `develop/...`-Route statt der bisherigen JS-Sättigungsnäherung, gegen die vier Standardprofile ODER eine frei wählbare `.icc`-Datei; nur Papierweiß bleibt clientseitig, siehe DECISIONS.md ADR-0039-Nachtrag II)
+- [x] 7. Beobachtete Ordner / Auto-Import (neuer Hintergrund-Task nach dem Vorbild des bestehenden Export-Queue-Workers, Polling statt Datei-System-Watcher-Crate; teilt sich die Import-Sperre mit einem manuellen Import, siehe DECISIONS.md ADR-0039-Nachtrag III)
 - [ ] 8. Dokumentation, volle Verifikation, Abnahme (Vergleichs-Artifact mit aktualisierter Lückenliste neu veröffentlichen)

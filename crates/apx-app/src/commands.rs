@@ -2656,6 +2656,59 @@ pub fn set_ui_settings(state: State<'_, AppState>, settings: UiSettingsDto) -> R
     all.save(&path).map_err(|err| err.to_string())
 }
 
+// ---- Beobachteter Ordner / Auto-Import (Phase 12 Schritt 7) ---------------
+//
+// Dasselbe Lade-/Speicher-Muster wie `get_ai_settings`/`get_ui_settings`
+// oben. Der eigentliche Hintergrund-Worker (`watched_folder_worker` in
+// `main.rs`) liest dieselbe Datei direkt, ohne über diese Commands zu
+// gehen — hier nur die Frontend-Verdrahtung zum Anzeigen/Ändern.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatchedFolderSettingsDto {
+    pub path: Option<String>,
+    pub enabled: bool,
+    pub poll_seconds: u32,
+}
+
+impl From<apx_core::WatchedFolderSettings> for WatchedFolderSettingsDto {
+    fn from(wf: apx_core::WatchedFolderSettings) -> Self {
+        Self {
+            path: wf.path,
+            enabled: wf.enabled,
+            poll_seconds: wf.poll_seconds,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_watched_folder_settings(
+    state: State<'_, AppState>,
+) -> Result<WatchedFolderSettingsDto, String> {
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    Ok(settings.watched_folder.into())
+}
+
+#[tauri::command]
+pub fn set_watched_folder_settings(
+    state: State<'_, AppState>,
+    settings: WatchedFolderSettingsDto,
+) -> Result<(), String> {
+    let path = state.paths.settings_file();
+    let mut all = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    all.watched_folder = apx_core::WatchedFolderSettings {
+        path: settings.path.filter(|p| !p.trim().is_empty()),
+        enabled: settings.enabled,
+        // Ein zu kleines Intervall würde den beobachteten Ordner bei
+        // jedem Poll komplett neu scannen (`run_with_mode` scannt den
+        // gesamten Baum, kein inkrementeller Dateisystem-Watcher, siehe
+        // `main.rs`s Moduldoku) — 5 Sekunden als niedrigste sinnvolle
+        // Untergrenze.
+        poll_seconds: settings.poll_seconds.max(5),
+    };
+    all.save(&path).map_err(|err| err.to_string())
+}
+
 // ---- KI: Preset-Generator (Phase 7 Schritt 4) ------------------------------
 //
 // Alle vier Erzeugungsarten liefern eine EDL-Teilmenge als JSON-String
@@ -2963,7 +3016,7 @@ pub struct ExportOutcomeDto {
     pub byte_size: usize,
 }
 
-fn parse_icc_target(
+pub(crate) fn parse_icc_target(
     profile: &str,
     custom_path: Option<&str>,
 ) -> Result<apx_export::icc::IccTarget, String> {

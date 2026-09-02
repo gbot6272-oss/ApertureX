@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useFocusTrap } from "../lib/a11y";
 import { useT } from "../lib/i18n";
-import type { UiSettingsDto } from "../lib/tauri";
+import { selectFolderDialog, type UiSettingsDto } from "../lib/tauri";
 import { resetWorkspaceLayout } from "../lib/workspaceLayout";
 import { useAppStore } from "../store";
 
@@ -11,7 +11,7 @@ interface SettingsDialogProps {
   onClose: () => void;
 }
 
-type Tab = "anzeige" | "sprache";
+type Tab = "anzeige" | "sprache" | "import";
 
 const DEFAULT_ACCENT = "#5b9bd5";
 
@@ -32,6 +32,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const uiSettings = useAppStore((s) => s.uiSettings);
   const loadUiSettings = useAppStore((s) => s.loadUiSettings);
   const saveUiSettings = useAppStore((s) => s.saveUiSettings);
+  const watchedFolderSettings = useAppStore((s) => s.watchedFolderSettings);
+  const loadWatchedFolderSettings = useAppStore((s) => s.loadWatchedFolderSettings);
+  const saveWatchedFolderSettings = useAppStore((s) => s.saveWatchedFolderSettings);
   const dialogRef = useRef<HTMLDivElement>(null);
   useFocusTrap(dialogRef, open);
 
@@ -39,13 +42,28 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     if (open && !uiSettings) void loadUiSettings();
   }, [open, uiSettings, loadUiSettings]);
 
+  useEffect(() => {
+    if (open && !watchedFolderSettings) void loadWatchedFolderSettings();
+  }, [open, watchedFolderSettings, loadWatchedFolderSettings]);
+
   if (!open) return null;
 
-  const tabLabels: Record<Tab, string> = { anzeige: t("settings.tab.display"), sprache: t("settings.tab.language") };
+  const tabLabels: Record<Tab, string> = {
+    anzeige: t("settings.tab.display"),
+    sprache: t("settings.tab.language"),
+    import: t("settings.tab.import"),
+  };
 
   function update(patch: Partial<UiSettingsDto>) {
     if (!uiSettings) return;
     void saveUiSettings({ ...uiSettings, ...patch });
+  }
+
+  async function handlePickWatchedFolder() {
+    const path = await selectFolderDialog();
+    if (path && watchedFolderSettings) {
+      void saveWatchedFolderSettings({ ...watchedFolderSettings, path });
+    }
   }
 
   return (
@@ -151,7 +169,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                 {t("settings.resetWorkspace")}
               </button>
             </div>
-          ) : (
+          ) : tab === "sprache" ? (
             <div className="flex flex-col gap-4 text-xs">
               <label className="flex flex-col gap-1">
                 <span className="text-text-secondary">{t("settings.language")}</span>
@@ -164,6 +182,49 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                   <option value="en">{t("settings.languageEn")}</option>
                 </select>
               </label>
+            </div>
+          ) : !watchedFolderSettings ? (
+            <p className="text-xs text-text-muted">{t("settings.loading")}</p>
+          ) : (
+            <div className="flex flex-col gap-4 text-xs">
+              <label className="flex items-center justify-between gap-2">
+                <span className="text-text-secondary">{t("settings.watchedFolderEnabled")}</span>
+                <input
+                  type="checkbox"
+                  checked={watchedFolderSettings.enabled}
+                  onChange={(event) => void saveWatchedFolderSettings({ ...watchedFolderSettings, enabled: event.target.checked })}
+                />
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span className="text-text-secondary">{t("settings.watchedFolderPath")}</span>
+                <div className="flex gap-1">
+                  <input
+                    type="text"
+                    readOnly
+                    value={watchedFolderSettings.path ?? ""}
+                    placeholder={t("settings.watchedFolderChoose")}
+                    className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1"
+                  />
+                  <button type="button" onClick={() => void handlePickWatchedFolder()} className="shrink-0 rounded border border-border px-2 py-1 hover:border-accent">
+                    {t("settings.watchedFolderChoose")}
+                  </button>
+                </div>
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span className="text-text-secondary">{t("settings.watchedFolderPollSeconds", { seconds: watchedFolderSettings.poll_seconds })}</span>
+                <input
+                  type="range"
+                  min={5}
+                  max={300}
+                  step={5}
+                  value={watchedFolderSettings.poll_seconds}
+                  onChange={(event) => void saveWatchedFolderSettings({ ...watchedFolderSettings, poll_seconds: Number(event.target.value) })}
+                />
+              </label>
+
+              <p className="text-text-muted">{t("settings.watchedFolderHint")}</p>
             </div>
           )}
         </div>

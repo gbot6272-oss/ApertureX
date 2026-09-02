@@ -75,6 +75,12 @@ export const de = {
   "settings.language": "Sprache",
   "settings.languageDe": "Deutsch",
   "settings.languageEn": "English",
+  "settings.tab.import": "Import",
+  "settings.watchedFolderEnabled": "Beobachteten Ordner automatisch importieren",
+  "settings.watchedFolderPath": "Beobachteter Ordner",
+  "settings.watchedFolderChoose": "Wählen…",
+  "settings.watchedFolderPollSeconds": "Prüfintervall: {seconds}s",
+  "settings.watchedFolderHint": "Prüft den gewählten Ordner regelmäßig auf neue Dateien und importiert sie automatisch an ihrem Ort (wie „Ordner importieren“, kein Kopieren/Verschieben). Bereits importierte Dateien werden dabei übersprungen.",
 
   // OnboardingDialog.tsx
   "onboarding.title": "Willkommen bei Aperture X",

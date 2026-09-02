@@ -69,6 +69,12 @@ export const en: Record<keyof typeof de, string> = {
   "settings.language": "Language",
   "settings.languageDe": "Deutsch",
   "settings.languageEn": "English",
+  "settings.tab.import": "Import",
+  "settings.watchedFolderEnabled": "Automatically import from watched folder",
+  "settings.watchedFolderPath": "Watched folder",
+  "settings.watchedFolderChoose": "Choose…",
+  "settings.watchedFolderPollSeconds": "Poll interval: {seconds}s",
+  "settings.watchedFolderHint": "Periodically checks the chosen folder for new files and imports them automatically in place (like \"Import folder\", no copying/moving). Already-imported files are skipped.",
 
   "onboarding.title": "Welcome to Aperture X",
   "onboarding.layout.title": "Basic layout",

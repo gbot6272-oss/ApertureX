@@ -108,6 +108,13 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       reduced_motion: false,
       onboarding_seen: true,
     },
+    // Beobachteter Ordner (Phase 12 Schritt 7) — derselbe Aus-Default wie
+    // im echten Backend (`apx_core::settings::WatchedFolderSettings`).
+    watchedFolderSettings: {
+      path: null as string | null,
+      enabled: false,
+      poll_seconds: 30,
+    },
     presetGeneratorSubsetJson: JSON.stringify({ basic: { exposure_ev: 0.6, contrast: 15 } }),
     referenceImageDialogCancelled: false,
     presetVariationCount: 3,
@@ -521,6 +528,11 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         high_contrast: boolean;
         reduced_motion: boolean;
         onboarding_seen: boolean;
+      };
+      watchedFolderSettings: {
+        path: string | null;
+        enabled: boolean;
+        poll_seconds: number;
       };
       presetGeneratorSubsetJson: string;
       referenceImageDialogCancelled: boolean;
@@ -1253,6 +1265,11 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return fixtures.uiSettings;
       case "set_ui_settings":
         fixtures.uiSettings = args.settings as typeof fixtures.uiSettings;
+        return null;
+      case "get_watched_folder_settings":
+        return fixtures.watchedFolderSettings;
+      case "set_watched_folder_settings":
+        fixtures.watchedFolderSettings = args.settings as typeof fixtures.watchedFolderSettings;
         return null;
       case "set_anthropic_api_key": {
         const key = args.apiKey as string | null;

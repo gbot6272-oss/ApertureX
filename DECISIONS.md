@@ -2135,3 +2135,74 @@ Datenbank-gestützte Objektiv-Zuordnung (jetzt sogar automatisch beim
 Fotowechsel), Teil B weiterhin eine echte, aus eigenen Fotos berechnete
 Kalibrierung für Objektive außerhalb der Datenbank. `FEATURES.md` und
 `PLAN.md` sind entsprechend präzisiert.
+
+## ADR-0039-Nachtrag II: Schritt 6 — echter ICC-Soft-Proof über `lcms2::Transform::new_proofing` ersetzt die JS-Näherung
+
+**Status:** Angenommen
+**Kontext:** Der Soft-Proof im Entwickeln-Panel (Phase 6 Schritt 10,
+ADR-0032 Punkt 6) war bis hierhin eine rein clientseitige Sättigungs-
+Näherung mit drei erfundenen "simulierten" Zielen (`srgb`/`print_sim`/
+`grayscale_sim`) — ADR-0032 selbst nannte das explizit als bewusste
+Vereinfachung, mit "kein echtes 3D-Gamut-Mapping" als offen benannte
+Lücke. `apx_export::icc` bindet `lcms2` bereits seit Phase 8 Schritt 2
+für den Export ein (`convert_from_srgb`, inklusive `IccTarget::
+CustomFile` für eine vom Nutzer gewählte `.icc`-Datei) — dieselbe
+Bibliothek unterstützt über `Transform::new_proofing` (kombiniert mit
+den `SOFT_PROOFING`/`GAMUT_CHECK`-Flags und `cmsSetAlarmCodes` für die
+Farbumfangswarnung) echtes, standardbasiertes Soft-Proofing, exakt die
+Funktion, die auch Lightroom/Photoshop intern nutzen.
+
+**Umsetzung:** neue Funktion `apx_export::icc::soft_proof_rgba8`
+(`Transform::new_proofing(sRGB-Anzeigeprofil, …, Zielprofil, Intent,
+Intent, Flags)`) für die vier gebündelten Standardprofile UND eine
+beliebige `.icc`-Datei — dieselbe `IccTarget`-Wiederverwendung wie beim
+Export. Statt eines neuen Tauri-Commands (der Puffer wäre pro
+Regler-Tick zu groß für JSON-serialisierte IPC, siehe die bestehende
+Begründung in `crates/apx-app/src/protocol/mod.rs`s Moduldoku, "ohne den
+Umweg über Base64-kodierte Tauri-Commands") läuft der Soft-Proof über
+ein zusätzliches `<soft_proof>`-Segment derselben `develop/...`-Route,
+die auch die normale Vorschau liefert (`none` oder base64url-kodiertes
+JSON, siehe `crates/apx-app/src/protocol/route.rs`s Moduldoku) — der
+Server liefert bei aktivem Soft-Proof direkt den fertig transformierten
+Puffer, kein zweiter Nachbearbeitungsschritt im Frontend für Farbe/Gamut.
+
+**Bewusst erhaltene, kleinere Vereinfachung:** die Papierweiß-Simulation
+hat in `lcms2` keine eingebaute Entsprechung (in echten
+Bildbearbeitungsprogrammen meist eine separate, dem ICC-Proofing
+nachgeschaltete Tonwertkompression) und bleibt daher eine kleine
+clientseitige Nachbearbeitung (`lib/softProof.ts::applyPaperWhite`) —
+anders als vorher betrifft sie aber nur noch den Tonwertbereich, nicht
+mehr Farbe/Sättigung/Gamut. Aus demselben Grund bleibt `developFrame`
+selbst (für Farbaufnehmer/TAT/Clipping-Overlay) immer der unveränderte,
+nicht soft-proofte Puffer — der Viewer holt bei aktivem Soft-Proof eine
+zweite, separate Antwort derselben Route nur für den tatsächlich
+gezeichneten Canvas-Inhalt.
+
+**Entscheidung:** `FEATURES.md`/`PLAN.md` sind entsprechend aktualisiert
+— Soft-Proof ist ab hier echtes ICC-Farbmanagement, keine Näherung mehr.
+
+## ADR-0039-Nachtrag III: Schritt 7 — Beobachteter Ordner / Auto-Import genau wie geplant umgesetzt
+
+**Status:** Angenommen
+**Kontext:** Schritt 7 (Beobachteter Ordner) folgt exakt dem im
+Ursprungsplan skizzierten Weg, ohne Abweichung — festgehalten hier nur der
+Vollständigkeit halber, wie bei jedem Schritt dieser Phase.
+
+**Umsetzung:** neuer `WatchedFolderSettings`-Block in `apx_core::settings`
+(Pfad, an/aus, Poll-Intervall in Sekunden, Default aus) neben den
+bestehenden `UiSettings`/`AiSettings`; ein neuer Hintergrund-Task
+`watched_folder_worker` in `apx-app/src/main.rs`, nach demselben
+Abfragen-statt-Weck-Benachrichtigung-Muster wie der bereits bestehende
+`export_queue_worker`. Bei jedem Durchlauf werden die Einstellungen frisch
+von der Platte gelesen (ein Umschalten in den Einstellungen wirkt ohne
+Neustart) und, falls aktiviert und der Ordner existiert, derselbe
+`import::run_with_mode`-Pfad im Modus `AddInPlace` angestoßen wie bei
+einem manuellen Import — geteilt über dieselbe `active_import`-Sperre, die
+schon einen doppelten manuellen Import verhindert, damit sich ein
+automatischer und ein manueller Import nie überschneiden. Kein natives
+Datei-System-Watcher-Crate nötig: `run_with_mode` überspringt bereits
+katalogisierte Dateien von selbst (`SingleFileOutcome::Unchanged`), ein
+wiederholter Lauf über denselben Ordner ist also von sich aus billig und
+idempotent — kein eigener "bereits gesehen"-Zustand nötig.
+
+**Entscheidung:** `FEATURES.md`/`PLAN.md` sind entsprechend aktualisiert.

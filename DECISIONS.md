@@ -1771,3 +1771,438 @@ sind mit Schritt 11 vollständig umgesetzt (bzw. mit dokumentierter
 bewusster Vereinfachung, siehe ADR-0035 Punkte 1–8) — Phase 9 gilt mit
 dieser einen, hier explizit benannten und begründeten Ausnahme als
 abgeschlossen.
+
+## ADR-0037: Phase-10-Scope — drei Phase-3/5-UI-Restposten reingezogen, Testdisziplin für diese Phase nutzerangeordnet gelockert, ehrliche Grenzen bei Installer-Signierung
+
+**Status:** Angenommen
+**Kontext:** Der Nutzer hat Phase 10 („Politur", `SPEC.md` §5: Performance-
+Profiling gegen die Ziele aus §2.4, Barrierefreiheit, Lokalisierung DE/EN,
+Onboarding, Installer und Signierung für alle drei Plattformen) angewiesen,
+mit zwei ausdrücklichen Vorgaben: (1) erst ein vollständiger Plan, dann alle
+Schritte ohne Zwischenstopp — dieselbe Disziplin wie Phase 9; (2) Fokus vor
+allem auf die UI, nicht auf weitere Tests, mit nur einer vollen Testsuite
+am Ende statt der sonst pro Schritt üblichen.
+
+**Entscheidung 1 — Scope-Erweiterung um drei UI-Restposten:** Drei
+`FEATURES.md`-Zeilen standen noch auf Phase 3/5, wurden dort aber nie
+angefasst: rechte Werkzeug-Palette/Modul-Umschalter oben (Phase 3),
+ein-/ausklappbare/breitenziehbare Paletten mit Arbeitsbereich-Preset
+(Phase 3), vollständige Befehlspalette (Phase 5, bisher nur
+Ordner+ein Befehl). Alle drei sind reine UI-Arbeit und passen exakt zum
+Auftrag „vor allem UI" — sie werden analog zu ADR-0032 (das
+Bibliotheks-Backlog von Phase 6 nach Phase 9 verschob) in Phase 10 gezogen,
+statt sie ein drittes Mal auf eine noch spätere Phase zu vertagen.
+
+**Entscheidung 2 — Testdisziplin gelockert, nur für diese Phase:**
+`PLAN.md` §6 verlangt normalerweise „Jedes Rust-Modul mit Unit-Tests …
+E2E-Test pro Modul" pro Schritt. Auf ausdrücklichen Nutzerwunsch schreibt
+Phase 10 **pro Schritt keine neue Testdatei** — nur `cargo build`/`tsc -b`
+als Kompilier-Kontrolle. Die volle Suite (`cargo fmt/clippy/test`,
+`tsc -b`, `vitest run`, volle Playwright-Suite) läuft einmalig am Ende
+(Schritt 12) gegen den gesamten in dieser Phase entstandenen Stand. Das ist
+eine bewusste, befristete Ausnahme von der sonst verbindlichen Regel — sie
+gilt nicht rückwirkend für Phase 1–9 und nicht automatisch für Phase 11+,
+falls es eine gibt.
+
+**Entscheidung 3 — Installer/Signierung ehrlich begrenzt:** Diese
+Linux-Sandbox besitzt keine echten Code-Signing-Zertifikate (Apple
+Developer ID + Notarisierungs-Zugangsdaten, Windows-Codesigning-Zertifikat)
+und kann sie nicht beschaffen — dieselbe Beschaffungslage wie
+`libgphoto2` (ADR-0035 Punkt 5) oder die fehlende ONNX-Runtime
+(ADR-0033). Schritt 11 baut die strukturelle Infrastruktur (Tauri-
+Bundler-Konfiguration, `@tauri-apps/cli`, ein neuer CI-`release`-Job auf
+dem bestehenden 3-OS-Matrix, Signierungsfelder aus optionalen
+GitHub-Secrets gespeist, übersprungen statt fehlschlagend, wenn sie
+fehlen) — produziert aber in dieser Umgebung **unsignierte** Installer.
+Echtes Signieren bleibt dem Nutzer vorbehalten, sobald eigene
+Zertifikate/Secrets hinterlegt sind. Cross-Plattform-Bundling
+(macOS-/Windows-Installer von Linux aus) wird nicht lokal versucht — die
+Verifikation läuft ausschließlich über die drei echten nativen CI-Runner.
+
+**Konsequenzen:** `FEATURES.md`s Phase-10-Zeilen wachsen um die drei
+umgetaggten Punkte. Performance-Profiling (Schritt 10) liefert eine
+dokumentierte Einschätzung gegen die in dieser Sandbox tatsächlich
+messbaren Teilziele statt spekulativer Umbauten ohne Befund — dieselbe
+Grenze wie die fehlenden Golden-Image-RAW-Tests (ADR-0007). Lokalisierung
+(Schritt 8) deckt systematisch alle Frontend-Komponenten ab, aber ohne
+einen dafür geschriebenen Coverage-Test ist einzelne übersehene Strings
+nicht mit Sicherheit ausgeschlossen — als offener, dokumentierter Rest
+statt stillschweigend behauptet.
+
+## ADR-0038: Phase 11 — Nachträge zu allen zurückgestellten Punkten aus Phase 1–10; vier neu verfügbare Crates real geprüft (drei brauchbar, eine als Fassade entlarvt), `libgphoto2` ist entgegen ADR-0035 tatsächlich per `apt` verfügbar
+
+**Status:** Angenommen
+**Kontext:** Der Nutzer hat angewiesen, alle bisher zurückgestellten Punkte
+aus Phase 1–10 aufzuarbeiten — mit der ausdrücklichen Vorgabe, für jeden
+Punkt neu zu prüfen, ob er inzwischen technisch machbar ist, statt ihn
+unangetastet zu lassen (dieselbe Disziplin, mit der dieses Projekt schon
+mehrfach Crate-Landschaften neu geprüft statt Annahmen fortgeschrieben
+hat). `FEATURES.md` listete zu Beginn dieser Runde neun offene
+Checkbox-Zeilen; dazu kommen vier in der Phase-10-Abnahme selbst benannte
+Lücken.
+
+**Dokumentationsfehler gefunden und korrigiert:** `FEATURES.md` Zeile 239
+führte „Adobe `.xmp`/`.lrtemplate`-Import/Export" noch als „Nicht begonnen",
+obwohl `apx_export::xmp` (`crates/apx-export/src/xmp.rs`, gebaut in Phase 9
+Schritt 2) den `.xmp`-Teil (Adobe `crs:`-Entwickeln-Einstellungen: Basic+HSL,
+echt bidirektional per `generate_xmp`/`parse_xmp_develop_settings`, über
+`import_xmp_develop_settings`/`import_xmp_sidecar_from_file` bis ins
+Frontend verdrahtet) bereits vollständig abdeckt. Nur der separate
+`.lrtemplate`-Teil (Lightrooms eigenes, nicht offiziell dokumentiertes
+Vorlagenformat) war tatsächlich noch offen — die Zeile wurde entsprechend
+präzisiert statt pauschal als „Nicht begonnen" stehen zu lassen.
+
+**Crate-Spikes** (`cargo add --dry-run` + realer Testbau in einem
+Wegwerf-Projekt, kein Produktivcode betroffen):
+1. **`gamut-dng`** (1.0.0, MIT/Apache-2.0) — kompiliert sauber, reines Rust,
+   `DngEncoder`/`DngDecoder` mit vollständiger Builder-API. Zum Zeitpunkt
+   von ADR-0034 (Phase 8) gab es keine schreibfähige DNG-Crate; diese
+   existiert jetzt. **Brauchbar** — siehe Schritt 1.
+2. **`gamut-jxl`** (0.4.0, MIT/Apache-2.0, Encode-Feature) — kompiliert,
+   aber nicht reines Rust: `gamut-jxl-sys` vendort und baut die
+   Referenz-C-Bibliothek `libjxl` (Lizenz BSD-3-Clause) selbst über
+   `cmake`/`cc` zur Bauzeit (kein System-`apt`-Paket nötig, aber ein
+   spürbar schwererer Build, ca. 1,5 Minuten allein für diese eine
+   Abhängigkeit in der Spike-Messung). **Brauchbar, aber teurer** — siehe
+   Schritt 2.
+3. **`ag-psd`** (0.2.0, MIT) — kompiliert sauber, reines Rust, „from-scratch
+   Rust port" der TypeScript-`ag-psd`-Bibliothek, `write_psd(&Psd,
+   &WriteOptions) -> Vec<u8>` als klare Top-Level-API. **Brauchbar** —
+   siehe Schritt 2.
+4. **`heif`** (0.1.0) — laut Beschreibung „A HEIF file decoder and encoder
+   written from scratch", tatsächlich aber ein reserviertes Fassaden-Paket:
+   `src/lib.rs` ist 14 Zeilen lang und enthält ausschließlich `cargo new`s
+   Standard-Vorlage (`pub fn add(left, right) -> u64`). **Nicht brauchbar**
+   — bestätigt, warum dieses Projekt Beschreibungen nie ungeprüft
+   übernimmt. `heif-rs` (26.7.0, „statically-linked libheif") wurde
+   testweise ebenfalls hinzugefügt: zieht über 190 Pakete nach, darunter
+   `bindgen` (braucht `libclang`), einen kompletten `image`-Crate-Formats-
+   Rattenschwanz (`gif`/`exr`/`zip`/…) und `ureq` (HTTP-Client — unklar,
+   wofür ein Bild-Codec Netzwerkzugriff bräuchte) — derselbe Beschaffungs-
+   Risikograd wie ONNX Runtime/`opencv` an anderer Stelle im Projekt, bei
+   nur 6 GB freiem Speicher in dieser Sandbox nicht vertretbar zu bauen.
+   **HEIF-Export bleibt zurückgestellt**, wie schon in ADR-0034.
+5. **`libgphoto2-dev`** ist entgegen der in ADR-0035 getroffenen Annahme
+   („auf keinem der drei CI-Runner installiert") tatsächlich per `apt-get`
+   installierbar (`apt-cache policy` zeigt Version 2.5.31-2.1ubuntu1.1
+   verfügbar) — die ADR-0035-Aussage war für diese Sandbox richtig
+   *behauptet*, aber nie tatsächlich mit `apt-cache policy` verifiziert
+   worden. Siehe Schritt 10: das `tethering`-Feature kann jetzt real
+   kompiliert und sein Verbindungs-Fehlerpfad ohne physische Kamera echt
+   getestet werden.
+
+**Entscheidung:** Phase 11 bündelt alle neun `FEATURES.md`-Zeilen plus die
+vier Phase-10-Lücken plus die eine gefundene Dokumentationskorrektur in
+13 Bauschritten (0–12), mit der normalen, vollen Testdisziplin aus
+`PLAN.md` §6 (die Lockerung aus ADR-0037 galt ausdrücklich nur für
+Phase 10). Für PSD/JPEG-XL/DNG werden die oben real geprüften Crates
+verwendet; für HEIF, echte Zertifikats-Signierung, echte GPU-Performance
+und echte neuronale Modellinferenz bleiben die bereits in ADR-0033/-0034/
+diesem Plan dokumentierten Grenzen unverändert bestehen — kein
+Software-Trick ersetzt fehlende Hardware, ein fehlendes Zertifikat oder
+ein nicht beschaffbares Modell.
+
+**Nachtrag nach Schritt 4 — Testdisziplin nutzerseitig erneut gelockert:**
+der Nutzer hat nach Abschluss von Schritt 3 angewiesen, ab Schritt 4 nur
+noch maximal einen Test pro Schritt zu schreiben und die vollständige
+Verifikationskette (`cargo fmt/clippy/test --workspace`, `tsc -b`, volle
+Vitest-/Playwright-Suite) nicht mehr nach jedem einzelnen Schritt,
+sondern erst einmalig am Ende in Schritt 12 laufen zu lassen — dieselbe
+Lockerung wie in ADR-0037 für Phase 10, nur diesmal ausdrücklich auch für
+Phase 11 (Schritte 4–11) angeordnet, statt wie oben ursprünglich
+festgehalten strikt auf Phase 10 begrenzt. Schritte 0–3 liefen noch mit
+der vollen, oben beschriebenen Disziplin; ab Schritt 4 gilt: pro Schritt
+ein gezielter Test (Rust-Unit- oder Playwright-Test, je nachdem, welcher
+den Kern der Änderung am direktesten abdeckt) plus ein gezielter
+Kompilier-/Typprüf-Lauf des geänderten Codes (kein vollständiger
+Testlauf) vor Commit+Push.
+
+**Nachtrag nach Schritt 7 — Plan-Abweichung `apx_ai::depth_estimate`:**
+der Plan sah die Laplace-Varianz-Schärfeheuristik für den neuen
+`BlurDepthApprox`-Maskentyp in `apx_ai::depth_estimate::
+relative_sharpness_map` vor. Tatsächlich implementiert wurde sie
+stattdessen direkt in `apx-pipeline::stages::masks` (wie
+`color_range_alpha`/`luminance_range_alpha`) — `apx-ai` hängt von
+`apx-pipeline` ab (siehe dessen `Cargo.toml`), eine Abhängigkeit in die
+umgekehrte Richtung wäre ein Zyklus gewesen. `MaskGeometry::
+BlurDepthApprox { threshold: f32 }` wird wie `ColorRange`/
+`LuminanceRange` live pro Render berechnet, nicht als vorab in `apx-ai`
+gebackene Alpha-Bitmap (anders als `AiGenerated`) — deshalb passt die
+Eigenständigkeit in `apx-pipeline` auch inhaltlich besser als ein
+Umweg über `apx-ai`.
+
+**Nachtrag nach Schritt 11 — Phase-10-Nachträge, mit einer weiteren
+ehrlichen Grenze bei der Installer-Signierung:**
+- **Lokalisierung**: die 13 in der Phase-10-Abnahme namentlich als
+  unübersetzt benannten Dialog-Komponenten (Export/Druck/Diashow/Buch/
+  Web/Vorlagen/Organisieren/Stacking/Skript & Plugins/Kollaboration/
+  Tethering/Metadaten-Editor/Statistik) sind jetzt vollständig über
+  `lib/i18n.ts`s `t()`-Muster übersetzt (de.ts/en.ts). `SlideshowPlayer.tsx`
+  (die separate Vollbild-Wiedergabekomponente, die `SlideshowDialog.tsx`
+  bei „Abspielen" öffnet) bleibt bewusst außerhalb dieses Schritts —
+  ehrlich als offene Ausbaustufe stehen gelassen statt stillschweigend
+  mitgezählt, ebenso die von `MetadataDialog.tsx` wiederverwendeten
+  `PRESET_CONDITION_FIELD_OPTIONS`/`PRESET_CONDITION_OPERATOR_OPTIONS`-
+  Labels aus `lib/presets.ts` (gemeinsam mit `SavePresetDialog.tsx`
+  genutzt, eigener Schritt nötig).
+- **`PaletteFrame`-Ausrollung**: `DevelopPanel.tsx`/`MasksPanel.tsx` sind
+  jetzt in `PaletteFrame` gewrappt (Ziehen/Einklappen wie die übrigen vier
+  Paletten). `MasksPanel.tsx`s `id="stage-masks"`-Sprunganker (von
+  `DevelopPanel.tsx`s Node-Editor „Öffnen"-Link genutzt) wandert dabei auf
+  die `<h2>`-Überschrift innerhalb des neuen `PaletteFrame`, weil dieser
+  selbst kein durchgereichtes `id`-Attribut auf sein `<aside>` anbietet —
+  funktional identisch (`scrollIntoView` scrollt denselben Container).
+  Direkt danach volle `develop-flow.spec.ts`/`masks-flow.spec.ts`-Regression
+  gefahren (40 Tests grün) — dieselbe Vorsicht, die Phase 10 Schritt 3
+  zurückgestellt hatte, jetzt mit Testnetz.
+- **Umbelegbare lokale Tastenkürzel**: `Viewer.tsx`s Zoom-Zifferntasten
+  (neu: `zoom-fit`/`zoom-100`) und `DevelopPanel.tsx`s eigener Ctrl/Cmd+Z-
+  Handler laufen jetzt über `lib/keybindings.ts`s `matchesBinding` statt
+  fest verdrahteter `event.key`-Vergleiche. Der Entwickeln-Panel-Handler
+  nutzt bewusst dieselben `"undo"`/`"redo"`-IDs wie `App.tsx`s Bibliotheks-
+  Metadaten-Undo (statt eigener neuer IDs), weil sich beide Kontexte
+  gegenseitig ausschließen (`App.tsx` reicht Ctrl/Cmd+Z nur weiter, wenn
+  das Entwickeln-Panel geschlossen ist) — ein Nutzer, der „Rückgängig"
+  umbelegt, bekommt eine konsistente neue Taste in beiden Kontexten.
+  Bewusst weiterhin fest: Kurven-/Masken-Editoren mit
+  `role="slider"`-Pfeiltasten-Feinjustierung und die Bewertungs-
+  Zifferntasten 0–5 (parametrisierte Ziffernreihe, keine einzelne feste
+  Aktion). Ein neuer Playwright-Test (max. 1 pro Schritt, siehe oben)
+  deckt beides ab: Ctrl+Z/Ctrl+Shift+Z committen jetzt tatsächlich über
+  den Tastatur-Pfad im Entwickeln-Panel (die bestehende
+  `develop-flow.spec.ts`-Suite deckte bislang nur den Rückgängig-Knopf ab,
+  nicht die Taste), und eine Neu-Belegung im Cheatsheet-Overlay steuert
+  Ctrl+Z tatsächlich um.
+- **Installer-Signierung — Mechanik-Nachweis, weiter eingeschränkt als
+  im Plan vorgesehen**: der Plan sah vor, ein selbstsigniertes Test-
+  Zertifikat einmalig als echtes GitHub-Actions-Secret zu setzen und
+  dadurch `ci.yml`s `release`-Job (Windows-Zertifikatsimport/
+  Fingerabdruck-Ermittlung/`--config`-Override) real durchlaufen zu
+  lassen. **Diese Sitzung hat kein Werkzeug, um Repository-Secrets zu
+  schreiben** (kein Admin-API-Zugriff über die verfügbaren GitHub-Tools),
+  und keinen Windows-/macOS-Ausführungskontext (reine Linux-Sandbox) —
+  ein echter CI-Lauf des `release`-Jobs war damit nicht möglich, ohne
+  einen Menschen um das Setzen des Secrets zu bitten (außerhalb des
+  Scopes dieser Sitzung). Stattdessen lokal verifiziert, **nur der
+  betriebssystemunabhängige Teil der Mechanik**: ein selbstsigniertes
+  Test-Zertifikat wurde per `openssl` erzeugt, zu einem PFX/P12-Bundle
+  gepackt (dasselbe Format wie `WINDOWS_CERTIFICATE`/`APPLE_CERTIFICATE`),
+  Base64-kodiert und wieder dekodiert (exakt der Schritt, den `ci.yml`s
+  `[Convert]::FromBase64String` beim echten Secret durchführt) —
+  Byte-für-Byte identisch zum Original bestätigt — und sein SHA1-
+  Fingerabdruck ermittelt (dieselbe Kennzahl, die Windows unter
+  `$cert.Thumbprint` liefert, nur von `openssl x509 -fingerprint -sha1`
+  anders formatiert ausgegeben). Zertifikat/Schlüssel/PFX wurden direkt
+  danach gelöscht, nichts committet. **Bleibt offen**: der eigentliche
+  `Import-PfxCertificate`-Aufruf in einen Windows-Zertifikatspeicher und
+  ein echter `tauri build`-Lauf mit `--config`-Override sind weiterhin
+  nie ausgeführt worden — dieselbe Grenze wie in ADR-0037, jetzt nur um
+  den zusätzlichen Befund ergänzt, dass auch der Secret-Setzschritt
+  selbst außerhalb der Werkzeuge dieser Sitzung liegt.
+
+## ADR-0039: Phase 12 — Lightroom-Lückenschluss; `lensfun`-Crate real geprüft und für Schritt 3 freigegeben
+
+**Status:** Angenommen
+**Kontext:** Der Nutzer hat einen ausführlichen, bidirektionalen
+Funktionsvergleich von ApertureX gegen Adobe Lightroom Classic/CC in
+Auftrag gegeben (veröffentlicht als Artifact „ApertureX vs. Lightroom"),
+jede Zeile aus `FEATURES.md` gegen den echten Lightroom-Funktionsumfang
+geprüft. Direkt im Anschluss wurde angewiesen, für die dort gefundenen
+Lücken einen Plan mit tief recherchierten, echten Lösungen zu schreiben —
+mit ausdrücklichem Fokus auf die Frage, ob der Kamera-/Objektiv-Profil-
+Import über eine „KI-generierte" Lösung tragen könnte.
+
+**Befund zur KI-Frage:** eine echte Modellinferenz für Verzeichnungs-/
+Vignettierungs-Koeffizienten aus einem einzelnen Foto ohne Kalibrierziel
+bräuchte trainierte Gewichte — dieselbe seit ADR-0033 dokumentierte Wand
+wie jede andere „KI"-Funktion in diesem Projekt. Eine LLM-„Schätzung"
+von Objektiv-Koeffizienten ohne echte Kalibrierdatengrundlage wäre reine
+Fabrikation und wird hier bewusst **nicht** vorgeschlagen.
+
+**Stattdessen real gefunden — die `lensfun`-Crate** (crates.io, v0.7.0,
+reines Rust, LGPL-3.0-or-later, Autor David Veszelovszki, Repo
+`github.com/vdavid/lensfun-rs`): ein gegen die C++-Referenzbibliothek
+bit-exakt getesteter Port (laut Projekt-README 1.640 A/B-Testfälle,
+Abweichung 4,88×10⁻⁴ Pixel) der echten, offenen LensFun-Objektivdatenbank.
+`Database::load_bundled()` liefert Tausende real kalibrierte Kamera-/
+Objektiv-Kombinationen direkt eingebettet (~574 KB gzip), ohne
+Laufzeit-Dateisystemzugriff. Das macht den bisherigen 3-Profile-
+Platzhalter (ADR-0028) für Schritt 3 gegenstandslos — **andere
+Datenquelle** (offene LensFun-Datenbank statt Adobe-DCP/LCP), **gleiche
+Wirkung**, ohne das ungelöste Adobe-Format-Problem selbst anzufassen.
+
+**Spike real durchgeführt** (nicht nur `--dry-run`): `cargo add
+lensfun@0.7` in `apx-pipeline`, `cargo build -p apx-pipeline` erfolgreich
+(„Finished dev profile … in 2m 01s"), einzige neue Abhängigkeit ist
+`roxmltree` (reines Rust, DOM-XML-Parser) — keine C-Bindings, kein
+`bindgen`/`libclang`. Ein Test lädt die gebündelte Datenbank, findet
+`Canon EOS 5D Mark III` + `Canon EF 16-35mm f/4L IS USM` real in den
+Daten und liest deren Verzeichnungskalibrierung bei 16mm aus
+(`crates/apx-pipeline/src/lens_profiles.rs`,
+`lensfun_bundled_database_has_plausible_distortion_calibration_for_known_lens`).
+**Ehrlicher Befund dabei:** `lensfun`s Poly3-`k1` (0,0128 für dieses
+Objektiv) folgt einer anderen Vorzeichen-/Skalierungskonvention als
+unser bisheriges `generic-wide`-Profil (`distortion_k1 = -0,12`, eigene
+Konvention seit ADR-0028) — ein direkter Zahlenvergleich zwischen beiden
+Systemen ist nicht aussagekräftig; die echte Umrechnung (inkl.
+`Modifier`s Re-Skalierung auf Bildmaße/Cropfaktor) ist Aufgabe von
+Schritt 3 Teil A. Der Spike verifiziert nur die Grundvoraussetzung:
+die Datenbank liefert für real existierende Objektive nutzbare,
+begrenzte Kalibrierwerte.
+
+**Für Objektive außerhalb der Datenbank** (Teil B, Schritt 3): ein
+Kalibrier-Assistent, der aus vom Nutzer selbst fotografierten
+Schachbrett-Kalibrierbildern per klassischer Zhang-Methode (Ecken-
+erkennung, Homographie-Schätzung, nichtlineare Verfeinerung — reine
+Optimierung, kein gelerntes Modell) ein Profil berechnet. Wird im Dialog
+und in `FEATURES.md` ehrlich als „aus eigenen Kalibrierfotos berechnet"
+beschriftet, nicht als „KI-generiert".
+
+**Entscheidung:** Phase 12 bündelt alle im Lightroom-Vergleichs-Artifact
+gefundenen, tatsächlich schließbaren Lücken in neun Bauschritten (0–8):
+Live-Masken-Overlay, Radialverlauf-Ellipse + Auto-Mask, echte LensFun-
+Datenbank + Kalibrier-Assistent, voller EXIF/IPTC-Editor, Mehrfachziel-
+Export, freies ICC-Profil beim Soft-Proof, beobachtete Ordner/Auto-
+Import. **Bewusst ausgeklammert** (echte Design-Entscheidung oder bereits
+dokumentiertes Beschaffungsproblem ohne neue Datenlage, siehe Vergleichs-
+Artifact): Cloud-Synchronisation/mobile Begleit-App, Mehrfach-Katalog,
+Publish Services, Print-on-Demand-Bestellintegration, Adobe-kompatibles
+Plugin-SDK, generative KI-Bildbearbeitung, HEIF-Export (ADR-0038 bereits
+geprüft, keine neue Datenlage). Testdisziplin wie vom Nutzer für den Rest
+von Phase 11 angeordnet fortgeführt: ein gezielter Test pro Schritt, volle
+Suite einmalig in Schritt 8.
+
+## ADR-0039-Nachtrag: Schritt 3 real umgesetzt — echte Ecken-Rückrechnung statt Koeffizienten-Übernahme, vereinfachter Kalibrier-Assistent statt vollem Zhang-Verfahren
+
+**Status:** Angenommen
+**Kontext:** Schritt 3 Teil A/B wurden umgesetzt. Zwei Stellen weichen
+ehrlich vom ursprünglichen ADR-0039-Text ab — beide Male, weil die
+Recherche beim Bauen mehr Klarheit brachte als beim Planen.
+
+**Teil A — Befund, der die geplante Schema-Migration gegenstandslos
+machte:** `radius_x`/`radius_y`/`angle_degrees` (Schritt 2) UND die
+Grundannahme für Schritt 3 wurden geprüft, bevor Code geschrieben wurde
+— dabei stellte sich heraus, dass `LensCorrectionAdjustment`s einzige
+wirkliche Lücke die *Datenquelle* für `distortion_k1`/`vignette_amount`/
+`ca_red_cyan`/`ca_blue_yellow` war, nicht das Feldschema selbst. Die
+eigentliche Herausforderung: `lensfun`s eigene Modelle (Poly3/Poly5/
+PTLens für Verzeichnung, mehrgliedrige TCA-/Vignettierungs-Polynome)
+sind reichhaltiger als unser Ein-Wert-r²-Modell — ein LensFun-
+Koeffizient lässt sich nicht 1:1 übernehmen, selbst mit korrekter
+Einheiten-Umrechnung, weil die Kurvenform selbst eine andere ist (exakt
+die Lücke, die der Schritt-0-Spike als „Aufgabe von Schritt 3" benannt
+hatte). Gelöst über eine an LensFuns *eigener* `Modifier`-Pixel-
+mathematik verankerte Rückrechnung: die reale, mehrparametrige Korrektur
+wird an der Ecke eines repräsentativen 3:2-Referenzbilds ausgewertet
+(`apply_geometry_distortion`/`apply_color_modification_f32`/
+`apply_subpixel_distortion` — dieselben Funktionen, die ein Foto real
+korrigieren würden), und daraus ein einzelner Koeffizient gesucht, der
+in unserem Modell an derselben Stelle dieselbe Wirkung erzeugt (siehe
+`crates/apx-pipeline/src/lens_profiles.rs`s
+`derive_lens_correction_values`). Eine echte, nachvollziehbare Näherung
+— keine geratene Zahl —, mit der ehrlichen Grenze, dass sie nur an der
+Bildecke exakt stimmt.
+
+**Teil B — bewusst kein Zhang-Verfahren:** der ursprüngliche Plantext
+nannte „Eckenerkennung per Harris-artigem Detektor + Homografie-
+Schätzung + nichtlineare Verfeinerung". Eine robuste automatische
+Schachbrett-Eckenerkennung plus volle Mehrparameter-Kamerakalibrierung
+ist ein eigenständiges, fehleranfälliges Computer-Vision-Projekt für
+sich — für unser Ein-Wert-Verzeichnungsmodell überdimensioniert und in
+diesem Umfang nicht seriös umsetzbar. Stattdessen implementiert
+`apx-ai::lens_calibration` eine bewusst schmalere, aber ebenso reale
+Methode: der Nutzer markiert selbst mehrere Punkte entlang einer in der
+Realität geraden Linie (direkt auf einer Bildvorschau im neuen Dialog
+„Objektiv kalibrieren", `LensCalibrationDialog.tsx`), und
+`calibrate_distortion_k1` sucht per Rasterverfeinerung den einen
+Verzeichnungskoeffizienten, der alle markierten Linien nach der
+Entzerrung gemeinsam am geradesten macht (totale Kleinste-Quadrate für
+die Geradheit, klassische 1-D-Optimierung für die Suche — kein
+gelerntes Modell). Ein Test mit synthetisch verzeichneten Linien
+bestätigt, dass ein bekannter Koeffizient wiedergefunden wird
+(Abweichung < 0,01). Ergebnis lebt direkt im EDL
+(`LensCorrectionAdjustment::custom_distortion_k1`, additiv per
+`#[serde(default)]`) statt in einer neuen Profildatenbank/-datei —
+Wiederverwendung auf andere Fotos über die seit Phase 5 vorhandene
+Einstellungen-kopieren-Funktion, kein neuer Persistenzmechanismus nötig.
+Bewusst nur Verzeichnung (Vignette/CA bräuchten andere Messungen –
+Helligkeits- bzw. Kanal-Registrierung statt Geradheit – nicht Teil
+dieses Umfangs).
+
+**Entscheidung:** Beide Abweichungen sind Umfangs-Präzisierungen, keine
+Kürzungen am eigentlichen Nutzen — Teil A liefert weiterhin eine echte,
+Datenbank-gestützte Objektiv-Zuordnung (jetzt sogar automatisch beim
+Fotowechsel), Teil B weiterhin eine echte, aus eigenen Fotos berechnete
+Kalibrierung für Objektive außerhalb der Datenbank. `FEATURES.md` und
+`PLAN.md` sind entsprechend präzisiert.
+
+## ADR-0039-Nachtrag II: Schritt 6 — echter ICC-Soft-Proof über `lcms2::Transform::new_proofing` ersetzt die JS-Näherung
+
+**Status:** Angenommen
+**Kontext:** Der Soft-Proof im Entwickeln-Panel (Phase 6 Schritt 10,
+ADR-0032 Punkt 6) war bis hierhin eine rein clientseitige Sättigungs-
+Näherung mit drei erfundenen "simulierten" Zielen (`srgb`/`print_sim`/
+`grayscale_sim`) — ADR-0032 selbst nannte das explizit als bewusste
+Vereinfachung, mit "kein echtes 3D-Gamut-Mapping" als offen benannte
+Lücke. `apx_export::icc` bindet `lcms2` bereits seit Phase 8 Schritt 2
+für den Export ein (`convert_from_srgb`, inklusive `IccTarget::
+CustomFile` für eine vom Nutzer gewählte `.icc`-Datei) — dieselbe
+Bibliothek unterstützt über `Transform::new_proofing` (kombiniert mit
+den `SOFT_PROOFING`/`GAMUT_CHECK`-Flags und `cmsSetAlarmCodes` für die
+Farbumfangswarnung) echtes, standardbasiertes Soft-Proofing, exakt die
+Funktion, die auch Lightroom/Photoshop intern nutzen.
+
+**Umsetzung:** neue Funktion `apx_export::icc::soft_proof_rgba8`
+(`Transform::new_proofing(sRGB-Anzeigeprofil, …, Zielprofil, Intent,
+Intent, Flags)`) für die vier gebündelten Standardprofile UND eine
+beliebige `.icc`-Datei — dieselbe `IccTarget`-Wiederverwendung wie beim
+Export. Statt eines neuen Tauri-Commands (der Puffer wäre pro
+Regler-Tick zu groß für JSON-serialisierte IPC, siehe die bestehende
+Begründung in `crates/apx-app/src/protocol/mod.rs`s Moduldoku, "ohne den
+Umweg über Base64-kodierte Tauri-Commands") läuft der Soft-Proof über
+ein zusätzliches `<soft_proof>`-Segment derselben `develop/...`-Route,
+die auch die normale Vorschau liefert (`none` oder base64url-kodiertes
+JSON, siehe `crates/apx-app/src/protocol/route.rs`s Moduldoku) — der
+Server liefert bei aktivem Soft-Proof direkt den fertig transformierten
+Puffer, kein zweiter Nachbearbeitungsschritt im Frontend für Farbe/Gamut.
+
+**Bewusst erhaltene, kleinere Vereinfachung:** die Papierweiß-Simulation
+hat in `lcms2` keine eingebaute Entsprechung (in echten
+Bildbearbeitungsprogrammen meist eine separate, dem ICC-Proofing
+nachgeschaltete Tonwertkompression) und bleibt daher eine kleine
+clientseitige Nachbearbeitung (`lib/softProof.ts::applyPaperWhite`) —
+anders als vorher betrifft sie aber nur noch den Tonwertbereich, nicht
+mehr Farbe/Sättigung/Gamut. Aus demselben Grund bleibt `developFrame`
+selbst (für Farbaufnehmer/TAT/Clipping-Overlay) immer der unveränderte,
+nicht soft-proofte Puffer — der Viewer holt bei aktivem Soft-Proof eine
+zweite, separate Antwort derselben Route nur für den tatsächlich
+gezeichneten Canvas-Inhalt.
+
+**Entscheidung:** `FEATURES.md`/`PLAN.md` sind entsprechend aktualisiert
+— Soft-Proof ist ab hier echtes ICC-Farbmanagement, keine Näherung mehr.
+
+## ADR-0039-Nachtrag III: Schritt 7 — Beobachteter Ordner / Auto-Import genau wie geplant umgesetzt
+
+**Status:** Angenommen
+**Kontext:** Schritt 7 (Beobachteter Ordner) folgt exakt dem im
+Ursprungsplan skizzierten Weg, ohne Abweichung — festgehalten hier nur der
+Vollständigkeit halber, wie bei jedem Schritt dieser Phase.
+
+**Umsetzung:** neuer `WatchedFolderSettings`-Block in `apx_core::settings`
+(Pfad, an/aus, Poll-Intervall in Sekunden, Default aus) neben den
+bestehenden `UiSettings`/`AiSettings`; ein neuer Hintergrund-Task
+`watched_folder_worker` in `apx-app/src/main.rs`, nach demselben
+Abfragen-statt-Weck-Benachrichtigung-Muster wie der bereits bestehende
+`export_queue_worker`. Bei jedem Durchlauf werden die Einstellungen frisch
+von der Platte gelesen (ein Umschalten in den Einstellungen wirkt ohne
+Neustart) und, falls aktiviert und der Ordner existiert, derselbe
+`import::run_with_mode`-Pfad im Modus `AddInPlace` angestoßen wie bei
+einem manuellen Import — geteilt über dieselbe `active_import`-Sperre, die
+schon einen doppelten manuellen Import verhindert, damit sich ein
+automatischer und ein manueller Import nie überschneiden. Kein natives
+Datei-System-Watcher-Crate nötig: `run_with_mode` überspringt bereits
+katalogisierte Dateien von selbst (`SingleFileOutcome::Unchanged`), ein
+wiederholter Lauf über denselben Ordner ist also von sich aus billig und
+idempotent — kein eigener "bereits gesehen"-Zustand nötig.
+
+**Entscheidung:** `FEATURES.md`/`PLAN.md` sind entsprechend aktualisiert.

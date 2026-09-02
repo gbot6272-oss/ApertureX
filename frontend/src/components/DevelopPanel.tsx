@@ -42,12 +42,16 @@ import {
   type SliderSpec,
   type StageEnabled,
 } from "../lib/edl";
+import { matchesBinding } from "../lib/keybindings";
 import { PRESET_SECTION_KEYS, PRESET_SECTION_LABELS, type PresetSectionKey } from "../lib/presets";
 import { SOFT_PROOF_INTENT_LABELS, SOFT_PROOF_PROFILE_LABELS, type SoftProofIntent, type SoftProofProfile } from "../lib/softProof";
+import { pickFilePath } from "../lib/tauri";
 import { selectActivePhotos, useAppStore } from "../store";
 import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
+import { LensCalibrationDialog } from "./LensCalibrationDialog";
+import { PaletteFrame } from "./PaletteFrame";
 import { SavePresetDialog } from "./SavePresetDialog";
 
 // ---- Reparatur (Klonen/Reparieren) — Phase 4 Schritt 12 --------------------
@@ -159,12 +163,19 @@ export function DevelopPanel() {
   const toggleSoftProof = useAppStore((s) => s.toggleSoftProof);
   const softProofProfile = useAppStore((s) => s.softProofProfile);
   const setSoftProofProfile = useAppStore((s) => s.setSoftProofProfile);
+  const softProofCustomIccPath = useAppStore((s) => s.softProofCustomIccPath);
+  const setSoftProofCustomIccPath = useAppStore((s) => s.setSoftProofCustomIccPath);
   const softProofIntent = useAppStore((s) => s.softProofIntent);
   const setSoftProofIntent = useAppStore((s) => s.setSoftProofIntent);
   const softProofGamutWarning = useAppStore((s) => s.softProofGamutWarning);
   const toggleSoftProofGamutWarning = useAppStore((s) => s.toggleSoftProofGamutWarning);
   const softProofPaperWhite = useAppStore((s) => s.softProofPaperWhite);
   const toggleSoftProofPaperWhite = useAppStore((s) => s.toggleSoftProofPaperWhite);
+
+  async function handlePickSoftProofIccFile() {
+    const path = await pickFilePath("ICC-Profil", ["icc", "icm"]);
+    if (path) setSoftProofCustomIccPath(path);
+  }
   const activePhotos = useAppStore(useShallow(selectActivePhotos));
   const otherPhotosForReference = activePhotos.filter((p) => p.id !== selectedPhotoId);
   const copiedEdlSubset = useAppStore((s) => s.copiedEdlSubset);
@@ -207,6 +218,7 @@ export function DevelopPanel() {
   const enhanceStatus = useAppStore((s) => s.enhanceStatus);
   const runDenoise = useAppStore((s) => s.runDenoise);
   const runUpscale = useAppStore((s) => s.runUpscale);
+  const runConvertToDng = useAppStore((s) => s.runConvertToDng);
   const colorMixer = useAppStore((s) => s.developEdl.color_mixer);
   const colorMixerPickerActive = useAppStore((s) => s.colorMixerPickerActive);
   const toggleColorMixerPicker = useAppStore((s) => s.toggleColorMixerPicker);
@@ -234,6 +246,9 @@ export function DevelopPanel() {
   const setLensCorrectionField = useAppStore((s) => s.setLensCorrectionField);
   const setLensCorrectionManualTransformField = useAppStore((s) => s.setLensCorrectionManualTransformField);
   const setLensCorrectionProfile = useAppStore((s) => s.setLensCorrectionProfile);
+  const manuallyDetectLensProfile = useAppStore((s) => s.manuallyDetectLensProfile);
+  const setLensCorrectionCustomDistortionK1 = useAppStore((s) => s.setLensCorrectionCustomDistortionK1);
+  const setLensCalibrationDialogOpen = useAppStore((s) => s.setLensCalibrationDialogOpen);
   const setLensCorrectionAutoCa = useAppStore((s) => s.setLensCorrectionAutoCa);
   const setLensCorrectionUprightMode = useAppStore((s) => s.setLensCorrectionUprightMode);
   const setLensCorrectionGuidedLineField = useAppStore((s) => s.setLensCorrectionGuidedLineField);
@@ -283,12 +298,17 @@ export function DevelopPanel() {
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") return;
 
-      event.preventDefault();
-      if (event.shiftKey) {
+      // Umbelegbar über `lib/keybindings.ts` (Phase 11 Schritt 11, siehe
+      // DECISIONS.md ADR-0038) — dieselben "undo"/"redo"-IDs wie
+      // `App.tsx`s Bibliotheks-Metadaten-Undo, weil sich beide Kontexte
+      // gegenseitig ausschließen (`App.tsx` reicht Ctrl/Cmd+Z nur weiter,
+      // wenn dieses Panel geschlossen ist).
+      if (matchesBinding(event, "redo")) {
+        event.preventDefault();
         void redoDevelop();
-      } else {
+      } else if (matchesBinding(event, "undo")) {
+        event.preventDefault();
         void undoDevelop();
       }
     }
@@ -304,7 +324,7 @@ export function DevelopPanel() {
 
   return (
     <>
-    <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border bg-bg-raised p-3" aria-label="Entwickeln">
+    <PaletteFrame id="develop" side="right" defaultWidth={288} label="Entwickeln" className="gap-4 border-l border-border bg-bg-raised p-3">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-text-primary">Entwickeln</h2>
         <div className="flex gap-1">
@@ -521,6 +541,20 @@ export function DevelopPanel() {
                   ))}
                 </select>
               </label>
+              {softProofProfile === "custom" && (
+                <div className="flex gap-1">
+                  <input
+                    type="text"
+                    readOnly
+                    value={softProofCustomIccPath}
+                    placeholder="ICC-Datei wählen…"
+                    className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+                  />
+                  <button type="button" onClick={() => void handlePickSoftProofIccFile()} className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent">
+                    Wählen…
+                  </button>
+                </div>
+              )}
               <label className="flex items-center gap-2 text-xs text-text-secondary">
                 Renderpriorität
                 <select
@@ -981,21 +1015,50 @@ export function DevelopPanel() {
           <fieldset id="stage-lens_corrections" className="flex flex-col gap-3">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Objektivkorrekturen</legend>
 
-            <label className="flex items-center gap-2 text-xs text-text-secondary">
-              Objektivprofil
-              <select
-                aria-label="Objektivprofil"
-                value={lensCorrections.profile_id ?? ""}
-                onChange={(event) => setLensCorrectionProfile(event.target.value || null)}
-                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+            <div className="flex items-center gap-2">
+              <label className="flex flex-1 items-center gap-2 text-xs text-text-secondary">
+                Objektivprofil
+                <select
+                  aria-label="Objektivprofil"
+                  value={lensCorrections.profile_id ?? ""}
+                  onChange={(event) => setLensCorrectionProfile(event.target.value || null)}
+                  className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+                >
+                  {LENS_PROFILE_OPTIONS.map((option) => (
+                    <option key={option.label} value={option.value ?? ""}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => void manuallyDetectLensProfile()}
+                title="Objektivprofil aus dem EXIF-Objektivstring des Fotos erkennen (Phase 12 Schritt 3, siehe DECISIONS.md ADR-0039)"
+                className="shrink-0 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:border-accent"
               >
-                {LENS_PROFILE_OPTIONS.map((option) => (
-                  <option key={option.label} value={option.value ?? ""}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+                Automatisch erkennen
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setLensCalibrationDialogOpen(true)}
+                title="Objektiv aus eigenen Kalibrierfotos vermessen (Phase 12 Schritt 3 Teil B, siehe DECISIONS.md ADR-0039)"
+                className="rounded border border-border px-2 py-1 text-text-secondary hover:border-accent"
+              >
+                Objektiv kalibrieren…
+              </button>
+              {lensCorrections.custom_distortion_k1 !== null && (
+                <span className="flex items-center gap-1 text-text-secondary">
+                  Eigene Kalibrierung aktiv (k1 = {lensCorrections.custom_distortion_k1.toFixed(4)})
+                  <button type="button" onClick={() => setLensCorrectionCustomDistortionK1(null)} className="text-danger underline">
+                    Entfernen
+                  </button>
+                </span>
+              )}
+            </div>
 
             <label className="flex items-center gap-2 text-xs text-text-secondary">
               <input
@@ -1331,10 +1394,28 @@ export function DevelopPanel() {
             </div>
             {enhanceStatus && <p className="text-xs text-text-muted">{enhanceStatus}</p>}
           </fieldset>
+
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">DNG-Konvertierung</legend>
+            <p className="text-xs text-text-muted">
+              Schreibt eine „Linear DNG" aus den unveränderten, kamera-nativen RAW-Daten (nicht dem entwickelten
+              Rendering) neben das Original — ein Rohdatenformat mit demosaicten statt der ursprünglichen
+              Bayer-Mosaik-Daten, siehe Dokumentation.
+            </p>
+            <button
+              type="button"
+              disabled={!selectedPhotoId || enhanceRunning !== null}
+              onClick={() => selectedPhotoId && void runConvertToDng(selectedPhotoId)}
+              className="rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {enhanceRunning === "dng" ? "Konvertiert…" : "Als DNG konvertieren"}
+            </button>
+          </fieldset>
         </>
       )}
-    </aside>
+    </PaletteFrame>
     <SavePresetDialog open={savePresetOpen} onClose={() => setSavePresetOpen(false)} />
+    <LensCalibrationDialog />
     </>
   );
 }

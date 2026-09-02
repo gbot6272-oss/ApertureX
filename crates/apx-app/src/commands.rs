@@ -74,6 +74,10 @@ pub struct PhotoDto {
     pub caption: Option<String>,
     pub copyright: Option<String>,
     pub creator: Option<String>,
+    /// Voller EXIF/IPTC-Editor (Phase 12 Schritt 4, siehe `DECISIONS.md`
+    /// ADR-0039) — frei benannte Zusatzfelder, siehe
+    /// `apx_catalog::Photo::custom_metadata`.
+    pub custom_metadata: std::collections::BTreeMap<String, String>,
 }
 
 impl From<apx_catalog::Photo> for PhotoDto {
@@ -106,6 +110,7 @@ impl From<apx_catalog::Photo> for PhotoDto {
             caption: photo.caption,
             copyright: photo.copyright,
             creator: photo.creator,
+            custom_metadata: photo.custom_metadata,
         }
     }
 }
@@ -793,6 +798,58 @@ pub fn current_develop_edit(
     history_position_to_dto(position)
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct LensProfileSuggestionDto {
+    id: String,
+    display_name: String,
+}
+
+/// Ordnet einen EXIF-Objektiv-String automatisch einem Objektivprofil zu
+/// (Phase 12 Schritt 3 Teil A, siehe `DECISIONS.md` ADR-0039) — dünner
+/// Wrapper um `apx_pipeline::lens_profiles::match_profile_for_lens_string`,
+/// das jetzt gegen die echte LensFun-Datenbank sucht statt gegen drei
+/// handgepflegte Beispielprofile. Kein DB-/State-Zugriff nötig, reine
+/// Funktionsauswertung.
+#[tauri::command]
+pub fn resolve_lens_profile(lens: Option<String>) -> Option<LensProfileSuggestionDto> {
+    let lens = lens?;
+    let lens = lens.trim();
+    if lens.is_empty() {
+        return None;
+    }
+    apx_pipeline::lens_profiles::match_profile_for_lens_string(lens).map(|profile| {
+        LensProfileSuggestionDto {
+            id: profile.id,
+            display_name: profile.display_name,
+        }
+    })
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CalibrationPointDto {
+    x: f32,
+    y: f32,
+}
+
+/// Berechnet aus vom Nutzer markierten, in der Realität geraden Linien
+/// einen Verzeichnungskoeffizienten (Phase 12 Schritt 3 Teil B, siehe
+/// `DECISIONS.md` ADR-0039) — dünner Wrapper um
+/// `apx_ai::lens_calibration::calibrate_distortion_k1`. Direkt als
+/// `LensCorrectionAdjustment::custom_distortion_k1` im EDL speicherbar,
+/// keine separate Profildatenbank/-datei nötig.
+#[tauri::command]
+pub fn calibrate_lens_distortion(lines: Vec<Vec<CalibrationPointDto>>) -> Result<f32, String> {
+    let lines: Vec<Vec<apx_ai::lens_calibration::StraightLinePoint>> = lines
+        .into_iter()
+        .map(|line| {
+            line.into_iter()
+                .map(|p| apx_ai::lens_calibration::StraightLinePoint { x: p.x, y: p.y })
+                .collect()
+        })
+        .collect();
+    apx_ai::lens_calibration::calibrate_distortion_k1(&lines).map_err(|err| err.to_string())
+}
+
 /// Geht einen Bearbeitungsschritt zurück. `None`, wenn schon am
 /// Ausgangszustand (kein Rückgängig möglich) — kein Fehler, siehe
 /// `apx_catalog::Catalog::undo_edit`.
@@ -1225,6 +1282,34 @@ pub fn set_photo_metadata(
         .map_err(|err| err.to_string())
 }
 
+/// Ersetzt die frei benannten IPTC-Zusatzfelder für eine oder mehrere
+/// Fotos (Phase 12 Schritt 4, voller EXIF/IPTC-Editor, siehe
+/// `DECISIONS.md` ADR-0039) — wie `set_photo_metadata` deckt das auch
+/// Stapel-Metadatenbearbeitung ab.
+#[tauri::command]
+pub fn set_photo_custom_metadata(
+    state: State<'_, AppState>,
+    photo_id: String,
+    metadata: std::collections::BTreeMap<String, String>,
+) -> Result<(), String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    state
+        .catalog
+        .set_photo_custom_metadata(photo_id, &metadata)
+        .map_err(|err| err.to_string())
+}
+
+/// Die wohlbekannten IPTC-Kernfeld-Schlüssel, die das Frontend fest
+/// anbietet (siehe `apx_catalog::iptc::WELL_KNOWN_FIELDS`) — reine
+/// Konstante, kein State-Zugriff nötig.
+#[tauri::command]
+pub fn list_well_known_iptc_fields() -> Vec<(String, String)> {
+    apx_catalog::iptc::WELL_KNOWN_FIELDS
+        .iter()
+        .map(|(key, label)| (key.to_string(), label.to_string()))
+        .collect()
+}
+
 /// Exportiert eine `.xmp`-Sidecar-Datei neben dem Original — Metadaten
 /// (Titel/Bildunterschrift/Copyright/Urheber/Schlagworte) plus optional
 /// die Adobe-`crs:`-Entwickeln-Einstellungen (Basic+HSL, siehe
@@ -1257,6 +1342,7 @@ pub fn export_xmp_sidecar(
         copyright: photo.copyright.clone(),
         creator: photo.creator.clone(),
         keywords: keywords.into_iter().map(|k| k.name).collect(),
+        custom_metadata: photo.custom_metadata.clone(),
     };
 
     let develop = if with_develop_settings {
@@ -1899,6 +1985,75 @@ pub async fn export_preset_to_apx_file(
     Ok(Some(path.display().to_string()))
 }
 
+/// Adobe `.lrtemplate`-Export für ein Preset (Phase 11 Schritt 8, siehe
+/// `DECISIONS.md` ADR-0038) — deckt dieselbe Teilmenge wie der bereits
+/// vorhandene `.xmp`-`crs:`-Export ab (Basic ohne Weißabgleich + HSL,
+/// siehe `apx_export::lrtemplate`s Moduldoku). Fehlt eine dieser beiden
+/// Sektionen im Preset (`edl_subset_json` enthält sie nicht, weil das
+/// Preset z. B. nur Kurven anpasst), wird sie als neutral exportiert —
+/// Lightroom kennt für diese Felder kein „nicht gesetzt", jede
+/// `.lrtemplate`-Datei trägt immer einen vollständigen Absolutwert je
+/// Feld. Nur Export, siehe Moduldoku zum Grund. `Ok(None)`, wenn der
+/// Dateidialog abgebrochen wurde.
+#[tauri::command]
+pub async fn export_preset_to_lrtemplate_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    preset_id: String,
+) -> Result<Option<String>, String> {
+    let preset_id = parse_preset_id(preset_id)?;
+    let preset = state
+        .catalog
+        .list_presets()
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .find(|p| p.id == preset_id)
+        .ok_or_else(|| "Preset nicht gefunden".to_string())?;
+    let version = state
+        .catalog
+        .latest_preset_version(preset_id)
+        .map_err(|err| err.to_string())?;
+
+    let subset: serde_json::Value = serde_json::from_str(&version.edl_subset_json)
+        .map_err(|err| format!("Preset-EDL-Teilmenge ist kein gültiges JSON: {err}"))?;
+    let basic: apx_pipeline::edl::BasicAdjustments = subset
+        .get("basic")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or(apx_pipeline::edl::BasicAdjustments::NEUTRAL);
+    let hsl: apx_pipeline::edl::HslAdjustment = subset
+        .get("hsl")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or(apx_pipeline::edl::HslAdjustment::NEUTRAL);
+
+    let content = apx_export::lrtemplate::generate_lrtemplate(
+        &preset.name,
+        &preset_id.to_string(),
+        &basic,
+        &hsl,
+    );
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("Lightroom-Vorlage", &["lrtemplate"])
+        .set_file_name(format!("{}.lrtemplate", preset.name))
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|err| format!("Speichern-Dialog fehlgeschlagen: {err}"))?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|err| format!("Ungültiger Pfad: {err}"))?;
+    std::fs::write(&path, content)
+        .map_err(|err| format!("Datei '{}' nicht schreibbar: {err}", path.display()))?;
+    Ok(Some(path.display().to_string()))
+}
+
 /// Liest eine `.apx`-Datei und legt sie als neues Preset in `folder_id`
 /// an. `Ok(None)`, wenn der Dateidialog abgebrochen wurde.
 #[tauri::command]
@@ -2006,6 +2161,71 @@ pub fn search_and_filter_photos(
     Ok(photos.into_iter().map(PhotoDto::from).collect())
 }
 
+// ---- Bibliothek: Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
+// DECISIONS.md ADR-0038) -----------------------------------------------
+
+/// Eingabe für [`apply_batch_rule`] — spiegelt `apx_catalog::BatchAction`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind")]
+pub enum BatchActionDto {
+    SetRating { rating: u8 },
+    SetColorLabel { color_label: Option<String> },
+    AddKeyword { name: String },
+}
+
+impl From<BatchActionDto> for apx_catalog::BatchAction {
+    fn from(dto: BatchActionDto) -> Self {
+        match dto {
+            BatchActionDto::SetRating { rating } => Self::SetRating(rating),
+            BatchActionDto::SetColorLabel { color_label } => Self::SetColorLabel(color_label),
+            BatchActionDto::AddKeyword { name } => Self::AddKeyword(name),
+        }
+    }
+}
+
+/// Fotos, die `criteria` treffen würden — schreibt nichts (Trockenlauf-
+/// Vorschau vor dem eigentlichen Anwenden, siehe `BatchConsoleDialog.tsx`).
+#[tauri::command]
+pub fn preview_batch_rule(
+    state: State<'_, AppState>,
+    criteria: FilterCriteriaDto,
+) -> Result<Vec<PhotoDto>, String> {
+    let photos = state
+        .catalog
+        .preview_batch_rule(&criteria.into())
+        .map_err(|err| err.to_string())?;
+    Ok(photos.into_iter().map(PhotoDto::from).collect())
+}
+
+/// Wendet `action` auf alle `criteria`-treffenden Fotos an und
+/// journalisiert jede tatsächliche Änderung — gibt die neue Stapel-ID
+/// (für [`undo_batch_operation`]) als String zurück.
+#[tauri::command]
+pub fn apply_batch_rule(
+    state: State<'_, AppState>,
+    criteria: FilterCriteriaDto,
+    action: BatchActionDto,
+) -> Result<String, String> {
+    let batch_id = state
+        .catalog
+        .apply_batch_rule(&criteria.into(), &action.into())
+        .map_err(|err| err.to_string())?;
+    Ok(batch_id.to_string())
+}
+
+/// Macht jede in `batch_id` journalisierte Änderung einzeln rückgängig.
+/// Gibt die Zahl tatsächlich rückgängig gemachter Änderungen zurück.
+#[tauri::command]
+pub fn undo_batch_operation(state: State<'_, AppState>, batch_id: String) -> Result<usize, String> {
+    let batch_id: apx_core::BatchOperationId = batch_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    state
+        .catalog
+        .undo_batch_operation(batch_id)
+        .map_err(|err| err.to_string())
+}
+
 // ---- Bibliothek: Duplikaterkennung (ab Phase 3, Schritt 8.2) --------------
 
 /// Gruppen von Fotos mit identischem Inhalt (exakter Hash-Vergleich), siehe
@@ -2088,6 +2308,65 @@ pub fn list_perceptual_duplicate_groups(
                 .map(|i| PhotoDto::from(hashed[i].0.clone()))
                 .collect()
         })
+        .collect())
+}
+
+/// Personenansicht (Phase 11 Schritt 5, siehe `DECISIONS.md` ADR-0038):
+/// grobe Vorsortierung von Fotos mit erkannten Gesichtsregionen nach
+/// Ähnlichkeit (Blob-Anzahl/-Fläche als grobe „Signatur") — **keine
+/// echte Personen-Identifizierung**, siehe `apx_ai::faces`s Moduldoku.
+/// Arbeitet wie [`list_perceptual_duplicate_groups`] auf dem bereits
+/// vorhandenen Thumbnail-Vorschau-Cache statt jedes Foto neu zu
+/// dekodieren (dieselbe Begründung: schnell genug für die ganze
+/// Bibliothek, kein zweiter teurer RAW-Dekodier-Durchlauf).
+#[tauri::command]
+pub fn list_people_groups(state: State<'_, AppState>) -> Result<Vec<Vec<PhotoDto>>, String> {
+    let photos = state
+        .catalog
+        .search_and_filter_photos(None, &apx_catalog::FilterCriteria::default())
+        .map_err(|err| err.to_string())?;
+
+    // Signatur-Schlüssel: (Blob-Anzahl, bei 4 gekappt) × (grob gebuckete
+    // durchschnittliche Blob-Fläche) — bewusst grob, siehe Moduldoku.
+    let mut buckets: std::collections::BTreeMap<(u32, u32), Vec<apx_catalog::Photo>> =
+        std::collections::BTreeMap::new();
+
+    for photo in photos {
+        let Ok(Some(preview)) = state
+            .catalog
+            .get_preview(photo.id, apx_catalog::PreviewLevel::Thumbnail)
+        else {
+            continue;
+        };
+        let Ok(img) = image::open(&preview.path) else {
+            continue;
+        };
+        let rgb = img.to_rgb8();
+        let (width, height) = rgb.dimensions();
+        let pixels: Vec<f32> = rgb
+            .into_raw()
+            .iter()
+            .map(|&v| f32::from(v) / 255.0)
+            .collect();
+        let Ok(regions) = apx_ai::faces::detect_face_regions(&pixels, width, height) else {
+            continue;
+        };
+        if regions.is_empty() {
+            continue;
+        }
+        let avg_area: f32 =
+            regions.iter().map(|r| r.width * r.height).sum::<f32>() / regions.len() as f32;
+        let key = (
+            regions.len().min(4) as u32,
+            (avg_area * 20.0).round() as u32,
+        );
+        buckets.entry(key).or_default().push(photo);
+    }
+
+    Ok(buckets
+        .into_values()
+        .filter(|group| group.len() >= 2)
+        .map(|group| group.into_iter().map(PhotoDto::from).collect())
         .collect())
 }
 
@@ -2316,6 +2595,118 @@ pub fn set_anthropic_api_key(
     let mut settings = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
     settings.ai.anthropic_api_key = api_key.filter(|key| !key.trim().is_empty());
     settings.save(&path).map_err(|err| err.to_string())
+}
+
+// ---- UI: Einstellungen (Phase 10 Schritt 1) --------------------------------
+//
+// Dieselbe Vertrauensgrenze/dasselbe Lade-Muster wie `get_ai_settings`/
+// `set_anthropic_api_key` oben: Einstellungen werden bei jedem Aufruf frisch
+// von der Platte gelesen (kein In-Memory-Cache in `AppState`), es gibt genau
+// eine gemeinsame TOML-Datei für alle Einstellungskategorien.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiSettingsDto {
+    pub theme: apx_core::Theme,
+    pub accent_color: Option<String>,
+    pub locale: String,
+    pub ui_scale_percent: u16,
+    pub high_contrast: bool,
+    pub reduced_motion: bool,
+    pub onboarding_seen: bool,
+}
+
+impl From<apx_core::UiSettings> for UiSettingsDto {
+    fn from(ui: apx_core::UiSettings) -> Self {
+        Self {
+            theme: ui.theme,
+            accent_color: ui.accent_color,
+            locale: ui.locale,
+            ui_scale_percent: ui.ui_scale_percent,
+            high_contrast: ui.high_contrast,
+            reduced_motion: ui.reduced_motion,
+            onboarding_seen: ui.onboarding_seen,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_ui_settings(state: State<'_, AppState>) -> Result<UiSettingsDto, String> {
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    Ok(settings.ui.into())
+}
+
+/// Speichert die komplette `UiSettingsDto` auf einmal (das Frontend hält
+/// bereits den vollständigen Stand im Store, siehe `store/index.ts`s
+/// `uiSettings` — kein granulares Patch-DTO nötig, derselbe Ansatz wie bei
+/// den übrigen Mehrfeld-Einstellungsobjekten dieses Projekts).
+#[tauri::command]
+pub fn set_ui_settings(state: State<'_, AppState>, settings: UiSettingsDto) -> Result<(), String> {
+    let path = state.paths.settings_file();
+    let mut all = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    all.ui = apx_core::UiSettings {
+        theme: settings.theme,
+        accent_color: settings.accent_color.filter(|c| !c.trim().is_empty()),
+        locale: settings.locale,
+        ui_scale_percent: settings.ui_scale_percent.clamp(75, 200),
+        high_contrast: settings.high_contrast,
+        reduced_motion: settings.reduced_motion,
+        onboarding_seen: settings.onboarding_seen,
+    };
+    all.save(&path).map_err(|err| err.to_string())
+}
+
+// ---- Beobachteter Ordner / Auto-Import (Phase 12 Schritt 7) ---------------
+//
+// Dasselbe Lade-/Speicher-Muster wie `get_ai_settings`/`get_ui_settings`
+// oben. Der eigentliche Hintergrund-Worker (`watched_folder_worker` in
+// `main.rs`) liest dieselbe Datei direkt, ohne über diese Commands zu
+// gehen — hier nur die Frontend-Verdrahtung zum Anzeigen/Ändern.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatchedFolderSettingsDto {
+    pub path: Option<String>,
+    pub enabled: bool,
+    pub poll_seconds: u32,
+}
+
+impl From<apx_core::WatchedFolderSettings> for WatchedFolderSettingsDto {
+    fn from(wf: apx_core::WatchedFolderSettings) -> Self {
+        Self {
+            path: wf.path,
+            enabled: wf.enabled,
+            poll_seconds: wf.poll_seconds,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_watched_folder_settings(
+    state: State<'_, AppState>,
+) -> Result<WatchedFolderSettingsDto, String> {
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    Ok(settings.watched_folder.into())
+}
+
+#[tauri::command]
+pub fn set_watched_folder_settings(
+    state: State<'_, AppState>,
+    settings: WatchedFolderSettingsDto,
+) -> Result<(), String> {
+    let path = state.paths.settings_file();
+    let mut all = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    all.watched_folder = apx_core::WatchedFolderSettings {
+        path: settings.path.filter(|p| !p.trim().is_empty()),
+        enabled: settings.enabled,
+        // Ein zu kleines Intervall würde den beobachteten Ordner bei
+        // jedem Poll komplett neu scannen (`run_with_mode` scannt den
+        // gesamten Baum, kein inkrementeller Dateisystem-Watcher, siehe
+        // `main.rs`s Moduldoku) — 5 Sekunden als niedrigste sinnvolle
+        // Untergrenze.
+        poll_seconds: settings.poll_seconds.max(5),
+    };
+    all.save(&path).map_err(|err| err.to_string())
 }
 
 // ---- KI: Preset-Generator (Phase 7 Schritt 4) ------------------------------
@@ -2607,6 +2998,12 @@ fn parse_export_format(format: &str) -> Result<apx_export::format::ExportFormat,
         "tiff" => Ok(apx_export::format::ExportFormat::Tiff),
         "webp" => Ok(apx_export::format::ExportFormat::WebP),
         "avif" => Ok(apx_export::format::ExportFormat::Avif),
+        // Phase 11 Schritt 2 (siehe DECISIONS.md ADR-0038): PSD (ag-psd,
+        // reines Rust) und JPEG-XL (gamut-jxl) — HEIF bleibt zurückgestellt
+        // (`heif` 0.1.0 ist eine Fassade, `heif-rs` zu riskant für das
+        // Plattenkontingent dieser Sandbox, siehe ADR-0038).
+        "psd" => Ok(apx_export::format::ExportFormat::Psd),
+        "jxl" => Ok(apx_export::format::ExportFormat::Jxl),
         other => Err(format!("unbekanntes Exportformat '{other}'")),
     }
 }
@@ -2619,7 +3016,7 @@ pub struct ExportOutcomeDto {
     pub byte_size: usize,
 }
 
-fn parse_icc_target(
+pub(crate) fn parse_icc_target(
     profile: &str,
     custom_path: Option<&str>,
 ) -> Result<apx_export::icc::IccTarget, String> {
@@ -3963,6 +4360,61 @@ pub fn clear_preview_cache(state: State<'_, AppState>) -> Result<(), String> {
     clear_dir_contents(&state.paths.preview_cache_dir()).map_err(|err| err.to_string())
 }
 
+/// Feste lange Kante für Smart Previews (Phase 11 Schritt 4, siehe
+/// DECISIONS.md ADR-0038) — deutlich kleiner als ein Original, aber groß
+/// genug für Betrachtung/Grob-Bearbeitung, wenn das Original selbst
+/// nicht erreichbar ist.
+const SMART_PREVIEW_EDGE: u32 = 2560;
+
+/// Erzeugt Smart Previews für `photo_ids`: je eine feste, verkleinerte
+/// JPEG-Zwischendatei in `AppPaths::smart_preview_dir()`, die
+/// `apx-app::protocol::resolve_source_path` als Fallback nutzt, wenn die
+/// Originaldatei nicht erreichbar ist (z. B. eine getrennte externe
+/// Festplatte) — ermöglicht eingeschränktes Weiterarbeiten offline
+/// (Anzeige/Entwickeln-Vorschau, siehe `Viewer.tsx`). Überspringt Fotos,
+/// deren Original selbst schon nicht erreichbar ist (kann daraus kein
+/// Smart Preview erzeugen), statt den ganzen Aufruf abzubrechen — gibt
+/// die Zahl tatsächlich erzeugter Previews zurück.
+#[tauri::command]
+pub fn generate_smart_previews(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+) -> Result<usize, String> {
+    let dir = state.paths.smart_preview_dir();
+    std::fs::create_dir_all(&dir).map_err(|err| {
+        format!(
+            "Smart-Preview-Verzeichnis '{}' nicht anlegbar: {err}",
+            dir.display()
+        )
+    })?;
+
+    let mut generated = 0usize;
+    for raw_id in photo_ids {
+        let photo_id = parse_photo_id(raw_id)?;
+        let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+        if !source_path.exists() {
+            tracing::warn!(photo_id = %photo_id, path = %source_path.display(), "Original nicht erreichbar, überspringe Smart-Preview-Erzeugung");
+            continue;
+        }
+        let decoded = apx_raw::decode(&source_path, Some(SMART_PREVIEW_EDGE))
+            .map_err(|err| err.to_string())?;
+        let image = decoded
+            .into_dynamic_image()
+            .ok_or_else(|| "Dekodiertes Bild hat inkonsistente Maße".to_string())?;
+        let dest_path = dir.join(format!("{photo_id}.jpg"));
+        image
+            .save_with_format(&dest_path, image::ImageFormat::Jpeg)
+            .map_err(|err| {
+                format!(
+                    "Smart Preview '{}' nicht schreibbar: {err}",
+                    dest_path.display()
+                )
+            })?;
+        generated += 1;
+    }
+    Ok(generated)
+}
+
 // ---- Entwickeln: Entrauschung, Hochskalierung (ab Phase 9 Schritt 6, siehe
 // DECISIONS.md ADR-0035) — klassische, deterministische Algorithmen statt
 // echter Modellinferenz (dasselbe ONNX-Beschaffungsproblem wie ADR-0033),
@@ -4053,6 +4505,46 @@ pub fn upscale_photo(state: State<'_, AppState>, photo_id: String) -> Result<Str
         out_height,
         &upscaled,
     )
+}
+
+// ---- Import mit DNG-Konvertierung (Phase 11 Schritt 1, siehe
+// DECISIONS.md ADR-0038) — schreibt eine „Linear DNG" (siehe
+// `apx_export::dng`s Moduldoku) aus den unveränderten, kamera-nativen
+// RAW-Daten (nicht dem entwickelten/edierten Rendering wie
+// `render_photo_full_resolution` unten) — echte DNG-Konvertierung
+// bewahrt den unbearbeiteten Ausgangszustand, kein zweiter
+// Rendering-Codepfad nötig, da `apx_raw::decode_linear` bereits der
+// Phase-2-Einstiegspunkt für `apx-pipeline` ist.
+#[tauri::command]
+pub fn convert_photo_to_dng(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<String, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+
+    let linear = apx_raw::decode_linear(&source_path, None).map_err(|err| err.to_string())?;
+    let camera_model = match (&photo.camera_make, &photo.camera_model) {
+        (Some(make), Some(model)) => format!("{make} {model}"),
+        (Some(make), None) => make.clone(),
+        (None, Some(model)) => model.clone(),
+        (None, None) => String::new(),
+    };
+    let bytes = apx_export::dng::encode_linear_dng(&linear, &camera_model)
+        .map_err(|err| err.to_string())?;
+
+    let stem = source_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Foto");
+    let dest_path = source_path.with_file_name(format!("{stem}.dng"));
+    std::fs::write(&dest_path, bytes)
+        .map_err(|err| format!("Datei '{}' nicht schreibbar: {err}", dest_path.display()))?;
+    Ok(dest_path.display().to_string())
 }
 
 // ---- Fortgeschrittenes: Fokus-/HDR-/Panorama-/Astro-Stacking (Phase 9
@@ -5009,5 +5501,30 @@ mod tests {
         let (mut backend, simulated) = new_tether_backend();
         assert!(simulated);
         assert!(backend.detect_camera().expect("ok").is_some());
+    }
+
+    #[test]
+    fn export_format_parses_all_seven_known_strings() {
+        // Phase 11 Schritt 2 (siehe DECISIONS.md ADR-0038): "psd"/"jxl"
+        // kamen hinzu, HEIF bleibt bewusst außen vor.
+        use apx_export::format::ExportFormat;
+        let cases = [
+            ("jpeg", ExportFormat::Jpeg),
+            ("png", ExportFormat::Png),
+            ("tiff", ExportFormat::Tiff),
+            ("webp", ExportFormat::WebP),
+            ("avif", ExportFormat::Avif),
+            ("psd", ExportFormat::Psd),
+            ("jxl", ExportFormat::Jxl),
+        ];
+        for (raw, expected) in cases {
+            assert_eq!(parse_export_format(raw).expect("sollte parsen"), expected);
+        }
+    }
+
+    #[test]
+    fn export_format_rejects_unknown_string() {
+        let err = parse_export_format("heif").expect_err("sollte fehlschlagen");
+        assert!(err.contains("heif"));
     }
 }

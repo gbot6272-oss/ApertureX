@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 
 import { buildChildrenByParent } from "../lib/folderTree";
+import { useT } from "../lib/i18n";
 import { buildPresetEdlSubset, PRESET_SECTION_KEYS } from "../lib/presets";
 import type { PresetDto, PresetFolderDto } from "../lib/tauri";
 import { selectPresetConditionMeta, useAppStore } from "../store";
+import { PaletteFrame } from "./PaletteFrame";
 import { PresetThumbnail } from "./PresetThumbnail";
 import { PresetVersionsDialog } from "./PresetVersionsDialog";
 
@@ -81,6 +83,7 @@ function PresetRow({ preset, folders, onOpenVersions }: PresetRowProps) {
   const clearPresetHoverPreview = useAppStore((s) => s.clearPresetHoverPreview);
   const photoMeta = useAppStore(selectPresetConditionMeta);
   const exportPresetAsApxFile = useAppStore((s) => s.exportPresetAsApxFile);
+  const exportPresetAsLrtemplateFile = useAppStore((s) => s.exportPresetAsLrtemplateFile);
 
   function handleRename(event: React.MouseEvent) {
     event.stopPropagation();
@@ -153,6 +156,15 @@ function PresetRow({ preset, folders, onOpenVersions }: PresetRowProps) {
           aria-label={`${preset.name} als .apx exportieren`}
         >
           ⬇
+        </button>
+        <button
+          type="button"
+          onClick={() => void exportPresetAsLrtemplateFile(preset.id)}
+          className="shrink-0 text-text-muted hover:text-accent"
+          title="Als Adobe .lrtemplate exportieren (nur Basic + HSL, siehe DECISIONS.md ADR-0038)"
+          aria-label={`${preset.name} als .lrtemplate exportieren`}
+        >
+          ⬇LR
         </button>
         <select
           aria-label={`${preset.name}: Ordner`}
@@ -476,6 +488,7 @@ function AiPresetGeneratorSection() {
  * Wie `DevelopPanel` nur sichtbar, während das Entwickeln-Panel offen ist.
  */
 export function PresetsPanel() {
+  const t = useT();
   const open = useAppStore((s) => s.developPanelOpen);
   const presetFolders = useAppStore((s) => s.presetFolders);
   const presets = useAppStore((s) => s.presets);
@@ -508,8 +521,8 @@ export function PresetsPanel() {
   }
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col gap-3 overflow-y-auto border-r border-border bg-bg-raised p-3">
-      <h2 className="text-sm font-semibold text-text-primary">Presets</h2>
+    <PaletteFrame id="presets" side="left" defaultWidth={256} label={t("presets.heading")} className="gap-3 border-r border-border bg-bg-raised p-3">
+      <h2 className="text-sm font-semibold text-text-primary">{t("presets.heading")}</h2>
 
       <ul className="space-y-0.5">
         <li>
@@ -575,6 +588,6 @@ export function PresetsPanel() {
         presetName={versionsDialog?.presetName ?? ""}
         onClose={() => setVersionsDialog(null)}
       />
-    </aside>
+    </PaletteFrame>
   );
 }

@@ -41,11 +41,23 @@ pub struct MaskPoint {
 /// — mehrere Striche akkumulieren ihre Deckung (Maximum je Pixel, nicht
 /// Summe, sonst würde mehrfaches Übermalen unbeabsichtigt über 100 %
 /// Deckkraft hinaus verstärken).
+///
+/// `auto_mask` (Phase 12 Schritt 2, siehe `DECISIONS.md` ADR-0039):
+/// Lightrooms „Auto Mask" — dämpft die Deckkraft dieses Strichs an
+/// lokal detailreichen/kontrastreichen Bildstellen (`masks.rs`s
+/// `relative_sharpness_map`, dieselbe Laplace-Varianz-Heuristik wie
+/// `BlurDepthApprox`), damit der Pinsel nicht über scharfe Kanten hinweg
+/// "ausblutet". `#[serde(default)]` statt Schema-Version-Sprung — additiv
+/// zu Version 3 wie schon der Schwarzweiß-Mixer in Phase 9 (siehe dessen
+/// Kommentar weiter unten in dieser Datei); ein gespeicherter Strich ohne
+/// dieses Feld liest weiterhin als `false` (altes Verhalten unverändert).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BrushStroke {
     pub points: Vec<MaskPoint>,
     pub radius: f32,
     pub feather: f32,
+    #[serde(default)]
+    pub auto_mask: bool,
 }
 
 /// Wie eine Maskenkomponente ihre räumliche Ausdehnung bestimmt — die
@@ -113,6 +125,24 @@ pub enum MaskGeometry {
         width: u32,
         height: u32,
         alpha: Vec<u8>,
+    },
+    /// **Unschärfe-basierte Tiefennäherung** (Phase 11 Schritt 7, siehe
+    /// `DECISIONS.md` ADR-0038) — keine echte Tiefenkarte (die gibt es in
+    /// diesem Projekt nirgends, siehe ADR-0033), sondern eine Laplace-
+    /// Varianz-Schärfeheuristik (`stages::masks::relative_sharpness_map`):
+    /// Pixel mit einer bildrelativen Schärfe über `threshold`
+    /// (`0.0..=1.0`) gelten als „im Fokus" (Alpha nahe 1), unschärfere
+    /// als Hintergrund (Alpha nahe 0). Anders als [`Self::AiGenerated`]
+    /// live pro Render berechnet (wie [`Self::ColorRange`]/
+    /// [`Self::LuminanceRange`]), nicht vorab gebacken — deshalb nur der
+    /// eine Schwellwert-Parameter statt einer Alpha-Bitmap. Funktioniert
+    /// nur bei echtem Schärfentiefe-Effekt (z. B. Porträts mit offener
+    /// Blende), versagt bei durchgehend scharfen Aufnahmen (Landschaften)
+    /// komplett — UI-Beschriftung bewusst „Unschärfe-basierte
+    /// Tiefennäherung", nicht „Tiefenbereich", um keine falsche
+    /// Erwartung an eine echte Tiefenkarte zu wecken.
+    BlurDepthApprox {
+        threshold: f32,
     },
 }
 

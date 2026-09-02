@@ -104,6 +104,20 @@ impl AppPaths {
         self.cache_dir.join("previews")
     }
 
+    /// Verzeichnis für Smart Previews (Phase 11 Schritt 4, siehe
+    /// `DECISIONS.md` ADR-0038): eine feste, verkleinerte JPEG-Zwischen-
+    /// datei je Foto, die `apx-app::protocol::resolve_source_path` als
+    /// Fallback nutzt, wenn die Originaldatei nicht erreichbar ist (z. B.
+    /// eine getrennte externe Festplatte) — ermöglicht eingeschränktes
+    /// Weiterarbeiten offline. Bewusst ein **Geschwister**-Verzeichnis von
+    /// `preview_cache_dir()`, nicht dessen Unterordner: `clear_preview_cache`
+    /// leert `preview_cache_dir()` komplett, Smart Previews sind aber
+    /// nutzergesteuert erzeugt und sollen diese Aktion überdauern — anders
+    /// als der automatische Vorschau-Cache.
+    pub fn smart_preview_dir(&self) -> PathBuf {
+        self.cache_dir.join("smart_previews")
+    }
+
     /// Verzeichnis für Log-Dateien.
     pub fn log_dir(&self) -> &Path {
         &self.log_dir

@@ -77,6 +77,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ag-psd"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3724167d5fc19ae66b8219fb5791f6338706884b713797116dc620773bfe2260"
+dependencies = [
+ "flate2",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -283,11 +292,15 @@ name = "apx-export"
 version = "0.1.0"
 dependencies = [
  "ab_glyph",
+ "ag-psd",
  "approx",
  "apx-catalog",
  "apx-core",
  "apx-pipeline",
  "apx-raw",
+ "gamut-core",
+ "gamut-dng",
+ "gamut-jxl 0.4.0",
  "image",
  "lcms2",
  "printpdf",
@@ -313,6 +326,7 @@ dependencies = [
  "apx-core",
  "apx-raw",
  "bytemuck",
+ "lensfun",
  "pollster",
  "rayon",
  "serde",
@@ -418,6 +432,12 @@ dependencies = [
  "cpufeatures 0.3.1",
  "password-hash",
 ]
+
+[[package]]
+name = "array-init"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d62b7694a562cdf5a74227903507c56ab2cc8bdd1f781ed5cb4cf9c9f810bfc"
 
 [[package]]
 name = "arrayvec"
@@ -2218,6 +2238,84 @@ dependencies = [
 ]
 
 [[package]]
+name = "gamut-bitstream"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "706ef7c7342d2cf3d2737690a6127b1c91f908add9d18c72e5d17c3931f2fe6a"
+dependencies = [
+ "gamut-core",
+]
+
+[[package]]
+name = "gamut-codec-abi"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38704051ac2980276478f6eb9c55a26fb608151f8e42c355f5a699a2f3afde03"
+
+[[package]]
+name = "gamut-core"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b17c79c8672b675d538dceffda1dd5d00ba279cbcca4f75c7b4fa847741d5d31"
+dependencies = [
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "gamut-dng"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab77ef628afcec0c690536c44040f484e8c95761a977efc183dfe03e77beee64"
+dependencies = [
+ "gamut-bitstream",
+ "gamut-core",
+ "gamut-ifd",
+ "gamut-jxl 0.3.0",
+ "miniz_oxide 0.8.9",
+]
+
+[[package]]
+name = "gamut-ifd"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d3bd47b53d4007db880394ed226de033d992646cfa394768237fed0e429806e"
+dependencies = [
+ "gamut-core",
+]
+
+[[package]]
+name = "gamut-jxl"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aeb902868a80069b5896495a66fc3a4ce7e0b85beb8acb008ac5c21f3279b073"
+dependencies = [
+ "gamut-core",
+ "jxl",
+]
+
+[[package]]
+name = "gamut-jxl"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8449465a694deb302f468edee6b5ed0c49587b03add54298bebebbedd7d02622"
+dependencies = [
+ "gamut-codec-abi",
+ "gamut-core",
+ "gamut-jxl-sys",
+ "jxl",
+]
+
+[[package]]
+name = "gamut-jxl-sys"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9b11d4b466b3f17ab6c7424d9051cff24d03cfd4d00e3170f7311aa7c30ed0d"
+dependencies = [
+ "cmake",
+ "jpegxl-src",
+]
+
+[[package]]
 name = "gdk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3363,6 +3461,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "jpegxl-src"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06f56a51e36f688517deebb0b7c10a11c598476936838938495c93764696180a"
+dependencies = [
+ "cmake",
+]
+
+[[package]]
 name = "js-sys"
 version = "0.3.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3393,6 +3500,22 @@ checksum = "5dea2b27dd239b2556ed7a25ba842fe47fd602e7fc7433c2a8d6106d4d9edd70"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "jxl"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96d1c706ad4b79469f7e713886c1d62b1cef365f38978c5e78d6e44258b18b99"
+dependencies = [
+ "array-init",
+ "byteorder",
+ "jxl_macros",
+ "jxl_simd",
+ "jxl_transforms",
+ "num-derive",
+ "num-traits",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -3574,6 +3697,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "jxl_macros"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d67c8b0a177004f4b05f73513c4be845845d2b5b1f93b6db71b5c72a1c9ad748"
+dependencies = [
+ "proc-macro-error2",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "jxl_simd"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15d37f283bbcd785c0a1b128a9c1249feb8bdca899fffb0f281a6b183d3c3761"
+
+[[package]]
+name = "jxl_transforms"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3dcc4291b69be45f42167d1722b286fec0ff8644e75e9e74d4c8db24e7e90bdf"
+dependencies = [
+ "jxl_simd",
+]
+
+[[package]]
 name = "kamadak-exif"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3709,6 +3859,18 @@ dependencies = [
  "dunce",
  "libc",
  "pkg-config",
+]
+
+[[package]]
+name = "lensfun"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe52f943cdba39214e90c8ff14c10cebc0f597dcbbbcdab15a68902fc8392bd8"
+dependencies = [
+ "flate2",
+ "regex",
+ "roxmltree",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -5184,6 +5346,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro-error-attr2"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96de42df36bb9bba5542fe9f1a054b8cc87e172759a1868aa05c1f3acc89dfc5"
+dependencies = [
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
+name = "proc-macro-error2"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11ec05c52be0a07b08061f7dd003e7d7092e0472bc731b4af7bb1ef876109802"
+dependencies = [
+ "proc-macro-error-attr2",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5764,6 +5948,12 @@ name = "rle-decode-fast"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3582f63211428f83597b51b2ddb88e2a91a9d52d12831f9d08f5e624e8977422"
+
+[[package]]
+name = "roxmltree"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "rsa"

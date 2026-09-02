@@ -227,10 +227,18 @@ pub mod gphoto2_backend {
                 .map_err(|err| TetherError::Camera {
                     message: err.to_string(),
                 })?;
-            let dest_path = dest_dir.join(captured.name());
+            // `folder()`/`name()` liefern `Cow<str>` (nicht `&str`, wie in
+            // der Crate-Dokumentation zunächst angenommen — beim ersten
+            // echten Kompilieren mit installiertem `libgphoto2-dev` in
+            // Phase 11 Schritt 10 aufgefallen und korrigiert) — `&str`
+            // per Deref-Koerzion daraus geliehen, `dest_path` braucht den
+            // Namen als eigenständiges `Path`-Segment.
+            let name: &str = &captured.name();
+            let folder: &str = &captured.folder();
+            let dest_path = dest_dir.join(name);
             camera
                 .fs()
-                .download_to(captured.folder(), captured.name(), &dest_path)
+                .download_to(folder, name, &dest_path)
                 .wait()
                 .map_err(|err| TetherError::Download {
                     message: err.to_string(),
@@ -293,5 +301,28 @@ mod tests {
         let first = backend.capture_and_download(tmp.path()).expect("ok");
         let second = backend.capture_and_download(tmp.path()).expect("ok");
         assert_ne!(first, second);
+    }
+}
+
+/// Phase 11 Schritt 10: mit installiertem `libgphoto2-dev` läuft dieser
+/// Test jetzt echt gegen die reale `libgphoto2`-C-API statt nur
+/// strukturell zu kompilieren (siehe DECISIONS.md ADR-0038) — genau die
+/// von ADR-0035 Punkt 5 als nicht testbar bezeichnete Klasse. Ohne
+/// angeschlossene Kamera muss `detect_camera()` einen sauberen `Ok(None)`
+/// statt eines Panics liefern (max. 1 Test für diesen Schritt, siehe die
+/// vom Nutzer ab Schritt 4 gelockerte Testdisziplin).
+#[cfg(all(test, feature = "tethering"))]
+mod gphoto2_tests {
+    use super::gphoto2_backend::Gphoto2Backend;
+    use super::TetherBackend;
+
+    #[test]
+    fn detect_camera_without_hardware_returns_a_clean_none_not_a_panic() {
+        let mut backend = Gphoto2Backend::new().expect("libgphoto2-Kontext sollte aufbaubar sein");
+        let result = backend.detect_camera();
+        assert!(
+            matches!(result, Ok(None)),
+            "ohne angeschlossene Kamera erwartet: Ok(None), erhalten: {result:?}"
+        );
     }
 }

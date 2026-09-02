@@ -13,10 +13,12 @@ import {
   newBrushMask,
   parseEdlEnvelopeJson,
   readBasicField,
+  visibleMasks,
   WHITE_BALANCE_PRESETS,
   writeBasicField,
   type BasicAdjustments,
   type Mask,
+  type MaskGroup,
 } from "./edl";
 
 describe("buildEdlEnvelopeJson / parseEdlEnvelopeJson", () => {
@@ -235,5 +237,24 @@ describe("Masken (Phase 6)", () => {
 
   it("emptyBrushGeometry() tags itself with kind 'Brush'", () => {
     expect(emptyBrushGeometry()).toEqual({ kind: "Brush", strokes: [] });
+  });
+
+  // Phase 12 Schritt 1 (siehe DECISIONS.md ADR-0039): `visibleMasks` ist
+  // das clientseitige Spiegelbild von
+  // `apx_pipeline::stages::masks::visible_masks` — hier für die
+  // Masken-Farbüberlagerung im Viewer statt für die Pipeline genutzt.
+  it("visibleMasks() hides invisible masks and masks in hidden groups, but keeps ungrouped/visible ones", () => {
+    const groups: MaskGroup[] = [
+      { id: "g-visible", name: "Himmel", visible: true },
+      { id: "g-hidden", name: "Vordergrund", visible: false },
+    ];
+    const visible = newBrushMask("m-visible", "Sichtbar");
+    const hidden = { ...newBrushMask("m-hidden", "Ausgeblendet"), visible: false };
+    const inHiddenGroup = { ...newBrushMask("m-in-hidden-group", "In ausgeblendeter Gruppe"), group_id: "g-hidden" };
+    const inVisibleGroup = { ...newBrushMask("m-in-visible-group", "In sichtbarer Gruppe"), group_id: "g-visible" };
+
+    const result = visibleMasks([visible, hidden, inHiddenGroup, inVisibleGroup], groups);
+
+    expect(result.map((m) => m.id)).toEqual(["m-visible", "m-in-visible-group"]);
   });
 });

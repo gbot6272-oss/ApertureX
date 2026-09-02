@@ -52,3 +52,66 @@ body {
   background: var(--color-border);
   border-radius: 5px;
 }
+
+/* Volles helles Theme (Phase 10 Schritt 7, siehe FEATURES.md
+   UI-Anforderungen) — dieselben `@theme`-Variablen wie oben, nur mit
+   hellen Werten; geschaltet über `data-theme="light"` auf `<html>`
+   (App.tsx, aus `uiSettings.theme`). Kombinierbar mit dem Kontrastmodus
+   aus Schritt 6, weil beide unterschiedliche Attribute schalten — bei
+   gleichzeitiger Aktivierung gewinnt der Kontrastmodus (steht in der
+   Kaskade weiter unten). */
+:root[data-theme="light"] {
+  --color-bg-base: #f5f3ee;
+  --color-bg-raised: #ffffff;
+  --color-bg-panel: #ebe8e1;
+  --color-border: #d8d4ca;
+  --color-text-primary: #232019;
+  --color-text-secondary: #5c584e;
+  --color-text-muted: #8a8579;
+  --color-accent: #3d76a8;
+  --color-danger: #c0503a;
+  --color-success: #4f8a4f;
+}
+
+/* Barrierefreiheit (Phase 10 Schritt 6, siehe FEATURES.md UI-Anforderungen)
+   — Kontrastmodus: schwarz/weiß-lastiges Tokenset mit deutlich höherem
+   Kontrastverhältnis als das Standard-Dark-Theme, geschaltet über
+   `uiSettings.high_contrast` (App.tsx setzt dafür `data-contrast="high"`
+   auf `<html>`). Überschreibt dieselben `@theme`-Variablen wie das helle
+   Theme aus Schritt 7 — beide sind unabhängig kombinierbar, weil sie
+   unterschiedliche Attribute schalten. */
+:root[data-contrast="high"] {
+  --color-bg-base: #000000;
+  --color-bg-raised: #0a0a0a;
+  --color-bg-panel: #141414;
+  --color-border: #ffffff;
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #e6e6e6;
+  --color-text-muted: #cccccc;
+  --color-accent: #7cc0ff;
+  --color-danger: #ff8a6b;
+  --color-success: #7fe89b;
+}
+
+/* Reduzierte Bewegung: sowohl die Betriebssystem-Einstellung
+   (`prefers-reduced-motion`) als auch die explizite App-Einstellung
+   (`uiSettings.reduced_motion`, App.tsx setzt dafür die Klasse
+   `apx-reduce-motion` auf `<html>`) deaktivieren nicht notwendige
+   Übergänge/Animationen. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+.apx-reduce-motion *,
+.apx-reduce-motion *::before,
+.apx-reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}

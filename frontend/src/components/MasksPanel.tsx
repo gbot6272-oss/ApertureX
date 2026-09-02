@@ -27,10 +27,11 @@ import { MASK_KIND_LABEL, useAppStore } from "../store";
 import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
+import { PaletteFrame } from "./PaletteFrame";
 
-/** Die fünf Maskentypen, in derselben Reihenfolge wie die „+ …"-Knöpfe
+/** Die sechs Maskentypen, in derselben Reihenfolge wie die „+ …"-Knöpfe
  * oben im Panel — wiederverwendet für „+ Komponente hinzufügen". */
-const MASK_KINDS: readonly MaskKind[] = ["LinearGradient", "RadialGradient", "Brush", "ColorRange", "LuminanceRange"];
+const MASK_KINDS: readonly MaskKind[] = ["LinearGradient", "RadialGradient", "Brush", "ColorRange", "LuminanceRange", "BlurDepthApprox"];
 
 /** Entwurfsregler für den *nächsten* im Viewer gemalten Pinselstrich
  * (Phase 6 Schritt 4) — analog zu `DevelopPanel.tsx`s
@@ -46,6 +47,9 @@ const COLOR_RANGE_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Weiche Ka
 const LUMINANCE_RANGE_MIN_SPEC: SliderSpec = { key: "range_min", label: "Untere Grenze (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 50 };
 const LUMINANCE_RANGE_MAX_SPEC: SliderSpec = { key: "range_max", label: "Obere Grenze (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 100 };
 const LUMINANCE_RANGE_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Weiche Kante (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 10 };
+/** Phase 11 Schritt 7 (siehe DECISIONS.md ADR-0038) — `threshold` ist im
+ * EDL `0.0..=1.0`, wie oben als Prozent angezeigt. */
+const BLUR_DEPTH_APPROX_THRESHOLD_SPEC: SliderSpec = { key: "threshold", label: "Schärfe-Schwellwert (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 50 };
 
 /**
  * Maskenverwaltung (Phase 6 Schritt 3-7, siehe `DECISIONS.md` ADR-0032) —
@@ -87,6 +91,8 @@ export function MasksPanel() {
   const maskGroups = useAppStore((s) => s.developEdl.mask_groups);
   const selectedMaskId = useAppStore((s) => s.selectedMaskId);
   const selectMask = useAppStore((s) => s.selectMask);
+  const maskOverlayVisible = useAppStore((s) => s.maskOverlayVisible);
+  const toggleMaskOverlay = useAppStore((s) => s.toggleMaskOverlay);
   const addMask = useAppStore((s) => s.addMask);
   const removeMask = useAppStore((s) => s.removeMask);
   const setMaskVisible = useAppStore((s) => s.setMaskVisible);
@@ -100,6 +106,8 @@ export function MasksPanel() {
   const maskBrushDraftRadius = useAppStore((s) => s.maskBrushDraftRadius);
   const maskBrushDraftFeather = useAppStore((s) => s.maskBrushDraftFeather);
   const setMaskBrushDraftField = useAppStore((s) => s.setMaskBrushDraftField);
+  const maskBrushDraftAutoMask = useAppStore((s) => s.maskBrushDraftAutoMask);
+  const toggleMaskBrushDraftAutoMask = useAppStore((s) => s.toggleMaskBrushDraftAutoMask);
   const removeMaskBrushStroke = useAppStore((s) => s.removeMaskBrushStroke);
   const updateMaskGeometry = useAppStore((s) => s.updateMaskGeometry);
   const maskColorRangePickerActive = useAppStore((s) => s.maskColorRangePickerActive);
@@ -180,12 +188,19 @@ export function MasksPanel() {
   }
 
   return (
-    <aside
-      id="stage-masks"
-      className="flex w-64 shrink-0 flex-col gap-3 overflow-y-auto border-l border-border bg-bg-raised p-3"
-      aria-label="Masken"
-    >
-      <h2 className="text-sm font-semibold text-text-primary">Masken</h2>
+    <PaletteFrame id="masks" side="right" defaultWidth={256} label="Masken" className="gap-3 border-l border-border bg-bg-raised p-3">
+      <div className="flex items-center justify-between">
+        <h2 id="stage-masks" className="text-sm font-semibold text-text-primary">Masken</h2>
+        <button
+          type="button"
+          onClick={toggleMaskOverlay}
+          aria-pressed={maskOverlayVisible}
+          title="Masken-Farbüberlagerung im Viewer ein-/ausblenden (Taste O)"
+          className={`rounded border px-2 py-0.5 text-xs ${maskOverlayVisible ? "border-accent bg-accent/10 text-accent" : "border-border text-text-secondary hover:border-accent"}`}
+        >
+          Überlagerung (O)
+        </button>
+      </div>
 
       <div className="grid grid-cols-2 gap-1">
         <button
@@ -224,9 +239,18 @@ export function MasksPanel() {
           type="button"
           onClick={() => addMask("LuminanceRange")}
           disabled={!selectedPhotoId}
-          className="col-span-2 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
           + Luminanzbereich
+        </button>
+        <button
+          type="button"
+          onClick={() => addMask("BlurDepthApprox")}
+          disabled={!selectedPhotoId}
+          title="Keine echte Tiefenkarte — eine Laplace-Varianz-Schärfeheuristik, funktioniert nur bei echtem Schärfentiefe-Effekt (siehe DECISIONS.md ADR-0038)"
+          className="col-span-2 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          + Unschärfe-basierte Tiefennäherung
         </button>
       </div>
 
@@ -520,6 +544,10 @@ export function MasksPanel() {
             onChange={(value) => setMaskBrushDraftField("feather", value / 100)}
             onCommit={() => {}}
           />
+          <label className="flex items-center gap-2 text-xs text-text-secondary" title="Dämpft die Deckkraft des nächsten Strichs an starken Bildkanten (Phase 12 Schritt 2), wie Lightrooms Auto Mask">
+            <input type="checkbox" aria-label="Auto-Mask für den nächsten Pinselstrich" checked={maskBrushDraftAutoMask} onChange={toggleMaskBrushDraftAutoMask} />
+            Auto-Mask (nächster Strich)
+          </label>
           {selectedMaskGeometry.strokes.length > 0 && (
             <ul className="flex flex-col gap-1 text-xs text-text-secondary">
               {selectedMaskGeometry.strokes.map((_, index) => (
@@ -592,6 +620,21 @@ export function MasksPanel() {
             spec={LUMINANCE_RANGE_FEATHER_SPEC}
             value={selectedMaskGeometry.feather * 100}
             onChange={(value) => updateMaskGeometry(selectedMask.id, { ...selectedMaskGeometry, feather: value / 100 })}
+            onCommit={commitMaskDrag}
+          />
+        </div>
+      )}
+
+      {selectedMask && selectedMaskGeometry?.kind === "BlurDepthApprox" && (
+        <div className="flex flex-col gap-2 border-t border-border pt-2">
+          <p className="text-xs text-text-muted">
+            Keine echte Tiefenkarte — eine Unschärfe-Heuristik, die nur bei echtem Schärfentiefe-Effekt (z. B. offene Blende) eine
+            sinnvolle Trennung liefert.
+          </p>
+          <DevelopSlider
+            spec={BLUR_DEPTH_APPROX_THRESHOLD_SPEC}
+            value={selectedMaskGeometry.threshold * 100}
+            onChange={(value) => updateMaskGeometry(selectedMask.id, { ...selectedMaskGeometry, threshold: value / 100 })}
             onCommit={commitMaskDrag}
           />
         </div>
@@ -829,6 +872,6 @@ export function MasksPanel() {
           </div>
         </fieldset>
       )}
-    </aside>
+    </PaletteFrame>
   );
 }

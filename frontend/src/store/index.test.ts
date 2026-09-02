@@ -30,6 +30,7 @@ function photo(id: string): PhotoDto {
     caption: null,
     copyright: null,
     creator: null,
+    custom_metadata: {},
   };
 }
 

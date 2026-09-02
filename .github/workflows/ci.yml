@@ -95,7 +95,8 @@ jobs:
             wget \
             file \
             libxdo-dev \
-            libssl-dev
+            libssl-dev \
+            libgphoto2-dev
 
       # Installiert automatisch die in `rust-toolchain.toml` gepinnte
       # Version (1.94.1) samt rustfmt/clippy — kein separater
@@ -132,17 +133,27 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo fmt --all -- --check
 
-      # Bewusst ohne `--all-features`: `apx-tether`s optionales Feature
-      # `tethering` (Phase 9 Schritt 11, siehe DECISIONS.md ADR-0035
-      # Punkt 5) bindet an die Systembibliothek `libgphoto2`, die auf
-      # keinem der drei CI-Runner installiert ist — dasselbe
-      # Beschaffungsproblem wie in dieser Sandbox. `--all-features` würde
-      # das Feature erzwingen und schon beim Kompilieren scheitern, nicht
-      # an einem echten Lint-Befund. Standard-Features decken den Rest
-      # des Workspace vollständig ab (kein zweites optionales Feature
-      # existiert bisher).
+      # Bewusst ohne `--all-features` für den restlichen Workspace:
+      # `apx-tether`s optionales Feature `tethering` (Phase 9 Schritt 11,
+      # siehe DECISIONS.md ADR-0035 Punkt 5) bindet an die
+      # Systembibliothek `libgphoto2` — auf macOS/Windows-Runnern nach wie
+      # vor nicht installiert (dasselbe Beschaffungsproblem wie zuvor).
+      # `--all-features` würde das Feature dort erzwingen und schon beim
+      # Kompilieren scheitern, nicht an einem echten Lint-Befund. Der
+      # Linux-Runner installiert `libgphoto2-dev` (oben) und deckt das
+      # Feature separat unten ab (Phase 11 Schritt 10, DECISIONS.md
+      # ADR-0038) — Standard-Features hier decken den Rest des Workspace
+      # auf allen drei Plattformen vollständig ab.
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings -D clippy::unwrap_used
+
+      # `tethering`-Feature nur auf Linux (siehe oben): baut/testet
+      # `apx-tether` echt gegen die installierte `libgphoto2` — die von
+      # ADR-0035 Punkt 5 als nicht testbar bezeichnete Klasse
+      # ("unerreichbarer Server"-Fehlerpfad ohne angeschlossene Kamera).
+      - name: cargo test -p apx-tether --features tethering (Linux)
+        if: runner.os == 'Linux'
+        run: cargo test -p apx-tether --features tethering -- --nocapture
 
       # `--nocapture` ist hier bewusst gesetzt (nicht nur bei Fehlschlag
       # aktiv): `apx-pipeline`s `gpu_matches_cpu`-artige Tests drucken bei
@@ -159,3 +170,148 @@ jobs:
 
       - name: cargo build
         run: cargo build --workspace
+
+  # Installer + Signierung (Phase 10 Schritt 11, siehe SPEC.md §5 Phase 10 /
+  # DECISIONS.md ADR-0037). Bewusst ein eigener Job statt in `rust` oben
+  # integriert: `tauri build` bündelt echte Installer-Pakete (NSIS/MSI,
+  # DMG/App, deb/AppImage) und ist deutlich teurer als `cargo build` — läuft
+  # deshalb nur bei einem Tag-Push oder manuell per `workflow_dispatch`,
+  # nicht bei jedem normalen Push/PR.
+  release:
+    name: Installer bauen (${{ matrix.os }})
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tauri-Systemabhängigkeiten installieren (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev
+
+      - name: Rust-Toolchain (aus rust-toolchain.toml)
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Abhängigkeiten installieren
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      # macOS-Signierung + Notarisierung: **konditional**, überspringt sich
+      # selbst, wenn kein Zertifikat als Secret hinterlegt ist (dann baut
+      # `tauri build` unten ein unsigniertes .app/.dmg, kein Fehlschlag).
+      # Erwartet ein base64-kodiertes .p12 in `APPLE_CERTIFICATE` +
+      # `APPLE_CERTIFICATE_PASSWORD`; Notarisierung zusätzlich `APPLE_ID`/
+      # `APPLE_PASSWORD` (App-spezifisches Passwort) oder `APPLE_API_KEY`/
+      # `APPLE_API_KEY_PATH`/`APPLE_API_ISSUER` + `APPLE_TEAM_ID` — von
+      # `tauri-cli`/`tauri-bundler` selbst zur Build-/Notarisierungszeit aus
+      # der Umgebung gelesen (kein zusätzlicher Import-Schritt nötig, im
+      # Unterschied zu Windows unten).
+      #
+      # **Ehrlich begrenzt** (ADR-0037): in dieser Sandbox nie mit einem
+      # echten Apple-Developer-Zertifikat ausgeführt/verifiziert — kein
+      # Konto/Zertifikat beschaffbar. Struktur/Umgebungsvariablen-Namen
+      # folgen der öffentlich dokumentierten Tauri-v2-Konvention.
+      - name: macOS-Signierungsstatus
+        if: runner.os == 'macOS'
+        run: |
+          if [ -n "${{ secrets.APPLE_CERTIFICATE }}" ]; then
+            echo "Apple-Zertifikat als Secret hinterlegt — signiert/notarisiert bauen."
+          else
+            echo "Kein Apple-Zertifikat hinterlegt — baue unsigniert (kein Fehlschlag)."
+          fi
+
+      # Windows-Signierung: **konditional**, importiert ein PFX nur, wenn
+      # `WINDOWS_CERTIFICATE`/`WINDOWS_CERTIFICATE_PASSWORD` als Secrets
+      # hinterlegt sind, und reicht den so ermittelten Zertifikats-
+      # Fingerabdruck per `--config`-Überschreibung an `tauri build` weiter
+      # (`bundle.windows.certificateThumbprint` erwartet ein bereits im
+      # Windows-Zertifikatspeicher installiertes Zertifikat, keinen Datei-
+      # pfad — anders als macOS liest `tauri-bundler` hier keine Datei
+      # direkt aus einer Umgebungsvariable). Ohne Secret bleibt
+      # `windowsSigningConfig` leer und `tauri build` läuft mit der
+      # unveränderten `tauri.conf.json` (unsigniert).
+      #
+      # **Ehrlich begrenzt** (ADR-0037): ebenfalls nie mit einem echten
+      # Zertifikat verifiziert.
+      - name: Windows-Zertifikat importieren (falls hinterlegt)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $configOverridePath = Join-Path $env:RUNNER_TEMP "windows-signing.conf.json"
+          if ([string]::IsNullOrEmpty($env:WINDOWS_CERTIFICATE)) {
+            Write-Host "Kein Windows-Zertifikat hinterlegt — baue unsigniert (kein Fehlschlag)."
+            "{}" | Set-Content -Path $configOverridePath
+          } else {
+            $pfxPath = Join-Path $env:RUNNER_TEMP "windows-signing.pfx"
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+            $securePassword = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+            $cert = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $securePassword
+            $config = @{ bundle = @{ windows = @{ certificateThumbprint = $cert.Thumbprint; digestAlgorithm = "sha256"; timestampUrl = "http://timestamp.digicert.com" } } }
+            $config | ConvertTo-Json -Depth 5 | Set-Content -Path $configOverridePath
+            Write-Host "Windows-Zertifikat importiert, Fingerabdruck: $($cert.Thumbprint)"
+          }
+          echo "TAURI_WINDOWS_CONFIG=$configOverridePath" >> $env:GITHUB_ENV
+
+      # `tauri.conf.json` liegt in `crates/apx-app/` (kein `src-tauri`-
+      # Unterordner, siehe dessen `build.beforeBuildCommand`, die relativ
+      # von dort aus `../../frontend` referenziert) — die `@tauri-apps/cli`
+      # ist aber als Frontend-DevDependency installiert. `npx --prefix`
+      # löst die lokal installierte Binary unabhängig vom Arbeitsverzeichnis
+      # auf, ohne dass `pnpm exec`s eigene Verzeichnis-Heuristik hier
+      # fehlschlägt — funktioniert identisch auf allen drei Plattformen.
+      - name: tauri build (Linux/macOS)
+        if: runner.os != 'Windows'
+        working-directory: crates/apx-app
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx --prefix ../../frontend tauri build
+
+      - name: tauri build (Windows)
+        if: runner.os == 'Windows'
+        working-directory: crates/apx-app
+        run: npx --prefix ../../frontend tauri build --config "$env:TAURI_WINDOWS_CONFIG"
+
+      - name: Installer-Artefakte hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: apx-installer-${{ matrix.os }}
+          path: |
+            target/release/bundle/**
+          retention-days: 14
+          if-no-files-found: warn

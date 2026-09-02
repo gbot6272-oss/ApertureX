@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 
-import type { MaskGeometry, MaskPoint } from "../lib/edl";
+import { radialGradientAxisHandlePositions, radialGradientBoundaryPoints, type MaskGeometry, type MaskPoint } from "../lib/edl";
 
 interface MaskOverlayProps {
   /** Position/Größe des angezeigten Bildes in Bildschirm-Pixeln, wie bei
@@ -44,7 +44,7 @@ function brushPointFromEvent(event: { clientX: number; clientY: number }, rect: 
   };
 }
 
-type DragHandle = "start" | "end" | "center" | "radius";
+type DragHandle = "start" | "end" | "center" | "radiusX" | "radiusY" | "rotation";
 
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
@@ -59,14 +59,19 @@ const HANDLE_CLASS =
  * bzw. `RepairOverlay`s Pfad-Malen: `onChange`/`onPaintBrushStroke` während
  * bzw. am Ende der Interaktion, `onCommit` beim Loslassen.
  *
- * **Bewusste Vereinfachung:** der Radialverlauf-Ziehgriff steuert nur
- * einen einzelnen, gemeinsamen Radius (`radius_x == radius_y`, kreisförmig)
- * — unabhängige Achsen und Rotation sind im Datenmodell bereits vorhanden
- * (`MaskGeometry::RadialGradient`), bekommen aber erst in einem späteren
- * Schritt eigene Ziehgriffe (z. B. Ellipsen-Achsen-Handles + Rotations-
- * Handle), um diesen Schritt nicht unnötig aufzublähen. Die Pinsel-
- * Live-Vorschau ist wie bei `RepairOverlay` rein clientseitig (dieses
- * SVG), der tatsächliche Pipeline-Effekt erscheint erst nach Loslassen.
+ * **Radialverlauf-Ellipse + Rotation (Phase 12 Schritt 2, siehe
+ * `DECISIONS.md` ADR-0039):** `radius_x`/`radius_y`/`angle_degrees` waren
+ * im Datenmodell und in der Pipeline (`masks.rs`s `radial_gradient_alpha`)
+ * schon länger unabhängig voneinander — nur diese Komponente hielt sie
+ * bislang künstlich gleich. Jetzt drei eigene Griffe: `radiusX`/`radiusY`
+ * entlang der (ggf. rotierten) Ellipsen-Achsen, `rotation` etwas weiter
+ * außen auf der X-Achse. Alle drei rechnen im selben Bild-Bruchteilsraum
+ * wie die Pipeline selbst (siehe `radialGradientBoundaryPoints`s
+ * Moduldoku in `lib/edl.ts` zur Rotationskonvention).
+ *
+ * Die Pinsel-Live-Vorschau ist wie bei `RepairOverlay` rein clientseitig
+ * (dieses SVG), der tatsächliche Pipeline-Effekt erscheint erst nach
+ * Loslassen.
  */
 export function MaskOverlay({
   imageLeft,
@@ -118,9 +123,40 @@ export function MaskOverlay({
       }
 
       if (!dragHandle || !dragStart.current || imageWidth <= 0 || imageHeight <= 0) return;
+      const base = dragStart.current.geometry;
+
+      // Achsen-/Rotations-Griffe (Phase 12 Schritt 2): rechnen mit der
+      // *absoluten* Bruchteilsposition des Zeigers relativ zum Mittelpunkt
+      // statt einer Delta-Akkumulation — für einen Rotations-Griff ist
+      // "zeig auf die gewünschte Ausrichtung" die einzig sinnvolle
+      // Interaktion, für die beiden Radius-Griffe konsistent mitgenutzt.
+      if (base.kind === "RadialGradient" && (dragHandle === "radiusX" || dragHandle === "radiusY" || dragHandle === "rotation")) {
+        const rect = event.currentTarget.getBoundingClientRect();
+        const fx = clamp01((event.clientX - rect.left) / rect.width);
+        const fy = clamp01((event.clientY - rect.top) / rect.height);
+        const dxAbs = fx - base.center_x;
+        const dyAbs = fy - base.center_y;
+
+        if (dragHandle === "rotation") {
+          onChange({ ...base, angle_degrees: (Math.atan2(dyAbs, dxAbs) * 180) / Math.PI });
+          return;
+        }
+
+        const angleRad = (base.angle_degrees * Math.PI) / 180;
+        const cosA = Math.cos(angleRad);
+        const sinA = Math.sin(angleRad);
+        if (dragHandle === "radiusX") {
+          // Projektion des Zeiger-Vektors auf die lokale (rotierte) X-Achse.
+          onChange({ ...base, radius_x: Math.max(0.02, dxAbs * cosA + dyAbs * sinA) });
+        } else {
+          // Projektion auf die lokale Y-Achse (senkrecht zur X-Achse).
+          onChange({ ...base, radius_y: Math.max(0.02, -dxAbs * sinA + dyAbs * cosA) });
+        }
+        return;
+      }
+
       const dx = (event.clientX - dragStart.current.x) / imageWidth;
       const dy = (event.clientY - dragStart.current.y) / imageHeight;
-      const base = dragStart.current.geometry;
 
       if (base.kind === "LinearGradient") {
         if (dragHandle === "start") {
@@ -131,13 +167,8 @@ export function MaskOverlay({
         return;
       }
 
-      if (base.kind === "RadialGradient") {
-        if (dragHandle === "center") {
-          onChange({ ...base, center_x: clamp01(base.center_x + dx), center_y: clamp01(base.center_y + dy) });
-        } else if (dragHandle === "radius") {
-          const newRadius = Math.max(0.02, base.radius_x + dx);
-          onChange({ ...base, radius_x: newRadius, radius_y: newRadius });
-        }
+      if (base.kind === "RadialGradient" && dragHandle === "center") {
+        onChange({ ...base, center_x: clamp01(base.center_x + dx), center_y: clamp01(base.center_y + dy) });
       }
     },
     [dragHandle, imageWidth, imageHeight, onChange],
@@ -181,8 +212,13 @@ export function MaskOverlay({
       } else if (geometry.kind === "RadialGradient") {
         if (handle === "center") {
           onChange({ ...geometry, center_x: clamp01(geometry.center_x + dx), center_y: clamp01(geometry.center_y + dy) });
-        } else if (handle === "radius") {
-          onChange({ ...geometry, radius_x: Math.max(0.02, geometry.radius_x + dx), radius_y: Math.max(0.02, geometry.radius_y + dx) });
+        } else if (handle === "radiusX") {
+          onChange({ ...geometry, radius_x: Math.max(0.02, geometry.radius_x + dx) });
+        } else if (handle === "radiusY") {
+          // ArrowUp (dy < 0) vergrößert, ArrowDown verkleinert.
+          onChange({ ...geometry, radius_y: Math.max(0.02, geometry.radius_y - dy) });
+        } else if (handle === "rotation") {
+          onChange({ ...geometry, angle_degrees: geometry.angle_degrees + dx * 180 });
         }
       }
       onCommit();
@@ -234,42 +270,75 @@ export function MaskOverlay({
         </>
       )}
 
-      {geometry.kind === "RadialGradient" && (
-        <>
-          <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
-            <ellipse
-              cx={`${geometry.center_x * 100}%`}
-              cy={`${geometry.center_y * 100}%`}
-              rx={`${geometry.radius_x * 100}%`}
-              ry={`${geometry.radius_y * 100}%`}
-              fill="none"
-              stroke="white"
-              strokeWidth={2}
-              strokeDasharray="4 4"
-            />
-          </svg>
-          <div
-            role="slider"
-            tabIndex={0}
-            aria-label="Radialer Verlauf: Mittelpunkt"
-            aria-valuenow={Math.round(geometry.center_x * 100)}
-            className={HANDLE_CLASS}
-            style={{ left: `${geometry.center_x * 100}%`, top: `${geometry.center_y * 100}%` }}
-            onPointerDown={(event) => startDrag("center", event)}
-            onKeyDown={handleKeyDown("center")}
-          />
-          <div
-            role="slider"
-            tabIndex={0}
-            aria-label="Radialer Verlauf: Radius"
-            aria-valuenow={Math.round(geometry.radius_x * 100)}
-            className={HANDLE_CLASS}
-            style={{ left: `${(geometry.center_x + geometry.radius_x) * 100}%`, top: `${geometry.center_y * 100}%` }}
-            onPointerDown={(event) => startDrag("radius", event)}
-            onKeyDown={handleKeyDown("radius")}
-          />
-        </>
-      )}
+      {geometry.kind === "RadialGradient" &&
+        (() => {
+          const handles = radialGradientAxisHandlePositions(geometry);
+          const boundary = radialGradientBoundaryPoints(geometry);
+          return (
+            <>
+              <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 100 100">
+                <polygon
+                  points={boundary.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")}
+                  fill="none"
+                  stroke="white"
+                  strokeWidth={0.3}
+                  strokeDasharray="1.2 1.2"
+                  vectorEffect="non-scaling-stroke"
+                />
+                <line
+                  x1={`${geometry.center_x * 100}`}
+                  y1={`${geometry.center_y * 100}`}
+                  x2={`${handles.rotation.x * 100}`}
+                  y2={`${handles.rotation.y * 100}`}
+                  stroke="white"
+                  strokeWidth={0.2}
+                  strokeDasharray="0.6 0.6"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </svg>
+              <div
+                role="slider"
+                tabIndex={0}
+                aria-label="Radialer Verlauf: Mittelpunkt"
+                aria-valuenow={Math.round(geometry.center_x * 100)}
+                className={HANDLE_CLASS}
+                style={{ left: `${geometry.center_x * 100}%`, top: `${geometry.center_y * 100}%` }}
+                onPointerDown={(event) => startDrag("center", event)}
+                onKeyDown={handleKeyDown("center")}
+              />
+              <div
+                role="slider"
+                tabIndex={0}
+                aria-label="Radialer Verlauf: Radius X-Achse"
+                aria-valuenow={Math.round(geometry.radius_x * 100)}
+                className={HANDLE_CLASS}
+                style={{ left: `${handles.radiusX.x * 100}%`, top: `${handles.radiusX.y * 100}%` }}
+                onPointerDown={(event) => startDrag("radiusX", event)}
+                onKeyDown={handleKeyDown("radiusX")}
+              />
+              <div
+                role="slider"
+                tabIndex={0}
+                aria-label="Radialer Verlauf: Radius Y-Achse"
+                aria-valuenow={Math.round(geometry.radius_y * 100)}
+                className={HANDLE_CLASS}
+                style={{ left: `${handles.radiusY.x * 100}%`, top: `${handles.radiusY.y * 100}%` }}
+                onPointerDown={(event) => startDrag("radiusY", event)}
+                onKeyDown={handleKeyDown("radiusY")}
+              />
+              <div
+                role="slider"
+                tabIndex={0}
+                aria-label="Radialer Verlauf: Rotation"
+                aria-valuenow={Math.round(geometry.angle_degrees)}
+                className={HANDLE_CLASS}
+                style={{ left: `${handles.rotation.x * 100}%`, top: `${handles.rotation.y * 100}%` }}
+                onPointerDown={(event) => startDrag("rotation", event)}
+                onKeyDown={handleKeyDown("rotation")}
+              />
+            </>
+          );
+        })()}
 
       {geometry.kind === "Brush" && (
         <>

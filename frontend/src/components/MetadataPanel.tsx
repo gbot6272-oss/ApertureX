@@ -2,7 +2,9 @@ import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { formatShutter } from "../lib/format";
+import { useT } from "../lib/i18n";
 import { selectActivePhotos, useAppStore } from "../store";
+import { PaletteFrame } from "./PaletteFrame";
 import { ColorLabelPicker, FlagToggle, RatingStars } from "./RatingFlagColor";
 
 /**
@@ -13,6 +15,7 @@ import { ColorLabelPicker, FlagToggle, RatingStars } from "./RatingFlagColor";
  * Flagge/Farbe/Schlagworte editierbar (siehe `PLAN.md` Phase 3, Schritt 6).
  */
 export function MetadataPanel() {
+  const t = useT();
   const open = useAppStore((s) => s.metadataPanelOpen);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
   // `useShallow` statt einer bloßen Referenzprüfung — siehe `GridView.tsx`
@@ -42,10 +45,10 @@ export function MetadataPanel() {
   }
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border bg-bg-raised p-3" aria-label="Metadaten">
-      <h2 className="text-sm font-semibold text-text-primary">Metadaten</h2>
+    <PaletteFrame id="metadata" side="right" defaultWidth={288} label={t("metadata.heading")} className="gap-4 border-l border-border bg-bg-raised p-3">
+      <h2 className="text-sm font-semibold text-text-primary">{t("metadata.heading")}</h2>
 
-      {!photo && <p className="text-xs text-text-muted">Kein Foto ausgewählt.</p>}
+      {!photo && <p className="text-xs text-text-muted">{t("metadata.noPhoto")}</p>}
 
       {photo && (
         <>
@@ -198,6 +201,6 @@ export function MetadataPanel() {
           </dl>
         </>
       )}
-    </aside>
+    </PaletteFrame>
   );
 }

@@ -84,6 +84,20 @@ statt stillschweigend übergangen.
 | `libloading` | ISC | Plugin-`cdylib`-Laden (`apx-plugin-host`, Schritt 9) | Unkritisch, ISC ist eine permissive MIT-ähnliche Lizenz |
 | `gphoto2` | MIT | Tethered Shooting (`apx-tether`, Schritt 11), hinter Cargo-Feature `tethering` (standardmäßig aus) | Bindet an System-`libgphoto2`, das selbst **LGPL-2.1** ist — **Ausnahme, siehe `DECISIONS.md` ADR-0035 Punkt 5**, derselbe Präzedenzfall wie `rawler` oben: keine praktikable Alternative für PTP/USB-Kamerasteuerung aus Rust. Die `gphoto2`-Crate selbst ist MIT, nur die dynamisch gelinkte Systembibliothek ist LGPL-2.1 (dynamisches Linken einer LGPL-Bibliothek verlangt keine Lizenzänderung des aufrufenden Codes) |
 
+## Rust — Phase 11 (siehe `DECISIONS.md` ADR-0038)
+
+| Crate | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `gamut-dng` | MIT OR Apache-2.0 | Schreiben von „Linear DNG"-Dateien aus kamera-nativen, unentwickelten RAW-Daten (`apx_export::dng`, Schritt 1) | Reines Rust, keine Systembibliothek. Zum Zeitpunkt von ADR-0034 (Phase 8) gab es keine schreibfähige DNG-Crate, diese wurde erst danach verfügbar — per Testbau (Encode→Decode-Rundreise) real verifiziert, nicht nur an der Registry-Beschreibung geglaubt |
+| `ag-psd` | MIT | Flacher PSD-Export (`apx_export::format::encode_psd`, Schritt 2) | Reines Rust, „from-scratch"-Portierung der gleichnamigen TypeScript-Bibliothek. Fallstrick per Testbau gefunden: `write_psd` **panickt** statt `Result` bei Abmessungen >30000 oder `bits_per_channel != 8` — `encode_psd` prüft die Abmessungen vorab und meldet stattdessen `ExportError::Unsupported` |
+| `gamut-jxl` / `gamut-core` | MIT OR Apache-2.0 | JPEG-XL-Export/-Import (`apx_export::format::encode_jxl`, Schritt 2) | Encoder bindet das echte libjxl (C, BSD-3-Clause, Referenzimplementierung) über `gamut-jxl-sys`, das es per `cmake` zur Kompilierzeit als Quelle vendort (kein reines Rust, ~1-2 Minuten zusätzliche Bauzeit) — kein reifer reiner-Rust-JXL-*Encoder* existiert. Der Decoder-Pfad ist dagegen das reine-Rust `jxl` (jxl-rs, BSD-3-Clause, vom libjxl-Projekt selbst), verifiziert per echtem Encode→Decode-Rundreise-Test (exakte Pixelwerte bei verlustfreier Kodierung) |
+
+## Rust — Phase 12 (siehe `DECISIONS.md` ADR-0039)
+
+| Crate | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `lensfun` | LGPL-3.0-or-later | Echte LensFun-Objektiv-/Kameradatenbank (`apx_pipeline::lens_profiles`, Schritt 0 Spike + Schritt 3) | Reines Rust, bit-exakt gegen die C++-Referenzbibliothek getesteter Port (laut Projekt-README 1.640 A/B-Testfälle, Abweichung 4,88×10⁻⁴ Pixel). Bundelt die echte, offene LensFun-XML-Datenbank (`Database::load_bundled()`, ~574 KB gzip) direkt eingebettet, keine Laufzeit-Dateisystemzugriffe. Einzige neue transitive Abhängigkeit: `roxmltree` (reines Rust, DOM-XML-Parser), keine C-Bindings/`bindgen`. LGPL-3.0-or-later gilt nur für die Bibliothek selbst (kein statisch gelinkter C-Code wie bei `lcms2`/`gamut-jxl`), dynamisches Linken/Aufrufen einer LGPL-Rust-Crate aus einem separaten Crate verlangt keine Lizenzänderung des aufrufenden Codes — analog zum bereits dokumentierten `gphoto2`/`libgphoto2`-Präzedenzfall (Phase 9) |
+
 ## Frontend — geplant für Phase 1
 
 | Paket | Lizenz | Zweck | Hinweis |
@@ -96,6 +110,7 @@ statt stillschweigend übergangen.
 | `tailwindcss` (4) | MIT | Styling | Unkritisch |
 | `@tanstack/react-virtual` | MIT | Virtualisierter Filmstreifen | Unkritisch |
 | `@tauri-apps/api` | MIT OR Apache-2.0 | Tauri-Frontend-Bindings | Unkritisch |
+| `@tauri-apps/cli` | Apache-2.0 OR MIT | Installer-Bau (`tauri build`), Phase 10 Schritt 11 | Reines Build-Werkzeug (DevDependency), nicht im ausgelieferten App-Bundle enthalten — trotzdem eingetragen (siehe Regel oben: jede hinzugefügte Bibliothek) |
 
 ## Testdaten (`testdata/`)
 

@@ -1,22 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { useDevelopRender } from "../hooks/useDevelopRender";
+import { useDevelopPreviewThumbnail, useDevelopRender } from "../hooks/useDevelopRender";
 import { useElementSize } from "../hooks/useElementSize";
 import { useImageBitmap } from "../hooks/useImageBitmap";
 import { computeAutoTone } from "../lib/autoTone";
-import { buildEdlEnvelopeJson } from "../lib/edl";
+import { hueDegreesFromRgbByte } from "../lib/colorSampling";
+import { buildEdlEnvelopeJson, CURVE_CHANNEL_TABS, nearestHslBand, visibleMasks, type CurvesAdjustment, type HslAdjustment } from "../lib/edl";
 import { formatShutter } from "../lib/format";
 import { buildClippingOverlay } from "../lib/histogram";
 import { computeMaskPinPosition } from "../lib/maskPins";
+import { matchesBinding } from "../lib/keybindings";
 import { imageUrl, previewUrl } from "../lib/media";
 import { mergeEdlSubset } from "../lib/presets";
-import { applySoftProof } from "../lib/softProof";
+import { applyPaperWhite, type SoftProofSettings } from "../lib/softProof";
 import { clampZoom, computeBaseScale, imageOrigin, nextZoomStep, panForZoomAtCursor } from "../lib/viewerMath";
 import { QuadRenderer } from "../lib/webgl";
 import { useAppStore } from "../store";
 import { BeforeAfterView } from "./BeforeAfterView";
 import { CropOverlay } from "./CropOverlay";
 import { DevelopAnalysisPanel } from "./DevelopAnalysisPanel";
+import { MaskColorOverlay } from "./MaskColorOverlay";
 import { MaskOverlay } from "./MaskOverlay";
 import { ReferenceView } from "./ReferenceView";
 import { RepairOverlay } from "./RepairOverlay";
@@ -43,6 +46,9 @@ export function Viewer() {
   const resetView = useAppStore((s) => s.resetView);
   const infoOverlayVisible = useAppStore((s) => s.infoOverlayVisible);
   const toggleInfoOverlay = useAppStore((s) => s.toggleInfoOverlay);
+  const maskOverlayVisible = useAppStore((s) => s.maskOverlayVisible);
+  const toggleMaskOverlay = useAppStore((s) => s.toggleMaskOverlay);
+  const maskGroups = useAppStore((s) => s.developEdl.mask_groups);
   const applyAutoTone = useAppStore((s) => s.applyAutoTone);
   const developPanelOpen = useAppStore((s) => s.developPanelOpen);
   const developEdl = useAppStore((s) => s.developEdl);
@@ -50,6 +56,7 @@ export function Viewer() {
   const referenceViewActive = useAppStore((s) => s.referenceViewActive);
   const softProofActive = useAppStore((s) => s.softProofActive);
   const softProofProfile = useAppStore((s) => s.softProofProfile);
+  const softProofCustomIccPath = useAppStore((s) => s.softProofCustomIccPath);
   const softProofIntent = useAppStore((s) => s.softProofIntent);
   const softProofGamutWarning = useAppStore((s) => s.softProofGamutWarning);
   const softProofPaperWhite = useAppStore((s) => s.softProofPaperWhite);
@@ -64,6 +71,12 @@ export function Viewer() {
   const addMaskColorMixerRegionAt = useAppStore((s) => s.addMaskColorMixerRegionAt);
   const aiMaskClickPickerActive = useAppStore((s) => s.aiMaskClickPickerActive);
   const addAiMask = useAppStore((s) => s.addAiMask);
+  const tatMode = useAppStore((s) => s.tatMode);
+  const tatCurveChannel = useAppStore((s) => s.tatCurveChannel);
+  const setTatMode = useAppStore((s) => s.setTatMode);
+  const setTatCurveChannel = useAppStore((s) => s.setTatCurveChannel);
+  const setCurveChannel = useAppStore((s) => s.setCurveChannel);
+  const setHslBandField = useAppStore((s) => s.setHslBandField);
   const pickerActive =
     wbPickerActive || colorMixerPickerActive || maskColorRangePickerActive || maskColorMixerPickerActive || aiMaskClickPickerActive;
   const geometryCropActive = useAppStore((s) => s.geometryCropActive);
@@ -117,7 +130,27 @@ export function Viewer() {
   const renderedEdl = hoverPresetSubset ? mergeEdlSubset(developEdl, hoverPresetSubset) : developEdl;
   const developEdlJson = developPanelOpen && photo ? buildEdlEnvelopeJson(renderedEdl) : null;
   const developPhotoId = developPanelOpen ? (photo?.id ?? null) : null;
-  const developFrame = useDevelopRender(developPhotoId, developEdlJson, photo && containerSize.width > 0 ? targetFullEdge : undefined);
+  const developMaxEdge = photo && containerSize.width > 0 ? targetFullEdge : undefined;
+  const developFrame = useDevelopRender(developPhotoId, developEdlJson, developMaxEdge);
+
+  // Echter Soft-Proof (Phase 12 Schritt 6, siehe `DECISIONS.md`
+  // ADR-0039-Nachtrag II): eine **separate** zweite Anfrage über dieselbe
+  // Route, statt `developFrame` selbst zu ersetzen — Farbaufnehmer (TAT,
+  // Weißabgleich-Pipette, Maskenfarbbereich), das Clipping-Overlay und
+  // der Histogramm-Aufbau lesen `developFrame.pixels` direkt und müssen
+  // dabei immer den echten, nicht soft-proof-verfälschten Entwickeln-
+  // Zustand sehen — nur der tatsächlich gezeichnete Canvas-Inhalt soll
+  // die Proof-Simulation zeigen.
+  const softProofSettings: SoftProofSettings | null = softProofActive
+    ? {
+        profile: softProofProfile,
+        customIccPath: softProofCustomIccPath,
+        intent: softProofIntent,
+        gamutWarning: softProofGamutWarning,
+        paperWhite: softProofPaperWhite,
+      }
+    : null;
+  const softProofFrame = useDevelopPreviewThumbnail(softProofActive ? developPhotoId : null, developEdlJson, developMaxEdge, softProofSettings);
 
   const drawSource = developFrame ?? activeBitmap ?? null;
 
@@ -166,19 +199,16 @@ export function Viewer() {
     }
 
     if (developFrame && drawSource === developFrame) {
-      // Soft-Proof (Phase 6 Schritt 10) betrifft nur die live entwickelte
+      // Soft-Proof (Phase 6 Schritt 10, seit Phase 12 Schritt 6 ein
+      // echter serverseitiger ICC-Transform statt einer Näherung, siehe
+      // `lib/softProof.ts`s Moduldoku) betrifft nur die live entwickelte
       // Vorschau, nie das rohe Vorschau-/Vollbild-Bitmap (das läuft ja
-      // nicht über die `develop/...`-Route) — siehe `lib/softProof.ts`s
-      // Moduldoku zur bewussten Beschränkung auf eine reine
-      // Anzeige-Nachbearbeitung.
-      const pixels = softProofActive
-        ? applySoftProof(developFrame, {
-            profile: softProofProfile,
-            intent: softProofIntent,
-            gamutWarning: softProofGamutWarning,
-            paperWhite: softProofPaperWhite,
-          })
-        : developFrame.pixels;
+      // nicht über die `develop/...`-Route). Solange `softProofFrame`
+      // noch nicht nachgeladen ist (asynchron, eigene Anfrage), bleibt
+      // die unveränderte `developFrame`-Vorschau stehen, statt kurz
+      // etwas Falsches oder Leeres zu zeigen.
+      const proofed = softProofActive ? softProofFrame : null;
+      const pixels = proofed ? (softProofPaperWhite ? applyPaperWhite(proofed) : proofed.pixels) : developFrame.pixels;
       renderer.uploadRgba8(developFrame.width, developFrame.height, pixels);
     } else if (activeBitmap && drawSource === activeBitmap) {
       renderer.uploadImageBitmap(activeBitmap);
@@ -202,9 +232,7 @@ export function Viewer() {
     panX,
     panY,
     softProofActive,
-    softProofProfile,
-    softProofIntent,
-    softProofGamutWarning,
+    softProofFrame,
     softProofPaperWhite,
   ]);
 
@@ -212,6 +240,18 @@ export function Viewer() {
 
   const dragState = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
+
+  // ---- Zielgerichtetes Anpassungswerkzeug (TAT, Phase 11 Schritt 6,
+  // siehe DECISIONS.md ADR-0038) — Klick+Zug im Bild steuert direkt am
+  // Bildpunkt den in `tatMode`/`tatCurveChannel` gewählten Regler.
+  // Eigener Ref statt `dragState` (der ist fürs Schwenken reserviert) —
+  // `canPan` schließt TAT-Ziehen aus, beide können also nie gleichzeitig
+  // aktiv sein.
+  const tatDragState = useRef<
+    | { kind: "curve"; channel: keyof CurvesAdjustment; pointIndex: number; startOutput: number; startClientY: number }
+    | { kind: "hsl"; band: keyof HslAdjustment; startLuminance: number; startClientY: number }
+    | null
+  >(null);
 
   // ---- Entwickeln-Analysewerkzeuge (Phase 9 Schritt 4) ------------------
   const [pointerSample, setPointerSample] = useState<{ r: number; g: number; b: number } | null>(null);
@@ -243,14 +283,99 @@ export function Viewer() {
   // schwenken. Dieselbe Fläche deckt `MaskOverlay` für eine ausgewählte
   // Pinselmaske ab (Phase 6 Schritt 4).
   const selectedMaskIsBrush = selectedMask?.components[selectedMaskComponentIndex]?.geometry.kind === "Brush";
-  const canPan = !repairActive && !selectedMaskIsBrush && (spaceHeld || effectiveScale > fitScale + 1e-6);
+  const tatActive = tatMode !== "off";
+  const canPan = !repairActive && !selectedMaskIsBrush && !tatActive && (spaceHeld || effectiveScale > fitScale + 1e-6);
+
+  // TAT-Schwellwert für "neuen Kurvenpunkt statt vorhandenen verschieben"
+  // (Eingabewert-Abstand, 0..1) — siehe Store-Moduldoku.
+  const TAT_NEW_POINT_THRESHOLD = 0.04;
 
   const handleMouseDown = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
+      if (tatActive && event.button === 0 && developFrame && imgW > 0 && imgH > 0) {
+        const rect = event.currentTarget.getBoundingClientRect();
+        const cursor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+        const origin = imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY });
+        const imageX = (cursor.x - origin.x) / effectiveScale;
+        const imageY = (cursor.y - origin.y) / effectiveScale;
+        if (imageX < 0 || imageY < 0 || imageX >= imgW || imageY >= imgH) return;
+
+        const sampleX = Math.min(developFrame.width - 1, Math.floor((imageX / imgW) * developFrame.width));
+        const sampleY = Math.min(developFrame.height - 1, Math.floor((imageY / imgH) * developFrame.height));
+        const index = (sampleY * developFrame.width + sampleX) * 4;
+        const r = developFrame.pixels[index] ?? 0;
+        const g = developFrame.pixels[index + 1] ?? 0;
+        const b = developFrame.pixels[index + 2] ?? 0;
+
+        if (tatMode === "curve") {
+          const channel = developEdl.curves[tatCurveChannel];
+          const points = channel.kind === "Points" ? channel.points : [{ input: 0, output: 0 }, { input: 1, output: 1 }];
+          const inputValue = (r / 255 + g / 255 + b / 255) / 3;
+
+          let nearestIndex = 0;
+          let nearestDistance = Infinity;
+          points.forEach((p, i) => {
+            const distance = Math.abs(p.input - inputValue);
+            if (distance < nearestDistance) {
+              nearestDistance = distance;
+              nearestIndex = i;
+            }
+          });
+
+          let workingPoints = points;
+          let pointIndex = nearestIndex;
+          if (nearestDistance > TAT_NEW_POINT_THRESHOLD) {
+            const newPoint = { input: inputValue, output: inputValue };
+            workingPoints = [...points, newPoint].sort((a, b2) => a.input - b2.input);
+            pointIndex = workingPoints.indexOf(newPoint);
+            setCurveChannel(tatCurveChannel, { kind: "Points", points: workingPoints });
+          } else if (channel.kind !== "Points") {
+            // Bestehender Punkt nah genug, aber der Kanal war bislang
+            // parametrisch — auf Punkte umstellen, sonst gäbe es keine
+            // Punkte zum Verschieben (siehe Store-Moduldoku).
+            setCurveChannel(tatCurveChannel, { kind: "Points", points: workingPoints });
+          }
+
+          tatDragState.current = {
+            kind: "curve",
+            channel: tatCurveChannel,
+            pointIndex,
+            startOutput: workingPoints[pointIndex]?.output ?? inputValue,
+            startClientY: event.clientY,
+          };
+        } else if (tatMode === "hsl") {
+          const band = nearestHslBand(hueDegreesFromRgbByte(r, g, b));
+          tatDragState.current = {
+            kind: "hsl",
+            band,
+            startLuminance: developEdl.hsl[band].luminance,
+            startClientY: event.clientY,
+          };
+        }
+        return;
+      }
+
       if (pickerActive || event.button !== 0 || !canPan) return;
       dragState.current = { startX: event.clientX, startY: event.clientY, startPanX: panX, startPanY: panY };
     },
-    [pickerActive, canPan, panX, panY],
+    [
+      tatActive,
+      tatMode,
+      tatCurveChannel,
+      developFrame,
+      imgW,
+      imgH,
+      containerSize.width,
+      containerSize.height,
+      effectiveScale,
+      panX,
+      panY,
+      developEdl.curves,
+      developEdl.hsl,
+      setCurveChannel,
+      pickerActive,
+      canPan,
+    ],
   );
 
   // Punktfarbmesser (Phase 9 Schritt 4): läuft unabhängig vom Ziehen mit,
@@ -264,6 +389,27 @@ export function Viewer() {
       const drag = dragState.current;
       if (drag) {
         setPan(drag.startPanX + (event.clientX - drag.startX), drag.startPanY + (event.clientY - drag.startY));
+      }
+
+      const tatDrag = tatDragState.current;
+      if (tatDrag && imgH > 0) {
+        // Vertikaler Zug skaliert mit der Bildhöhe *auf dem Bildschirm*
+        // (Lightroom-Konvention, siehe PLAN.md Phase 11 Schritt 6): die
+        // volle sichtbare Bildhöhe zu ziehen deckt den vollen Regler-
+        // Bereich ab, unabhängig vom aktuellen Zoom.
+        const pixelHeight = imgH * effectiveScale;
+        const deltaFraction = (event.clientY - tatDrag.startClientY) / pixelHeight;
+        if (tatDrag.kind === "curve") {
+          const channel = developEdl.curves[tatDrag.channel];
+          if (channel.kind === "Points") {
+            const clampedOutput = Math.min(1, Math.max(0, tatDrag.startOutput - deltaFraction));
+            const newPoints = channel.points.map((p, i) => (i === tatDrag.pointIndex ? { ...p, output: clampedOutput } : p));
+            setCurveChannel(tatDrag.channel, { kind: "Points", points: newPoints });
+          }
+        } else {
+          const clampedLuminance = Math.min(100, Math.max(-100, tatDrag.startLuminance - deltaFraction * 200));
+          setHslBandField(tatDrag.band, "luminance", clampedLuminance);
+        }
       }
 
       if (!developPanelOpen || !developFrame || imgW <= 0 || imgH <= 0) {
@@ -288,12 +434,32 @@ export function Viewer() {
         b: developFrame.pixels[index + 2] ?? 0,
       });
     },
-    [setPan, developPanelOpen, developFrame, imgW, imgH, containerSize.width, containerSize.height, effectiveScale, panX, panY, pointerSample],
+    [
+      setPan,
+      developPanelOpen,
+      developFrame,
+      imgW,
+      imgH,
+      containerSize.width,
+      containerSize.height,
+      effectiveScale,
+      panX,
+      panY,
+      pointerSample,
+      developEdl.curves,
+      developEdl.hsl,
+      setCurveChannel,
+      setHslBandField,
+    ],
   );
 
   const endDrag = useCallback(() => {
     dragState.current = null;
-  }, []);
+    if (tatDragState.current) {
+      tatDragState.current = null;
+      void commitDevelopEdit();
+    }
+  }, [commitDevelopEdit]);
 
   const handleMouseLeave = useCallback(() => {
     endDrag();
@@ -429,15 +595,19 @@ export function Viewer() {
         setZoom(nextZoomStep(effectiveScale, 1, fitScale), "manual");
       } else if (event.key === "-") {
         setZoom(nextZoomStep(effectiveScale, -1, fitScale), "manual");
-      } else if (event.key === "0") {
+      } else if (matchesBinding(event, "zoom-fit")) {
         resetView();
-      } else if (event.key === "1") {
+      } else if (matchesBinding(event, "zoom-100")) {
         setZoom(1, "manual");
         setPan(0, 0);
       } else if (event.key === "i" || event.key === "I") {
         // Info-Overlay ein-/ausblenden (Phase 9 Schritt 5) — dieselbe
         // Taste wie in Lightroom Classic.
         toggleInfoOverlay();
+      } else if (event.key === "o" || event.key === "O") {
+        // Masken-Farbüberlagerung ein-/ausblenden (Phase 12 Schritt 1,
+        // siehe DECISIONS.md ADR-0039) — dieselbe Taste wie in Lightroom.
+        toggleMaskOverlay();
       }
     }
     function handleKeyUp(event: KeyboardEvent) {
@@ -450,7 +620,7 @@ export function Viewer() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [effectiveScale, fitScale, setZoom, setPan, resetView, toggleInfoOverlay]);
+  }, [effectiveScale, fitScale, setZoom, setPan, resetView, toggleInfoOverlay, toggleMaskOverlay]);
 
   return (
     <main
@@ -463,11 +633,68 @@ export function Viewer() {
       onMouseLeave={handleMouseLeave}
       onClick={handleImageClick}
       onDoubleClick={handleDoubleClick}
-      style={{ cursor: pickerActive ? "crosshair" : canPan ? (dragState.current ? "grabbing" : "grab") : "default" }}
+      style={{ cursor: pickerActive || tatActive ? "crosshair" : canPan ? (dragState.current ? "grabbing" : "grab") : "default" }}
     >
       {!photo && <p className="pointer-events-none text-sm text-text-muted">Kein Foto ausgewählt.</p>}
 
       <canvas ref={canvasRef} className="pointer-events-none absolute inset-0" />
+
+      {/* Offline-Kennzeichnung (Phase 11 Schritt 4, siehe `DECISIONS.md`
+          ADR-0038): `photo.missing` kommt von der bestehenden Abgleich-
+          Logik (`reconcile.rs`), die es setzt, sobald die Originaldatei
+          nicht mehr gefunden wird — rendert trotzdem etwas (`drawSource`
+          nicht leer), kann das nur das Smart-Preview-Fallback in
+          `resolve_source_path` gewesen sein. Kein eigenes Backend-Signal
+          nötig, siehe dessen Moduldoku. */}
+      {photo?.missing && drawSource && (
+        <div className="pointer-events-none absolute left-3 top-3 rounded bg-bg-raised/90 px-2 py-1 text-xs font-medium text-accent backdrop-blur">
+          Offline (Smart Preview)
+        </div>
+      )}
+
+      {/* Zielgerichtetes Anpassungswerkzeug (TAT, Phase 11 Schritt 6,
+          siehe DECISIONS.md ADR-0038) — nur sichtbar, während das
+          Entwickeln-Panel offen ist (die Ziel-Regler leben dort). */}
+      {developPanelOpen && (
+        <div
+          role="group"
+          aria-label="Zielgerichtetes Anpassungswerkzeug"
+          className="absolute right-3 top-3 flex items-center gap-1 rounded bg-bg-raised/90 p-1 text-xs backdrop-blur"
+          onClick={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            onClick={() => setTatMode(tatMode === "curve" ? "off" : "curve")}
+            aria-pressed={tatMode === "curve"}
+            className={`rounded border px-2 py-1 ${tatMode === "curve" ? "border-accent bg-accent/10 text-accent" : "border-border hover:border-accent"}`}
+          >
+            TAT: Kurve
+          </button>
+          {tatMode === "curve" && (
+            <select
+              aria-label="TAT-Kurvenkanal"
+              value={tatCurveChannel}
+              onChange={(event) => setTatCurveChannel(event.target.value as keyof CurvesAdjustment)}
+              className="rounded border border-border bg-bg-panel px-1 py-1"
+            >
+              {CURVE_CHANNEL_TABS.map((tab) => (
+                <option key={tab.key} value={tab.key}>
+                  {tab.label}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            type="button"
+            onClick={() => setTatMode(tatMode === "hsl" ? "off" : "hsl")}
+            aria-pressed={tatMode === "hsl"}
+            className={`rounded border px-2 py-1 ${tatMode === "hsl" ? "border-accent bg-accent/10 text-accent" : "border-border hover:border-accent"}`}
+          >
+            TAT: HSL
+          </button>
+        </div>
+      )}
 
       {clippingOverlayEnabled && developFrame && imgW > 0 && imgH > 0 && (
         <canvas
@@ -525,6 +752,21 @@ export function Viewer() {
           autoSourceModeActive={autoSourceModeActive}
           onSuggestSource={(point) => void suggestRepairSourceForTarget(point.x, point.y)}
           spotCandidates={sensorSpotCandidates}
+        />
+      )}
+
+      {/* Masken-Farbüberlagerung (Phase 12 Schritt 1, siehe `DECISIONS.md`
+          ADR-0039) — zeigt alle sichtbaren Masken eingefärbt an, unabhängig
+          von der gerade zur Bearbeitung ausgewählten. Wird vor dem
+          Ziehgriff-Overlay unten gerendert, damit dessen Griffe/Linien
+          weiterhin sichtbar über der Einfärbung liegen. */}
+      {photo && developPanelOpen && maskOverlayVisible && imgW > 0 && imgH > 0 && (
+        <MaskColorOverlay
+          imageLeft={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).x}
+          imageTop={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).y}
+          imageWidth={imgW * effectiveScale}
+          imageHeight={imgH * effectiveScale}
+          masks={visibleMasks(developEdl.masks, maskGroups)}
         />
       )}
 

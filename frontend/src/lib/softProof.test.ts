@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { DevelopFrame } from "../hooks/useDevelopRender";
-import { applySoftProof, type SoftProofSettings } from "./softProof";
+import { applyPaperWhite, encodeSoftProofSegment, type SoftProofSettings } from "./softProof";
 
 function frameOf(pixels: number[]): DevelopFrame {
   return { width: pixels.length / 4, height: 1, pixels: new Uint8Array(pixels) };
@@ -9,63 +9,51 @@ function frameOf(pixels: number[]): DevelopFrame {
 
 const BASE_SETTINGS: SoftProofSettings = {
   profile: "srgb",
+  customIccPath: "",
   intent: "perceptual",
   gamutWarning: false,
   paperWhite: false,
 };
 
-describe("applySoftProof", () => {
-  it("sRGB + wahrnehmungsorientiert lässt Pixel unverändert (Identität)", () => {
-    const frame = frameOf([10, 200, 50, 255, 0, 0, 0, 255, 255, 255, 255, 128]);
-    const out = applySoftProof(frame, BASE_SETTINGS);
-    expect(Array.from(out)).toEqual(Array.from(frame.pixels));
-  });
+// Die eigentliche Farb-/Gamut-Transformation lief bis Phase 12 Schritt 6
+// clientseitig (siehe die vorherige Fassung dieser Datei) und läuft seither
+// als echter `lcms2`-Transform serverseitig über die `develop/...`-Route
+// (`crates/apx-export/src/icc.rs::soft_proof_rgba8`, dort bereits mit
+// eigenem Test abgedeckt). Hier bleiben nur die beiden clientseitigen
+// Bausteine übrig: die Papierweiß-Tonwertkompression und die
+// URL-Segment-Kodierung, die den Server-Aufruf überhaupt erst auslöst.
 
-  it("Graustufen-Druck (simuliert) + wahrnehmungsorientiert setzt jeden Kanal auf die Rec.601-Luminanz", () => {
-    const frame = frameOf([255, 0, 0, 255]); // reines Rot
-    const out = applySoftProof(frame, { ...BASE_SETTINGS, profile: "grayscale_sim" });
-    const expectedLuma = Math.round(0.299 * 255);
-    expect(out[0]).toBe(expectedLuma);
-    expect(out[1]).toBe(expectedLuma);
-    expect(out[2]).toBe(expectedLuma);
-    expect(out[3]).toBe(255); // Alpha bleibt unangetastet
-  });
-
-  it("Relativ farbmetrisch lässt schwach gesättigte Pixel unangetastet, komprimiert aber stark gesättigte", () => {
-    const mutedPink = frameOf([210, 190, 195, 255]); // niedrige Sättigung
-    const pureRed = frameOf([255, 0, 0, 255]); // maximale Sättigung
-    const settings: SoftProofSettings = { ...BASE_SETTINGS, profile: "print_sim", intent: "relative_colorimetric" };
-
-    const mutedOut = applySoftProof(mutedPink, settings);
-    expect(Array.from(mutedOut)).toEqual(Array.from(mutedPink.pixels));
-
-    const redOut = applySoftProof(pureRed, settings);
-    expect(Array.from(redOut)).not.toEqual(Array.from(pureRed.pixels));
-    // R=G=B wäre nur bei vollständiger Entsättigung (factor 0) der Fall —
-    // "Druck (simuliert)" hat factor 0.7, bleibt also näher an Rot als an Grau.
-    expect(redOut[0]).toBeGreaterThan(redOut[1]!);
-  });
-
-  it("Farbumfangswarnung färbt außerhalb liegende Pixel magenta statt sie zu komprimieren", () => {
-    const pureRed = frameOf([255, 0, 0, 255]);
-    const settings: SoftProofSettings = { profile: "print_sim", intent: "relative_colorimetric", gamutWarning: true, paperWhite: false };
-    const out = applySoftProof(pureRed, settings);
-    expect(Array.from(out)).toEqual([255, 0, 255, 255]);
-  });
-
-  it("Papierweiß-Simulation komprimiert reines Schwarz und Weiß Richtung der Bodenwerte", () => {
-    const frame = frameOf([0, 0, 0, 255, 255, 255, 255, 255]);
-    const out = applySoftProof(frame, { ...BASE_SETTINGS, paperWhite: true });
+describe("applyPaperWhite", () => {
+  it("komprimiert reines Schwarz und Weiß Richtung der Bodenwerte, lässt Alpha unangetastet", () => {
+    const frame = frameOf([0, 0, 0, 255, 255, 255, 255, 128]);
+    const out = applyPaperWhite(frame);
     expect(out[0]).toBeGreaterThan(0);
     expect(out[0]).toBeLessThan(255);
+    expect(out[3]).toBe(255);
     expect(out[4]).toBeLessThan(255);
     expect(out[4]).toBeGreaterThan(0);
+    expect(out[7]).toBe(128);
   });
 
   it("verändert den übergebenen Frame-Puffer nicht (gibt einen neuen zurück)", () => {
-    const frame = frameOf([255, 0, 0, 255]);
+    const frame = frameOf([0, 0, 0, 255]);
     const original = Array.from(frame.pixels);
-    applySoftProof(frame, { ...BASE_SETTINGS, profile: "grayscale_sim", paperWhite: true });
+    applyPaperWhite(frame);
     expect(Array.from(frame.pixels)).toEqual(original);
+  });
+});
+
+describe("encodeSoftProofSegment", () => {
+  it("liefert 'none' ohne Einstellungen und ein dekodierbares base64url-JSON mit Einstellungen", () => {
+    expect(encodeSoftProofSegment(null)).toBe("none");
+
+    const settings: SoftProofSettings = { ...BASE_SETTINGS, profile: "adobe_rgb", gamutWarning: true };
+    const segment = encodeSoftProofSegment(settings);
+    expect(segment).not.toBe("none");
+    expect(segment).not.toContain("/"); // muss die bestehende URL-Segmentierung nicht stören.
+
+    const decoded = JSON.parse(atob(segment.replaceAll("-", "+").replaceAll("_", "/"))) as { target: string; gamut_warning: boolean };
+    expect(decoded.target).toBe("adobe_rgb");
+    expect(decoded.gamut_warning).toBe(true);
   });
 });

@@ -216,6 +216,44 @@ export const HSL_BAND_TABS: ReadonlyArray<{ key: keyof HslAdjustment; label: str
   { key: "magenta", label: "Magenta" },
 ] as const;
 
+/** Bandzentren in Grad, exakte Reihenfolge/Werte wie
+ * `crates/apx-pipeline/src/stages/hsl_color_mixer.rs`s
+ * `HSL_BAND_CENTERS_DEGREES` — für das zielgerichtete Anpassungswerkzeug
+ * (TAT, Phase 11 Schritt 6): ordnet einen im Viewer gesampelten Farbton
+ * dem nächstgelegenen der acht festen Bänder zu. */
+const HSL_BAND_CENTERS_DEGREES: Record<keyof HslAdjustment, number> = {
+  red: 0,
+  orange: 30,
+  yellow: 60,
+  green: 120,
+  aqua: 180,
+  blue: 240,
+  purple: 270,
+  magenta: 300,
+};
+
+/** Kürzester Kreisabstand zweier Farbtöne in Grad (0..180), wie Rusts
+ * `color_math::circular_distance_degrees`. */
+function circularHueDistanceDegrees(a: number, b: number): number {
+  const diff = Math.abs(a - b) % 360;
+  return diff > 180 ? 360 - diff : diff;
+}
+
+/** Ordnet einen Farbton (Grad) dem nächstgelegenen der acht festen
+ * HSL-Bänder zu — siehe TAT-Moduldoku in `store/index.ts`. */
+export function nearestHslBand(hueDegrees: number): keyof HslAdjustment {
+  let closest: keyof HslAdjustment = "red";
+  let closestDistance = Infinity;
+  for (const tab of HSL_BAND_TABS) {
+    const distance = circularHueDistanceDegrees(hueDegrees, HSL_BAND_CENTERS_DEGREES[tab.key]);
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closest = tab.key;
+    }
+  }
+  return closest;
+}
+
 /** Regler-Spezifikationen für ein einzelnes HSL-Band — dieselben drei
  * Felder für jedes der acht Bänder. */
 export const HSL_BAND_SLIDER_SPECS: readonly SliderSpec[] = [
@@ -400,8 +438,10 @@ export const NEUTRAL_MANUAL_TRANSFORM: ManualTransform = {
 };
 
 export interface LensCorrectionAdjustment {
-  /** Referenz auf ein Profil in der eingebauten Mini-Profildatenbank
-   * (siehe `DECISIONS.md` ADR-0028), `null` = kein Profil zugeordnet. */
+  /** Referenz auf ein Profil — eines der drei Alt-Beispielprofile
+   * (ADR-0028) oder ein echter LensFun-Datenbankeintrag (seit Phase 12
+   * Schritt 3, siehe `DECISIONS.md` ADR-0039), `null` = kein Profil
+   * zugeordnet. */
   profile_id: string | null;
   ca_red_cyan: number;
   ca_blue_yellow: number;
@@ -411,6 +451,10 @@ export interface LensCorrectionAdjustment {
   upright_mode: UprightMode;
   guided_lines: GuidedLine[];
   manual_transform: ManualTransform;
+  /** Ergebnis einer eigenen Kalibrierung aus markierten geraden Linien
+   * (Phase 12 Schritt 3 Teil B, siehe `DECISIONS.md` ADR-0039) — hat
+   * Vorrang vor `profile_id`s Verzeichnungswert, wenn gesetzt. */
+  custom_distortion_k1: number | null;
 }
 
 export function neutralLensCorrections(): LensCorrectionAdjustment {
@@ -424,6 +468,7 @@ export function neutralLensCorrections(): LensCorrectionAdjustment {
     upright_mode: "Off",
     guided_lines: [],
     manual_transform: NEUTRAL_MANUAL_TRANSFORM,
+    custom_distortion_k1: null,
   };
 }
 
@@ -644,6 +689,12 @@ export interface BrushStroke {
   points: MaskPoint[];
   radius: number;
   feather: number;
+  /** Auto-Mask (Phase 12 Schritt 2, siehe `DECISIONS.md` ADR-0039):
+   * dämpft die Deckkraft dieses Strichs an starken lokalen Bildkanten
+   * (`masks.rs`s `relative_sharpness_map`), damit der Pinsel nicht über
+   * scharfe Kanten hinweg "ausblutet" — wie Lightrooms gleichnamige
+   * Option. */
+  auto_mask: boolean;
 }
 
 /** Die fünf KI-Masken-Heuristiken (Phase 7, siehe `DECISIONS.md`
@@ -661,9 +712,12 @@ export const AI_MASK_KIND_LABELS: Record<AiMaskKind, string> = {
 };
 
 /** Spiegelt Rusts intern getaggtes `#[serde(tag = "kind")]`-Enum — die
- * fünf `SPEC.md` §5 genannten Maskentypen plus die sechste, ab Phase 7
- * hinzugekommene KI-generierte Rasterfläche (Tiefenbereich ist weiterhin
- * bewusst nicht Teil dieses Schemas, siehe ADR-0032 Punkt 3). */
+ * fünf `SPEC.md` §5 genannten Maskentypen plus die ab Phase 7
+ * hinzugekommene KI-generierte Rasterfläche und die ab Phase 11 Schritt 7
+ * hinzugekommene Unschärfe-basierte Tiefennäherung (siehe
+ * `DECISIONS.md` ADR-0038 — echter „Tiefenbereich" wie in ADR-0032
+ * Punkt 3 zurückgestellt bleibt weiterhin nicht Teil dieses Schemas, es
+ * gibt in diesem Projekt nirgends echte Tiefendaten). */
 export type MaskGeometry =
   | { kind: "Brush"; strokes: BrushStroke[] }
   | { kind: "LinearGradient"; x1: number; y1: number; x2: number; y2: number }
@@ -678,7 +732,8 @@ export type MaskGeometry =
     }
   | { kind: "ColorRange"; target_r: number; target_g: number; target_b: number; tolerance: number; feather: number }
   | { kind: "LuminanceRange"; range_min: number; range_max: number; feather: number }
-  | { kind: "AiGenerated"; ai_kind: AiMaskKind; width: number; height: number; alpha: number[] };
+  | { kind: "AiGenerated"; ai_kind: AiMaskKind; width: number; height: number; alpha: number[] }
+  | { kind: "BlurDepthApprox"; threshold: number };
 
 /** Dekodiert eine Base64-Ein-Kanal-Bitmap (`AiMaskAlphaDto.alpha_base64`,
  * siehe `lib/tauri.ts`) in ein Array von Byte-Werten (`0..=255`) — genau
@@ -754,6 +809,18 @@ export const OVERLAY_COLOR_OPTIONS: ReadonlyArray<{ value: OverlayColor; label: 
   { value: "Magenta", label: "Magenta" },
 ];
 
+/** Kräftige, auf dunklem wie hellem Bildgrund gut sichtbare Werte je
+ * `OverlayColor` — für das Masken-Farbüberlagerung im Viewer (Phase 12
+ * Schritt 1, siehe `DECISIONS.md` ADR-0039), nicht für UI-Chrome (dort
+ * gelten die Theme-Tokens aus `index.css`). */
+export const OVERLAY_COLOR_HEX: Record<OverlayColor, string> = {
+  Red: "#ff3b30",
+  Green: "#34c759",
+  Blue: "#0a84ff",
+  Yellow: "#ffd60a",
+  Magenta: "#ff2d95",
+};
+
 /** Eine lokale Anpassung (`SPEC.md` §3.3) — `id` clientseitig vergeben
  * (Masken leben ausschließlich im opaken EDL-JSON-Blob, nie als eigene
  * Katalogzeile). */
@@ -823,6 +890,57 @@ export function defaultColorRangeGeometry(): MaskGeometry {
   return { kind: "ColorRange", target_r: 0.5, target_g: 0.5, target_b: 0.5, tolerance: 0.15, feather: 0.1 };
 }
 
+export type RadialGradientGeometry = Extract<MaskGeometry, { kind: "RadialGradient" }>;
+
+/** Randpunkte der (ggf. rotierten) Radialverlauf-Ellipse in Bild-
+ * Bruchteil-Koordinaten (Phase 12 Schritt 2, siehe `DECISIONS.md`
+ * ADR-0039) — exakte Umkehrung von `masks.rs`s `radial_gradient_alpha`-
+ * Rotationsformel, damit `MaskOverlay`/`MaskColorOverlay` dieselbe Form
+ * zeichnen, die die Pipeline tatsächlich berechnet.
+ *
+ * **Wichtig:** das ist eine Rotation im *Bruchteilsraum* (x/y je eigener
+ * Kantenlänge normiert, wie die gesamte Maskengeometrie in diesem
+ * Projekt), keine physische Bildschirm-Rotation — bei einem nicht-
+ * quadratischen Foto unterscheiden sich beide sichtbar. Das ist keine
+ * Vereinfachung dieser Funktion, sondern spiegelt exakt, wie
+ * `radial_gradient_alpha` selbst rechnet. */
+export function radialGradientBoundaryPoints(geometry: RadialGradientGeometry, steps = 48): MaskPoint[] {
+  const angle = (geometry.angle_degrees * Math.PI) / 180;
+  const cosA = Math.cos(angle);
+  const sinA = Math.sin(angle);
+  const points: MaskPoint[] = [];
+  for (let i = 0; i < steps; i += 1) {
+    const t = (i / steps) * Math.PI * 2;
+    const localX = geometry.radius_x * Math.cos(t);
+    const localY = geometry.radius_y * Math.sin(t);
+    points.push({
+      x: geometry.center_x + localX * cosA - localY * sinA,
+      y: geometry.center_y + localX * sinA + localY * cosA,
+    });
+  }
+  return points;
+}
+
+/** Ziehgriff-Positionen für die unabhängigen Radius-Achsen + den
+ * Rotations-Griff (Phase 12 Schritt 2) — dieselbe Parametrisierung wie
+ * [`radialGradientBoundaryPoints`] an den Stellen `t=0`/`t=π/2`, der
+ * Rotations-Griff sitzt etwas weiter außen auf dem `t=0`-Strahl. */
+export function radialGradientAxisHandlePositions(geometry: RadialGradientGeometry): {
+  radiusX: MaskPoint;
+  radiusY: MaskPoint;
+  rotation: MaskPoint;
+} {
+  const angle = (geometry.angle_degrees * Math.PI) / 180;
+  const cosA = Math.cos(angle);
+  const sinA = Math.sin(angle);
+  const rotationDist = geometry.radius_x + 0.06;
+  return {
+    radiusX: { x: geometry.center_x + geometry.radius_x * cosA, y: geometry.center_y + geometry.radius_x * sinA },
+    radiusY: { x: geometry.center_x - geometry.radius_y * sinA, y: geometry.center_y + geometry.radius_y * cosA },
+    rotation: { x: geometry.center_x + rotationDist * cosA, y: geometry.center_y + rotationDist * sinA },
+  };
+}
+
 /** Obere Tonwerthälfte (Lichter) als plausibler Startzustand — dieselbe
  * Konvention wie Lightrooms Luminanzbereichs-Maske, die üblicherweise
  * zuerst auf „Lichter" steht. */
@@ -830,10 +948,32 @@ export function defaultLuminanceRangeGeometry(): MaskGeometry {
   return { kind: "LuminanceRange", range_min: 0.5, range_max: 1, feather: 0.1 };
 }
 
+/** Mittlerer Schwellwert als plausibler Startzustand — siehe
+ * `MaskGeometry`s Moduldoku zur Unschärfe-basierten Tiefennäherung
+ * (Phase 11 Schritt 7). */
+export function defaultBlurDepthApproxGeometry(): MaskGeometry {
+  return { kind: "BlurDepthApprox", threshold: 0.5 };
+}
+
 export interface MaskGroup {
   id: string;
   name: string;
   visible: boolean;
+}
+
+/** Die Masken, die tatsächlich wirken/angezeigt werden sollen: `mask.visible`
+ * UND (keine Gruppe zugeordnet ODER die zugeordnete Gruppe ist selbst
+ * sichtbar) — Spiegelbild von `apx_pipeline::stages::masks::visible_masks`
+ * (siehe dessen Moduldoku), hier für die clientseitige Masken-
+ * Farbüberlagerung (Phase 12 Schritt 1) statt einer Pipeline-Anfrage
+ * genutzt. */
+export function visibleMasks(masks: readonly Mask[], groups: readonly MaskGroup[]): Mask[] {
+  return masks.filter((mask) => {
+    if (!mask.visible) return false;
+    if (mask.group_id === null) return true;
+    const group = groups.find((g) => g.id === mask.group_id);
+    return group ? group.visible : true;
+  });
 }
 
 export const MASK_SLIDER_SPECS: readonly SliderSpec[] = [

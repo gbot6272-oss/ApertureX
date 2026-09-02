@@ -123,7 +123,7 @@ apx-pipeline/
 Analog zu §2s Phase-1-Datenfluss, hier für den neuen interaktiven Entwickeln-Pfad:
 
 **Regler-Tick (Ziehen, noch nicht committet):**
-Frontend `DevelopSlider.onChange` → Store `setBasicField` (nur In-Memory, kein IPC) → `Viewer` berechnet `edlJson` aus dem aktuellen `developBasic` (`lib/edl.ts::buildEdlEnvelopeJson`) → `useDevelopRender` schickt frühestens im nächsten `requestAnimationFrame` einen `fetch()` an `apx://develop/<id>/<max_edge>/<edl_json>` → `apx-app::protocol::compute_develop`: `apx_core::EdlEnvelope::from_json_str` + `apx_pipeline::edl::from_envelope` (Validierung) → `TileCache::get_or_decode` (Cache-Treffer bei jedem Tick nach dem ersten desselben Fotos — `apx_raw::decode_linear()` läuft nur einmal) → `apx_pipeline::develop::render_rgba8`: `white_balance::compute_gains` → `basic_fused::apply_gpu` (mit automatischem CPU-Fallback) → `color::linear_camera_rgb_to_srgb_rgba8` (feste Matrix + Gammakurve) → 8-Byte-Breite/Höhe-Header + rohes RGBA8 zurück → Frontend lädt die Bytes direkt als WebGL2-Textur (`lib/webgl.ts::QuadRenderer`), kein Dekodierschritt nötig.
+Frontend `DevelopSlider.onChange` → Store `setBasicField` (nur In-Memory, kein IPC) → `Viewer` berechnet `edlJson` aus dem aktuellen `developBasic` (`lib/edl.ts::buildEdlEnvelopeJson`) → `useDevelopRender` schickt frühestens im nächsten `requestAnimationFrame` einen `fetch()` an `apx://develop/<id>/<max_edge>/<soft_proof>/<edl_json>` (`<soft_proof>` seit Phase 12 Schritt 6: `none` oder base64url-kodiertes JSON, siehe `protocol/route.rs`s Moduldoku) → `apx-app::protocol::compute_develop`: `apx_core::EdlEnvelope::from_json_str` + `apx_pipeline::edl::from_envelope` (Validierung) → `TileCache::get_or_decode` (Cache-Treffer bei jedem Tick nach dem ersten desselben Fotos — `apx_raw::decode_linear()` läuft nur einmal) → `apx_pipeline::develop::render_rgba8`: `white_balance::compute_gains` → `basic_fused::apply_gpu` (mit automatischem CPU-Fallback) → `color::linear_camera_rgb_to_srgb_rgba8` (feste Matrix + Gammakurve) → bei aktivem Soft-Proof zusätzlich `apx_export::icc::soft_proof_rgba8` (echter `lcms2`-Proofing-Transform) → 8-Byte-Breite/Höhe-Header + rohes RGBA8 zurück → Frontend lädt die Bytes direkt als WebGL2-Textur (`lib/webgl.ts::QuadRenderer`), kein Dekodierschritt nötig.
 
 **Commit (Loslassen/Blur/Doppelklick-Reset):**
 `DevelopSlider.onCommit` → Store `commitDevelopEdit` → Tauri-Command `apply_develop_edit` → `apx-catalog::Catalog::commit_edit` schreibt einen neuen `edit_history`-Schnappschuss und rückt `edit_current` nach (verwirft dabei eine zuvor per Undo erreichte „Zukunft", siehe ADR-0014).
@@ -502,3 +502,207 @@ jeweiligen Schritte 3/5 entschieden): Übersichtsansicht, Schnellentwicklung
 im Raster, Smart Previews/Offline-Bearbeitung, Zielgerichtetes
 Anpassungswerkzeug (TAT). Tiefenbereich-Masken bleiben weiterhin ohne
 Phasenzuordnung (ADR-0032 Punkt 3).
+
+## 14. Architektur Phase 10 — Politur
+
+Beschreibt den tatsächlich gebauten Stand aller elf Bauschritte (siehe
+`DECISIONS.md` ADR-0037 für die Scope-Entscheidungen: drei
+Phase-3/5-UI-Restposten reingezogen, Testdisziplin für diese Phase
+nutzerangeordnet gelockert, Installer-Signierung ehrlich begrenzt).
+Anders als jede vorherige Phase berührt Phase 10 fast ausschließlich das
+Frontend (`frontend/src/`) plus einen neuen CI-Job — kein neues
+Rust-Crate, keine neue EDL-Schema-Version, keine Katalog-Migration.
+
+**Settings-Fundament** (Schritt 1, trägt alle folgenden Schritte):
+`apx_core::settings::UiSettings` war seit Phase 1 bereits mit
+`theme`/`locale`/`ui_scale_percent` vorbereitet (Kommentare „kommt erst
+in Phase 10"), aber an nichts angebunden — Schritt 1 erweitert sie um
+`accent_color`/`high_contrast`/`reduced_motion`/`onboarding_seen` und
+verdrahtet `get_ui_settings`/`set_ui_settings` (dasselbe Lade-/
+Speicher-Muster wie `get_ai_settings`/`set_anthropic_api_key` aus
+Phase 7 — Einstellungen werden bei jedem Aufruf frisch aus derselben
+TOML-Datei gelesen, kein In-Memory-Cache in `AppState`). Ein neuer
+`SettingsDialog.tsx` ist die einzige Schreib-Oberfläche.
+
+**Frontend-lokale Zustands-Brücke** (`store/index.ts`s
+`pendingCommand`/`requestCommand`/`clearPendingCommand`, Schritt 4/9):
+Neun Dialoge (Vorlagen/Organisieren/Stacking/Skript & Plugins/
+Kollaboration/Tethering/Metadaten/Statistik/Import mit Vorlage) sind seit
+ihrer jeweiligen Einführung in früheren Phasen bewusst lokaler `useState`
+in `Header.tsx` geblieben (reine Ein/Aus-Flags ohne Async-Logik, anders
+als z. B. `exportDialogOpen`). Die jetzt vollständige Befehlspalette
+(Schritt 4) und das Onboarding (Schritt 9) sind aber keine Kinder von
+`Header.tsx` und können diese Dialoge nicht direkt öffnen — `pendingCommand`
+ist die schmale Brücke: ein Store-Feld, das `Header.tsx`/`App.tsx` per
+`useEffect` beobachten und sofort wieder abräumen. Kein bestehender
+Dialog wurde in den Store migriert, um das Regressionsrisiko in dieser
+testdisziplin-gelockerten Phase klein zu halten.
+
+**UI-Effekte zentral in `App.tsx`** (Schritte 6/7): ein einzelner
+`useEffect` auf `uiSettings` setzt `data-contrast`/`data-theme`-Attribute
+und die `apx-reduce-motion`-Klasse auf `<html>` sowie `--color-accent`
+und `font-size` per Inline-Style — bewusst hier statt verteilt in
+`SettingsDialog.tsx`, weil diese Effekte app-weit gelten müssen, nicht
+nur während der Dialog offen ist. `index.css`s `@theme`-Tokens (seit
+Phase 1 absichtlich semantisch benannt, nicht „gray-800") bekommen zwei
+neue Override-Blöcke: `:root[data-theme="light"]` und
+`:root[data-contrast="high"]` — dieselben Variablennamen, nur andere
+Werte, keine neuen Tailwind-Klassen nötig.
+
+**`PaletteFrame.tsx`** (Schritt 3): gemeinsame Außenhülle für
+ein-/ausklappbare, breitenziehbare Paletten (`lib/workspaceLayout.ts`,
+Breite+Eingeklappt-Status in `localStorage` — bewusst nicht in
+`UiSettings`, weil reiner Anzeigezustand des Fensters, nicht App-weit
+gültig wie Theme/Sprache). Angewendet auf `Sidebar.tsx`/
+`PresetsPanel.tsx`/`MetadataPanel.tsx`; `DevelopPanel.tsx`/
+`MasksPanel.tsx` bewusst ausgeklammert (siehe „Ehrlich begrenzt" unten).
+
+**`lib/i18n.ts`** (Schritt 8): flache `t()`-Key-Lookup-Funktion +
+`lib/locales/de.ts`/`en.ts` — kein `react-i18next`. Deutsch ist die
+Schlüsselsprache; jeder Wert ist character-für-character identisch mit
+dem vormals hartkodierten deutschen Text, damit `uiSettings.locale`s
+Standard (`"de"`, dasselbe wie `UiSettings::default()`) jeden
+bestehenden `getByText`/`getByRole(..., { name })`-e2e-Testpfad
+unverändert lässt. `en.ts` ist als `Record<keyof typeof de, string>`
+getippt — ein fehlender Schlüssel ist ein Compile-Fehler.
+
+**`lib/keybindings.ts`** (Schritt 5): zentrale, umbelegbare
+Zuordnungstabelle für die globalen `App.tsx`-Kürzel, ersetzt dessen
+vormals fest verdrahtete `event.key`-Vergleichskette durch
+`matchesBinding()`-Aufrufe (dieselbe Reihenfolge/dieselben Wächter wie
+zuvor). Neubelegung in `localStorage`, Cheatsheet-Overlay bei `?`
+(`KeybindingsCheatsheet.tsx`).
+
+**`lib/a11y.ts`** (`useFocusTrap`, Schritt 6): Tab/Shift+Tab bleibt im
+Dialog gefangen, Fokus springt beim Öffnen aufs erste fokussierbare
+Element und beim Schließen zurück — als Muster auf die zwei in dieser
+Phase neuen Dialoge (`SettingsDialog.tsx`, `KeybindingsCheatsheet.tsx`)
+angewendet.
+
+### Datenfluss Phase 10: Einstellung ändern → app-weit sichtbar
+
+```
+SettingsDialog.tsx (Feld geändert)
+  -> saveUiSettings(patch) [store]
+       -> api.setUiSettings(...) -> set_ui_settings-Command
+            -> UiSettings in derselben TOML-Datei wie ai/catalog gespeichert
+       -> state.uiSettings = patch [optimistisch, kein Reload nötig]
+  -> App.tsx' useEffect (Abhängigkeit: uiSettings)
+       -> document.documentElement: data-theme/data-contrast-Attribute,
+          apx-reduce-motion-Klasse, --color-accent/font-size Inline-Style
+  -> index.css-Kaskade wendet den passenden @theme-Override-Block an
+```
+
+**Ehrlich begrenzt** (ADR-0037):
+1. Lokalisierung deckt die durchgängig sichtbare Navigations-/Rahmen-UI ab (Header, Seitenleiste, Einstellungen, Cheatsheet, Presets-/Metadaten-Panel-Überschriften) — nicht die ca. 20 Dialog-Komponenten, die den Großteil der ~10.700 Frontend-Zeilen tragen. **Nachtrag Phase 11 Schritt 11:** die 13 namentlich benannten Dialoge sind inzwischen übersetzt, siehe Kapitel 15.
+2. `PaletteFrame`s Ziehen/Einklappen gilt nicht für `DevelopPanel`/`MasksPanel` — beide sind Fragment-umschlossen mit Geschwister-Dialogen und die am dichtesten e2e-getesteten Dateien im Frontend; ihr bestehendes store-gesteuertes Ein-/Ausblenden über den Header bleibt ihre Form von „ausklappbar". **Nachtrag Phase 11 Schritt 11:** inzwischen ausgerollt, siehe Kapitel 15.
+3. Fokus-Falle nur als Muster auf die zwei neuen Dialoge angewendet, nicht auf die älteren, bereits e2e-getesteten Dialoge ausgerollt.
+4. Performance-Profiling (Schritt 10, siehe `PLAN.md`) liefert für zwei der fünf SPEC-§2.4-Ziele keine neue Messung (in dieser Sandbox strukturell nicht möglich: 1000 echte RAW-Dateien, ein nativer Tauri-Prozess für Idle-Speicher) — für die Import-Performance immerhin ein konkret benannter Code-Befund (sequenzielle Verarbeitung ohne `rayon`) statt einer bloßen Lücke.
+5. Installer-Signierung ist strukturell vorbereitet (neuer CI-`release`-Job, konditional auf GitHub-Secrets), aber in dieser Sandbox nie mit einem echten Zertifikat ausgeführt/verifiziert — kein Apple-Developer-Konto oder Code-Signing-Zertifikat beschaffbar. **Nachtrag Phase 11 Schritt 11:** der betriebssystemunabhängige Teil der Mechanik (PFX-Erzeugung, Base64-Rundreise, Fingerabdruck) jetzt lokal nachgewiesen, siehe Kapitel 15 — der eigentliche `Import-PfxCertificate`-Lauf bleibt weiterhin offen.
+
+## 15. Architektur Phase 11 — Nachträge
+
+Schließt alle in Phase 1–10 bewusst zurückgestellten Punkte (siehe
+`DECISIONS.md` ADR-0038 für die vollständige Scope-Begründung, inkl. der
+vier real geprüften neuen Crates und der `libgphoto2`-Neubewertung). Zwölf
+Bauschritte (0–11 plus dieser Abnahme-Schritt 12), erst mit voller
+Testdisziplin (Schritte 0–3), dann nutzerangeordnet gelockert (Schritte
+4–11, max. ein gezielter Test pro Schritt statt der vollen Suite — siehe
+ADR-0038-Nachtrag) und diese Abnahme fährt die volle Suite einmalig am
+Ende nach.
+
+**Neue Crates** (`apx-export`): `gamut-dng` (DNG-Schreiben,
+`dng.rs`), `gamut-jxl` (JPEG-XL, in `format.rs`), `ag-psd` (flaches PSD,
+in `format.rs`) — alle drei real gegen crates.io kompiliert und in
+Schritt 0 per Testbau verifiziert, bevor sie produktiv verwendet wurden.
+`heif` 0.1.0 erwies sich als reine Fassade (keine echte Kodierung) und
+bleibt zurückgestellt.
+
+**`apx_export::dng`** (Schritt 1): schreibt ein dekodiertes RAW
+(`apx_raw::decode_linear`-Ausgabe) als valide Linear-DNG — bewusst aus den
+*unveränderten* RAW-Daten, nicht aus einem ggf. bereits bearbeiteten
+Ergebnis. Abweichend vom ursprünglichen Plan als Knopf im
+Entwickeln-Panel statt als Import-Dialog-Checkbox umgesetzt (der Import-
+Dialog hat noch keinen Foto-Kontext für die Konvertierung).
+
+**`apx_export::lrtemplate`** (Schritt 8): reines Export-Mapping
+`EdlV4` → Lightrooms Lua-artige `.lrtemplate`-Serialisierung (Basic+HSL,
+dieselben Felder wie das `.xmp`-Crs-Mapping aus Phase 9 Schritt 2), gegen
+ein real recherchiertes öffentliches Beispiel verifiziert (Byte-Vergleich
+im Test). Kein Import — ein robuster Lua-Tabellen-Parser für einen nicht
+spezifizierten Dialekt wäre ein eigener, riskanterer Bauschritt.
+
+**`apx_ai::faces`** (Schritt 5): Hautton-Erkennung im YCbCr-Raum
+(wiederverwendet `segmentation::person_alpha`) + iterative Flood-Fill-
+Konturanalyse, liefert grobe Bounding-Boxes statt echter
+Landmark-Erkennung. `list_people_groups` gruppiert per Regionenzahl +
+gerundeter Durchschnittsfläche, reine Vorsortierung — kein Gesichts-
+Embedding, keine Personen-Identifizierung über Fotos hinweg.
+
+**`MaskGeometry::BlurDepthApprox`** (Schritt 7): Unschärfe-basierte
+Tiefennäherung statt echter Tiefendaten — Laplace-Varianz in einem
+gleitenden 5×5-Fenster, bild-relativ auf 0..1 normalisiert, live pro
+Render gerechnet (wie `ColorRange`/`LuminanceRange`, nicht vorab
+gebacken wie `AiGenerated`). Implementiert direkt in
+`apx-pipeline::stages::masks`, nicht in `apx-ai` wie ursprünglich
+geplant — `apx-ai` hängt von `apx-pipeline` ab, die umgekehrte Richtung
+wäre ein Zyklus gewesen (siehe DECISIONS.md-Nachtrag nach Schritt 7).
+
+**Smart Previews** (Schritt 4): `AppPaths::smart_preview_dir()` ist ein
+*Geschwister*-Verzeichnis von `preview_cache_dir()`, kein Unterordner —
+damit `clear_preview_cache` erzeugte Smart Previews nicht mitlöscht.
+`protocol::resolve_source_path` fällt auf die Smart-Preview-JPEG zurück,
+wenn die Originaldatei fehlt (externe Festplatte getrennt); die
+„Offline (Smart Preview)"-Kennzeichnung im Viewer liest dafür nur das
+bestehende `photo.missing`-Flag plus einen nicht-null `drawSource` — kein
+neues Backend-Signal nötig.
+
+**Stapelverarbeitungs-Konsole** (Schritt 9, die in ADR-0036 explizit
+benannte Phase-9-Lücke): neue Migration 0009 (`batch_operations`/
+`batch_operation_items`) — ein generisches Journal für gruppierte
+Katalogmutationen. `repository::batch::apply_batch_rule` überspringt
+No-op-Änderungen (journalisiert nur echte Änderungen), `undo_batch_
+operation` liest das Journal rückwärts und löscht danach die
+`batch_operations`-Zeile — ein zweites Undo desselben Stapels ist damit
+ein sicheres No-op statt eines Fehlers.
+
+**Tethering real kompiliert** (Schritt 10): `libgphoto2-dev` ist entgegen
+der ADR-0035-Annahme per `apt` installierbar — der Linux-CI-Zweig baut/
+testet `apx-tether` jetzt zusätzlich mit `--features tethering` gegen die
+echte Bibliothek. Der erste echte Kompilierlauf deckte zwei Abweichungen
+von der zuvor nur aus der Doku abgeleiteten API auf (`CameraFile::
+folder()`/`name()` liefern `Cow<str>`, nicht `&str`) — der Fehler wäre
+ohne die echte Bibliothek nie aufgefallen. Bleibt ehrlich begrenzt: echte
+Aufnahme/Download bleiben ungetestet (keine physische Kamera), nur der
+Verbindungs-/Fehlerpfad ist jetzt real statt strukturell verifiziert.
+
+**Phase-10-Nachträge** (Schritt 11, siehe Kapitel 14 für die
+ursprünglichen Einschränkungen):
+- Lokalisierung: alle 13 zuvor unübersetzten Dialog-Komponenten über
+  `lib/i18n.ts`s `t()`-Muster übersetzt. `SlideshowPlayer.tsx` und die
+  von `MetadataDialog.tsx`/`SavePresetDialog.tsx` gemeinsam genutzten
+  `PRESET_CONDITION_*`-Labels aus `lib/presets.ts` bleiben offen.
+- `PaletteFrame` jetzt auch auf `DevelopPanel`/`MasksPanel` — deren
+  bislang festes `<aside>` ist jeweils durch `<PaletteFrame id="develop"/
+  "masks" side="right">` ersetzt; `MasksPanel.tsx`s `id="stage-masks"`-
+  Sprunganker (vom Node-Editor genutzt) wandert dabei auf die
+  `<h2>`-Überschrift, da `PaletteFrame` selbst kein durchgereichtes
+  `id`-Attribut anbietet.
+- `lib/keybindings.ts` deckt jetzt zusätzlich `Viewer.tsx`s Zoom-
+  Zifferntasten (`zoom-fit`/`zoom-100`) und `DevelopPanel.tsx`s eigenen
+  Ctrl/Cmd+Z-Handler ab (nutzt dieselben `undo`/`redo`-IDs wie die
+  Bibliotheks-Metadaten, da sich beide Kontexte gegenseitig
+  ausschließen). Weiterhin bewusst fest: Bewertungs-Zifferntasten 0–5,
+  Kurven-/Masken-Editor-Pfeiltasten.
+- Installer-Signierung-Mechanik-Nachweis enger gefasst als geplant: diese
+  Sitzung hat kein Werkzeug für GitHub-Actions-Repository-Secrets und
+  keinen Windows-/macOS-Ausführungskontext — lokal nur der
+  betriebssystemunabhängige Teil verifiziert (PFX-Erzeugung per
+  `openssl`, Base64-Rundreise byte-identisch, SHA1-Fingerabdruck), nicht
+  der eigentliche `Import-PfxCertificate`-Lauf.
+
+**Ehrlich begrenzt** (unverändert seit ADR-0032/-0033/-0034, in ADR-0038
+erneut geprüft und bestätigt): echte GPU-Rendering-Performance, echte
+neuronale Modellinferenz, reale Zertifikats-Signierung. Kein
+Software-Trick ersetzt fehlende Hardware, ein fehlendes Zertifikat oder
+ein nicht beschaffbares Modell.

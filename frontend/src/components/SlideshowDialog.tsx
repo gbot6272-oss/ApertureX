@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { useT } from "../lib/i18n";
 import { buildSlideItems, type SlideshowSettings, type SlideshowTransition, type TitleCardSettings } from "../lib/slideshow";
 import { pickFilePath, pickSaveFilePath, type SlideshowVideoOptions } from "../lib/tauri";
 import { useAppStore } from "../store";
@@ -35,6 +36,7 @@ function hexToRgb(hex: string): [number, number, number] {
  * vs. `ffmpeg`).
  */
 export function SlideshowDialog({ open, photoIds, onClose }: SlideshowDialogProps) {
+  const t = useT();
   const ffmpegAvailable = useAppStore((s) => s.ffmpegAvailable);
   const checkFfmpegAvailability = useAppStore((s) => s.checkFfmpegAvailability);
   const videoExportRunning = useAppStore((s) => s.videoExportRunning);
@@ -90,17 +92,17 @@ export function SlideshowDialog({ open, photoIds, onClose }: SlideshowDialogProp
   const slides = buildSlideItems(photoIds, settings);
 
   async function handlePickFont() {
-    const path = await pickFilePath("Schriftdateien", ["ttf", "otf"]);
+    const path = await pickFilePath(t("slideshowDialog.fontFilter"), ["ttf", "otf"]);
     if (path) setFontPath(path);
   }
 
   async function handlePickMusic() {
-    const path = await pickFilePath("Audiodateien", ["mp3", "wav", "ogg", "flac", "m4a", "aac"]);
+    const path = await pickFilePath(t("slideshowDialog.audioFilter"), ["mp3", "wav", "ogg", "flac", "m4a", "aac"]);
     if (path) setMusicPath(path);
   }
 
   async function handleExportVideo() {
-    const destPath = await pickSaveFilePath("MP4-Video", ["mp4"], "Diashow.mp4");
+    const destPath = await pickSaveFilePath(t("slideshowDialog.videoFilter"), ["mp4"], "Diashow.mp4");
     if (!destPath) return;
     const { width, height } = RESOLUTIONS[resolution];
     const options: SlideshowVideoOptions = {
@@ -129,33 +131,33 @@ export function SlideshowDialog({ open, photoIds, onClose }: SlideshowDialogProp
           onClick={(e) => e.stopPropagation()}
           className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
         >
-          <h2 className="mb-1 text-sm font-semibold text-text-primary">Diashow</h2>
+          <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("slideshowDialog.title")}</h2>
           <p className="mb-3 text-xs text-text-muted">
-            {photoIds.length} Foto{photoIds.length === 1 ? "" : "s"}
+            {t("slideshowDialog.photoCount", { count: photoIds.length, plural: photoIds.length === 1 ? "" : "s" })}
           </p>
 
           <div className="mb-3 flex gap-2">
             <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
-              Dauer je Foto (s)
+              {t("slideshowDialog.secondsPerPhoto")}
               <input type="number" min={0.5} step={0.5} value={slideSeconds} onChange={(e) => setSlideSeconds(Number(e.target.value))} className="rounded border border-border bg-bg-panel px-2 py-1" />
             </label>
             <label className="flex flex-1 items-end gap-2 pb-1 text-xs text-text-secondary">
               <input type="checkbox" checked={kenBurns} onChange={(e) => setKenBurns(e.target.checked)} />
-              Ken-Burns-Effekt
+              {t("slideshowDialog.kenBurns")}
             </label>
           </div>
 
           <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
-            Übergang
+            {t("slideshowDialog.transition")}
             <select value={transition} onChange={(e) => setTransition(e.target.value as SlideshowTransition)} className="rounded border border-border bg-bg-panel px-2 py-1 text-sm">
-              <option value="cut">Harter Schnitt</option>
-              <option value="cross_fade">Überblendung</option>
+              <option value="cut">{t("slideshowDialog.transitionCut")}</option>
+              <option value="cross_fade">{t("slideshowDialog.transitionCrossFade")}</option>
             </select>
           </label>
 
           {transition === "cross_fade" && (
             <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
-              Dauer der Überblendung (s)
+              {t("slideshowDialog.crossFadeSeconds")}
               <input type="number" min={0.1} step={0.1} value={transitionSeconds} onChange={(e) => setTransitionSeconds(Number(e.target.value))} className="rounded border border-border bg-bg-panel px-2 py-1" />
             </label>
           )}
@@ -163,22 +165,22 @@ export function SlideshowDialog({ open, photoIds, onClose }: SlideshowDialogProp
           <div className="mb-3 rounded border border-border p-2">
             <label className="mb-2 flex items-center gap-2 text-xs text-text-secondary">
               <input type="checkbox" checked={introEnabled} onChange={(e) => setIntroEnabled(e.target.checked)} />
-              Intro-Bildschirm
+              {t("slideshowDialog.introScreen")}
             </label>
             {introEnabled && (
               <div className="flex flex-col gap-2">
-                <input type="text" placeholder="Text" value={introText} onChange={(e) => setIntroText(e.target.value)} className="rounded border border-border bg-bg-panel px-2 py-1 text-sm" />
+                <input type="text" placeholder={t("slideshowDialog.text")} value={introText} onChange={(e) => setIntroText(e.target.value)} className="rounded border border-border bg-bg-panel px-2 py-1 text-sm" />
                 <div className="flex items-center gap-2">
                   <label className="flex flex-1 items-center gap-1 text-xs text-text-secondary">
-                    Dauer (s)
+                    {t("slideshowDialog.duration")}
                     <input type="number" min={0.5} step={0.5} value={introSeconds} onChange={(e) => setIntroSeconds(Number(e.target.value))} className="w-16 rounded border border-border bg-bg-panel px-1 py-0.5" />
                   </label>
                   <label className="flex items-center gap-1 text-xs text-text-secondary">
-                    Hintergrund
+                    {t("slideshowDialog.background")}
                     <input type="color" value={introBackground} onChange={(e) => setIntroBackground(e.target.value)} />
                   </label>
                   <label className="flex items-center gap-1 text-xs text-text-secondary">
-                    Text
+                    {t("slideshowDialog.text")}
                     <input type="color" value={introTextColor} onChange={(e) => setIntroTextColor(e.target.value)} />
                   </label>
                 </div>
@@ -189,22 +191,22 @@ export function SlideshowDialog({ open, photoIds, onClose }: SlideshowDialogProp
           <div className="mb-3 rounded border border-border p-2">
             <label className="mb-2 flex items-center gap-2 text-xs text-text-secondary">
               <input type="checkbox" checked={outroEnabled} onChange={(e) => setOutroEnabled(e.target.checked)} />
-              Outro-Bildschirm
+              {t("slideshowDialog.outroScreen")}
             </label>
             {outroEnabled && (
               <div className="flex flex-col gap-2">
-                <input type="text" placeholder="Text" value={outroText} onChange={(e) => setOutroText(e.target.value)} className="rounded border border-border bg-bg-panel px-2 py-1 text-sm" />
+                <input type="text" placeholder={t("slideshowDialog.text")} value={outroText} onChange={(e) => setOutroText(e.target.value)} className="rounded border border-border bg-bg-panel px-2 py-1 text-sm" />
                 <div className="flex items-center gap-2">
                   <label className="flex flex-1 items-center gap-1 text-xs text-text-secondary">
-                    Dauer (s)
+                    {t("slideshowDialog.duration")}
                     <input type="number" min={0.5} step={0.5} value={outroSeconds} onChange={(e) => setOutroSeconds(Number(e.target.value))} className="w-16 rounded border border-border bg-bg-panel px-1 py-0.5" />
                   </label>
                   <label className="flex items-center gap-1 text-xs text-text-secondary">
-                    Hintergrund
+                    {t("slideshowDialog.background")}
                     <input type="color" value={outroBackground} onChange={(e) => setOutroBackground(e.target.value)} />
                   </label>
                   <label className="flex items-center gap-1 text-xs text-text-secondary">
-                    Text
+                    {t("slideshowDialog.text")}
                     <input type="color" value={outroTextColor} onChange={(e) => setOutroTextColor(e.target.value)} />
                   </label>
                 </div>
@@ -214,29 +216,29 @@ export function SlideshowDialog({ open, photoIds, onClose }: SlideshowDialogProp
 
           {needsFont && (
             <div className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
-              <span>Schriftdatei (für Intro-/Outro-Text)</span>
+              <span>{t("slideshowDialog.fontFile")}</span>
               <div className="flex gap-1">
-                <input type="text" readOnly value={fontPath} placeholder="Keine ausgewählt" className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-sm" />
+                <input type="text" readOnly value={fontPath} placeholder={t("slideshowDialog.noneSelected")} className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-sm" />
                 <button type="button" onClick={() => void handlePickFont()} className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent">
-                  Schriftdatei wählen…
+                  {t("slideshowDialog.chooseFontFile")}
                 </button>
               </div>
             </div>
           )}
 
           <div className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
-            <span>Musik</span>
+            <span>{t("slideshowDialog.music")}</span>
             <div className="flex gap-1">
-              <input type="text" readOnly value={musicPath} placeholder="Keine ausgewählt" className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-sm" />
+              <input type="text" readOnly value={musicPath} placeholder={t("slideshowDialog.noneSelected")} className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-sm" />
               <button type="button" onClick={() => void handlePickMusic()} className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent">
-                Musikdatei wählen…
+                {t("slideshowDialog.chooseMusicFile")}
               </button>
             </div>
           </div>
 
           <div className="mb-3 flex gap-2">
             <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
-              Video-Auflösung
+              {t("slideshowDialog.videoResolution")}
               <select value={resolution} onChange={(e) => setResolution(e.target.value as Resolution)} className="rounded border border-border bg-bg-panel px-2 py-1 text-sm">
                 <option value="1280x720">1280×720 (HD)</option>
                 <option value="1920x1080">1920×1080 (Full HD)</option>
@@ -244,7 +246,7 @@ export function SlideshowDialog({ open, photoIds, onClose }: SlideshowDialogProp
               </select>
             </label>
             <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
-              Bildrate (fps)
+              {t("slideshowDialog.frameRate")}
               <select value={fps} onChange={(e) => setFps(Number(e.target.value))} className="rounded border border-border bg-bg-panel px-2 py-1 text-sm">
                 <option value={25}>25</option>
                 <option value={30}>30</option>
@@ -254,18 +256,18 @@ export function SlideshowDialog({ open, photoIds, onClose }: SlideshowDialogProp
           </div>
 
           {ffmpegAvailable === false && (
-            <p className="mb-2 text-xs text-text-muted">Video-Export nicht verfügbar — ffmpeg wurde auf diesem Rechner nicht gefunden.</p>
+            <p className="mb-2 text-xs text-text-muted">{t("slideshowDialog.ffmpegUnavailable")}</p>
           )}
-          {videoExportError && <p className="mb-2 text-xs text-danger">Fehler: {videoExportError}</p>}
+          {videoExportError && <p className="mb-2 text-xs text-danger">{t("slideshowDialog.error", { message: videoExportError })}</p>}
           {!videoExportRunning && videoExportOutcome && (
             <p className="mb-2 text-xs text-text-secondary">
-              Video gespeichert: {videoExportOutcome.path} ({videoExportOutcome.duration_seconds.toFixed(1)}s)
+              {t("slideshowDialog.videoSaved", { path: videoExportOutcome.path, seconds: videoExportOutcome.duration_seconds.toFixed(1) })}
             </p>
           )}
 
           <div className="flex justify-end gap-2">
             <button type="button" onClick={onClose} className="rounded border border-border px-3 py-1 text-xs hover:border-accent">
-              Schließen
+              {t("slideshowDialog.close")}
             </button>
             <button
               type="button"
@@ -273,7 +275,7 @@ export function SlideshowDialog({ open, photoIds, onClose }: SlideshowDialogProp
               disabled={photoIds.length === 0}
               className="rounded border border-border bg-bg-panel px-3 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Abspielen
+              {t("slideshowDialog.play")}
             </button>
             <button
               type="button"
@@ -281,7 +283,7 @@ export function SlideshowDialog({ open, photoIds, onClose }: SlideshowDialogProp
               disabled={photoIds.length === 0 || videoExportRunning || ffmpegAvailable !== true}
               className="rounded border border-accent bg-accent/10 px-3 py-1 text-xs text-accent disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {videoExportRunning ? "Exportiere Video…" : "Als Video exportieren (MP4)"}
+              {videoExportRunning ? t("slideshowDialog.exporting") : t("slideshowDialog.exportAsVideo")}
             </button>
           </div>
         </div>

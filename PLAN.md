@@ -903,8 +903,122 @@ Zulieferer existiert, siehe ADR-0032 Punkt 3).
   - **Nachtrag**: `THIRD_PARTY.md` fehlten die in Schritt 1/8/9 bereits eingeführten `image_hasher`/`rustfft`/`rhai`/`libloading`-Zeilen entgegen der Datei-eigenen Regel — beim Verifizieren dieses Schritts aufgefallen und zusammen mit `gphoto2` rückwirkend nachgetragen
   - Tests (bewusst schlank): 5 neue `apx-tether`-Rust-Unit-Tests (`FakeBackend`, inkl. eines echten JPEG-Decodier-Rundlaufs), 4 neue `apx-app`-Tests (`resolve_tether_import_settings`-Auflösung mit/ohne/unbekanntem Preset, `new_tether_backend`s Simulations-Kennzeichnung), 1 neuer Playwright-e2e-Test (`tether-flow.spec.ts`); `cargo test -p apx-tether -p apx-core -p apx-app` (5+24+70 Tests) und die volle Vitest-Suite (195 Tests) erneut grün
 
-- [ ] 12. Dokumentation, Tests, Abnahme
+- [x] 12. Dokumentation, Tests, Abnahme
   - `ARCHITECTURE.md`: neues Kapitel „Architektur Phase 9"
   - `FEATURES.md`: alle 38 Phase-9-Zeilen final; Tiefenbereich-Masken bleibt offen
   - Einmalige finale Verifikation (nicht wiederholt nach jedem Teilschritt): `cargo build --workspace`, `tsc -b`, `vitest run`, eine gezielte Playwright-Stichprobe
   - Commit+Push, ehrlicher Abschlussbericht inkl. aller ADR-0035-Vereinfachungen
+
+## Aktuelle Phase: Phase 10 — Politur
+
+Ausführlicher Schritt-für-Schritt-Plan siehe ADR-0037 (Scope-Entscheidungen)
+und die Session-Planungsnotiz; hier die verbindliche Schrittliste. Abweichend
+von §6: **pro Schritt keine neue Testdatei**, nur `cargo build`/`tsc -b` als
+Kompilier-Kontrolle — die volle Suite läuft einmalig in Schritt 12 (siehe
+ADR-0037, nutzerangeordnete befristete Ausnahme).
+
+- [x] 0. Scope festzurren (ADR-0037: drei Phase-3/5-UI-Restposten reingezogen, Testdisziplin gelockert, Installer-Signierung ehrlich begrenzt)
+- [x] 1. Settings-Fundament: Backend-Anbindung (`UiSettings` erweitert um `accent_color`/`high_contrast`/`reduced_motion`/`onboarding_seen`, `get_ui_settings`/`set_ui_settings`) + neuer `SettingsDialog.tsx`
+- [x] 2. Modul-Umschalter + rechte Werkzeug-Palette — `Header.tsx` in zwei Zeilen (Ansicht/Module-Gruppen) statt einer Flach-Liste, `DevelopPanel`/`MasksPanel` unter gemeinsamer Wrapper-Hülle; kein Knopf umbenannt oder versteckt (siehe `DECISIONS.md` ADR-0037)
+- [x] 3. Ein-/ausklappbare, breitenziehbare Paletten + Arbeitsbereich-Preset — `PaletteFrame.tsx` auf Sidebar/PresetsPanel/MetadataPanel angewendet (DevelopPanel/MasksPanel bewusst ausgeklammert, siehe deren Moduldoku)
+- [x] 4. Vollständige Befehlspalette — alle Header-Funktionen, Presets, Fotos der aktuellen Ansicht, Ordner
+- [x] 5. Vollständig belegbare Tastenkürzel + Cheatsheet-Overlay (`?`) — `lib/keybindings.ts`, globale App.tsx-Kürzel umbelegbar, lokale Komponenten-Kürzel bewusst fest (siehe deren Moduldoku)
+- [x] 6. Barrierefreiheit — Kontrastmodus/UI-Skalierung 75–200 %/reduzierte Bewegung app-weit verdrahtet, Fokus-Falle als Muster auf die zwei neuen Dialoge angewendet
+- [x] 7. Volles helles Theme + benutzerdefinierte Akzentfarbe
+- [x] 8. Lokalisierung (Deutsch/Englisch) — Header/Sidebar/Presets/Metadaten/Settings/Cheatsheet übersetzt, die ca. 20 Dialog-Komponenten bewusst offen (siehe `lib/i18n.ts`-Moduldoku)
+- [x] 9. Onboarding
+- [x] 10. Performance-Profiling gegen SPEC.md §2.4 (siehe Detail-Absatz unten)
+- [ ] 11. Installer + Signierung (alle drei Plattformen, strukturell + konditional)
+- [x] 12. Dokumentation, einmalige volle Verifikation, Abnahme — `ARCHITECTURE.md` §14, `FEATURES.md` final (inkl. neuem §5 „Phase 10 — Politur" für die vier bisher nur als SPEC.md-§5-Prosa vorhandenen Punkte). Volle Suite: `cargo fmt --check`/`cargo clippy`/`cargo test --workspace` grün, `tsc -b` grün, volle Vitest-Suite (195 Tests) grün, volle Playwright-Suite (127 Tests, nicht nur Stichprobe) — ein echter Regressionsfund dabei: der neue `<nav>`-Gruppenname „Vorlagen" (Header.tsx Schritt 2/8) kollidierte per Teilstring mit `print-flow.spec.ts`s `getByLabel("Vorlage")`, behoben durch Entfernen des `aria-label` auf dieser einen Gruppe (Details siehe Commit)
+
+**Schritt 10 — Performance-Profiling gegen SPEC.md §2.4, im Detail:**
+Alle fünf Ziele einzeln gegen das geprüft, was in dieser Sandbox tatsächlich
+belastbar messbar ist — keine neue Messinfrastruktur gebaut, wo schon eine
+aus Phase 2/3 existiert:
+- **Regler-Bewegung < 16 ms:** bereits in Phase 2 Schritt 7 real gemessen
+  und ehrlich dokumentiert (`developLastLatencyMs`, `performance.now()` um
+  `fetch()` in `useDevelopRender`): ≈181 ms GPU-Pfad / ≈102 ms
+  CPU-Fallback für ein 2048×1365-Bild auf dem Software-Vulkan-Adapter
+  `llvmpipe` dieser Sandbox — **Ziel auf dieser Hardware klar verfehlt**,
+  echte GPU-Hardware wird nicht verfügbar sein, um das zu widerlegen oder
+  zu bestätigen. Keine neue Messung nötig, derselbe Pfad/dieselbe
+  Instrumentierung gilt unverändert.
+- **Bildwechsel < 200 ms:** läuft über denselben `useDevelopRender`-Pfad
+  wie oben (ein Fotowechsel löst denselben `develop/...`-Fetch mit neuer
+  `photo_id` aus) — dieselben ≈102–181 ms gelten näherungsweise auch hier;
+  eine separate Messung würde nur denselben Codepfad ein zweites Mal
+  instrumentieren, ohne neue Erkenntnis.
+- **100.000-Bild-Raster virtualisiert:** bereits in Phase 3 verifiziert
+  (manueller Playwright-Lauf: DOM-Zellenzahl bleibt zwischen 35–60 statt
+  100.000, JS-Heap ≈119 MB) und als automatisierte 5.000-Foto-Regression
+  in `library-flow.spec.ts` dauerhaft abgesichert — keine neue Arbeit
+  nötig.
+- **Import 1000 RAWs < 4 Minuten:** **nicht neu messbar** (dieselbe Grenze
+  wie ADR-0007s fehlende Golden-Image-RAW-Tests — kein Zugriff auf 1000
+  echte Kamera-RAW-Dateien noch auf „moderne Hardware" in dieser Sandbox).
+  Stattdessen ein konkreter Code-Befund: `apx-app/src/import/mod.rs`
+  verarbeitet Dateien sequenziell in einem einzelnen `spawn_blocking`
+  (kein `rayon`/parallele Task-Aufteilung über mehrere Dateien) — ein
+  plausibler realer Engpass gegen das 4-Minuten-Ziel bei 1000 Dateien auf
+  Mehrkern-Hardware. **Bewusst nicht in diesem Schritt behoben**: eine
+  Parallelisierung des Import-Pfads berührt Event-Reihenfolge,
+  Duplikaterkennung und Fortschritts-Reporting — Kernlogik aus Phase 1
+  mit entsprechend dichter Testabdeckung, deren Umbau ohne begleitenden
+  Test in dieser testdisziplin-gelockerten Phase (ADR-0037) ein
+  unnötiges Regressionsrisiko wäre. Bleibt ein konkret benannter
+  Kandidat für einen eigenen späteren Optimierungsschritt, keine
+  überstürzte Umsetzung (dieselbe Zurückhaltung wie ADR-0036).
+- **Speicherverbrauch im Leerlauf < 800 MB:** **nicht neu messbar** — das
+  misst den nativen Tauri-Prozess (Rust-Backend + WebView-Engine), aber
+  diese Sandbox hat laut ADR-0010 keinen echten Tauri-Runtime-Host, nur
+  den Produktions-Build im gewöhnlichen Browser. Einzig verfügbarer Proxy:
+  der reine JS-Heap aus der Phase-3-Messung (≈119 MB) — das ist nur ein
+  Teil des tatsächlichen Idle-Speicherbilds, keine verlässliche Aussage
+  über die vollständigen 800 MB.
+
+**Fazit:** Zwei von fünf Zielen sind sauber verifiziert (Raster-Virtualisierung
+erreicht, Regler-Latenz auf dieser Sandbox-Hardware verfehlt aber ehrlich
+gemessen); zwei (Import-Zeit, Idle-Speicher) sind in dieser Umgebung
+strukturell nicht messbar; für die Import-Zeit existiert immerhin ein
+konkreter, benannter Optimierungskandidat statt einer bloßen Lücke.
+
+## Aktuelle Phase: Phase 11 — Nachträge
+
+Bündelt alle in Phase 1–10 zurückgestellten Punkte (siehe DECISIONS.md
+ADR-0038 für die Crate-Spike-Ergebnisse). Anders als Phase 10 gilt wieder
+die volle Testdisziplin aus §6 — jeder Schritt bekommt eigene Rust-Unit-
+Tests + gezielte Playwright-Tests, Commit+Push nach jedem Schritt.
+
+- [x] 0. Scope festzurren, Crate-Spikes, Dokumentationsfehler beheben (ADR-0038: gamut-dng/gamut-jxl/ag-psd brauchbar, heif als Fassade entlarvt, libgphoto2 tatsächlich per apt verfügbar; FEATURES.md Zeile 239 korrigiert)
+- [x] 1. DNG-Konvertierung (gamut-dng) — abweichend von der ursprünglichen Formulierung als Knopf im Entwickeln-Panel statt als Import-Dialog-Checkbox umgesetzt (siehe `commands.rs`s Moduldoku bei `convert_photo_to_dng`): eine „Linear DNG" muss aus den unveränderten RAW-Daten entstehen, nicht aus dem ggf. bereits während des Imports bearbeiteten Ergebnis — das Entwickeln-Panel hat ohnehin schon den Foto-Kontext, der Import-Dialog nicht zwingend
+- [x] 2. Export-Formatlücken: PSD (ag-psd, flach), JPEG-XL (gamut-jxl, verlustfrei ab Qualität 100) — HEIF bleibt zurückgestellt (siehe ADR-0038: `heif` 0.1.0 ist eine Fassade, `heif-rs` zu riskant für das Plattenkontingent dieser Sandbox)
+- [x] 3. Bibliothek: Übersichtsansicht + Schnellentwicklung im Raster
+- [x] 4. Bibliothek: Smart Previews + Offline-Bearbeitung
+- [x] 5. Bibliothek: Personenansicht (Hautton-Heuristik-Clustering)
+- [x] 6. Entwickeln: Zielgerichtetes Anpassungswerkzeug (TAT)
+- [x] 7. Maskentyp Tiefenbereich — Alternative: Unschärfe-basierte Tiefennäherung
+- [x] 8. Adobe `.lrtemplate`-Export (best-effort, nur Export)
+- [x] 9. Stapelverarbeitungs-Konsole (neuer Batch-Operationen-Log, siehe ADR-0036) — echtes feldübergreifendes Journal (`batch_operations`/`batch_operation_items`), `BatchConsoleDialog.tsx` (Filter-Auswahl, Trockenlauf, Ausführen, Rückgängig), Kopf-Knopf + Befehlspalette verdrahtet
+- [x] 10. Tethering real kompilieren (`libgphoto2-dev` in CI, `--features tethering`) — `libgphoto2-dev` real installiert und gegen die echte Bibliothek gebaut/getestet (nicht nur strukturell); dabei zwei echte API-Abweichungen von der Doku-Annahme gefunden und behoben (`CameraFile::folder()`/`name()` liefern `Cow<str>`, nicht `&str`); Linux-CI-Zweig deckt das Feature jetzt ab, macOS/Windows bleiben ohne `libgphoto2` (Standard-Features)
+- [x] 11. Phase-10-Nachträge (restliche Lokalisierung, PaletteFrame auf DevelopPanel/MasksPanel, lokale Tastenkürzel umbelegbar, Installer-Signierung-Mechanik-Nachweis) — alle vier Teilpunkte umgesetzt, Installer-Signierung-Nachweis dabei enger gefasst als ursprünglich geplant (kein Repository-Secret-Schreibzugriff in dieser Sitzung, siehe DECISIONS.md ADR-0038-Nachtrag)
+- [x] 12. Dokumentation, volle Verifikation, Abnahme
+
+## Aktuelle Phase: Phase 12 — Lightroom-Lückenschluss
+
+Direkter Nachfolger auf den Lightroom-Vergleichs-Artifact („ApertureX vs.
+Lightroom") und ADR-0039: bündelt alle dort gefundenen, tatsächlich
+schließbaren Lücken. Wichtigster Einzelfund: die `lensfun`-Crate (echte
+LensFun-Objektivdatenbank, real geprüft) macht die bisherigen drei
+Platzhalter-Objektivprofile gegenstandslos, ohne das Adobe-DCP/LCP-Format
+selbst zu lösen. Testdisziplin wie in Phase 11 fortgeführt: ein gezielter
+Test pro Schritt, volle Suite einmalig in Schritt 8.
+
+- [x] 0. Scope festzurren, `lensfun`-Crate-Spike (ADR-0039: Crate real per `cargo add` + `cargo build` geprüft, ein Spike-Test liest eine echte Kalibrierung aus der gebündelten Datenbank; Vorzeichen-/Skalierungskonvention weicht ehrlich dokumentiert von den bisherigen Platzhalterprofilen ab)
+- [x] 1. Live-Masken-Overlay im Viewer (`overlay_color` per Taste „O" umschaltbar sichtbar; clientseitige SVG-Näherung statt echter Pipeline-Alpha, siehe ADR-0039/FEATURES.md)
+- [x] 2. Radialverlauf-Ellipse + Rotation, Auto-Mask beim Pinsel (Ellipse/Rotation waren in Datenmodell+Pipeline schon vorhanden, nur der Ziehgriff fehlte; Auto-Mask nutzt die bestehende Laplace-Varianz-Kantenerkennung aus `BlurDepthApprox` wieder — kein Schema-Version-Sprung nötig, siehe DECISIONS.md ADR-0039)
+- [x] 3. Objektiv-/Kameraprofile: echte LensFun-Datenbank (Teil A, automatische Anwendung + ehrliche Ecken-Rückrechnung statt 1:1-Koeffizienten-Import) + vereinfachter Kalibrier-Assistent (Teil B, Linien-Geradheit statt vollem Zhang-Verfahren, siehe DECISIONS.md ADR-0039)
+- [x] 4. Voller EXIF/IPTC-Editor (generisches `custom_metadata_json`-Feld statt fester Spalten, wohlbekannte IPTC-Kernfelder + frei benannte Zusatzfelder, XMP-Sidecar-Export erweitert, siehe DECISIONS.md ADR-0039)
+- [x] 5. Mehrfachziel-Export (reine Frontend-Schleife über den bestehenden enqueue_export_photo-Befehl, kein neuer Backend-Mechanismus, siehe DECISIONS.md ADR-0039)
+- [x] 6. Freies ICC-Profil beim Soft-Proof (echter `lcms2::Transform::new_proofing`-Transform über ein zusätzliches Segment derselben `develop/...`-Route statt der bisherigen JS-Sättigungsnäherung, gegen die vier Standardprofile ODER eine frei wählbare `.icc`-Datei; nur Papierweiß bleibt clientseitig, siehe DECISIONS.md ADR-0039-Nachtrag II)
+- [x] 7. Beobachtete Ordner / Auto-Import (neuer Hintergrund-Task nach dem Vorbild des bestehenden Export-Queue-Workers, Polling statt Datei-System-Watcher-Crate; teilt sich die Import-Sperre mit einem manuellen Import, siehe DECISIONS.md ADR-0039-Nachtrag III)
+- [x] 8. Dokumentation, volle Verifikation, Abnahme (Vergleichs-Artifact mit aktualisierter Lückenliste neu veröffentlicht) — volle Suite grün: `cargo fmt`/`clippy --workspace` sauber, 672 Rust-Unit-/Doc-Tests, 193 Vitest-, 135 Playwright-Tests, `tsc -b` sauber

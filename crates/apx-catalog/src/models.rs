@@ -108,6 +108,14 @@ pub struct Photo {
     pub caption: Option<String>,
     pub copyright: Option<String>,
     pub creator: Option<String>,
+    /// Voller EXIF/IPTC-Editor (Phase 12 Schritt 4, siehe `DECISIONS.md`
+    /// ADR-0039, `migrations/0010_custom_metadata.sql`) — frei benannte
+    /// Zusatzfelder über die vier festen Spalten oben hinaus (die üblichen
+    /// IPTC-Kernfelder, siehe `crate::iptc::WELL_KNOWN_FIELDS`, plus
+    /// beliebige eigene Schlüssel). Leere Werte werden beim Speichern
+    /// entfernt statt als leerer String gehalten (siehe
+    /// `Catalog::set_photo_custom_metadata`).
+    pub custom_metadata: std::collections::BTreeMap<String, String>,
 }
 
 /// Auflösungsstufe eines Vorschaubilds, siehe `PHASE1_PROMPT.md` Abschnitt 5.

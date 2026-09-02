@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { CommandPalette } from "./components/CommandPalette";
 import { CompareGridView } from "./components/CompareGridView";
@@ -9,13 +9,18 @@ import { FilterBar } from "./components/FilterBar";
 import { Filmstrip } from "./components/Filmstrip";
 import { GridView } from "./components/GridView";
 import { Header } from "./components/Header";
+import { KeybindingsCheatsheet } from "./components/KeybindingsCheatsheet";
 import { MapView } from "./components/MapView";
 import { MasksPanel } from "./components/MasksPanel";
 import { MetadataPanel } from "./components/MetadataPanel";
+import { OnboardingDialog } from "./components/OnboardingDialog";
+import { PeopleView } from "./components/PeopleView";
 import { PresetsPanel } from "./components/PresetsPanel";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { Viewer } from "./components/Viewer";
 import { useImportEvents } from "./hooks/useImportEvents";
+import { matchesBinding } from "./lib/keybindings";
 import { useAppStore } from "./store";
 
 async function toggleFullscreen(): Promise<void> {
@@ -39,6 +44,15 @@ export default function App() {
 
   const refreshFolders = useAppStore((s) => s.refreshFolders);
   const refreshCatalogStatus = useAppStore((s) => s.refreshCatalogStatus);
+  const loadUiSettings = useAppStore((s) => s.loadUiSettings);
+  const uiSettings = useAppStore((s) => s.uiSettings);
+  const saveUiSettings = useAppStore((s) => s.saveUiSettings);
+  const settingsDialogOpen = useAppStore((s) => s.settingsDialogOpen);
+  const setSettingsDialogOpen = useAppStore((s) => s.setSettingsDialogOpen);
+  const pendingCommand = useAppStore((s) => s.pendingCommand);
+  const clearPendingCommand = useAppStore((s) => s.clearPendingCommand);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const onboardingAutoShown = useRef(false);
   const stepSelection = useAppStore((s) => s.stepSelection);
   const centerView = useAppStore((s) => s.centerView);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
@@ -48,15 +62,83 @@ export default function App() {
   const undoLibraryAction = useAppStore((s) => s.undoLibraryAction);
   const redoLibraryAction = useAppStore((s) => s.redoLibraryAction);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
 
   useEffect(() => {
     void refreshFolders();
     void refreshCatalogStatus();
-  }, [refreshFolders, refreshCatalogStatus]);
+    void loadUiSettings();
+  }, [refreshFolders, refreshCatalogStatus, loadUiSettings]);
+
+  // Barrierefreiheit (Phase 10 Schritt 6): Kontrastmodus/UI-Skalierung/
+  // reduzierte Bewegung wirken app-weit auf `<html>`, nicht nur innerhalb
+  // dieser Komponente — deshalb hier statt in `SettingsDialog.tsx`
+  // angewendet, das nur die Werte schreibt. Theme (Dark/Hell/Akzentfarbe)
+  // folgt in Schritt 7 nach demselben Muster.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (uiSettings?.high_contrast) {
+      root.setAttribute("data-contrast", "high");
+    } else {
+      root.removeAttribute("data-contrast");
+    }
+    root.classList.toggle("apx-reduce-motion", uiSettings?.reduced_motion ?? false);
+    root.style.fontSize = uiSettings ? `${uiSettings.ui_scale_percent}%` : "";
+
+    // Theme + benutzerdefinierte Akzentfarbe (Phase 10 Schritt 7).
+    root.setAttribute("data-theme", uiSettings?.theme ?? "dark");
+    if (uiSettings?.accent_color) {
+      root.style.setProperty("--color-accent", uiSettings.accent_color);
+    } else {
+      root.style.removeProperty("--color-accent");
+    }
+  }, [uiSettings]);
+
+  // Onboarding (Phase 10 Schritt 9): einmaliges automatisches Erstanzeigen
+  // über uiSettings.onboarding_seen, sobald die Einstellungen tatsächlich
+  // geladen sind (nicht bei jedem Rerender — `onboardingAutoShown` schützt
+  // davor, den Dialog erneut zu öffnen, nachdem der Nutzer ihn geschlossen
+  // hat, obwohl das Backend-Feld erst mit dem Schließen selbst auf `true`
+  // wechselt).
+  useEffect(() => {
+    if (uiSettings && !uiSettings.onboarding_seen && !onboardingAutoShown.current) {
+      onboardingAutoShown.current = true;
+      setOnboardingOpen(true);
+    }
+  }, [uiSettings]);
+
+  function closeOnboarding() {
+    setOnboardingOpen(false);
+    if (uiSettings && !uiSettings.onboarding_seen) {
+      void saveUiSettings({ ...uiSettings, onboarding_seen: true });
+    }
+  }
+
+  // Befehlspalette-Brücke fürs erneute Aufrufen (siehe store/index.ts
+  // pendingCommand-Moduldoku) — Header.tsx ignoriert unbekannte
+  // Befehls-IDs (fällt auf `default: return` ohne `clearPendingCommand()`
+  // zurück), diese Komponente behandelt deshalb nur "onboarding".
+  useEffect(() => {
+    if (pendingCommand === "onboarding") {
+      setOnboardingOpen(true);
+      clearPendingCommand();
+    } else if (pendingCommand === "cheatsheet-overlay") {
+      setCheatsheetOpen(true);
+      clearPendingCommand();
+    }
+  }, [pendingCommand, clearPendingCommand]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+      // Vollständig belegbare Tastenkürzel (Phase 10 Schritt 5, siehe
+      // `lib/keybindings.ts`) — dieselbe Verzweigung wie zuvor, jetzt über
+      // `matchesBinding` statt fest verdrahteter `event.key`-Vergleiche,
+      // damit jede hier behandelte Aktion im Cheatsheet-Overlay (`?`)
+      // umbelegbar ist. Reihenfolge/Wächter (mod+k vor dem
+      // Editierbar-Ausschluss, Undo/Redo nur bei geschlossenem
+      // Entwickeln-Panel) sind unverändert aus der vorherigen Fassung
+      // übernommen.
+      if (matchesBinding(event, "toggle-palette")) {
         event.preventDefault();
         setPaletteOpen((open) => !open);
         return;
@@ -83,31 +165,37 @@ export default function App() {
       // offen ist: das hat schon seinen eigenen lokalen Ctrl/Cmd+Z-Handler
       // (siehe `DevelopPanel.tsx`), sonst würden beide Aktionen auf
       // denselben Tastendruck reagieren.
-      if (!developPanelOpen && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+      if (!developPanelOpen && matchesBinding(event, "redo")) {
         event.preventDefault();
-        if (event.shiftKey) {
-          void redoLibraryAction();
-        } else {
-          void undoLibraryAction();
-        }
+        void redoLibraryAction();
+        return;
+      }
+      if (!developPanelOpen && matchesBinding(event, "undo")) {
+        event.preventDefault();
+        void undoLibraryAction();
         return;
       }
 
-      if (event.key === "ArrowLeft") {
+      if (matchesBinding(event, "prev-photo")) {
         stepSelection(-1);
-      } else if (event.key === "ArrowRight") {
+      } else if (matchesBinding(event, "next-photo")) {
         stepSelection(1);
-      } else if (event.key === "Escape") {
+      } else if (matchesBinding(event, "cheatsheet")) {
+        setCheatsheetOpen((open) => !open);
+      } else if (matchesBinding(event, "close-overlay")) {
+        setCheatsheetOpen(false);
         setPaletteOpen(false);
-      } else if (event.key.toLowerCase() === "f") {
+      } else if (matchesBinding(event, "fullscreen")) {
         void toggleFullscreen();
       } else if (selectedPhotoId && /^[0-5]$/.test(event.key)) {
         // Bewertungs-Tastenkürzel (Lightroom-Konvention), siehe
-        // `PLAN.md` Phase 3, Schritt 6.
+        // `PLAN.md` Phase 3, Schritt 6 — bewusst nicht Teil von
+        // `lib/keybindings.ts`: eine parametrisierte Ziffernreihe statt
+        // einer einzelnen festen Aktion.
         void setPhotoRating(selectedPhotoId, Number(event.key));
-      } else if (selectedPhotoId && event.key.toLowerCase() === "p") {
+      } else if (selectedPhotoId && matchesBinding(event, "flag-pick")) {
         void setPhotoFlag(selectedPhotoId, 1);
-      } else if (selectedPhotoId && event.key.toLowerCase() === "x") {
+      } else if (selectedPhotoId && matchesBinding(event, "flag-reject")) {
         void setPhotoFlag(selectedPhotoId, -1);
       }
     }
@@ -120,19 +208,40 @@ export default function App() {
     <div className="flex h-screen flex-col bg-bg-base text-text-primary">
       <Header />
       <ErrorBanner />
-      {centerView === "grid" && <FilterBar />}
+      {(centerView === "grid" || centerView === "overview") && <FilterBar />}
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <PresetsPanel />
-        {centerView === "grid" ? <GridView /> : centerView === "map" ? <MapView /> : <Viewer />}
+        {centerView === "grid" ? (
+          <GridView />
+        ) : centerView === "overview" ? (
+          <GridView variant="overview" />
+        ) : centerView === "map" ? (
+          <MapView />
+        ) : centerView === "people" ? (
+          <PeopleView />
+        ) : (
+          <Viewer />
+        )}
         <MetadataPanel />
-        <DevelopPanel />
-        <MasksPanel />
+        {/* Rechte Werkzeug-Palette (Phase 10 Schritt 2): Entwickeln- und
+            Masken-Panel bleiben zwei unabhängig sichtbare/aufklappbare
+            Bereiche (nicht exklusiv verdeckende Reiter — viele bestehende
+            e2e-Tests bedienen Entwickeln- und Maskenregler im selben
+            Ablauf), aber unter einer gemeinsamen visuellen Außenhülle statt
+            zweier lose nebeneinanderstehender <aside>s. */}
+        <div className="flex shrink-0">
+          <DevelopPanel />
+          <MasksPanel />
+        </div>
       </div>
       <Filmstrip />
       <CompareGridView />
       <HistoryTimelineDialog />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <SettingsDialog open={settingsDialogOpen} onClose={() => setSettingsDialogOpen(false)} />
+      <KeybindingsCheatsheet open={cheatsheetOpen} onClose={() => setCheatsheetOpen(false)} />
+      <OnboardingDialog open={onboardingOpen} onClose={closeOnboarding} />
     </div>
   );
 }

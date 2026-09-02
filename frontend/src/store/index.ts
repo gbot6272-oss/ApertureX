@@ -5,6 +5,7 @@ import {
   AI_MASK_KIND_LABELS,
   base64ToByteArray,
   buildEdlEnvelopeJson,
+  defaultBlurDepthApproxGeometry,
   defaultColorRangeGeometry,
   defaultLinearGradientGeometry,
   defaultLuminanceRangeGeometry,
@@ -39,6 +40,7 @@ import type { SoftProofIntent, SoftProofProfile } from "../lib/softProof";
 import * as api from "../lib/tauri";
 import type {
   AiSettingsDto,
+  BatchAction,
   BookOptions,
   BookOutcomeDto,
   CatalogStatusDto,
@@ -73,6 +75,8 @@ import type {
   WebGalleryOutcomeDto,
   WorkflowTemplatePayload,
   SpotCandidateDto,
+  UiSettingsDto,
+  WatchedFolderSettingsDto,
 } from "../lib/tauri";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
@@ -240,6 +244,13 @@ interface ViewerSlice {
    * umschaltbar statt fest eingeblendet, siehe `Viewer.tsx`. */
   infoOverlayVisible: boolean;
   toggleInfoOverlay: () => void;
+  /** Masken-Farbüberlagerung (Phase 12 Schritt 1, siehe `DECISIONS.md`
+   * ADR-0039) — zeigt alle sichtbaren Masken eingefärbt nach ihrer
+   * `overlay_color` im Viewer an, umschaltbar per Taste „O" (Lightroom-
+   * Konvention), unabhängig von der gerade zur Bearbeitung ausgewählten
+   * Maske. */
+  maskOverlayVisible: boolean;
+  toggleMaskOverlay: () => void;
 }
 
 // ---- Jobs-Slice (Import) ---------------------------------------------------
@@ -306,6 +317,15 @@ interface DevelopSlice {
    * (oder neutral, falls noch nie bearbeitet) — aufgerufen beim Öffnen
    * des Panels und bei jedem Fotowechsel, während es offen ist. */
   loadDevelopStateForPhoto: (photoId: string) => Promise<void>;
+  /** Automatische Objektivprofil-Zuordnung (Phase 12 Schritt 3 Teil A,
+   * siehe `DECISIONS.md` ADR-0039) — von `loadDevelopStateForPhoto` nur
+   * bei einem noch nie bearbeiteten Foto aufgerufen, siehe dessen Kommentar. */
+  autoApplyLensProfileIfMatched: (photoId: string) => Promise<void>;
+  /** Manueller „Automatisch erkennen"-Knopf im Entwickeln-Panel — anders
+   * als `autoApplyLensProfileIfMatched` ohne Bedingung an ein noch nie
+   * bearbeitetes Foto, setzt/überschreibt `profile_id` immer, wenn ein
+   * Treffer gefunden wird (Phase 12 Schritt 3 Teil A). */
+  manuallyDetectLensProfile: () => Promise<void>;
 
   // ---- Schritt 9: Einstellungen kopieren/einfügen, Vorherige, Sync --------
   /** Der zuletzt kopierte Ausschnitt (Schritt 9, `SPEC.md` §3.4) —
@@ -368,17 +388,20 @@ interface DevelopSlice {
   toggleReferenceView: () => void;
   setReferencePhotoId: (photoId: string | null) => void;
 
-  /** Soft-Proof-Vorschau (Phase 6 Schritt 10, `SPEC.md` §3.4/§7) — siehe
-   * `lib/softProof.ts`s Moduldoku für die Vereinfachung gegenüber echtem
-   * ICC-Farbmanagement (`DECISIONS.md` ADR-0032 Punkt 6). Reine
-   * Anzeige-Einstellung, nicht Teil des EDL/der Datenbank. */
+  /** Soft-Proof-Vorschau (Phase 6 Schritt 10, `SPEC.md` §3.4/§7) — seit
+   * Phase 12 Schritt 6 ein echter serverseitiger ICC-Transform, siehe
+   * `lib/softProof.ts`s Moduldoku. Reine Anzeige-Einstellung, nicht Teil
+   * des EDL/der Datenbank. */
   softProofActive: boolean;
   softProofProfile: SoftProofProfile;
+  /** Nur bei `softProofProfile === "custom"` gelesen. */
+  softProofCustomIccPath: string;
   softProofIntent: SoftProofIntent;
   softProofGamutWarning: boolean;
   softProofPaperWhite: boolean;
   toggleSoftProof: () => void;
   setSoftProofProfile: (profile: SoftProofProfile) => void;
+  setSoftProofCustomIccPath: (path: string) => void;
   setSoftProofIntent: (intent: SoftProofIntent) => void;
   toggleSoftProofGamutWarning: () => void;
   toggleSoftProofPaperWhite: () => void;
@@ -416,10 +439,15 @@ interface DevelopSlice {
   applyAutoTone: (result: AutoToneResult) => void;
   /** Entrauschung/Hochskalierung (Phase 9 Schritt 6) — schreiben eine
    * neue Datei neben dem Original, ändern die EDL nicht. */
-  enhanceRunning: "denoise" | "upscale" | null;
+  enhanceRunning: "denoise" | "upscale" | "dng" | null;
   enhanceStatus: string | null;
   runDenoise: (photoId: string) => Promise<void>;
   runUpscale: (photoId: string) => Promise<void>;
+  /** DNG-Konvertierung (Phase 11 Schritt 1) — schreibt eine „Linear DNG"
+   * aus den unveränderten, kamera-nativen RAW-Daten (nicht dem
+   * entwickelten Rendering wie Entrauschen/Hochskalieren oben) neben das
+   * Original, ändert die EDL nicht. */
+  runConvertToDng: (photoId: string) => Promise<void>;
   /** Ersetzt eine der fünf Kurven (Phase 4 Schritt 4, siehe
    * `components/CurveEditor.tsx`) — Zwischenstand beim Ziehen, committet
    * wird separat über `commitDevelopEdit()`. */
@@ -427,6 +455,21 @@ interface DevelopSlice {
   /** Setzt ein einzelnes Feld eines der acht festen HSL-Bänder (Phase 4
    * Schritt 5) — Zwischenstand beim Ziehen. */
   setHslBandField: (band: keyof HslAdjustment, field: keyof HslBand, value: number) => void;
+  /** Zielgerichtetes Anpassungswerkzeug (TAT, Phase 11 Schritt 6, siehe
+   * `DECISIONS.md` ADR-0038): Klick+Zug im Bild steuert direkt am
+   * Bildpunkt einen vorher gewählten Regler — `"off"` deaktiviert es,
+   * `"curve"` verschiebt den nächstgelegenen Punkt von
+   * `tatCurveChannel` (legt bei Bedarf einen neuen an), `"hsl"`
+   * verschiebt die Luminanz des unter dem Cursor gesampelten
+   * HSL-Bands (siehe `lib/edl.ts`s `nearestHslBand`). Die eigentliche
+   * Zug-Logik lebt in `Viewer.tsx` (dieselbe Stelle wie die
+   * Weißabgleich-/Farbmischer-Pipetten) und ruft `setCurveChannel`/
+   * `setHslBandField` + `commitDevelopEdit` auf — kein neuer
+   * Store-Zustand für den Kurvenpunkt/Bandwert selbst nötig. */
+  tatMode: "off" | "curve" | "hsl";
+  tatCurveChannel: keyof CurvesAdjustment;
+  setTatMode: (mode: "off" | "curve" | "hsl") => void;
+  setTatCurveChannel: (channel: keyof CurvesAdjustment) => void;
   /** Ob der Farbmischer gerade auf einen Klick in den Viewer wartet, um
    * eine neue Region anzulegen (teilt den Sampling-Code im Viewer mit
    * der Weißabgleich-Pipette, siehe `lib/colorSampling.ts`). */
@@ -479,6 +522,12 @@ interface DevelopSlice {
   /** Setzt das Objektivprofil absolut und committet sofort (wie ein
    * WB-/Kameraprofil-Dropdown-Wechsel). */
   setLensCorrectionProfile: (value: string | null) => void;
+  /** Setzt/entfernt das Ergebnis einer eigenen Kalibrierung (Phase 12
+   * Schritt 3 Teil B, siehe `DECISIONS.md` ADR-0039) — committet sofort,
+   * wie `setLensCorrectionProfile`. */
+  setLensCorrectionCustomDistortionK1: (value: number | null) => void;
+  lensCalibrationDialogOpen: boolean;
+  setLensCalibrationDialogOpen: (open: boolean) => void;
   /** Schaltet die automatische CA-Korrektur um und committet sofort. */
   setLensCorrectionAutoCa: (value: boolean) => void;
   /** Setzt den Perspektive/Upright-Modus absolut und committet sofort. */
@@ -562,16 +611,38 @@ interface DevelopSlice {
 interface LibrarySlice {
   /** Was in der Mitte statt des Viewers gezeigt wird — `"grid"` ist das
    * neue Raster (Schritt 6), `"viewer"` der bisherige Einzelbild-Viewer,
-   * `"map"` die Kartenansicht (Phase 8 Schritt 7). */
-  centerView: "viewer" | "grid" | "map";
+   * `"map"` die Kartenansicht (Phase 8 Schritt 7), `"overview"` die
+   * Übersichtsansicht (Phase 11 Schritt 3, siehe `DECISIONS.md`
+   * ADR-0038): größere Kacheln, reduzierte Metadaten-Overlays, kein
+   * Mehrfachauswahl-Raster wie das normale Raster — eher ein
+   * Sichtungsmodus mit Schnellentwicklung statt Stapel-Bearbeitung.
+   * `"people"` die Personenansicht (Phase 11 Schritt 5, siehe
+   * `PeopleView.tsx`): grobe, nach Blob-Anzahl/-Fläche vorsortierte
+   * Gruppen statt echter Personen-Identifizierung. */
+  centerView: "viewer" | "grid" | "map" | "overview" | "people";
   toggleCenterView: () => void;
-  setCenterView: (view: "viewer" | "grid" | "map") => void;
+  setCenterView: (view: "viewer" | "grid" | "map" | "overview" | "people") => void;
 
   /** Mehrfachauswahl fürs Stapel-Bearbeiten (Bewertung/Flagge/Sammlung-
    * Hinzufügen) — geteilt zwischen Raster und Filmstreifen. Enthält
    * `selectedPhotoId`, sobald eines gesetzt ist. */
   multiSelectedIds: string[];
   togglePhotoSelection: (photoId: string, mode: SelectionMode) => void;
+
+  /** Schnellentwicklung im Raster (Phase 11 Schritt 3): pro Kachel bei
+   * Hover/Auswahl ein kompaktes Overlay mit den sieben Phase-2-
+   * Basisreglern (Belichtung/Kontrast/Lichter/Tiefen/Weiß/Schwarz/
+   * Sättigung), committet über den bestehenden `apply_develop_edit`-Pfad.
+   * Bewusst **eigener** Zustand statt Wiederverwendung von
+   * `developEdl`/`developPhotoId`: die Kachel kann ein anderes Foto
+   * betreffen als das im Entwickeln-Panel gerade offene — ein geteilter
+   * Zustand würde dessen Bearbeitungsstand überschreiben. */
+  quickDevelopPhotoId: string | null;
+  quickDevelopEdl: EdlPayload | null;
+  loadQuickDevelopStateForPhoto: (photoId: string) => Promise<void>;
+  setQuickDevelopBasicField: (key: string, value: number) => void;
+  commitQuickDevelopEdit: () => Promise<void>;
+  clearQuickDevelopState: () => void;
 
   metadataPanelOpen: boolean;
   toggleMetadataPanel: () => void;
@@ -665,6 +736,10 @@ interface PresetsSlice {
    * Format (`SPEC.md` §3.5: „Import/Export .apx") — no-op (kein Fehler),
    * wenn der Dialog abgebrochen wird. */
   exportPresetAsApxFile: (presetId: string) => Promise<void>;
+  /** Adobe `.lrtemplate`-Export (Phase 11 Schritt 8, siehe `DECISIONS.md`
+   * ADR-0038) — nur Export, siehe `apx-app`s `export_preset_to_
+   * lrtemplate_file`-Moduldoku für die abgedeckte Teilmenge. */
+  exportPresetAsLrtemplateFile: (presetId: string) => Promise<void>;
   /** Öffnet den nativen Öffnen-Dialog, liest eine `.apx`-Datei und legt
    * daraus ein neues Preset in `folderId` an. */
   importPresetFromApxFile: (folderId: string | null) => Promise<void>;
@@ -731,7 +806,7 @@ interface PresetsSlice {
 
 // ---- Masken-Slice (ab Phase 6, siehe DECISIONS.md ADR-0032) ----------------
 
-export type MaskKind = "LinearGradient" | "RadialGradient" | "Brush" | "ColorRange" | "LuminanceRange";
+export type MaskKind = "LinearGradient" | "RadialGradient" | "Brush" | "ColorRange" | "LuminanceRange" | "BlurDepthApprox";
 
 const MASK_KIND_DEFAULT_GEOMETRY: Record<MaskKind, () => MaskGeometry> = {
   LinearGradient: defaultLinearGradientGeometry,
@@ -739,6 +814,7 @@ const MASK_KIND_DEFAULT_GEOMETRY: Record<MaskKind, () => MaskGeometry> = {
   Brush: emptyBrushGeometry,
   ColorRange: defaultColorRangeGeometry,
   LuminanceRange: defaultLuminanceRangeGeometry,
+  BlurDepthApprox: defaultBlurDepthApproxGeometry,
 };
 
 /** `MaskGeometry["kind"]` verwendet dieselben String-Literale wie
@@ -751,6 +827,9 @@ export const MASK_KIND_LABEL: Record<MaskKind, string> = {
   Brush: "Pinsel",
   ColorRange: "Farbbereich",
   LuminanceRange: "Luminanzbereich",
+  // Bewusst nicht "Tiefenbereich" (siehe MaskGeometry-Moduldoku in
+  // lib/edl.ts) — keine echte Tiefenkarte, nur eine Unschärfe-Heuristik.
+  BlurDepthApprox: "Unschärfe-basierte Tiefennäherung",
 };
 
 /** Die fünf KI-Maskenarten in derselben Reihenfolge wie die Knöpfe im
@@ -823,6 +902,11 @@ interface MasksSlice {
   maskBrushDraftRadius: number;
   maskBrushDraftFeather: number;
   setMaskBrushDraftField: (key: "radius" | "feather", value: number) => void;
+  /** Auto-Mask für den *nächsten* gemalten Pinselstrich (Phase 12
+   * Schritt 2, siehe `DECISIONS.md` ADR-0039) — derselbe Draft-Zustand
+   * wie `maskBrushDraftRadius`/`-Feather`, kein EDL-Feld für sich. */
+  maskBrushDraftAutoMask: boolean;
+  toggleMaskBrushDraftAutoMask: () => void;
   /** Hängt einen fertig gemalten Strich (bereits ausgedünnter Zielpfad,
    * siehe `MaskOverlay.tsx`) an die *aktive* Komponente der Maske
    * (`selectedMaskComponentIndex`) an — ein No-op, falls deren Geometrie
@@ -964,6 +1048,35 @@ interface AiSlice {
    * aus dem erkannten Fleck übernommen) und committet sofort. */
   applySensorSpotAsRepairStroke: (spot: SpotCandidateDto) => void;
 
+  // -- Befehlspalette: Brücke zu Header.tsx-lokalen Dialog-Zuständen
+  // (Phase 10 Schritt 4) --
+  /** Templates/Organisieren/Stacking/Skript & Plugins/Kollaboration/
+   * Tethering/Metadaten/Statistik/Import-mit-Vorlage sind bewusst
+   * `useState` innerhalb `Header.tsx` geblieben statt vollständiger
+   * eigener Store-Slices (reine Ein/Aus-Flags ohne Async-Logik, anders
+   * als z. B. `exportDialogOpen`) — `pendingCommand` ist die schmale
+   * Brücke, über die `CommandPalette.tsx` (kein Kind von `Header.tsx`)
+   * trotzdem einen dieser Dialoge öffnen kann: `Header.tsx` beobachtet
+   * dieses Feld per `useEffect` und räumt es sofort wieder ab. */
+  pendingCommand: string | null;
+  requestCommand: (id: string) => void;
+  clearPendingCommand: () => void;
+
+  // -- UI-Einstellungen (Phase 10 Schritt 1) --
+  /** `null` nur vor dem ersten `loadUiSettings()`-Aufruf (siehe App.tsx,
+   * beim Start geladen — anders als `aiSettings`, das erst beim Öffnen des
+   * Presets-Panels lädt, muss Theme/Sprache/Skalierung sofort greifen). */
+  uiSettings: UiSettingsDto | null;
+  loadUiSettings: () => Promise<void>;
+  saveUiSettings: (settings: UiSettingsDto) => Promise<void>;
+  settingsDialogOpen: boolean;
+  setSettingsDialogOpen: (open: boolean) => void;
+
+  // -- Beobachteter Ordner / Auto-Import (Phase 12 Schritt 7) --
+  watchedFolderSettings: WatchedFolderSettingsDto | null;
+  loadWatchedFolderSettings: () => Promise<void>;
+  saveWatchedFolderSettings: (settings: WatchedFolderSettingsDto) => Promise<void>;
+
   // -- Preset-Generator (Schritt 4) --
   aiSettings: AiSettingsDto | null;
   loadAiSettings: () => Promise<void>;
@@ -1034,6 +1147,11 @@ interface ExportSlice {
    * Fortschritt bis alle abgeschlossen sind (egal ob erfolgreich oder
    * fehlgeschlagen). */
   exportPhotos: (photoIds: string[], destFolder: string, options: ExportPhotoOptions) => Promise<void>;
+  /** Mehrfachziel-Export (Phase 12 Schritt 5, siehe `DECISIONS.md`
+   * ADR-0039) — reicht `photoIds` nacheinander an jedes `destination` in
+   * `destinations` weiter (Schleife über das bestehende `exportPhotos`,
+   * kein neues Warteschlangen-Konzept). */
+  exportPhotosToDestinations: (photoIds: string[], destinations: Array<{ destFolder: string; options: ExportPhotoOptions }>) => Promise<void>;
   toggleExportQueuePause: () => Promise<void>;
 }
 
@@ -1168,6 +1286,35 @@ interface LibraryBacklogSlice {
   perceptualDuplicateGroups: PhotoDto[][];
   perceptualDuplicatesRunning: boolean;
   runPerceptualDuplicateDetection: (maxDistance: number) => Promise<void>;
+
+  /** Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
+   * `DECISIONS.md` ADR-0038): eine Regel = `libraryFilter` (wiederverwendet,
+   * wie beim normalen Filter-Panel) + eine `BatchAction`. */
+  batchPreview: PhotoDto[];
+  batchPreviewLoading: boolean;
+  batchApplying: boolean;
+  /** Stapel-ID des zuletzt angewendeten Vorgangs — `null` nach einem
+   * Undo oder wenn noch keiner angewendet wurde. */
+  batchLastId: string | null;
+  batchLastUndoCount: number | null;
+  previewBatchRule: (criteria: FilterCriteriaDto) => Promise<void>;
+  applyBatchRule: (criteria: FilterCriteriaDto, action: BatchAction) => Promise<void>;
+  undoLastBatchOperation: () => Promise<void>;
+
+  /** Personenansicht (Phase 11 Schritt 5, siehe `DECISIONS.md` ADR-0038)
+   * — dieselbe „bereits vorhandene Miniaturansicht statt Neudekodierung"-
+   * Vereinfachung wie `perceptualDuplicateGroups`. */
+  peopleGroups: PhotoDto[][];
+  peopleGroupsLoading: boolean;
+  loadPeopleGroups: () => Promise<void>;
+
+  /** Smart Previews (Phase 11 Schritt 4, siehe `DECISIONS.md` ADR-0038):
+   * erzeugt für die aktuelle Auswahl (wie `createStackFromSelection`)
+   * verkleinerte Zwischendateien, die der Viewer nutzt, wenn das
+   * Original später nicht erreichbar ist. */
+  smartPreviewsGenerating: boolean;
+  smartPreviewsGeneratedCount: number | null;
+  generateSmartPreviewsForSelection: () => Promise<void>;
 }
 
 /** Metadaten, Schlagworthierarchie, Adobe-Interop (Phase 9 Schritt 2, siehe
@@ -1195,6 +1342,16 @@ interface MetadataSlice {
   xmpStatus: string | null;
   exportXmpSidecarForSelected: (withDevelopSettings: boolean) => Promise<void>;
   importXmpSidecarForSelected: () => Promise<void>;
+
+  /** Voller EXIF/IPTC-Editor (Phase 12 Schritt 4, siehe `DECISIONS.md`
+   * ADR-0039) — dieselbe Stapel-Metadatenbearbeitung wie
+   * `updatePhotoMetadata`, nur für die frei benannten Zusatzfelder;
+   * `metadata` ersetzt die gesamte Map. */
+  updatePhotoCustomMetadata: (photoId: string, metadata: Record<string, string>) => Promise<void>;
+  /** `[Schlüssel, Anzeigename]`-Paare, die der Metadaten-Dialog fest
+   * anbietet — statische Backend-Liste, einmal geladen. */
+  wellKnownIptcFields: Array<[string, string]>;
+  refreshWellKnownIptcFields: () => Promise<void>;
 }
 
 /** Ansichten/Filter-Presets/Vorschau-Cache/Statistik (Phase 9 Schritt 3,
@@ -1471,6 +1628,13 @@ export const useAppStore = create<AppStore>()(
       });
     },
 
+    maskOverlayVisible: false,
+    toggleMaskOverlay: () => {
+      set((state) => {
+        state.maskOverlayVisible = !state.maskOverlayVisible;
+      });
+    },
+
     // Jobs (Import)
     importRunning: false,
     importProgress: null,
@@ -1607,6 +1771,18 @@ export const useAppStore = create<AppStore>()(
           state.developPhotoId = photoId;
           if (previousPhotoId && previousPhotoId !== photoId) state.lastDevelopPhotoId = previousPhotoId;
         });
+        // Phase 12 Schritt 3 Teil A (siehe DECISIONS.md ADR-0039): beim
+        // allerersten Öffnen eines Fotos (kein gespeicherter Bearbeitungs-
+        // stand, `position.kind === "Neutral"`) automatisch ein passendes
+        // Objektivprofil aus dem EXIF-Objektivstring zuordnen — dieselbe
+        // Konvention wie Lightrooms automatische Profilanwendung. Läuft nur
+        // dieses eine Mal: sobald ein erster Edit committet ist (auch dieser
+        // automatische selbst), liefert `current_develop_edit` beim nächsten
+        // Laden `"At"` statt `"Neutral"` — ein späteres bewusstes „Kein
+        // Profil" des Nutzers wird dadurch nie erneut überschrieben.
+        if (position.kind === "Neutral") {
+          void get().autoApplyLensProfileIfMatched(photoId);
+        }
       } catch (err) {
         console.error("Bearbeitungszustand konnte nicht geladen werden:", err);
         set((state) => {
@@ -1616,6 +1792,45 @@ export const useAppStore = create<AppStore>()(
         });
       }
       void get().refreshSnapshots();
+    },
+
+    autoApplyLensProfileIfMatched: async (photoId) => {
+      const photo = findPhotoAnywhere(get(), photoId);
+      if (!photo?.lens) return;
+      let suggestion;
+      try {
+        suggestion = await api.resolveLensProfile(photo.lens);
+      } catch (err) {
+        console.error("Automatische Objektivprofil-Erkennung fehlgeschlagen:", err);
+        return;
+      }
+      if (!suggestion) return;
+      // Zwischenzeitlich könnte ein Fotowechsel oder eine manuelle Auswahl
+      // passiert sein (die Auflösung läuft asynchron im Hintergrund) — dann
+      // nicht mehr eingreifen.
+      const state = get();
+      if (state.developPhotoId !== photoId || state.developEdl.lens_corrections.profile_id !== null) return;
+      set((state) => {
+        state.developEdl.lens_corrections.profile_id = suggestion.id;
+      });
+      void get().commitDevelopEdit(`Objektivprofil automatisch erkannt: ${suggestion.display_name}`);
+    },
+
+    manuallyDetectLensProfile: async () => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      const photo = findPhotoAnywhere(get(), developPhotoId);
+      if (!photo?.lens) return;
+      try {
+        const suggestion = await api.resolveLensProfile(photo.lens);
+        if (!suggestion) return;
+        set((state) => {
+          state.developEdl.lens_corrections.profile_id = suggestion.id;
+        });
+        void get().commitDevelopEdit(`Objektivprofil erkannt: ${suggestion.display_name}`);
+      } catch (err) {
+        console.error("Objektivprofil-Erkennung fehlgeschlagen:", err);
+      }
     },
 
     copiedEdlSubset: null,
@@ -1778,6 +1993,7 @@ export const useAppStore = create<AppStore>()(
 
     softProofActive: false,
     softProofProfile: "srgb",
+    softProofCustomIccPath: "",
     softProofIntent: "perceptual",
     softProofGamutWarning: false,
     softProofPaperWhite: false,
@@ -1791,6 +2007,12 @@ export const useAppStore = create<AppStore>()(
     setSoftProofProfile: (profile) => {
       set((state) => {
         state.softProofProfile = profile;
+      });
+    },
+
+    setSoftProofCustomIccPath: (path) => {
+      set((state) => {
+        state.softProofCustomIccPath = path;
       });
     },
 
@@ -1914,6 +2136,26 @@ export const useAppStore = create<AppStore>()(
       }
     },
 
+    runConvertToDng: async (photoId) => {
+      set((state) => {
+        state.enhanceRunning = "dng";
+      });
+      try {
+        const path = await api.convertPhotoToDng(photoId);
+        set((state) => {
+          state.enhanceStatus = `Als DNG konvertiert: ${path}`;
+        });
+      } catch (err) {
+        set((state) => {
+          state.enhanceStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.enhanceRunning = null;
+        });
+      }
+    },
+
     setCurveChannel: (key, channel) => {
       set((state) => {
         state.developEdl.curves[key] = channel;
@@ -1923,6 +2165,21 @@ export const useAppStore = create<AppStore>()(
     setHslBandField: (band, field, value) => {
       set((state) => {
         state.developEdl.hsl[band][field] = value;
+      });
+    },
+
+    tatMode: "off",
+    tatCurveChannel: "rgb",
+
+    setTatMode: (mode) => {
+      set((state) => {
+        state.tatMode = mode;
+      });
+    },
+
+    setTatCurveChannel: (channel) => {
+      set((state) => {
+        state.tatCurveChannel = channel;
       });
     },
 
@@ -1993,6 +2250,20 @@ export const useAppStore = create<AppStore>()(
         state.developEdl.lens_corrections.profile_id = value;
       });
       void get().commitDevelopEdit();
+    },
+
+    setLensCorrectionCustomDistortionK1: (value) => {
+      set((state) => {
+        state.developEdl.lens_corrections.custom_distortion_k1 = value;
+      });
+      void get().commitDevelopEdit(value === null ? "Eigene Objektiv-Kalibrierung entfernt" : "Eigene Objektiv-Kalibrierung angewendet");
+    },
+
+    lensCalibrationDialogOpen: false,
+    setLensCalibrationDialogOpen: (open) => {
+      set((state) => {
+        state.lensCalibrationDialogOpen = open;
+      });
     },
 
     setLensCorrectionAutoCa: (value) => {
@@ -2260,6 +2531,54 @@ export const useAppStore = create<AppStore>()(
     setCenterView: (view) => {
       set((state) => {
         state.centerView = view;
+      });
+    },
+
+    // Schnellentwicklung im Raster (Phase 11 Schritt 3)
+    quickDevelopPhotoId: null,
+    quickDevelopEdl: null,
+
+    loadQuickDevelopStateForPhoto: async (photoId) => {
+      const position = await api.currentDevelopEdit(photoId).catch((err: unknown) => {
+        console.error("Schnellentwicklung: Bearbeitungsstand konnte nicht geladen werden:", err);
+        return null;
+      });
+      if (!position) return;
+      set((state) => {
+        state.quickDevelopPhotoId = photoId;
+        state.quickDevelopEdl = edlFromHistoryPosition(position);
+      });
+    },
+
+    setQuickDevelopBasicField: (key, value) => {
+      set((state) => {
+        if (!state.quickDevelopEdl) return;
+        writeBasicField(state.quickDevelopEdl.basic, key, value);
+      });
+    },
+
+    commitQuickDevelopEdit: async () => {
+      const { quickDevelopPhotoId, quickDevelopEdl } = get();
+      if (!quickDevelopPhotoId || !quickDevelopEdl) return;
+      try {
+        await api.applyDevelopEdit(quickDevelopPhotoId, buildEdlEnvelopeJson(quickDevelopEdl), "Schnellentwicklung (Raster)");
+      } catch (err) {
+        console.error("Schnellentwicklung konnte nicht gespeichert werden:", err);
+      }
+      // Ist im Entwickeln-Panel gerade dasselbe Foto offen, dessen
+      // Zustand mit übernehmen, statt dass er dort veraltet erscheint,
+      // bis das Panel das Foto das nächste Mal neu lädt.
+      if (get().developPhotoId === quickDevelopPhotoId) {
+        set((state) => {
+          state.developEdl = quickDevelopEdl;
+        });
+      }
+    },
+
+    clearQuickDevelopState: () => {
+      set((state) => {
+        state.quickDevelopPhotoId = null;
+        state.quickDevelopEdl = null;
       });
     },
 
@@ -2800,6 +3119,16 @@ export const useAppStore = create<AppStore>()(
       }
     },
 
+    exportPresetAsLrtemplateFile: async (presetId) => {
+      try {
+        await api.exportPresetToLrtemplateFile(presetId);
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
     importPresetFromApxFile: async (folderId) => {
       try {
         const imported = await api.importPresetFromApxFile(folderId);
@@ -3103,6 +3432,7 @@ export const useAppStore = create<AppStore>()(
 
     maskBrushDraftRadius: 0.05,
     maskBrushDraftFeather: 0.02,
+    maskBrushDraftAutoMask: false,
 
     setMaskBrushDraftField: (key, value) => {
       set((state) => {
@@ -3111,13 +3441,19 @@ export const useAppStore = create<AppStore>()(
       });
     },
 
+    toggleMaskBrushDraftAutoMask: () => {
+      set((state) => {
+        state.maskBrushDraftAutoMask = !state.maskBrushDraftAutoMask;
+      });
+    },
+
     addMaskBrushStroke: (maskId, points) => {
       if (points.length === 0) return;
-      const { maskBrushDraftRadius, maskBrushDraftFeather } = get();
+      const { maskBrushDraftRadius, maskBrushDraftFeather, maskBrushDraftAutoMask } = get();
       set((state) => {
         const geometry = state.developEdl.masks.find((m) => m.id === maskId)?.components[state.selectedMaskComponentIndex]?.geometry;
         if (geometry?.kind !== "Brush") return;
-        geometry.strokes.push({ points, radius: maskBrushDraftRadius, feather: maskBrushDraftFeather });
+        geometry.strokes.push({ points, radius: maskBrushDraftRadius, feather: maskBrushDraftFeather, auto_mask: maskBrushDraftAutoMask });
       });
       void get().commitDevelopEdit();
     },
@@ -3496,6 +3832,81 @@ export const useAppStore = create<AppStore>()(
       void get().commitDevelopEdit("Sensorfleck automatisch repariert");
     },
 
+    pendingCommand: null,
+    requestCommand: (id) => {
+      set((state) => {
+        state.pendingCommand = id;
+      });
+    },
+    clearPendingCommand: () => {
+      set((state) => {
+        state.pendingCommand = null;
+      });
+    },
+
+    uiSettings: null,
+    settingsDialogOpen: false,
+
+    setSettingsDialogOpen: (open) => {
+      set((state) => {
+        state.settingsDialogOpen = open;
+      });
+    },
+
+    loadUiSettings: async () => {
+      try {
+        const settings = await api.getUiSettings();
+        set((state) => {
+          state.uiSettings = settings;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    saveUiSettings: async (settings) => {
+      try {
+        await api.setUiSettings(settings);
+        set((state) => {
+          state.uiSettings = settings;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    watchedFolderSettings: null,
+
+    loadWatchedFolderSettings: async () => {
+      try {
+        const settings = await api.getWatchedFolderSettings();
+        set((state) => {
+          state.watchedFolderSettings = settings;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    saveWatchedFolderSettings: async (settings) => {
+      try {
+        await api.setWatchedFolderSettings(settings);
+        set((state) => {
+          state.watchedFolderSettings = settings;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
     aiSettings: null,
 
     loadAiSettings: async () => {
@@ -3773,6 +4184,12 @@ export const useAppStore = create<AppStore>()(
         state.exportError = firstError;
       });
       await api.clearFinishedExportJobs();
+    },
+
+    exportPhotosToDestinations: async (photoIds, destinations) => {
+      for (const destination of destinations) {
+        await get().exportPhotos(photoIds, destination.destFolder, destination.options);
+      }
     },
 
     toggleExportQueuePause: async () => {
@@ -4189,6 +4606,97 @@ export const useAppStore = create<AppStore>()(
       }
     },
 
+    batchPreview: [],
+    batchPreviewLoading: false,
+    batchApplying: false,
+    batchLastId: null,
+    batchLastUndoCount: null,
+
+    previewBatchRule: async (criteria) => {
+      set((state) => {
+        state.batchPreviewLoading = true;
+      });
+      try {
+        const photos = await api.previewBatchRule(criteria);
+        set((state) => {
+          state.batchPreview = photos;
+        });
+      } finally {
+        set((state) => {
+          state.batchPreviewLoading = false;
+        });
+      }
+    },
+
+    applyBatchRule: async (criteria, action) => {
+      set((state) => {
+        state.batchApplying = true;
+      });
+      try {
+        const batchId = await api.applyBatchRule(criteria, action);
+        set((state) => {
+          state.batchLastId = batchId;
+          state.batchLastUndoCount = null;
+        });
+        await get().previewBatchRule(criteria);
+      } finally {
+        set((state) => {
+          state.batchApplying = false;
+        });
+      }
+    },
+
+    undoLastBatchOperation: async () => {
+      const { batchLastId } = get();
+      if (!batchLastId) return;
+      const count = await api.undoBatchOperation(batchLastId);
+      set((state) => {
+        state.batchLastUndoCount = count;
+        state.batchLastId = null;
+      });
+    },
+
+    peopleGroups: [],
+    peopleGroupsLoading: false,
+
+    loadPeopleGroups: async () => {
+      set((state) => {
+        state.peopleGroupsLoading = true;
+      });
+      try {
+        const groups = await api.listPeopleGroups();
+        set((state) => {
+          state.peopleGroups = groups;
+        });
+      } finally {
+        set((state) => {
+          state.peopleGroupsLoading = false;
+        });
+      }
+    },
+
+    smartPreviewsGenerating: false,
+    smartPreviewsGeneratedCount: null,
+
+    generateSmartPreviewsForSelection: async () => {
+      const { multiSelectedIds, selectedPhotoId } = get();
+      const targets = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
+      if (targets.length === 0) return;
+      set((state) => {
+        state.smartPreviewsGenerating = true;
+      });
+      try {
+        const count = await api.generateSmartPreviews(targets);
+        set((state) => {
+          state.smartPreviewsGeneratedCount = count;
+        });
+      } finally {
+        set((state) => {
+          state.smartPreviewsGenerating = false;
+        });
+      }
+    },
+
     // ---- Metadaten, Schlagworthierarchie, Adobe-Interop (Phase 9 Schritt 2) --
 
     keywords: [],
@@ -4258,6 +4766,23 @@ export const useAppStore = create<AppStore>()(
       );
       set((state) => {
         for (const id of targets) patchPhotoEverywhere(state, id, fields);
+      });
+    },
+
+    updatePhotoCustomMetadata: async (photoId, metadata) => {
+      const { multiSelectedIds } = get();
+      const targets = multiSelectedIds.includes(photoId) && multiSelectedIds.length > 1 ? multiSelectedIds : [photoId];
+      await Promise.all(targets.map((id) => api.setPhotoCustomMetadata(id, metadata)));
+      set((state) => {
+        for (const id of targets) patchPhotoEverywhere(state, id, { custom_metadata: metadata });
+      });
+    },
+
+    wellKnownIptcFields: [],
+    refreshWellKnownIptcFields: async () => {
+      const fields = await api.listWellKnownIptcFields();
+      set((state) => {
+        state.wellKnownIptcFields = fields;
       });
     },
 

@@ -56,6 +56,10 @@ export interface PhotoDto {
   caption: string | null;
   copyright: string | null;
   creator: string | null;
+  /** Voller EXIF/IPTC-Editor (Phase 12 Schritt 4, siehe `DECISIONS.md`
+   * ADR-0039) — frei benannte Zusatzfelder; bekannte Schlüssel siehe
+   * `listWellKnownIptcFields`. */
+  custom_metadata: Record<string, string>;
 }
 
 export interface KeywordDto {
@@ -289,6 +293,31 @@ export function gotoDevelopEdit(photoId: string, sequence: number): Promise<Hist
   return invoke<HistoryPositionDto | null>("goto_develop_edit", { photoId, sequence });
 }
 
+/** Ein automatisch gefundenes Objektivprofil (Phase 12 Schritt 3 Teil A,
+ * siehe `DECISIONS.md` ADR-0039) — spiegelt `apx_app::commands::
+ * LensProfileSuggestionDto`. */
+export interface LensProfileSuggestionDto {
+  id: string;
+  display_name: string;
+}
+
+/** Ordnet einen EXIF-Objektiv-String automatisch einem Objektivprofil aus
+ * der echten LensFun-Datenbank zu (Fallback: die drei Alt-Profile) —
+ * `null`, wenn nichts passt. */
+export function resolveLensProfile(lens: string | null): Promise<LensProfileSuggestionDto | null> {
+  return invoke<LensProfileSuggestionDto | null>("resolve_lens_profile", { lens });
+}
+
+/** Kalibrier-Assistent (Phase 12 Schritt 3 Teil B, siehe `DECISIONS.md`
+ * ADR-0039): `lines` sind je eine Liste normierter (`0..1`) Bildpunkte
+ * entlang einer in der Realität geraden Linie — mindestens eine Linie
+ * mit mindestens drei Punkten. Liefert den gefundenen
+ * Verzeichnungskoeffizienten (direkt kompatibel mit
+ * `LensCorrectionAdjustment.custom_distortion_k1`). */
+export function calibrateLensDistortion(lines: Array<Array<{ x: number; y: number }>>): Promise<number> {
+  return invoke<number>("calibrate_lens_distortion", { lines });
+}
+
 // ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------------
 // Anders als der lineare Verlauf oben: siehe `crates/apx-app/src/commands.rs`s
 // Moduldoku für die Abgrenzung. Kein eigener "restore"-Aufruf — die
@@ -391,6 +420,20 @@ export function setPhotoMetadata(
   creator: string | null,
 ): Promise<void> {
   return invoke<void>("set_photo_metadata", { photoId, title, caption, copyright, creator });
+}
+
+/** Ersetzt die frei benannten IPTC-Zusatzfelder (Phase 12 Schritt 4,
+ * voller EXIF/IPTC-Editor, siehe `DECISIONS.md` ADR-0039) — wie
+ * `setPhotoMetadata` deckt das auch Stapel-Metadatenbearbeitung ab. */
+export function setPhotoCustomMetadata(photoId: string, metadata: Record<string, string>): Promise<void> {
+  return invoke<void>("set_photo_custom_metadata", { photoId, metadata });
+}
+
+/** Die wohlbekannten IPTC-Kernfeld-Schlüssel, die der Dialog fest
+ * anbietet (`[Schlüssel, Anzeigename]`-Paare) — statische Liste, wird
+ * beim ersten Öffnen des Dialogs einmal geladen. */
+export function listWellKnownIptcFields(): Promise<Array<[string, string]>> {
+  return invoke<Array<[string, string]>>("list_well_known_iptc_fields");
 }
 
 /** Schreibt eine `.xmp`-Sidecar-Datei neben dem Original, gibt deren Pfad
@@ -519,6 +562,16 @@ export function listPerceptualDuplicateGroups(maxDistance: number): Promise<Phot
   return invoke<PhotoDto[][]>("list_perceptual_duplicate_groups", { maxDistance });
 }
 
+// ---- Bibliothek: Personenansicht (Phase 11 Schritt 5, siehe
+// DECISIONS.md ADR-0038) -----------------------------------------------
+
+/** Siehe `apx-app`s `list_people_groups`-Command-Moduldoku für die
+ * Einschränkung (grobe Vorsortierung nach Blob-Anzahl/-Fläche, keine
+ * echte Personen-Identifizierung). */
+export function listPeopleGroups(): Promise<PhotoDto[][]> {
+  return invoke<PhotoDto[][]>("list_people_groups");
+}
+
 // ---- Presets (ab Phase 5, siehe DECISIONS.md ADR-0031) --------------------
 
 export function createPresetFolder(name: string, parentId: string | null): Promise<string> {
@@ -587,6 +640,15 @@ export function exportPresetToApxFile(presetId: string): Promise<string | null> 
   return invoke<string | null>("export_preset_to_apx_file", { presetId });
 }
 
+/** Adobe `.lrtemplate`-Export (Phase 11 Schritt 8, siehe `DECISIONS.md`
+ * ADR-0038) — siehe `apx-app`s `export_preset_to_lrtemplate_file`-
+ * Moduldoku für die abgedeckte Teilmenge (Basic ohne Weißabgleich + HSL)
+ * und die Nur-Export-Einschränkung. `null`, wenn der Dialog abgebrochen
+ * wurde. */
+export function exportPresetToLrtemplateFile(presetId: string): Promise<string | null> {
+  return invoke<string | null>("export_preset_to_lrtemplate_file", { presetId });
+}
+
 /** Öffnet einen Öffnen-Dialog und legt die gewählte `.apx`-Datei als neues
  * Preset an. `null`, wenn der Dialog abgebrochen wurde. */
 export function importPresetFromApxFile(folderId: string | null): Promise<PresetDto | null> {
@@ -607,6 +669,35 @@ export function filterPhotos(criteria: FilterCriteriaDto): Promise<PhotoDto[]> {
  * zu {@link searchPhotos}/{@link filterPhotos}, siehe `DECISIONS.md` ADR-0027. */
 export function searchAndFilterPhotos(query: string | null, criteria: FilterCriteriaDto): Promise<PhotoDto[]> {
   return invoke<PhotoDto[]>("search_and_filter_photos", { query, criteria });
+}
+
+// ---- Bibliothek: Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
+// DECISIONS.md ADR-0038) -----------------------------------------------
+
+/** Spiegelt `apx_catalog::BatchAction` — siehe `apx-app`s
+ * `BatchActionDto`. */
+export type BatchAction =
+  | { kind: "SetRating"; rating: number }
+  | { kind: "SetColorLabel"; color_label: string | null }
+  | { kind: "AddKeyword"; name: string };
+
+/** Fotos, die `criteria` treffen würden — schreibt nichts. */
+export function previewBatchRule(criteria: FilterCriteriaDto): Promise<PhotoDto[]> {
+  return invoke<PhotoDto[]>("preview_batch_rule", { criteria });
+}
+
+/** Wendet `action` auf alle `criteria`-treffenden Fotos an und
+ * journalisiert jede tatsächliche Änderung — gibt die neue Stapel-ID
+ * zurück (für {@link undoBatchOperation}). */
+export function applyBatchRule(criteria: FilterCriteriaDto, action: BatchAction): Promise<string> {
+  return invoke<string>("apply_batch_rule", { criteria, action });
+}
+
+/** Macht jede im Stapel `batchId` journalisierte Änderung einzeln
+ * rückgängig. Gibt die Zahl tatsächlich rückgängig gemachter Änderungen
+ * zurück. */
+export function undoBatchOperation(batchId: string): Promise<number> {
+  return invoke<number>("undo_batch_operation", { batchId });
 }
 
 // ---- Bibliothek: Duplikaterkennung (ab Phase 3, Schritt 8.2) ---------------
@@ -686,6 +777,44 @@ export function setAnthropicApiKey(apiKey: string | null): Promise<void> {
   return invoke<void>("set_anthropic_api_key", { apiKey: apiKey || null });
 }
 
+// ---- UI-Einstellungen (Phase 10 Schritt 1) --------------------------------
+
+export type Theme = "dark" | "light";
+
+export interface UiSettingsDto {
+  theme: Theme;
+  accent_color: string | null;
+  locale: string;
+  ui_scale_percent: number;
+  high_contrast: boolean;
+  reduced_motion: boolean;
+  onboarding_seen: boolean;
+}
+
+export function getUiSettings(): Promise<UiSettingsDto> {
+  return invoke<UiSettingsDto>("get_ui_settings");
+}
+
+export function setUiSettings(settings: UiSettingsDto): Promise<void> {
+  return invoke<void>("set_ui_settings", { settings });
+}
+
+// ---- Beobachteter Ordner / Auto-Import (Phase 12 Schritt 7) ---------------
+
+export interface WatchedFolderSettingsDto {
+  path: string | null;
+  enabled: boolean;
+  poll_seconds: number;
+}
+
+export function getWatchedFolderSettings(): Promise<WatchedFolderSettingsDto> {
+  return invoke<WatchedFolderSettingsDto>("get_watched_folder_settings");
+}
+
+export function setWatchedFolderSettings(settings: WatchedFolderSettingsDto): Promise<void> {
+  return invoke<void>("set_watched_folder_settings", { settings });
+}
+
 /** LLM-Modus des Preset-Generators — liefert die EDL-Teilmenge als
  * JSON-String (`lib/presets.ts::parseEdlSubset`). Braucht einen
  * hinterlegten Anthropic-API-Schlüssel. */
@@ -737,7 +866,7 @@ export function suggestTags(photoId: string): Promise<string[]> {
 
 // ---- Export (Phase 8, siehe DECISIONS.md ADR-0034) -------------------------
 
-export type ExportFormat = "jpeg" | "png" | "tiff" | "webp" | "avif";
+export type ExportFormat = "jpeg" | "png" | "tiff" | "webp" | "avif" | "psd" | "jxl";
 
 export type WatermarkPosition = "top_left" | "top_right" | "bottom_left" | "bottom_right" | "center";
 export type IccProfileChoice = "srgb" | "adobe_rgb" | "pro_photo_rgb" | "display_p3" | "custom";
@@ -1117,6 +1246,17 @@ export function clearPreviewCache(): Promise<void> {
   return invoke<void>("clear_preview_cache");
 }
 
+/** Smart Previews (Phase 11 Schritt 4, siehe `DECISIONS.md` ADR-0038):
+ * erzeugt je Foto eine feste, verkleinerte JPEG-Zwischendatei, die als
+ * Fallback dient, wenn die Originaldatei später nicht erreichbar ist
+ * (z. B. eine getrennte externe Festplatte) — ermöglicht eingeschränktes
+ * Weiterarbeiten offline. Gibt die Zahl tatsächlich erzeugter Previews
+ * zurück (überspringt Fotos, deren Original selbst schon nicht
+ * erreichbar ist). */
+export function generateSmartPreviews(photoIds: string[]): Promise<number> {
+  return invoke<number>("generate_smart_previews", { photoIds });
+}
+
 // ---- Entwickeln: Entrauschung, Hochskalierung (ab Phase 9 Schritt 6, siehe
 // DECISIONS.md ADR-0035) — klassische Algorithmen, keine echte
 // Modellinferenz (dieselbe Ehrlichkeitslinie wie ADR-0033). -----------------
@@ -1132,6 +1272,13 @@ export function denoisePhoto(photoId: string, rangeSigma?: number): Promise<stri
  * zurück. */
 export function upscalePhoto(photoId: string): Promise<string> {
   return invoke<string>("upscale_photo", { photoId });
+}
+
+/** DNG-Konvertierung (Phase 11 Schritt 1) — schreibt eine „Linear DNG" aus
+ * den unveränderten, kamera-nativen RAW-Daten neben das Original, gibt
+ * deren Pfad zurück. */
+export function convertPhotoToDng(photoId: string): Promise<string> {
+  return invoke<string>("convert_photo_to_dng", { photoId });
 }
 
 // ---- Fortgeschrittenes: Fokus-/HDR-/Panorama-/Astro-Stacking (Phase 9

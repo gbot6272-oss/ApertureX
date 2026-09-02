@@ -48,6 +48,11 @@ pub enum ExportError {
     #[error("Video-Export fehlgeschlagen: {message}")]
     Video { message: String },
 
+    /// DNG-Konvertierung (Phase 11 Schritt 1) fehlgeschlagen — ungültige
+    /// Bilddaten oder ein von `gamut-dng` abgelehntes Profil/Format.
+    #[error("DNG-Konvertierung fehlgeschlagen: {message}")]
+    Dng { message: String },
+
     /// Ein zugrunde liegender Pipeline-/Katalog-/RAW-Fehler.
     #[error(transparent)]
     App(#[from] AppError),

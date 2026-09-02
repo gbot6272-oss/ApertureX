@@ -96,7 +96,7 @@ test.describe("Masken-Panel", () => {
     await setUpWithSelectedPhoto(page);
     await page.getByRole("button", { name: "+ Radialer Verlauf" }).click();
 
-    const radiusHandle = page.getByRole("slider", { name: "Radialer Verlauf: Radius" });
+    const radiusHandle = page.getByRole("slider", { name: "Radialer Verlauf: Radius X-Achse" });
     await expect(radiusHandle).toBeVisible();
     await radiusHandle.focus();
     await radiusHandle.press("ArrowRight");

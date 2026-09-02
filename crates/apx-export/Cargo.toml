@@ -52,6 +52,23 @@ tokio = { version = "1.53.1", features = ["io-util"] }
 reverse_geocoder = "4.1.1"
 # GPX-Tracklog-Import (Schritt 7) — reines Rust, kein XML-Systemparser.
 quick-xml = "0.42.0"
+# DNG-Schreibpfad (Phase 11 Schritt 1, siehe DECISIONS.md ADR-0038) —
+# reines Rust, `DngEncoder`/`RawImage::new_linear_raw` real per Testbau
+# verifiziert. Zum Zeitpunkt von ADR-0034 (Phase 8) gab es keine
+# schreibfähige DNG-Crate, diese existiert jetzt.
+gamut-dng = "1.0.0"
+# PSD-Schreib-/Lesepfad (Phase 11 Schritt 2, siehe DECISIONS.md ADR-0038) —
+# reines Rust, `write_psd`/`read_psd` real per Testbau verifiziert (inkl.
+# des `use_image_data: Some(true)`-Fallstricks: ohne dieses Flag landet die
+# gelesene Bildmatrix in `Psd::canvas`, nicht `Psd::image_data`).
+ag-psd = "0.2.0"
+# JPEG-XL-Schreib-/Lesepfad (Phase 11 Schritt 2, siehe DECISIONS.md
+# ADR-0038) — Encoder bindet das echte libjxl (C, per `gamut-jxl-sys`
+# via `cmake` zur Kompilierzeit vendort, kein reines Rust), Decoder ist
+# das reine-Rust `jxl` (jxl-rs). Real per Testbau verifiziert (verlustfreier
+# RGBA8-Rundreise-Test über Encoder→Decoder bestätigt exakte Pixelwerte).
+gamut-jxl = "0.4.0"
+gamut-core = "2.0.1"
 
 [dev-dependencies]
 tempfile = "3"

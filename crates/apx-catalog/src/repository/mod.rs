@@ -2,6 +2,7 @@
 //! `&rusqlite::Connection` (funktioniert dank `Deref` auch mit
 //! `&rusqlite::Transaction`). Nur [`crate::Catalog`] ruft diese Module auf.
 
+pub(crate) mod batch;
 pub(crate) mod collections;
 pub(crate) mod color_labels;
 pub(crate) mod edits;

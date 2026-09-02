@@ -21,21 +21,36 @@ pub enum Theme {
 #[serde(default)]
 pub struct UiSettings {
     pub theme: Theme,
-    /// Sprachcode, z. B. "de" oder "en". Lokalisierung selbst kommt erst in
-    /// Phase 10, das Feld existiert aber schon, damit spätere Migrationen
-    /// nicht das Schema brechen.
+    /// Benutzerdefinierte Akzentfarbe als `#rrggbb`-Hex-String, `None` =
+    /// Standard-Akzent des jeweiligen Themes (siehe Phase 10 Schritt 7).
+    pub accent_color: Option<String>,
+    /// Sprachcode, "de" oder "en" (Phase 10 Schritt 8).
     pub locale: String,
     /// UI-Skalierung in Prozent, 75–200 laut SPEC.md Abschnitt 3.6
-    /// (Barrierefreiheit). Wird erst in Phase 10 tatsächlich ausgewertet.
+    /// (Barrierefreiheit, Phase 10 Schritt 6).
     pub ui_scale_percent: u16,
+    /// Kontrastmodus (Phase 10 Schritt 6): schaltet auf ein
+    /// High-Contrast-Tokenset im Frontend um.
+    pub high_contrast: bool,
+    /// Reduzierte Bewegung (Phase 10 Schritt 6): deaktiviert nicht
+    /// notwendige CSS-Übergänge/-Animationen im Frontend.
+    pub reduced_motion: bool,
+    /// Ob das Onboarding (Phase 10 Schritt 9) bereits einmal gezeigt wurde
+    /// — steuert nur das automatische Erstanzeigen, nicht die manuelle
+    /// erneute Aufrufbarkeit über die Befehlspalette.
+    pub onboarding_seen: bool,
 }
 
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
             theme: Theme::default(),
+            accent_color: None,
             locale: "de".to_string(),
             ui_scale_percent: 100,
+            high_contrast: false,
+            reduced_motion: false,
+            onboarding_seen: false,
         }
     }
 }
@@ -60,12 +75,42 @@ pub struct AiSettings {
     pub anthropic_api_key: Option<String>,
 }
 
+/// Einstellungen für den beobachteten Ordner (Phase 12 Schritt 7, siehe
+/// `DECISIONS.md` ADR-0039-Nachtrag III) — ein optionaler lokaler Ordner,
+/// der im Hintergrund periodisch auf neue Dateien geprüft wird, um sie
+/// automatisch über denselben Weg wie ein manueller Import
+/// (`import::run_with_mode`, Modus `AddInPlace`) einzuspielen.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WatchedFolderSettings {
+    /// Absoluter Pfad des beobachteten Ordners. `None`/leer = nichts
+    /// konfiguriert (unabhängig von `enabled`).
+    pub path: Option<String>,
+    pub enabled: bool,
+    /// Poll-Intervall in Sekunden — derselbe Abfragen-statt-Weck-
+    /// Benachrichtigung-Ansatz wie beim Export-Queue-Worker
+    /// (`crates/apx-app/src/main.rs`s Moduldoku), hier aber mit einem für
+    /// Dateisystem-Polling sinnvollen Wert statt 150 ms.
+    pub poll_seconds: u32,
+}
+
+impl Default for WatchedFolderSettings {
+    fn default() -> Self {
+        Self {
+            path: None,
+            enabled: false,
+            poll_seconds: 30,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub ui: UiSettings,
     pub catalog: CatalogSettings,
     pub ai: AiSettings,
+    pub watched_folder: WatchedFolderSettings,
 }
 
 impl Settings {
@@ -118,6 +163,31 @@ mod tests {
         settings.ui.theme = Theme::Light;
         settings.ui.locale = "en".to_string();
         settings.catalog.last_opened_catalog = Some("/pfad/zum/katalog.sqlite".to_string());
+        settings
+            .save(&path)
+            .expect("Speichern darf nicht scheitern");
+
+        let loaded = Settings::load_or_default(&path).expect("Laden darf nicht scheitern");
+        assert_eq!(loaded, settings);
+    }
+
+    #[test]
+    fn watched_folder_settings_roundtrip_and_default_to_disabled() {
+        let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
+        let path = tmp.path().join("settings.toml");
+
+        // Ohne gespeicherte Einstellungsdatei ist der beobachtete Ordner
+        // aus (kein automatischer Dateisystemzugriff ohne, dass der
+        // Nutzer ihn jemals konfiguriert hat).
+        let defaults = Settings::load_or_default(&path).expect("Defaults dürfen nicht scheitern");
+        assert!(!defaults.watched_folder.enabled);
+        assert_eq!(defaults.watched_folder.path, None);
+        assert_eq!(defaults.watched_folder.poll_seconds, 30);
+
+        let mut settings = Settings::default();
+        settings.watched_folder.path = Some("/home/user/Fotos/Eingang".to_string());
+        settings.watched_folder.enabled = true;
+        settings.watched_folder.poll_seconds = 60;
         settings
             .save(&path)
             .expect("Speichern darf nicht scheitern");

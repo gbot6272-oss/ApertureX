@@ -50,6 +50,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // hinterlegte Ergebnisse, per Fixture steuerbar (siehe
     // `exportPresetToApxFile`/`importPresetFromApxFile`-Tests).
     exportApxPathResult: "/mock/export.apx" as string | null,
+    // Adobe .lrtemplate-Export (Phase 11 Schritt 8).
+    exportLrtemplatePathResult: "/mock/export.lrtemplate" as string | null,
     importApxFile: null as { name: string; tags: string[]; conditions_json: string; edl_subset_json: string } | null,
     // Kollaborationsmodus (Phase 9 Schritt 10) — dieselbe Fixture-Strategie
     // wie beim `.apx`-Dialog oben: der eigentliche `content_hash`-Abgleich
@@ -93,6 +95,26 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     repairSourceSuggestion: { x: 0.2, y: 0.2 },
     sensorSpots: [{ x: 0.4, y: 0.4, radius: 0.03, strength: 0.7 }] as Array<{ x: number; y: number; radius: number; strength: number }>,
     anthropicApiKey: null as string | null,
+    // Phase 10 Schritt 1/9: `onboarding_seen: true` als Testdefault, damit
+    // das automatische Onboarding-Overlay (App.tsx) nicht in jedem
+    // e2e-Test ungefragt aufpoppt — ein Test, der das Onboarding gezielt
+    // prüfen will, überschreibt das per `setMockFixtures`.
+    uiSettings: {
+      theme: "dark" as "dark" | "light",
+      accent_color: null as string | null,
+      locale: "de",
+      ui_scale_percent: 100,
+      high_contrast: false,
+      reduced_motion: false,
+      onboarding_seen: true,
+    },
+    // Beobachteter Ordner (Phase 12 Schritt 7) — derselbe Aus-Default wie
+    // im echten Backend (`apx_core::settings::WatchedFolderSettings`).
+    watchedFolderSettings: {
+      path: null as string | null,
+      enabled: false,
+      poll_seconds: 30,
+    },
     presetGeneratorSubsetJson: JSON.stringify({ basic: { exposure_ev: 0.6, contrast: 15 } }),
     referenceImageDialogCancelled: false,
     presetVariationCount: 3,
@@ -155,6 +177,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     importedTemplateFile: null as { kind: string; name: string; payload_json: string } | null,
     // Perceptual-Hash-Duplikaterkennung (Phase 9 Schritt 1).
     perceptualDuplicateGroups: [] as unknown[][],
+    // Personenansicht (Phase 11 Schritt 5).
+    peopleGroups: [] as unknown[][],
     // Adobe-XMP-Sidecar (Phase 9 Schritt 2).
     exportedXmpSidecarPath: "/mock/photos/IMG_0001.xmp" as string,
     xmpImportApplies: true as boolean,
@@ -172,6 +196,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // Entrauschung/Hochskalierung (Phase 9 Schritt 6).
     denoisedPhotoPath: "/mock/photos/IMG_0001_entrauscht.png" as string,
     upscaledPhotoPath: "/mock/photos/IMG_0001_hochskaliert.png" as string,
+    // DNG-Konvertierung (Phase 11 Schritt 1).
+    convertedDngPath: "/mock/photos/IMG_0001.dng" as string,
     ...initialFixtures,
   };
   w.__mockInvokeLog = [] as Array<{ cmd: string; args: unknown }>;
@@ -245,6 +271,19 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   const photoKeywords: Record<string, { id: string; name: string }[]> = {};
   let nextCollectionId = 1;
   let nextKeywordId = 1;
+
+  // Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe DECISIONS.md
+  // ADR-0038) — ein Journal fürs Undo, dasselbe Prinzip wie
+  // `batch_operation_items` auf der echten Seite: pro angewandtem Stapel
+  // wird für jede tatsächlich geänderte Eigenschaft der alte Wert notiert.
+  interface MockBatchItem {
+    photoId: string;
+    field: "rating" | "color_label" | "keyword";
+    oldValue: number | string | null;
+    newValue: number | string | null;
+  }
+  const batchOperations: Record<string, MockBatchItem[]> = {};
+  let nextBatchId = 1;
 
   // Schlagworthierarchie/Tag-Regeln/Metadaten (Phase 9 Schritt 2, siehe
   // DECISIONS.md ADR-0035) — `keywordMeta` hält parent_id/synonyms separat
@@ -459,6 +498,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       folders: unknown[];
       photosByFolder: Record<string, unknown[]>;
       exportApxPathResult: string | null;
+      exportLrtemplatePathResult: string | null;
       importApxFile: { name: string; tags: string[]; conditions_json: string; edl_subset_json: string } | null;
       exportSharePathResult: string | null;
       importShareResult: {
@@ -480,6 +520,20 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       repairSourceSuggestion: { x: number; y: number };
       sensorSpots: Array<{ x: number; y: number; radius: number; strength: number }>;
       anthropicApiKey: string | null;
+      uiSettings: {
+        theme: "dark" | "light";
+        accent_color: string | null;
+        locale: string;
+        ui_scale_percent: number;
+        high_contrast: boolean;
+        reduced_motion: boolean;
+        onboarding_seen: boolean;
+      };
+      watchedFolderSettings: {
+        path: string | null;
+        enabled: boolean;
+        poll_seconds: number;
+      };
       presetGeneratorSubsetJson: string;
       referenceImageDialogCancelled: boolean;
       presetVariationCount: number;
@@ -502,6 +556,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       exportTemplateFilePathResult: string | null;
       importedTemplateFile: { kind: string; name: string; payload_json: string } | null;
       perceptualDuplicateGroups: unknown[][];
+      peopleGroups: unknown[][];
     };
 
     switch (cmd) {
@@ -760,10 +815,14 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "clear_preview_cache":
         fixtures.previewCacheStats = { file_count: 0, total_bytes: 0 };
         return null;
+      case "generate_smart_previews":
+        return (args.photoIds as string[]).length;
       case "denoise_photo":
         return fixtures.denoisedPhotoPath;
       case "upscale_photo":
         return fixtures.upscaledPhotoPath;
+      case "convert_photo_to_dng":
+        return fixtures.convertedDngPath;
 
       // ---- Bibliothek: Sammlungen (ab Phase 3, Sammlungssätze/intelligente -
       // Sammlungen ab Phase 9 Schritt 1) --------------------------------------
@@ -927,6 +986,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       // ---- Bibliothek: Perceptual-Hash-Duplikaterkennung (Phase 9 Schritt 1) -
       case "list_perceptual_duplicate_groups":
         return fixtures.perceptualDuplicateGroups;
+      case "list_people_groups":
+        return fixtures.peopleGroups;
 
       // ---- Bibliothek: Suche/Filter (ab Phase 3) ---------------------------
       case "search_photos": {
@@ -958,6 +1019,74 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           .filter((p) => (!query ? true : p.filename.toLowerCase().includes(query)))
           .filter((p) => matchesFilterCriteria(p, criteria))
           .map(clonePhoto);
+      }
+
+      // ---- Stapelverarbeitungs-Konsole (Phase 11 Schritt 9) ------------------
+      case "preview_batch_rule": {
+        const criteria = args.criteria as {
+          rating_at_least?: number;
+          flag?: number;
+          color_label?: string;
+          camera_model?: string;
+        };
+        return allPhotos()
+          .filter((p) => matchesFilterCriteria(p, criteria))
+          .map(clonePhoto);
+      }
+      case "apply_batch_rule": {
+        const criteria = args.criteria as {
+          rating_at_least?: number;
+          flag?: number;
+          color_label?: string;
+          camera_model?: string;
+        };
+        const action = args.action as
+          | { kind: "SetRating"; rating: number }
+          | { kind: "SetColorLabel"; color_label: string | null }
+          | { kind: "AddKeyword"; name: string };
+        const matched = allPhotos().filter((p) => matchesFilterCriteria(p, criteria));
+        const items: MockBatchItem[] = [];
+        for (const photo of matched) {
+          if (action.kind === "SetRating") {
+            if (photo.rating !== action.rating) {
+              items.push({ photoId: photo.id, field: "rating", oldValue: photo.rating, newValue: action.rating });
+              photo.rating = action.rating;
+            }
+          } else if (action.kind === "SetColorLabel") {
+            if ((photo.color_label ?? null) !== (action.color_label ?? null)) {
+              items.push({ photoId: photo.id, field: "color_label", oldValue: photo.color_label ?? null, newValue: action.color_label ?? null });
+              photo.color_label = action.color_label;
+            }
+          } else {
+            const list = (photoKeywords[photo.id] ??= []);
+            if (!list.some((k) => k.name === action.name)) {
+              const id = `kw-${nextKeywordId++}`;
+              list.push({ id, name: action.name });
+              items.push({ photoId: photo.id, field: "keyword", oldValue: null, newValue: id });
+            }
+          }
+        }
+        const batchId = `batch-${nextBatchId++}`;
+        batchOperations[batchId] = items;
+        return batchId;
+      }
+      case "undo_batch_operation": {
+        const batchId = args.batchId as string;
+        const items = batchOperations[batchId];
+        if (!items) return 0;
+        for (const item of items) {
+          const photo = findPhoto(item.photoId);
+          if (item.field === "rating") {
+            if (photo) photo.rating = item.oldValue as number;
+          } else if (item.field === "color_label") {
+            if (photo) photo.color_label = item.oldValue as string | null;
+          } else {
+            const list = photoKeywords[item.photoId] ?? [];
+            photoKeywords[item.photoId] = list.filter((k) => k.id !== item.newValue);
+          }
+        }
+        delete batchOperations[batchId];
+        return items.length;
       }
 
       // ---- Bibliothek: Duplikaterkennung (ab Phase 3, Schritt 8.2) ---------
@@ -1087,6 +1216,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       // einem erfolgreichen Import).
       case "export_preset_to_apx_file":
         return fixtures.exportApxPathResult;
+      case "export_preset_to_lrtemplate_file":
+        return fixtures.exportLrtemplatePathResult;
       case "import_preset_from_apx_file": {
         const file = fixtures.importApxFile;
         if (!file) return null;
@@ -1130,6 +1261,16 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return fixtures.sensorSpots;
       case "get_ai_settings":
         return { anthropic_api_key: fixtures.anthropicApiKey };
+      case "get_ui_settings":
+        return fixtures.uiSettings;
+      case "set_ui_settings":
+        fixtures.uiSettings = args.settings as typeof fixtures.uiSettings;
+        return null;
+      case "get_watched_folder_settings":
+        return fixtures.watchedFolderSettings;
+      case "set_watched_folder_settings":
+        fixtures.watchedFolderSettings = args.settings as typeof fixtures.watchedFolderSettings;
+        return null;
       case "set_anthropic_api_key": {
         const key = args.apiKey as string | null;
         fixtures.anthropicApiKey = key && key.trim() !== "" ? key : null;

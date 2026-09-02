@@ -265,6 +265,19 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   let nextCollectionId = 1;
   let nextKeywordId = 1;
 
+  // Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe DECISIONS.md
+  // ADR-0038) — ein Journal fürs Undo, dasselbe Prinzip wie
+  // `batch_operation_items` auf der echten Seite: pro angewandtem Stapel
+  // wird für jede tatsächlich geänderte Eigenschaft der alte Wert notiert.
+  interface MockBatchItem {
+    photoId: string;
+    field: "rating" | "color_label" | "keyword";
+    oldValue: number | string | null;
+    newValue: number | string | null;
+  }
+  const batchOperations: Record<string, MockBatchItem[]> = {};
+  let nextBatchId = 1;
+
   // Schlagworthierarchie/Tag-Regeln/Metadaten (Phase 9 Schritt 2, siehe
   // DECISIONS.md ADR-0035) — `keywordMeta` hält parent_id/synonyms separat
   // von `photoKeywords`, weil dasselbe Schlagwort an mehreren Fotos hängen
@@ -994,6 +1007,74 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           .filter((p) => (!query ? true : p.filename.toLowerCase().includes(query)))
           .filter((p) => matchesFilterCriteria(p, criteria))
           .map(clonePhoto);
+      }
+
+      // ---- Stapelverarbeitungs-Konsole (Phase 11 Schritt 9) ------------------
+      case "preview_batch_rule": {
+        const criteria = args.criteria as {
+          rating_at_least?: number;
+          flag?: number;
+          color_label?: string;
+          camera_model?: string;
+        };
+        return allPhotos()
+          .filter((p) => matchesFilterCriteria(p, criteria))
+          .map(clonePhoto);
+      }
+      case "apply_batch_rule": {
+        const criteria = args.criteria as {
+          rating_at_least?: number;
+          flag?: number;
+          color_label?: string;
+          camera_model?: string;
+        };
+        const action = args.action as
+          | { kind: "SetRating"; rating: number }
+          | { kind: "SetColorLabel"; color_label: string | null }
+          | { kind: "AddKeyword"; name: string };
+        const matched = allPhotos().filter((p) => matchesFilterCriteria(p, criteria));
+        const items: MockBatchItem[] = [];
+        for (const photo of matched) {
+          if (action.kind === "SetRating") {
+            if (photo.rating !== action.rating) {
+              items.push({ photoId: photo.id, field: "rating", oldValue: photo.rating, newValue: action.rating });
+              photo.rating = action.rating;
+            }
+          } else if (action.kind === "SetColorLabel") {
+            if ((photo.color_label ?? null) !== (action.color_label ?? null)) {
+              items.push({ photoId: photo.id, field: "color_label", oldValue: photo.color_label ?? null, newValue: action.color_label ?? null });
+              photo.color_label = action.color_label;
+            }
+          } else {
+            const list = (photoKeywords[photo.id] ??= []);
+            if (!list.some((k) => k.name === action.name)) {
+              const id = `kw-${nextKeywordId++}`;
+              list.push({ id, name: action.name });
+              items.push({ photoId: photo.id, field: "keyword", oldValue: null, newValue: id });
+            }
+          }
+        }
+        const batchId = `batch-${nextBatchId++}`;
+        batchOperations[batchId] = items;
+        return batchId;
+      }
+      case "undo_batch_operation": {
+        const batchId = args.batchId as string;
+        const items = batchOperations[batchId];
+        if (!items) return 0;
+        for (const item of items) {
+          const photo = findPhoto(item.photoId);
+          if (item.field === "rating") {
+            if (photo) photo.rating = item.oldValue as number;
+          } else if (item.field === "color_label") {
+            if (photo) photo.color_label = item.oldValue as string | null;
+          } else {
+            const list = photoKeywords[item.photoId] ?? [];
+            photoKeywords[item.photoId] = list.filter((k) => k.id !== item.newValue);
+          }
+        }
+        delete batchOperations[batchId];
+        return items.length;
       }
 
       // ---- Bibliothek: Duplikaterkennung (ab Phase 3, Schritt 8.2) ---------

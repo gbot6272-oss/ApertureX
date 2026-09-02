@@ -29,9 +29,9 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use apx_core::{
-    AppError, CollectionFolderId, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId,
-    PhotoId, PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId, StackId, TagRuleId,
-    TemplateId,
+    AppError, BatchOperationId, CollectionFolderId, CollectionId, EditHistoryId, EdlEnvelope,
+    FolderId, KeywordId, PhotoId, PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId,
+    StackId, TagRuleId, TemplateId,
 };
 use rusqlite::Connection;
 use time::OffsetDateTime;
@@ -41,6 +41,7 @@ pub use models::{
     FilterCriteria, Folder, HistoryPosition, Keyword, NewPhoto, Photo, Preset, PresetFolder,
     PresetVersion, Preview, PreviewLevel, Snapshot, Stack, TagRule, Template,
 };
+pub use repository::batch::BatchAction;
 pub use repository::share::ShareDiff;
 
 pub struct Catalog {
@@ -743,6 +744,34 @@ impl Catalog {
     pub fn list_duplicate_photo_groups(&self) -> Result<Vec<Vec<Photo>>> {
         let conn = self.lock()?;
         repository::photos::list_duplicate_groups(&conn)
+    }
+
+    // ---- Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
+    // DECISIONS.md ADR-0038) -------------------------------------------------
+
+    /// Fotos, die `criteria` treffen würden — schreibt nichts.
+    pub fn preview_batch_rule(&self, criteria: &FilterCriteria) -> Result<Vec<Photo>> {
+        let conn = self.lock()?;
+        repository::batch::preview_batch_rule(&conn, criteria)
+    }
+
+    /// Wendet `action` auf alle `criteria`-treffenden Fotos an und
+    /// journalisiert jede tatsächliche Änderung — siehe
+    /// `repository::batch`s Moduldoku.
+    pub fn apply_batch_rule(
+        &self,
+        criteria: &FilterCriteria,
+        action: &BatchAction,
+    ) -> Result<BatchOperationId> {
+        let conn = self.lock()?;
+        repository::batch::apply_batch_rule(&conn, criteria, action, OffsetDateTime::now_utc())
+    }
+
+    /// Macht jede in `batch_id` journalisierte Änderung einzeln rückgängig.
+    /// Gibt die Zahl tatsächlich rückgängig gemachter Änderungen zurück.
+    pub fn undo_batch_operation(&self, batch_id: BatchOperationId) -> Result<usize> {
+        let conn = self.lock()?;
+        repository::batch::undo_batch_operation(&conn, batch_id)
     }
 
     // ---- Vorlagen (Phase 8 Schritt 8) --------------------------------------

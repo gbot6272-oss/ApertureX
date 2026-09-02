@@ -24,6 +24,7 @@ export const en: Record<keyof typeof de, string> = {
   "header.group.templates": "Templates",
   "header.templates": "Templates…",
   "header.organize": "Organize…",
+  "header.batchConsole": "Batch console…",
   "header.metadata": "Metadata…",
   "header.group.advanced": "Advanced",
   "header.stacking": "Stacking…",

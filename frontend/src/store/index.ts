@@ -40,6 +40,7 @@ import type { SoftProofIntent, SoftProofProfile } from "../lib/softProof";
 import * as api from "../lib/tauri";
 import type {
   AiSettingsDto,
+  BatchAction,
   BookOptions,
   BookOutcomeDto,
   CatalogStatusDto,
@@ -1244,6 +1245,20 @@ interface LibraryBacklogSlice {
   perceptualDuplicateGroups: PhotoDto[][];
   perceptualDuplicatesRunning: boolean;
   runPerceptualDuplicateDetection: (maxDistance: number) => Promise<void>;
+
+  /** Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
+   * `DECISIONS.md` ADR-0038): eine Regel = `libraryFilter` (wiederverwendet,
+   * wie beim normalen Filter-Panel) + eine `BatchAction`. */
+  batchPreview: PhotoDto[];
+  batchPreviewLoading: boolean;
+  batchApplying: boolean;
+  /** Stapel-ID des zuletzt angewendeten Vorgangs — `null` nach einem
+   * Undo oder wenn noch keiner angewendet wurde. */
+  batchLastId: string | null;
+  batchLastUndoCount: number | null;
+  previewBatchRule: (criteria: FilterCriteriaDto) => Promise<void>;
+  applyBatchRule: (criteria: FilterCriteriaDto, action: BatchAction) => Promise<void>;
+  undoLastBatchOperation: () => Promise<void>;
 
   /** Personenansicht (Phase 11 Schritt 5, siehe `DECISIONS.md` ADR-0038)
    * — dieselbe „bereits vorhandene Miniaturansicht statt Neudekodierung"-
@@ -4418,6 +4433,56 @@ export const useAppStore = create<AppStore>()(
           state.perceptualDuplicatesRunning = false;
         });
       }
+    },
+
+    batchPreview: [],
+    batchPreviewLoading: false,
+    batchApplying: false,
+    batchLastId: null,
+    batchLastUndoCount: null,
+
+    previewBatchRule: async (criteria) => {
+      set((state) => {
+        state.batchPreviewLoading = true;
+      });
+      try {
+        const photos = await api.previewBatchRule(criteria);
+        set((state) => {
+          state.batchPreview = photos;
+        });
+      } finally {
+        set((state) => {
+          state.batchPreviewLoading = false;
+        });
+      }
+    },
+
+    applyBatchRule: async (criteria, action) => {
+      set((state) => {
+        state.batchApplying = true;
+      });
+      try {
+        const batchId = await api.applyBatchRule(criteria, action);
+        set((state) => {
+          state.batchLastId = batchId;
+          state.batchLastUndoCount = null;
+        });
+        await get().previewBatchRule(criteria);
+      } finally {
+        set((state) => {
+          state.batchApplying = false;
+        });
+      }
+    },
+
+    undoLastBatchOperation: async () => {
+      const { batchLastId } = get();
+      if (!batchLastId) return;
+      const count = await api.undoBatchOperation(batchLastId);
+      set((state) => {
+        state.batchLastUndoCount = count;
+        state.batchLastId = null;
+      });
     },
 
     peopleGroups: [],

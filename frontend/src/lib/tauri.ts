@@ -628,6 +628,35 @@ export function searchAndFilterPhotos(query: string | null, criteria: FilterCrit
   return invoke<PhotoDto[]>("search_and_filter_photos", { query, criteria });
 }
 
+// ---- Bibliothek: Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
+// DECISIONS.md ADR-0038) -----------------------------------------------
+
+/** Spiegelt `apx_catalog::BatchAction` — siehe `apx-app`s
+ * `BatchActionDto`. */
+export type BatchAction =
+  | { kind: "SetRating"; rating: number }
+  | { kind: "SetColorLabel"; color_label: string | null }
+  | { kind: "AddKeyword"; name: string };
+
+/** Fotos, die `criteria` treffen würden — schreibt nichts. */
+export function previewBatchRule(criteria: FilterCriteriaDto): Promise<PhotoDto[]> {
+  return invoke<PhotoDto[]>("preview_batch_rule", { criteria });
+}
+
+/** Wendet `action` auf alle `criteria`-treffenden Fotos an und
+ * journalisiert jede tatsächliche Änderung — gibt die neue Stapel-ID
+ * zurück (für {@link undoBatchOperation}). */
+export function applyBatchRule(criteria: FilterCriteriaDto, action: BatchAction): Promise<string> {
+  return invoke<string>("apply_batch_rule", { criteria, action });
+}
+
+/** Macht jede im Stapel `batchId` journalisierte Änderung einzeln
+ * rückgängig. Gibt die Zahl tatsächlich rückgängig gemachter Änderungen
+ * zurück. */
+export function undoBatchOperation(batchId: string): Promise<number> {
+  return invoke<number>("undo_batch_operation", { batchId });
+}
+
 // ---- Bibliothek: Duplikaterkennung (ab Phase 3, Schritt 8.2) ---------------
 
 /** Gruppen von Fotos mit identischem Inhalt (exakter Hash-Vergleich), siehe

@@ -26,6 +26,7 @@ export const de = {
   "header.group.templates": "Vorlagen",
   "header.templates": "Vorlagen…",
   "header.organize": "Organisieren…",
+  "header.batchConsole": "Stapelverarbeitung…",
   "header.metadata": "Metadaten…",
   "header.group.advanced": "Fortgeschritten",
   "header.stacking": "Stacking…",

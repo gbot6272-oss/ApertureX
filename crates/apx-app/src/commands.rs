@@ -2071,6 +2071,70 @@ pub fn search_and_filter_photos(
     Ok(photos.into_iter().map(PhotoDto::from).collect())
 }
 
+// ---- Bibliothek: Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
+// DECISIONS.md ADR-0038) -----------------------------------------------
+
+/// Eingabe für [`apply_batch_rule`] — spiegelt `apx_catalog::BatchAction`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind")]
+pub enum BatchActionDto {
+    SetRating { rating: u8 },
+    SetColorLabel { color_label: Option<String> },
+    AddKeyword { name: String },
+}
+
+impl From<BatchActionDto> for apx_catalog::BatchAction {
+    fn from(dto: BatchActionDto) -> Self {
+        match dto {
+            BatchActionDto::SetRating { rating } => Self::SetRating(rating),
+            BatchActionDto::SetColorLabel { color_label } => Self::SetColorLabel(color_label),
+            BatchActionDto::AddKeyword { name } => Self::AddKeyword(name),
+        }
+    }
+}
+
+/// Fotos, die `criteria` treffen würden — schreibt nichts (Trockenlauf-
+/// Vorschau vor dem eigentlichen Anwenden, siehe `BatchConsoleDialog.tsx`).
+#[tauri::command]
+pub fn preview_batch_rule(
+    state: State<'_, AppState>,
+    criteria: FilterCriteriaDto,
+) -> Result<Vec<PhotoDto>, String> {
+    let photos = state
+        .catalog
+        .preview_batch_rule(&criteria.into())
+        .map_err(|err| err.to_string())?;
+    Ok(photos.into_iter().map(PhotoDto::from).collect())
+}
+
+/// Wendet `action` auf alle `criteria`-treffenden Fotos an und
+/// journalisiert jede tatsächliche Änderung — gibt die neue Stapel-ID
+/// (für [`undo_batch_operation`]) als String zurück.
+#[tauri::command]
+pub fn apply_batch_rule(
+    state: State<'_, AppState>,
+    criteria: FilterCriteriaDto,
+    action: BatchActionDto,
+) -> Result<String, String> {
+    let batch_id = state
+        .catalog
+        .apply_batch_rule(&criteria.into(), &action.into())
+        .map_err(|err| err.to_string())?;
+    Ok(batch_id.to_string())
+}
+
+/// Macht jede in `batch_id` journalisierte Änderung einzeln rückgängig.
+/// Gibt die Zahl tatsächlich rückgängig gemachter Änderungen zurück.
+#[tauri::command]
+pub fn undo_batch_operation(state: State<'_, AppState>, batch_id: String) -> Result<usize, String> {
+    let batch_id: apx_core::BatchOperationId =
+        batch_id.parse().map_err(|err: apx_core::AppError| err.to_string())?;
+    state
+        .catalog
+        .undo_batch_operation(batch_id)
+        .map_err(|err| err.to_string())
+}
+
 // ---- Bibliothek: Duplikaterkennung (ab Phase 3, Schritt 8.2) --------------
 
 /// Gruppen von Fotos mit identischem Inhalt (exakter Hash-Vergleich), siehe

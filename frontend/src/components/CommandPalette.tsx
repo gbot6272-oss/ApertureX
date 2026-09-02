@@ -71,6 +71,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       { id: "fn:web", label: "Web…", run: openWebDialog },
       { id: "fn:templates", label: "Vorlagen…", run: () => requestCommand("templates") },
       { id: "fn:organize", label: "Organisieren…", run: () => requestCommand("organize") },
+      { id: "fn:batch-console", label: "Stapelverarbeitung…", run: () => requestCommand("batch-console") },
       { id: "fn:stacking", label: "Stacking…", run: () => requestCommand("stacking") },
       { id: "fn:script-plugin", label: "Skript & Plugins…", run: () => requestCommand("script-plugin") },
       { id: "fn:share", label: "Kollaboration…", run: () => requestCommand("share") },

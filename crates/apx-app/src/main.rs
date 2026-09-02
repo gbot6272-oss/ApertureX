@@ -13,12 +13,52 @@ mod protocol;
 mod reconcile;
 mod state;
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use apx_catalog::Catalog;
 use apx_core::AppPaths;
 use state::AppState;
+
+/// Sucht die ONNX-Runtime-Bibliothek für `apx_ai::inpaint::
+/// init_environment` (Phase 13 Schritt 1, siehe `DECISIONS.md` ADR-0040)
+/// — `apx-ai` nutzt `ort`s `load-dynamic`-Feature statt `download-binaries`
+/// (siehe `apx-ai/Cargo.toml`s Begründung: funktioniert überall, verlangt
+/// aber, dass die Bibliothek zur Laufzeit gefunden wird):
+/// 1. `ORT_DYLIB_PATH`, falls gesetzt und die Datei existiert — derselbe
+///    Override, den `ort` selbst dokumentiert, z. B. für Entwicklung oder
+///    diese Sandbox (siehe `apx-ai/src/inpaint.rs`s Testhilfsfunktion).
+/// 2. Eine Datei mit dem plattformüblichen Namen direkt neben der
+///    ausführbaren Datei — der vorgesehene Ort für ein künftiges
+///    Installer-Bundling (siehe `PLAN.md` Phase 10 Schritt 11).
+///
+/// **Ehrliche Lücke:** das eigentliche Bundling (die Laufzeitbibliothek
+/// tatsächlich in den Installer packen) ist noch nicht umgesetzt — ohne
+/// diesen Schritt findet ein frisch installiertes Aperture X keine
+/// Laufzeit. `None` ist deshalb ein erwarteter, kein fehlerhafter Zustand:
+/// `main()` initialisiert die ONNX-Umgebung dann einfach nicht, KI-
+/// Ausfüllen bleibt mit einer klaren Fehlermeldung aus statt abzustürzen
+/// (derselbe „fehlt halt"-Umgang wie bei einem fehlenden GPU-Adapter an
+/// anderer Stelle in diesem Projekt).
+fn find_onnx_runtime_dylib() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("ORT_DYLIB_PATH") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let filename = if cfg!(target_os = "windows") {
+        "onnxruntime.dll"
+    } else if cfg!(target_os = "macos") {
+        "libonnxruntime.dylib"
+    } else {
+        "libonnxruntime.so"
+    };
+    let candidate = exe_dir.join(filename);
+    candidate.exists().then_some(candidate)
+}
 
 /// Der einzige Hintergrund-Worker für die Export-Warteschlange (Phase 8
 /// Schritt 2, siehe `state.rs`s Moduldoku) — fragt `queue` in einer
@@ -170,6 +210,20 @@ fn main() {
         .expect("wgpu-Gerätekontext konnte nicht aufgebaut werden (weder Hardware- noch Software-Adapter verfügbar)");
     tracing::info!(adapter = %pipeline.adapter_info.name, backend = ?pipeline.adapter_info.backend, "wgpu-Gerätekontext bereit");
 
+    // KI-Ausfüllen (Phase 13 Schritt 1, siehe `find_onnx_runtime_dylib`s
+    // Moduldoku) — bewusst kein `expect()`: eine fehlende ONNX-Laufzeit
+    // ist ein erwarteter Zustand (noch kein Installer-Bundling), keiner,
+    // der den ganzen Programmstart verhindern sollte.
+    match find_onnx_runtime_dylib() {
+        Some(dylib) => match apx_ai::inpaint::init_environment(&dylib) {
+            Ok(()) => tracing::info!(dylib = %dylib.display(), "ONNX-Laufzeit initialisiert (KI-Ausfüllen verfügbar)"),
+            Err(err) => tracing::warn!(%err, "ONNX-Laufzeit konnte nicht initialisiert werden — KI-Ausfüllen bleibt deaktiviert"),
+        },
+        None => tracing::info!(
+            "keine ONNX-Laufzeit gefunden — KI-Ausfüllen bleibt deaktiviert (siehe find_onnx_runtime_dylib-Moduldoku)"
+        ),
+    }
+
     let builder = protocol::register(tauri::Builder::default());
 
     let catalog = Arc::new(catalog);
@@ -318,6 +372,9 @@ fn main() {
             commands::detect_sensor_spots,
             commands::get_ai_settings,
             commands::set_anthropic_api_key,
+            commands::download_inpainting_model,
+            commands::clear_inpainting_model_path,
+            commands::run_ai_inpaint,
             commands::get_ui_settings,
             commands::set_ui_settings,
             commands::get_watched_folder_settings,

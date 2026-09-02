@@ -95,6 +95,10 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     repairSourceSuggestion: { x: 0.2, y: 0.2 },
     sensorSpots: [{ x: 0.4, y: 0.4, radius: 0.03, strength: 0.7 }] as Array<{ x: number; y: number; radius: number; strength: number }>,
     anthropicApiKey: null as string | null,
+    // Phase 13 Schritt 1 (ADR-0040): `null` = kein Modell heruntergeladen
+    // (Testdefault) — ein Test, der den heruntergeladenen Zustand prüfen
+    // will, überschreibt das per `setMockFixtures`.
+    inpaintingModelPath: null as string | null,
     // Phase 10 Schritt 1/9: `onboarding_seen: true` als Testdefault, damit
     // das automatische Onboarding-Overlay (App.tsx) nicht in jedem
     // e2e-Test ungefragt aufpoppt — ein Test, der das Onboarding gezielt
@@ -520,6 +524,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       repairSourceSuggestion: { x: number; y: number };
       sensorSpots: Array<{ x: number; y: number; radius: number; strength: number }>;
       anthropicApiKey: string | null;
+      inpaintingModelPath: string | null;
       uiSettings: {
         theme: "dark" | "light";
         accent_color: string | null;
@@ -1260,7 +1265,35 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "detect_sensor_spots":
         return fixtures.sensorSpots;
       case "get_ai_settings":
-        return { anthropic_api_key: fixtures.anthropicApiKey };
+        return {
+          anthropic_api_key: fixtures.anthropicApiKey,
+          inpainting_model_path: fixtures.inpaintingModelPath,
+        };
+      case "download_inpainting_model":
+        fixtures.inpaintingModelPath = "/mock/models/lama_fp32.onnx";
+        return fixtures.inpaintingModelPath;
+      case "clear_inpainting_model_path":
+        fixtures.inpaintingModelPath = null;
+        return null;
+      case "run_ai_inpaint": {
+        const w = 4;
+        const h = 4;
+        // Reines Grau, 4x4 — reicht als Platzhalter-Ergebnis für e2e-Tests,
+        // die nur den Anwenden-Fluss (Strich bekommt ein `ai_fill`) prüfen,
+        // nicht die tatsächliche Bildqualität.
+        const pixels = new Uint8Array(w * h * 3).fill(128);
+        let binary = "";
+        for (const byte of pixels) binary += String.fromCharCode(byte);
+        return {
+          x: args.x,
+          y: args.y,
+          width: args.width,
+          height: args.height,
+          bitmap_width: w,
+          bitmap_height: h,
+          pixels_base64: btoa(binary),
+        };
+      }
       case "get_ui_settings":
         return fixtures.uiSettings;
       case "set_ui_settings":

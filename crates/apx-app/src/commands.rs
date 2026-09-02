@@ -2574,6 +2574,9 @@ pub struct AiSettingsDto {
     /// `type="password"`, nicht serverseitig verborgen — ein lokaler,
     /// nicht synchronisierter Einzelnutzer-Schlüssel).
     pub anthropic_api_key: Option<String>,
+    /// `Some`, sobald der Nutzer den Download bestätigt und er
+    /// erfolgreich war (Phase 13 Schritt 1, siehe [`download_inpainting_model`]).
+    pub inpainting_model_path: Option<String>,
 }
 
 #[tauri::command]
@@ -2582,6 +2585,7 @@ pub fn get_ai_settings(state: State<'_, AppState>) -> Result<AiSettingsDto, Stri
         .map_err(|err| err.to_string())?;
     Ok(AiSettingsDto {
         anthropic_api_key: settings.ai.anthropic_api_key,
+        inpainting_model_path: settings.ai.inpainting_model_path,
     })
 }
 
@@ -2595,6 +2599,193 @@ pub fn set_anthropic_api_key(
     let mut settings = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
     settings.ai.anthropic_api_key = api_key.filter(|key| !key.trim().is_empty());
     settings.save(&path).map_err(|err| err.to_string())
+}
+
+// ---- KI: Ausfüllen (LaMa-Inpainting, Phase 13 Schritt 1) -------------------
+//
+// Opt-in, kein Bundling im Installer (siehe `DECISIONS.md` ADR-0040 und
+// `apx_core::settings::AiSettings::inpainting_model_path`s Moduldoku) —
+// derselbe Ansatz wie der Anthropic-API-Schlüssel oben: der Nutzer
+// bestätigt den ~208-MB-Download ausdrücklich im Einstellungsdialog,
+// bevor irgendetwas heruntergeladen wird.
+
+/// Öffentliche Download-URL des von `DECISIONS.md` ADR-0040 recherchierten
+/// Modells (`Carve/LaMa-ONNX`, Apache-2.0, Hugging Face). **Nicht in
+/// dieser Sitzung erreichbar/verifiziert** — `huggingface.co` ist von
+/// dieser Entwicklungs-Sandbox aus blockiert (siehe `apx-ai::inpaint`s
+/// Moduldoku) — die URL folgt Hugging Faces dokumentiertem
+/// `resolve/main/<datei>`-Schema für Rohdatei-Downloads, wurde aber nicht
+/// tatsächlich abgerufen. Vor Produktivnutzung mit erreichbarem
+/// `huggingface.co` einmal nachprüfen.
+const LAMA_MODEL_URL: &str = "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx";
+
+/// Lädt das LaMa-Inpainting-Modell herunter (siehe [`LAMA_MODEL_URL`]s
+/// Vorbehalt) nach `AppPaths::models_dir()` und hinterlegt den Pfad in den
+/// Einstellungen. **Keine Hash-Prüfung** — der auf Hugging Face
+/// veröffentlichte Datei-Hash wurde in dieser Sitzung nie tatsächlich
+/// abgerufen (siehe oben), eine erfundene Prüfsumme wäre schlimmer als
+/// keine (stiller Fabrikations-Bug statt einer ehrlichen Lücke). Wer
+/// diesen Command auf einer Maschine mit erreichbarem `huggingface.co`
+/// zuerst nutzt, sollte den echten Hash ergänzen.
+#[tauri::command]
+pub async fn download_inpainting_model(state: State<'_, AppState>) -> Result<String, String> {
+    let response = reqwest::get(LAMA_MODEL_URL)
+        .await
+        .map_err(|err| format!("Download von '{LAMA_MODEL_URL}' fehlgeschlagen: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Download von '{LAMA_MODEL_URL}' fehlgeschlagen: HTTP {}",
+            response.status()
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| format!("Antwort konnte nicht gelesen werden: {err}"))?;
+
+    let dest_dir = state.paths.models_dir();
+    std::fs::create_dir_all(&dest_dir).map_err(|err| err.to_string())?;
+    let dest_path = dest_dir.join("lama_fp32.onnx");
+    std::fs::write(&dest_path, &bytes).map_err(|err| err.to_string())?;
+
+    let path_string = dest_path.to_string_lossy().to_string();
+    let settings_path = state.paths.settings_file();
+    let mut settings =
+        apx_core::Settings::load_or_default(&settings_path).map_err(|err| err.to_string())?;
+    settings.ai.inpainting_model_path = Some(path_string.clone());
+    settings
+        .save(&settings_path)
+        .map_err(|err| err.to_string())?;
+
+    Ok(path_string)
+}
+
+/// Entfernt den hinterlegten Modellpfad (löscht die Datei selbst nicht —
+/// der Nutzer kann sie manuell entfernen, dieselbe Zurückhaltung wie beim
+/// Löschen anderer nutzergesteuerter lokaler Dateien in diesem Projekt).
+#[tauri::command]
+pub fn clear_inpainting_model_path(state: State<'_, AppState>) -> Result<(), String> {
+    let path = state.paths.settings_file();
+    let mut settings = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    settings.ai.inpainting_model_path = None;
+    settings.save(&path).map_err(|err| err.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AiFillPatchDto {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    /// Base64-kodiertes interleaved-RGB-`u8`-Ergebnis, `bitmap_width *
+    /// bitmap_height * 3` Bytes nach dem Dekodieren — dasselbe
+    /// Übertragungsmuster wie `AiMaskAlphaDto::alpha_base64`.
+    pub pixels_base64: String,
+}
+
+/// Führt echte LaMa-Inferenz für ein normiertes Rechteck (`x`/`y`/`width`/
+/// `height`, `0.0..=1.0`) auf `photo_id` aus (Phase 13 Schritt 1, siehe
+/// `DECISIONS.md` ADR-0040) — das Frontend ruft dies erst nach
+/// ausdrücklichem „Anwenden" auf einem gemalten `RepairMode::AiInpaint`-
+/// Strich auf (siehe `apx-pipeline::edl::v2::AiFillPatch`s Moduldoku),
+/// nicht bei jedem Regler-Tick.
+///
+/// Läuft auf derselben capped Analyse-Auflösung (`apx_ai::segmentation::
+/// ANALYSIS_MAX_EDGE`) wie jede andere KI-Bildanalyse in diesem Projekt —
+/// das komplette Rechteck gilt als „auszufüllen" (Maske `255` überall
+/// innerhalb, kein zusätzliches Federn: LaMa selbst lernt einen weichen
+/// Übergang, siehe `apx_ai::inpaint`s Moduldoku).
+///
+/// **Ehrliche Grenze:** läuft auf dem linearen Kamera-RGB-Dekodierergebnis
+/// (`decode_linear`, derselbe Farbraum wie [`generate_ai_mask`]/
+/// [`suggest_repair_source`]), nicht auf entwickelten sRGB-Pixeln — LaMa
+/// wurde vermutlich auf gewöhnlichen (sRGB-artigen) Fotos trainiert, ein
+/// linearer Farbraum ist eine Näherung, keine exakte Übereinstimmung mit
+/// den Trainingsdaten (dieselbe Art Kompromiss wie bei jeder anderen
+/// KI-Heuristik dieses Projekts, die auf demselben Dekodierergebnis
+/// arbeitet).
+#[tauri::command]
+pub fn run_ai_inpaint(
+    state: State<'_, AppState>,
+    photo_id: String,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> Result<AiFillPatchDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let model_path = settings
+        .ai
+        .inpainting_model_path
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| {
+            "Kein KI-Ausfüllen-Modell heruntergeladen — siehe Einstellungen → KI.".to_string()
+        })?;
+
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let px = (x * linear.width as f32)
+        .round()
+        .clamp(0.0, linear.width as f32 - 1.0) as u32;
+    let py = (y * linear.height as f32)
+        .round()
+        .clamp(0.0, linear.height as f32 - 1.0) as u32;
+    let pw = (width * linear.width as f32)
+        .round()
+        .max(1.0)
+        .min((linear.width - px) as f32) as u32;
+    let ph = (height * linear.height as f32)
+        .round()
+        .max(1.0)
+        .min((linear.height - py) as f32) as u32;
+
+    let mut crop_u8 = vec![0u8; (pw as usize) * (ph as usize) * 3];
+    for row in 0..ph {
+        for col in 0..pw {
+            let src_idx = ((py + row) as usize * linear.width as usize + (px + col) as usize) * 3;
+            let dst_idx = (row as usize * pw as usize + col as usize) * 3;
+            for c in 0..3 {
+                let value = linear.pixels[src_idx + c].clamp(0.0, 1.0);
+                crop_u8[dst_idx + c] = (value * 255.0).round() as u8;
+            }
+        }
+    }
+    // Vollflächige Maske — das gesamte übergebene Rechteck gilt als
+    // auszufüllen (siehe Funktionsdoku).
+    let mask = vec![255u8; (pw as usize) * (ph as usize)];
+
+    // Session wird pro Aufruf frisch geladen statt in `AppState` gehalten
+    // — einfacher, aber langsamer bei wiederholter Nutzung (das Modell
+    // wird bei jedem „Anwenden"-Klick neu von der Platte gelesen und der
+    // ONNX-Graph neu aufgebaut). Für einen Nutzer-ausgelösten, nicht
+    // performance-kritischen Ein-Klick-Vorgang akzeptabel; eine gehaltene
+    // Session in `AppState` wäre eine mögliche spätere Optimierung.
+    let mut session = apx_ai::inpaint::InpaintSession::load(Path::new(&model_path))
+        .map_err(|err| err.to_string())?;
+    let filled = session
+        .fill_rgb8(&crop_u8, pw, ph, &mask)
+        .map_err(|err| err.to_string())?;
+
+    Ok(AiFillPatchDto {
+        x,
+        y,
+        width,
+        height,
+        bitmap_width: pw,
+        bitmap_height: ph,
+        pixels_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &filled),
+    })
 }
 
 // ---- UI: Einstellungen (Phase 10 Schritt 1) --------------------------------

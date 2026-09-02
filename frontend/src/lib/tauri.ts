@@ -766,6 +766,9 @@ export function detectSensorSpots(photoId: string, sensitivity: number, maxSpots
 
 export interface AiSettingsDto {
   anthropic_api_key: string | null;
+  /** `null`, solange der Nutzer den Download nicht bestätigt hat (Phase 13
+   * Schritt 1, siehe `DECISIONS.md` ADR-0040). */
+  inpainting_model_path: string | null;
 }
 
 export function getAiSettings(): Promise<AiSettingsDto> {
@@ -775,6 +778,46 @@ export function getAiSettings(): Promise<AiSettingsDto> {
 /** `null`/leerer String löscht den hinterlegten Schlüssel. */
 export function setAnthropicApiKey(apiKey: string | null): Promise<void> {
   return invoke<void>("set_anthropic_api_key", { apiKey: apiKey || null });
+}
+
+// ---- KI: Ausfüllen (LaMa-Inpainting, Phase 13 Schritt 1) -------------------
+
+/** Lädt das ~208-MB-Modell herunter (Apache-2.0, `Carve/LaMa-ONNX`, siehe
+ * `DECISIONS.md` ADR-0040) — löst erst nach ausdrücklicher Nutzerbestätigung
+ * (Einstellungsdialog-Button). Liefert den lokalen Zielpfad zurück. */
+export function downloadInpaintingModel(): Promise<string> {
+  return invoke<string>("download_inpainting_model");
+}
+
+/** Entfernt nur den hinterlegten Pfad — löscht die heruntergeladene Datei
+ * selbst nicht (der Nutzer kann sie manuell entfernen). */
+export function clearInpaintingModelPath(): Promise<void> {
+  return invoke<void>("clear_inpainting_model_path");
+}
+
+export interface AiFillPatchDto {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  bitmap_width: number;
+  bitmap_height: number;
+  /** Base64-kodiertes interleaved-RGB-`u8`-Ergebnis. */
+  pixels_base64: string;
+}
+
+/** Führt echte LaMa-Inferenz für ein normiertes Rechteck aus (`x`/`y`/
+ * `width`/`height`, `0.0..=1.0`) — braucht ein zuvor heruntergeladenes
+ * Modell (siehe [`downloadInpaintingModel`]), scheitert sonst mit einer
+ * klaren Fehlermeldung. */
+export function runAiInpaint(
+  photoId: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): Promise<AiFillPatchDto> {
+  return invoke<AiFillPatchDto>("run_ai_inpaint", { photoId, x, y, width, height });
 }
 
 // ---- UI-Einstellungen (Phase 10 Schritt 1) --------------------------------

@@ -151,6 +151,16 @@ impl AppPaths {
     pub fn tether_download_dir(&self) -> PathBuf {
         self.data_dir.join("tether")
     }
+
+    /// Zielverzeichnis für vom Nutzer opt-in heruntergeladene KI-Modelle
+    /// (Phase 13, siehe `DECISIONS.md` ADR-0040 — z. B. das LaMa-
+    /// Inpainting-ONNX-Modell). Unterhalb von `data_dir`, nicht
+    /// `cache_dir`: ein Modell bleibt hier bis der Nutzer es bewusst
+    /// löscht, ist also kein wegwerfbarer Cache (dieselbe Begründung wie
+    /// `tether_download_dir`).
+    pub fn models_dir(&self) -> PathBuf {
+        self.data_dir.join("models")
+    }
 }
 
 fn create_dir_all(dir: &Path) -> Result<()> {

@@ -579,6 +579,15 @@ interface DevelopSlice {
   addRepairStroke: (targetPath: RepairPoint[]) => void;
   /** Entfernt einen Reparatur-Strich per Index und committet sofort. */
   removeRepairStroke: (index: number) => void;
+  /** Läuft echte LaMa-Inferenz für einen bereits gemalten
+   * `RepairMode::AiInpaint`-Strich (Phase 13 Schritt 1, siehe
+   * `DECISIONS.md` ADR-0040) — das eigentliche „Anwenden": bis dahin ist
+   * der Strich (kein gesetztes `ai_fill`) ein reiner No-Op. `index`
+   * bezieht sich auf `developEdl.repair`. */
+  runAiInpaintForStroke: (index: number) => Promise<void>;
+  /** Läuft während [`runAiInpaintForStroke`] — der Index des gerade
+   * berechneten Strichs, sonst `null`. */
+  aiInpaintLoadingIndex: number | null;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
    * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
    * bei jedem Zwischenwert). */
@@ -1081,6 +1090,11 @@ interface AiSlice {
   aiSettings: AiSettingsDto | null;
   loadAiSettings: () => Promise<void>;
   saveAnthropicApiKey: (apiKey: string) => Promise<void>;
+  /** Lädt das opt-in LaMa-Inpainting-Modell herunter (Phase 13 Schritt 1,
+   * siehe `DECISIONS.md` ADR-0040) — derselbe „Nutzer bestätigt zuerst
+   * ausdrücklich"-Ansatz wie beim Anthropic-Schlüssel. */
+  downloadInpaintingModel: () => Promise<void>;
+  inpaintingModelDownloading: boolean;
   presetGeneratorLoading: boolean;
   presetGeneratorPreview: PresetEdlSubset[];
   /** Index innerhalb `presetGeneratorPreview`, der gerade in der
@@ -2382,12 +2396,16 @@ export const useAppStore = create<AppStore>()(
 
     addRepairStroke: (targetPath) => {
       const { repairPendingSource, repairDraftMode, repairDraftRadius, repairDraftFeather, repairDraftOpacity } = get();
-      // Inhaltsbasiertes Füllen (Phase 7) sucht seinen Füllinhalt selbst
-      // aus der Bildumgebung — anders als Klonen/Reparieren braucht es
+      // Inhaltsbasiertes Füllen (Phase 7) und KI-Ausfüllen (Phase 13
+      // Schritt 1) suchen ihren Füllinhalt selbst (aus der Bildumgebung
+      // bzw. per Inferenz) — anders als Klonen/Reparieren brauchen sie
       // keinen vom Nutzer gesetzten Quellpunkt (`source` wird von
-      // `apx-pipeline` für diesen Modus ignoriert, siehe ADR-0033 Punkt 4).
-      const isContentAwareFill = repairDraftMode === "ContentAwareFill";
-      if ((!repairPendingSource && !isContentAwareFill) || targetPath.length === 0) return;
+      // `apx-pipeline` für beide Modi ignoriert, siehe ADR-0033 Punkt 4
+      // bzw. ADR-0040). Ein frisch angelegter `AiInpaint`-Strich hat noch
+      // kein `ai_fill` — er bleibt ein No-Op, bis `runAiInpaintForStroke`
+      // ihn nach einem expliziten „Anwenden" berechnet.
+      const needsNoSource = repairDraftMode === "ContentAwareFill" || repairDraftMode === "AiInpaint";
+      if ((!repairPendingSource && !needsNoSource) || targetPath.length === 0) return;
       set((state) => {
         state.developEdl.repair.push({
           mode: repairDraftMode,
@@ -2407,6 +2425,55 @@ export const useAppStore = create<AppStore>()(
         state.developEdl.repair.splice(index, 1);
       });
       void get().commitDevelopEdit();
+    },
+
+    aiInpaintLoadingIndex: null,
+
+    runAiInpaintForStroke: async (index) => {
+      const { selectedPhotoId } = get();
+      const stroke = get().developEdl.repair[index];
+      if (!selectedPhotoId || !stroke || stroke.mode !== "AiInpaint") return;
+
+      // Normiertes Zielrechteck: Bounding-Box des gemalten Pfads, um
+      // `radius + feather` erweitert (derselbe Bereich, den der Pinsel
+      // visuell abdeckt) — dieselbe Marge wie `RepairOverlay.tsx`s
+      // Vorschau-Darstellung eines Strichs.
+      const margin = stroke.radius + stroke.feather;
+      const xs = stroke.target_path.map((p) => p.x);
+      const ys = stroke.target_path.map((p) => p.y);
+      const x0 = Math.max(0, Math.min(...xs) - margin);
+      const y0 = Math.max(0, Math.min(...ys) - margin);
+      const x1 = Math.min(1, Math.max(...xs) + margin);
+      const y1 = Math.min(1, Math.max(...ys) + margin);
+
+      set((state) => {
+        state.aiInpaintLoadingIndex = index;
+      });
+      try {
+        const dto = await api.runAiInpaint(selectedPhotoId, x0, y0, x1 - x0, y1 - y0);
+        set((state) => {
+          const current = state.developEdl.repair[index];
+          if (!current || current.mode !== "AiInpaint") return; // Strich wurde zwischenzeitlich entfernt.
+          current.ai_fill = {
+            x: dto.x,
+            y: dto.y,
+            width: dto.width,
+            height: dto.height,
+            bitmap_width: dto.bitmap_width,
+            bitmap_height: dto.bitmap_height,
+            pixels: base64ToByteArray(dto.pixels_base64),
+          };
+        });
+        void get().commitDevelopEdit("KI-Ausfüllen angewendet");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.aiInpaintLoadingIndex = null;
+        });
+      }
     },
 
     colorMixerPickerActive: false,
@@ -3929,6 +3996,26 @@ export const useAppStore = create<AppStore>()(
       } catch (err) {
         set((state) => {
           state.catalogError = String(err);
+        });
+      }
+    },
+
+    inpaintingModelDownloading: false,
+
+    downloadInpaintingModel: async () => {
+      set((state) => {
+        state.inpaintingModelDownloading = true;
+      });
+      try {
+        await api.downloadInpaintingModel();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.inpaintingModelDownloading = false;
         });
       }
     },

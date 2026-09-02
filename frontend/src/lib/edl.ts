@@ -659,12 +659,36 @@ export const GRID_OVERLAY_OPTIONS: ReadonlyArray<{ value: GridOverlay; label: st
 
 /** `ContentAwareFill` seit Phase 7 (siehe `DECISIONS.md` ADR-0033 Punkt
  * 4) — `source` wird für diesen Modus ignoriert, der Füllinhalt kommt
- * aus der Bildumgebung statt einem manuell gesetzten Quellpunkt. */
-export type RepairMode = "Clone" | "Heal" | "ContentAwareFill";
+ * aus der Bildumgebung statt einem manuell gesetzten Quellpunkt.
+ * `AiInpaint` seit Phase 13 Schritt 1 (siehe ADR-0040) — ebenfalls ohne
+ * `source`, der Füllinhalt kommt aus einer einmalig per echtem
+ * LaMa-Modell berechneten [`AiFillPatch`], die erst nach einem
+ * ausdrücklichen „Anwenden" (Tauri-Command, siehe `store/index.ts`)
+ * gesetzt wird — bis dahin ist der Strich ein No-Op. */
+export type RepairMode = "Clone" | "Heal" | "ContentAwareFill" | "AiInpaint";
 
 export interface RepairPoint {
   x: number;
   y: number;
+}
+
+/** Ergebnis eines einmaligen KI-Ausfüllen-Laufs (Phase 13 Schritt 1, siehe
+ * `DECISIONS.md` ADR-0040) — `x`/`y`/`width`/`height` sind normierte
+ * Bildkoordinaten (`0.0..=1.0`, wie `RepairPoint`/`RepairStroke.radius`),
+ * die gespeicherte `pixels`-Bitmap hat dagegen ihre eigene, von der
+ * Analyse-Auflösung vorgegebene feste Größe (`bitmap_width`/
+ * `bitmap_height`) — `stages::repair` skaliert sie beim Einsetzen
+ * bilinear auf die Zielrechteck-Größe hoch (siehe `edl/v2.rs`s
+ * `AiFillPatch`-Kommentar). `pixels` ist interleaved RGB (`0..=255`),
+ * `bitmap_width * bitmap_height * 3` Zahlen lang. */
+export interface AiFillPatch {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  bitmap_width: number;
+  bitmap_height: number;
+  pixels: number[];
 }
 
 /** Ein einzelner Klon-/Reparatur-Pinselzug. Bewusst **nicht** Teil von
@@ -676,6 +700,10 @@ export interface RepairStroke {
   radius: number;
   feather: number;
   opacity: number;
+  /** Nur für `mode === "AiInpaint"` relevant — `undefined`/fehlend liest
+   * im Rust-Backend als `None` (additives Feld, siehe `edl/v2.rs`s
+   * `RepairStroke::ai_fill`-Kommentar). */
+  ai_fill?: AiFillPatch;
 }
 
 // ---- Masken (Phase 6, siehe DECISIONS.md ADR-0032) --------------------------

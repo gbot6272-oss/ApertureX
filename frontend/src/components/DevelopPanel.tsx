@@ -104,6 +104,10 @@ const REPAIR_MODE_OPTIONS: ReadonlyArray<{ value: RepairMode; label: string }> =
   // Quellpunkt nötig, siehe RepairOverlay.tsx/store/index.ts's
   // addRepairStroke.
   { value: "ContentAwareFill", label: "Inhaltsbasiert füllen" },
+  // KI-Ausfüllen (Phase 13 Schritt 1, ADR-0040): ebenfalls kein
+  // Quellpunkt, braucht aber zusätzlich einen expliziten „Anwenden"-Klick
+  // (`runAiInpaintForStroke`) — der Strich bleibt bis dahin ein No-Op.
+  { value: "AiInpaint", label: "KI-Ausfüllen" },
 ];
 
 // ---- Preset-Stärke (Phase 5 Schritt 5, siehe SPEC.md §3.5) -----------------
@@ -273,6 +277,12 @@ export function DevelopPanel() {
   const repairPendingSource = useAppStore((s) => s.repairPendingSource);
   const cancelRepairSource = useAppStore((s) => s.cancelRepairSource);
   const removeRepairStroke = useAppStore((s) => s.removeRepairStroke);
+  const runAiInpaintForStroke = useAppStore((s) => s.runAiInpaintForStroke);
+  const aiInpaintLoadingIndex = useAppStore((s) => s.aiInpaintLoadingIndex);
+  const aiSettings = useAppStore((s) => s.aiSettings);
+  const loadAiSettings = useAppStore((s) => s.loadAiSettings);
+  const downloadInpaintingModel = useAppStore((s) => s.downloadInpaintingModel);
+  const inpaintingModelDownloading = useAppStore((s) => s.inpaintingModelDownloading);
   // Reparatur-Erweiterungen (Phase 7 Schritt 3, siehe DECISIONS.md ADR-0033).
   const autoSourceModeActive = useAppStore((s) => s.autoSourceModeActive);
   const toggleAutoSourceMode = useAppStore((s) => s.toggleAutoSourceMode);
@@ -291,6 +301,18 @@ export function DevelopPanel() {
     }
     previousRegionCount.current = colorMixer.regions.length;
   }, [colorMixer.regions.length]);
+
+  // `aiSettings` (Phase 13 Schritt 1) wird sonst nur beim Öffnen des
+  // Presets-Panels geladen (siehe `PresetsPanel.tsx`s
+  // `AiPresetGeneratorSection`) — hier zusätzlich einmalig, sobald der
+  // Nutzer den KI-Ausfüllen-Modus wählt, damit der Download-Status ohne
+  // Umweg über das Presets-Panel sichtbar ist.
+  useEffect(() => {
+    if (repairDraftMode === "AiInpaint" && !aiSettings) {
+      void loadAiSettings();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repairDraftMode]);
 
   useEffect(() => {
     if (!open) return;
@@ -1259,10 +1281,12 @@ export function DevelopPanel() {
               <p className="text-xs text-text-muted">
                 {repairDraftMode === "ContentAwareFill"
                   ? "Ziel im Bild malen (Ziehen) — kein Quellpunkt nötig, der Füllinhalt kommt aus der Umgebung."
-                  : repairPendingSource
-                    ? "Ziel im Bild malen (Ziehen), um den Strich abzuschließen."
-                    : "Quellpunkt im Bild anklicken."}
-                {repairDraftMode !== "ContentAwareFill" && repairPendingSource && (
+                  : repairDraftMode === "AiInpaint"
+                    ? "Ziel im Bild malen (Ziehen) — kein Quellpunkt nötig. Danach unten „Anwenden“ klicken, um die KI-Inferenz auszulösen."
+                    : repairPendingSource
+                      ? "Ziel im Bild malen (Ziehen), um den Strich abzuschließen."
+                      : "Quellpunkt im Bild anklicken."}
+                {repairDraftMode !== "ContentAwareFill" && repairDraftMode !== "AiInpaint" && repairPendingSource && (
                   <button type="button" onClick={cancelRepairSource} className="ml-2 underline">
                     Quellpunkt verwerfen
                   </button>
@@ -1286,10 +1310,35 @@ export function DevelopPanel() {
               </select>
             </label>
 
+            {/* KI-Ausfüllen (Phase 13 Schritt 1, ADR-0040): echtes
+                LaMa-Modell, opt-in-Download (~208 MB, Apache-2.0,
+                `Carve/LaMa-ONNX`, lokal — kein Text-Prompt, kein
+                Cloud-Aufruf). Ohne heruntergeladenes Modell schlägt
+                „Anwenden" oben mit einer klaren Fehlermeldung fehl. */}
+            {repairDraftMode === "AiInpaint" && (
+              <p className="rounded border border-border px-2 py-1 text-xs text-text-secondary">
+                {aiSettings?.inpainting_model_path ? (
+                  "KI-Ausfüllen-Modell installiert."
+                ) : (
+                  <>
+                    Kein Modell installiert — LaMa-Inpainting (Apache-2.0, ~208 MB, lokal, kein Cloud-Aufruf).{" "}
+                    <button
+                      type="button"
+                      disabled={inpaintingModelDownloading}
+                      onClick={() => void downloadInpaintingModel()}
+                      className="text-accent underline disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {inpaintingModelDownloading ? "Lädt herunter…" : "Herunterladen"}
+                    </button>
+                  </>
+                )}
+              </p>
+            )}
+
             {/* Auto-Quellenfindung (Phase 7 Schritt 3, ADR-0033) — nur für
-                Klonen/Reparieren sinnvoll, ContentAwareFill braucht ohnehin
-                keinen Quellpunkt. */}
-            {repairDraftMode !== "ContentAwareFill" && (
+                Klonen/Reparieren sinnvoll, ContentAwareFill/AiInpaint
+                brauchen ohnehin keinen Quellpunkt. */}
+            {repairDraftMode !== "ContentAwareFill" && repairDraftMode !== "AiInpaint" && (
               <label className="flex items-center gap-2 text-xs text-text-secondary">
                 <input type="checkbox" checked={autoSourceModeActive} onChange={toggleAutoSourceMode} />
                 Quelle automatisch vorschlagen
@@ -1326,11 +1375,31 @@ export function DevelopPanel() {
                         ? "Reparieren"
                         : stroke.mode === "ContentAwareFill"
                           ? "Inhaltsbasiert gefüllt"
-                          : "Klonen"}
+                          : stroke.mode === "AiInpaint"
+                            ? stroke.ai_fill
+                              ? "KI-ausgefüllt"
+                              : "KI-Ausfüllen (noch nicht angewendet)"
+                            : "Klonen"}
                     </span>
-                    <button type="button" onClick={() => removeRepairStroke(index)} className="text-danger underline">
-                      Entfernen
-                    </button>
+                    <span className="flex items-center gap-2">
+                      {/* KI-Ausfüllen läuft nicht automatisch (siehe
+                          Moduldoku `runAiInpaintForStroke`) — ein
+                          gemalter, noch nicht angewendeter Strich zeigt
+                          hier den expliziten Auslöser. */}
+                      {stroke.mode === "AiInpaint" && !stroke.ai_fill && (
+                        <button
+                          type="button"
+                          disabled={!selectedPhotoId || aiInpaintLoadingIndex !== null}
+                          onClick={() => void runAiInpaintForStroke(index)}
+                          className="text-accent underline disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {aiInpaintLoadingIndex === index ? "Berechnet…" : "Anwenden"}
+                        </button>
+                      )}
+                      <button type="button" onClick={() => removeRepairStroke(index)} className="text-danger underline">
+                        Entfernen
+                      </button>
+                    </span>
                   </li>
                 ))}
               </ul>

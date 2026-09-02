@@ -73,6 +73,12 @@ pub struct CatalogSettings {
 #[serde(default)]
 pub struct AiSettings {
     pub anthropic_api_key: Option<String>,
+    /// Lokaler Pfad zum heruntergeladenen LaMa-Inpainting-ONNX-Modell
+    /// (Phase 13, siehe `DECISIONS.md` ADR-0040) — `None`, solange der
+    /// Nutzer den Download nicht ausdrücklich bestätigt hat (kein
+    /// mitgeliefertes ~208-MB-Modell im Installer, derselbe Opt-in wie
+    /// der Anthropic-Schlüssel oben).
+    pub inpainting_model_path: Option<String>,
 }
 
 /// Einstellungen für den beobachteten Ordner (Phase 12 Schritt 7, siehe

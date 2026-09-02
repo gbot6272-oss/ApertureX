@@ -189,7 +189,7 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Maskentyp Radialer Verlauf — Phase 6 — Status: Fertig — **Teil-Einschränkung:** nur ein einzelner, gemeinsamer Radius (kreisförmig), keine unabhängigen Ellipsen-Achsen/Rotation im Ziehgriff (siehe `PLAN.md` Schritt 3)
 - [x] Maskentyp Farbbereich — Phase 6 — Status: Fertig
 - [x] Maskentyp Luminanzbereich — Phase 6 — Status: Fertig
-- [ ] Maskentyp Tiefenbereich — Später zurückgestellt — Status: Nicht begonnen (siehe ADR-0032: kein Tiefendaten-Zulieferer existiert, keinem Phasenplan-Punkt zugeordnet)
+- [x] Maskentyp Tiefenbereich — in Phase 11 Schritt 7 als Alternative nachgerüstet — Status: Fertig (abweichend, siehe DECISIONS.md ADR-0038) — kein echter Tiefendaten-Zulieferer existiert weiterhin (ADR-0032 bleibt in der Sache richtig), stattdessen neuer Maskentyp `BlurDepthApprox`: Laplace-Varianz-Schärfeheuristik in einem gleitenden 5×5-Fenster (`apx-pipeline::stages::masks::relative_sharpness_map`), trennt grob Vordergrund/Hintergrund bei echtem Schärfentiefe-Effekt (offene Blende) — versagt bei durchgehend scharfen Aufnahmen. UI-Beschriftung bewusst „Unschärfe-basierte Tiefennäherung", nicht „Tiefenbereich"
 - [x] KI-Motiv-Maske — Phase 7 — Status: Fertig (abweichend, siehe ADR-0033 Punkt 1/2) — Center-Surround-Saliency-Heuristik statt echter ONNX-Modellinferenz (kein legitimer Weg, echte Segmentierungs-Modellgewichte in dieser Umgebung zu beschaffen und mitzuliefern)
 - [x] KI-Himmel-Maske — Phase 7 — Status: Fertig (abweichend, siehe ADR-0033 Punkt 1/2) — Farbton-/Helligkeits-/Positions-Heuristik
 - [x] KI-Hintergrund-Maske — Phase 7 — Status: Fertig (abweichend, siehe ADR-0033 Punkt 1/2) — Komplement der Motiv-Maske

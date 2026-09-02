@@ -28,9 +28,9 @@ import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
 
-/** Die fünf Maskentypen, in derselben Reihenfolge wie die „+ …"-Knöpfe
+/** Die sechs Maskentypen, in derselben Reihenfolge wie die „+ …"-Knöpfe
  * oben im Panel — wiederverwendet für „+ Komponente hinzufügen". */
-const MASK_KINDS: readonly MaskKind[] = ["LinearGradient", "RadialGradient", "Brush", "ColorRange", "LuminanceRange"];
+const MASK_KINDS: readonly MaskKind[] = ["LinearGradient", "RadialGradient", "Brush", "ColorRange", "LuminanceRange", "BlurDepthApprox"];
 
 /** Entwurfsregler für den *nächsten* im Viewer gemalten Pinselstrich
  * (Phase 6 Schritt 4) — analog zu `DevelopPanel.tsx`s
@@ -46,6 +46,9 @@ const COLOR_RANGE_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Weiche Ka
 const LUMINANCE_RANGE_MIN_SPEC: SliderSpec = { key: "range_min", label: "Untere Grenze (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 50 };
 const LUMINANCE_RANGE_MAX_SPEC: SliderSpec = { key: "range_max", label: "Obere Grenze (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 100 };
 const LUMINANCE_RANGE_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Weiche Kante (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 10 };
+/** Phase 11 Schritt 7 (siehe DECISIONS.md ADR-0038) — `threshold` ist im
+ * EDL `0.0..=1.0`, wie oben als Prozent angezeigt. */
+const BLUR_DEPTH_APPROX_THRESHOLD_SPEC: SliderSpec = { key: "threshold", label: "Schärfe-Schwellwert (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 50 };
 
 /**
  * Maskenverwaltung (Phase 6 Schritt 3-7, siehe `DECISIONS.md` ADR-0032) —
@@ -224,9 +227,18 @@ export function MasksPanel() {
           type="button"
           onClick={() => addMask("LuminanceRange")}
           disabled={!selectedPhotoId}
-          className="col-span-2 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
           + Luminanzbereich
+        </button>
+        <button
+          type="button"
+          onClick={() => addMask("BlurDepthApprox")}
+          disabled={!selectedPhotoId}
+          title="Keine echte Tiefenkarte — eine Laplace-Varianz-Schärfeheuristik, funktioniert nur bei echtem Schärfentiefe-Effekt (siehe DECISIONS.md ADR-0038)"
+          className="col-span-2 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          + Unschärfe-basierte Tiefennäherung
         </button>
       </div>
 
@@ -592,6 +604,21 @@ export function MasksPanel() {
             spec={LUMINANCE_RANGE_FEATHER_SPEC}
             value={selectedMaskGeometry.feather * 100}
             onChange={(value) => updateMaskGeometry(selectedMask.id, { ...selectedMaskGeometry, feather: value / 100 })}
+            onCommit={commitMaskDrag}
+          />
+        </div>
+      )}
+
+      {selectedMask && selectedMaskGeometry?.kind === "BlurDepthApprox" && (
+        <div className="flex flex-col gap-2 border-t border-border pt-2">
+          <p className="text-xs text-text-muted">
+            Keine echte Tiefenkarte — eine Unschärfe-Heuristik, die nur bei echtem Schärfentiefe-Effekt (z. B. offene Blende) eine
+            sinnvolle Trennung liefert.
+          </p>
+          <DevelopSlider
+            spec={BLUR_DEPTH_APPROX_THRESHOLD_SPEC}
+            value={selectedMaskGeometry.threshold * 100}
+            onChange={(value) => updateMaskGeometry(selectedMask.id, { ...selectedMaskGeometry, threshold: value / 100 })}
             onCommit={commitMaskDrag}
           />
         </div>

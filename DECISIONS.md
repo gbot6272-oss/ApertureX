@@ -1916,3 +1916,17 @@ ein gezielter Test (Rust-Unit- oder Playwright-Test, je nachdem, welcher
 den Kern der Änderung am direktesten abdeckt) plus ein gezielter
 Kompilier-/Typprüf-Lauf des geänderten Codes (kein vollständiger
 Testlauf) vor Commit+Push.
+
+**Nachtrag nach Schritt 7 — Plan-Abweichung `apx_ai::depth_estimate`:**
+der Plan sah die Laplace-Varianz-Schärfeheuristik für den neuen
+`BlurDepthApprox`-Maskentyp in `apx_ai::depth_estimate::
+relative_sharpness_map` vor. Tatsächlich implementiert wurde sie
+stattdessen direkt in `apx-pipeline::stages::masks` (wie
+`color_range_alpha`/`luminance_range_alpha`) — `apx-ai` hängt von
+`apx-pipeline` ab (siehe dessen `Cargo.toml`), eine Abhängigkeit in die
+umgekehrte Richtung wäre ein Zyklus gewesen. `MaskGeometry::
+BlurDepthApprox { threshold: f32 }` wird wie `ColorRange`/
+`LuminanceRange` live pro Render berechnet, nicht als vorab in `apx-ai`
+gebackene Alpha-Bitmap (anders als `AiGenerated`) — deshalb passt die
+Eigenständigkeit in `apx-pipeline` auch inhaltlich besser als ein
+Umweg über `apx-ai`.

@@ -5,6 +5,7 @@ import {
   AI_MASK_KIND_LABELS,
   base64ToByteArray,
   buildEdlEnvelopeJson,
+  defaultBlurDepthApproxGeometry,
   defaultColorRangeGeometry,
   defaultLinearGradientGeometry,
   defaultLuminanceRangeGeometry,
@@ -774,7 +775,7 @@ interface PresetsSlice {
 
 // ---- Masken-Slice (ab Phase 6, siehe DECISIONS.md ADR-0032) ----------------
 
-export type MaskKind = "LinearGradient" | "RadialGradient" | "Brush" | "ColorRange" | "LuminanceRange";
+export type MaskKind = "LinearGradient" | "RadialGradient" | "Brush" | "ColorRange" | "LuminanceRange" | "BlurDepthApprox";
 
 const MASK_KIND_DEFAULT_GEOMETRY: Record<MaskKind, () => MaskGeometry> = {
   LinearGradient: defaultLinearGradientGeometry,
@@ -782,6 +783,7 @@ const MASK_KIND_DEFAULT_GEOMETRY: Record<MaskKind, () => MaskGeometry> = {
   Brush: emptyBrushGeometry,
   ColorRange: defaultColorRangeGeometry,
   LuminanceRange: defaultLuminanceRangeGeometry,
+  BlurDepthApprox: defaultBlurDepthApproxGeometry,
 };
 
 /** `MaskGeometry["kind"]` verwendet dieselben String-Literale wie
@@ -794,6 +796,9 @@ export const MASK_KIND_LABEL: Record<MaskKind, string> = {
   Brush: "Pinsel",
   ColorRange: "Farbbereich",
   LuminanceRange: "Luminanzbereich",
+  // Bewusst nicht "Tiefenbereich" (siehe MaskGeometry-Moduldoku in
+  // lib/edl.ts) — keine echte Tiefenkarte, nur eine Unschärfe-Heuristik.
+  BlurDepthApprox: "Unschärfe-basierte Tiefennäherung",
 };
 
 /** Die fünf KI-Maskenarten in derselben Reihenfolge wie die Knöpfe im

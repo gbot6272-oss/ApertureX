@@ -114,6 +114,24 @@ pub enum MaskGeometry {
         height: u32,
         alpha: Vec<u8>,
     },
+    /// **Unschärfe-basierte Tiefennäherung** (Phase 11 Schritt 7, siehe
+    /// `DECISIONS.md` ADR-0038) — keine echte Tiefenkarte (die gibt es in
+    /// diesem Projekt nirgends, siehe ADR-0033), sondern eine Laplace-
+    /// Varianz-Schärfeheuristik (`stages::masks::relative_sharpness_map`):
+    /// Pixel mit einer bildrelativen Schärfe über `threshold`
+    /// (`0.0..=1.0`) gelten als „im Fokus" (Alpha nahe 1), unschärfere
+    /// als Hintergrund (Alpha nahe 0). Anders als [`Self::AiGenerated`]
+    /// live pro Render berechnet (wie [`Self::ColorRange`]/
+    /// [`Self::LuminanceRange`]), nicht vorab gebacken — deshalb nur der
+    /// eine Schwellwert-Parameter statt einer Alpha-Bitmap. Funktioniert
+    /// nur bei echtem Schärfentiefe-Effekt (z. B. Porträts mit offener
+    /// Blende), versagt bei durchgehend scharfen Aufnahmen (Landschaften)
+    /// komplett — UI-Beschriftung bewusst „Unschärfe-basierte
+    /// Tiefennäherung", nicht „Tiefenbereich", um keine falsche
+    /// Erwartung an eine echte Tiefenkarte zu wecken.
+    BlurDepthApprox {
+        threshold: f32,
+    },
 }
 
 /// Welche der fünf KI-Masken-Heuristiken (`apx-ai::segmentation`) eine

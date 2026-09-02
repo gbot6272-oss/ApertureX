@@ -699,9 +699,12 @@ export const AI_MASK_KIND_LABELS: Record<AiMaskKind, string> = {
 };
 
 /** Spiegelt Rusts intern getaggtes `#[serde(tag = "kind")]`-Enum — die
- * fünf `SPEC.md` §5 genannten Maskentypen plus die sechste, ab Phase 7
- * hinzugekommene KI-generierte Rasterfläche (Tiefenbereich ist weiterhin
- * bewusst nicht Teil dieses Schemas, siehe ADR-0032 Punkt 3). */
+ * fünf `SPEC.md` §5 genannten Maskentypen plus die ab Phase 7
+ * hinzugekommene KI-generierte Rasterfläche und die ab Phase 11 Schritt 7
+ * hinzugekommene Unschärfe-basierte Tiefennäherung (siehe
+ * `DECISIONS.md` ADR-0038 — echter „Tiefenbereich" wie in ADR-0032
+ * Punkt 3 zurückgestellt bleibt weiterhin nicht Teil dieses Schemas, es
+ * gibt in diesem Projekt nirgends echte Tiefendaten). */
 export type MaskGeometry =
   | { kind: "Brush"; strokes: BrushStroke[] }
   | { kind: "LinearGradient"; x1: number; y1: number; x2: number; y2: number }
@@ -716,7 +719,8 @@ export type MaskGeometry =
     }
   | { kind: "ColorRange"; target_r: number; target_g: number; target_b: number; tolerance: number; feather: number }
   | { kind: "LuminanceRange"; range_min: number; range_max: number; feather: number }
-  | { kind: "AiGenerated"; ai_kind: AiMaskKind; width: number; height: number; alpha: number[] };
+  | { kind: "AiGenerated"; ai_kind: AiMaskKind; width: number; height: number; alpha: number[] }
+  | { kind: "BlurDepthApprox"; threshold: number };
 
 /** Dekodiert eine Base64-Ein-Kanal-Bitmap (`AiMaskAlphaDto.alpha_base64`,
  * siehe `lib/tauri.ts`) in ein Array von Byte-Werten (`0..=255`) — genau
@@ -866,6 +870,13 @@ export function defaultColorRangeGeometry(): MaskGeometry {
  * zuerst auf „Lichter" steht. */
 export function defaultLuminanceRangeGeometry(): MaskGeometry {
   return { kind: "LuminanceRange", range_min: 0.5, range_max: 1, feather: 0.1 };
+}
+
+/** Mittlerer Schwellwert als plausibler Startzustand — siehe
+ * `MaskGeometry`s Moduldoku zur Unschärfe-basierten Tiefennäherung
+ * (Phase 11 Schritt 7). */
+export function defaultBlurDepthApproxGeometry(): MaskGeometry {
+  return { kind: "BlurDepthApprox", threshold: 0.5 };
 }
 
 export interface MaskGroup {

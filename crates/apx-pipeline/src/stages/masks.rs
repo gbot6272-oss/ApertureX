@@ -302,6 +302,9 @@ fn geometry_alpha(geometry: &MaskGeometry, pixels: &[f32], w: usize, h: usize) -
             alpha,
             ..
         } => ai_generated_alpha(alpha, *width, *height, w, h),
+        MaskGeometry::BlurDepthApprox { threshold } => {
+            blur_depth_approx_alpha(*threshold, pixels, w, h)
+        }
     }
 }
 
@@ -407,6 +410,106 @@ fn luminance_range_alpha(range_min: f32, range_max: f32, feather: f32, pixels: &
             let falling = 1.0 - smoothstep(range_max, range_max + feather, luminance);
             rising * falling
         })
+        .collect()
+}
+
+/// Berechnet eine grobe, **bildrelative** Schärfe-Karte (`0.0..=1.0`,
+/// höher = schärfer) über die Laplace-Varianz in einem gleitenden
+/// 5×5-Fenster (klassisches „Variance of Laplacian"-Schärfemaß) — die
+/// Grundlage für [`MaskGeometry::BlurDepthApprox`] (siehe dessen
+/// Moduldoku). Randpixel klemmen auf den nächstgelegenen Nachbarn statt
+/// Nullpolsterung, sonst gäbe es einen künstlichen Schärfesprung am
+/// Bildrand.
+///
+/// **Architektur-Hinweis:** die im Plan genannte Heimat
+/// `apx_ai::depth_estimate` ist hier bewusst *nicht* verwendet —
+/// `apx-pipeline` hängt nicht von `apx-ai` ab (`apx-ai` hängt umgekehrt
+/// von `apx-pipeline` ab, siehe dessen `Cargo.toml`s Beschreibung), eine
+/// Abhängigkeit in diese Richtung wäre ein Zyklus. Diese Funktion ist
+/// deshalb wie [`color_range_alpha`]/[`luminance_range_alpha`]
+/// selbstständig direkt hier implementiert statt aus `apx-ai` importiert.
+fn relative_sharpness_map(pixels: &[f32], w: usize, h: usize) -> Vec<f32> {
+    if w == 0 || h == 0 {
+        return Vec::new();
+    }
+
+    let luminance: Vec<f32> = pixels
+        .par_chunks_exact(3)
+        .map(|rgb| 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2])
+        .collect();
+
+    let clamped_index = |x: isize, y: isize| -> usize {
+        let cx = x.clamp(0, w as isize - 1) as usize;
+        let cy = y.clamp(0, h as isize - 1) as usize;
+        cy * w + cx
+    };
+
+    // 3x3-Laplace-Kernel [[0,1,0],[1,-4,1],[0,1,0]] je Pixel.
+    let laplacian_map: Vec<f32> = (0..h)
+        .into_par_iter()
+        .flat_map(|y| {
+            let luminance = &luminance;
+            (0..w)
+                .map(move |x| {
+                    let (xi, yi) = (x as isize, y as isize);
+                    let center = luminance[clamped_index(xi, yi)];
+                    luminance[clamped_index(xi, yi - 1)]
+                        + luminance[clamped_index(xi, yi + 1)]
+                        + luminance[clamped_index(xi - 1, yi)]
+                        + luminance[clamped_index(xi + 1, yi)]
+                        - 4.0 * center
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    // Lokale Varianz der Laplace-Antwort in einem Fenster mit Radius 2
+    // (5x5) — das "gleitende Fenster" aus der Moduldoku.
+    const RADIUS: isize = 2;
+    let variance_map: Vec<f32> = (0..h)
+        .into_par_iter()
+        .flat_map(|y| {
+            let laplacian_map = &laplacian_map;
+            (0..w)
+                .map(move |x| {
+                    let mut sum = 0.0f32;
+                    let mut sum_sq = 0.0f32;
+                    let mut count = 0.0f32;
+                    for dy in -RADIUS..=RADIUS {
+                        for dx in -RADIUS..=RADIUS {
+                            let v = laplacian_map[clamped_index(x as isize + dx, y as isize + dy)];
+                            sum += v;
+                            sum_sq += v * v;
+                            count += 1.0;
+                        }
+                    }
+                    let mean = sum / count;
+                    (sum_sq / count - mean * mean).max(0.0)
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    let max_variance = variance_map.iter().copied().fold(0.0f32, f32::max).max(1e-6);
+    variance_map
+        .into_iter()
+        .map(|v| (v / max_variance).clamp(0.0, 1.0))
+        .collect()
+}
+
+/// Fester weicher Übergang um `threshold` — die Laplace-Varianz-Karte
+/// selbst ist schon bildrelativ normiert (siehe [`relative_sharpness_map`]),
+/// ein zusätzlicher `feather`-Parameter (wie bei den übrigen Bereichs-
+/// Masken) wäre für diese eine grobe Heuristik ein nicht gerechtfertigter
+/// zusätzlicher Regler.
+const BLUR_DEPTH_APPROX_FEATHER: f32 = 0.15;
+
+fn blur_depth_approx_alpha(threshold: f32, pixels: &[f32], w: usize, h: usize) -> Vec<f32> {
+    let sharpness = relative_sharpness_map(pixels, w, h);
+    let t = threshold.clamp(0.0, 1.0);
+    sharpness
+        .into_iter()
+        .map(|s| smoothstep(t - BLUR_DEPTH_APPROX_FEATHER, t + BLUR_DEPTH_APPROX_FEATHER, s))
         .collect()
 }
 
@@ -667,6 +770,44 @@ mod tests {
         assert!(alpha[0] > alpha[3], "Alpha soll von Start zu Ende abfallen");
         assert!(alpha[0] > 0.8);
         assert!(alpha[3] < 0.2);
+    }
+
+    /// Phase 11 Schritt 7 (siehe `DECISIONS.md` ADR-0038): ein
+    /// synthetisches Bild mit einer scharfen Vordergrund-Hälfte
+    /// (Schachbrettmuster, hoher lokaler Kontrast) und einer unscharfen
+    /// Hintergrund-Hälfte (gleichmäßige Fläche, kein lokaler Kontrast)
+    /// muss der scharfen Hälfte eine deutlich höhere Alpha zuweisen —
+    /// die Kern-Behauptung der Unschärfe-basierten Tiefennäherung.
+    #[test]
+    fn blur_depth_approx_alpha_favors_the_sharp_half_over_the_uniform_half() {
+        let w = 16usize;
+        let h = 16usize;
+        let mut pixels = vec![0.0f32; w * h * 3];
+        for y in 0..h {
+            for x in 0..w {
+                let idx = (y * w + x) * 3;
+                // Linke Hälfte: Schachbrettmuster (hoher lokaler
+                // Kontrast → hohe Laplace-Varianz). Rechte Hälfte:
+                // gleichmäßiges Mittelgrau (keine lokale Varianz).
+                let v = if x < w / 2 {
+                    if (x + y) % 2 == 0 { 0.9 } else { 0.1 }
+                } else {
+                    0.5
+                };
+                pixels[idx] = v;
+                pixels[idx + 1] = v;
+                pixels[idx + 2] = v;
+            }
+        }
+
+        let alpha = blur_depth_approx_alpha(0.3, &pixels, w, h);
+
+        let sharp_avg: f32 = (0..h).map(|y| alpha[y * w + 2]).sum::<f32>() / h as f32;
+        let uniform_avg: f32 = (0..h).map(|y| alpha[y * w + (w - 2)]).sum::<f32>() / h as f32;
+        assert!(
+            sharp_avg > uniform_avg + 0.3,
+            "scharfe Hälfte ({sharp_avg}) sollte deutlich höhere Alpha haben als die gleichmäßige Hälfte ({uniform_avg})"
+        );
     }
 
     #[test]

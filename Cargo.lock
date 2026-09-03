@@ -329,6 +329,7 @@ dependencies = [
  "apx-core",
  "apx-raw",
  "bytemuck",
+ "gamut-ifd",
  "lensfun",
  "pollster",
  "rayon",

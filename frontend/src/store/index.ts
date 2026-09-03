@@ -505,6 +505,15 @@ interface DevelopSlice {
    * committet sofort — ein Dropdown-Wechsel ist wie ein WB-Preset-Klick
    * eine abgeschlossene Aktion, kein Zwischenstand beim Ziehen. */
   setCalibrationCameraProfile: (value: string | null) => void;
+  /** Öffnet den Datei-Dialog für eine `.dcp`-Datei (Phase 13 Schritt 3,
+   * siehe `DECISIONS.md` ADR-0040-Nachtrag), parst sie und speichert das Ergebnis
+   * direkt in `calibration.dcp_profile` — committet sofort. No-op, wenn
+   * der Dialog abgebrochen wurde. */
+  importDcpProfile: () => Promise<void>;
+  /** Entfernt einen zuvor importierten `.dcp`-Profil — `camera_profile`s
+   * Handliste wird danach wieder maßgeblich. */
+  clearDcpProfile: () => void;
+  dcpProfileImporting: boolean;
   /** Setzt eines der zehn numerischen Details-Felder (Phase 4 Schritt 8)
    * — Zwischenstand beim Ziehen. */
   setDetailsField: (key: keyof Omit<DetailsAdjustment, "use_deconvolution_sharpen">, value: number) => void;
@@ -2248,6 +2257,37 @@ export const useAppStore = create<AppStore>()(
     setCalibrationCameraProfile: (value) => {
       set((state) => {
         state.developEdl.calibration.camera_profile = value;
+      });
+      void get().commitDevelopEdit();
+    },
+
+    dcpProfileImporting: false,
+
+    importDcpProfile: async () => {
+      set((state) => {
+        state.dcpProfileImporting = true;
+      });
+      try {
+        const profile = await api.importDcpProfile();
+        if (!profile) return; // Dialog abgebrochen.
+        set((state) => {
+          state.developEdl.calibration.dcp_profile = profile;
+        });
+        void get().commitDevelopEdit(`DCP-Profil „${profile.name}" importiert`);
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.dcpProfileImporting = false;
+        });
+      }
+    },
+
+    clearDcpProfile: () => {
+      set((state) => {
+        state.developEdl.calibration.dcp_profile = undefined;
       });
       void get().commitDevelopEdit();
     },

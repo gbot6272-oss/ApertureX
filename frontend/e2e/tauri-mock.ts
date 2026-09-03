@@ -1493,6 +1493,13 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return created;
       }
 
+      case "import_dcp_profile":
+        // Kein Fixture-Feld nötig — der Dialog wird in Tests nie
+        // ausgelöst (kein e2e-Test deckt Phase 13 Schritt 3 bisher ab);
+        // liefert konsistent "abgebrochen" statt eines unbekannten-
+        // Befehl-Fehlers, falls doch einmal geklickt wird.
+        return null;
+
       default:
         throw new Error(`Test-Stub: unbekannter invoke-Befehl "${cmd}"`);
     }

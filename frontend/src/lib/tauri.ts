@@ -318,6 +318,25 @@ export function calibrateLensDistortion(lines: Array<Array<{ x: number; y: numbe
   return invoke<number>("calibrate_lens_distortion", { lines });
 }
 
+// ---- Adobe-DCP-Farbprofil-Import (Phase 13 Schritt 3) ----------------------
+
+export interface DcpProfileDataDto {
+  name: string;
+  hue_divisions: number;
+  sat_divisions: number;
+  val_divisions: number;
+  hue_sat_map: Array<[number, number, number]>;
+  tone_curve: Array<[number, number]>;
+}
+
+/** Öffnet einen Datei-Dialog für eine `.dcp`-Datei und parst sie — `null`,
+ * wenn der Dialog abgebrochen wurde. Wirft bei einer strukturell
+ * ungültigen Datei oder einer ohne HueSatMap-Daten (siehe
+ * `apx_pipeline::dcp_profile`s Moduldoku). */
+export function importDcpProfile(): Promise<DcpProfileDataDto | null> {
+  return invoke<DcpProfileDataDto | null>("import_dcp_profile");
+}
+
 // ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------------
 // Anders als der lineare Verlauf oben: siehe `crates/apx-app/src/commands.rs`s
 // Moduldoku für die Abgrenzung. Kein eigener "restore"-Aufruf — die

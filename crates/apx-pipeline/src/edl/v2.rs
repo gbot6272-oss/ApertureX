@@ -509,8 +509,48 @@ pub struct CalibrationAdjustment {
     pub blue_primary: PrimaryColorAdjustment,
     /// Name eines Profils in der kleinen eingebauten Kameraprofil-Liste
     /// (kein DCP-Import, siehe `DECISIONS.md` ADR-0028), `None` =
-    /// Standardprofil.
+    /// Standardprofil. Ignoriert, solange [`Self::dcp_profile`] gesetzt
+    /// ist (echte Daten haben Vorrang vor dem Platzhalter-Bias).
     pub camera_profile: Option<String>,
+    /// Aus einer importierten `.dcp`-Datei einmalig ausgelesene
+    /// Profildaten (Phase 13 Schritt 3, siehe `DECISIONS.md` ADR-0040-Nachtrag) —
+    /// dasselbe „einmal auflösen, als reine Zahlen im EDL ablegen"-Muster
+    /// wie `AiFillPatch` (Phase 13 Schritt 1): die Pipeline öffnet nie
+    /// selbst eine Datei. `#[serde(default)]` statt Schema-Version-
+    /// Sprung, additiv wie `BrushStroke::auto_mask`.
+    #[serde(default)]
+    pub dcp_profile: Option<DcpProfileData>,
+}
+
+/// Aus einer Adobe-`.dcp`-Datei gelesene Farbprofildaten (Phase 13
+/// Schritt 3, siehe `DECISIONS.md` ADR-0040-Nachtrag und `apx_pipeline::
+/// dcp_profile`s Moduldoku für den Parser). Enthält nur, was `stages::
+/// calibration` tatsächlich anwendet — die echten HueSatMap-/
+/// Tonwertkurven-„Look"-Daten, dieselbe Art Anpassung, die
+/// [`CalibrationAdjustment::camera_profile`]s Handliste bisher nur grob
+/// nachahmte.
+///
+/// **Bewusst NICHT enthalten:** `ColorMatrix1`/`ForwardMatrix1` &c. — der
+/// Parser (`dcp_profile::DcpProfile`) liest sie zwar (siehe dessen
+/// Moduldoku), aber eine echte Farbmatrix-Umrechnung ist Aufgabe des
+/// Rohdaten-Decoders (`apx-raw`s `cam_to_srgb`-Matrix, bereits beim
+/// Dekodieren angewendet), nicht dieser Entwickeln-Stufe — dasselbe
+/// Scope-Argument wie `gamut-dng`s eigene „Farbwiedergabe ist Aufgabe
+/// eines Rohdaten-Prozessors"-Grenze.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DcpProfileData {
+    pub name: String,
+    pub hue_divisions: u32,
+    pub sat_divisions: u32,
+    pub val_divisions: u32,
+    /// `hue_divisions * sat_divisions * val_divisions` Einträge
+    /// `[hue_shift_degrees, sat_scale, val_scale]`, in Wert-Farbton-
+    /// Sättigung-Reihenfolge (außen nach innen) — dieselbe Anordnung wie
+    /// Adobes `dng_hue_sat_map` (siehe Parser-Moduldoku).
+    pub hue_sat_map: Vec<[f32; 3]>,
+    /// Tonwertkurven-Stützpunkte `[x, y]`, beide `0.0..=1.0`, aufsteigend
+    /// sortiert — leer, wenn die Datei keine `ProfileToneCurve` enthält.
+    pub tone_curve: Vec<[f32; 2]>,
 }
 
 impl CalibrationAdjustment {
@@ -521,6 +561,7 @@ impl CalibrationAdjustment {
         green_primary: PrimaryColorAdjustment::NEUTRAL,
         blue_primary: PrimaryColorAdjustment::NEUTRAL,
         camera_profile: None,
+        dcp_profile: None,
     };
 
     pub fn neutral() -> Self {

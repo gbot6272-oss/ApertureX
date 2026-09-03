@@ -243,6 +243,9 @@ export function DevelopPanel() {
   const setCalibrationPrimaryField = useAppStore((s) => s.setCalibrationPrimaryField);
   const setCalibrationShadowTint = useAppStore((s) => s.setCalibrationShadowTint);
   const setCalibrationCameraProfile = useAppStore((s) => s.setCalibrationCameraProfile);
+  const importDcpProfile = useAppStore((s) => s.importDcpProfile);
+  const clearDcpProfile = useAppStore((s) => s.clearDcpProfile);
+  const dcpProfileImporting = useAppStore((s) => s.dcpProfileImporting);
   const details = useAppStore((s) => s.developEdl.details);
   const setDetailsField = useAppStore((s) => s.setDetailsField);
   const setDetailsUseDeconvolutionSharpen = useAppStore((s) => s.setDetailsUseDeconvolutionSharpen);
@@ -977,8 +980,9 @@ export function DevelopPanel() {
               <select
                 aria-label="Kameraprofil"
                 value={calibration.camera_profile ?? ""}
+                disabled={Boolean(calibration.dcp_profile)}
                 onChange={(event) => setCalibrationCameraProfile(event.target.value || null)}
-                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {CAMERA_PROFILE_OPTIONS.map((option) => (
                   <option key={option.label} value={option.value ?? ""}>
@@ -987,6 +991,31 @@ export function DevelopPanel() {
                 ))}
               </select>
             </label>
+
+            {/* Echter DCP-Import (Phase 13 Schritt 3, ADR-0040-Nachtrag) — hat
+                Vorrang vor der Handliste oben, deshalb dort deaktiviert,
+                solange ein Profil importiert ist. */}
+            <div className="flex items-center justify-between text-xs text-text-secondary">
+              {calibration.dcp_profile ? (
+                <>
+                  <span className="truncate" title={calibration.dcp_profile.name}>
+                    DCP: {calibration.dcp_profile.name}
+                  </span>
+                  <button type="button" onClick={clearDcpProfile} className="shrink-0 text-danger underline">
+                    Entfernen
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  disabled={dcpProfileImporting}
+                  onClick={() => void importDcpProfile()}
+                  className="rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {dcpProfileImporting ? "Importiert…" : "Adobe-.dcp-Profil importieren…"}
+                </button>
+              )}
+            </div>
           </fieldset>
 
           <fieldset id="stage-details" className="flex flex-col gap-3">

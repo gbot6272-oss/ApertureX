@@ -23,17 +23,31 @@
 //!   Konvention wie [`super::white_balance`]s Tint-Regler: positiv = weniger
 //!   Grün = Richtung Magenta), gewichtet mit einer festen Gauß-Schatten-Zone
 //!   (Luminanz nahe 0) statt eines editierbaren Umschlagpunkts.
-//! - **Kameraprofil:** kein echter DCP-/ICC-Profilwechsel (bräuchte eine
-//!   Farbmanagement-Pipeline, siehe `SPEC.md` §2.2) — [`CAMERA_PROFILES`]
-//!   ist eine kleine handgepflegte Liste, jedes Profil nur ein fester
-//!   Sättigungs-/Kontrast-Bias (dieselbe Formel wie `basic_fused.rs`s
-//!   Kontrast-Regler), global angewendet statt zonenweise.
+//! - **Kameraprofil (Handliste):** kein echter DCP-/ICC-Profilwechsel
+//!   (bräuchte eine Farbmanagement-Pipeline, siehe `SPEC.md` §2.2) —
+//!   [`CAMERA_PROFILES`] ist eine kleine handgepflegte Liste, jedes Profil
+//!   nur ein fester Sättigungs-/Kontrast-Bias (dieselbe Formel wie
+//!   `basic_fused.rs`s Kontrast-Regler), global angewendet statt
+//!   zonenweise. **Bleibt als Fallback bestehen**, wenn kein `.dcp`
+//!   importiert wurde.
+//!
+//! **Phase 13 Schritt 3 — echter DCP-Import** (siehe `DECISIONS.md`
+//! ADR-0040-Nachtrag): ist [`CalibrationAdjustment::dcp_profile`] gesetzt, ersetzt
+//! `apply_dcp_look` den obigen Handlisten-Bias durch die echte, aus der
+//! `.dcp`-Datei gelesene HueSatMap-/Tonwertkurven-„Look"-Daten (siehe
+//! `crate::dcp_profile`s Moduldoku für die Herkunft der Interpolations-
+//! formel). **CPU-only** — die Tabelle ist variabel groß (bis zu
+//! Hunderten Einträgen je Profil) und passt nicht in das feste
+//! GPU-Uniform-Layout dieses Moduls; läuft aus demselben Grund CPU-seitig
+//! wie `stages::repair`s `ContentAwareFill`/`AiInpaint`.
 
 use bytemuck::{Pod, Zeroable};
 use rayon::prelude::*;
 
-use super::color_math::{circular_distance_degrees, gaussian_weight, hsl_to_rgb, rgb_to_hsl};
-use crate::edl::v2::CalibrationAdjustment;
+use super::color_math::{
+    circular_distance_degrees, gaussian_weight, hsl_to_rgb, hsv6_to_rgb, rgb_to_hsl, rgb_to_hsv6,
+};
+use crate::edl::v2::{CalibrationAdjustment, DcpProfileData};
 use crate::error::Result;
 use crate::gpu::{dispatch, GpuContext};
 
@@ -119,7 +133,13 @@ impl CalibrationParams {
     }
 }
 
-fn tonal_shift(r: f32, g: f32, b: f32, params: &CalibrationParams) -> (f32, f32, f32) {
+fn tonal_shift(
+    r: f32,
+    g: f32,
+    b: f32,
+    params: &CalibrationParams,
+    dcp: Option<&DcpProfileData>,
+) -> (f32, f32, f32) {
     let (h, s, l) = rgb_to_hsl(r, g, b);
 
     let mut hue_sum = 0.0;
@@ -154,8 +174,14 @@ fn tonal_shift(r: f32, g: f32, b: f32, params: &CalibrationParams) -> (f32, f32,
     let shadow_weight = gaussian_weight(l, SHADOW_TINT_SIGMA);
     ng = (ng - (params.shadow_tint / 100.0) * SHADOW_TINT_STRENGTH * shadow_weight).clamp(0.0, 1.0);
 
-    // Kameraprofil — globaler Sättigungs-/Kontrast-Bias, unabhängig von
-    // Tonwertzonen (siehe Moduldoku).
+    // Kameraprofil — echte DCP-Daten haben Vorrang vor der Handlisten-
+    // Näherung (siehe Moduldoku).
+    if let Some(profile) = dcp {
+        return apply_dcp_look(nr, ng, nb, profile);
+    }
+
+    // Kameraprofil-Handliste — globaler Sättigungs-/Kontrast-Bias,
+    // unabhängig von Tonwertzonen (siehe Moduldoku).
     let (h2, s2, l2) = rgb_to_hsl(nr, ng, nb);
     let profile_sat_factor = 1.0 + params.camera_profile_saturation / 100.0;
     let (pr, pg, pb) = hsl_to_rgb(h2, (s2 * profile_sat_factor).clamp(0.0, 1.0), l2);
@@ -165,13 +191,173 @@ fn tonal_shift(r: f32, g: f32, b: f32, params: &CalibrationParams) -> (f32, f32,
     (apply_contrast(pr), apply_contrast(pg), apply_contrast(pb))
 }
 
-/// CPU-Fallback — dieselbe Formel wie `calibration.wgsl`.
+// ---- Echter DCP-Import (Phase 13 Schritt 3) --------------------------------
+
+/// Wendet die aus einer `.dcp`-Datei gelesene HueSatMap (falls vorhanden)
+/// und Tonwertkurve (falls vorhanden) an — beide unabhängig optional,
+/// eine Datei kann nur eine von beiden oder beide enthalten. Bei einem
+/// `DcpProfileData` ohne beides (theoretisch möglich, aber praktisch nie
+/// bei einer echten Adobe-Datei, siehe `dcp_profile::parse_dcp_bytes`s
+/// Gültigkeitsprüfung) ist dies die Identität.
+fn apply_dcp_look(r: f32, g: f32, b: f32, profile: &DcpProfileData) -> (f32, f32, f32) {
+    let (r, g, b) = if profile.hue_sat_map.is_empty() {
+        (r, g, b)
+    } else {
+        apply_hue_sat_map(r, g, b, profile)
+    };
+    if profile.tone_curve.is_empty() {
+        (r, g, b)
+    } else {
+        (
+            apply_tone_curve(r, &profile.tone_curve),
+            apply_tone_curve(g, &profile.tone_curve),
+            apply_tone_curve(b, &profile.tone_curve),
+        )
+    }
+}
+
+/// Echte, trilinear interpolierte DCP-HueSatMap-Anwendung — Formel und
+/// Tabellen-Indexierung sind eine direkte Portierung von Adobes eigener
+/// `RefBaselineHueSatMap`-Referenzimplementierung (siehe
+/// `crate::dcp_profile`s Moduldoku). Zwei Zweige wie im Original: das
+/// häufige „2.5D"-Sonderfall (`val_divisions < 2`, nur Farbton/Sättigung)
+/// und die volle 3D-Trilinearinterpolation.
+fn apply_hue_sat_map(r: f32, g: f32, b: f32, profile: &DcpProfileData) -> (f32, f32, f32) {
+    let (h, s, v) = rgb_to_hsv6(r, g, b);
+
+    let hue_div = profile.hue_divisions as i32;
+    let sat_div = profile.sat_divisions as i32;
+    let val_div = profile.val_divisions as i32;
+    let table = &profile.hue_sat_map;
+
+    let h_scale = if hue_div < 2 {
+        0.0
+    } else {
+        hue_div as f32 / 6.0
+    };
+    let s_scale = (sat_div - 1) as f32;
+    let v_scale = (val_div - 1) as f32;
+
+    let max_hue_index0 = hue_div - 1;
+    let max_sat_index0 = sat_div - 2;
+
+    let hue_step = sat_div;
+    let val_step = hue_div * hue_step;
+
+    let entry = |h_idx: i32, s_idx: i32, v_idx: i32| -> [f32; 3] {
+        table[(v_idx * val_step + h_idx * hue_step + s_idx) as usize]
+    };
+
+    let (hue_shift, sat_scale, val_scale) = if val_div < 2 {
+        let h_scaled = h * h_scale;
+        let s_scaled = s * s_scale;
+        let mut h_index0 = h_scaled as i32;
+        let s_index0 = (s_scaled as i32).min(max_sat_index0);
+        let mut h_index1 = h_index0 + 1;
+        if h_index0 >= max_hue_index0 {
+            h_index0 = max_hue_index0;
+            h_index1 = 0;
+        }
+        let h_fract1 = h_scaled - h_index0 as f32;
+        let s_fract1 = s_scaled - s_index0 as f32;
+        let h_fract0 = 1.0 - h_fract1;
+        let s_fract0 = 1.0 - s_fract1;
+
+        let e00 = entry(h_index0, s_index0, 0);
+        let e01 = entry(h_index1, s_index0, 0);
+        let e10 = entry(h_index0, s_index0 + 1, 0);
+        let e11 = entry(h_index1, s_index0 + 1, 0);
+
+        let lerp_h = |a: [f32; 3], b: [f32; 3], i: usize| h_fract0 * a[i] + h_fract1 * b[i];
+        let along_sat = |i: usize| s_fract0 * lerp_h(e00, e01, i) + s_fract1 * lerp_h(e10, e11, i);
+
+        (along_sat(0), along_sat(1), along_sat(2))
+    } else {
+        let max_val_index0 = val_div - 2;
+        let h_scaled = h * h_scale;
+        let s_scaled = s * s_scale;
+        let v_scaled = v * v_scale;
+        let mut h_index0 = h_scaled as i32;
+        let s_index0 = (s_scaled as i32).min(max_sat_index0);
+        let v_index0 = (v_scaled as i32).min(max_val_index0);
+        let mut h_index1 = h_index0 + 1;
+        if h_index0 >= max_hue_index0 {
+            h_index0 = max_hue_index0;
+            h_index1 = 0;
+        }
+        let h_fract1 = h_scaled - h_index0 as f32;
+        let s_fract1 = s_scaled - s_index0 as f32;
+        let v_fract1 = v_scaled - v_index0 as f32;
+        let h_fract0 = 1.0 - h_fract1;
+        let s_fract0 = 1.0 - s_fract1;
+        let v_fract0 = 1.0 - v_fract1;
+
+        let lerp_hv = |s_idx: i32, i: usize| {
+            let e00 = entry(h_index0, s_idx, v_index0)[i];
+            let e01 = entry(h_index1, s_idx, v_index0)[i];
+            let e10 = entry(h_index0, s_idx, v_index0 + 1)[i];
+            let e11 = entry(h_index1, s_idx, v_index0 + 1)[i];
+            v_fract0 * (h_fract0 * e00 + h_fract1 * e01)
+                + v_fract1 * (h_fract0 * e10 + h_fract1 * e11)
+        };
+        let along_sat =
+            |i: usize| s_fract0 * lerp_hv(s_index0, i) + s_fract1 * lerp_hv(s_index0 + 1, i);
+
+        (along_sat(0), along_sat(1), along_sat(2))
+    };
+
+    // Grad → internen 0..6-Bereich (siehe `rgb_to_hsv6`s Moduldoku).
+    let new_h = h + hue_shift * (6.0 / 360.0);
+    let new_s = (s * sat_scale).min(1.0);
+    let new_v = (v * val_scale).clamp(0.0, 1.0);
+    hsv6_to_rgb(new_h, new_s, new_v)
+}
+
+/// Stückweise lineare Interpolation über `points` (aufsteigend sortierte
+/// `[x, y]`-Stützpunkte, beide `0.0..=1.0`) — Adobes Referenz-SDK nutzt
+/// intern eine Spline, für Profile mit den üblichen 16+ Stützpunkten ist
+/// der optische Unterschied zur stückweise-linearen Näherung
+/// vernachlässigbar (dieselbe Art Kompromiss wie andernorts in diesem
+/// Projekt, wo eine exakte Spline-Bibliothek den Aufwand nicht
+/// rechtfertigt — siehe `curves.rs` für die einzige echte Spline-Stelle
+/// dieses Projekts, dort mit editierbaren, meist wenigen Punkten).
+/// `value` außerhalb `points`s Spanne wird auf den jeweiligen Randwert
+/// geklemmt.
+fn apply_tone_curve(value: f32, points: &[[f32; 2]]) -> f32 {
+    let Some(&[first_x, first_y]) = points.first() else {
+        return value;
+    };
+    if value <= first_x {
+        return first_y;
+    }
+    let &[last_x, last_y] = points.last().expect("points ist nicht leer");
+    if value >= last_x {
+        return last_y;
+    }
+    for window in points.windows(2) {
+        let [x0, y0] = window[0];
+        let [x1, y1] = window[1];
+        if value >= x0 && value <= x1 {
+            if (x1 - x0).abs() < 1e-6 {
+                return y1;
+            }
+            let t = (value - x0) / (x1 - x0);
+            return y0 + (y1 - y0) * t;
+        }
+    }
+    value
+}
+
+/// CPU-Fallback — dieselbe Formel wie `calibration.wgsl`, außer bei
+/// gesetztem `dcp_profile` (siehe Moduldoku — dann läuft ausschließlich
+/// dieser CPU-Pfad, auch von `apply_gpu` aus).
 pub fn apply_cpu(pixels: &[f32], adjustment: &CalibrationAdjustment) -> Vec<f32> {
     let params = CalibrationParams::new(adjustment);
+    let dcp = adjustment.dcp_profile.as_ref();
     pixels
         .par_chunks_exact(3)
         .flat_map_iter(|rgb| {
-            let (r, g, b) = tonal_shift(rgb[0], rgb[1], rgb[2], &params);
+            let (r, g, b) = tonal_shift(rgb[0], rgb[1], rgb[2], &params, dcp);
             [r, g, b]
         })
         .collect()
@@ -182,6 +368,11 @@ pub fn apply_gpu(
     pixels: &[f32],
     adjustment: &CalibrationAdjustment,
 ) -> Result<Vec<f32>> {
+    if adjustment.dcp_profile.is_some() {
+        // Variable-große Tabelle, passt nicht ins feste GPU-Uniform-
+        // Layout dieses Moduls (siehe Moduldoku) — läuft CPU-seitig.
+        return Ok(apply_cpu(pixels, adjustment));
+    }
     let params = CalibrationParams::new(adjustment);
     dispatch::run_compute_f32(ctx, "calibration", SHADER, "main", params, pixels, 64)
 }
@@ -293,6 +484,32 @@ mod tests {
                 "input={input} output={output}"
             );
         }
+    }
+
+    #[test]
+    fn dcp_hue_sat_map_takes_priority_over_camera_profile_and_desaturates() {
+        // Winziges, aber echtes HueSatMap-Gitter (1 Farbton × 2
+        // Sättigung × 1 Wert — der häufige "2.5D"-Fall): jeder Eintrag
+        // hat sat_scale=0, entsättigt also vollständig, unabhängig vom
+        // eingehenden Farbton/Sättigungswert.
+        let dcp_profile = DcpProfileData {
+            name: "Test".to_string(),
+            hue_divisions: 1,
+            sat_divisions: 2,
+            val_divisions: 1,
+            hue_sat_map: vec![[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]],
+            tone_curve: Vec::new(),
+        };
+        let adjustment = CalibrationAdjustment {
+            // Sollte ignoriert werden — dcp_profile hat Vorrang.
+            camera_profile: Some("Vivid".to_string()),
+            dcp_profile: Some(dcp_profile),
+            ..CalibrationAdjustment::NEUTRAL
+        };
+        let saturated_red = vec![0.9, 0.1, 0.1];
+        let result = apply_cpu(&saturated_red, &adjustment);
+        let (_, s, _) = rgb_to_hsv6(result[0], result[1], result[2]);
+        assert!(s < 1e-3, "sollte vollständig entsättigt sein, s={s}");
     }
 
     #[test]

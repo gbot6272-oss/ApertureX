@@ -2261,3 +2261,75 @@ bleibt stehen, war zum damaligen Rechercheergebnis ehrlich). Phase 13
 setzt echte ONNX-Inferenz für das KI-Ausfüllen ein (Schritt 1) und
 klassische, gewichtsfreie CV für Perspektive/Panorama (Schritte 4/5).
 Vollständiger Schritt-für-Schritt-Plan in `PLAN.md`.
+
+## ADR-0040-Nachtrag: Schritt 3 — echter Adobe-DCP-Import; `ColorMatrix`
+geparst, aber bewusst nicht angewendet; `ProfileHueSatMap`/
+`ProfileToneCurve` real umgesetzt, direkt von Adobes eigenem
+Open-Source-DNG-SDK portiert
+
+**Status:** Angenommen
+**Kontext:** `stages::calibration`s bisherige `CAMERA_PROFILES`-Handliste
+(sechs feste Namen, je nur ein globaler Sättigungs-/Kontrast-Bias, siehe
+ADR-0028) sollte durch echten Import beliebiger Adobe-`.dcp`-Dateien
+ersetzt werden — derselbe Sprung wie Phase 12 Schritt 3 von einer
+Objektiv-Handliste zur echten LensFun-Datenbank.
+
+**Ergebnis der Recherche:** `.dcp`-Dateien sind reine TIFF/IFD-Container
+ohne Rohbild-Daten. `gamut-dng`s `DngDecoder::decode()` (bereits
+Abhängigkeit von `apx-export`) verlangt ein echtes Rohbild und scheitert
+deshalb an eigenständigen `.dcp`-Dateien. Die real verfügbare Lösung:
+`gamut-ifd` (2.0.1, dieselbe IFD-Lese-Grundlage, die `gamut-dng` selbst
+intern nutzt) direkt einbinden und nur die tatsächlich benötigten Tags
+lesen — per `cargo add --dry-run` gegen die echte crates.io-Registry
+bestätigt. Die Tag-Nummern (`ColorMatrix1` 50721 usw.) sind gegen
+`gamut-dng`s eigenes öffentliches `tags`-Modul **und** unabhängig davon
+gegen Adobes eigenes, quelloffenes DNG-SDK
+(`github.com/aizvorski/dng_sdk`) geprüft.
+
+**Zwei Ebenen, unterschiedlich behandelt:**
+
+1. **`ColorMatrix1`/`ColorMatrix2`/`ForwardMatrix1/2`/
+   `CameraCalibration1/2`** (die eigentliche Farbmatrix) — wird geparst
+   (`dcp_profile::DcpProfile`), aber **bewusst nicht in die Pipeline
+   eingespeist**. Eine echte Kamera→XYZ-Matrixumrechnung ist Aufgabe des
+   Rohdaten-Decoders (`apx-raw` hat dafür bereits eine eigene
+   `cam_to_srgb`-Matrix, einmalig beim Dekodieren angewendet) — ein
+   Matrixwechsel je Kalibrierungs-Regler würde eine erneute
+   Rohdaten-Dekodierung bei jedem Bearbeitungsschritt verlangen, was der
+   gesamten "einmal dekodieren, beliebig oft günstig entwickeln"-
+   Architektur widerspräche. Dieselbe Scope-Grenze, die `gamut-dng`
+   selbst für sich zieht ("Farbwiedergabe ist Aufgabe eines
+   Rohdaten-Prozessors").
+2. **`ProfileHueSatMapDims`/`ProfileHueSatMapData1`/`ProfileToneCurve`**
+   (die "Look"-Daten, die z. B. Adobes "Camera Landscape" von "Camera
+   Standard" unterscheiden) — wird **echt angewendet**, in
+   `stages::calibration`, anstelle der bisherigen Handlisten-Näherung.
+   Die PDF-Spezifikation selbst war von dieser Sandbox aus nicht
+   abrufbar (`docs.rs`, `huggingface.co`, `helpx.adobe.com`,
+   `paulbourke.net` — alle blockiert), aber Adobes eigenes DNG-SDK ist
+   auf GitHub quelloffen (`raw.githubusercontent.com` war erreichbar):
+   Indexierung, Interpolationsformel (trilinear, Farbton zirkulär) und
+   die HSV-Parametrisierung (`0.0..6.0` statt Grad) in
+   `stages::calibration::apply_hue_sat_map` sind eine direkte Portierung
+   von `dng_reference.cpp::RefBaselineHueSatMap` (samt
+   `dng_hue_sat_map.h/.cpp` für die Tabellen-Indexierung und
+   `dng_utils.h::DNG_RGBtoHSV/DNG_HSVtoRGB` für die HSV-Umrechnung,
+   letztere als `stages::color_math::rgb_to_hsv6`/`hsv6_to_rgb` portiert)
+   — nicht aus dem Gedächtnis nachgebaut. Bewusst ausgelassen: das
+   optionale `ProfileHueSatMapEncoding` (nichtlineare Wert-Kodierung, nur
+   bei wenigen Profilen gesetzt) und die Spline-Interpolation der
+   Tonwertkurve (stückweise linear stattdessen, siehe `apply_tone_curve`s
+   Kommentar).
+
+**CPU-only:** die HueSatMap-Tabelle ist variabel groß (bis zu Hunderten
+Einträgen), passt nicht in `calibration.rs`s festes GPU-Uniform-Layout —
+läuft aus demselben Grund CPU-seitig wie `ContentAwareFill`/`AiInpaint`
+(`stages::repair`).
+
+**Entscheidung:** Neues additives `CalibrationAdjustment::dcp_profile:
+Option<DcpProfileData>` (dasselbe "einmal auflösen, als Zahlen im EDL
+ablegen"-Muster wie `AiFillPatch`, Phase 13 Schritt 1) — hat Vorrang vor
+`camera_profile`s Handliste, die als Fallback bestehen bleibt, wenn kein
+`.dcp` importiert wurde. `apx-app`s `import_dcp_profile`-Command öffnet
+einen Datei-Dialog und parst — kein eingebautes Profil im Installer,
+derselbe Opt-in wie beim LensFun-Kalibrier-Assistenten.

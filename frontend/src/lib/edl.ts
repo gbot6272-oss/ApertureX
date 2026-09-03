@@ -560,6 +560,19 @@ export interface PrimaryColorAdjustment {
 
 export const NEUTRAL_PRIMARY_COLOR: PrimaryColorAdjustment = { hue: 0, saturation: 0 };
 
+/** Aus einer importierten `.dcp`-Datei einmalig ausgelesene Profildaten
+ * (Phase 13 Schritt 3, siehe `DECISIONS.md` ADR-0040-Nachtrag) — direkt im EDL
+ * gespeichert, dasselbe Muster wie `AiFillPatch`. Hat Vorrang vor
+ * `CalibrationAdjustment.camera_profile`s Handliste, wenn gesetzt. */
+export interface DcpProfileData {
+  name: string;
+  hue_divisions: number;
+  sat_divisions: number;
+  val_divisions: number;
+  hue_sat_map: Array<[number, number, number]>;
+  tone_curve: Array<[number, number]>;
+}
+
 export interface CalibrationAdjustment {
   process_version: ProcessVersion;
   shadow_tint: number;
@@ -567,8 +580,13 @@ export interface CalibrationAdjustment {
   green_primary: PrimaryColorAdjustment;
   blue_primary: PrimaryColorAdjustment;
   /** Name eines eingebauten Kameraprofils (kein DCP-Import, siehe
-   * ADR-0028), `null` = Standardprofil. */
+   * ADR-0028), `null` = Standardprofil. Ignoriert, solange `dcp_profile`
+   * gesetzt ist. */
   camera_profile: string | null;
+  /** Echte, aus einer `.dcp`-Datei gelesene Profildaten (Phase 13
+   * Schritt 3) — `undefined`/fehlend = kein Import, `camera_profile`
+   * bleibt maßgeblich. */
+  dcp_profile?: DcpProfileData;
 }
 
 export function neutralCalibration(): CalibrationAdjustment {

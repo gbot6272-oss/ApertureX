@@ -850,6 +850,76 @@ pub fn calibrate_lens_distortion(lines: Vec<Vec<CalibrationPointDto>>) -> Result
     apx_ai::lens_calibration::calibrate_distortion_k1(&lines).map_err(|err| err.to_string())
 }
 
+// ---- Adobe-DCP-Farbprofil-Import (Phase 13 Schritt 3) ----------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DcpProfileDataDto {
+    pub name: String,
+    pub hue_divisions: u32,
+    pub sat_divisions: u32,
+    pub val_divisions: u32,
+    pub hue_sat_map: Vec<[f32; 3]>,
+    pub tone_curve: Vec<[f32; 2]>,
+}
+
+impl From<apx_pipeline::edl::DcpProfileData> for DcpProfileDataDto {
+    fn from(data: apx_pipeline::edl::DcpProfileData) -> Self {
+        Self {
+            name: data.name,
+            hue_divisions: data.hue_divisions,
+            sat_divisions: data.sat_divisions,
+            val_divisions: data.val_divisions,
+            hue_sat_map: data.hue_sat_map,
+            tone_curve: data.tone_curve,
+        }
+    }
+}
+
+/// Öffnet einen Datei-Dialog für eine `.dcp`-Datei, parst sie
+/// (`apx_pipeline::dcp_profile::parse_dcp_bytes`, siehe dessen Moduldoku)
+/// und liefert die für `stages::calibration` relevanten Profildaten
+/// zurück — `None`, wenn der Dialog abgebrochen wurde. Das Frontend
+/// speichert das Ergebnis direkt in `CalibrationAdjustment::dcp_profile`
+/// (derselbe „einmal auflösen, als Zahlen im EDL ablegen"-Ansatz wie bei
+/// KI-Ausfüllen, Phase 13 Schritt 1) — dieser Command liest die Datei
+/// nur, schreibt nichts in den Katalog.
+///
+/// **Kein eingebautes Profil enthalten** — der Nutzer bringt eine eigene
+/// `.dcp`-Datei mit (z. B. Adobes kostenlos herunterladbare
+/// Kameraprofile), genau wie beim LensFun-Kalibrier-Assistenten
+/// (Phase 12 Schritt 3) niemand die LensFun-Datenbank selbst mitliefert,
+/// sondern nur den Code, sie zu nutzen.
+#[tauri::command]
+pub async fn import_dcp_profile(app: AppHandle) -> Result<Option<DcpProfileDataDto>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("Adobe-Kameraprofil", &["dcp"])
+        .pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|err| format!("Öffnen-Dialog fehlgeschlagen: {err}"))?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|err| format!("Ungültiger Pfad: {err}"))?;
+    let bytes = std::fs::read(&path)
+        .map_err(|err| format!("Datei '{}' nicht lesbar: {err}", path.display()))?;
+    let profile =
+        apx_pipeline::dcp_profile::parse_dcp_bytes(&bytes).map_err(|err| err.to_string())?;
+    let Some(hue_sat_map) = profile.hue_sat_map else {
+        return Err(format!(
+            "'{}' enthält keine HueSatMap-Look-Daten (nur Farbmatrizen) — diese Datei liefert derzeit keinen sichtbaren Effekt, siehe apx-pipeline::dcp_profile-Moduldoku",
+            path.display()
+        ));
+    };
+    Ok(Some(hue_sat_map.into()))
+}
+
 /// Geht einen Bearbeitungsschritt zurück. `None`, wenn schon am
 /// Ausgangszustand (kein Rückgängig möglich) — kein Fehler, siehe
 /// `apx_catalog::Catalog::undo_edit`.

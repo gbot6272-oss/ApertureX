@@ -456,6 +456,27 @@ pub struct EffectsAdjustment {
     pub grain_amount: f32,
     pub grain_size: f32,
     pub grain_roughness: f32,
+    /// Echte Halation-/Bloom-Simulation (Phase 14 Schritt 4, siehe
+    /// `DECISIONS.md` ADR-0041 — Lightroom Classic "cannot create true
+    /// film halation, only a soft bloom approximation"). Additiv,
+    /// `#[serde(default)]`: ein gespeichertes `EffectsAdjustment` ohne
+    /// diese drei Felder liest `halation_amount` als `0.0` (aus,
+    /// unverändertes bisheriges Verhalten) — `halation_radius`/
+    /// `halation_hue` sind bei `amount == 0.0` ohnehin wirkungslos, ihr
+    /// Default-Wert `0.0` ist also unproblematisch. `0.0..=100.0`.
+    #[serde(default)]
+    pub halation_amount: f32,
+    /// Bruchteil der Bildbreite für den Bloom-Weichzeichnungsradius
+    /// (`0.0..=100.0`, wie ein Prozent-Regler — intern auf einen
+    /// Pixel-Radius umgerechnet, siehe `stages::effects::apply_halation`).
+    #[serde(default)]
+    pub halation_radius: f32,
+    /// Farbton des Bloom-Einfärbens in Grad (`0.0..=360.0`, HSV-Farbrad)
+    /// — echte Filmhalation ist charakteristisch rot-orange (Rückseiten-
+    /// Reflexion an der Filmbasis), daher liegt der sinnvolle Bereich
+    /// meist bei kleinen Werten (`0..40`), aber jeder Farbton ist erlaubt.
+    #[serde(default)]
+    pub halation_hue: f32,
 }
 
 impl EffectsAdjustment {
@@ -467,6 +488,9 @@ impl EffectsAdjustment {
         post_vignette_highlights: 0.0,
         grain_amount: 0.0,
         grain_size: 25.0,
+        halation_amount: 0.0,
+        halation_radius: 30.0,
+        halation_hue: 15.0,
         grain_roughness: 50.0,
     };
 }
@@ -601,7 +625,7 @@ impl CropRect {
     };
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GeometryAdjustment {
     pub crop: CropRect,
     /// `None` = freie Seitenverhältniswahl, sonst Breite/Höhe-Verhältnis.
@@ -611,6 +635,13 @@ pub struct GeometryAdjustment {
     /// Vereinfachte Auto-Ausrichtung: nur EXIF-Orientierung, kein echtes
     /// Kantenerkennungs-Verfahren (siehe `DECISIONS.md` ADR-0028).
     pub auto_horizon: bool,
+    /// KI-Ausfüllen über die Bildränder hinaus (Phase 14 Schritt 1, siehe
+    /// `DECISIONS.md` ADR-0041) — additiv statt Schema-Version-Sprung
+    /// (`#[serde(default)]`, dieselbe Konvention wie `RepairStroke::
+    /// ai_fill`): ein gespeichertes EDL ohne dieses Feld liest weiterhin
+    /// als `None` (keine Erweiterung).
+    #[serde(default)]
+    pub canvas_extension: Option<CanvasExtension>,
 }
 
 impl GeometryAdjustment {
@@ -620,6 +651,7 @@ impl GeometryAdjustment {
         angle_degrees: 0.0,
         overlay: GridOverlay::None,
         auto_horizon: false,
+        canvas_extension: None,
     };
 }
 
@@ -627,6 +659,49 @@ impl Default for GeometryAdjustment {
     fn default() -> Self {
         Self::NEUTRAL
     }
+}
+
+/// Leinwand-Erweiterung über die ursprünglichen Bildränder hinaus (Phase 14
+/// Schritt 1, siehe `DECISIONS.md` ADR-0041) — läuft am **Ende** der
+/// Geometrie-Stufe, nach Drehung und Zuschnitt (dieselbe Stelle, an der
+/// laut dieser Moduldoku bereits die einzige größenverändernde Operation
+/// der ganzen Pipeline sitzt). Die vier Ränder sind — wie `CropRect`s
+/// Koordinaten — als Bruchteil (`0.0..`) der jeweils **aktuellen**
+/// (gedrehten/zugeschnittenen) Breite (`margin_left`/`margin_right`)
+/// bzw. Höhe (`margin_top`/`margin_bottom`) angegeben, nicht in
+/// absoluten Pixeln — ein Bruchteil skaliert bei jeder Export-/
+/// Vorschau-Auflösung gleichermaßen sinnvoll mit, absolute Pixel würden
+/// bei doppelter Export-Auflösung nur noch halb so breit wirken.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CanvasExtension {
+    pub margin_left: f32,
+    pub margin_top: f32,
+    pub margin_right: f32,
+    pub margin_bottom: f32,
+    /// Einmalig vorab per `apx_ai::inpaint::InpaintSession::fill_rgb8`
+    /// berechnetes Ergebnis (analog zu [`AiFillPatch`]) — `None` heißt
+    /// „Ränder gewählt, aber „Anwenden" noch nicht bestätigt", dieselbe
+    /// „noch nicht berechnet"-Konvention wie `RepairStroke::ai_fill`.
+    /// Ohne Patch bleibt die Stufe ein No-Op (keine neue, ungefüllte
+    /// Leinwand ohne KI-Ergebnis).
+    #[serde(default)]
+    pub patch: Option<CanvasExtensionPatch>,
+}
+
+/// `pixels` ist die **gesamte** erweiterte Leinwand (nicht nur die neuen
+/// Ränder) als interleaved RGB (`0..=255`), `bitmap_width *
+/// bitmap_height * 3` Bytes — beim Rendern liefert die Bildmitte immer
+/// das live gerenderte Bild, aus dieser Bitmap wird nur der Rand-Bereich
+/// entnommen (bilinear auf die tatsächliche Zielgröße hochskaliert,
+/// dieselbe Technik wie `AiFillPatch`). Eine einzige Bitmap statt vier
+/// Rand-Rechtecken, weil LaMas Inferenz ohnehin über die ganze Leinwand
+/// läuft (siehe `apx_ai::inpaint`) und die Ecken sonst an den
+/// Rand-Nahtstellen sichtbar unstetig wären.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CanvasExtensionPatch {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub pixels: Vec<u8>,
 }
 
 // ---- Reparatur (Klonen/Reparieren) ------------------------------------------
@@ -697,6 +772,24 @@ pub struct RepairPoint {
     pub y: f32,
 }
 
+/// Welche Frequenz-Ebene ein Strich betrifft (Phase 14 Schritt 2, siehe
+/// `DECISIONS.md` ADR-0041, `stages::frequency_separation`s Moduldoku) —
+/// `Normal` ist das bisherige Verhalten (Strich wirkt direkt auf das
+/// volle Bild). Bei `LowFrequency`/`HighFrequency` zerlegt
+/// `stages::repair` das Bild vor diesem Strich per Box-Tiefpass in
+/// Ton/Farbe (Tieffrequenz) und Textur/Kanten (Hochfrequenz), wendet den
+/// Strich nur auf die gewählte Ebene an und setzt beide Ebenen danach
+/// wieder zusammen — dieselbe Retusche-Technik wie Photoshops
+/// „Frequenztrennung", die Lightroom selbst nicht bietet (siehe
+/// ADR-0041s Recherche-Tabelle, Punkt 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum RepairLayer {
+    #[default]
+    Normal,
+    LowFrequency,
+    HighFrequency,
+}
+
 /// Ein einzelner Klon-/Reparatur-Pinselzug — jeder Strich ist einzeln
 /// entfernbar/undo-fähig (siehe `PLAN.md` Phase 4 Schritt 12). Bewusst
 /// **nicht** Teil dieses Schritts: Auto-Quellenfindung, inhaltsbasiertes
@@ -718,6 +811,11 @@ pub struct RepairStroke {
     /// `mode` ohnehin der einzig sinnvolle Wert).
     #[serde(default)]
     pub ai_fill: Option<AiFillPatch>,
+    /// Frequenztrennung (Phase 14 Schritt 2) — additiv, `#[serde(default)]`
+    /// liest einen älteren gespeicherten Strich ohne dieses Feld als
+    /// `RepairLayer::Normal` (unverändertes bisheriges Verhalten).
+    #[serde(default)]
+    pub layer: RepairLayer,
 }
 
 // ---- Der vollständige EDL v2 -----------------------------------------------

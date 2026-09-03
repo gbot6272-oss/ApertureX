@@ -19,8 +19,9 @@ use crate::edl::{
 use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
-    basic_fused, bw_mixer, calibration, color_grading, curves, details, effects, geometry,
-    hsl_color_mixer, lens_corrections, local_contrast, masks, repair, white_balance,
+    basic_fused, bw_mixer, calibration, color_grading, composite, curves, details, effects,
+    geometry, hsl_color_mixer, lens_corrections, local_contrast, masks, repair, sky_replace,
+    style_transfer, virtual_aperture, white_balance,
 };
 
 /// Das Ergebnis von [`render_rgba8`] — `width`/`height` beschreiben
@@ -307,6 +308,32 @@ pub fn render_rgba8(
         }
     };
 
+    // Halation-/Bloom-Simulation (Phase 14 Schritt 4) — bewusst CPU-only,
+    // unabhängig vom GPU-/CPU-Dispatch oben (siehe `stages::effects`s
+    // Moduldoku), deshalb ein eigener Kurzschluss statt Teil desselben
+    // `apply_gpu`/`apply_cpu`-Aufrufs.
+    let effected = if !stages.effects || edl.effects.halation_amount <= 0.0 {
+        effected
+    } else {
+        effects::apply_halation(&effected, linear.width, linear.height, &edl.effects)
+    };
+
+    // KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8) —
+    // bewusst CPU-only, unabhängig vom GPU-/CPU-Dispatch der Vignette/
+    // Korn (siehe `stages::virtual_aperture`s Moduldoku, dieselbe
+    // Begründung wie Halation in Schritt 4), deshalb ein eigener
+    // Kurzschluss statt Teil desselben `apply_gpu`/`apply_cpu`-Aufrufs.
+    let effected = if !stages.virtual_aperture || edl.virtual_aperture.amount <= 0.0 {
+        effected
+    } else {
+        virtual_aperture::apply(
+            &effected,
+            linear.width,
+            linear.height,
+            &edl.virtual_aperture,
+        )
+    };
+
     let masked = if !stages.masks || edl.masks.is_empty() {
         // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
         // oder keine Masken vorhanden sind (Regelfall) — siehe
@@ -347,14 +374,45 @@ pub fn render_rgba8(
         curves::apply_rgba8(&treated, &edl.curves)
     };
 
+    let composited = if !stages.composite || edl.composite_layers.is_empty() {
+        // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
+        // oder keine Compositing-Ebenen vorhanden sind (Regelfall) —
+        // siehe `stages::composite`s Moduldoku für die Pipeline-Position
+        // (nach `curves`, im fertig entwickelten sRGB-RGBA8-Bild).
+        curved
+    } else {
+        composite::apply_all(&curved, linear.width, linear.height, &edl.composite_layers)
+    };
+
+    // KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — läuft nach
+    // `composite`, vor `geometry`, im selben fertig entwickelten
+    // sRGB-RGBA8-Bild wie Compositing (siehe `stages::style_transfer`s
+    // Moduldoku).
+    let styled = if !stages.style_transfer || edl.style_transfer.amount <= 0.0 {
+        composited
+    } else {
+        style_transfer::apply(
+            &composited,
+            linear.width,
+            linear.height,
+            &edl.style_transfer,
+        )
+    };
+
+    let skied = if !stages.sky_replace || edl.sky_replace.is_none() {
+        styled
+    } else {
+        sky_replace::apply(&styled, linear.width, linear.height, &edl.sky_replace)
+    };
+
     let (width, height, pixels) = if !stages.geometry || edl.geometry == GeometryAdjustment::NEUTRAL
     {
         // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
         // oder weder Drehung noch Zuschnitt etwas zu tun haben
         // (Regelfall).
-        (linear.width, linear.height, curved)
+        (linear.width, linear.height, skied)
     } else {
-        geometry::apply(&curved, linear.width, linear.height, &edl.geometry)
+        geometry::apply(&skied, linear.width, linear.height, &edl.geometry)
     };
 
     Ok(RenderedImage {
@@ -415,6 +473,54 @@ mod tests {
         assert_eq!(
             with_stage_off.pixels[0], neutral.pixels[0],
             "eine deaktivierte Stufe darf keine Wirkung mehr haben, egal was ihre Regler sagen"
+        );
+    }
+
+    /// Phase 14 Schritt 3 (Mehrfachbelichtung/Compositing): eine
+    /// Compositing-Ebene aus `edl.composite_layers` muss tatsächlich in
+    /// `render_rgba8`s fester Kette ankommen (nicht nur in
+    /// `stages::composite`s eigenen isolierten Tests funktionieren) —
+    /// und `stage_enabled.composite = false` muss sie wieder abschalten,
+    /// derselbe Node-Editor-Vertrag wie jede andere Stufe.
+    #[test]
+    fn a_composite_layer_reaches_the_final_render_and_can_be_disabled() {
+        let linear = flat_gray_linear_image(0.2);
+        let layer = crate::edl::CompositeLayer {
+            visible: true,
+            blend_mode: crate::edl::BlendMode::Normal,
+            opacity: 1.0,
+            scale: 1.0,
+            offset_x: 0.5,
+            offset_y: 0.5,
+            source: crate::edl::CompositeLayerSource {
+                bitmap_width: 1,
+                bitmap_height: 1,
+                pixels: vec![250, 250, 250],
+            },
+        };
+        let edl = EdlV4 {
+            composite_layers: vec![layer],
+            ..EdlV4::neutral()
+        };
+        let rendered = render_rgba8(None, &linear, &edl).expect("rendern");
+        assert!(
+            rendered.pixels[0] > 200,
+            "die volldeckende Compositing-Ebene sollte das dunkle Basisbild überschreiben, war {}",
+            rendered.pixels[0]
+        );
+
+        let disabled_edl = EdlV4 {
+            stage_enabled: crate::edl::StageEnabled {
+                composite: false,
+                ..crate::edl::StageEnabled::ALL
+            },
+            ..edl
+        };
+        let with_stage_off = render_rgba8(None, &linear, &disabled_edl).expect("rendern");
+        let neutral = render_rgba8(None, &linear, &EdlV4::neutral()).expect("rendern");
+        assert_eq!(
+            with_stage_off.pixels[0], neutral.pixels[0],
+            "deaktiviertes Compositing darf keine Wirkung mehr haben"
         );
     }
 
@@ -587,7 +693,7 @@ mod tests {
             CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerAdjustment,
             ColorMixerRegion, CurveChannel, CurvesAdjustment, DetailsAdjustment, EffectsAdjustment,
             GeometryAdjustment, GridOverlay, HslAdjustment, HslBand, LensCorrectionAdjustment,
-            PrimaryColorAdjustment, RepairMode, RepairPoint, RepairStroke,
+            PrimaryColorAdjustment, RepairLayer, RepairMode, RepairPoint, RepairStroke,
         };
 
         let edl = EdlV4 {
@@ -697,12 +803,17 @@ mod tests {
                 feather: 0.01,
                 opacity: 1.0,
                 ai_fill: None,
+                layer: RepairLayer::Normal,
             }],
             masks: Vec::new(),
             mask_groups: Vec::new(),
             treatment: crate::edl::Treatment::Color,
             bw_mixer: crate::edl::BlackAndWhiteMixerAdjustment::NEUTRAL,
             stage_enabled: crate::edl::StageEnabled::ALL,
+            composite_layers: Vec::new(),
+            virtual_aperture: crate::edl::v4::VirtualApertureAdjustment::NEUTRAL,
+            style_transfer: crate::edl::v4::StyleTransferAdjustment::NEUTRAL,
+            sky_replace: None,
         };
 
         if let Some(ctx) = &ctx {

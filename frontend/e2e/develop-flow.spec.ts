@@ -502,7 +502,7 @@ test.describe("Entwickeln-Panel", () => {
     expect(lensCorrections.guided_lines[0]?.x2).toBeCloseTo(0.8);
   });
 
-  test("Effekte: ein Vignettierung-Regler und ein Körnung-Regler committen", async ({ page }) => {
+  test("Effekte: ein Vignettierung-Regler, ein Körnung-Regler und die Halation-Regler committen", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
     await page.getByRole("button", { name: "Entwickeln" }).click();
 
@@ -514,9 +514,19 @@ test.describe("Entwickeln-Panel", () => {
     await grainAmountInput.fill("60");
     await grainAmountInput.blur();
 
+    // Phase 14 Schritt 4 (echte Halation-/Bloom-Simulation, siehe
+    // DECISIONS.md ADR-0041): Lightroom Classic hat das nicht.
+    const halationAmountInput = page.getByRole("spinbutton", { name: "Halation: Betrag (Zahlenwert)" });
+    await halationAmountInput.fill("75");
+    await halationAmountInput.blur();
+
+    const halationHueInput = page.getByRole("spinbutton", { name: "Farbton (Halation) (Zahlenwert)" });
+    await halationHueInput.fill("30");
+    await halationHueInput.blur();
+
     await expect.poll(async () => {
       const log = await getMockInvokeLog(page);
-      return log.filter((entry) => entry.cmd === "apply_develop_edit").length >= 2;
+      return log.filter((entry) => entry.cmd === "apply_develop_edit").length >= 4;
     }).toBe(true);
 
     const log = await getMockInvokeLog(page);
@@ -525,9 +535,13 @@ test.describe("Entwickeln-Panel", () => {
     const effects = JSON.parse(edlJson).payload.effects as {
       post_vignette_amount: number;
       grain_amount: number;
+      halation_amount: number;
+      halation_hue: number;
     };
     expect(effects.post_vignette_amount).toBeCloseTo(-40);
     expect(effects.grain_amount).toBeCloseTo(60);
+    expect(effects.halation_amount).toBeCloseTo(75);
+    expect(effects.halation_hue).toBeCloseTo(30);
   });
 
   test("Geometrie: Winkel, Seitenverhältnis, Raster und Auto-Ausrichtung committen", async ({ page }) => {

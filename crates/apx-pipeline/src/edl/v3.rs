@@ -233,7 +233,13 @@ impl Default for MaskAdjustments {
 /// Wie die maskiert bearbeitete Bildkopie mit dem bisherigen Bildzustand
 /// zurückgemischt wird — `Normal` plus die in `SPEC.md` §3.3 namentlich
 /// genannten Beispiele („Multiplizieren, Weiches Licht, Farbe,
-/// Luminanz").
+/// Luminanz"). `Screen` kam in Phase 14 Schritt 3/4 additiv dazu (siehe
+/// `DECISIONS.md` ADR-0041) — für Mehrfachbelichtung/Compositing (helle
+/// Ebenen wie Lichtleck-Texturen) und die Halation-/Bloom-Simulation
+/// (`stages::effects::apply_halation`), die den weichgezeichneten,
+/// eingefärbten Lichter-Ausblutungseffekt additiv-artig, aber nie über
+/// Weiß hinaus zurückmischt — dieselbe Umkehrformel wie `Multiply`
+/// (`1 - (1-a)(1-b)` statt `a*b`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BlendMode {
     Normal,
@@ -241,6 +247,7 @@ pub enum BlendMode {
     SoftLight,
     Color,
     Luminosity,
+    Screen,
 }
 
 /// Überlagerungsfarbe zur Masken-Visualisierung im Viewer (`SPEC.md`

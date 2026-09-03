@@ -12,6 +12,7 @@ import { computeMaskPinPosition } from "../lib/maskPins";
 import { matchesBinding } from "../lib/keybindings";
 import { imageUrl, previewUrl } from "../lib/media";
 import { mergeEdlSubset } from "../lib/presets";
+import { applyFrequencyView } from "../lib/frequencySeparation";
 import { applyPaperWhite, type SoftProofSettings } from "../lib/softProof";
 import { clampZoom, computeBaseScale, imageOrigin, nextZoomStep, panForZoomAtCursor } from "../lib/viewerMath";
 import { QuadRenderer } from "../lib/webgl";
@@ -60,6 +61,7 @@ export function Viewer() {
   const softProofIntent = useAppStore((s) => s.softProofIntent);
   const softProofGamutWarning = useAppStore((s) => s.softProofGamutWarning);
   const softProofPaperWhite = useAppStore((s) => s.softProofPaperWhite);
+  const frequencyViewMode = useAppStore((s) => s.frequencyViewMode);
   const hoverPresetSubset = useAppStore((s) => s.hoverPresetSubset);
   const wbPickerActive = useAppStore((s) => s.wbPickerActive);
   const pickWhiteBalanceAt = useAppStore((s) => s.pickWhiteBalanceAt);
@@ -71,6 +73,8 @@ export function Viewer() {
   const addMaskColorMixerRegionAt = useAppStore((s) => s.addMaskColorMixerRegionAt);
   const aiMaskClickPickerActive = useAppStore((s) => s.aiMaskClickPickerActive);
   const addAiMask = useAppStore((s) => s.addAiMask);
+  const virtualApertureFocusPickerActive = useAppStore((s) => s.virtualApertureFocusPickerActive);
+  const setVirtualApertureFocusPoint = useAppStore((s) => s.setVirtualApertureFocusPoint);
   const tatMode = useAppStore((s) => s.tatMode);
   const tatCurveChannel = useAppStore((s) => s.tatCurveChannel);
   const setTatMode = useAppStore((s) => s.setTatMode);
@@ -78,7 +82,12 @@ export function Viewer() {
   const setCurveChannel = useAppStore((s) => s.setCurveChannel);
   const setHslBandField = useAppStore((s) => s.setHslBandField);
   const pickerActive =
-    wbPickerActive || colorMixerPickerActive || maskColorRangePickerActive || maskColorMixerPickerActive || aiMaskClickPickerActive;
+    wbPickerActive ||
+    colorMixerPickerActive ||
+    maskColorRangePickerActive ||
+    maskColorMixerPickerActive ||
+    aiMaskClickPickerActive ||
+    virtualApertureFocusPickerActive;
   const geometryCropActive = useAppStore((s) => s.geometryCropActive);
   const setGeometryCrop = useAppStore((s) => s.setGeometryCrop);
   const repairActive = useAppStore((s) => s.repairActive);
@@ -208,7 +217,11 @@ export function Viewer() {
       // die unveränderte `developFrame`-Vorschau stehen, statt kurz
       // etwas Falsches oder Leeres zu zeigen.
       const proofed = softProofActive ? softProofFrame : null;
-      const pixels = proofed ? (softProofPaperWhite ? applyPaperWhite(proofed) : proofed.pixels) : developFrame.pixels;
+      const basePixels = proofed ? (softProofPaperWhite ? applyPaperWhite(proofed) : proofed.pixels) : developFrame.pixels;
+      // Frequenztrennungs-Ansichtsmodus (Phase 14 Schritt 2, siehe
+      // `DECISIONS.md` ADR-0041) — reine Anzeige-Transformation über den
+      // bereits gerenderten Puffer, verändert `developEdl` nicht.
+      const pixels = applyFrequencyView(basePixels, developFrame.width, developFrame.height, frequencyViewMode);
       renderer.uploadRgba8(developFrame.width, developFrame.height, pixels);
     } else if (activeBitmap && drawSource === activeBitmap) {
       renderer.uploadImageBitmap(activeBitmap);
@@ -234,6 +247,7 @@ export function Viewer() {
     softProofActive,
     softProofFrame,
     softProofPaperWhite,
+    frequencyViewMode,
   ]);
 
   // ---- Maus: Zoom zum Cursor, Pan per Ziehen ---------------------------
@@ -515,6 +529,11 @@ export function Viewer() {
         // übrigen Bild-Klick-Werkzeuge oben keine Farbe, sondern nur die
         // normierte Klickposition als Startpunkt fürs Region-Growing.
         void addAiMask("ClickRegion", { x: imageX / imgW, y: imageY / imgH });
+      } else if (virtualApertureFocusPickerActive) {
+        // Fokuspunkt der "Virtuellen Blende" (Phase 14 Schritt 8) —
+        // genau wie bei `ClickRegion` oben nur die normierte
+        // Klickposition, keine Farbe.
+        setVirtualApertureFocusPoint(imageX / imgW, imageY / imgH);
       }
     },
     [
@@ -525,6 +544,8 @@ export function Viewer() {
       maskColorMixerPickerActive,
       aiMaskClickPickerActive,
       addAiMask,
+      virtualApertureFocusPickerActive,
+      setVirtualApertureFocusPoint,
       selectedMask,
       developFrame,
       imgW,

@@ -2499,6 +2499,152 @@ pub fn list_people_groups(state: State<'_, AppState>) -> Result<Vec<Vec<PhotoDto
         .collect())
 }
 
+/// Ein Foto innerhalb eines analysierten Shootings, siehe
+/// [`analyze_style_consistency`].
+#[derive(Debug, Clone, Serialize)]
+pub struct StylePhotoAnalysisDto {
+    pub photo: PhotoDto,
+    pub mean_l: f32,
+    pub mean_a: f32,
+    pub mean_b: f32,
+    pub distance_from_group: f32,
+    pub is_outlier: bool,
+    pub suggested_exposure_ev_delta: f32,
+    pub suggested_temp_shift_kelvin_delta: f32,
+    pub suggested_tint_shift_delta: f32,
+}
+
+/// Automatischer Stil-Konsistenz-Check fürs Shooting (Phase 14 Schritt 5,
+/// siehe `DECISIONS.md` ADR-0041 Nachtrag V): Lightroom hat dafür kein
+/// Äquivalent, nur das manuelle "Sync Settings" zwischen zwei Fotos. Die
+/// eigentliche Lab-Statistik lebt in `apx_ai::style_consistency` (rein,
+/// unit-getestet) — dieser Command löst nur die Fotos eines Ordners auf
+/// und arbeitet wie [`list_perceptual_duplicate_groups`]/
+/// [`list_people_groups`] auf dem bereits vorhandenen Thumbnail-
+/// Vorschau-Cache statt jedes Foto neu von der RAW-Datei zu dekodieren.
+/// Fotos ohne bereits generierte Miniaturansicht werden übersprungen wie
+/// bei den beiden genannten Vorbildern.
+#[tauri::command]
+pub fn analyze_style_consistency(
+    state: State<'_, AppState>,
+    folder_id: String,
+) -> Result<Vec<StylePhotoAnalysisDto>, String> {
+    let folder_id: apx_core::FolderId = folder_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    let photos = state
+        .catalog
+        .list_photos_by_folder(folder_id)
+        .map_err(|err| err.to_string())?;
+
+    let mut with_signatures: Vec<(
+        apx_catalog::Photo,
+        apx_ai::style_consistency::StyleSignature,
+    )> = Vec::new();
+    for photo in photos {
+        let Ok(Some(preview)) = state
+            .catalog
+            .get_preview(photo.id, apx_catalog::PreviewLevel::Thumbnail)
+        else {
+            continue;
+        };
+        let Ok(img) = image::open(&preview.path) else {
+            continue;
+        };
+        let rgb = img.to_rgb8();
+        let (width, height) = rgb.dimensions();
+        let pixels: Vec<f32> = rgb
+            .into_raw()
+            .iter()
+            .map(|&v| f32::from(v) / 255.0)
+            .collect();
+        let signature = apx_ai::style_consistency::compute_style_signature(&pixels, width, height);
+        with_signatures.push((photo, signature));
+    }
+
+    let signatures: Vec<apx_ai::style_consistency::StyleSignature> = with_signatures
+        .iter()
+        .map(|(_, signature)| *signature)
+        .collect();
+    let analyses = apx_ai::style_consistency::analyze_group(&signatures);
+
+    Ok(with_signatures
+        .into_iter()
+        .zip(analyses)
+        .map(|((photo, _), analysis)| StylePhotoAnalysisDto {
+            photo: PhotoDto::from(photo),
+            mean_l: analysis.signature.mean_l,
+            mean_a: analysis.signature.mean_a,
+            mean_b: analysis.signature.mean_b,
+            distance_from_group: analysis.distance_from_group,
+            is_outlier: analysis.is_outlier,
+            suggested_exposure_ev_delta: analysis.suggestion.exposure_ev_delta,
+            suggested_temp_shift_kelvin_delta: analysis.suggestion.temp_shift_kelvin_delta,
+            suggested_tint_shift_delta: analysis.suggestion.tint_shift_delta,
+        })
+        .collect())
+}
+
+/// Eine dominante Farbe der extrahierten Palette, siehe
+/// [`extract_color_palette`].
+#[derive(Debug, Clone, Serialize)]
+pub struct PaletteColorDto {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub hue_degrees: f32,
+    pub chroma: f32,
+    pub lightness: f32,
+    pub percentage: f32,
+}
+
+/// Farb-Harmonie-Rad: automatische Paletten-Extraktion (Phase 14
+/// Schritt 7, siehe `DECISIONS.md` ADR-0041 Nachtrag VII). Die eigentliche
+/// k-means-Analyse lebt in `apx_ai::palette` (rein, unit-getestet) —
+/// dieser Command arbeitet wie [`list_perceptual_duplicate_groups`]/
+/// [`analyze_style_consistency`] auf dem bereits vorhandenen Thumbnail-
+/// Vorschau-Cache statt jedes Mal neu von der RAW-Datei zu dekodieren.
+/// Dieselbe ehrliche Grenze wie bei jeder anderen Analyse auf Basis
+/// dieses Caches: spiegelt bereits im Entwickeln-Modul gesetzte, aber
+/// noch nicht in eine neue Vorschau gebackene Anpassungen nicht wider.
+#[tauri::command]
+pub fn extract_color_palette(
+    state: State<'_, AppState>,
+    photo_id: String,
+    k: Option<usize>,
+) -> Result<Vec<PaletteColorDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let preview = state
+        .catalog
+        .get_preview(photo_id, apx_catalog::PreviewLevel::Thumbnail)
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| "Keine Vorschau für dieses Foto vorhanden".to_string())?;
+    let img = image::open(&preview.path).map_err(|err| err.to_string())?;
+    let rgb = img.to_rgb8();
+    let (width, height) = rgb.dimensions();
+    let pixels: Vec<f32> = rgb
+        .into_raw()
+        .iter()
+        .map(|&v| f32::from(v) / 255.0)
+        .collect();
+
+    let k = k.unwrap_or(apx_ai::palette::DEFAULT_PALETTE_SIZE);
+    let colors = apx_ai::palette::extract_palette(&pixels, width, height, k);
+
+    Ok(colors
+        .into_iter()
+        .map(|color| PaletteColorDto {
+            r: color.r,
+            g: color.g,
+            b: color.b,
+            hue_degrees: color.hue_degrees,
+            chroma: color.chroma,
+            lightness: color.lightness,
+            percentage: color.percentage,
+        })
+        .collect())
+}
+
 // ---- KI-Funktionen (Phase 7, siehe `DECISIONS.md` ADR-0033) ---------------
 //
 // Alle Analyse-Algorithmen selbst leben in `apx-ai` (klassische
@@ -2715,6 +2861,16 @@ pub struct AiSettingsDto {
     /// wurde — das Frontend zeigt sonst einen Hinweis statt der Download-
     /// /Erkennungs-Aktionen (siehe `apx-ai::people`s Moduldoku).
     pub people_feature_compiled: bool,
+    /// `Some`, sobald der Nutzer den Download des MiDaS-Tiefenschätzungs-
+    /// Modells bestätigt hat und er erfolgreich war (Phase 14 Schritt 8,
+    /// siehe [`download_depth_model`]).
+    pub depth_model_path: Option<String>,
+    /// Je Stil (`apx_ai::style_transfer::StyleKind::id()` als Schlüssel)
+    /// der lokale Pfad, sobald der Nutzer dessen Download bestätigt hat
+    /// und er erfolgreich war (Phase 14 Schritt 9, siehe
+    /// [`download_style_transfer_model`]) — ein fehlender Schlüssel
+    /// heißt „dieser Stil noch nicht heruntergeladen".
+    pub style_transfer_model_paths: std::collections::BTreeMap<String, String>,
 }
 
 #[tauri::command]
@@ -2727,6 +2883,8 @@ pub fn get_ai_settings(state: State<'_, AppState>) -> Result<AiSettingsDto, Stri
         people_landmark_model_path: settings.ai.people_landmark_model_path,
         people_encoder_model_path: settings.ai.people_encoder_model_path,
         people_feature_compiled: cfg!(feature = "people"),
+        depth_model_path: settings.ai.depth_model_path,
+        style_transfer_model_paths: settings.ai.style_transfer_model_paths,
     })
 }
 
@@ -2926,6 +3084,629 @@ pub fn run_ai_inpaint(
         bitmap_width: pw,
         bitmap_height: ph,
         pixels_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &filled),
+    })
+}
+
+// ---- KI: Leinwand-Erweiterung (Outpainting, Phase 14 Schritt 1, siehe
+// DECISIONS.md ADR-0041) -----------------------------------------------------
+//
+// Dieselbe LaMa-Session wie `run_ai_inpaint` oben (kein zweites Modell,
+// kein zweiter Download-Command) — nur eine andere Maskenform: statt
+// eines gemalten Pinselstrichs ist die gesamte neue Randfläche rund um
+// das zentrierte Original als „auszufüllen" markiert. Das Ergebnis ist
+// bereits die vollständig zusammengesetzte, erweiterte Leinwand (Original
+// + KI-Rand) — `stages::geometry::extend_canvas` braucht den Rand-Anteil
+// nicht separat, weil sie den Original-Bereich beim Rendern ohnehin durch
+// die exakten Original-Pixel ersetzt (siehe deren Doku) und das
+// zurückgegebene Bitmap unverändert als `CanvasExtensionPatch::pixels`
+// übernommen werden kann — dasselbe „einmal berechnen, bei jedem Rendern
+// nur noch skalieren"-Muster wie `AiFillPatch`.
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CanvasExtensionPatchDto {
+    pub margin_left: f32,
+    pub margin_top: f32,
+    pub margin_right: f32,
+    pub margin_bottom: f32,
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    /// Base64-kodiertes interleaved-RGB-`u8`-Ergebnis, `bitmap_width *
+    /// bitmap_height * 3` Bytes nach dem Dekodieren — dasselbe
+    /// Übertragungsmuster wie `AiFillPatchDto::pixels_base64`.
+    pub pixels_base64: String,
+}
+
+/// Ersetzt den Rand einer um `margin_left`/`margin_top`/`margin_right`/
+/// `margin_bottom` (normierte Bruchteile der aktuellen Bildbreite/-höhe,
+/// `0.0..=1.0`, dieselbe Konvention wie `CanvasExtension`s Feldtypen)
+/// erweiterten Leinwand durch echte LaMa-Inferenz (Phase 14 Schritt 1).
+/// Läuft — wie `run_ai_inpaint` — auf dem linearen, auf
+/// `apx_ai::segmentation::ANALYSIS_MAX_EDGE` gedeckelten Dekodierergebnis,
+/// **ohne** eine bereits im Entwickeln-Modul gesetzte Drehung/Zuschnitt zu
+/// berücksichtigen — dieselbe ehrliche Vereinfachung wie bei jeder
+/// anderen KI-Analyse in diesem Projekt (`generate_ai_mask`,
+/// `suggest_repair_source`, …), die ebenfalls auf dem rohen
+/// Dekodierergebnis statt der entwickelten Vorschau arbeitet.
+#[tauri::command]
+pub fn run_ai_outpaint(
+    state: State<'_, AppState>,
+    photo_id: String,
+    margin_left: f32,
+    margin_top: f32,
+    margin_right: f32,
+    margin_bottom: f32,
+) -> Result<CanvasExtensionPatchDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let model_path = settings
+        .ai
+        .inpainting_model_path
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| {
+            "Kein KI-Ausfüllen-Modell heruntergeladen — siehe Einstellungen → KI.".to_string()
+        })?;
+
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let width = linear.width;
+    let height = linear.height;
+    let ml = (margin_left.max(0.0) * width as f32).round() as u32;
+    let mr = (margin_right.max(0.0) * width as f32).round() as u32;
+    let mt = (margin_top.max(0.0) * height as f32).round() as u32;
+    let mb = (margin_bottom.max(0.0) * height as f32).round() as u32;
+    let new_width = width + ml + mr;
+    let new_height = height + mt + mb;
+    if new_width == 0 || new_height == 0 || (ml == 0 && mr == 0 && mt == 0 && mb == 0) {
+        return Err("Leinwand-Erweiterung braucht mindestens einen Rand größer als 0.".to_string());
+    }
+
+    // Original als `u8`-RGB in die Bildmitte der neuen Leinwand kopieren;
+    // der neue Rand wird per Kanten-Klemmung (nächstliegender Original-
+    // Pixel) vorbefüllt statt mit einer harten Flächenfarbe — reduziert
+    // sichtbare Kanten-Artefakte, bevor LaMa den Rand tatsächlich neu
+    // erzeugt (dieselbe Näherung, mit der auch andere Inpainting-Tools
+    // ihre Startfüllung wählen).
+    let (nw, nh) = (new_width as usize, new_height as usize);
+    let mut extended_u8 = vec![0u8; nw * nh * 3];
+    let mut mask = vec![255u8; nw * nh];
+    for y in 0..new_height {
+        for x in 0..new_width {
+            let src_x = x.saturating_sub(ml).min(width.saturating_sub(1));
+            let src_y = y.saturating_sub(mt).min(height.saturating_sub(1));
+            let src = (src_y as usize * width as usize + src_x as usize) * 3;
+            let dst = (y as usize * nw + x as usize) * 3;
+            for c in 0..3 {
+                let value = linear.pixels[src + c].clamp(0.0, 1.0);
+                extended_u8[dst + c] = (value * 255.0).round() as u8;
+            }
+            let in_center = x >= ml && x < ml + width && y >= mt && y < mt + height;
+            if in_center {
+                mask[y as usize * nw + x as usize] = 0;
+            }
+        }
+    }
+
+    // Session wird pro Aufruf frisch geladen — dieselbe akzeptierte
+    // Vereinfachung wie in `run_ai_inpaint` oben (siehe dort).
+    let mut session = apx_ai::inpaint::InpaintSession::load(Path::new(&model_path))
+        .map_err(|err| err.to_string())?;
+    let filled = session
+        .fill_rgb8(&extended_u8, new_width, new_height, &mask)
+        .map_err(|err| err.to_string())?;
+
+    Ok(CanvasExtensionPatchDto {
+        margin_left,
+        margin_top,
+        margin_right,
+        margin_bottom,
+        bitmap_width: new_width,
+        bitmap_height: new_height,
+        pixels_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &filled),
+    })
+}
+
+// ---- Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3, siehe
+// DECISIONS.md ADR-0041) ------------------------------------------------------
+//
+// Kein KI-Modell nötig — reine Verdrahtung + Bilddekodierung. Löst
+// entweder ein weiteres Katalog-Foto (`photo_id`) oder eine vom Nutzer
+// per `pick_file_path` gewählte Textur-Datei (`texture_path`) EINMALIG
+// zu einer fertigen RGB-Bitmap auf, die das Frontend danach unverändert
+// in `CompositeLayer::source` ablegt — dasselbe „einmal auflösen, bei
+// jedem Rendern nur noch skalieren"-Muster wie [`run_ai_inpaint`]/
+// [`run_ai_outpaint`] oben. `apx-pipeline` selbst hat keinen Katalog-/
+// Dateisystemzugriff (siehe `edl::v4::CompositeLayerSource`s Moduldoku)
+// — das Auflösen passiert bewusst hier, nicht dort.
+
+fn downsample_rgb_image(img: image::RgbImage, max_edge: u32) -> image::RgbImage {
+    let (width, height) = (img.width(), img.height());
+    if width.max(height) <= max_edge {
+        return img;
+    }
+    let scale = max_edge as f32 / width.max(height) as f32;
+    let new_width = ((width as f32) * scale).round().max(1.0) as u32;
+    let new_height = ((height as f32) * scale).round().max(1.0) as u32;
+    image::imageops::resize(
+        &img,
+        new_width,
+        new_height,
+        image::imageops::FilterType::Triangle,
+    )
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CompositeLayerSourceDto {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    /// Base64-kodiertes interleaved-RGB-`u8`-Ergebnis, `bitmap_width *
+    /// bitmap_height * 3` Bytes nach dem Dekodieren — dasselbe
+    /// Übertragungsmuster wie `AiFillPatchDto::pixels_base64`.
+    pub pixels_base64: String,
+}
+
+/// Löst genau eine der beiden Quellen zu einer fertigen RGB-Bitmap auf
+/// (`photo_id` **oder** `texture_path`, nie beide/keines) — auf
+/// `apx_ai::segmentation::ANALYSIS_MAX_EDGE` gedeckelt, dieselbe
+/// Auflösungsgrenze wie jede andere in der EDL gespeicherte Bitmap
+/// dieses Projekts.
+#[tauri::command]
+pub fn prepare_composite_layer_source(
+    state: State<'_, AppState>,
+    photo_id: Option<String>,
+    texture_path: Option<String>,
+) -> Result<CompositeLayerSourceDto, String> {
+    let max_edge = apx_ai::segmentation::ANALYSIS_MAX_EDGE;
+
+    let (width, height, rgb) = match (photo_id, texture_path) {
+        (Some(photo_id), None) => {
+            let photo_id = parse_photo_id(photo_id)?;
+            let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+            let linear = apx_raw::decode_linear(&source_path, Some(max_edge))
+                .map_err(|err| err.to_string())?;
+            let rgba = apx_pipeline::color::linear_camera_rgb_to_srgb_rgba8(
+                &linear.pixels,
+                linear.cam_to_srgb,
+            );
+            let pixel_count = (linear.width as usize) * (linear.height as usize);
+            let mut rgb = vec![0u8; pixel_count * 3];
+            for i in 0..pixel_count {
+                rgb[i * 3] = rgba[i * 4];
+                rgb[i * 3 + 1] = rgba[i * 4 + 1];
+                rgb[i * 3 + 2] = rgba[i * 4 + 2];
+            }
+            (linear.width, linear.height, rgb)
+        }
+        (None, Some(texture_path)) => {
+            let img = image::open(&texture_path)
+                .map_err(|err| {
+                    format!("Textur '{texture_path}' konnte nicht geladen werden: {err}")
+                })?
+                .into_rgb8();
+            let img = downsample_rgb_image(img, max_edge);
+            let (width, height) = (img.width(), img.height());
+            (width, height, img.into_raw())
+        }
+        _ => {
+            return Err(
+                "Entweder photo_id oder texture_path muss angegeben werden (nicht beides, nicht keines)."
+                    .to_string(),
+            );
+        }
+    };
+
+    Ok(CompositeLayerSourceDto {
+        bitmap_width: width,
+        bitmap_height: height,
+        pixels_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &rgb),
+    })
+}
+
+// ---- KI: Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8,
+// siehe DECISIONS.md ADR-0041 Nachtrag VIII) ---------------------------------
+//
+// Opt-in, kein Bundling im Installer (dasselbe Muster wie das LaMa-
+// Inpainting-Modell oben): der Nutzer bestätigt den ~64-MB-Download
+// ausdrücklich im Einstellungsdialog, bevor irgendetwas heruntergeladen
+// wird.
+
+/// Öffentliche Download-URL des in `DECISIONS.md` ADR-0041 (Schritt 0 +
+/// Nachtrag VIII) recherchierten Modells (`isl-org/MiDaS`, MIT,
+/// GitHub-Release-Asset). **Anders als beim LaMa-Modell in dieser
+/// Sitzung tatsächlich real heruntergeladen und geprüft** — siehe
+/// [`MIDAS_MODEL_SHA256`].
+const MIDAS_MODEL_URL: &str =
+    "https://github.com/isl-org/MiDaS/releases/download/v2_1/model-small.onnx";
+/// SHA-256 der real heruntergeladenen Datei (siehe `apx_ai::depth`s
+/// Moduldoku für den genauen Verifikationsweg) — anders als beim
+/// LaMa-Modell (`huggingface.co` aus dieser Sandbox nicht erreichbar)
+/// hier eine echte Prüfsumme statt einer offenen Lücke.
+const MIDAS_MODEL_SHA256: &str = "2d8c6cb8f415229daf1eb041024208e2608c9f98e17c81cc7c6ecb449c56fd58";
+
+/// Lädt das MiDaS-Tiefenschätzungs-Modell herunter, prüft die Prüfsumme
+/// gegen [`MIDAS_MODEL_SHA256`] und hinterlegt den Pfad in den
+/// Einstellungen — nur bei erfolgreicher Prüfung, sonst wird die Datei
+/// verworfen (kein potenziell manipuliertes/beschädigtes Modell landet
+/// je in den Einstellungen).
+#[tauri::command]
+pub async fn download_depth_model(state: State<'_, AppState>) -> Result<String, String> {
+    let response = reqwest::get(MIDAS_MODEL_URL)
+        .await
+        .map_err(|err| format!("Download von '{MIDAS_MODEL_URL}' fehlgeschlagen: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Download von '{MIDAS_MODEL_URL}' fehlgeschlagen: HTTP {}",
+            response.status()
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| format!("Antwort konnte nicht gelesen werden: {err}"))?;
+
+    use sha2::Digest as _;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(&bytes);
+    let actual_hash = format!("{:x}", hasher.finalize());
+    if actual_hash != MIDAS_MODEL_SHA256 {
+        return Err(format!(
+            "Prüfsumme stimmt nicht überein (erwartet {MIDAS_MODEL_SHA256}, erhalten {actual_hash}) — Download verworfen."
+        ));
+    }
+
+    let dest_dir = state.paths.models_dir();
+    std::fs::create_dir_all(&dest_dir).map_err(|err| err.to_string())?;
+    let dest_path = dest_dir.join("midas_v21_small.onnx");
+    std::fs::write(&dest_path, &bytes).map_err(|err| err.to_string())?;
+
+    let path_string = dest_path.to_string_lossy().to_string();
+    let settings_path = state.paths.settings_file();
+    let mut settings =
+        apx_core::Settings::load_or_default(&settings_path).map_err(|err| err.to_string())?;
+    settings.ai.depth_model_path = Some(path_string.clone());
+    settings
+        .save(&settings_path)
+        .map_err(|err| err.to_string())?;
+
+    Ok(path_string)
+}
+
+/// Entfernt den hinterlegten Modellpfad (löscht die Datei selbst nicht —
+/// dieselbe Zurückhaltung wie [`clear_inpainting_model_path`]).
+#[tauri::command]
+pub fn clear_depth_model_path(state: State<'_, AppState>) -> Result<(), String> {
+    let path = state.paths.settings_file();
+    let mut settings = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    settings.ai.depth_model_path = None;
+    settings.save(&path).map_err(|err| err.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DepthMapDto {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    /// Base64-kodierte `0..=255`-Tiefenkarte (`255` = am nächsten), ein
+    /// Byte je Pixel — dieselbe Übertragungskonvention wie
+    /// `AiMaskAlphaDto::alpha_base64`.
+    pub depth_base64: String,
+}
+
+/// Berechnet einmalig eine echte monokulare Tiefenkarte für `photo_id`
+/// per MiDaS v2.1 small (Phase 14 Schritt 8) — das Frontend ruft diesen
+/// Command nur auf ausdrücklichen Nutzerwunsch ("Tiefenkarte berechnen")
+/// auf, nicht bei jedem Regler-Tick, und speichert das Ergebnis als
+/// `VirtualApertureAdjustment::depth_map` in der EDL (dasselbe „einmal
+/// berechnen"-Muster wie [`run_ai_inpaint`]).
+///
+/// **Ehrliche Grenze, dieselbe wie [`run_ai_inpaint`]:** läuft auf dem
+/// linearen Kamera-RGB-Dekodierergebnis (`decode_linear`), nicht auf
+/// entwickelten sRGB-Pixeln — MiDaS wurde vermutlich auf gewöhnlichen
+/// (sRGB-artigen) Fotos trainiert, ein linearer Farbraum ist eine
+/// Näherung, keine exakte Übereinstimmung mit den Trainingsdaten
+/// (dieselbe Art Kompromiss wie bei jeder anderen KI-Heuristik dieses
+/// Projekts, die auf demselben Dekodierergebnis arbeitet).
+#[tauri::command]
+pub fn estimate_photo_depth(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<DepthMapDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let model_path = settings
+        .ai
+        .depth_model_path
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| {
+            "Kein Tiefenschätzungs-Modell heruntergeladen — siehe Einstellungen → KI.".to_string()
+        })?;
+
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let pixel_count = (linear.width as usize) * (linear.height as usize);
+    let rgb_u8: Vec<u8> = linear.pixels[..pixel_count * 3]
+        .iter()
+        .map(|&v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+        .collect();
+
+    // Session wird pro Aufruf frisch geladen (dieselbe Begründung wie
+    // `run_ai_inpaint`: einfacher, für einen Ein-Klick-Vorgang
+    // akzeptabel).
+    let mut session =
+        apx_ai::depth::DepthSession::load(Path::new(&model_path)).map_err(|err| err.to_string())?;
+    let depth = session
+        .estimate_rgb8(&rgb_u8, linear.width, linear.height)
+        .map_err(|err| err.to_string())?;
+    let depth_u8: Vec<u8> = depth
+        .iter()
+        .map(|&v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+        .collect();
+
+    Ok(DepthMapDto {
+        bitmap_width: linear.width,
+        bitmap_height: linear.height,
+        depth_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &depth_u8),
+    })
+}
+
+// ---- KI: Stiltransfer zwischen Fotos (Phase 14 Schritt 9, siehe
+// DECISIONS.md ADR-0041 Nachtrag IX) -----------------------------------------
+//
+// Opt-in, kein Bundling im Installer (dasselbe Muster wie MiDaS/LaMa
+// oben) — fünf unabhängig voneinander herunterladbare feste Stile
+// (`apx_ai::style_transfer::StyleKind`), jeweils real per SHA-256
+// geprüft.
+
+/// Basis-URL für alle fünf `fast_neural_style`-Modelle — derselbe echte
+/// Git-LFS-Auslieferungs-Host wie bei MiDaS' Recherche identifiziert
+/// (`media.githubusercontent.com/media/...`, `raw.githubusercontent.com`
+/// liefert für LFS-Dateien nur den Zeiger-Text, siehe `DECISIONS.md`
+/// ADR-0041).
+const STYLE_TRANSFER_BASE_URL: &str = "https://media.githubusercontent.com/media/onnx/models/main/validated/vision/style_transfer/fast_neural_style/model";
+
+/// Real berechnete SHA-256-Hashes je Stil (alle fünf Dateien in dieser
+/// Sitzung tatsächlich heruntergeladen, je exakt 6 728 029 Byte — siehe
+/// `apx_ai::style_transfer`s Moduldoku) — wie bei MiDaS eine echte
+/// Prüfsumme statt der bei LaMa dokumentierten offenen Lücke.
+fn style_transfer_model_sha256(style: apx_ai::style_transfer::StyleKind) -> &'static str {
+    use apx_ai::style_transfer::StyleKind;
+    match style {
+        StyleKind::Candy => "9d11a3529d1e547da6ae07201d93484dbab2ec0a3614535752c8f40f0fe2968a",
+        StyleKind::Mosaic => "fa646dedade881243f8d5a2ceb7de2b93675b21fc24f7482894ac4851a9a0a47",
+        StyleKind::RainPrincess => {
+            "4162912e6f75fedef6f810ae989b9e10d3d5d43308dab34b027c850cf255e152"
+        }
+        StyleKind::Udnie => "8656b6ce7dec8f22ee13c2d557d6b67bd6f550dde88d0f2e7c9972aeb765cc0d",
+        StyleKind::Pointilism => "5ee2b8d4d6bc60a777f54e0fe96a1b717360a004b79d56c67390d4a975b14d98",
+    }
+}
+
+/// Lädt das ONNX-Modell für genau einen Stil herunter, prüft die
+/// Prüfsumme gegen [`style_transfer_model_sha256`] und hinterlegt den
+/// Pfad in den Einstellungen (unter `style.id()` als Schlüssel) — nur
+/// bei erfolgreicher Prüfung, sonst wird die Datei verworfen.
+#[tauri::command]
+pub async fn download_style_transfer_model(
+    state: State<'_, AppState>,
+    style: String,
+) -> Result<String, String> {
+    let kind = apx_ai::style_transfer::StyleKind::from_id(&style)
+        .ok_or_else(|| format!("Unbekannter Stil '{style}'."))?;
+    let url = format!("{STYLE_TRANSFER_BASE_URL}/{}-9.onnx", kind.id());
+    let response = reqwest::get(&url)
+        .await
+        .map_err(|err| format!("Download von '{url}' fehlgeschlagen: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Download von '{url}' fehlgeschlagen: HTTP {}",
+            response.status()
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| format!("Antwort konnte nicht gelesen werden: {err}"))?;
+
+    use sha2::Digest as _;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(&bytes);
+    let actual_hash = format!("{:x}", hasher.finalize());
+    let expected_hash = style_transfer_model_sha256(kind);
+    if actual_hash != expected_hash {
+        return Err(format!(
+            "Prüfsumme stimmt nicht überein (erwartet {expected_hash}, erhalten {actual_hash}) — Download verworfen."
+        ));
+    }
+
+    let dest_dir = state.paths.models_dir();
+    std::fs::create_dir_all(&dest_dir).map_err(|err| err.to_string())?;
+    let dest_path = dest_dir.join(format!("style_transfer_{}.onnx", kind.id()));
+    std::fs::write(&dest_path, &bytes).map_err(|err| err.to_string())?;
+
+    let path_string = dest_path.to_string_lossy().to_string();
+    let settings_path = state.paths.settings_file();
+    let mut settings =
+        apx_core::Settings::load_or_default(&settings_path).map_err(|err| err.to_string())?;
+    settings
+        .ai
+        .style_transfer_model_paths
+        .insert(kind.id().to_string(), path_string.clone());
+    settings
+        .save(&settings_path)
+        .map_err(|err| err.to_string())?;
+
+    Ok(path_string)
+}
+
+/// Entfernt den hinterlegten Pfad für genau einen Stil (löscht die Datei
+/// selbst nicht — dieselbe Zurückhaltung wie [`clear_depth_model_path`]).
+#[tauri::command]
+pub fn clear_style_transfer_model_path(
+    state: State<'_, AppState>,
+    style: String,
+) -> Result<(), String> {
+    let kind = apx_ai::style_transfer::StyleKind::from_id(&style)
+        .ok_or_else(|| format!("Unbekannter Stil '{style}'."))?;
+    let path = state.paths.settings_file();
+    let mut settings = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    settings.ai.style_transfer_model_paths.remove(kind.id());
+    settings.save(&path).map_err(|err| err.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StyleTransferPatchDto {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    /// Base64-kodiertes interleaved-RGB-`u8`-Ergebnis — dasselbe
+    /// Übertragungsmuster wie `CompositeLayerSourceDto::pixels_base64`.
+    pub pixels_base64: String,
+}
+
+/// Berechnet einmalig das stilisierte Ergebnis für `photo_id` mit dem
+/// gewählten `style` (Phase 14 Schritt 9) — das Frontend ruft diesen
+/// Command nur auf ausdrücklichen Nutzerwunsch auf, nicht bei jedem
+/// Regler-Tick, und speichert das Ergebnis als
+/// `StyleTransferAdjustment::patch` in der EDL (dasselbe „einmal
+/// berechnen"-Muster wie [`estimate_photo_depth`]/[`run_ai_inpaint`]).
+///
+/// **Anders als `estimate_photo_depth`/`run_ai_inpaint`: läuft auf dem
+/// bereits nach sRGB konvertierten Dekodierergebnis**, nicht auf rohen
+/// linearen Pixeln — dieselbe Farbraum-Wahl wie
+/// [`prepare_composite_layer_source`] (Schritt 3), weil das Ergebnis
+/// hier direkt als sichtbares Bild ins fertig entwickelte Foto
+/// zurückgeblendet wird (`stages::style_transfer::apply`), nicht nur
+/// als Zwischengröße für eine weitere Berechnung dient wie eine
+/// Tiefenkarte — ein linearer Kompromiss wäre hier ein sichtbarer
+/// Tonwert-Fehler, keine bloße Ungenauigkeit.
+#[tauri::command]
+pub fn stylize_photo(
+    state: State<'_, AppState>,
+    photo_id: String,
+    style: String,
+) -> Result<StyleTransferPatchDto, String> {
+    let kind = apx_ai::style_transfer::StyleKind::from_id(&style)
+        .ok_or_else(|| format!("Unbekannter Stil '{style}'."))?;
+    let photo_id = parse_photo_id(photo_id)?;
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let model_path = settings
+        .ai
+        .style_transfer_model_paths
+        .get(kind.id())
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| {
+            format!(
+                "Stil '{}' noch nicht heruntergeladen — siehe Einstellungen → KI.",
+                kind.id()
+            )
+        })?
+        .clone();
+
+    let max_edge = apx_ai::segmentation::ANALYSIS_MAX_EDGE;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let linear =
+        apx_raw::decode_linear(&source_path, Some(max_edge)).map_err(|err| err.to_string())?;
+    let rgba =
+        apx_pipeline::color::linear_camera_rgb_to_srgb_rgba8(&linear.pixels, linear.cam_to_srgb);
+    let pixel_count = (linear.width as usize) * (linear.height as usize);
+    let mut rgb = vec![0u8; pixel_count * 3];
+    for i in 0..pixel_count {
+        rgb[i * 3] = rgba[i * 4];
+        rgb[i * 3 + 1] = rgba[i * 4 + 1];
+        rgb[i * 3 + 2] = rgba[i * 4 + 2];
+    }
+
+    // Session wird pro Aufruf frisch geladen (dieselbe Begründung wie
+    // `run_ai_inpaint`/`estimate_photo_depth`: einfacher, für einen
+    // Ein-Klick-Vorgang akzeptabel).
+    let mut session = apx_ai::style_transfer::StyleTransferSession::load(Path::new(&model_path))
+        .map_err(|err| err.to_string())?;
+    let styled = session
+        .stylize_rgb8(&rgb, linear.width, linear.height)
+        .map_err(|err| err.to_string())?;
+
+    Ok(StyleTransferPatchDto {
+        bitmap_width: linear.width,
+        bitmap_height: linear.height,
+        pixels_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &styled),
+    })
+}
+
+// ---- Himmelsaustausch mit automatischer Neubelichtung (Phase 14
+// Schritt 10) — klassischer Algorithmus, kein ONNX-Modell. -----------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkyReplacePatchDto {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub pixels_base64: String,
+}
+
+/// Ersetzt den Himmel in `photo_id` durch das Foto unter `sky_image_path`
+/// und gleicht den Vordergrund grob an dessen Farbtemperatur/Helligkeit
+/// an (`apx_ai::sky_replace::composite`).
+#[tauri::command]
+pub fn replace_sky(
+    state: State<'_, AppState>,
+    photo_id: String,
+    sky_image_path: String,
+) -> Result<SkyReplacePatchDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let max_edge = apx_ai::segmentation::ANALYSIS_MAX_EDGE;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let linear =
+        apx_raw::decode_linear(&source_path, Some(max_edge)).map_err(|err| err.to_string())?;
+    let alpha = apx_ai::segmentation::sky_alpha(&linear.pixels, linear.width, linear.height)
+        .map_err(|err| err.to_string())?;
+    let rgba =
+        apx_pipeline::color::linear_camera_rgb_to_srgb_rgba8(&linear.pixels, linear.cam_to_srgb);
+    let pixel_count = (linear.width as usize) * (linear.height as usize);
+    let mut rgb = vec![0u8; pixel_count * 3];
+    for i in 0..pixel_count {
+        rgb[i * 3] = rgba[i * 4];
+        rgb[i * 3 + 1] = rgba[i * 4 + 1];
+        rgb[i * 3 + 2] = rgba[i * 4 + 2];
+    }
+
+    let sky_img = image::open(&sky_image_path)
+        .map_err(|err| {
+            format!("Himmel-Foto '{sky_image_path}' konnte nicht geladen werden: {err}")
+        })?
+        .into_rgb8();
+    let sky_img = downsample_rgb_image(sky_img, max_edge);
+    let (sky_w, sky_h) = (sky_img.width(), sky_img.height());
+
+    let composited = apx_ai::sky_replace::composite(
+        &rgb,
+        linear.width,
+        linear.height,
+        &alpha,
+        sky_img.as_raw(),
+        sky_w,
+        sky_h,
+    );
+
+    Ok(SkyReplacePatchDto {
+        bitmap_width: linear.width,
+        bitmap_height: linear.height,
+        pixels_base64: base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            &composited,
+        ),
     })
 }
 

@@ -20,7 +20,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::v2;
-use super::v3::{self, BlackAndWhiteMixerAdjustment, Mask, MaskGroup, Treatment};
+use super::v3::{self, BlackAndWhiteMixerAdjustment, BlendMode, Mask, MaskGroup, Treatment};
 
 // ---- Stufen-Aktivierung (Node-Editor) --------------------------------------
 
@@ -43,7 +43,41 @@ pub struct StageEnabled {
     pub masks: bool,
     pub treatment: bool,
     pub curves: bool,
+    /// Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3, siehe
+    /// `DECISIONS.md` ADR-0041) — läuft nach `curves`, vor `geometry`
+    /// (siehe `stages::composite`s Moduldoku für die Begründung).
+    /// `#[serde(default = "default_true")]` statt eines bloßen
+    /// `#[serde(default)]`: ein gespeichertes `StageEnabled`-Objekt von
+    /// vor diesem Feld muss weiterhin als „diese (damals noch nicht
+    /// existierende) Stufe war aktiv" gelesen werden, nicht als
+    /// „deaktiviert" (`bool`s eigener `Default` wäre `false`) —
+    /// dieselbe Konvention wie [`StageEnabled::ALL`], wo jede Stufe
+    /// `true` startet.
+    #[serde(default = "default_true")]
+    pub composite: bool,
+    /// KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8,
+    /// siehe `DECISIONS.md` ADR-0041 Nachtrag VIII) — läuft nach
+    /// `effects` (Halation), vor `masks`, noch im linearen Arbeitsraum
+    /// (siehe `stages::virtual_aperture`s Moduldoku). Dieselbe
+    /// `default_true`-Begründung wie `composite` oben.
+    #[serde(default = "default_true")]
+    pub virtual_aperture: bool,
+    /// KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9, siehe
+    /// `DECISIONS.md` ADR-0041 Nachtrag IX) — läuft nach `composite`,
+    /// vor `geometry`, im fertig entwickelten sRGB-RGBA8-Bild (siehe
+    /// `stages::style_transfer`s Moduldoku). Dieselbe
+    /// `default_true`-Begründung wie `composite`/`virtual_aperture` oben.
+    #[serde(default = "default_true")]
+    pub style_transfer: bool,
+    /// Himmelsaustausch (Phase 14 Schritt 10) — läuft nach `style_transfer`,
+    /// vor `geometry`.
+    #[serde(default = "default_true")]
+    pub sky_replace: bool,
     pub geometry: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl StageEnabled {
@@ -62,6 +96,10 @@ impl StageEnabled {
         masks: true,
         treatment: true,
         curves: true,
+        composite: true,
+        virtual_aperture: true,
+        style_transfer: true,
+        sky_replace: true,
         geometry: true,
     };
 }
@@ -70,6 +108,158 @@ impl Default for StageEnabled {
     fn default() -> Self {
         Self::ALL
     }
+}
+
+// ---- Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3) -------------
+
+/// Ein einmalig aufgelöstes Foto oder eine Textur, als fertige Bitmap
+/// gespeichert (Phase 14 Schritt 3, siehe `DECISIONS.md` ADR-0041) —
+/// dasselbe „einmal per Command auflösen, bei jedem Rendern nur noch
+/// skalieren"-Muster wie `v2::AiFillPatch`/`v2::CanvasExtensionPatch`.
+/// Diese Crate hat keinen Katalog-/Dateisystemzugriff — das Auflösen
+/// eines `photo_id`-Verweises oder einer vom Nutzer gewählten
+/// Textur-Datei passiert außerhalb, in `apx-app`s Tauri-Commands; hier
+/// kommt nur noch das fertige Ergebnis an. `pixels` ist interleaved RGB
+/// (`0..=255`), `bitmap_width * bitmap_height * 3` Zahlen lang —
+/// dieselbe Konvention wie `AiFillPatch::pixels`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CompositeLayerSource {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub pixels: Vec<u8>,
+}
+
+/// Eine einzelne Ebene für Mehrfachbelichtung/Compositing — Lightroom
+/// Classic selbst hat "keine klassischen Ebenen-Kompositionsfähigkeiten
+/// wie Photoshop" (siehe `DECISIONS.md` ADR-0041s Recherche-Tabelle,
+/// Punkt 5). Wiederverwendet dieselben Blend-Modi wie die Masken-Stufe
+/// (`v3::BlendMode`, `stages::masks::blend_pixel`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CompositeLayer {
+    pub visible: bool,
+    pub blend_mode: BlendMode,
+    /// `0.0..=1.0`.
+    pub opacity: f32,
+    /// Bruchteil der Leinwandgröße, um den die Ebene skaliert wird —
+    /// `1.0` deckt die Leinwand (an ihrem eigenen Seitenverhältnis
+    /// gestreckt) exakt ab, dieselbe Größenreferenz wie
+    /// `v2::CanvasExtension`s normierte Bruchteile.
+    pub scale: f32,
+    /// Normierte Position (`0.0..=1.0`) des Ebenen-**Mittelpunkts** auf
+    /// der Leinwand — `0.5`/`0.5` zentriert die Ebene.
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub source: CompositeLayerSource,
+}
+
+// ---- KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8) ----
+
+/// Einmalig vorab per `apx_ai::depth::DepthSession::estimate_rgb8`
+/// berechnete, `0..=255`-normierte Tiefenkarte (`255` = am nächsten) —
+/// dasselbe „einmal berechnen, bei jedem Rendern nur noch skalieren"-
+/// Muster wie `v2::AiFillPatch`/`CompositeLayerSource`. `depth` ist EIN
+/// Byte je Pixel (kein RGB), `bitmap_width * bitmap_height` Bytes lang.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DepthMapPatch {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub depth: Vec<u8>,
+}
+
+/// KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8,
+/// siehe `DECISIONS.md` ADR-0041 Nachtrag VIII, Recherche-Tabelle
+/// Punkt 1): Lightroom hat keine KI-Tiefenschätzung/synthetisches Bokeh
+/// — nur die vorhandene grobe Unschärfe-Heuristik in ApertureX selbst
+/// (Laplace-Varianz, `stages::masks`s `MaskGeometry::BlurDepthApprox`,
+/// Phase 11 Schritt 7). `focus_x`/`focus_y` sind normierte
+/// Bildkoordinaten (`0.0..=1.0`) des angeklickten Fokuspunkts, `amount`
+/// (`0.0..=100.0`) die "Blendenöffnung" — je größer, desto stärker
+/// blendet der Unschärferadius mit wachsendem Tiefenabstand vom
+/// Fokuspunkt auf. Ohne `depth_map` (Tiefenkarte noch nicht berechnet)
+/// bleibt die Stufe ein No-Op — dieselbe „noch nicht berechnet"-
+/// Konvention wie `v2::RepairStroke::ai_fill`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VirtualApertureAdjustment {
+    pub focus_x: f32,
+    pub focus_y: f32,
+    pub amount: f32,
+    #[serde(default)]
+    pub depth_map: Option<DepthMapPatch>,
+}
+
+impl VirtualApertureAdjustment {
+    pub const NEUTRAL: Self = Self {
+        focus_x: 0.5,
+        focus_y: 0.5,
+        amount: 0.0,
+        depth_map: None,
+    };
+}
+
+impl Default for VirtualApertureAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+// ---- KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) -------------------
+
+/// Einmalig vorab per `apx_ai::style_transfer::StyleTransferSession::
+/// stylize_rgb8` berechnetes stilisiertes Bild — dasselbe „einmal
+/// berechnen, bei jedem Rendern nur noch skalieren"-Muster wie
+/// `CompositeLayerSource`/`DepthMapPatch`. `pixels` ist interleaved RGB
+/// (`0..=255`), `bitmap_width * bitmap_height * 3` Zahlen lang.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StyleTransferPatch {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub pixels: Vec<u8>,
+}
+
+/// KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9, siehe
+/// `DECISIONS.md` ADR-0041 Nachtrag IX, Recherche-Tabelle Punkt 7):
+/// Lightroom hat dafür kein Äquivalent. Anders als ursprünglich erhofft
+/// (ein *beliebiges* Referenzfoto als Stilvorlage) bewusst auf fünf
+/// fest lizenzierte `fast_neural_style`-Netze beschränkt (siehe
+/// `apx_ai::style_transfer`s Moduldoku) — welcher der fünf Stile gewählt
+/// ist, steckt bereits im vorab berechneten `patch` und muss dieser
+/// Crate (die keinen Modell-/Katalogzugriff hat) nicht bekannt sein.
+/// `amount` (`0.0..=1.0`) blendet linear zwischen dem unveränderten
+/// Bild (`0.0`) und dem vollen Stiltransfer-Ergebnis (`1.0`) — dieselbe
+/// Deckkraft-Konvention wie `CompositeLayer::opacity`, hier aber
+/// global statt pro Ebene. Ohne `patch` (noch nicht berechnet) bleibt
+/// die Stufe ein No-Op — dieselbe „noch nicht berechnet"-Konvention wie
+/// `VirtualApertureAdjustment::depth_map`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StyleTransferAdjustment {
+    pub amount: f32,
+    #[serde(default)]
+    pub patch: Option<StyleTransferPatch>,
+}
+
+impl StyleTransferAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        patch: None,
+    };
+}
+
+impl Default for StyleTransferAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+// ---- Himmelsaustausch (Phase 14 Schritt 10) --------------------------------
+
+/// Einmalig per `apx_ai::sky_replace::composite` berechnetes, bereits
+/// belichtungsangeglichenes Vollbild (Himmel ersetzt) — `None` = kein
+/// Austausch berechnet.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkyReplacePatch {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub pixels: Vec<u8>,
 }
 
 // ---- Der vollständige EDL v4 -----------------------------------------------
@@ -96,6 +286,28 @@ pub struct EdlV4 {
     /// Node-Editor (Phase 9 Schritt 7) — additiv, siehe Moduldoku oben.
     #[serde(default)]
     pub stage_enabled: StageEnabled,
+    /// Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3) —
+    /// additiv, `#[serde(default)]` liest ein gespeichertes `EdlV4` ohne
+    /// dieses Feld als leere Ebenenliste (unverändertes bisheriges
+    /// Verhalten).
+    #[serde(default)]
+    pub composite_layers: Vec<CompositeLayer>,
+    /// KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14
+    /// Schritt 8) — additiv, `#[serde(default)]` liest ein gespeichertes
+    /// `EdlV4` ohne dieses Feld als
+    /// `VirtualApertureAdjustment::NEUTRAL` (unverändertes bisheriges
+    /// Verhalten, keine Tiefenkarte berechnet).
+    #[serde(default)]
+    pub virtual_aperture: VirtualApertureAdjustment,
+    /// KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — additiv,
+    /// `#[serde(default)]` liest ein gespeichertes `EdlV4` ohne dieses
+    /// Feld als `StyleTransferAdjustment::NEUTRAL` (unverändertes
+    /// bisheriges Verhalten, kein Stiltransfer berechnet).
+    #[serde(default)]
+    pub style_transfer: StyleTransferAdjustment,
+    /// Himmelsaustausch (Phase 14 Schritt 10) — additiv, `#[serde(default)]`.
+    #[serde(default)]
+    pub sky_replace: Option<SkyReplacePatch>,
 }
 
 impl EdlV4 {
@@ -119,6 +331,10 @@ impl EdlV4 {
             treatment: Treatment::Color,
             bw_mixer: BlackAndWhiteMixerAdjustment::NEUTRAL,
             stage_enabled: StageEnabled::ALL,
+            composite_layers: Vec::new(),
+            virtual_aperture: VirtualApertureAdjustment::NEUTRAL,
+            style_transfer: StyleTransferAdjustment::NEUTRAL,
+            sky_replace: None,
         }
     }
 
@@ -145,6 +361,10 @@ impl EdlV4 {
             treatment: old.treatment,
             bw_mixer: old.bw_mixer,
             stage_enabled: StageEnabled::ALL,
+            composite_layers: Vec::new(),
+            virtual_aperture: VirtualApertureAdjustment::NEUTRAL,
+            style_transfer: StyleTransferAdjustment::NEUTRAL,
+            sky_replace: None,
         }
     }
 }

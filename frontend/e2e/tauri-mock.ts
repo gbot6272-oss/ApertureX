@@ -207,6 +207,43 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     perceptualDuplicateGroups: [] as unknown[][],
     // Personenansicht (Phase 11 Schritt 5).
     peopleGroups: [] as unknown[][],
+    // Stil-Konsistenz-Check fürs Shooting (Phase 14 Schritt 5) — die
+    // echte Lab-Statistik ist bereits in `apx-ai::style_consistency`s
+    // Rust-Unit-Tests abgedeckt, hier steuert die Fixture direkt das
+    // Ergebnis, das `analyze_style_consistency` zurückgäbe.
+    styleConsistencyResult: [] as unknown[],
+    // Farb-Harmonie-Rad (Phase 14 Schritt 7) — die echte k-means-Analyse
+    // ist bereits in `apx-ai::palette`s Rust-Unit-Tests abgedeckt, hier
+    // steuert die Fixture direkt das Ergebnis, das
+    // `extract_color_palette` zurückgäbe.
+    colorPaletteResult: [] as unknown[],
+    // KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8) —
+    // `null` = kein Modell heruntergeladen (Testdefault), dasselbe Muster
+    // wie `inpaintingModelPath`. `depthMapResult` steuert direkt das
+    // Ergebnis, das `estimate_photo_depth` zurückgäbe (die echte
+    // MiDaS-Inferenz ist bereits in `apx-ai::depth`s Rust-Unit-Tests
+    // abgedeckt).
+    depthModelPath: null as string | null,
+    depthMapResult: {
+      bitmap_width: 4,
+      bitmap_height: 4,
+      // 16 Bytes, alle 128 — Base64 von `Uint8Array(16).fill(128)`.
+      depth_base64: "gICAgICAgICAgICAgICAgA==",
+    },
+    // KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — leeres Objekt
+    // = kein Stil heruntergeladen (Testdefault), dasselbe Muster wie
+    // `depthModelPath`, hier aber je Stil-ID ein eigener Eintrag.
+    // `styleTransferPatchResult` steuert direkt das Ergebnis, das
+    // `stylize_photo` zurückgäbe (die echte `fast_neural_style`-
+    // Inferenz ist bereits in `apx-ai::style_transfer`s Rust-Unit-Tests
+    // abgedeckt).
+    styleTransferModelPaths: {} as Record<string, string>,
+    styleTransferPatchResult: {
+      bitmap_width: 2,
+      bitmap_height: 2,
+      // 12 Bytes (2x2 RGB), alle 222 — Base64 von `Uint8Array(12).fill(222)`.
+      pixels_base64: "3t7e3t7e3t7e3t7e",
+    },
     // Adobe-XMP-Sidecar (Phase 9 Schritt 2).
     exportedXmpSidecarPath: "/mock/photos/IMG_0001.xmp" as string,
     xmpImportApplies: true as boolean,
@@ -604,6 +641,12 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       importedTemplateFile: { kind: string; name: string; payload_json: string } | null;
       perceptualDuplicateGroups: unknown[][];
       peopleGroups: unknown[][];
+      styleConsistencyResult: unknown[];
+      colorPaletteResult: unknown[];
+      depthModelPath: string | null;
+      depthMapResult: { bitmap_width: number; bitmap_height: number; depth_base64: string };
+      styleTransferModelPaths: Record<string, string>;
+      styleTransferPatchResult: { bitmap_width: number; bitmap_height: number; pixels_base64: string };
     };
 
     switch (cmd) {
@@ -1049,6 +1092,14 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "list_people_groups":
         return fixtures.peopleGroups;
 
+      // ---- Stil-Konsistenz-Check fürs Shooting (Phase 14 Schritt 5) --------
+      case "analyze_style_consistency":
+        return fixtures.styleConsistencyResult;
+
+      // ---- Farb-Harmonie-Rad (Phase 14 Schritt 7) ---------------------------
+      case "extract_color_palette":
+        return fixtures.colorPaletteResult;
+
       // ---- Bibliothek: Suche/Filter (ab Phase 3) ---------------------------
       case "search_photos": {
         const query = (args.query as string).toLowerCase();
@@ -1335,6 +1386,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           people_landmark_model_path: fixtures.peopleLandmarkModelPath,
           people_encoder_model_path: fixtures.peopleEncoderModelPath,
           people_feature_compiled: fixtures.peopleFeatureCompiled,
+          depth_model_path: fixtures.depthModelPath,
+          style_transfer_model_paths: fixtures.styleTransferModelPaths,
         };
       case "download_inpainting_model":
         fixtures.inpaintingModelPath = "/mock/models/lama_fp32.onnx";
@@ -1342,6 +1395,34 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "clear_inpainting_model_path":
         fixtures.inpaintingModelPath = null;
         return null;
+
+      // ---- KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14
+      // Schritt 8) — die echte MiDaS-Inferenz ist bereits in
+      // `apx-ai::depth`s Rust-Unit-Tests abgedeckt. ------------------------
+      case "download_depth_model":
+        fixtures.depthModelPath = "/mock/models/midas_v21_small.onnx";
+        return fixtures.depthModelPath;
+      case "clear_depth_model_path":
+        fixtures.depthModelPath = null;
+        return null;
+      case "estimate_photo_depth":
+        return fixtures.depthMapResult;
+
+      // ---- KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — die
+      // echte fast_neural_style-Inferenz ist bereits in
+      // `apx-ai::style_transfer`s Rust-Unit-Tests abgedeckt. ---------------
+      case "download_style_transfer_model": {
+        const style = args.style as string;
+        fixtures.styleTransferModelPaths[style] = `/mock/models/style_transfer_${style}.onnx`;
+        return fixtures.styleTransferModelPaths[style];
+      }
+      case "clear_style_transfer_model_path": {
+        const style = args.style as string;
+        delete fixtures.styleTransferModelPaths[style];
+        return null;
+      }
+      case "stylize_photo":
+        return fixtures.styleTransferPatchResult;
 
       // ---- Echte Personen-Wiedererkennung (Phase 13 Schritt 8) -----------
       case "download_people_models":
@@ -1427,6 +1508,46 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           y: args.y,
           width: args.width,
           height: args.height,
+          bitmap_width: w,
+          bitmap_height: h,
+          pixels_base64: btoa(binary),
+        };
+      }
+      case "run_ai_outpaint": {
+        // Phase 14 Schritt 1: dieselbe graue Platzhalter-Logik wie
+        // `run_ai_inpaint` oben, nur als bereits zusammengesetzte
+        // erweiterte Leinwand (siehe `CanvasExtensionPatch`s Doku).
+        const w = 6;
+        const h = 6;
+        const pixels = new Uint8Array(w * h * 3).fill(128);
+        let binary = "";
+        for (const byte of pixels) binary += String.fromCharCode(byte);
+        return {
+          margin_left: args.marginLeft,
+          margin_top: args.marginTop,
+          margin_right: args.marginRight,
+          margin_bottom: args.marginBottom,
+          bitmap_width: w,
+          bitmap_height: h,
+          pixels_base64: btoa(binary),
+        };
+      }
+      case "prepare_composite_layer_source": {
+        // Phase 14 Schritt 3: feste, deutlich von Grau unterscheidbare
+        // 2×2-Platzhalter-Bitmap (kräftiges Grün) — reicht aus, um den
+        // "Ebene hinzugefügt"-Fluss zu prüfen, ohne eine echte Bilddatei
+        // ins Repo aufzunehmen.
+        const w = 2;
+        const h = 2;
+        const pixels = new Uint8Array(w * h * 3);
+        for (let i = 0; i < pixels.length; i += 3) {
+          pixels[i] = 40;
+          pixels[i + 1] = 200;
+          pixels[i + 2] = 60;
+        }
+        let binary = "";
+        for (const byte of pixels) binary += String.fromCharCode(byte);
+        return {
           bitmap_width: w,
           bitmap_height: h,
           pixels_base64: btoa(binary),

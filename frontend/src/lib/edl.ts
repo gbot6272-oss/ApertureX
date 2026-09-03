@@ -522,6 +522,16 @@ export interface EffectsAdjustment {
   grain_amount: number;
   grain_size: number;
   grain_roughness: number;
+  /** Echte Halation-/Bloom-Simulation (Phase 14 Schritt 4, siehe
+   * `DECISIONS.md` ADR-0041) — Lightroom Classic "cannot create true
+   * film halation, only a soft bloom approximation". `0..=100`. */
+  halation_amount: number;
+  /** Bruchteil der Bildbreite für den Bloom-Weichzeichnungsradius,
+   * `0..=100` (Prozent-Regler). */
+  halation_radius: number;
+  /** Farbton der Bloom-Einfärbung in Grad (`0..=360`) — echte
+   * Filmhalation ist charakteristisch rot-orange. */
+  halation_hue: number;
 }
 
 export const NEUTRAL_EFFECTS: EffectsAdjustment = {
@@ -533,6 +543,9 @@ export const NEUTRAL_EFFECTS: EffectsAdjustment = {
   grain_amount: 0,
   grain_size: 25,
   grain_roughness: 50,
+  halation_amount: 0,
+  halation_radius: 30,
+  halation_hue: 15,
 };
 
 export const POST_VIGNETTE_SLIDER_SPECS: readonly SliderSpec[] = [
@@ -547,6 +560,38 @@ export const GRAIN_SLIDER_SPECS: readonly SliderSpec[] = [
   { key: "grain_amount", label: "Körnung: Betrag", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
   { key: "grain_size", label: "Körnung: Größe", min: 1, max: 100, fineStep: 1, coarseStep: 10, neutral: 25 },
   { key: "grain_roughness", label: "Körnung: Unregelmäßigkeit", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 },
+];
+
+/** Lightroom Classic "cannot create true film halation, only a soft
+ * bloom approximation" (siehe `DECISIONS.md` ADR-0041, Recherche-Tabelle
+ * Punkt 8). */
+export const HALATION_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "halation_amount", label: "Halation: Betrag", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "halation_radius", label: "Halation: Radius", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 30 },
+  // Label bewusst als "Farbton (Halation)" statt "Halation: Farbton" —
+  // sonst wäre der zugängliche Name "Halation: Farbton (Zahlenwert)" eine
+  // Teilzeichenkette von "Farbton (Zahlenwert)" (Playwrights `name`-Option
+  // matcht standardmäßig als Teilstring) und würde bestehende
+  // `.nth()`-Disambiguierungen wie in `masks-flow.spec.ts` verschieben —
+  // dasselbe Muster wie "Farbton (Rot)" bei der HSL-/Kalibrierungs-Zeile.
+  { key: "halation_hue", label: "Farbton (Halation)", min: 0, max: 360, fineStep: 1, coarseStep: 15, neutral: 15 },
+];
+
+/** KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8) —
+ * Lightroom hat "keine KI-Tiefenschätzung/synthetisches Bokeh" (siehe
+ * `DECISIONS.md` ADR-0041, Recherche-Tabelle Punkt 1). Wie
+ * `REPAIR_RADIUS_SPEC` (`0..=100` UI-Skala für einen intern
+ * `0.0..=1.0`-Bruchteil, siehe `VirtualApertureAdjustment.amount`). */
+export const VIRTUAL_APERTURE_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "amount", label: "Virtuelle Blende: Betrag", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+];
+
+/** KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — Lightroom hat
+ * dafür kein Äquivalent. Wie `VIRTUAL_APERTURE_SLIDER_SPECS` (`0..=100`
+ * UI-Skala für einen intern `0.0..=1.0`-Bruchteil, siehe
+ * `StyleTransferAdjustment.amount`). */
+export const STYLE_TRANSFER_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "amount", label: "Stiltransfer: Betrag", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
 ];
 
 // ---- Kalibrierung -----------------------------------------------------------
@@ -638,6 +683,37 @@ export interface CropRect {
 /** Das ganze Bild, kein Beschnitt. */
 export const FULL_CROP_RECT: CropRect = { x: 0, y: 0, width: 1, height: 1 };
 
+/** Vorab von `run_ai_outpaint` berechnetes, bereits zusammengesetztes
+ * Bitmap der erweiterten Leinwand (Original + KI-erzeugter Rand) — wird
+ * bei jedem Rendern nur noch auf die tatsächliche Zielgröße hoch-/
+ * herunterskaliert (dasselbe „einmal berechnen, immer wieder
+ * skalieren"-Muster wie `AiFillPatch`, siehe `CanvasExtension`s Doku
+ * unten). */
+export interface CanvasExtensionPatch {
+  bitmap_width: number;
+  bitmap_height: number;
+  pixels: number[];
+}
+
+/** KI-Ausfüllen über die Bildränder hinaus (Phase 14 Schritt 1, siehe
+ * `DECISIONS.md` ADR-0041). `margin_left`/`margin_top`/`margin_right`/
+ * `margin_bottom` sind normierte Bruchteile der *aktuellen* Bildbreite/
+ * -höhe (`0.0..=1.0`, dieselbe Konvention wie `CropRect`) — anders als
+ * `CanvasExtensionPatch::bitmap_width/height` (eine feste
+ * Speicherauflösung, die bei jedem Rendern passend skaliert wird) legen
+ * die Margen unmittelbar das neue Seitenverhältnis fest und müssen daher
+ * mit dem Bild mitskalieren statt eine absolute Pixelzahl zu sein. Ohne
+ * `patch` (Ränder gewählt, aber „Anwenden" noch nicht ausgelöst) bleibt
+ * die Erweiterung ein No-Op — dieselbe Konvention wie ein frischer
+ * `AiInpaint`-Reparaturstrich ohne `ai_fill`. */
+export interface CanvasExtension {
+  margin_left: number;
+  margin_top: number;
+  margin_right: number;
+  margin_bottom: number;
+  patch: CanvasExtensionPatch | null;
+}
+
 export interface GeometryAdjustment {
   crop: CropRect;
   /** `null` = freie Seitenverhältniswahl, sonst Breite/Höhe-Verhältnis. */
@@ -646,6 +722,9 @@ export interface GeometryAdjustment {
   overlay: GridOverlay;
   /** Vereinfachte Auto-Ausrichtung: nur EXIF-Orientierung, siehe ADR-0028. */
   auto_horizon: boolean;
+  /** `null`, solange keine Leinwand-Erweiterung gewählt wurde (Phase 14
+   * Schritt 1) — additiv, siehe `CanvasExtension`s Doku. */
+  canvas_extension: CanvasExtension | null;
 }
 
 export const NEUTRAL_GEOMETRY: GeometryAdjustment = {
@@ -654,6 +733,7 @@ export const NEUTRAL_GEOMETRY: GeometryAdjustment = {
   angle_degrees: 0,
   overlay: "None",
   auto_horizon: false,
+  canvas_extension: null,
 };
 
 export const ASPECT_RATIO_PRESETS: ReadonlyArray<{ value: number | null; label: string }> = [
@@ -684,6 +764,14 @@ export const GRID_OVERLAY_OPTIONS: ReadonlyArray<{ value: GridOverlay; label: st
  * ausdrücklichen „Anwenden" (Tauri-Command, siehe `store/index.ts`)
  * gesetzt wird — bis dahin ist der Strich ein No-Op. */
 export type RepairMode = "Clone" | "Heal" | "ContentAwareFill" | "AiInpaint";
+
+/** Welche Frequenz-Ebene ein Strich betrifft (Phase 14 Schritt 2, siehe
+ * `DECISIONS.md` ADR-0041) — `"Normal"` ist das bisherige Verhalten
+ * (Strich wirkt direkt auf das volle Bild). `"LowFrequency"`/
+ * `"HighFrequency"` lassen ihn stattdessen gezielt nur auf Ton/Farbe
+ * bzw. Textur/Kanten wirken (`stages::frequency_separation`, siehe
+ * `edl/v2.rs`s `RepairLayer`-Kommentar). */
+export type RepairLayer = "Normal" | "LowFrequency" | "HighFrequency";
 
 export interface RepairPoint {
   x: number;
@@ -722,6 +810,8 @@ export interface RepairStroke {
    * im Rust-Backend als `None` (additives Feld, siehe `edl/v2.rs`s
    * `RepairStroke::ai_fill`-Kommentar). */
   ai_fill?: AiFillPatch;
+  /** Frequenztrennung (Phase 14 Schritt 2) — siehe `RepairLayer`s Doku. */
+  layer: RepairLayer;
 }
 
 // ---- Masken (Phase 6, siehe DECISIONS.md ADR-0032) --------------------------
@@ -835,7 +925,7 @@ export function neutralMaskAdjustments(): MaskAdjustments {
 
 /** `SPEC.md` §5: „Normal" plus die namentlich genannten Beispiele
  * (Multiplizieren, Weiches Licht, Farbe, Luminanz). */
-export type BlendMode = "Normal" | "Multiply" | "SoftLight" | "Color" | "Luminosity";
+export type BlendMode = "Normal" | "Multiply" | "SoftLight" | "Color" | "Luminosity" | "Screen";
 
 export const BLEND_MODE_OPTIONS: ReadonlyArray<{ value: BlendMode; label: string }> = [
   { value: "Normal", label: "Normal" },
@@ -843,6 +933,7 @@ export const BLEND_MODE_OPTIONS: ReadonlyArray<{ value: BlendMode; label: string
   { value: "SoftLight", label: "Weiches Licht" },
   { value: "Color", label: "Farbe" },
   { value: "Luminosity", label: "Luminanz" },
+  { value: "Screen", label: "Negativ multiplizieren" },
 ];
 
 export type OverlayColor = "Red" | "Green" | "Blue" | "Yellow" | "Magenta";
@@ -1077,6 +1168,20 @@ export interface StageEnabled {
   masks: boolean;
   treatment: boolean;
   curves: boolean;
+  /** Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3) — läuft
+   * nach `curves`, vor `geometry`. */
+  composite: boolean;
+  /** KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8) —
+   * läuft nach dem Halation-Kurzschluss, vor `masks` (siehe `develop.rs`s
+   * Moduldoku). Vorne in der Deklaration platziert wie auf der Rust-Seite
+   * (`edl/v4.rs`s `StageEnabled`), auch wenn die tatsächliche
+   * Rendering-Reihenfolge eine andere ist. */
+  virtual_aperture: boolean;
+  /** KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — läuft nach
+   * `composite`, vor `geometry`, im fertig entwickelten sRGB-RGBA8-Bild
+   * (siehe `stages::style_transfer`s Moduldoku). */
+  style_transfer: boolean;
+  sky_replace: boolean;
   geometry: boolean;
 }
 
@@ -1093,8 +1198,130 @@ export const NEUTRAL_STAGE_ENABLED: StageEnabled = {
   masks: true,
   treatment: true,
   curves: true,
+  composite: true,
+  virtual_aperture: true,
+  style_transfer: true,
+  sky_replace: true,
   geometry: true,
 };
+
+/** Ein einmalig aufgelöstes Foto oder eine Textur, als fertige Bitmap
+ * gespeichert (Phase 14 Schritt 3, siehe `DECISIONS.md` ADR-0041) —
+ * dasselbe „einmal per Command auflösen, bei jedem Rendern nur noch
+ * skalieren"-Muster wie `AiFillPatch`/`CanvasExtensionPatch`. `pixels`
+ * ist interleaved RGB (`0..=255`), `bitmap_width * bitmap_height * 3`
+ * Zahlen lang. */
+export interface CompositeLayerSource {
+  bitmap_width: number;
+  bitmap_height: number;
+  pixels: number[];
+}
+
+/** Eine einzelne Ebene für Mehrfachbelichtung/Compositing — Lightroom
+ * Classic hat "keine klassischen Ebenen-Kompositionsfähigkeiten wie
+ * Photoshop" (siehe `DECISIONS.md` ADR-0041). Wiederverwendet dieselben
+ * Blend-Modi wie die Masken-Stufe. `scale`: Bruchteil der Leinwandgröße
+ * (`1.0` deckt die Leinwand ab). `offset_x`/`offset_y`: normierte
+ * Position (`0.0..=1.0`) des Ebenen-*Mittelpunkts* (`0.5`/`0.5` =
+ * zentriert). */
+export interface CompositeLayer {
+  visible: boolean;
+  blend_mode: BlendMode;
+  opacity: number;
+  scale: number;
+  offset_x: number;
+  offset_y: number;
+  source: CompositeLayerSource;
+}
+
+/** Eine einmalig berechnete Tiefenkarte (Phase 14 Schritt 8, MiDaS v2.1
+ * small) — dasselbe „einmal per Command auflösen, bei jedem Rendern nur
+ * noch skalieren"-Muster wie `CompositeLayerSource`. `depth_base64` ist
+ * base64-kodiertes Graustufen-Rohmaterial (`bitmap_width * bitmap_height`
+ * Bytes, `0..=255`, näher = heller) — die Frontend-Seite dekodiert das
+ * nicht selbst, sondern reicht es nur unverändert an die Rust-Seite
+ * zurück (`VirtualApertureAdjustment.depth_map`), die es beim Rendern
+ * bilinear auf die tatsächliche Bildgröße skaliert. */
+export interface DepthMapPatch {
+  bitmap_width: number;
+  bitmap_height: number;
+  /** Auf der Rust-Seite `Vec<u8>` (`depth`), hier als base64-String
+   * transportiert — siehe `DepthMapDto` in `lib/tauri.ts`. */
+  depth: string;
+}
+
+/** KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8) —
+ * spiegelt `apx_pipeline::edl::v4::VirtualApertureAdjustment`.
+ * `focus_x`/`focus_y`: normierter Fokuspunkt (`0.0..=1.0`), per Klick ins
+ * Bild gesetzt (dasselbe Muster wie `ClickRegion`-KI-Masken). `amount`:
+ * `0.0..=1.0`, virtueller Blendenwert (0 = keine Wirkung). Ohne
+ * berechnete Tiefenkarte (`depth_map === null`) bleibt die Stufe
+ * wirkungslos, selbst bei `amount > 0` (siehe `virtual_aperture.rs`s
+ * Moduldoku). */
+export interface VirtualApertureAdjustment {
+  focus_x: number;
+  focus_y: number;
+  amount: number;
+  depth_map: DepthMapPatch | null;
+}
+
+export const NEUTRAL_VIRTUAL_APERTURE: VirtualApertureAdjustment = {
+  focus_x: 0.5,
+  focus_y: 0.5,
+  amount: 0.0,
+  depth_map: null,
+};
+
+/** Einmalig berechnetes Stiltransfer-Ergebnis (Phase 14 Schritt 9) —
+ * dasselbe „einmal per Command auflösen, bei jedem Rendern nur noch
+ * skalieren"-Muster wie `CompositeLayerSource`/`DepthMapPatch`.
+ * `pixels` ist interleaved RGB (`0..=255`), base64-kodiert — die
+ * Frontend-Seite dekodiert das nicht selbst, sondern reicht es nur
+ * unverändert an die Rust-Seite zurück (`StyleTransferAdjustment.patch`),
+ * die es beim Rendern bilinear auf die tatsächliche Bildgröße skaliert. */
+export interface StyleTransferPatch {
+  bitmap_width: number;
+  bitmap_height: number;
+  /** Auf der Rust-Seite `Vec<u8>` (`pixels`), hier als base64-String
+   * transportiert — siehe `StyleTransferPatchDto` in `lib/tauri.ts`. */
+  pixels: string;
+}
+
+/** KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — spiegelt
+ * `apx_pipeline::edl::v4::StyleTransferAdjustment`. `amount`:
+ * `0.0..=1.0`, blendet linear zwischen unverändertem Bild (`0.0`) und
+ * vollem Stiltransfer-Ergebnis (`1.0`). Ohne berechnetes Ergebnis
+ * (`patch === null`) bleibt die Stufe wirkungslos, selbst bei
+ * `amount > 0` (siehe `style_transfer.rs`s Moduldoku) — welcher der
+ * fünf festen Stile zuletzt gewählt wurde, steckt bereits im
+ * berechneten `patch` und ist hier nicht separat nachgeführt. */
+export interface StyleTransferAdjustment {
+  amount: number;
+  patch: StyleTransferPatch | null;
+}
+
+export const NEUTRAL_STYLE_TRANSFER: StyleTransferAdjustment = {
+  amount: 0.0,
+  patch: null,
+};
+
+/** Die fünf real lizenzierten, festen Stile (`onnx/models`, MIT,
+ * `fast_neural_style`, siehe `apx_ai::style_transfer::StyleKind`) — kein
+ * beliebiges Referenzfoto als Stilvorlage (siehe `DECISIONS.md`
+ * ADR-0041 Nachtrag IX für die Begründung). `id` spiegelt
+ * `StyleKind::id()` exakt. */
+export interface StyleTransferStyle {
+  id: string;
+  label: string;
+}
+
+export const STYLE_TRANSFER_STYLES: readonly StyleTransferStyle[] = [
+  { id: "candy", label: "Candy" },
+  { id: "mosaic", label: "Mosaik" },
+  { id: "rain-princess", label: "Rain Princess" },
+  { id: "udnie", label: "Udnie" },
+  { id: "pointilism", label: "Pointillismus" },
+] as const;
 
 /** Ein Knoten im Node-Editor — Anzeigereihenfolge identisch zur
  * tatsächlichen Rendering-Reihenfolge (siehe `develop.rs`s Moduldoku).
@@ -1119,6 +1346,10 @@ export const STAGE_NODE_SPECS: readonly StageNodeSpec[] = [
   { key: "masks", label: "Masken" },
   { key: "treatment", label: "Behandlung (SW-Mixer)" },
   { key: "curves", label: "Kurven" },
+  { key: "composite", label: "Compositing" },
+  { key: "virtual_aperture", label: "Virtuelle Blende" },
+  { key: "style_transfer", label: "Stiltransfer" },
+  { key: "sky_replace", label: "Himmelsaustausch" },
   { key: "geometry", label: "Geometrie" },
 ] as const;
 
@@ -1141,6 +1372,10 @@ export interface EdlPayload {
   treatment: Treatment;
   bw_mixer: BlackAndWhiteMixerAdjustment;
   stage_enabled: StageEnabled;
+  composite_layers: CompositeLayer[];
+  virtual_aperture: VirtualApertureAdjustment;
+  style_transfer: StyleTransferAdjustment;
+  sky_replace: SkyReplacePatch | null;
 }
 
 export function neutralEdlPayload(): EdlPayload {
@@ -1161,6 +1396,10 @@ export function neutralEdlPayload(): EdlPayload {
     treatment: "Color",
     bw_mixer: NEUTRAL_BW_MIXER,
     stage_enabled: NEUTRAL_STAGE_ENABLED,
+    composite_layers: [],
+    virtual_aperture: NEUTRAL_VIRTUAL_APERTURE,
+    style_transfer: NEUTRAL_STYLE_TRANSFER,
+    sky_replace: null,
   };
 }
 
@@ -1311,4 +1550,10 @@ export function writeBasicField(basic: BasicAdjustments, key: string, value: num
     return;
   }
   basic[key as Exclude<keyof BasicAdjustments, "white_balance">] = value;
+}
+
+export interface SkyReplacePatch {
+  bitmap_width: number;
+  bitmap_height: number;
+  pixels: string;
 }

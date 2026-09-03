@@ -1,6 +1,7 @@
 //! Anwendungseinstellungen: Laden/Speichern als TOML, mit sinnvollen
 //! Defaults, falls noch keine Einstellungsdatei existiert.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -116,6 +117,20 @@ pub struct AiSettings {
     /// vom Nutzer selbst heruntergeladen, kein Bundling im Installer.
     pub people_landmark_model_path: Option<String>,
     pub people_encoder_model_path: Option<String>,
+    /// Lokaler Pfad zum heruntergeladenen MiDaS-v2.1-small-ONNX-Modell
+    /// (Phase 14 Schritt 8, siehe `DECISIONS.md` ADR-0041 Nachtrag VIII)
+    /// — `None`, solange der Nutzer den Download nicht ausdrücklich
+    /// bestätigt hat, derselbe Opt-in wie `inpainting_model_path` oben.
+    pub depth_model_path: Option<String>,
+    /// Lokale Pfade zu den heruntergeladenen `fast_neural_style`-ONNX-
+    /// Modellen (Phase 14 Schritt 9, siehe `DECISIONS.md` ADR-0041
+    /// Nachtrag IX), je Stil einzeln per `apx_ai::style_transfer::
+    /// StyleKind::id()` als Schlüssel (`"candy"`, `"mosaic"`, …) —
+    /// anders als `depth_model_path`/`inpainting_model_path` (je genau
+    /// ein Modell) gibt es hier fünf unabhängig voneinander
+    /// herunterladbare Stile, ein fehlender Schlüssel heißt „dieser Stil
+    /// noch nicht heruntergeladen".
+    pub style_transfer_model_paths: BTreeMap<String, String>,
 }
 
 /// Einstellungen für den beobachteten Ordner (Phase 12 Schritt 7, siehe

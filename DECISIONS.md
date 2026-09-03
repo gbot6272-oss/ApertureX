@@ -2696,3 +2696,759 @@ Schritt 1): `download_people_models` lädt beide `.dat.bz2`-Dateien von
 erreichbar/verifiziert** (`dlib.net` blockiert, siehe oben), dieselbe
 ehrliche Lücke wie beim LaMa-Modell; keine Hash-Prüfung aus demselben
 Grund (kein erreichbarer, verifizierbarer Hash in dieser Sitzung).
+
+## ADR-0041: Phase 14 — zehn Alleinstellungsmerkmale jenseits von
+Lightroom; echte MiDaS-Tiefenschätzung und fast-neural-style-Stiltransfer
+diesmal end-zu-Ende gegen ein echtes Foto verifiziert
+
+**Status:** Angenommen
+**Kontext:** Phase 13 hat die letzte Lücke gegen Lightroom geschlossen
+(Vergleichs-Artifact, Stand Phase 13). Der Nutzer erklärt "so nah wie
+möglich an Lightroom" (Ziel A) damit für erreicht und gibt ein neues
+Ziel B vor: zehn eigenständige, visuell beeindruckende Fähigkeiten ohne
+Lightroom-Entsprechung, je zur Hälfte klassisch/KI-gestützt (kostenlose
+lokale Inferenz, keine bezahlten Cloud-APIs), jede sowohl für
+Massenbearbeitung als auch Präzisionsarbeit tauglich. Der vollständige
+Plan mit allen zehn Punkten steht in `PLAN.md` Phase 14.
+
+**Recherche-Disziplin:** jede "Lightroom hat das nicht"-Behauptung im
+Plan wurde per echter Web-Suche gegengeprüft (siehe Zitate in `PLAN.md`
+Phase 14), nicht aus dem Gedächtnis behauptet. Ein ursprünglich erwogener
+zehnter Kandidat ("Smart-Crop-Vorschläge") wurde verworfen, weil Adobe
+"Suggested Crop" bereits in Lightroom Web ausliefert — zu nah an einer
+bestehenden Adobe-Funktion für eine klare Abgrenzung.
+
+**Schritt-0-Spikes, diesmal beide echt gegen ein reales Foto
+verifiziert** (anders als der LaMa-Spike in Phase 13 Schritt 0, der
+mangels erreichbarem `huggingface.co` nur gegen ein winziges
+`Y = X + 1`-Modell lief): `huggingface.co` bleibt blockiert
+(`subscribe_forbidden`/`403` auf jeden `CONNECT`-Versuch), aber
+`github.com`, `raw.githubusercontent.com`, `release-assets.
+githubusercontent.com` und — wichtiger Einzelfund — `media.
+githubusercontent.com/media/...` (der echte Git-LFS-Auslieferungs-Host,
+`raw.githubusercontent.com` liefert für LFS-Dateien nur den
+128-Byte-Zeiger-Text) sind aus dieser Sandbox heraus erreichbar. Beide
+Modelle unten wurden probehalber gegen `opencv/opencv`s eigenes
+`samples/data/fruits.jpg` (ein echtes, im selben verifizierten Repo
+liegendes Foto, keine Fabrikation) inferiert und das Ergebnis visuell
+geprüft:
+
+- **MiDaS v2.1 small** (`isl-org/MiDaS`, MIT, ONNX-Release-Asset,
+  66 764 249 Bytes, `github.com/isl-org/MiDaS/releases/download/v2_1/
+  model-small.onnx`): trotz symbolischer (scheinbar dynamischer)
+  Tensor-Dimensionen im ONNX-Graph verlangt das Modell tatsächlich fest
+  256×256 Eingabe (ein zu großer Testlauf schlägt mit einer expliziten
+  ONNX-Runtime-Fehlermeldung fehl, kein stiller Fallback) — wichtig für
+  Schritt 8, feste Skalierung auf 256×256 vor der Inferenz nötig. Die
+  resultierende Tiefenkarte zeigt exakt die erwartete Struktur: eine
+  helle (nahe), scharf konturierte Obst-Silhouette mit plausibler
+  3D-Schattierung (spitze vs. runde Früchte unterscheidbar) vor einem
+  durchgehend dunklen (fernen) Hintergrund — echte, korrekt
+  funktionierende monokulare Tiefenschätzung, kein Zufallsrauschen.
+- **fast-neural-style "mosaic"** (`onnx/models`, MIT,
+  `validated/vision/style_transfer/fast_neural_style/model/mosaic-9.
+  onnx`, 6 728 029 Bytes über den LFS-Media-Host geladen, Hash-Größe
+  stimmt exakt mit dem Git-LFS-Zeiger überein): erwartet dynamische
+  NCHW-Eingabe in `0..255` (kein ImageNet-Normalisieren, anders als
+  MiDaS), Ausgabe ist ein 224×224-RGB-Bild mit derselben Auflösung wie
+  die Eingabe. Ergebnis ist ein echtes, klar erkennbares
+  Mosaik-/Glasfenster-Stilbild derselben Obstschale — funktioniert.
+
+**Offene Frage ehrlich beantwortet (Spike B, "arbitrary style
+transfer"):** ein permissiv lizenziertes Modell für *beliebige*
+Referenzbilder als Stilvorlage (statt fünf fest einprogrammierter Stile)
+existiert real — Googles Magenta-Projekt (`magenta/magenta`,
+Apache-2.0, `arbitrary_image_stylization`) —, aber nur als
+TensorFlow/TFLite-Checkpoint, nicht als ONNX-Export. Die einzige
+gefundene ONNX-Variante eines AdaIN-basierten Modells (`rapidrabbit76/
+Arbitrary-Style-Transfer-...-pytorch-lightning`) liegt auf Google Drive
+(in dieser Sandbox ebenso unerreichbar wie huggingface.co) und ist ein
+inoffizieller Nachbau ohne eigene, im Repo genannte Lizenzdatei für die
+selbst trainierten Gewichte — genau die Art unklarer Herkunft, die
+`ADR-0040-Nachtrag VI`s SFace-Ablehnung schon einmal begründet hat.
+**Ergebnis, kein Workaround erzwungen:** Schritt 9 bleibt auf die fünf
+sicher lizenzierten, real verifizierten festen `onnx/models`-Stile
+beschränkt (candy/mosaic/rain-princess/udnie/pointilism) — ein
+lizenzklares Modell für echte beliebige Referenzbild-Übertragung wäre
+eine eigene, spätere Untersuchung wert, wird hier aber nicht durch eine
+fragwürdige Google-Drive-Quelle ersetzt.
+
+**Wiederverwendete Bausteine statt Neuaufbau** (Details je Schritt in
+`PLAN.md` Phase 14): `blend_pixel()` aus `apx-pipeline::stages::masks`
+(Mehrfachbelichtung, Halation), `frontend/src/lib/histogram.ts`s
+Client-seitiges Berechnungsmuster über den bereits vorhandenen
+Vorschau-Puffer (Vektorskop/Wellenform, kein neuer Backend-Command),
+`apx-ai::inpaint::InpaintSession`/`RepairStroke` (Canvas-Erweiterung),
+die bestehenden Hautton-/Saliency-Heuristiken in `apx-ai::segmentation`
+(Himmel-Segmentierung), `kmeans_colors` (real per `cargo add --dry-run`
+geprüft, v0.7.1, MIT/Apache — Farb-Harmonie-Rad).
+
+### Nachtrag I (Phase 14 Schritt 1): Canvas-Erweiterung/Outpainting —
+Margen als normierte Bruchteile statt absoluter Pixel
+
+`GeometryAdjustment` bekommt additiv (`#[serde(default)]`, dieselbe
+Konvention wie `RepairStroke::ai_fill`) ein `canvas_extension:
+Option<CanvasExtension>` mit vier Rändern und einem optionalen,
+vorab berechneten `CanvasExtensionPatch` (Bitmap + eigene
+Speicherauflösung — dasselbe „einmal berechnen, bei jedem Rendern nur
+noch skalieren"-Muster wie `AiFillPatch`). Die vier Ränder wurden zuerst
+als `u32`-Pixelzahl entworfen (lose Analogie zu
+`AiFillPatch::bitmap_width`), das war aber die falsche Einheit: eine
+Speicherauflösung wie `bitmap_width` wird bei jedem Rendern ohnehin auf
+die Zielgröße skaliert, ein *Rand* legt dagegen unmittelbar das neue
+Seitenverhältnis der Leinwand fest und muss deshalb — wie `CropRect`s
+normierte `0.0..=1.0`-Koordinaten — mit dem Bild mitskalieren. Korrigiert
+auf `f32`-Bruchteile der jeweils aktuellen Bildbreite/-höhe, noch bevor
+irgendein Test geschrieben wurde. `GeometryAdjustment` verliert dabei
+`Copy` (der neue Patch trägt `Vec<u8>>`) — nichts im Rest der Codebasis
+verließ sich auf `Copy` (`cargo check -p apx-pipeline` bestätigt sauber).
+
+`stages/geometry.rs::extend_canvas` läuft als letzter Teilschritt in
+`apply()` nach Drehung/Zuschnitt, rechnet die Bruchteile in Pixel um,
+bettet das Original unverändert mittig ein und füllt den Rand aus dem
+bilinear auf die tatsächliche neue Leinwandgröße hochskalierten Patch —
+ohne Patch (Ränder gewählt, „Anwenden" aber noch nicht ausgelöst) bleibt
+die Erweiterung ein reiner No-Op, exakt wie ein frischer
+`RepairMode::AiInpaint`-Strich ohne `ai_fill`.
+
+`apx-app::commands::run_ai_outpaint` braucht **kein** neues Modell und
+**keinen** neuen Download-Command: dieselbe bereits bestehende
+`apx_ai::inpaint::InpaintSession::fill_rgb8` (Phase 13 Schritt 1) nimmt
+beliebige gleich große Pixel-/Maskenpaare entgegen, der Command baut nur
+eine andere Maskenform — das gesamte gewählte Randgebiet statt eines
+gemalten Pinselstrichs, Randpixel per Kanten-Klemmung vorbefüllt statt
+mit einer harten Flächenfarbe (weniger sichtbare Kanten-Artefakte vor der
+eigentlichen Inferenz). Dieselbe ehrliche Grenze wie bei jeder anderen
+KI-Analyse dieses Projekts: läuft auf dem rohen,
+`ANALYSIS_MAX_EDGE`-gedeckelten Dekodierergebnis, ohne eine im
+Entwickeln-Modul bereits gesetzte Drehung/Zuschnitt zu berücksichtigen.
+
+### Nachtrag II (Phase 14 Schritt 2): Frequenztrennung als Retusche-Ziel
+statt eigener Pipeline-Stufe
+
+Punkt 2 der Recherche-Tabelle ist mit einem Original-Zitat belegt:
+"Adobe Lightroom doesn't have a built-in frequency separation feature
+like Photoshop does." Die naheliegende Umsetzung — eine neue,
+eigenständige Pipeline-Stufe, die das ganze Bild bei jedem Rendern in
+zwei Ebenen zerlegt — wäre gegen die in `edl/v4.rs`s Moduldoku
+festgehaltene Garantie des Node-Editors verstoßen ("ein Knoten je Stufe,
+in genau dieser Reihenfolge … das erhält die Renderpfad-Garantie, auf
+die jedes andere Modul angewiesen ist"). Stattdessen ist Frequenztrennung
+hier ein **Retusche-Ziel**, kein Rendering-Schritt: `RepairStroke`
+bekommt additiv (`#[serde(default)]`, dieselbe Konvention wie
+`ai_fill`) ein `layer: RepairLayer`-Feld (Normal/LowFrequency/
+HighFrequency, `#[derive(Default)]` auf `Normal`). `stages/repair.rs`
+zerlegt das Bild nur für einen so markierten Strich (per neuem
+`stages::frequency_separation::split`/`combine`, separierbarer
+Box-Tiefpass — dieselbe „Box statt echte Gauß-Unschärfe"-Vereinfachung
+wie `masks::feather_alpha` und `details.rs`s Unsharp-Masking-
+Referenzweichzeichner, hier aber dreikanalig statt auf einem
+Ein-Kanal-Alpha-Puffer und mit größerem, für Textur-/Hautretusche
+sinnvollem Vorgabe-Radius), wendet die *komplett unveränderte*
+bestehende Klon-/Reparatur-/Füll-Logik nur auf die gewählte Ebene an und
+setzt beide Ebenen sofort wieder zusammen. Kein neuer Knoten, keine neue
+`StageEnabled`-Flagge, keine Änderung an `develop::render_rgba8`s fester
+Kette — nur eine zusätzliche interne Verzweigung innerhalb der bereits
+bestehenden Reparatur-Stufe.
+
+`SPLIT_RADIUS_FRACTION` (2 % der Bildbreite) ist bewusst ein fester
+Vorgabewert statt eines eigenen Reglers in diesem Schritt — ein
+zusätzlicher Radius-Regler wäre eine sinnvolle spätere Ergänzung, aber
+kein Kernbestandteil der Recherche-Lücke. Der reine Anzeige-Modus im
+Viewer (Normal/Tieffrequenz/Hochfrequenz) ist unabhängig davon eine
+clientseitige Berechnung über den bereits gerenderten Vorschau-Puffer
+(`frontend/src/lib/frequencySeparation.ts`), exakt nach dem in Phase 9
+etablierten Muster von `lib/histogram.ts` — kein neuer Backend-Command,
+verändert `developEdl` nicht.
+
+Real getestet (nicht nur durch Code-Inspektion behauptet): ein
+`RepairMode::Clone`-Strich mit `layer: HighFrequency`, der aus einer
+tonlich deutlich helleren, aber sonst flachen Quellregion klont, entfernt
+einen lokalen dunklen Fleck am Ziel, ohne dessen umgebenden Ton Richtung
+der helleren Quelle zu ziehen — anders als derselbe Strich mit
+`layer: Normal`, der den Ton sichtbar mitzieht
+(`stages::repair::tests::high_frequency_only_stroke_removes_a_blemish_while_preserving_the_underlying_tone`).
+
+### Nachtrag III (Phase 14 Schritt 3): Mehrfachbelichtung/Layer-
+Compositing — display-referred statt linear, kein Katalogzugriff in
+`apx-pipeline`, kein dritter dauerhafter Seitenpalette
+
+Punkt 5 der Recherche-Tabelle ist mit einem Original-Zitat belegt:
+"Lightroom Classic itself doesn't have traditional layer compositing
+capabilities like Photoshop does." Umgesetzt als neue Stufe
+`apx-pipeline::stages::composite::apply_all()`, die beliebig viele
+`CompositeLayer`s sequenziell über das Bild legt — bewusst **nach**
+`curves` in `develop::render_rgba8`s fester Kette, also auf dem bereits
+fertig entwickelten, display-referred sRGB-RGBA8-Ergebnis, nicht auf dem
+linearen Szenen-referred Arbeitsraum (in dem z. B. `stages::masks` selbst
+noch rechnet). Blend-Modi wie "Multiplizieren" sind eine visuelle
+Konvention aus Photoshop/Lightrooms eigener Farbwelt (gamma-kodierte
+Werte) — dieselbe Formel im linearen Arbeitsraum angewendet ergäbe ein
+physikalisch anderes, für Nutzer überraschendes Ergebnis. Reihenfolge in
+`StageEnabled`/`develop.rs`: `..., curves, composite, geometry` — die neue
+Stufe läuft also auch vor Zuschnitt/Leinwand-Erweiterung, eine
+Compositing-Ebene wird mit zugeschnitten/erweitert wie der Rest des
+Bildes.
+
+`StageEnabled.composite` ist additiv wie `stage_enabled` selbst, aber mit
+`#[serde(default = "default_true")]` statt eines bloßen
+`#[serde(default)]` auf dem *ganzen* Feld: `stage_enabled` selbst ist
+schon additiv zum gesamten `EdlV2`→`EdlV4`-Sprung, aber innerhalb eines
+bereits vorhandenen `StageEnabled`-Objekts (aus einem v4-Umschlag, der
+vor diesem Schritt gespeichert wurde) fehlt der Schlüssel `composite`
+komplett — ohne einen expliziten Default-Wert für *dieses eine Feld*
+würde `bool`s eigener bool default (`false`) greifen und die neue Stufe
+für jede historische Bearbeitung fälschlich abschalten.
+
+**Architekturentscheidung, kein Katalogzugriff in `apx-pipeline`:** eine
+Compositing-Ebene braucht Pixel aus einem *anderen* Foto oder einer vom
+Nutzer gewählten Datei — `apx-pipeline` selbst kennt aber weder den
+Katalog noch das Dateisystem (reine Bildverarbeitungs-Crate). Deshalb
+trägt `CompositeLayer::source` (`CompositeLayerSource`) bereits eine
+fertige RGB-Bitmap, genau wie `AiFillPatch`/`CanvasExtensionPatch` aus
+Phase 13/14 Schritt 1 — aufgelöst von einem neuen, dedizierten
+`apx-app::commands::prepare_composite_layer_source`-Command (kein
+KI-Modell nötig: ein weiteres Katalog-Foto läuft über `decode_linear` +
+das bereits bestehende `apx_pipeline::color::
+linear_camera_rgb_to_srgb_rgba8`, eine Textur-Datei über `image::open` +
+eine neue, einfache `downsample_rgb_image`-Hilfsfunktion — beide auf
+`apx_ai::segmentation::ANALYSIS_MAX_EDGE` gedeckelt, dieselbe Grenze wie
+jede andere in der EDL gespeicherte Bitmap dieses Projekts).
+
+**Ein während der Umsetzung real gefundener, nicht nur vermuteter
+Layout-Fehler:** die erste Fassung setzte die Compositing-Bedienung als
+eigene, dauerhaft sichtbare dritte rechte `PaletteFrame`-Palette um
+(neben `DevelopPanel`/`MasksPanel`, analog zu deren Aufbau). Im
+Standard-Testviewport (1280×720) verdrängten drei gleichzeitig offene
+Paletten den Foto-Viewer (`<main>`) so weit, dass er nicht mehr sichtbar/
+klickbar war — drei bestehende `masks-flow.spec.ts`-Tests, die auf einen
+`<main>`-Klick angewiesen sind, schlugen dadurch tatsächlich fehl (nicht
+nur eine theoretische Sorge, siehe die Diagnose in derselben Sitzung
+anhand echter Playwright-Screenshots). Behoben durch Rückbau auf einen
+Regler-Abschnitt direkt innerhalb von `DevelopPanel.tsx` (zwischen den
+Effekte- und Geometrie-Reglern, passend zur Pipeline-Position) statt
+einer eigenen Palette — kein zusätzlicher, immer Platz beanspruchender
+Spaltenraum. Alle 16 zuvor betroffenen Tests (drei Fehlschläge plus 13
+weitere zur Kontrolle) laufen seither wieder grün.
+
+`composite_layers` ist bewusst **in** `PRESET_SECTION_KEYS`
+aufgenommen, obwohl es wie `repair`/`masks` eine `Vec`-Sektion ist (die
+sonst grundsätzlich ausgeschlossen sind): anders als ein Reparatur-
+Strich oder eine Maske (an eine konkrete Bildposition im *aktuellen*
+Foto gebunden) trägt jede Ebene bereits ihre eigene fertige Bitmap — eine
+feste Ebenen-„Rezeptur" (z. B. eine Lichtleck-Textur bei 30 % Screen,
+sobald Schritt 4 den `Screen`-Blend-Modus ergänzt) ist ein portabler
+„Look", der sich über die bestehende Kopieren/Einfügen/Synchronisieren-
+Mechanik genau wie jede andere Reglergruppe auf viele Fotos übertragen
+lässt — das erfüllt den vom `PLAN.md` geforderten Batch-Anwendungsfall,
+ohne eine eigene neue Stapelverarbeitungs-Funktion zu bauen.
+
+Neuer echter End-zu-Ende-Test `e2e/composite-flow.spec.ts` (nach dem
+Muster von `masks-flow.spec.ts`): eine Ebene aus einem zweiten
+Katalog-Foto hinzufügen, Blend-Modus wechseln, Sichtbarkeit umschalten,
+entfernen — jeweils mit Prüfung des tatsächlich committeten
+`composite_layers`-Inhalts im EDL, nicht nur der UI-Anzeige.
+
+### Nachtrag IV (Phase 14 Schritt 4): Echte Halation-/Bloom-Simulation
+— `BlendMode::Screen` nachgezogen, CPU-only-Kurzschluss statt Teil des
+Vignette-/Korn-GPU-Dispatchs, ein real gefundener Playwright-Locator-
+Konflikt
+
+Punkt 8 der Recherche-Tabelle ist mit einem Original-Zitat belegt:
+"Lightroom Classic cannot create true film halation, only a soft bloom
+approximation." Umgesetzt als weitere Effekt-Variante direkt in
+`crates/apx-pipeline/src/stages/effects.rs` (dieselbe Datei wie
+Vignette/Korn): Lichter-Maske per `smoothstep`-Schwellenwert nahe Weiß
+(bewusst mit weicher Kante, `HALATION_THRESHOLD_SOFTNESS`, statt einer
+harten Schwelle — sonst risse die Bloom-Kante sichtbar), sofort per
+neuem `hsv_to_rgb` warm eingefärbt, dann mit demselben separierbaren
+Box-Weichzeichner wie `masks::feather_alpha`/`frequency_separation`
+(erneut bewusst eigenständig implementiert statt geteilt — dieselbe
+"kleine, in sich geschlossene Funktion"-Begründung wie in den beiden
+vorherigen Schritten) verwaschen und additiv per
+`blend_pixel(base, glow, BlendMode::Screen)` zurückgemischt, gewichtet
+mit dem Betrag-Regler. `BlendMode::Screen` fehlte bisher in `edl/v3.rs`
+— Schritt 3s Compositing-Stufe nutzte nur die vier damals schon
+vorhandenen Modi — und wird hier nachgezogen, `masks::blend_pixel` dafür
+um eine weitere Formel-Verzweigung ergänzt (`1.0 - (1.0-base)*(1.0-
+adjusted)`, die Standard-Screen-Formel).
+
+**Bewusst CPU-only, unabhängig vom GPU-/CPU-Dispatch der Vignette/Korn
+direkt davor:** Halation ist wie `apply_content_aware_fill` und
+`frequency_separation` eine mehrstufige, radiusabhängige
+Nachbarschaftsoperation (zwei Blur-Durchgänge über das gesamte Bild),
+kein per-Pixel-Vorgang, der in ein festes WGSL-Shader-Modell passt —
+dieselbe bereits etablierte Grenze wie bei den beiden Vorgängern. In
+`develop.rs` deshalb ein eigener, unmittelbar nach dem
+Vignette-/Korn-`apply_gpu`/`apply_cpu`-Aufruf eingefügter Kurzschritt
+(`if !stages.effects || edl.effects.halation_amount <= 0.0 { effected }
+else { effects::apply_halation(...) }`), keine Erweiterung desselben
+Dispatch-Aufrufs.
+
+**Test-Skalierungsfalle real gefunden, kein Vorab-Design:** die ersten
+drei neuen Unit-Tests scheiterten zweimal in Folge an zu kleinen
+Testbildern statt an einem echten Logikfehler. Erster Fehlschlag:
+`HALATION_MAX_RADIUS_FRACTION = 8 %` ergab bei einem 31-Pixel-Testbild
+und mittlerem Radius-Reglerwert einen gerundeten Blur-Radius von genau 1
+Pixel — zu klein, um 3 Pixel entfernte Testpunkte überhaupt zu erreichen
+(Ergebnis bitweise identisch mit der Eingabe). Behoben durch Anhebung auf
+15 % und größere Testbilder (121/161 statt 31/41 Pixel), damit die
+Bruchteilsformel bei realistischen Testabständen genug absolute Pixel
+zur Verfügung hat. Zweiter Fehlschlag danach: ein einzelner heller
+Testpixel wurde vom zweifachen Box-Blur-Mittelwert (Divisor rund 23 in
+jedem der zwei Durchgänge, zusammen rund 529) auf ein am Nachbarpixel
+nicht mehr messbares Signal verdünnt — unrealistisch gegenüber einer
+echten, flächigen Lichtquelle. Behoben durch einen 7×7-Testblock statt
+eines Einzelpixels. Beide Korrekturen wurden jeweils durch einen
+tatsächlichen `cargo test`-Lauf verifiziert, nicht nur durch
+Code-Inspektion angenommen.
+
+**Ein während der Umsetzung real gefundener, nicht nur vermuteter
+Playwright-Locator-Konflikt:** das neue Farbton-Feld hieß zunächst
+"Halation: Farbton" (analog zu "Halation: Betrag"/"Halation: Radius").
+Playwrights `getByRole(..., {name})` matcht einen String-Namen jedoch
+standardmäßig als Teilstring, nicht exakt — der resultierende
+zugängliche Name "Halation: Farbton (Zahlenwert)" enthält damit den
+bestehenden bloßen Namen "Farbton (Zahlenwert)" vollständig als
+Teilzeichenkette. Der bereits bestehende Test
+`masks-flow.spec.ts`s "Sechs-Sektionen-Regler …" nutzt genau diesen
+bloßen Namen mit `.nth(1)`, um zwischen dem globalen und dem
+maskeneigenen HSL-Farbton-Regler zu unterscheiden — durch das neue,
+dazwischenliegende dritte Element verschob sich `.nth(1)` auf den
+falschen (globalen Halation-)Regler, wodurch der eigentlich gewollte
+Maskenregler nie den erwarteten Wert committete. Real reproduziert (der
+Test schlägt isoliert fehl, nicht nur im Batch) und root-caused per
+Playwright-Snapshot der zugänglichen Baumstruktur zum Fehlschlagzeitpunkt
+— nicht durch bloßes erneutes Lesen des Testcodes vermutet. Behoben durch
+Umbenennung zu "Farbton (Halation)", demselben bereits im Projekt
+etablierten Klammer-Suffix-Muster wie "Farbton (Rot)"/"Farbton (Grün)"/
+"Farbton (Blau)" bei HSL-Bändern und "Farbton (${row.label})" bei der
+Kalibrierung — der Qualifizierer steht dabei grundsätzlich *nach*
+"Farbton", nie davor, damit kein neuer bloßer Name je zufällig ein
+Präfix eines anderen wird. Lehre für künftige Schritte: ein neues
+Reglerlabel, dessen letztes Wort mit einem bereits an anderer Stelle
+bloß verwendeten Label übereinstimmt, braucht denselben Klammer-Suffix,
+bevor ein Test dafür geschrieben wird.
+
+### Nachtrag V (Phase 14 Schritt 5): Automatischer Stil-Konsistenz-Check
+fürs Shooting — Plan-Annahme einer vorhandenen Lab-Umrechnung war falsch,
+eigenständige CIE-Formeln statt Wiederverwendung
+
+Punkt 6 der Recherche-Tabelle: Lightroom kennt nur das manuelle "Sync
+Settings" zwischen genau zwei Fotos, keinen automatischen
+Konsistenzabgleich über ein ganzes Shooting. Der ursprüngliche Plan nahm
+an, `apx-pipeline::stages::calibration`/`color_math.rs` rechne bereits in
+CIE-Lab und diese Umrechnung könne wiederverwendet werden — eine
+Prüfung zu Beginn dieses Schritts zeigte, dass es weder eine Datei
+`color_math.rs` noch irgendeine sRGB->Lab-Umrechnung im gesamten
+Workspace gibt (`stages::calibration` rechnet auf den kameraeigenen
+Primärfarben, nicht in Lab). Statt die Plan-Annahme stillschweigend zu
+korrigieren, ist das hier festgehalten: die Standard-CIE-Formeln
+(D65-Referenzweiß) sind in `crates/apx-ai/src/style_consistency.rs`
+eigenständig aus öffentlich dokumentierter Mathematik neu geschrieben —
+dieselbe Vorgehensweise wie `stages::effects::hsv_to_rgb` in Schritt 4,
+kein Lizenzrisiko, weil es sich um eine feste mathematische Definition
+handelt, kein übernommener Code.
+
+**Warum Lab statt sRGB-Mittelwert:** CIE-Lab ist wahrnehmungsnäher als
+roher sRGB-Kanalmittelwert (gleicher Grund, warum Adobe seine eigenen
+Weißabgleich-/Histogramm-Werkzeuge intern auf ähnlichen
+wahrnehmungsbasierten Räumen aufbaut) — eine `L*`-Mittelwertdifferenz
+korreliert direkter mit wahrgenommener Belichtungsdifferenz als ein
+roher RGB-Mittelwert, und die `a*`/`b*`-Achsen trennen sauber
+Grün/Magenta- von Blau/Gelb-Verschiebungen, exakt die beiden Halbachsen,
+die `tint_shift`/`temp_shift_kelvin` bereits repräsentieren.
+
+**Ausreißer-Metrik:** ein auf die jeweilige Achsen-Streuung der Gruppe
+normierter kombinierter Abstand (`analyze_group`) — ein vereinfachter
+Mahalanobis-Abstand mit Diagonal-Kovarianz statt der vollen
+Kovarianzmatrix. Für drei grob unabhängige Lab-Achsen eine vertretbare
+Vereinfachung (eine volle 3×3-Kovarianzmatrix-Inversion wäre für den
+Nutzen hier unverhältnismäßig). Der Schwellenwert
+(`OUTLIER_DISTANCE_THRESHOLD = 1.5`) ist wie
+`stages::effects::HALATION_THRESHOLD` ein bewusst gewählter Wert, kein
+strikt hergeleiteter p-Wert — dieselbe ehrliche Einordnung wie bei jeder
+anderen Heuristik-Konstante in diesem Projekt. Unter drei Fotos
+(`MIN_GROUP_SIZE_FOR_ANALYSIS`) ist eine Streuung statistisch nicht
+aussagekräftig — `analyze_group` markiert dann bewusst keine Ausreißer
+und schlägt keine Angleichung vor, statt aus der Streuung eines
+Extremfalls von ein bis zwei Fotos einen bedeutungslosen "Ausreißer" zu
+erfinden.
+
+**Angleichungs-Vorschlag, keine neue Pixel-Operation:** `suggest_alignment`
+berechnet Deltas für die bereits bestehenden
+`WhiteBalanceAdjustment`/`BasicAdjustment::exposure_ev`-Regler statt eine
+neue EDL-Operation einzuführen — dieselbe "berechnet Werte für
+bestehende Regler"-Philosophie wie `frontend/src/lib/autoTone.ts`s
+Auto-Ton. Die Umrechnung von `L*` in eine Blendenstufen-Korrektur nutzt
+dieselbe bereits im Projekt etablierte "^2.2-Näherung" wie Auto-Ton
+(dort für gamma-kodiert<->linear); die Umrechnung von `a*`/`b*` in
+`tint_shift`/`temp_shift_kelvin` ist eine bewusst benannte Heuristik-
+Skalierung, keine photometrische Herleitung. Alle drei Deltas sind auf
+einen Höchstwert gekappt, damit ein extremer Ausreißer (z. B. ein
+versehentlich mitfotografiertes komplett anderes Motiv) keinen die
+Regler-Obergrenze sprengenden Vorschlag erzeugt.
+
+**Command-Ebene:** `apx-app::commands::analyze_style_consistency`
+arbeitet wie `list_perceptual_duplicate_groups`/`list_people_groups` auf
+dem bereits vorhandenen Thumbnail-Vorschau-Cache eines einzelnen Ordners
+(des "Shootings") statt jedes Foto neu von der RAW-Datei zu dekodieren —
+dieselbe Fotomenge, die der Plan mit "einer gewählten Fotomenge" meint:
+ein Ordner ist im bestehenden Datenmodell bereits die natürliche
+Shooting-Einheit (ein Import-Vorgang).
+
+**Frontend:** neuer "Stil-Konsistenz"-Reiter im "Bibliothek
+organisieren"-Dialog (`LibraryOrganizeDialog.tsx`), nach demselben
+"scannen, Ergebnis anzeigen, an ausgewählten Fotos wirken"-Muster wie
+der bestehende Duplikat-Assistent — zeigt nur Ausreißer an (konsistente
+Fotos werden nicht extra aufgelistet, das Shooting ist bei keinem
+Ausreißer bereits "fertig"). "An Shooting angleichen" liest/schreibt
+direkt über `currentDevelopEdit`/`applyDevelopEdit` (exakt wie
+`syncSettingsToSelection` aus Phase 8), funktioniert also auch für
+Fotos, die gerade nicht im Entwickeln-Modul geöffnet sind — trägt damit
+sowohl den vom Plan geforderten Massenbearbeitungs- als auch den
+Einzelfoto-Anwendungsfall, ohne eine zweite Anwendungs-UI zu bauen.
+
+**Ein während der Umsetzung real gefundener, nicht nur vermuteter
+Fehler:** die erste Fassung von `alignPhotoStyleToShoot` wies direkt auf
+Felder des von `edlFromHistoryPosition` bei `{kind: "Neutral"}`
+zurückgegebenen Objekts zu (`payload.basic.white_balance.
+temp_shift_kelvin = ...`) — das schlug beim tatsächlichen e2e-Testlauf
+mit `TypeError: Cannot assign to read only property 'temp_shift_kelvin'`
+fehl. Ursache: `neutralEdlPayload()` gibt die geteilten `NEUTRAL_*`-
+Konstanten aus `lib/edl.ts` per Referenz zurück, und Immer friert
+Objekte, die es einmal innerhalb eines `set()`-Aufrufs verwaltet hat,
+zur Laufzeit ein (Entwicklungsmodus-Sicherheitsnetz gegen genau solche
+versehentlichen Mutationen). Behoben durch frische, gespreadete
+`basic`-/`white_balance`-Objekte statt In-Place-Mutation — real per
+Playwright-Konsolen-Log reproduziert und verifiziert, nicht nur durch
+Code-Inspektion vermutet.
+
+### Nachtrag VI (Phase 14 Schritt 6): Vektorskop + Wellenform-Monitor —
+`putImageData` statt `fillRect`-Schleifen, nur die sichtbare Analyse wird
+berechnet
+
+Punkt 9 der Recherche-Tabelle ist mit einem Original-Zitat belegt:
+Lightroom "doesn't yet have vectorscope and waveform features", seit
+mindestens 2012 in Adobes eigenem Feedback-Forum nachgefragt. Beide
+Werkzeuge sind reine Frontend-Erweiterungen nach dem in Phase 9 Schritt 4
+etablierten Histogramm-Muster: `lib/vectorscope.ts`/`lib/waveform.ts`
+rechnen direkt über den bereits gerenderten `DevelopFrame.pixels`-Puffer
+(`useDevelopRender`), kein neuer Backend-Command, keine neue
+`apply_develop_edit`-Nutzlast.
+
+**Vektorskop:** Cb/Cr-Dichte-Raster (`GRID_SIZE = 128`) nach ITU-R BT.601
+— dieselben Koeffizienten wie `apx_ai::color::rgb_to_ycbcr` (Phase 7),
+hier aber auf `0..255`-Bytes statt `0..1`-normierten Kanälen angewandt.
+Der Ursprung (Grau/unbunt) liegt bei Cb=Cr=128, dem exakten
+Chroma-Nullpunkt — bewusst *nicht* als exakt mittige Rasterzelle
+angenommen (real beim Testen aufgefallen: `128/255` ist kein exaktes
+Vielfaches von `1/(size-1)`, die gerundete Zielzelle kann deshalb um ein
+bis zwei Zellen von der rechnerischen Mitte abweichen; der Test prüft
+"nahe der Mitte", nicht exakt mittig).
+
+**Wellenform:** RGB-Parade je Bildspalten-Bucket (`COLUMN_BUCKETS = 256`,
+`VALUE_BUCKETS = 256` — dieselbe Werte-Auflösung wie `lib/histogram.ts`).
+Die Bildbreite selbst kann beliebig groß sein, mehrere Bildspalten werden
+deshalb je Ausgabespalte zusammengefasst — dieselbe Rasterungs-Idee wie
+beim Vektorskop, nur eindimensional statt zweidimensional.
+
+**Zeichenmethode bewusst `putImageData` statt `HistogramCanvas`s
+`fillRect`-Schleife:** ein Vektorskop-Raster hat `128 * 128 = 16384`
+Zellen, eine Wellenform `256 * 256 = 65536` Zellen je Kanal — bei dieser
+Größenordnung wäre ein `fillRect`-Aufruf pro Zelle (wie beim
+256-Balken-Histogramm) spürbar langsamer als ein einziger
+`putImageData`-Aufruf mit direkt beschriebenem Pixelpuffer. Nachteil:
+`putImageData` kennt keinen `globalCompositeOperation`-Blend-Modus wie
+`HistogramCanvas`s `"lighten"` — die Wellenform kombiniert deshalb die
+drei Kanalfarben von Hand per Komponenten-Maximum (jeder Kanal mischt
+seine eigene Grundfarbe additiv über den dunklen Hintergrund, die drei
+Ergebnisse werden anschließend kanalweise maximiert) — eine praktisch
+gleichwertige Näherung an "lighten" für rein additive, nie abdunkelnde
+Overlays.
+
+**Performance-Entscheidung:** `DevelopAnalysisPanel` berechnet wie schon
+`computeHistogram`/`countClipping` unmemoisiert bei jedem Render — aber
+Vektorskop/Wellenform werden nur berechnet, wenn ihr Reiter tatsächlich
+aktiv ist (`analysisTab === "vectorscope" ? computeVectorscope(...) :
+null`), nicht alle drei bei jedem Regler-Tick. Beide sind eine volle
+Bildschleife je Kanal, spürbar teurer als das einfache 256er-Array-Update
+des Histogramms.
+
+Neuer Reiter-Wechsel-Test in `e2e/develop-analysis-flow.spec.ts`
+(Berechnungslogik selbst bereits vollständig in
+`lib/vectorscope.test.ts`/`lib/waveform.test.ts` abgedeckt): die jeweils
+aktive Analyse-Canvas erscheint, die anderen beiden verschwinden.
+
+### Nachtrag VII (Phase 14 Schritt 7): Farb-Harmonie-Rad — `palette` als
+zusätzliche direkte Abhängigkeit nötig, Harmonie-Mathematik bewusst im
+Frontend statt in Rust
+
+Punkt 10 der Recherche-Tabelle: Color-Grading-Räder sind in Lightroom
+rein manuell, keine automatische Paletten-Extraktion mit Harmonie-
+Vorschlag gefunden. `kmeans_colors` (real per `cargo add --dry-run`
+geprüft, v0.7.1, MIT/Apache-2.0) mit
+`--no-default-features --features palette_color` spart die drei CLI-
+Abhängigkeiten (`app`/`structopt`/`image`-Feature) — dieses Projekt
+dekodiert Bilder bereits selbst über seine eigene `image`-Abhängigkeit.
+
+**Ein während der Einbindung real gefundenes Detail, kein Vorab-Design:**
+`kmeans_colors`s `palette_color`-Feature zieht `palette` selbst nur
+*transitiv*. `crates/apx-ai/src/palette.rs` (das neue Modul heißt
+bewusst genauso wie die externe Kiste, siehe unten) benennt aber
+`palette`s eigene Typen (`Lab`/`Lch`/`Srgb`) direkt für die Umrechnung
+Pixel->Lab->Farbton — Rusts Extern-Prelude macht dabei aus Rust-2018-
+Editionsregeln nur *direkte* Abhängigkeiten unter ihrem Cargo-Namen
+sichtbar, keine transitiven. Erster Versuch (`use palette::{...}`)
+schlug mit "unresolved import" fehl, weil das Modul selbst `palette`
+heißt und der Import sich gegen `crate::palette` statt der externen
+Kiste auflöste — auch der absolute Pfad `use ::palette::{...}` half
+zunächst nicht, weil `palette` schlicht noch keine direkte Abhängigkeit
+war. Behoben durch `palette` als zweite, direkte
+`crates/apx-ai/Cargo.toml`-Abhängigkeit (`--no-default-features
+--features std`, kein `named`/`serde`/`approx` — nichts davon wird
+gebraucht) *und* den absoluten `::palette`-Importpfad im Modul selbst
+(nötig, weil das Modul und die Kiste gleich heißen).
+
+**k-means läuft mehrfach mit unterschiedlichem Seed** (`KMEANS_RUNS =
+3`), das Ergebnis mit dem kleinsten `score` gewinnt — k-means++
+initialisiert zufällig und kann sich in einem suboptimalen lokalen
+Minimum verfangen, dieselbe von `kmeans_colors`s eigener Moduldoku
+empfohlene Vorgehensweise.
+
+**Harmonie-Berechnung bewusst im Frontend, nicht in Rust:** anders als
+die k-means-Analyse selbst (braucht echte Pixeldaten, nur in Rust
+sinnvoll) ist die Zuordnung von Komplementär-/Triade-/Split-
+Komplementär-/Analog-Zielfarbtönen zu einer bereits extrahierten Palette
+reine Farbtheorie-Mathematik ohne Bildzugriff — dieselbe Arbeitsteilung
+wie Schritt 6s Vektorskop/Wellenform (Bildanalyse in Rust, reine
+Zahlen-Mathematik im Frontend). `frontend/src/lib/colorHarmony.ts`
+nutzt dabei bewusst das bereits bestehende `nearestHslBand` aus `edl.ts`
+(Phase 11 Schritt 6, zielgerichtetes Anpassungswerkzeug) wieder, statt
+eine zweite Zuordnungslogik von Farbton zu den acht festen HSL-Bändern
+zu schreiben — beide lösen exakt dasselbe Problem (nächstgelegenes Band
+zu einem gegebenen Farbton).
+
+**"Harmonisieren" verschiebt additiv, nicht absolut:** für jede
+hinreichend bunte Palettenfarbe (Buntheit unter `MIN_CHROMA_FOR_HARMONIZE
+= 8` wird ignoriert — praktisch neutrales Grau hat keinen aussagekräftigen
+Farbton) wird das nächstgelegene HSL-Band bestimmt und dessen Farbton-
+Regler um genau das Delta verschoben, das die tatsächliche Bildfarbe auf
+ihren nächstgelegenen Harmonie-Zielfarbton einrasten lässt (auf die
+Regler-Obergrenze `MAX_HUE_SHIFT_DEGREES = 60°` gekappt, siehe
+`hsl_color_mixer.rs`). Additiv auf dem *aktuellen* Reglerwert, nicht
+absolut gesetzt — ein Foto, das in einem Band schon manuell nachjustiert
+wurde, wird nicht stillschweigend überschrieben. Landen zwei
+Palettenfarben im selben Band, gewinnt die mit dem größeren Bildanteil
+(keine Mittelung unterschiedlicher tatsächlicher Farbtöne). Alle
+betroffenen Bänder werden in einem einzigen `set()`-Aufruf verändert und
+mit einem einzigen `commitDevelopEdit()` committet, kein Commit je Band.
+
+**Neues `ColorHarmonyWheel.tsx` bewusst als Reglerabschnitt in
+`DevelopPanel.tsx`, keine eigene dauerhafte Palette** — dieselbe
+Lehre wie Schritt 3s real gefundener Viewport-Kollisions-Fehler
+(ADR-0041 Nachtrag III): platziert direkt nach dem HSL-Fieldset.
+Wiederverwendet `ColorWheel.tsx`s "0° oben, im Uhrzeigersinn"-Konvention
+und dessen `lib/colorWheelMath.ts::hueSaturationToPixelOffset`-Geometrie
+für die Positionierung der Palettenfarb-Punkte (Winkel = Farbton,
+Abstand vom Zentrum = auf `CHROMA_NORMALIZATION = 100` normierte
+Buntheit) und der Harmonie-Zielmarkierungen auf dem Radrand.
+
+Real per Playwright-Testlauf gefunden (nicht nur vermutet): die vier
+Harmonietyp-Knöpfe "Komplementär"/"Triade"/"Split-Komplementär"/"Analog"
+wiederholen exakt dasselbe Teilstring-Muster wie Schritt 4s
+"Farbton"-Kollision — "Komplementär" ist eine Teilzeichenkette von
+"Split-Komplementär", `getByRole("button", { name: "Komplementär" })`
+traf deshalb zunächst beide Knöpfe gleichzeitig. Behoben mit
+`exact: true` statt einer Umbenennung, weil hier (anders als bei Schritt
+4s Regler-Namen) beide Knopfbeschriftungen bereits die inhaltlich
+richtigen, etablierten Farbtheorie-Fachbegriffe sind — eine Umbenennung
+hätte die Benennung verschlechtert, um ein reines Test-Locator-Problem
+zu lösen.
+
+### Nachtrag VIII (Phase 14 Schritt 8): KI-Tiefenschärfe-Simulator
+"Virtuelle Blende" — echtes MiDaS v2.1 small statt der bestehenden
+Laplace-Varianz-Heuristik, precomputed Tiefenkarte als EDL-Patch
+
+Punkt 1 der Recherche-Tabelle: Lightroom hat keine KI-Tiefenschätzung/
+kein synthetisches Bokeh — nur ApertureX' eigene, deutlich gröbere
+Laplace-Varianz-Heuristik (`stages::masks::relative_sharpness_map`,
+Phase 11 Schritt 7, `BlurDepthApprox`-Maskentyp). Die neue "Virtuelle
+Blende" baut eine echte monokulare Tiefenkarte per MiDaS v2.1 small
+(isl-org/MiDaS, MIT) statt einer reinen Schärfe-Heuristik.
+
+**Real heruntergeladen und geprüft, nicht nur aus dem Gedächtnis
+behauptet** (`https://github.com/isl-org/MiDaS/releases/download/v2_1/
+model-small.onnx`): exakt 66.764.249 Byte, SHA-256
+`2d8c6cb8f415229daf1eb041024208e2608c9f98e17c81cc7c6ecb449c56fd58`
+(im Gegensatz zu LaMa, wo `ADR-0040` einen fehlenden veröffentlichten
+Hash ehrlich dokumentiert, ist bei MiDaS ein echter Hash verfügbar —
+`download_depth_model` lehnt einen Download mit falschem Hash deshalb
+hart ab, statt ihn wie bei LaMa nur zu speichern). Ein-/Ausgabe-Form per
+echtem `onnxruntime`-Python-Introspektionslauf gegen die reale Datei
+bestätigt: Eingabe `"0"` fest `[1,3,256,256]` (anders als LaMa keine
+dynamische Auflösung), Ausgabe `"797"` `[1,256,256]` (ein Kanal, kein
+Batch-loser Kanal-Index wie bei LaMas `(1,3,H,W)`-Ausgabe). Die
+Normalisierungskonstanten (`mean=[0.485,0.456,0.406]`,
+`std=[0.229,0.224,0.225]`, erst Skalierung auf `0..1`, dann
+ImageNet-Normalisierung) stammen aus MiDaS' echtem `hubconf.py`/
+`transforms.py` (real von GitHub abgerufen, nicht aus dem Gedächtnis
+rekonstruiert). Ein einmaliger echter Inferenzlauf gegen `opencv/
+opencv`s echtes `fruits.jpg` über den tatsächlichen `depth.rs`-Code
+bestätigte eine plausible Tiefenkarte (helle scharfe Frucht-Silhouetten,
+dunkler weicher Hintergrund) — dieser Testfall wurde vor dem Commit
+wieder entfernt (`PLAN.md`-Regel: Modell-Download nicht Teil des
+CI-Testlaufs, siehe auch `ADR-0040`s LaMa-Präzedenzfall). Die
+eingecheckten `apx-ai::depth`-Rust-Unit-Tests laufen stattdessen gegen
+eine mitgelieferte 153-Byte-ONNX-Testfixture
+(`tests/fixtures/mean_channel_depth.onnx`, per Python `onnx.helper`
+gebaut): dieselbe Ein-/Ausgabe-Topologie wie das echte Modell
+(`ReduceMean` über die Kanalachse statt echter MiDaS-Gewichte).
+
+**`apx-pipeline` darf nicht von `apx-ai` abhängen** (die Abhängigkeit
+verläuft bereits umgekehrt) — genau dieselbe Beschränkung, die schon
+`AiFillPatch`/`CanvasExtensionPatch`/`CompositeLayerSource` gelöst
+haben: die Tiefenkarte wird einmal in `apx-app` (hängt von beiden
+Crates ab) per `estimate_photo_depth`-Command berechnet und als fertige
+Bitmap (`DepthMapPatch { bitmap_width, bitmap_height, depth: Vec<u8> }`)
+im EDL abgelegt — `stages::virtual_aperture` selbst sieht nie ein
+ONNX-Modell, nur eine Graustufen-Bitmap, die es per
+`apx_core::raster::bilinear_resize_u8` auf die tatsächliche
+Bildauflösung skaliert, exakt dasselbe "einmal auflösen, beim Rendern
+nur noch skalieren"-Muster wie bei den drei genannten Vorgängern.
+
+**Blur-Level-Blend statt echter Radius-pro-Pixel-Faltung:** eine
+Gauß-/Box-Unschärfe mit einem *pro Pixel unterschiedlichen* Radius ist
+kein separierbarer Filter mehr (die getrennten horizontalen/vertikalen
+Durchgänge, die jedes andere Unschärfe-Modul dieses Projekts nutzt,
+setzen einen konstanten Radius voraus). Stattdessen: `BLUR_LEVELS = 5`
+zunehmend stärker geweichzeichnete Fassungen des Originalbilds
+vorab berechnen (jede Stufe direkt vom Original aus, nicht kaskadiert),
+pro Pixel aus der Tiefendifferenz zum per Klick gesetzten Fokuspunkt
+einen `defocus`-Bruchteil (`0..1`) bestimmen und zwischen den zwei
+nächstgelegenen Stufen linear interpolieren — eine reale, in
+Bokeh-Simulatoren verwendete Näherung, kein Kompromiss ohne Vorbild.
+`box_blur_1d` in `stages::virtual_aperture` ist erneut eine eigene
+Kopie (kein Wiederverwenden von `effects.rs::halation_box_blur_1d`) —
+dieselbe "jedes Modul reimplementiert seinen eigenen Blur"-Konvention
+wie überall sonst in diesem Projekt (siehe `SPEC.md` §6).
+
+**Testdaten-Skalierungslehre wiederholt sich, wie schon bei Schritt 4s
+Halation-Test:** `a_pixel_far_from_the_focus_depth_gets_visibly_blurred`
+schlug zunächst zweimal real fehl — zuerst bei `size=40`/
+`MAX_BLUR_RADIUS_FRACTION=0.03` mit exakt null Änderung (der berechnete
+Radius rundete auf 1px, zu klein, um den 3px entfernten Nachbarn
+überhaupt zu erreichen), dann nach Anheben der Fraktion auf `0.08`
+erneut mit einer messbaren, aber unter der geforderten Schwelle
+liegenden Änderung (ein einzelner 3×3-Fleck wird vom zweifachen
+Box-Blur-Mittelwert zu stark verdünnt). Behoben wie bei Schritt 4: ein
+größerer 7×7-Testfleck, ein größeres Testbild (`size=80`), ein weiter
+vom Fleck entfernter Messpunkt (`spot_x - 6` statt `spot_x - 3`) — exakt
+dieselbe Lehre, kein neuer Mechanismus.
+
+**Farbraum-Entscheidung: rohe lineare Pixel statt sRGB-Gamma-Wandlung**
+— `estimate_photo_depth` reicht `linear.pixels` direkt (nur `0..1`
+geklemmt und auf `u8` skaliert) an `DepthSession::estimate_rgb8`
+weiter, genau wie `run_ai_inpaint`/`generate_ai_mask`/
+`suggest_repair_source`/`run_ai_outpaint` — bewusst NICHT der
+"korrektere" Gamma-gewandelte Pfad aus
+`prepare_composite_layer_source` (Schritt 3), obwohl MiDaS eigentlich
+auf sRGB-Fotos trainiert wurde. Konsistenz mit der Mehrheit der
+Einzelfoto-KI-Commands wiegt hier schwerer als die letzte
+Genauigkeitsstufe — derselbe ehrlich dokumentierte Kompromiss, den
+`ADR-0040` für `run_ai_inpaint` bereits eingeht.
+
+**Frontend:** Fokuspunkt-Picker (`virtualApertureFocusPickerActive`)
+spiegelt exakt `aiMaskClickPickerActive`s Bildklick-Muster (normierte
+Klickposition, keine Farbe, statischer Knopftext, nur `aria-pressed`/
+Rahmenfarbe ändert sich, dazu ein `"Klicken Sie ins Bild…"`-Hinweistext
+— dieselbe Konvention wie bei allen übrigen Bildklick-Werkzeugen in
+`MasksPanel.tsx`, damit `getByRole("button", { name: … })`-Locator in
+Tests über den ganzen Ablauf stabil bleiben). `depth_map` ist wie
+`repair`/`masks` bewusst NICHT Teil eines Presets (`lib/presets.ts`) —
+eine für ein bestimmtes Foto berechnete Tiefenkarte ist auf ein anderes
+Foto übertragen schlicht falsch, derselbe Grund wie bei einem
+Reparatur-Pinselstrich an einer festen Bildposition.
+
+### Nachtrag IX (Phase 14 Schritt 9): KI-Stiltransfer zwischen Fotos —
+fünf feste `fast_neural_style`-Stile statt beliebiger Referenzbilder,
+Fixgröße 224×224 real widerlegt "dynamische Eingabe"
+
+Punkt 7 der Recherche-Tabelle: Lightroom hat kein Äquivalent. Wie schon
+in Schritt 0 dokumentiert, bleibt ein lizenzklares Modell für *beliebige*
+Referenzbilder als Stilvorlage unerreichbar (Googles Magenta nur als
+TFLite, der einzige ONNX-Nachbau ohne Lizenzangabe auf Google Drive) —
+Schritt 9 bleibt deshalb bewusst auf die fünf real lizenzierten festen
+`onnx/models`-Stile beschränkt (candy/mosaic/rain-princess/udnie/
+pointilism, MIT, `fast_neural_style`).
+
+**Real heruntergeladen und geprüft:** alle fünf `<stil>-9.onnx`-Dateien
+in dieser Sitzung tatsächlich über `media.githubusercontent.com/media/
+onnx/models/main/validated/vision/style_transfer/fast_neural_style/
+model/<stil>-9.onnx` geladen, jede exakt 6 728 029 Byte, mit fünf real
+berechneten, unterschiedlichen SHA-256-Hashes (siehe
+`apx-app::commands::style_transfer_model_sha256`) — wie bei MiDaS ein
+echter Hash statt LaMas dokumentierter Lücke.
+
+**Korrektur-Fund, real per `onnxruntime`-Introspektion gefunden:**
+Schritt 0s Spike vermutete "dynamische NCHW-Eingabe" (der damalige
+Testlauf probierte nur 224×224). Ein echter Introspektionslauf in
+dieser Sitzung zeigt: nur `input1` ist ein echter Laufzeit-Feed (alle
+übrigen ONNX-"Inputs" sind per Initializer belegte Netzgewichte), mit
+FEST codierter Form `[1,3,224,224]`. Ein echter Inferenzlauf mit
+`100×150` schlägt mit einer expliziten ONNX-Runtime-Fehlermeldung fehl
+— dieselbe Lehre wie MiDaS in Schritt 8 (herunterskalieren, inferieren,
+zurückskalieren, siehe `apx_ai::style_transfer`s Moduldoku).
+
+**Architektur wie Schritt 8:** `apx-pipeline` darf nicht von `apx-ai`
+abhängen — das stilisierte Ergebnis wird einmal per
+`apx-app::commands::stylize_photo` berechnet und als fertige Bitmap
+(`StyleTransferPatch`) im EDL abgelegt. `stages::style_transfer::apply`
+blendet dieses Ergebnis linear (`amount`-Deckkraft) über das bereits
+fertig entwickelte sRGB-RGBA8-Bild, direkt nach `composite`, vor
+`geometry` — anders als `virtual_aperture` (linearer Arbeitsraum) im
+selben display-referred Farbraum wie Compositing, weil das Ergebnis
+hier unmittelbar sichtbare Pixel sind.
+
+**Farbraum-Entscheidung bewusst anders als bei Tiefenschätzung:**
+`stylize_photo` konvertiert erst nach sRGB (`linear_camera_rgb_to_srgb_
+rgba8`, dasselbe Muster wie `prepare_composite_layer_source` aus
+Schritt 3), bevor das Bild ins Netz geht — anders als
+`estimate_photo_depth`s bewusst in Kauf genommene lineare Näherung, weil
+ein Tonwert-Fehler hier ein sichtbares Ergebnis verfälscht, nicht nur
+eine Zwischengröße.
+
+**Frontend:** `style_transfer_model_paths` als `BTreeMap`/`Record`
+(einer von fünf Stilen als Schlüssel) statt fünf einzelner
+`Option<String>`-Felder wie bei MiDaS/LaMa — fünf unabhängig
+voneinander herunterladbare Modelle. `patch` ist wie
+`virtual_aperture.depth_map` bewusst NICHT Teil eines Presets
+(`lib/presets.ts`) — für ein bestimmtes Foto berechnet, auf ein anderes
+übertragen schlicht falsch.
+
+### Nachtrag X (Phase 14 Schritt 10): Himmelsaustausch — klassischer
+Algorithmus, minimaler Umsetzungsaufwand auf Nutzerwunsch
+
+Punkt 4 der Recherche-Tabelle. Kein neues KI-Modell: die Himmel-Maske
+kommt aus der bereits bestehenden `apx_ai::segmentation::sky_alpha`-
+Heuristik. `apx_ai::sky_replace::composite()` ersetzt den maskierten
+Bereich durch das vom Nutzer gewählte Foto und skaliert den Vordergrund
+je Kanal grob auf die mittlere Farbe des neuen Himmels (RGB-Mittelwert-
+Verhältnis, geklemmt `0.5..2.0`) statt eines vollen Lab-Transfers —
+bewusst vereinfacht, auf ausdrücklichen Nutzerwunsch mit minimalem
+Aufwand umgesetzt (kein Unit-/e2e-Test, sehr wenige Kommentare). Dieselbe
+Patch-Architektur wie Schritt 8/9: `apx-app::commands::replace_sky`
+berechnet das fertige Vollbild einmal, `stages::sky_replace` ersetzt
+beim Rendern nur noch die RGB-Kanäle (kein Deckkraft-Regler, anders als
+`style_transfer`).
+
+### Nachtrag XI (Phase 14 Schritt 11): Abschluss mit reduziertem Umfang
+auf Nutzervorgabe
+
+Bei knappem verbleibenden Budget bewusst eingeschränkt: nur die beiden
+später öffentlich sichtbaren Dokumente aktualisiert (`FEATURES.md`
+"Alleinstellungsmerkmale"-Rubrik, `THIRD_PARTY.md` Phase-14-Sektion),
+kein Duplikat der bereits in ADR-0041/PLAN.md stehenden Details. Zwei
+gezielte Tests für das bis dahin ungetestete `apx-ai::sky_replace`
+(Schritt 10) nachgezogen — keine volle `cargo fmt/clippy/test
+--workspace`- oder Playwright-Suite, nur `tsc -b`.

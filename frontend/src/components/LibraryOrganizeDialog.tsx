@@ -18,7 +18,7 @@ interface LibraryOrganizeDialogProps {
   onClose: () => void;
 }
 
-type Tab = "sets" | "stacks" | "copies" | "colors" | "duplicates";
+type Tab = "sets" | "stacks" | "copies" | "colors" | "duplicates" | "style";
 
 /**
  * Bibliotheks-Backlog-Dialog (Phase 9 Schritt 1, siehe `PLAN.md`/
@@ -37,6 +37,7 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
     copies: t("libraryOrganizeDialog.tabCopies"),
     colors: t("libraryOrganizeDialog.tabColors"),
     duplicates: t("libraryOrganizeDialog.tabDuplicates"),
+    style: t("libraryOrganizeDialog.tabStyle"),
   };
 
   const collectionFolders = useAppStore((s) => s.collectionFolders);
@@ -67,6 +68,13 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
 
   const perceptualDuplicateGroups = useAppStore((s) => s.perceptualDuplicateGroups);
   const perceptualDuplicatesRunning = useAppStore((s) => s.perceptualDuplicatesRunning);
+
+  const selectedFolderId = useAppStore((s) => s.selectedFolderId);
+  const styleConsistencyResult = useAppStore((s) => s.styleConsistencyResult);
+  const styleConsistencyRunning = useAppStore((s) => s.styleConsistencyRunning);
+  const runStyleConsistencyCheck = useAppStore((s) => s.runStyleConsistencyCheck);
+  const alignPhotoStyleToShoot = useAppStore((s) => s.alignPhotoStyleToShoot);
+  const [aligningPhotoId, setAligningPhotoId] = useState<string | null>(null);
 
   const smartPreviewsGenerating = useAppStore((s) => s.smartPreviewsGenerating);
   const smartPreviewsGeneratedCount = useAppStore((s) => s.smartPreviewsGeneratedCount);
@@ -363,6 +371,66 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
                 );
               })}
             </ul>
+          </div>
+        )}
+
+        {tab === "style" && (
+          <div className="flex flex-col gap-3">
+            {!selectedFolderId && <p className="text-xs text-text-muted">{t("libraryOrganizeDialog.styleNoFolderSelected")}</p>}
+            {selectedFolderId && (
+              <>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void runStyleConsistencyCheck()}
+                    disabled={styleConsistencyRunning}
+                    className="rounded border border-accent bg-accent/10 px-2 py-1 text-xs text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {styleConsistencyRunning ? t("libraryOrganizeDialog.styleCheckRunning") : t("libraryOrganizeDialog.styleCheckRun")}
+                  </button>
+                </div>
+                {styleConsistencyResult !== null && styleConsistencyResult.length > 0 && styleConsistencyResult.length < 3 && (
+                  <p className="text-xs text-text-muted">{t("libraryOrganizeDialog.styleTooFewPhotos")}</p>
+                )}
+                {styleConsistencyResult !== null && styleConsistencyResult.length >= 3 && !styleConsistencyResult.some((analysis) => analysis.is_outlier) && (
+                  <p className="text-xs text-text-muted">{t("libraryOrganizeDialog.styleNoOutliers")}</p>
+                )}
+                <ul className="flex flex-col gap-2">
+                  {(styleConsistencyResult ?? [])
+                    .filter((analysis) => analysis.is_outlier)
+                    .map((analysis) => (
+                      <li key={analysis.photo.id} className="rounded border border-border p-2 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <span>
+                            {analysis.photo.filename} <span className="text-danger">{t("libraryOrganizeDialog.styleOutlierBadge")}</span>{" "}
+                            <span className="text-text-muted">{t("libraryOrganizeDialog.styleDistance", { distance: analysis.distance_from_group.toFixed(2) })}</span>
+                          </span>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button type="button" onClick={() => selectPhoto(analysis.photo.id)} className="rounded border border-border px-1.5 py-0.5 hover:border-accent">
+                              {t("libraryOrganizeDialog.open")}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                setAligningPhotoId(analysis.photo.id);
+                                try {
+                                  await alignPhotoStyleToShoot(analysis);
+                                } finally {
+                                  setAligningPhotoId(null);
+                                }
+                              }}
+                              disabled={aligningPhotoId === analysis.photo.id}
+                              className="rounded border border-accent bg-accent/10 px-1.5 py-0.5 text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {aligningPhotoId === analysis.photo.id ? t("libraryOrganizeDialog.styleAligning") : t("libraryOrganizeDialog.styleAlign")}
+                            </button>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                </ul>
+              </>
+            )}
           </div>
         )}
 

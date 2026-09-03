@@ -4,13 +4,16 @@ import { immer } from "zustand/middleware/immer";
 import {
   AI_MASK_KIND_LABELS,
   base64ToByteArray,
+  BASIC_SLIDER_SPECS,
   buildEdlEnvelopeJson,
+  clampSliderValue,
   defaultBlurDepthApproxGeometry,
   defaultColorRangeGeometry,
   defaultLinearGradientGeometry,
   defaultLuminanceRangeGeometry,
   defaultRadialGradientGeometry,
   emptyBrushGeometry,
+  HSL_BAND_SLIDER_SPECS,
   MAX_COLOR_MIXER_REGIONS,
   neutralEdlPayload,
   newColorMixerRegion,
@@ -20,8 +23,11 @@ import {
   writeBasicField,
   writeBwMixerField,
 } from "../lib/edl";
-import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
+import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairLayer, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
+import type { FrequencyViewMode } from "../lib/frequencySeparation";
+import { computeHarmonizeShifts } from "../lib/colorHarmony";
+import type { HarmonyType } from "../lib/colorHarmony";
 import {
   applyRulesToSubset,
   buildPresetEdlSubset,
@@ -81,6 +87,8 @@ import type {
   WorkflowTemplatePayload,
   SpotCandidateDto,
   SmartCollectionLeaf,
+  PaletteColorDto,
+  StylePhotoAnalysisDto,
   UiSettingsDto,
   WatchedFolderSettingsDto,
 } from "../lib/tauri";
@@ -544,6 +552,9 @@ interface DevelopSlice {
   setLensCorrectionCustomDistortionK1: (value: number | null) => void;
   lensCalibrationDialogOpen: boolean;
   setLensCalibrationDialogOpen: (open: boolean) => void;
+  /** Öffnet/schließt den Leinwand-Erweiterungs-Dialog (Phase 14 Schritt 1). */
+  canvasExtendDialogOpen: boolean;
+  setCanvasExtendDialogOpen: (open: boolean) => void;
   /** Schaltet die automatische CA-Korrektur um und committet sofort. */
   setLensCorrectionAutoCa: (value: boolean) => void;
   /** Setzt den Perspektive/Upright-Modus absolut und committet sofort. */
@@ -591,8 +602,21 @@ interface DevelopSlice {
   repairDraftRadius: number;
   repairDraftFeather: number;
   repairDraftOpacity: number;
+  /** Welche Frequenz-Ebene der *nächste* Strich betrifft (Phase 14
+   * Schritt 2, siehe `DECISIONS.md` ADR-0041) — dieselbe „nur für neue
+   * Striche"-Konvention wie die übrigen Pinsel-Einstellungen oben. */
+  repairDraftLayer: RepairLayer;
   setRepairDraftMode: (mode: RepairMode) => void;
+  setRepairDraftLayer: (layer: RepairLayer) => void;
   setRepairDraftField: (key: "radius" | "feather" | "opacity", value: number) => void;
+  /** Reiner Anzeige-Modus im Viewer (Phase 14 Schritt 2) — zeigt
+   * Tieffrequenz (Ton/Farbe, unscharf) oder Hochfrequenz (Textur/Poren,
+   * Mittelgrau-verschoben) statt des normalen Bilds, berechnet
+   * clientseitig aus `developFrame.pixels` (siehe `lib/
+   * frequencySeparation.ts`). Verändert `developEdl` nicht — reine
+   * Anzeige-Hilfe wie der Clipping-Overlay. */
+  frequencyViewMode: FrequencyViewMode;
+  setFrequencyViewMode: (mode: FrequencyViewMode) => void;
   /** Der nach dem ersten Klick gesetzte Quellpunkt eines neuen Strichs,
    * bis der Zielpfad fertig gemalt ist (`null` = als Nächstes wird der
    * Quellpunkt gesetzt). */
@@ -615,6 +639,34 @@ interface DevelopSlice {
   /** Läuft während [`runAiInpaintForStroke`] — der Index des gerade
    * berechneten Strichs, sonst `null`. */
   aiInpaintLoadingIndex: number | null;
+  /** Erweitert die Leinwand um die übergebenen Ränder (normierte
+   * Bruchteile, `0.0..=1.0`) und lässt LaMa den neuen Rand füllen (Phase
+   * 14 Schritt 1) — dasselbe „Anwenden"-Muster wie
+   * [`runAiInpaintForStroke`], nur auf `developEdl.geometry.
+   * canvas_extension` statt einem Reparatur-Strich. */
+  runAiOutpaint: (marginLeft: number, marginTop: number, marginRight: number, marginBottom: number) => Promise<void>;
+  /** `true`, während [`runAiOutpaint`] läuft. */
+  aiOutpaintLoading: boolean;
+  /** Entfernt eine gewählte/angewendete Leinwand-Erweiterung wieder
+   * (zurück auf die Original-Bildgröße) und committet sofort. */
+  clearCanvasExtension: () => void;
+
+  // ---- Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3) --------
+  /** Löst `photoId`/`texturePath` per `prepare_composite_layer_source`
+   * auf und hängt eine neue, sichtbare Ebene (Normal-Blend, volle
+   * Deckkraft, `scale: 1.0`, zentriert) an `developEdl.composite_layers`
+   * an — dieselbe „Anwenden löst die eine teure Auflösung aus, danach
+   * nur noch schnelle lokale Regler"-Trennung wie `runAiOutpaint`. */
+  addCompositeLayerFromPhoto: (photoId: string) => Promise<void>;
+  addCompositeLayerFromTexture: (texturePath: string) => Promise<void>;
+  /** `true`, während eine der beiden `addCompositeLayer*`-Aktionen läuft. */
+  compositeLayerLoading: boolean;
+  removeCompositeLayer: (index: number) => void;
+  setCompositeLayerField: (
+    index: number,
+    field: "visible" | "blend_mode" | "opacity" | "scale" | "offset_x" | "offset_y",
+    value: boolean | BlendMode | number,
+  ) => void;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
    * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
    * bei jedem Zwischenwert). */
@@ -1327,6 +1379,82 @@ interface LibraryBacklogSlice {
   perceptualDuplicateGroups: PhotoDto[][];
   perceptualDuplicatesRunning: boolean;
   runPerceptualDuplicateDetection: (maxDistance: number) => Promise<void>;
+
+  /** Automatischer Stil-Konsistenz-Check fürs Shooting (Phase 14
+   * Schritt 5, siehe `DECISIONS.md` ADR-0041 Nachtrag V) — arbeitet auf
+   * dem aktuell geöffneten Ordner (`selectedFolderId`) als "Shooting",
+   * dieselbe „bereits vorhandene Miniaturansicht"-Vereinfachung wie
+   * `perceptualDuplicateGroups`/`peopleGroups`. */
+  styleConsistencyResult: StylePhotoAnalysisDto[] | null;
+  styleConsistencyRunning: boolean;
+  runStyleConsistencyCheck: () => Promise<void>;
+  /** Übernimmt den in `analyzeStyleConsistency`s Antwort vorgeschlagenen
+   * Weißabgleichs-/Belichtungs-Delta für ein einzelnes Foto — additiv auf
+   * dessen *aktuellem* Bearbeitungsstand (nicht absolut gesetzt), auch
+   * wenn das Foto gerade nicht im Entwickeln-Modul geöffnet ist (liest/
+   * schreibt direkt über `currentDevelopEdit`/`applyDevelopEdit`, exakt
+   * wie `syncSettingsToSelection`). */
+  alignPhotoStyleToShoot: (analysis: StylePhotoAnalysisDto) => Promise<void>;
+
+  /** Farb-Harmonie-Rad (Phase 14 Schritt 7, siehe `DECISIONS.md`
+   * ADR-0041 Nachtrag VII) — Palette des aktuell im Entwickeln-Modul
+   * geöffneten Fotos (`developPhotoId`), dieselbe „bereits vorhandene
+   * Miniaturansicht"-Vereinfachung wie `styleConsistencyResult`. */
+  colorPalette: PaletteColorDto[] | null;
+  colorPaletteLoading: boolean;
+  extractColorPaletteForCurrentPhoto: () => Promise<void>;
+  /** Verschiebt die Farbton-Regler der acht festen HSL-Bänder (siehe
+   * `lib/colorHarmony.ts`s `computeHarmonizeShifts`) additiv auf ihrem
+   * *aktuellen* Wert, damit die extrahierte Palette auf die gewählte
+   * Harmonie relativ zu `baseHueDegrees` einrastet — ein einziger
+   * Commit für alle betroffenen Bänder zusammen, kein Commit je Band. */
+  harmonizeToTarget: (harmony: HarmonyType, baseHueDegrees: number) => void;
+
+  /** KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8,
+   * siehe `DECISIONS.md` ADR-0041 Nachtrag VIII) — MiDaS v2.1 small,
+   * derselbe Opt-in-Download wie `downloadInpaintingModel`. */
+  downloadDepthModel: () => Promise<void>;
+  depthModelDownloading: boolean;
+  clearDepthModelPath: () => Promise<void>;
+  /** `true`, während auf einen Bildklick für den Fokuspunkt gewartet
+   * wird — analog zu `aiMaskClickPickerActive`. */
+  virtualApertureFocusPickerActive: boolean;
+  toggleVirtualApertureFocusPicker: () => void;
+  /** Setzt den normierten Fokuspunkt (`0.0..=1.0`), schließt den Picker
+   * und committet sofort. */
+  setVirtualApertureFocusPoint: (x: number, y: number) => void;
+  setVirtualApertureAmount: (value: number) => void;
+  depthEstimating: boolean;
+  /** Ruft `apx_ai::depth::DepthSession` für das aktuell im
+   * Entwickeln-Modul geöffnete Foto ab und legt das Ergebnis in
+   * `developEdl.virtual_aperture.depth_map` ab — braucht ein zuvor
+   * heruntergeladenes Modell (siehe `downloadDepthModel`), scheitert
+   * sonst mit einer klaren Fehlermeldung (`catalogError`). */
+  estimateDepthForCurrentPhoto: () => Promise<void>;
+
+  /** KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9, siehe
+   * `DECISIONS.md` ADR-0041 Nachtrag IX) — fünf feste Stile
+   * (`STYLE_TRANSFER_STYLES`), jeder einzeln per Stil-ID herunterladbar. */
+  downloadStyleTransferModel: (style: string) => Promise<void>;
+  /** Die Stil-ID, deren Modell gerade heruntergeladen wird — `null`,
+   * wenn keine läuft (nur ein Download gleichzeitig, wie bei allen
+   * anderen Opt-in-Downloads dieses Projekts). */
+  styleTransferModelDownloading: string | null;
+  clearStyleTransferModelPath: (style: string) => Promise<void>;
+  setStyleTransferAmount: (value: number) => void;
+  styleTransferStylizing: boolean;
+  /** Ruft `apx_ai::style_transfer::StyleTransferSession` für das aktuell
+   * im Entwickeln-Modul geöffnete Foto mit `style` ab und legt das
+   * Ergebnis in `developEdl.style_transfer.patch` ab — braucht ein zuvor
+   * für diesen Stil heruntergeladenes Modell (siehe
+   * `downloadStyleTransferModel`), scheitert sonst mit einer klaren
+   * Fehlermeldung (`catalogError`). */
+  stylizePhotoWithStyle: (style: string) => Promise<void>;
+
+  /** Himmelsaustausch (Phase 14 Schritt 10). */
+  skyReplacing: boolean;
+  replaceSkyForCurrentPhoto: (skyImagePath: string) => Promise<void>;
+  clearSkyReplace: () => void;
 
   /** Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
    * `DECISIONS.md` ADR-0038): eine Regel = `libraryFilter` (wiederverwendet,
@@ -2377,6 +2505,13 @@ export const useAppStore = create<AppStore>()(
       });
     },
 
+    canvasExtendDialogOpen: false,
+    setCanvasExtendDialogOpen: (open) => {
+      set((state) => {
+        state.canvasExtendDialogOpen = open;
+      });
+    },
+
     setLensCorrectionAutoCa: (value) => {
       set((state) => {
         state.developEdl.lens_corrections.auto_ca = value;
@@ -2494,10 +2629,24 @@ export const useAppStore = create<AppStore>()(
     repairDraftRadius: 0.05,
     repairDraftFeather: 0.02,
     repairDraftOpacity: 1,
+    repairDraftLayer: "Normal",
 
     setRepairDraftMode: (mode) => {
       set((state) => {
         state.repairDraftMode = mode;
+      });
+    },
+
+    setRepairDraftLayer: (layer) => {
+      set((state) => {
+        state.repairDraftLayer = layer;
+      });
+    },
+
+    frequencyViewMode: "Normal",
+    setFrequencyViewMode: (mode) => {
+      set((state) => {
+        state.frequencyViewMode = mode;
       });
     },
 
@@ -2524,7 +2673,7 @@ export const useAppStore = create<AppStore>()(
     },
 
     addRepairStroke: (targetPath) => {
-      const { repairPendingSource, repairDraftMode, repairDraftRadius, repairDraftFeather, repairDraftOpacity } = get();
+      const { repairPendingSource, repairDraftMode, repairDraftRadius, repairDraftFeather, repairDraftOpacity, repairDraftLayer } = get();
       // Inhaltsbasiertes Füllen (Phase 7) und KI-Ausfüllen (Phase 13
       // Schritt 1) suchen ihren Füllinhalt selbst (aus der Bildumgebung
       // bzw. per Inferenz) — anders als Klonen/Reparieren brauchen sie
@@ -2543,6 +2692,7 @@ export const useAppStore = create<AppStore>()(
           radius: repairDraftRadius,
           feather: repairDraftFeather,
           opacity: repairDraftOpacity,
+          layer: repairDraftLayer,
         });
         state.repairPendingSource = null;
       });
@@ -2602,6 +2752,162 @@ export const useAppStore = create<AppStore>()(
         set((state) => {
           state.aiInpaintLoadingIndex = null;
         });
+      }
+    },
+
+    aiOutpaintLoading: false,
+
+    runAiOutpaint: async (marginLeft, marginTop, marginRight, marginBottom) => {
+      const { selectedPhotoId } = get();
+      if (!selectedPhotoId) return;
+      if (marginLeft <= 0 && marginTop <= 0 && marginRight <= 0 && marginBottom <= 0) return;
+
+      set((state) => {
+        state.aiOutpaintLoading = true;
+      });
+      try {
+        const dto = await api.runAiOutpaint(selectedPhotoId, marginLeft, marginTop, marginRight, marginBottom);
+        set((state) => {
+          state.developEdl.geometry.canvas_extension = {
+            margin_left: dto.margin_left,
+            margin_top: dto.margin_top,
+            margin_right: dto.margin_right,
+            margin_bottom: dto.margin_bottom,
+            patch: {
+              bitmap_width: dto.bitmap_width,
+              bitmap_height: dto.bitmap_height,
+              pixels: base64ToByteArray(dto.pixels_base64),
+            },
+          };
+        });
+        void get().commitDevelopEdit("Leinwand erweitert");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.aiOutpaintLoading = false;
+        });
+      }
+    },
+
+    clearCanvasExtension: () => {
+      set((state) => {
+        state.developEdl.geometry.canvas_extension = null;
+      });
+      void get().commitDevelopEdit("Leinwand-Erweiterung entfernt");
+    },
+
+    compositeLayerLoading: false,
+
+    addCompositeLayerFromPhoto: async (photoId) => {
+      set((state) => {
+        state.compositeLayerLoading = true;
+      });
+      try {
+        const dto = await api.prepareCompositeLayerSource(photoId, null);
+        set((state) => {
+          state.developEdl.composite_layers.push({
+            visible: true,
+            blend_mode: "Normal",
+            opacity: 1,
+            scale: 1,
+            offset_x: 0.5,
+            offset_y: 0.5,
+            source: {
+              bitmap_width: dto.bitmap_width,
+              bitmap_height: dto.bitmap_height,
+              pixels: base64ToByteArray(dto.pixels_base64),
+            },
+          });
+        });
+        void get().commitDevelopEdit("Compositing-Ebene hinzugefügt");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.compositeLayerLoading = false;
+        });
+      }
+    },
+
+    addCompositeLayerFromTexture: async (texturePath) => {
+      set((state) => {
+        state.compositeLayerLoading = true;
+      });
+      try {
+        const dto = await api.prepareCompositeLayerSource(null, texturePath);
+        set((state) => {
+          state.developEdl.composite_layers.push({
+            visible: true,
+            blend_mode: "Normal",
+            opacity: 1,
+            scale: 1,
+            offset_x: 0.5,
+            offset_y: 0.5,
+            source: {
+              bitmap_width: dto.bitmap_width,
+              bitmap_height: dto.bitmap_height,
+              pixels: base64ToByteArray(dto.pixels_base64),
+            },
+          });
+        });
+        void get().commitDevelopEdit("Compositing-Ebene hinzugefügt");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.compositeLayerLoading = false;
+        });
+      }
+    },
+
+    removeCompositeLayer: (index) => {
+      set((state) => {
+        state.developEdl.composite_layers.splice(index, 1);
+      });
+      void get().commitDevelopEdit("Compositing-Ebene entfernt");
+    },
+
+    setCompositeLayerField: (index, field, value) => {
+      set((state) => {
+        const layer = state.developEdl.composite_layers[index];
+        if (!layer) return;
+        switch (field) {
+          case "visible":
+            layer.visible = value as boolean;
+            break;
+          case "blend_mode":
+            layer.blend_mode = value as BlendMode;
+            break;
+          case "opacity":
+            layer.opacity = value as number;
+            break;
+          case "scale":
+            layer.scale = value as number;
+            break;
+          case "offset_x":
+            layer.offset_x = value as number;
+            break;
+          case "offset_y":
+            layer.offset_y = value as number;
+            break;
+        }
+      });
+      // `visible`/`blend_mode` sind abgeschlossene Einzelklicks (wie
+      // `setMaskVisible`/`setMaskBlendMode`) und committen sofort;
+      // `opacity`/`scale`/`offset_x`/`offset_y` sind Regler-Zwischenwerte
+      // beim Ziehen (wie `setMaskOpacity`/`setBasicField`) — dort löst
+      // erst `DevelopSlider`s `onCommit` beim Loslassen den eigentlichen
+      // Commit aus, sonst würde jeder Zwischenwert einen eigenen
+      // Verlaufs-Schritt erzeugen.
+      if (field === "visible" || field === "blend_mode") {
+        void get().commitDevelopEdit();
       }
     },
 
@@ -4022,6 +4328,7 @@ export const useAppStore = create<AppStore>()(
           radius: spot.radius,
           feather: Math.min(spot.radius * 0.3, 0.05),
           opacity: 1,
+          layer: "Normal",
         });
         state.sensorSpotCandidates = state.sensorSpotCandidates.filter((candidate) => candidate !== spot);
       });
@@ -4703,6 +5010,10 @@ export const useAppStore = create<AppStore>()(
     colorLabelDefinitions: [],
     perceptualDuplicateGroups: [],
     perceptualDuplicatesRunning: false,
+    styleConsistencyResult: null,
+    styleConsistencyRunning: false,
+    colorPalette: null,
+    colorPaletteLoading: false,
 
     refreshCollectionFolders: async () => {
       const folders = await api.listCollectionFolders();
@@ -4820,6 +5131,279 @@ export const useAppStore = create<AppStore>()(
           state.perceptualDuplicatesRunning = false;
         });
       }
+    },
+
+    runStyleConsistencyCheck: async () => {
+      const { selectedFolderId } = get();
+      if (!selectedFolderId) return;
+      set((state) => {
+        state.styleConsistencyRunning = true;
+      });
+      try {
+        const result = await api.analyzeStyleConsistency(selectedFolderId);
+        set((state) => {
+          state.styleConsistencyResult = result;
+        });
+      } finally {
+        set((state) => {
+          state.styleConsistencyRunning = false;
+        });
+      }
+    },
+
+    alignPhotoStyleToShoot: async (analysis) => {
+      const photoId = analysis.photo.id;
+      const tempSpec = BASIC_SLIDER_SPECS.find((spec) => spec.key === "temp_shift_kelvin")!;
+      const tintSpec = BASIC_SLIDER_SPECS.find((spec) => spec.key === "tint_shift")!;
+      const exposureSpec = BASIC_SLIDER_SPECS.find((spec) => spec.key === "exposure_ev")!;
+      try {
+        const position = await api.currentDevelopEdit(photoId);
+        const base = edlFromHistoryPosition(position);
+        // `edlFromHistoryPosition` gibt bei "Neutral" die geteilten, von
+        // Immer eingefrorenen `NEUTRAL_*`-Konstanten aus `lib/edl.ts` per
+        // Referenz zurück (siehe `neutralEdlPayload`) — ein direktes
+        // Zuweisen auf ein Feld davon wirft zur Laufzeit
+        // "Cannot assign to read only property". Deshalb hier frische
+        // `basic`-/`white_balance`-Objekte statt In-Place-Mutation.
+        const payload: EdlPayload = {
+          ...base,
+          basic: {
+            ...base.basic,
+            white_balance: {
+              ...base.basic.white_balance,
+              temp_shift_kelvin: clampSliderValue(base.basic.white_balance.temp_shift_kelvin + analysis.suggested_temp_shift_kelvin_delta, tempSpec),
+              tint_shift: clampSliderValue(base.basic.white_balance.tint_shift + analysis.suggested_tint_shift_delta, tintSpec),
+            },
+            exposure_ev: clampSliderValue(base.basic.exposure_ev + analysis.suggested_exposure_ev_delta, exposureSpec),
+          },
+        };
+        await api.applyDevelopEdit(photoId, buildEdlEnvelopeJson(payload), "Stil an Shooting-Durchschnitt angeglichen");
+        if (get().developPhotoId === photoId) {
+          set((state) => {
+            state.developEdl = payload;
+          });
+        }
+      } catch (err) {
+        console.error(`Stil-Angleichung für Foto ${photoId} fehlgeschlagen:`, err);
+      }
+    },
+
+    extractColorPaletteForCurrentPhoto: async () => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.colorPaletteLoading = true;
+      });
+      try {
+        const palette = await api.extractColorPalette(developPhotoId);
+        set((state) => {
+          state.colorPalette = palette;
+        });
+      } finally {
+        set((state) => {
+          state.colorPaletteLoading = false;
+        });
+      }
+    },
+
+    harmonizeToTarget: (harmony, baseHueDegrees) => {
+      const { colorPalette, developEdl } = get();
+      if (!colorPalette || colorPalette.length === 0) return;
+      const shifts = computeHarmonizeShifts(colorPalette, baseHueDegrees, harmony);
+      if (shifts.length === 0) return;
+      const hueSpec = HSL_BAND_SLIDER_SPECS.find((spec) => spec.key === "hue")!;
+      set((state) => {
+        for (const shift of shifts) {
+          const current = developEdl.hsl[shift.band].hue;
+          state.developEdl.hsl[shift.band].hue = clampSliderValue(current + shift.hueRegler, hueSpec);
+        }
+      });
+      void get().commitDevelopEdit("Farb-Harmonie angewendet");
+    },
+
+    depthModelDownloading: false,
+
+    downloadDepthModel: async () => {
+      set((state) => {
+        state.depthModelDownloading = true;
+      });
+      try {
+        await api.downloadDepthModel();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.depthModelDownloading = false;
+        });
+      }
+    },
+
+    clearDepthModelPath: async () => {
+      try {
+        await api.clearDepthModelPath();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    virtualApertureFocusPickerActive: false,
+
+    toggleVirtualApertureFocusPicker: () => {
+      set((state) => {
+        state.virtualApertureFocusPickerActive = !state.virtualApertureFocusPickerActive;
+      });
+    },
+
+    setVirtualApertureFocusPoint: (x, y) => {
+      set((state) => {
+        state.developEdl.virtual_aperture.focus_x = x;
+        state.developEdl.virtual_aperture.focus_y = y;
+        state.virtualApertureFocusPickerActive = false;
+      });
+      void get().commitDevelopEdit("Fokuspunkt gesetzt");
+    },
+
+    setVirtualApertureAmount: (value) => {
+      set((state) => {
+        state.developEdl.virtual_aperture.amount = value;
+      });
+    },
+
+    depthEstimating: false,
+
+    estimateDepthForCurrentPhoto: async () => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.depthEstimating = true;
+      });
+      try {
+        const dto = await api.estimatePhotoDepth(developPhotoId);
+        set((state) => {
+          state.developEdl.virtual_aperture.depth_map = {
+            bitmap_width: dto.bitmap_width,
+            bitmap_height: dto.bitmap_height,
+            depth: dto.depth_base64,
+          };
+        });
+        void get().commitDevelopEdit("Tiefenkarte berechnet");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.depthEstimating = false;
+        });
+      }
+    },
+
+    styleTransferModelDownloading: null,
+
+    downloadStyleTransferModel: async (style) => {
+      set((state) => {
+        state.styleTransferModelDownloading = style;
+      });
+      try {
+        await api.downloadStyleTransferModel(style);
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.styleTransferModelDownloading = null;
+        });
+      }
+    },
+
+    clearStyleTransferModelPath: async (style) => {
+      try {
+        await api.clearStyleTransferModelPath(style);
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    setStyleTransferAmount: (value) => {
+      set((state) => {
+        state.developEdl.style_transfer.amount = value;
+      });
+    },
+
+    styleTransferStylizing: false,
+
+    stylizePhotoWithStyle: async (style) => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.styleTransferStylizing = true;
+      });
+      try {
+        const dto = await api.stylizePhoto(developPhotoId, style);
+        set((state) => {
+          state.developEdl.style_transfer.patch = {
+            bitmap_width: dto.bitmap_width,
+            bitmap_height: dto.bitmap_height,
+            pixels: dto.pixels_base64,
+          };
+        });
+        void get().commitDevelopEdit("Stiltransfer angewendet");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.styleTransferStylizing = false;
+        });
+      }
+    },
+
+    skyReplacing: false,
+
+    replaceSkyForCurrentPhoto: async (skyImagePath) => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.skyReplacing = true;
+      });
+      try {
+        const dto = await api.replaceSky(developPhotoId, skyImagePath);
+        set((state) => {
+          state.developEdl.sky_replace = {
+            bitmap_width: dto.bitmap_width,
+            bitmap_height: dto.bitmap_height,
+            pixels: dto.pixels_base64,
+          };
+        });
+        void get().commitDevelopEdit("Himmel ersetzt");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.skyReplacing = false;
+        });
+      }
+    },
+
+    clearSkyReplace: () => {
+      set((state) => {
+        state.developEdl.sky_replace = null;
+      });
+      void get().commitDevelopEdit("Himmelsaustausch entfernt");
     },
 
     batchPreview: [],

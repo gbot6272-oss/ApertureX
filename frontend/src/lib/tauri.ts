@@ -646,6 +646,50 @@ export function listPeopleGroups(): Promise<PhotoDto[][]> {
   return invoke<PhotoDto[][]>("list_people_groups");
 }
 
+// ---- Stil-Konsistenz-Check fürs Shooting (Phase 14 Schritt 5, siehe
+// DECISIONS.md ADR-0041 Nachtrag V) ------------------------------------
+
+export interface StylePhotoAnalysisDto {
+  photo: PhotoDto;
+  mean_l: number;
+  mean_a: number;
+  mean_b: number;
+  distance_from_group: number;
+  is_outlier: boolean;
+  suggested_exposure_ev_delta: number;
+  suggested_temp_shift_kelvin_delta: number;
+  suggested_tint_shift_delta: number;
+}
+
+/** Siehe `apx-app`s `analyze_style_consistency`-Command-Moduldoku:
+ * arbeitet wie `listPerceptualDuplicateGroups`/`listPeopleGroups` auf dem
+ * bereits vorhandenen Thumbnail-Vorschau-Cache eines einzelnen Ordners
+ * (des "Shootings"), keine erneute RAW-Dekodierung. */
+export function analyzeStyleConsistency(folderId: string): Promise<StylePhotoAnalysisDto[]> {
+  return invoke<StylePhotoAnalysisDto[]>("analyze_style_consistency", { folderId });
+}
+
+// ---- Farb-Harmonie-Rad (Phase 14 Schritt 7, siehe DECISIONS.md
+// ADR-0041 Nachtrag VII) ------------------------------------------------
+
+export interface PaletteColorDto {
+  r: number;
+  g: number;
+  b: number;
+  hue_degrees: number;
+  chroma: number;
+  lightness: number;
+  percentage: number;
+}
+
+/** Siehe `apx-app`s `extract_color_palette`-Command-Moduldoku: arbeitet
+ * wie `analyzeStyleConsistency`/`listPerceptualDuplicateGroups` auf dem
+ * bereits vorhandenen Thumbnail-Vorschau-Cache, keine erneute RAW-
+ * Dekodierung. */
+export function extractColorPalette(photoId: string, k?: number): Promise<PaletteColorDto[]> {
+  return invoke<PaletteColorDto[]>("extract_color_palette", { photoId, k });
+}
+
 // ---- Presets (ab Phase 5, siehe DECISIONS.md ADR-0031) --------------------
 
 export function createPresetFolder(name: string, parentId: string | null): Promise<string> {
@@ -851,6 +895,14 @@ export interface AiSettingsDto {
    * wurde — `PeopleView.tsx` zeigt dann einen Hinweis statt der Download-/
    * Erkennungs-Aktionen. */
   people_feature_compiled: boolean;
+  /** `null`, solange der Nutzer den Download nicht bestätigt hat (Phase 14
+   * Schritt 8, siehe `DECISIONS.md` ADR-0041 Nachtrag VIII). */
+  depth_model_path: string | null;
+  /** Je Stil (`STYLE_TRANSFER_STYLES`-ID als Schlüssel, `lib/edl.ts`) der
+   * lokale Pfad, sobald heruntergeladen (Phase 14 Schritt 9, siehe
+   * `DECISIONS.md` ADR-0041 Nachtrag IX) — ein fehlender Schlüssel heißt
+   * „dieser Stil noch nicht heruntergeladen". */
+  style_transfer_model_paths: Record<string, string>;
 }
 
 export function getAiSettings(): Promise<AiSettingsDto> {
@@ -875,6 +927,83 @@ export function downloadInpaintingModel(): Promise<string> {
  * selbst nicht (der Nutzer kann sie manuell entfernen). */
 export function clearInpaintingModelPath(): Promise<void> {
   return invoke<void>("clear_inpainting_model_path");
+}
+
+// ---- KI: Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8,
+// siehe DECISIONS.md ADR-0041 Nachtrag VIII) --------------------------------
+
+/** Lädt das ~66-MB-Modell herunter (MIT, `isl-org/MiDaS` v2.1 small,
+ * SHA-256-geprüft) — löst erst nach ausdrücklicher Nutzerbestätigung
+ * (Einstellungsdialog-Button). Liefert den lokalen Zielpfad zurück. */
+export function downloadDepthModel(): Promise<string> {
+  return invoke<string>("download_depth_model");
+}
+
+/** Entfernt nur den hinterlegten Pfad — löscht die heruntergeladene Datei
+ * selbst nicht (der Nutzer kann sie manuell entfernen). */
+export function clearDepthModelPath(): Promise<void> {
+  return invoke<void>("clear_depth_model_path");
+}
+
+export interface DepthMapDto {
+  bitmap_width: number;
+  bitmap_height: number;
+  /** Base64-kodiertes Graustufen-`u8`-Ergebnis, näher = heller. */
+  depth_base64: string;
+}
+
+/** Führt echte monokulare Tiefenschätzung (MiDaS v2.1 small) für ein Foto
+ * aus — braucht ein zuvor heruntergeladenes Modell (siehe
+ * [`downloadDepthModel`]), scheitert sonst mit einer klaren
+ * Fehlermeldung. Das Ergebnis wird unverändert in
+ * `EdlPayload.virtual_aperture.depth_map` abgelegt. */
+export function estimatePhotoDepth(photoId: string): Promise<DepthMapDto> {
+  return invoke<DepthMapDto>("estimate_photo_depth", { photoId });
+}
+
+// ---- KI: Stiltransfer zwischen Fotos (Phase 14 Schritt 9, siehe
+// DECISIONS.md ADR-0041 Nachtrag IX) -----------------------------------------
+
+/** Lädt das ~6,7-MB-ONNX-Modell für genau einen Stil herunter (MIT,
+ * `onnx/models` `fast_neural_style`, SHA-256-geprüft) — `style` ist eine
+ * der `STYLE_TRANSFER_STYLES`-IDs (`lib/edl.ts`). Löst erst nach
+ * ausdrücklicher Nutzerbestätigung. Liefert den lokalen Zielpfad zurück. */
+export function downloadStyleTransferModel(style: string): Promise<string> {
+  return invoke<string>("download_style_transfer_model", { style });
+}
+
+/** Entfernt nur den hinterlegten Pfad für `style` — löscht die
+ * heruntergeladene Datei selbst nicht. */
+export function clearStyleTransferModelPath(style: string): Promise<void> {
+  return invoke<void>("clear_style_transfer_model_path", { style });
+}
+
+export interface StyleTransferPatchDto {
+  bitmap_width: number;
+  bitmap_height: number;
+  /** Base64-kodiertes interleaved-RGB-`u8`-Ergebnis. */
+  pixels_base64: string;
+}
+
+/** Führt echten Stiltransfer für `photoId` mit dem gewählten `style` aus
+ * — braucht ein zuvor heruntergeladenes Modell für diesen Stil (siehe
+ * [`downloadStyleTransferModel`]), scheitert sonst mit einer klaren
+ * Fehlermeldung. Das Ergebnis wird unverändert in
+ * `EdlPayload.style_transfer.patch` abgelegt. */
+export function stylizePhoto(photoId: string, style: string): Promise<StyleTransferPatchDto> {
+  return invoke<StyleTransferPatchDto>("stylize_photo", { photoId, style });
+}
+
+// ---- Himmelsaustausch (Phase 14 Schritt 10) --------------------------------
+
+export interface SkyReplacePatchDto {
+  bitmap_width: number;
+  bitmap_height: number;
+  pixels_base64: string;
+}
+
+export function replaceSky(photoId: string, skyImagePath: string): Promise<SkyReplacePatchDto> {
+  return invoke<SkyReplacePatchDto>("replace_sky", { photoId, skyImagePath });
 }
 
 // ---- KI: Echte Personen-Wiedererkennung (Phase 13 Schritt 8) ---------------
@@ -970,6 +1099,57 @@ export function runAiInpaint(
   height: number,
 ): Promise<AiFillPatchDto> {
   return invoke<AiFillPatchDto>("run_ai_inpaint", { photoId, x, y, width, height });
+}
+
+// ---- KI: Leinwand-Erweiterung / Outpainting (Phase 14 Schritt 1) ----------
+
+export interface CanvasExtensionPatchDto {
+  margin_left: number;
+  margin_top: number;
+  margin_right: number;
+  margin_bottom: number;
+  bitmap_width: number;
+  bitmap_height: number;
+  /** Base64-kodiertes interleaved-RGB-`u8`-Ergebnis der gesamten
+   * erweiterten Leinwand (Original + KI-erzeugter Rand). */
+  pixels_base64: string;
+}
+
+/** Erweitert die Leinwand um `marginLeft`/`marginTop`/`marginRight`/
+ * `marginBottom` (normierte Bruchteile der aktuellen Bildbreite/-höhe,
+ * `0.0..=1.0`) und füllt den neuen Rand per LaMa-Inferenz — dasselbe
+ * heruntergeladene Modell wie [`runAiInpaint`], braucht also denselben
+ * vorherigen Download. */
+export function runAiOutpaint(
+  photoId: string,
+  marginLeft: number,
+  marginTop: number,
+  marginRight: number,
+  marginBottom: number,
+): Promise<CanvasExtensionPatchDto> {
+  return invoke<CanvasExtensionPatchDto>("run_ai_outpaint", {
+    photoId,
+    marginLeft,
+    marginTop,
+    marginRight,
+    marginBottom,
+  });
+}
+
+// ---- Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3) ------------
+
+export interface CompositeLayerSourceDto {
+  bitmap_width: number;
+  bitmap_height: number;
+  /** Base64-kodiertes interleaved-RGB-`u8`-Ergebnis. */
+  pixels_base64: string;
+}
+
+/** Löst genau eine der beiden Quellen zu einer fertigen RGB-Bitmap auf
+ * (`photoId` **oder** `texturePath`, nie beide/keines) — für
+ * `CompositeLayer::source`. */
+export function prepareCompositeLayerSource(photoId: string | null, texturePath: string | null): Promise<CompositeLayerSourceDto> {
+  return invoke<CompositeLayerSourceDto>("prepare_composite_layer_source", { photoId, texturePath });
 }
 
 // ---- UI-Einstellungen (Phase 10 Schritt 1) --------------------------------

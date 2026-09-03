@@ -96,7 +96,11 @@ fn apply_one(
 /// Ergebnis wird danach in `apply_one` alpha-gewichtet mit `base`
 /// zurückgemischt (Normal-Modus liefert also `adjusted` unverändert,
 /// als hätte gar kein Mischmodus stattgefunden).
-fn blend_pixel(base: [f32; 3], adjusted: [f32; 3], mode: BlendMode) -> [f32; 3] {
+/// `pub(crate)` statt privat — Phase 14 Schritt 3s
+/// `stages::composite` nutzt dieselbe Blend-Formel für ganze
+/// Compositing-Ebenen statt nur für lokale Masken-Anpassungen (siehe
+/// dessen Moduldoku).
+pub(crate) fn blend_pixel(base: [f32; 3], adjusted: [f32; 3], mode: BlendMode) -> [f32; 3] {
     match mode {
         BlendMode::Normal => adjusted,
         BlendMode::Multiply => std::array::from_fn(|i| base[i] * adjusted[i]),
@@ -105,6 +109,10 @@ fn blend_pixel(base: [f32; 3], adjusted: [f32; 3], mode: BlendMode) -> [f32; 3] 
         BlendMode::Color => set_luminosity(adjusted, luminosity(base)),
         // „Luminanz": Luminanz von `adjusted`, Farbton/Sättigung von `base`.
         BlendMode::Luminosity => set_luminosity(base, luminosity(adjusted)),
+        // "Screen": Umkehrformel zu `Multiply` (`1 - (1-a)(1-b)`) — hellt
+        // immer auf, läuft nie unter `base`, geht aber auch bei hoher
+        // Deckkraft nie über Weiß hinaus (siehe Phase 14 Schritt 3/4).
+        BlendMode::Screen => std::array::from_fn(|i| 1.0 - (1.0 - base[i]) * (1.0 - adjusted[i])),
     }
 }
 

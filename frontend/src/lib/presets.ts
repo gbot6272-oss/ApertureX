@@ -15,9 +15,39 @@ import type { RuleNode } from "./ruleTree";
 // `repair`/`masks`/`mask_groups` — den Presets-Workflow (Kopieren/
 // Einfügen/Synchronisieren/gespeicherte Presets) um eine zehnte Sektion
 // zu erweitern ist eine spätere, eigene Ausbaustufe.
+//
+// `composite_layers` (Phase 14 Schritt 3) ist dagegen bewusst
+// EINGESCHLOSSEN, obwohl es wie `repair`/`masks` eine Vec-Sektion ist:
+// anders als ein Reparatur-Strich oder eine Maske (an eine konkrete
+// Bildposition gebunden) trägt jede Ebene bereits ihre eigene fertige
+// Bitmap (`CompositeLayerSource`) — eine feste Ebenen-„Rezeptur" (z. B.
+// eine Lichtleck-Textur bei 30 % Screen) ist ein portabler „Look", der
+// sich per Kopieren/Einfügen/Synchronisieren genau wie jede andere
+// Reglergruppe auf viele Fotos übertragen lässt (siehe `PLAN.md` Phase 14
+// Schritt 3, „Batch-Fähigkeit").
+//
+// `virtual_aperture` (Phase 14 Schritt 8) ist dagegen wie `repair`/`masks`
+// AUSGESCHLOSSEN: `depth_map` ist eine für genau ein Foto berechnete
+// Tiefenkarte (MiDaS-Inferenz über dessen konkreten Bildinhalt) — auf ein
+// anderes Foto übertragen wäre sie schlicht falsch, genau wie ein
+// Pinselstrich an einer bestimmten Bildposition.
+//
+// `style_transfer` (Phase 14 Schritt 9) ist aus demselben Grund
+// AUSGESCHLOSSEN: `patch` ist ein für genau ein Foto berechnetes
+// stilisiertes Ergebnis (Stiltransfer-Inferenz über dessen konkreten
+// Bildinhalt) — auf ein anderes Foto übertragen wäre es exakt so falsch
+// wie `virtual_aperture.depth_map`.
 export type PresetSectionKey = Exclude<
   keyof EdlPayload,
-  "repair" | "masks" | "mask_groups" | "treatment" | "bw_mixer" | "stage_enabled"
+  | "repair"
+  | "masks"
+  | "mask_groups"
+  | "treatment"
+  | "bw_mixer"
+  | "stage_enabled"
+  | "virtual_aperture"
+  | "style_transfer"
+  | "sky_replace"
 >;
 
 export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [
@@ -31,6 +61,7 @@ export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [
   "effects",
   "calibration",
   "geometry",
+  "composite_layers",
 ];
 
 export const PRESET_SECTION_LABELS: Record<PresetSectionKey, string> = {
@@ -44,6 +75,7 @@ export const PRESET_SECTION_LABELS: Record<PresetSectionKey, string> = {
   effects: "Effekte",
   calibration: "Kalibrierung",
   geometry: "Geometrie",
+  composite_layers: "Compositing-Ebenen",
 };
 
 /** Die eigentliche gespeicherte EDL-Teilmenge — für `apx-catalog`/

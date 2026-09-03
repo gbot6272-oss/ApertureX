@@ -4,6 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 import {
   ASPECT_RATIO_PRESETS,
   BASIC_SLIDER_SPECS,
+  BLEND_MODE_OPTIONS,
   BW_MIXER_BAND_TABS,
   BW_MIXER_SLIDER_SPEC,
   CALIBRATION_PRIMARY_ROWS,
@@ -14,6 +15,7 @@ import {
   CURVE_CHANNEL_TABS,
   GRAIN_SLIDER_SPECS,
   GRID_OVERLAY_OPTIONS,
+  HALATION_SLIDER_SPECS,
   HSL_BAND_SLIDER_SPECS,
   HSL_BAND_TABS,
   LENS_CA_SLIDER_SPECS,
@@ -29,6 +31,7 @@ import {
   UPRIGHT_MODE_OPTIONS,
   WHITE_BALANCE_PRESETS,
   type BlackAndWhiteMixerAdjustment,
+  type BlendMode,
   type ColorMixerRegion,
   type CurvesAdjustment,
   type DetailsSliderKey,
@@ -38,6 +41,7 @@ import {
   type HslAdjustment,
   type LensCorrectionAdjustment,
   type ManualTransform,
+  type RepairLayer,
   type RepairMode,
   type SliderSpec,
   type StageEnabled,
@@ -47,12 +51,18 @@ import { PRESET_SECTION_KEYS, PRESET_SECTION_LABELS, type PresetSectionKey } fro
 import { SOFT_PROOF_INTENT_LABELS, SOFT_PROOF_PROFILE_LABELS, type SoftProofIntent, type SoftProofProfile } from "../lib/softProof";
 import { pickFilePath } from "../lib/tauri";
 import { selectActivePhotos, useAppStore } from "../store";
+import { ColorHarmonyWheel } from "./ColorHarmonyWheel";
 import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
 import { LensCalibrationDialog } from "./LensCalibrationDialog";
+import { CanvasExtendDialog } from "./CanvasExtendDialog";
+import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import { PaletteFrame } from "./PaletteFrame";
 import { SavePresetDialog } from "./SavePresetDialog";
+import { SkyReplacePanel } from "./SkyReplacePanel";
+import { StyleTransferPanel } from "./StyleTransferPanel";
+import { VirtualAperturePanel } from "./VirtualAperturePanel";
 
 // ---- Reparatur (Klonen/Reparieren) — Phase 4 Schritt 12 --------------------
 //
@@ -65,6 +75,15 @@ import { SavePresetDialog } from "./SavePresetDialog";
 const REPAIR_RADIUS_SPEC: SliderSpec = { key: "radius", label: "Radius (% der Bildbreite)", min: 1, max: 50, fineStep: 0.5, coarseStep: 5, neutral: 5 };
 const REPAIR_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Weiche Kante (% der Bildbreite)", min: 0, max: 25, fineStep: 0.5, coarseStep: 2, neutral: 2 };
 const REPAIR_OPACITY_SPEC: SliderSpec = { key: "opacity", label: "Deckkraft (%)", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 100 };
+
+// ---- Mehrfachbelichtung/Layer-Compositing — Phase 14 Schritt 3, siehe
+// DECISIONS.md ADR-0041 (Lightroom Classic hat "keine klassischen
+// Ebenen-Kompositionsfähigkeiten wie Photoshop") --------------------------
+const COMPOSITE_OPACITY_SPEC: SliderSpec = { key: "opacity", label: "Deckkraft (%)", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 100 };
+const COMPOSITE_SCALE_SPEC: SliderSpec = { key: "scale", label: "Skalierung (%)", min: 10, max: 300, fineStep: 1, coarseStep: 10, neutral: 100 };
+const COMPOSITE_OFFSET_X_SPEC: SliderSpec = { key: "offset_x", label: "Position X (%)", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 };
+const COMPOSITE_OFFSET_Y_SPEC: SliderSpec = { key: "offset_y", label: "Position Y (%)", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 };
+
 // ---- Node-Editor (Phase 9 Schritt 7, siehe DECISIONS.md ADR-0035) ---------
 //
 // Kein `@xyflow/react`-Graph-Canvas: die Rendering-Reihenfolge ist fest
@@ -90,6 +109,10 @@ const STAGE_ANCHOR_IDS: Record<keyof StageEnabled, string> = {
   masks: "stage-masks",
   treatment: "stage-treatment",
   curves: "stage-curves",
+  composite: "stage-composite",
+  virtual_aperture: "stage-virtual_aperture",
+  style_transfer: "stage-style_transfer",
+  sky_replace: "stage-sky_replace",
   geometry: "stage-geometry",
 };
 
@@ -108,6 +131,16 @@ const REPAIR_MODE_OPTIONS: ReadonlyArray<{ value: RepairMode; label: string }> =
   // Quellpunkt, braucht aber zusätzlich einen expliziten „Anwenden"-Klick
   // (`runAiInpaintForStroke`) — der Strich bleibt bis dahin ein No-Op.
   { value: "AiInpaint", label: "KI-Ausfüllen" },
+];
+
+// Frequenztrennung (Phase 14 Schritt 2, ADR-0041): lässt Klonen/
+// Reparieren/Inhaltsbasiert-füllen/KI-Ausfüllen gezielt nur auf Ton/
+// Farbe (Tieffrequenz) oder Textur/Poren/Kanten (Hochfrequenz) statt
+// direkt auf dem vollen Bild wirken.
+const REPAIR_LAYER_OPTIONS: ReadonlyArray<{ value: RepairLayer; label: string }> = [
+  { value: "Normal", label: "Ganzes Bild" },
+  { value: "LowFrequency", label: "Nur Tieffrequenz (Ton/Farbe)" },
+  { value: "HighFrequency", label: "Nur Hochfrequenz (Textur/Poren)" },
 ];
 
 // ---- Preset-Stärke (Phase 5 Schritt 5, siehe SPEC.md §3.5) -----------------
@@ -182,6 +215,13 @@ export function DevelopPanel() {
   }
   const activePhotos = useAppStore(useShallow(selectActivePhotos));
   const otherPhotosForReference = activePhotos.filter((p) => p.id !== selectedPhotoId);
+  const compositeLayers = useAppStore((s) => s.developEdl.composite_layers);
+  const compositeLayerLoading = useAppStore((s) => s.compositeLayerLoading);
+  const addCompositeLayerFromPhoto = useAppStore((s) => s.addCompositeLayerFromPhoto);
+  const addCompositeLayerFromTexture = useAppStore((s) => s.addCompositeLayerFromTexture);
+  const removeCompositeLayer = useAppStore((s) => s.removeCompositeLayer);
+  const setCompositeLayerField = useAppStore((s) => s.setCompositeLayerField);
+  const [compositeSourcePhotoId, setCompositeSourcePhotoId] = useState("");
   const copiedEdlSubset = useAppStore((s) => s.copiedEdlSubset);
   const copyDevelopSettings = useAppStore((s) => s.copyDevelopSettings);
   const pasteDevelopSettings = useAppStore((s) => s.pasteDevelopSettings);
@@ -256,6 +296,7 @@ export function DevelopPanel() {
   const manuallyDetectLensProfile = useAppStore((s) => s.manuallyDetectLensProfile);
   const setLensCorrectionCustomDistortionK1 = useAppStore((s) => s.setLensCorrectionCustomDistortionK1);
   const setLensCalibrationDialogOpen = useAppStore((s) => s.setLensCalibrationDialogOpen);
+  const setCanvasExtendDialogOpen = useAppStore((s) => s.setCanvasExtendDialogOpen);
   const setLensCorrectionAutoCa = useAppStore((s) => s.setLensCorrectionAutoCa);
   const setLensCorrectionUprightMode = useAppStore((s) => s.setLensCorrectionUprightMode);
   const runUprightAutoDetect = useAppStore((s) => s.runUprightAutoDetect);
@@ -275,6 +316,10 @@ export function DevelopPanel() {
   const toggleRepairActive = useAppStore((s) => s.toggleRepairActive);
   const repairDraftMode = useAppStore((s) => s.repairDraftMode);
   const setRepairDraftMode = useAppStore((s) => s.setRepairDraftMode);
+  const repairDraftLayer = useAppStore((s) => s.repairDraftLayer);
+  const setRepairDraftLayer = useAppStore((s) => s.setRepairDraftLayer);
+  const frequencyViewMode = useAppStore((s) => s.frequencyViewMode);
+  const setFrequencyViewMode = useAppStore((s) => s.setFrequencyViewMode);
   const repairDraftRadius = useAppStore((s) => s.repairDraftRadius);
   const repairDraftFeather = useAppStore((s) => s.repairDraftFeather);
   const repairDraftOpacity = useAppStore((s) => s.repairDraftOpacity);
@@ -806,6 +851,11 @@ export function DevelopPanel() {
             </div>
           </fieldset>
 
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Farb-Harmonie-Rad</legend>
+            <ColorHarmonyWheel />
+          </fieldset>
+
           <fieldset id="stage-treatment" className="flex flex-col gap-2">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Behandlung</legend>
             <div className="flex gap-1" role="group" aria-label="Behandlung">
@@ -1249,6 +1299,157 @@ export function DevelopPanel() {
                 />
               ))}
             </div>
+            {/* Echte Halation-/Bloom-Simulation (Phase 14 Schritt 4,
+                ADR-0041): Lightroom Classic "cannot create true film
+                halation, only a soft bloom approximation". */}
+            <div className="flex flex-col gap-2 border-t border-border pt-2">
+              <p className="text-xs text-text-muted">Halation (Lichter-Ausblutung, z. B. Filmlook)</p>
+              {HALATION_SLIDER_SPECS.map((spec) => (
+                <DevelopSlider
+                  key={spec.key}
+                  spec={spec}
+                  value={effects[spec.key as keyof EffectsAdjustment]}
+                  onChange={(value) => setEffectsField(spec.key as keyof EffectsAdjustment, value)}
+                  onCommit={() => void commitDevelopEdit()}
+                />
+              ))}
+            </div>
+          </fieldset>
+
+          <fieldset id="stage-composite" className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Compositing</legend>
+            <p className="text-xs text-text-muted">Mehrfachbelichtung: legt ein weiteres Foto oder eine Textur (z. B. ein Lichtleck) über das aktuelle Bild.</p>
+
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              Foto
+              <select
+                aria-label="Ebenen-Quellfoto"
+                value={compositeSourcePhotoId}
+                onChange={(event) => setCompositeSourcePhotoId(event.target.value)}
+                className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-1.5 py-0.5"
+              >
+                <option value="">Foto wählen…</option>
+                {otherPhotosForReference.map((photo) => (
+                  <option key={photo.id} value={photo.id}>
+                    {photo.filename}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                onClick={() => compositeSourcePhotoId && void addCompositeLayerFromPhoto(compositeSourcePhotoId)}
+                disabled={!compositeSourcePhotoId || compositeLayerLoading}
+                className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                + Ebene aus Foto
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void (async () => {
+                    const path = await pickFilePath("Bild", ["png", "jpg", "jpeg", "webp", "tiff", "bmp"]);
+                    if (path) void addCompositeLayerFromTexture(path);
+                  })();
+                }}
+                disabled={compositeLayerLoading}
+                className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                + Ebene aus Textur…
+              </button>
+            </div>
+            {compositeLayerLoading && <p className="text-xs text-text-muted">Löst Ebenenquelle auf…</p>}
+
+            {compositeLayers.length === 0 && <p className="text-xs text-text-muted">Keine Compositing-Ebenen vorhanden.</p>}
+
+            <ul className="flex flex-col gap-2">
+              {compositeLayers.map((layer, index) => (
+                <li key={index} className="flex flex-col gap-2 rounded border border-border px-2 py-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setCompositeLayerField(index, "visible", !layer.visible)}
+                      aria-label={layer.visible ? `Ebene ${index + 1} ausblenden` : `Ebene ${index + 1} einblenden`}
+                      aria-pressed={layer.visible}
+                      className={`shrink-0 ${layer.visible ? "text-accent" : "text-text-muted"}`}
+                      title="Sichtbarkeit"
+                    >
+                      {layer.visible ? "👁" : "🚫"}
+                    </button>
+                    <span className="min-w-0 flex-1 truncate text-xs text-text-primary">Ebene {index + 1}</span>
+                    <button type="button" onClick={() => removeCompositeLayer(index)} className="shrink-0 text-danger" aria-label={`Ebene ${index + 1} löschen`}>
+                      ×
+                    </button>
+                  </div>
+
+                  <label className="flex items-center gap-2 text-xs text-text-secondary">
+                    Blend-Modus
+                    <select
+                      aria-label={`Blend-Modus Ebene ${index + 1}`}
+                      value={layer.blend_mode}
+                      onChange={(event) => setCompositeLayerField(index, "blend_mode", event.target.value as BlendMode)}
+                      className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-1.5 py-0.5"
+                    >
+                      {BLEND_MODE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <DevelopSlider
+                    spec={COMPOSITE_OPACITY_SPEC}
+                    value={layer.opacity * 100}
+                    onChange={(value) => setCompositeLayerField(index, "opacity", value / 100)}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
+                  <DevelopSlider
+                    spec={COMPOSITE_SCALE_SPEC}
+                    value={layer.scale * 100}
+                    onChange={(value) => setCompositeLayerField(index, "scale", value / 100)}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
+                  <DevelopSlider
+                    spec={COMPOSITE_OFFSET_X_SPEC}
+                    value={layer.offset_x * 100}
+                    onChange={(value) => setCompositeLayerField(index, "offset_x", value / 100)}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
+                  <DevelopSlider
+                    spec={COMPOSITE_OFFSET_Y_SPEC}
+                    value={layer.offset_y * 100}
+                    onChange={(value) => setCompositeLayerField(index, "offset_y", value / 100)}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
+                </li>
+              ))}
+            </ul>
+          </fieldset>
+
+          {/* KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14
+              Schritt 8, ADR-0041 Nachtrag VIII) — läuft nach dem
+              Halation-Kurzschluss, vor `masks` (siehe `develop.rs`s
+              Moduldoku), in der Anzeige aber neben `composite` platziert
+              (dieselbe Vereinfachung wie bei allen übrigen Knoten:
+              Anzeigereihenfolge = `STAGE_NODE_SPECS`). */}
+          <fieldset id="stage-virtual_aperture" className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Virtuelle Blende</legend>
+            <VirtualAperturePanel />
+          </fieldset>
+
+          {/* KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9,
+              ADR-0041 Nachtrag IX) — läuft nach `composite`, vor
+              `geometry` (siehe `stages::style_transfer`s Moduldoku). */}
+          <fieldset id="stage-style_transfer" className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Stiltransfer</legend>
+            <StyleTransferPanel />
+          </fieldset>
+
+          <fieldset id="stage-sky_replace" className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Himmelsaustausch</legend>
+            <SkyReplacePanel />
           </fieldset>
 
           <fieldset id="stage-geometry" className="flex flex-col gap-3">
@@ -1309,10 +1510,38 @@ export function DevelopPanel() {
               />
               Automatische Ausrichtung (nur EXIF-Ausrichtung, siehe ADR-0028)
             </label>
+
+            <button
+              type="button"
+              onClick={() => setCanvasExtendDialogOpen(true)}
+              title="Leinwand per KI-Ausfüllen über den Bildrand hinaus erweitern (Phase 14 Schritt 1, siehe DECISIONS.md ADR-0041)"
+              className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:border-accent"
+            >
+              Leinwand erweitern (KI)…
+            </button>
           </fieldset>
 
           <fieldset id="stage-repair" className="flex flex-col gap-3">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Reparatur (Klonen/Reparieren)</legend>
+
+            {/* Frequenztrennungs-Ansichtsmodus (Phase 14 Schritt 2,
+                ADR-0041): zeigt Tieffrequenz/Hochfrequenz statt des
+                normalen Bilds im Viewer — reine Anzeige, verändert
+                developEdl nicht. */}
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              Ansicht
+              <select
+                aria-label="Frequenztrennungs-Ansicht"
+                value={frequencyViewMode}
+                onChange={(event) => setFrequencyViewMode(event.target.value as FrequencyViewMode)}
+                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+              >
+                <option value="Normal">Normal</option>
+                <option value="LowFrequency">Tieffrequenz (Ton/Farbe)</option>
+                <option value="HighFrequency">Hochfrequenz (Textur/Poren)</option>
+              </select>
+            </label>
+
             <button
               type="button"
               aria-pressed={repairActive}
@@ -1348,6 +1577,26 @@ export function DevelopPanel() {
                 className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
               >
                 {REPAIR_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {/* Frequenztrennung (Phase 14 Schritt 2, ADR-0041): Lightroom
+                hat kein eingebautes Frequenztrennungs-Werkzeug wie
+                Photoshop — lässt den Strich gezielt nur auf Ton/Farbe
+                oder nur auf Textur wirken, siehe stages::repair. */}
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              Ebene
+              <select
+                aria-label="Frequenz-Ebene"
+                value={repairDraftLayer}
+                onChange={(event) => setRepairDraftLayer(event.target.value as RepairLayer)}
+                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+              >
+                {REPAIR_LAYER_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -1530,6 +1779,7 @@ export function DevelopPanel() {
     </PaletteFrame>
     <SavePresetDialog open={savePresetOpen} onClose={() => setSavePresetOpen(false)} />
     <LensCalibrationDialog />
+    <CanvasExtendDialog />
     </>
   );
 }

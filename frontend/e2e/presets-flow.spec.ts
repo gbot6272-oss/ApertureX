@@ -219,7 +219,7 @@ test.describe("Presets-Panel", () => {
     for (const label of ["Kurven", "HSL", "Farbmischer", "Color Grading", "Details", "Objektivkorrekturen", "Effekte", "Kalibrierung", "Geometrie"]) {
       await dialog.getByLabel(label).uncheck();
     }
-    await dialog.getByRole("button", { name: "+ Bedingung" }).click();
+    await dialog.getByRole("button", { name: "+ Regelgruppe" }).click();
     // Feld bleibt beim Default "ISO", Operator beim Default ">" — PHOTO.iso
     // ist 200, die Bedingung (> 1000) schlägt also fehl. Sektion bleibt
     // beim Default "Ganzes Preset".
@@ -251,7 +251,7 @@ test.describe("Presets-Panel", () => {
     for (const label of ["HSL", "Farbmischer", "Color Grading", "Details", "Objektivkorrekturen", "Effekte", "Kalibrierung", "Geometrie"]) {
       await dialog.getByLabel(label).uncheck();
     }
-    await dialog.getByRole("button", { name: "+ Bedingung" }).click();
+    await dialog.getByRole("button", { name: "+ Regelgruppe" }).click();
     // ISO 200 ist nicht > 1000 — die Regel schlägt fehl, betrifft aber nur
     // die Sektion "Kurven", nicht "Grundeinstellungen".
     await dialog.getByLabel("Bedingungswert").fill("1000");

@@ -20,6 +20,7 @@
 #![deny(clippy::unwrap_used)]
 
 pub mod color;
+pub mod dcp_profile;
 pub mod develop;
 pub mod edl;
 pub mod error;

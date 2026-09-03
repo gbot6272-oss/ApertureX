@@ -39,6 +39,7 @@ export const en: Record<keyof typeof de, string> = {
   "header.secondaryDisplay": "Second display…",
   "header.secondaryDisplayTitle": "Show the current photo in a second window",
   "header.stats": "Statistics…",
+  "header.catalog": "Catalog…",
   "header.settings": "Settings…",
   "header.settingsTitle": "Theme, language, UI scaling, accessibility (Phase 10)",
   "header.paletteHint": "Ctrl/Cmd+K — Command palette",
@@ -168,6 +169,11 @@ export const en: Record<keyof typeof de, string> = {
   "tetherDialog.trigger": "Trigger",
   "tetherDialog.running": "Running…",
   "tetherDialog.close": "Close",
+  // Phase 13 Schritt 2: direct import of files already on the camera.
+  "tetherDialog.existingFiles": "Files already on the camera",
+  "tetherDialog.listFiles": "List files",
+  "tetherDialog.listing": "Searching…",
+  "tetherDialog.importFile": "Import",
 
   // StatsCacheDialog.tsx (Phase 11 Schritt 11)
   "statsCacheDialog.title": "Statistics & preview cache",
@@ -180,6 +186,32 @@ export const en: Record<keyof typeof de, string> = {
   "statsCacheDialog.previewCache": "Preview cache",
   "statsCacheDialog.cacheFileCount": "{count} files, {size}",
   "statsCacheDialog.clearCache": "Clear preview cache",
+
+  // CatalogDialog.tsx (Phase 13 Schritt 6)
+  "catalogDialog.title": "Catalog",
+  "catalogDialog.currentCatalog": "Current catalog",
+  "catalogDialog.path": "Path:",
+  "catalogDialog.size": "Size:",
+  "catalogDialog.maintenance": "Maintenance",
+  "catalogDialog.integrityCheck": "Integrity check",
+  "catalogDialog.integrityCheckRunning": "Checking…",
+  "catalogDialog.integrityCheckOk": "No problems found.",
+  "catalogDialog.integrityCheckProblems": "{count} problem(s) found:",
+  "catalogDialog.optimize": "Optimize (VACUUM)",
+  "catalogDialog.optimizeRunning": "Optimizing…",
+  "catalogDialog.optimizeDone": "Catalog optimized.",
+  "catalogDialog.backup": "Back up as…",
+  "catalogDialog.backupRunning": "Backing up…",
+  "catalogDialog.backupDone": "Backup created: {path}",
+  "catalogDialog.switchCatalog": "Switch catalog",
+  "catalogDialog.switchWarning": "Switching or creating a catalog restarts Aperture X.",
+  "catalogDialog.newCatalog": "New catalog…",
+  "catalogDialog.openCatalog": "Open catalog…",
+  "catalogDialog.recentCatalogs": "Recently opened",
+  "catalogDialog.noRecentCatalogs": "No other catalogs yet.",
+  "catalogDialog.current": "current",
+  "catalogDialog.missing": "not found",
+  "catalogDialog.switchTo": "Switch",
 
   // ScriptPluginDialog.tsx (Phase 11 Schritt 11)
   "scriptPluginDialog.title": "Script & plugins",

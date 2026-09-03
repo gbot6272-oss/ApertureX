@@ -6,7 +6,9 @@ import {
   PRESET_SECTION_KEYS,
   PRESET_SECTION_LABELS,
 } from "../lib/presets";
-import type { PresetCondition, PresetConditionField, PresetConditionOperator, PresetSectionKey } from "../lib/presets";
+import type { PresetLeafCondition, PresetRuleGroup, PresetRules, PresetSectionKey } from "../lib/presets";
+import { conditionNode } from "../lib/ruleTree";
+import { RuleTreeEditor } from "./RuleTreeEditor";
 import { useAppStore } from "../store";
 
 interface SavePresetDialogProps {
@@ -14,16 +16,20 @@ interface SavePresetDialogProps {
   onClose: () => void;
 }
 
-let nextConditionKey = 0;
+let nextRuleKey = 0;
 
-/** Eine Bedingungsregel im Editor-Zustand — `key` ist reines React-Listen-
- * Schlüssel-Hilfsmittel, kein Teil der gespeicherten `PresetCondition`. */
-interface DraftCondition extends PresetCondition {
+/** Eine Regelgruppe im Editor-Zustand — `key` ist reines React-Listen-
+ * Schlüsselhilfsmittel, kein Teil der gespeicherten [`PresetRuleGroup`]. */
+interface DraftRule extends PresetRuleGroup {
   key: number;
 }
 
-function makeDraftCondition(): DraftCondition {
-  return { key: nextConditionKey++, field: "iso", op: ">", value: "", section: null };
+function makeDefaultLeaf(): PresetLeafCondition {
+  return { field: "iso", op: ">", value: "" };
+}
+
+function makeDraftRule(): DraftRule {
+  return { key: nextRuleKey++, section: null, node: conditionNode(makeDefaultLeaf()) };
 }
 
 /**
@@ -31,6 +37,13 @@ function makeDraftCondition(): DraftCondition {
  * Speichern zeigt ein Dialog jede einzelne Einstellungsgruppe mit
  * Checkbox"). Reparatur ist bewusst keine wählbare Sektion (siehe
  * `lib/presets.ts`s `PresetSectionKey`-Moduldoku).
+ *
+ * Die Bedingungen (Phase 13 Schritt 7) sind eine Liste von Regelgruppen —
+ * jede gattert entweder das ganze Preset (`section: null`) oder genau eine
+ * Sektion, mehrere Gruppen bleiben untereinander UND-verknüpft. Innerhalb
+ * einer Gruppe ist jetzt aber ein echter, beliebig verschachtelbarer
+ * UND/ODER-Baum möglich ([`RuleTreeEditor`]) statt nur einer einzelnen
+ * Bedingung — siehe `DECISIONS.md` ADR-0040-Nachtrag V.
  */
 export function SavePresetDialog({ open, onClose }: SavePresetDialogProps) {
   const presetFolders = useAppStore((s) => s.presetFolders);
@@ -40,7 +53,7 @@ export function SavePresetDialog({ open, onClose }: SavePresetDialogProps) {
   const [folderId, setFolderId] = useState<string>("");
   const [tagsText, setTagsText] = useState("");
   const [selectedSections, setSelectedSections] = useState<Set<PresetSectionKey>>(new Set(PRESET_SECTION_KEYS));
-  const [conditions, setConditions] = useState<DraftCondition[]>([]);
+  const [rules, setRules] = useState<DraftRule[]>([]);
 
   if (!open) return null;
 
@@ -53,16 +66,16 @@ export function SavePresetDialog({ open, onClose }: SavePresetDialogProps) {
     });
   }
 
-  function addCondition() {
-    setConditions((previous) => [...previous, makeDraftCondition()]);
+  function addRule() {
+    setRules((previous) => [...previous, makeDraftRule()]);
   }
 
-  function updateCondition(key: number, patch: Partial<PresetCondition>) {
-    setConditions((previous) => previous.map((condition) => (condition.key === key ? { ...condition, ...patch } : condition)));
+  function updateRule(key: number, patch: Partial<Pick<DraftRule, "section" | "node">>) {
+    setRules((previous) => previous.map((rule) => (rule.key === key ? { ...rule, ...patch } : rule)));
   }
 
-  function removeCondition(key: number) {
-    setConditions((previous) => previous.filter((condition) => condition.key !== key));
+  function removeRule(key: number) {
+    setRules((previous) => previous.filter((rule) => rule.key !== key));
   }
 
   function reset() {
@@ -70,7 +83,7 @@ export function SavePresetDialog({ open, onClose }: SavePresetDialogProps) {
     setFolderId("");
     setTagsText("");
     setSelectedSections(new Set(PRESET_SECTION_KEYS));
-    setConditions([]);
+    setRules([]);
   }
 
   async function handleSave() {
@@ -78,10 +91,8 @@ export function SavePresetDialog({ open, onClose }: SavePresetDialogProps) {
       .split(",")
       .map((tag) => tag.trim())
       .filter((tag) => tag.length > 0);
-    const savedConditions: PresetCondition[] = conditions
-      .filter((condition) => condition.value.trim().length > 0)
-      .map(({ field, op, value, section }) => ({ field, op, value: value.trim(), section }));
-    await savePresetFromCurrentEdl(name, folderId || null, tags, [...selectedSections], savedConditions);
+    const savedRules: PresetRules = rules.map(({ section, node }) => ({ section, node }));
+    await savePresetFromCurrentEdl(name, folderId || null, tags, [...selectedSections], savedRules);
     reset();
     onClose();
   }
@@ -93,7 +104,7 @@ export function SavePresetDialog({ open, onClose }: SavePresetDialogProps) {
       <div
         role="dialog"
         aria-label="Preset speichern"
-        className="w-full max-w-sm rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
+        className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
         onClick={(event) => event.stopPropagation()}
       >
         <h2 className="mb-3 text-sm font-semibold text-text-primary">Preset speichern</h2>
@@ -148,70 +159,81 @@ export function SavePresetDialog({ open, onClose }: SavePresetDialogProps) {
 
         <fieldset className="mb-3 flex flex-col gap-2">
           <legend className="mb-1 text-xs font-medium text-text-secondary">
-            Bedingungen (optional — mehrere Regeln müssen alle zutreffen)
+            Bedingungen (optional — mehrere Regelgruppen müssen alle zutreffen, innerhalb einer Gruppe frei UND/ODER-verschachtelbar)
           </legend>
-          {conditions.map((condition) => (
-            <div key={condition.key} className="flex flex-wrap items-center gap-1 text-xs">
-              <select
-                aria-label="Bedingungsfeld"
-                value={condition.field}
-                onChange={(event) => updateCondition(condition.key, { field: event.target.value as PresetConditionField })}
-                className="min-w-0 rounded border border-border bg-bg-panel px-1 py-0.5"
-              >
-                {PRESET_CONDITION_FIELD_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label="Bedingungsoperator"
-                value={condition.op}
-                onChange={(event) => updateCondition(condition.key, { op: event.target.value as PresetConditionOperator })}
-                className="min-w-0 rounded border border-border bg-bg-panel px-1 py-0.5"
-              >
-                {PRESET_CONDITION_OPERATOR_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="text"
-                aria-label="Bedingungswert"
-                value={condition.value}
-                onChange={(event) => updateCondition(condition.key, { value: event.target.value })}
-                className="w-16 min-w-0 rounded border border-border bg-bg-panel px-1 py-0.5"
+          {rules.map((rule) => (
+            <div key={rule.key} className="flex flex-col gap-1 rounded border border-border p-2">
+              <div className="flex items-center justify-between gap-1">
+                <select
+                  aria-label="Betroffene Sektion"
+                  value={rule.section ?? ""}
+                  onChange={(event) => updateRule(rule.key, { section: (event.target.value || null) as PresetSectionKey | null })}
+                  className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-1 py-0.5 text-xs"
+                >
+                  <option value="">Ganzes Preset</option>
+                  {PRESET_SECTION_KEYS.map((key) => (
+                    <option key={key} value={key}>
+                      Nur {PRESET_SECTION_LABELS[key]}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => removeRule(rule.key)}
+                  aria-label="Regelgruppe entfernen"
+                  className="shrink-0 text-xs text-danger"
+                >
+                  ×
+                </button>
+              </div>
+              <RuleTreeEditor
+                node={rule.node}
+                onChange={(next) => updateRule(rule.key, { node: next })}
+                makeDefaultLeaf={makeDefaultLeaf}
+                renderLeaf={(leaf, onLeafChange) => (
+                  <>
+                    <select
+                      aria-label="Bedingungsfeld"
+                      value={leaf.field}
+                      onChange={(event) => onLeafChange({ ...leaf, field: event.target.value as PresetLeafCondition["field"] })}
+                      className="min-w-0 rounded border border-border bg-bg-panel px-1 py-0.5"
+                    >
+                      {PRESET_CONDITION_FIELD_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      aria-label="Bedingungsoperator"
+                      value={leaf.op}
+                      onChange={(event) => onLeafChange({ ...leaf, op: event.target.value as PresetLeafCondition["op"] })}
+                      className="min-w-0 rounded border border-border bg-bg-panel px-1 py-0.5"
+                    >
+                      {PRESET_CONDITION_OPERATOR_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      aria-label="Bedingungswert"
+                      value={leaf.value}
+                      onChange={(event) => onLeafChange({ ...leaf, value: event.target.value })}
+                      className="w-16 min-w-0 rounded border border-border bg-bg-panel px-1 py-0.5"
+                    />
+                  </>
+                )}
               />
-              <select
-                aria-label="Betroffene Sektion"
-                value={condition.section ?? ""}
-                onChange={(event) => updateCondition(condition.key, { section: (event.target.value || null) as PresetSectionKey | null })}
-                className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-1 py-0.5"
-              >
-                <option value="">Ganzes Preset</option>
-                {PRESET_SECTION_KEYS.map((key) => (
-                  <option key={key} value={key}>
-                    Nur {PRESET_SECTION_LABELS[key]}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => removeCondition(condition.key)}
-                aria-label="Bedingung entfernen"
-                className="shrink-0 text-danger"
-              >
-                ×
-              </button>
             </div>
           ))}
           <button
             type="button"
-            onClick={addCondition}
+            onClick={addRule}
             className="self-start rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel"
           >
-            + Bedingung
+            + Regelgruppe
           </button>
         </fieldset>
 

@@ -31,6 +31,10 @@ export function TetherDialog({ open, onClose }: TetherDialogProps) {
   const captureTetherPhoto = useAppStore((s) => s.captureTetherPhoto);
   const importPresets = useAppStore((s) => s.importPresets);
   const refreshImportPresets = useAppStore((s) => s.refreshImportPresets);
+  const cameraFiles = useAppStore((s) => s.cameraFiles);
+  const cameraFilesLoading = useAppStore((s) => s.cameraFilesLoading);
+  const listCameraFilesAction = useAppStore((s) => s.listCameraFilesAction);
+  const importCameraFile = useAppStore((s) => s.importCameraFile);
 
   useEffect(() => {
     if (open) void refreshImportPresets();
@@ -98,6 +102,45 @@ export function TetherDialog({ open, onClose }: TetherDialogProps) {
               >
                 {t("tetherDialog.trigger")}
               </button>
+            </div>
+
+            {/* Direktimport bereits vorhandener Aufnahmen (Phase 13
+                Schritt 2) — im Unterschied zum Auslösen oben: listet
+                Dateien, die schon auf der Kamera liegen. */}
+            <div className="mt-2 border-t border-border pt-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-text-secondary">{t("tetherDialog.existingFiles")}</span>
+                <button
+                  type="button"
+                  onClick={() => void listCameraFilesAction()}
+                  disabled={cameraFilesLoading}
+                  className="rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {cameraFilesLoading ? t("tetherDialog.listing") : t("tetherDialog.listFiles")}
+                </button>
+              </div>
+              {cameraFiles.length > 0 && (
+                <ul className="mt-1 flex max-h-40 flex-col gap-1 overflow-y-auto text-xs text-text-secondary">
+                  {cameraFiles.map((file) => (
+                    <li
+                      key={`${file.folder}/${file.name}`}
+                      className="flex items-center justify-between rounded border border-border px-2 py-1"
+                    >
+                      <span className="truncate" title={`${file.folder}/${file.name}`}>
+                        {file.name}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={tetherCapturing}
+                        onClick={() => void importCameraFile(file, presetName || undefined)}
+                        className="shrink-0 text-accent underline disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {t("tetherDialog.importFile")}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
         )}

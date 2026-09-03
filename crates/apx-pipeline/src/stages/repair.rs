@@ -131,6 +131,10 @@ impl RepairParams {
                 // `radius`/`feather`/`opacity`/`path` wird auch für den
                 // Füll-Pfad daraus gelesen).
                 RepairMode::ContentAwareFill => 0.0,
+                // KI-Ausfüllen erreicht den Shader ebenfalls nie (siehe
+                // `apply_ai_fill` weiter unten) — derselbe Platzhalter-Grund
+                // wie bei `ContentAwareFill`.
+                RepairMode::AiInpaint => 0.0,
             },
             radius: to_pixels(stroke.radius, width),
             feather: to_pixels(stroke.feather, width),
@@ -570,9 +574,108 @@ fn apply_content_aware_fill(
     out
 }
 
+/// Zerlegt eine interleaved-RGB-`u8`-Bitmap (wie [`AiFillPatch::pixels`])
+/// in drei Ein-Kanal-Puffer — dieselbe Aufteilung wie `apx-ai::inpaint`s
+/// private `split_channels`, hier separat gehalten statt über die
+/// Crate-Grenze hinweg geteilt (kleine, in sich geschlossene Funktion,
+/// kein Grund für eine neue gemeinsame Abhängigkeit).
+fn split_patch_channels(pixels: &[u8], width: u32, height: u32) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let n = (width as usize) * (height as usize);
+    let mut r = vec![0u8; n];
+    let mut g = vec![0u8; n];
+    let mut b = vec![0u8; n];
+    for i in 0..n.min(pixels.len() / 3) {
+        r[i] = pixels[i * 3];
+        g[i] = pixels[i * 3 + 1];
+        b[i] = pixels[i * 3 + 2];
+    }
+    (r, g, b)
+}
+
+/// Setzt einen zuvor per `apx-ai::inpaint` einmalig berechneten
+/// [`AiFillPatch`] wieder in `pixels` ein (Phase 13 Schritt 1, siehe
+/// `DECISIONS.md` ADR-0040) — reines Umrechnen/Skalieren (Bitmap-
+/// Auflösung → Zielrechteck-Pixelgröße per Kanal-für-Kanal-Bilinear-
+/// Hochskalierung, dann `u8` `0..=255` → linear `f32` `0.0..=1.0`,
+/// opazitätsgewichtet wie jeder andere Reparatur-Strich), **keine**
+/// erneute neuronale Inferenz (die läuft einmalig vorab über einen
+/// Tauri-Command in `apx-app`, siehe `apx-ai::inpaint`s Moduldoku für die
+/// Begründung, warum das nicht live pro Render-Tick passieren kann). Ohne
+/// gesetztes `ai_fill` (der Nutzer hat den Strich gemalt, aber „Anwenden"
+/// noch nicht bestätigt) ein No-Op — derselbe „noch nicht berechnet"-
+/// Zustand wie eine frische `MaskGeometry::AiGenerated` vor ihrem ersten
+/// Lauf.
+fn apply_ai_fill(pixels: &[f32], width: u32, height: u32, stroke: &RepairStroke) -> Vec<f32> {
+    let Some(patch) = &stroke.ai_fill else {
+        return pixels.to_vec();
+    };
+    if patch.bitmap_width == 0 || patch.bitmap_height == 0 {
+        return pixels.to_vec();
+    }
+
+    // Normiertes Zielrechteck in Pixelkoordinaten der aktuellen
+    // Render-Auflösung umrechnen — dieselbe `to_pixels`-Konvention wie
+    // `radius`/`feather` oben (siehe Typdoku von `AiFillPatch`).
+    let dst_x0 = to_pixels(patch.x, width).round() as i64;
+    let dst_y0 = to_pixels(patch.y, height).round() as i64;
+    let dst_w = to_pixels(patch.width, width).round().max(1.0) as u32;
+    let dst_h = to_pixels(patch.height, height).round().max(1.0) as u32;
+
+    let (bitmap_r, bitmap_g, bitmap_b) =
+        split_patch_channels(&patch.pixels, patch.bitmap_width, patch.bitmap_height);
+    let resized_r = apx_core::raster::bilinear_resize_u8(
+        &bitmap_r,
+        patch.bitmap_width,
+        patch.bitmap_height,
+        dst_w,
+        dst_h,
+    );
+    let resized_g = apx_core::raster::bilinear_resize_u8(
+        &bitmap_g,
+        patch.bitmap_width,
+        patch.bitmap_height,
+        dst_w,
+        dst_h,
+    );
+    let resized_b = apx_core::raster::bilinear_resize_u8(
+        &bitmap_b,
+        patch.bitmap_width,
+        patch.bitmap_height,
+        dst_w,
+        dst_h,
+    );
+
+    let w = width as usize;
+    let opacity = stroke.opacity.clamp(0.0, 1.0);
+    let mut out = pixels.to_vec();
+    for py in 0..dst_h {
+        let img_y = dst_y0 + py as i64;
+        if img_y < 0 || img_y >= height as i64 {
+            continue;
+        }
+        for px in 0..dst_w {
+            let img_x = dst_x0 + px as i64;
+            if img_x < 0 || img_x >= width as i64 {
+                continue;
+            }
+            let dst_i = (img_y as usize * w + img_x as usize) * 3;
+            let src_i = py as usize * dst_w as usize + px as usize;
+            for (c, channel) in [&resized_r, &resized_g, &resized_b].into_iter().enumerate() {
+                let original = pixels[dst_i + c];
+                let filled = channel[src_i] as f32 / 255.0;
+                out[dst_i + c] = (original + (filled - original) * opacity).clamp(0.0, 1.0);
+            }
+        }
+    }
+    out
+}
+
 /// CPU-Fallback für einen einzelnen Strich — dieselbe Formel wie
 /// `repair.wgsl`.
 fn apply_stroke_cpu(pixels: &[f32], width: u32, height: u32, stroke: &RepairStroke) -> Vec<f32> {
+    if stroke.mode == RepairMode::AiInpaint {
+        return apply_ai_fill(pixels, width, height, stroke);
+    }
     let params = RepairParams::new(width, height, stroke);
     if stroke.mode == RepairMode::ContentAwareFill {
         return apply_content_aware_fill(pixels, width, height, &params);
@@ -603,8 +706,11 @@ fn apply_stroke_gpu(
     // Nachbarpixel, mehrere Durchläufe) und passt damit nicht in den
     // 1:1-Compute-Dispatch dieses Moduls — es läuft auch auf dem
     // GPU-Pfad CPU-seitig, wie schon Kurven/Geometrie in Phase 4
-    // (siehe `develop.rs`s Moduldoku).
-    if stroke.mode == RepairMode::ContentAwareFill {
+    // (siehe `develop.rs`s Moduldoku). KI-Ausfüllen ist reines
+    // Kopieren eines vorab berechneten Patches (siehe `apply_ai_fill`)
+    // — für einen eigenen Compute-Shader dafür gibt es keinen Grund,
+    // läuft aus demselben Grund CPU-seitig.
+    if stroke.mode == RepairMode::ContentAwareFill || stroke.mode == RepairMode::AiInpaint {
         return Ok(apply_stroke_cpu(pixels, width, height, stroke));
     }
     let params = RepairParams::new(width, height, stroke);
@@ -639,6 +745,7 @@ pub fn apply_gpu(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::edl::v2::AiFillPatch;
 
     fn flat_gray(width: u32, height: u32, value: f32) -> Vec<f32> {
         vec![value; (width * height * 3) as usize]
@@ -673,6 +780,7 @@ mod tests {
             radius: 0.05,
             feather: 0.01,
             opacity: 1.0,
+            ai_fill: None,
         };
         let result = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
         let target_px = (0.75 * size as f32) as usize;
@@ -698,6 +806,7 @@ mod tests {
             radius: 0.1,
             feather: 0.02,
             opacity: 0.0,
+            ai_fill: None,
         };
         let result = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
         assert_eq!(result, pixels);
@@ -716,6 +825,7 @@ mod tests {
             radius: 0.05,
             feather: 0.01,
             opacity: 1.0,
+            ai_fill: None,
         };
         let result = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
         // Eine weit vom Pfad entfernte Ecke sollte unverändert bleiben.
@@ -743,6 +853,7 @@ mod tests {
             radius: 0.15,
             feather: 0.02,
             opacity: 1.0,
+            ai_fill: None,
         };
         let clone_stroke = RepairStroke {
             mode: RepairMode::Clone,
@@ -776,6 +887,7 @@ mod tests {
                 radius: 0.08,
                 feather: 0.03,
                 opacity: 0.8,
+                ai_fill: None,
             },
             RepairStroke {
                 mode: RepairMode::Heal,
@@ -784,6 +896,7 @@ mod tests {
                 radius: 0.06,
                 feather: 0.02,
                 opacity: 1.0,
+                ai_fill: None,
             },
         ];
         let cpu = apply_cpu(&pixels, size, size, &strokes);
@@ -816,6 +929,7 @@ mod tests {
             radius: 0.1,
             feather: 0.01,
             opacity: 1.0,
+            ai_fill: None,
         };
         let filled = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
         let center = ((24 * size + 24) * 3) as usize;
@@ -851,6 +965,7 @@ mod tests {
             radius: 0.12,
             feather: 0.02,
             opacity: 1.0,
+            ai_fill: None,
         };
         let first = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
         let second = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
@@ -868,8 +983,72 @@ mod tests {
             radius: 0.1,
             feather: 0.02,
             opacity: 0.0,
+            ai_fill: None,
         };
         let filled = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
         assert_eq!(filled, pixels);
+    }
+
+    #[test]
+    fn ai_inpaint_without_a_computed_patch_is_a_no_op() {
+        // Der Nutzer hat den Strich gemalt, aber „Anwenden" (der Tauri-
+        // Command, der `apx-ai::inpaint` aufruft) noch nicht bestätigt —
+        // `ai_fill` ist `None`, das Bild darf sich nicht ändern.
+        let size = 16u32;
+        let pixels = flat_gray(size, size, 0.4);
+        let stroke = RepairStroke {
+            mode: RepairMode::AiInpaint,
+            source: point(0.0, 0.0),
+            target_path: vec![point(0.5, 0.5)],
+            radius: 0.1,
+            feather: 0.02,
+            opacity: 1.0,
+            ai_fill: None,
+        };
+        let result = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
+        assert_eq!(result, pixels);
+    }
+
+    #[test]
+    fn ai_inpaint_composites_only_the_patch_rectangle_at_full_opacity() {
+        let size = 16u32;
+        let pixels = flat_gray(size, size, 0.2);
+        // Normiertes Rechteck (x=3, y=5, 4x4 Pixel bei 16x16) — dieselbe
+        // Bitmap-Auflösung wie das Zielrechteck, damit die bilineare
+        // Hochskalierung ein reiner Identitäts-Fall ist (siehe
+        // `bilinear_resize_u8`s "gleiche Größe"-Kurzschluss) und die
+        // Assertion unten exakt (nicht nur ungefähr) prüfen kann.
+        let patch = AiFillPatch {
+            x: 3.0 / size as f32,
+            y: 5.0 / size as f32,
+            width: 4.0 / size as f32,
+            height: 4.0 / size as f32,
+            bitmap_width: 4,
+            bitmap_height: 4,
+            // Reines Weiß im Patch — deutlich vom grauen Untergrund
+            // (0.2) unterscheidbar.
+            pixels: vec![255u8; 4 * 4 * 3],
+        };
+        let stroke = RepairStroke {
+            mode: RepairMode::AiInpaint,
+            source: point(0.0, 0.0),            // wird ignoriert
+            target_path: vec![point(0.5, 0.5)], // wird ignoriert
+            radius: 0.0,
+            feather: 0.0,
+            opacity: 1.0,
+            ai_fill: Some(patch),
+        };
+        let result = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
+
+        // Innerhalb des Patch-Rechtecks: voll weiß.
+        let inside_idx = ((7 * size + 4) * 3) as usize;
+        assert!(
+            (result[inside_idx] - 1.0).abs() < 1e-6,
+            "Pixel innerhalb des Patches sollte weiß sein, war {}",
+            result[inside_idx]
+        );
+        // Außerhalb des Patch-Rechtecks: unverändert grau.
+        let outside_idx = 0usize;
+        assert!((result[outside_idx] - pixels[outside_idx]).abs() < 1e-6);
     }
 }

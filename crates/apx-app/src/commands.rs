@@ -850,6 +850,131 @@ pub fn calibrate_lens_distortion(lines: Vec<Vec<CalibrationPointDto>>) -> Result
     apx_ai::lens_calibration::calibrate_distortion_k1(&lines).map_err(|err| err.to_string())
 }
 
+// ---- Perspektive/Upright: automatische Kantenerkennung (Phase 13 Schritt 4,
+// siehe DECISIONS.md ADR-0040-Nachtrag II) -----------------------------------
+
+fn parse_upright_mode(mode: &str) -> Result<apx_pipeline::edl::UprightMode, String> {
+    match mode {
+        "Off" => Ok(apx_pipeline::edl::UprightMode::Off),
+        "Auto" => Ok(apx_pipeline::edl::UprightMode::Auto),
+        "Level" => Ok(apx_pipeline::edl::UprightMode::Level),
+        "Vertical" => Ok(apx_pipeline::edl::UprightMode::Vertical),
+        "Full" => Ok(apx_pipeline::edl::UprightMode::Full),
+        "Guided" => Ok(apx_pipeline::edl::UprightMode::Guided),
+        other => Err(format!("unbekannter Upright-Modus '{other}'")),
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UprightCorrectionDto {
+    pub rotate_degrees: f32,
+    pub horizontal: f32,
+}
+
+/// Automatische Perspektive/Upright-Kantenerkennung — dünner Wrapper um
+/// `apx_ai::upright::detect_from_linear_rgb` (dasselbe Analyse-Auflösung-
+/// über-`TileCache`-Muster wie `generate_ai_mask` oben, obwohl dies keine
+/// KI-Funktion im engeren Sinn ist, siehe dessen Moduldoku zu Canny/Hough).
+/// `mode` muss einer von `UprightMode`s sechs Werten sein; für `"Off"`/
+/// `"Guided"` liefert die Analyse ohnehin nur Nullen (siehe
+/// `apx_ai::upright::detect`s Doku) — der Befehl nimmt sie trotzdem an,
+/// statt sie als Fehler abzulehnen, für einen einfacheren Aufrufer.
+#[tauri::command]
+pub fn detect_upright_correction(
+    state: State<'_, AppState>,
+    photo_id: String,
+    mode: String,
+) -> Result<UprightCorrectionDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let mode = parse_upright_mode(&mode)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let correction =
+        apx_ai::upright::detect_from_linear_rgb(&linear.pixels, linear.width, linear.height, mode);
+    Ok(UprightCorrectionDto {
+        rotate_degrees: correction.rotate_degrees,
+        horizontal: correction.horizontal,
+    })
+}
+
+// ---- Adobe-DCP-Farbprofil-Import (Phase 13 Schritt 3) ----------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DcpProfileDataDto {
+    pub name: String,
+    pub hue_divisions: u32,
+    pub sat_divisions: u32,
+    pub val_divisions: u32,
+    pub hue_sat_map: Vec<[f32; 3]>,
+    pub tone_curve: Vec<[f32; 2]>,
+}
+
+impl From<apx_pipeline::edl::DcpProfileData> for DcpProfileDataDto {
+    fn from(data: apx_pipeline::edl::DcpProfileData) -> Self {
+        Self {
+            name: data.name,
+            hue_divisions: data.hue_divisions,
+            sat_divisions: data.sat_divisions,
+            val_divisions: data.val_divisions,
+            hue_sat_map: data.hue_sat_map,
+            tone_curve: data.tone_curve,
+        }
+    }
+}
+
+/// Öffnet einen Datei-Dialog für eine `.dcp`-Datei, parst sie
+/// (`apx_pipeline::dcp_profile::parse_dcp_bytes`, siehe dessen Moduldoku)
+/// und liefert die für `stages::calibration` relevanten Profildaten
+/// zurück — `None`, wenn der Dialog abgebrochen wurde. Das Frontend
+/// speichert das Ergebnis direkt in `CalibrationAdjustment::dcp_profile`
+/// (derselbe „einmal auflösen, als Zahlen im EDL ablegen"-Ansatz wie bei
+/// KI-Ausfüllen, Phase 13 Schritt 1) — dieser Command liest die Datei
+/// nur, schreibt nichts in den Katalog.
+///
+/// **Kein eingebautes Profil enthalten** — der Nutzer bringt eine eigene
+/// `.dcp`-Datei mit (z. B. Adobes kostenlos herunterladbare
+/// Kameraprofile), genau wie beim LensFun-Kalibrier-Assistenten
+/// (Phase 12 Schritt 3) niemand die LensFun-Datenbank selbst mitliefert,
+/// sondern nur den Code, sie zu nutzen.
+#[tauri::command]
+pub async fn import_dcp_profile(app: AppHandle) -> Result<Option<DcpProfileDataDto>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("Adobe-Kameraprofil", &["dcp"])
+        .pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|err| format!("Öffnen-Dialog fehlgeschlagen: {err}"))?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|err| format!("Ungültiger Pfad: {err}"))?;
+    let bytes = std::fs::read(&path)
+        .map_err(|err| format!("Datei '{}' nicht lesbar: {err}", path.display()))?;
+    let profile =
+        apx_pipeline::dcp_profile::parse_dcp_bytes(&bytes).map_err(|err| err.to_string())?;
+    let Some(hue_sat_map) = profile.hue_sat_map else {
+        return Err(format!(
+            "'{}' enthält keine HueSatMap-Look-Daten (nur Farbmatrizen) — diese Datei liefert derzeit keinen sichtbaren Effekt, siehe apx-pipeline::dcp_profile-Moduldoku",
+            path.display()
+        ));
+    };
+    Ok(Some(hue_sat_map.into()))
+}
+
 /// Geht einen Bearbeitungsschritt zurück. `None`, wenn schon am
 /// Ausgangszustand (kein Rückgängig möglich) — kein Fehler, siehe
 /// `apx_catalog::Catalog::undo_edit`.
@@ -1476,18 +1601,22 @@ pub fn create_collection(
 }
 
 /// Legt eine intelligente Sammlung an — siehe `Catalog::create_smart_collection`s
-/// Moduldoku.
+/// Moduldoku. `criteria_json` ist seit Phase 13 Schritt 7 der serialisierte
+/// UND/ODER-Regelbaum (`apx_catalog::FilterNode`, vom Frontend-
+/// `RuleTreeEditor.tsx` erzeugt) statt der alten flachen `FilterCriteriaDto`
+/// — als opakes JSON durchgereicht, wie `conditions_json` bei Presets.
 #[tauri::command]
 pub fn create_smart_collection(
     state: State<'_, AppState>,
     name: String,
     folder_id: Option<String>,
-    criteria: FilterCriteriaDto,
+    criteria_json: String,
 ) -> Result<String, String> {
     let folder_id = folder_id.map(parse_collection_folder_id).transpose()?;
+    let node = apx_catalog::parse_filter_node(&criteria_json).map_err(|err| err.to_string())?;
     let id = state
         .catalog
-        .create_smart_collection(&name, folder_id, &criteria.into())
+        .create_smart_collection(&name, folder_id, &node)
         .map_err(|err| err.to_string())?;
     Ok(id.to_string())
 }
@@ -2568,12 +2697,24 @@ pub fn detect_sensor_spots(
 pub struct AiSettingsDto {
     /// Liegt im Klartext in der Einstellungsdatei — dieselbe
     /// Vertrauensgrenze wie z. B. `last_opened_catalog`, siehe
-    /// `apx_core::settings::AiSettings`s Moduldoku. Wird dem Frontend
+    /// `apx_core::AiSettings`s Moduldoku. Wird dem Frontend
     /// unverändert zurückgegeben, damit das Eingabefeld den hinterlegten
     /// Schlüssel zur Kontrolle/Bearbeitung zeigen kann (maskiert per
     /// `type="password"`, nicht serverseitig verborgen — ein lokaler,
     /// nicht synchronisierter Einzelnutzer-Schlüssel).
     pub anthropic_api_key: Option<String>,
+    /// `Some`, sobald der Nutzer den Download bestätigt und er
+    /// erfolgreich war (Phase 13 Schritt 1, siehe [`download_inpainting_model`]).
+    pub inpainting_model_path: Option<String>,
+    /// `Some`, sobald der Nutzer den Download beider Personen-
+    /// Wiedererkennungs-Modelle bestätigt hat und er erfolgreich war
+    /// (Phase 13 Schritt 8, siehe [`download_people_models`]).
+    pub people_landmark_model_path: Option<String>,
+    pub people_encoder_model_path: Option<String>,
+    /// `true`, wenn diese Build mit dem Cargo-Feature `people` kompiliert
+    /// wurde — das Frontend zeigt sonst einen Hinweis statt der Download-
+    /// /Erkennungs-Aktionen (siehe `apx-ai::people`s Moduldoku).
+    pub people_feature_compiled: bool,
 }
 
 #[tauri::command]
@@ -2582,6 +2723,10 @@ pub fn get_ai_settings(state: State<'_, AppState>) -> Result<AiSettingsDto, Stri
         .map_err(|err| err.to_string())?;
     Ok(AiSettingsDto {
         anthropic_api_key: settings.ai.anthropic_api_key,
+        inpainting_model_path: settings.ai.inpainting_model_path,
+        people_landmark_model_path: settings.ai.people_landmark_model_path,
+        people_encoder_model_path: settings.ai.people_encoder_model_path,
+        people_feature_compiled: cfg!(feature = "people"),
     })
 }
 
@@ -2595,6 +2740,531 @@ pub fn set_anthropic_api_key(
     let mut settings = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
     settings.ai.anthropic_api_key = api_key.filter(|key| !key.trim().is_empty());
     settings.save(&path).map_err(|err| err.to_string())
+}
+
+// ---- KI: Ausfüllen (LaMa-Inpainting, Phase 13 Schritt 1) -------------------
+//
+// Opt-in, kein Bundling im Installer (siehe `DECISIONS.md` ADR-0040 und
+// `apx_core::AiSettings::inpainting_model_path`s Moduldoku) —
+// derselbe Ansatz wie der Anthropic-API-Schlüssel oben: der Nutzer
+// bestätigt den ~208-MB-Download ausdrücklich im Einstellungsdialog,
+// bevor irgendetwas heruntergeladen wird.
+
+/// Öffentliche Download-URL des von `DECISIONS.md` ADR-0040 recherchierten
+/// Modells (`Carve/LaMa-ONNX`, Apache-2.0, Hugging Face). **Nicht in
+/// dieser Sitzung erreichbar/verifiziert** — `huggingface.co` ist von
+/// dieser Entwicklungs-Sandbox aus blockiert (siehe `apx-ai::inpaint`s
+/// Moduldoku) — die URL folgt Hugging Faces dokumentiertem
+/// `resolve/main/<datei>`-Schema für Rohdatei-Downloads, wurde aber nicht
+/// tatsächlich abgerufen. Vor Produktivnutzung mit erreichbarem
+/// `huggingface.co` einmal nachprüfen.
+const LAMA_MODEL_URL: &str = "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx";
+
+/// Lädt das LaMa-Inpainting-Modell herunter (siehe [`LAMA_MODEL_URL`]s
+/// Vorbehalt) nach `AppPaths::models_dir()` und hinterlegt den Pfad in den
+/// Einstellungen. **Keine Hash-Prüfung** — der auf Hugging Face
+/// veröffentlichte Datei-Hash wurde in dieser Sitzung nie tatsächlich
+/// abgerufen (siehe oben), eine erfundene Prüfsumme wäre schlimmer als
+/// keine (stiller Fabrikations-Bug statt einer ehrlichen Lücke). Wer
+/// diesen Command auf einer Maschine mit erreichbarem `huggingface.co`
+/// zuerst nutzt, sollte den echten Hash ergänzen.
+#[tauri::command]
+pub async fn download_inpainting_model(state: State<'_, AppState>) -> Result<String, String> {
+    let response = reqwest::get(LAMA_MODEL_URL)
+        .await
+        .map_err(|err| format!("Download von '{LAMA_MODEL_URL}' fehlgeschlagen: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Download von '{LAMA_MODEL_URL}' fehlgeschlagen: HTTP {}",
+            response.status()
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| format!("Antwort konnte nicht gelesen werden: {err}"))?;
+
+    let dest_dir = state.paths.models_dir();
+    std::fs::create_dir_all(&dest_dir).map_err(|err| err.to_string())?;
+    let dest_path = dest_dir.join("lama_fp32.onnx");
+    std::fs::write(&dest_path, &bytes).map_err(|err| err.to_string())?;
+
+    let path_string = dest_path.to_string_lossy().to_string();
+    let settings_path = state.paths.settings_file();
+    let mut settings =
+        apx_core::Settings::load_or_default(&settings_path).map_err(|err| err.to_string())?;
+    settings.ai.inpainting_model_path = Some(path_string.clone());
+    settings
+        .save(&settings_path)
+        .map_err(|err| err.to_string())?;
+
+    Ok(path_string)
+}
+
+/// Entfernt den hinterlegten Modellpfad (löscht die Datei selbst nicht —
+/// der Nutzer kann sie manuell entfernen, dieselbe Zurückhaltung wie beim
+/// Löschen anderer nutzergesteuerter lokaler Dateien in diesem Projekt).
+#[tauri::command]
+pub fn clear_inpainting_model_path(state: State<'_, AppState>) -> Result<(), String> {
+    let path = state.paths.settings_file();
+    let mut settings = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    settings.ai.inpainting_model_path = None;
+    settings.save(&path).map_err(|err| err.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AiFillPatchDto {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    /// Base64-kodiertes interleaved-RGB-`u8`-Ergebnis, `bitmap_width *
+    /// bitmap_height * 3` Bytes nach dem Dekodieren — dasselbe
+    /// Übertragungsmuster wie `AiMaskAlphaDto::alpha_base64`.
+    pub pixels_base64: String,
+}
+
+/// Führt echte LaMa-Inferenz für ein normiertes Rechteck (`x`/`y`/`width`/
+/// `height`, `0.0..=1.0`) auf `photo_id` aus (Phase 13 Schritt 1, siehe
+/// `DECISIONS.md` ADR-0040) — das Frontend ruft dies erst nach
+/// ausdrücklichem „Anwenden" auf einem gemalten `RepairMode::AiInpaint`-
+/// Strich auf (siehe `apx-pipeline::edl::v2::AiFillPatch`s Moduldoku),
+/// nicht bei jedem Regler-Tick.
+///
+/// Läuft auf derselben capped Analyse-Auflösung (`apx_ai::segmentation::
+/// ANALYSIS_MAX_EDGE`) wie jede andere KI-Bildanalyse in diesem Projekt —
+/// das komplette Rechteck gilt als „auszufüllen" (Maske `255` überall
+/// innerhalb, kein zusätzliches Federn: LaMa selbst lernt einen weichen
+/// Übergang, siehe `apx_ai::inpaint`s Moduldoku).
+///
+/// **Ehrliche Grenze:** läuft auf dem linearen Kamera-RGB-Dekodierergebnis
+/// (`decode_linear`, derselbe Farbraum wie [`generate_ai_mask`]/
+/// [`suggest_repair_source`]), nicht auf entwickelten sRGB-Pixeln — LaMa
+/// wurde vermutlich auf gewöhnlichen (sRGB-artigen) Fotos trainiert, ein
+/// linearer Farbraum ist eine Näherung, keine exakte Übereinstimmung mit
+/// den Trainingsdaten (dieselbe Art Kompromiss wie bei jeder anderen
+/// KI-Heuristik dieses Projekts, die auf demselben Dekodierergebnis
+/// arbeitet).
+#[tauri::command]
+pub fn run_ai_inpaint(
+    state: State<'_, AppState>,
+    photo_id: String,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> Result<AiFillPatchDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let model_path = settings
+        .ai
+        .inpainting_model_path
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| {
+            "Kein KI-Ausfüllen-Modell heruntergeladen — siehe Einstellungen → KI.".to_string()
+        })?;
+
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let px = (x * linear.width as f32)
+        .round()
+        .clamp(0.0, linear.width as f32 - 1.0) as u32;
+    let py = (y * linear.height as f32)
+        .round()
+        .clamp(0.0, linear.height as f32 - 1.0) as u32;
+    let pw = (width * linear.width as f32)
+        .round()
+        .max(1.0)
+        .min((linear.width - px) as f32) as u32;
+    let ph = (height * linear.height as f32)
+        .round()
+        .max(1.0)
+        .min((linear.height - py) as f32) as u32;
+
+    let mut crop_u8 = vec![0u8; (pw as usize) * (ph as usize) * 3];
+    for row in 0..ph {
+        for col in 0..pw {
+            let src_idx = ((py + row) as usize * linear.width as usize + (px + col) as usize) * 3;
+            let dst_idx = (row as usize * pw as usize + col as usize) * 3;
+            for c in 0..3 {
+                let value = linear.pixels[src_idx + c].clamp(0.0, 1.0);
+                crop_u8[dst_idx + c] = (value * 255.0).round() as u8;
+            }
+        }
+    }
+    // Vollflächige Maske — das gesamte übergebene Rechteck gilt als
+    // auszufüllen (siehe Funktionsdoku).
+    let mask = vec![255u8; (pw as usize) * (ph as usize)];
+
+    // Session wird pro Aufruf frisch geladen statt in `AppState` gehalten
+    // — einfacher, aber langsamer bei wiederholter Nutzung (das Modell
+    // wird bei jedem „Anwenden"-Klick neu von der Platte gelesen und der
+    // ONNX-Graph neu aufgebaut). Für einen Nutzer-ausgelösten, nicht
+    // performance-kritischen Ein-Klick-Vorgang akzeptabel; eine gehaltene
+    // Session in `AppState` wäre eine mögliche spätere Optimierung.
+    let mut session = apx_ai::inpaint::InpaintSession::load(Path::new(&model_path))
+        .map_err(|err| err.to_string())?;
+    let filled = session
+        .fill_rgb8(&crop_u8, pw, ph, &mask)
+        .map_err(|err| err.to_string())?;
+
+    Ok(AiFillPatchDto {
+        x,
+        y,
+        width,
+        height,
+        bitmap_width: pw,
+        bitmap_height: ph,
+        pixels_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &filled),
+    })
+}
+
+// ---- KI: Echte Personen-Wiedererkennung (Phase 13 Schritt 8, siehe
+// DECISIONS.md ADR-0040-Nachtrag VI) -----------------------------------------
+//
+// Opt-in, kein Bundling im Installer (dasselbe Muster wie das LaMa-
+// Inpainting-Modell oben): der Nutzer bestätigt den Download der beiden
+// gemeinfreien `dlib`-Modelldateien ausdrücklich im Einstellungsdialog.
+// Die eigentliche `dlib`-Bindung steckt hinter dem standardmäßig
+// ausgeschalteten Cargo-Feature `people` (siehe `apx-ai::people`s
+// Moduldoku, `apx-tether`s `tethering`-Feature für dieselbe Konvention);
+// `detect_faces_for_photo` gibt ohne dieses Feature einen klaren Fehler
+// statt eines stillen No-Ops zurück.
+
+const PEOPLE_LANDMARK_MODEL_URL: &str =
+    "http://dlib.net/files/shape_predictor_5_face_landmarks.dat.bz2";
+const PEOPLE_ENCODER_MODEL_URL: &str =
+    "http://dlib.net/files/dlib_face_recognition_resnet_model_v1.dat.bz2";
+
+async fn download_and_decompress_bz2(url: &str, dest: &Path) -> Result<(), String> {
+    let response = reqwest::get(url)
+        .await
+        .map_err(|err| format!("Download von '{url}' fehlgeschlagen: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Download von '{url}' fehlgeschlagen: HTTP {}",
+            response.status()
+        ));
+    }
+    let compressed = response
+        .bytes()
+        .await
+        .map_err(|err| format!("Antwort konnte nicht gelesen werden: {err}"))?;
+    let mut decoder = bzip2::read::BzDecoder::new(compressed.as_ref());
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut decoder, &mut bytes)
+        .map_err(|err| format!("bz2-Dekompression fehlgeschlagen: {err}"))?;
+    std::fs::write(dest, &bytes).map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+/// Lädt beide für Personen-Wiedererkennung nötigen Modelle herunter
+/// (siehe [`PEOPLE_LANDMARK_MODEL_URL`]/[`PEOPLE_ENCODER_MODEL_URL`]s
+/// Herkunft in `apx-ai::people`s Moduldoku — **nicht in dieser Sitzung
+/// erreichbar/verifiziert**, `dlib.net` ist von dieser Entwicklungs-
+/// Sandbox aus blockiert, siehe `apx-ai::people`s Moduldoku) und
+/// hinterlegt beide Pfade in den Einstellungen. **Keine Hash-Prüfung**
+/// — dieselbe ehrliche Lücke wie beim LaMa-Modell oben, aus demselben
+/// Grund (kein erreichbarer, verifizierbarer Hash in dieser Sitzung).
+#[tauri::command]
+pub async fn download_people_models(state: State<'_, AppState>) -> Result<(), String> {
+    let dest_dir = state.paths.models_dir();
+    std::fs::create_dir_all(&dest_dir).map_err(|err| err.to_string())?;
+    let landmark_path = dest_dir.join("shape_predictor_5_face_landmarks.dat");
+    let encoder_path = dest_dir.join("dlib_face_recognition_resnet_model_v1.dat");
+
+    download_and_decompress_bz2(PEOPLE_LANDMARK_MODEL_URL, &landmark_path).await?;
+    download_and_decompress_bz2(PEOPLE_ENCODER_MODEL_URL, &encoder_path).await?;
+
+    let settings_path = state.paths.settings_file();
+    let mut settings =
+        apx_core::Settings::load_or_default(&settings_path).map_err(|err| err.to_string())?;
+    settings.ai.people_landmark_model_path = Some(landmark_path.to_string_lossy().to_string());
+    settings.ai.people_encoder_model_path = Some(encoder_path.to_string_lossy().to_string());
+    settings.save(&settings_path).map_err(|err| err.to_string())
+}
+
+/// Entfernt beide hinterlegten Modellpfade (löscht die Dateien selbst
+/// nicht, siehe [`clear_inpainting_model_path`]s Begründung).
+#[tauri::command]
+pub fn clear_people_model_paths(state: State<'_, AppState>) -> Result<(), String> {
+    let path = state.paths.settings_file();
+    let mut settings = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    settings.ai.people_landmark_model_path = None;
+    settings.ai.people_encoder_model_path = None;
+    settings.save(&path).map_err(|err| err.to_string())
+}
+
+#[cfg(feature = "people")]
+fn build_person_embedder(
+    settings: &apx_core::AiSettings,
+) -> Result<apx_ai::people::PersonEmbedder, String> {
+    let landmark_path = settings
+        .people_landmark_model_path
+        .as_deref()
+        .filter(|p| !p.trim().is_empty())
+        .ok_or_else(|| {
+            "Kein Landmarken-Modell heruntergeladen — siehe Einstellungen → KI.".to_string()
+        })?;
+    let encoder_path = settings
+        .people_encoder_model_path
+        .as_deref()
+        .filter(|p| !p.trim().is_empty())
+        .ok_or_else(|| {
+            "Kein Embedding-Modell heruntergeladen — siehe Einstellungen → KI.".to_string()
+        })?;
+    apx_ai::people::PersonEmbedder::new(Path::new(landmark_path), Path::new(encoder_path))
+        .map_err(|err| err.to_string())
+}
+
+#[cfg(not(feature = "people"))]
+fn build_person_embedder(
+    _settings: &apx_core::AiSettings,
+) -> Result<std::convert::Infallible, String> {
+    Err(
+        "Diese Aperture-X-Build wurde ohne echte Personen-Wiedererkennung kompiliert (Cargo-Feature \"people\" fehlt — libdlib/libblas/liblapack sind nicht in jeder Umgebung installiert)."
+            .to_string(),
+    )
+}
+
+#[cfg(feature = "people")]
+fn detect_faces_with_embedder(
+    embedder: &apx_ai::people::PersonEmbedder,
+    img: &image::RgbImage,
+) -> Result<Vec<(apx_catalog::FaceRect, Vec<f64>)>, String> {
+    let detected = embedder
+        .detect_and_embed(img.as_raw(), img.width(), img.height())
+        .map_err(|err| err.to_string())?;
+    Ok(detected
+        .into_iter()
+        .map(|face| {
+            (
+                (face.left, face.top, face.right, face.bottom),
+                face.embedding,
+            )
+        })
+        .collect())
+}
+
+#[cfg(not(feature = "people"))]
+fn detect_faces_with_embedder(
+    embedder: &std::convert::Infallible,
+    _img: &image::RgbImage,
+) -> Result<Vec<(apx_catalog::FaceRect, Vec<f64>)>, String> {
+    match *embedder {}
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FaceDetectionDto {
+    pub id: String,
+    pub photo_id: String,
+    pub person_id: Option<String>,
+    pub rect_left: i64,
+    pub rect_top: i64,
+    pub rect_right: i64,
+    pub rect_bottom: i64,
+}
+
+impl From<apx_catalog::FaceDetection> for FaceDetectionDto {
+    fn from(face: apx_catalog::FaceDetection) -> Self {
+        Self {
+            id: face.id.to_string(),
+            photo_id: face.photo_id.to_string(),
+            person_id: face.person_id.map(|id| id.to_string()),
+            rect_left: face.rect_left,
+            rect_top: face.rect_top,
+            rect_right: face.rect_right,
+            rect_bottom: face.rect_bottom,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PersonDto {
+    pub id: String,
+    pub name: Option<String>,
+    pub cover_face_id: Option<String>,
+}
+
+impl From<apx_catalog::Person> for PersonDto {
+    fn from(person: apx_catalog::Person) -> Self {
+        Self {
+            id: person.id.to_string(),
+            name: person.name,
+            cover_face_id: person.cover_face_id.map(|id| id.to_string()),
+        }
+    }
+}
+
+/// Erkennt alle Gesichter in `photo_id`s bereits gerenderter Standard-
+/// Vorschau (`apx_catalog::PreviewLevel::Standard` — dieselbe
+/// Auflösungsbegrenzung wie jede andere KI-Analyse in diesem Projekt),
+/// speichert sie (ersetzt frühere Erkennungen desselben Fotos) und
+/// ordnet neue Gesichter automatisch bereits benannten Personen zu, wenn
+/// deren Embedding-Abstand unter der Schwelle liegt (siehe
+/// `apx_catalog::Catalog::save_face_detections`s Moduldoku).
+#[tauri::command]
+pub fn detect_faces_for_photo(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<Vec<FaceDetectionDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let embedder = build_person_embedder(&settings.ai)?;
+
+    let preview = state
+        .catalog
+        .get_preview(photo_id, apx_catalog::PreviewLevel::Standard)
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| {
+            "Keine Vorschau für dieses Foto vorhanden — zuerst öffnen/entwickeln.".to_string()
+        })?;
+    let img = image::open(&preview.path)
+        .map_err(|err| format!("Vorschau konnte nicht gelesen werden: {err}"))?
+        .to_rgb8();
+
+    let detections = detect_faces_with_embedder(&embedder, &img)?;
+
+    let saved = state
+        .catalog
+        .save_face_detections(photo_id, &detections)
+        .map_err(|err| err.to_string())?;
+    Ok(saved.into_iter().map(FaceDetectionDto::from).collect())
+}
+
+#[tauri::command]
+pub fn list_faces_for_photo(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<Vec<FaceDetectionDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let faces = state
+        .catalog
+        .list_faces_for_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    Ok(faces.into_iter().map(FaceDetectionDto::from).collect())
+}
+
+#[tauri::command]
+pub fn list_people(state: State<'_, AppState>) -> Result<Vec<PersonDto>, String> {
+    let people = state.catalog.list_people().map_err(|err| err.to_string())?;
+    Ok(people.into_iter().map(PersonDto::from).collect())
+}
+
+/// Alle Fotos, die mindestens ein `person_id` zugeordnetes Gesicht
+/// enthalten — nach Dateiname sortiert wie andere Foto-Listen in diesem
+/// Projekt, doppelte Fotos (mehrere Gesichter derselben Person auf einem
+/// Foto) werden herausgefiltert.
+#[tauri::command]
+pub fn list_photos_for_person(
+    state: State<'_, AppState>,
+    person_id: String,
+) -> Result<Vec<PhotoDto>, String> {
+    let person_id: apx_core::PersonId = person_id
+        .parse()
+        .map_err(|_| "Ungültige Personen-ID".to_string())?;
+    let faces = state
+        .catalog
+        .list_faces_for_person(person_id)
+        .map_err(|err| err.to_string())?;
+    let mut seen = std::collections::HashSet::new();
+    let mut photos = Vec::new();
+    for face in faces {
+        if !seen.insert(face.photo_id) {
+            continue;
+        }
+        if let Ok(photo) = state.catalog.get_photo(face.photo_id) {
+            photos.push(PhotoDto::from(photo));
+        }
+    }
+    photos.sort_by(|a, b| a.filename.cmp(&b.filename));
+    Ok(photos)
+}
+
+#[tauri::command]
+pub fn create_person(state: State<'_, AppState>, name: Option<String>) -> Result<String, String> {
+    let id = state
+        .catalog
+        .create_person(name.as_deref().filter(|n| !n.trim().is_empty()))
+        .map_err(|err| err.to_string())?;
+    Ok(id.to_string())
+}
+
+#[tauri::command]
+pub fn rename_person(
+    state: State<'_, AppState>,
+    person_id: String,
+    name: Option<String>,
+) -> Result<(), String> {
+    let person_id: apx_core::PersonId = person_id
+        .parse()
+        .map_err(|_| "Ungültige Personen-ID".to_string())?;
+    state
+        .catalog
+        .rename_person(person_id, name.as_deref().filter(|n| !n.trim().is_empty()))
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn delete_person(state: State<'_, AppState>, person_id: String) -> Result<(), String> {
+    let person_id: apx_core::PersonId = person_id
+        .parse()
+        .map_err(|_| "Ungültige Personen-ID".to_string())?;
+    state
+        .catalog
+        .delete_person(person_id)
+        .map_err(|err| err.to_string())
+}
+
+/// Ordnet ein Gesicht manuell einer Person zu — `person_id: None` legt
+/// eine neue, noch unbenannte Person an und ordnet das Gesicht dieser
+/// zu (derselbe Ablauf wie „Als neue Person markieren" in Adobe
+/// Lightroom Classics Personenansicht).
+#[tauri::command]
+pub fn assign_face_to_person(
+    state: State<'_, AppState>,
+    face_id: String,
+    person_id: Option<String>,
+) -> Result<String, String> {
+    let face_id: apx_core::FaceDetectionId = face_id
+        .parse()
+        .map_err(|_| "Ungültige Gesichts-ID".to_string())?;
+    let person_id = match person_id {
+        Some(id) => id
+            .parse()
+            .map_err(|_| "Ungültige Personen-ID".to_string())?,
+        None => state
+            .catalog
+            .create_person(None)
+            .map_err(|err| err.to_string())?,
+    };
+    state
+        .catalog
+        .assign_face_to_person(face_id, person_id)
+        .map_err(|err| err.to_string())?;
+    Ok(person_id.to_string())
+}
+
+#[tauri::command]
+pub fn unassign_face(state: State<'_, AppState>, face_id: String) -> Result<(), String> {
+    let face_id: apx_core::FaceDetectionId = face_id
+        .parse()
+        .map_err(|_| "Ungültige Gesichts-ID".to_string())?;
+    state
+        .catalog
+        .unassign_face(face_id)
+        .map_err(|err| err.to_string())
 }
 
 // ---- UI: Einstellungen (Phase 10 Schritt 1) --------------------------------
@@ -4296,6 +4966,169 @@ pub fn catalog_statistics(state: State<'_, AppState>) -> Result<CatalogStatistic
         .map_err(|err| err.to_string())
 }
 
+// ---- Mehrere Kataloge + Katalog-Wartung (Phase 13 Schritt 6, siehe
+// DECISIONS.md ADR-0040-Nachtrag IV) -----------------------------------
+//
+// **Kein Hot-Swap der offenen Katalogverbindung im laufenden Prozess:**
+// `AppState::catalog` ist ein `Arc<Catalog>`, von dem praktisch jeder
+// Command in dieser Datei eine Kopie hält oder direkt referenziert — ein
+// echtes Austauschen der Verbindung würde entweder jeden dieser
+// Zugriffe hinter ein zusätzliches Lock verlegen (invasiv, hohes
+// Fehlerrisiko quer durch die ganze Datei) oder den `Arc` selbst
+// austauschbar machen (bringt dieselbe Umbau-Größe). Stattdessen exakt
+// dieselbe UX wie Adobe Lightroom Classics eigener Katalogwechsel:
+// „Diese Änderung erfordert einen Neustart" — Wechseln/Neuanlegen
+// speichert den Zielpfad in den Einstellungen und startet die App über
+// `AppHandle::request_restart` neu, die beim nächsten Start (siehe
+// `main.rs`) automatisch den neuen Pfad öffnet.
+
+/// Informationen zum aktuell geöffneten Katalog — für eine
+/// "Katalog-Informationen"-Anzeige, ergänzend zu [`catalog_statistics`].
+#[derive(Debug, Clone, Serialize)]
+pub struct CatalogInfoDto {
+    pub path: String,
+    /// `None`, wenn die Dateigröße nicht ermittelbar ist (sollte für den
+    /// aktuell offenen Katalog praktisch nie vorkommen).
+    pub file_size_bytes: Option<u64>,
+}
+
+#[tauri::command]
+pub fn get_active_catalog_info(state: State<'_, AppState>) -> CatalogInfoDto {
+    CatalogInfoDto {
+        path: state.catalog_path.display().to_string(),
+        file_size_bytes: std::fs::metadata(&state.catalog_path)
+            .map(|meta| meta.len())
+            .ok(),
+    }
+}
+
+/// Ein Eintrag der "Zuletzt geöffnet"-Liste (`Settings::catalog::
+/// recent_catalogs`) — `exists`/`file_size_bytes` live vom Dateisystem
+/// abgefragt statt in den Einstellungen mitgeführt, damit ein seit dem
+/// letzten Öffnen verändertes/gelöschtes/wieder aufgetauchtes Netzlaufwerk
+/// sich sofort korrekt widerspiegelt.
+#[derive(Debug, Clone, Serialize)]
+pub struct RecentCatalogDto {
+    pub path: String,
+    pub file_name: String,
+    pub exists: bool,
+    pub is_current: bool,
+    pub file_size_bytes: Option<u64>,
+}
+
+#[tauri::command]
+pub fn list_recent_catalogs(state: State<'_, AppState>) -> Result<Vec<RecentCatalogDto>, String> {
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    Ok(settings
+        .catalog
+        .recent_catalogs
+        .into_iter()
+        .map(|path| {
+            let path_buf = PathBuf::from(&path);
+            let metadata = std::fs::metadata(&path_buf).ok();
+            RecentCatalogDto {
+                file_name: path_buf
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.clone()),
+                exists: metadata.is_some(),
+                is_current: path_buf == state.catalog_path,
+                file_size_bytes: metadata.map(|meta| meta.len()),
+                path,
+            }
+        })
+        .collect())
+}
+
+/// Öffnet `path` kurz zur Prüfung (das lässt bei einer bestehenden
+/// fremden, nicht-Aperture-X-SQLite-Datei den Wechsel ehrlich mit einem
+/// echten SQL-Fehler scheitern, statt sie erst beim nächsten Start
+/// kaputtzumachen), trägt ihn dann als zuletzt geöffneten Katalog ein und
+/// startet die App neu.
+fn persist_catalog_choice_and_restart(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    path: &str,
+) -> Result<(), String> {
+    apx_catalog::Catalog::open(Path::new(path)).map_err(|err| err.to_string())?;
+
+    let settings_path = state.paths.settings_file();
+    let mut settings =
+        apx_core::Settings::load_or_default(&settings_path).map_err(|err| err.to_string())?;
+    settings.catalog.record_opened(path);
+    settings
+        .save(&settings_path)
+        .map_err(|err| err.to_string())?;
+
+    app.request_restart();
+    Ok(())
+}
+
+/// Legt einen neuen, leeren Katalog unter `path` an (frisches Schema per
+/// Migrationen, siehe `apx_catalog::Catalog::open`) und wechselt per
+/// Neustart zu ihm. Lehnt einen bereits existierenden Pfad ab — sonst
+/// könnte ein Nutzer versehentlich eine fremde Datei auswählen und sie
+/// überschreiben; zum Öffnen eines bestehenden Katalogs ist
+/// [`switch_active_catalog`] da.
+#[tauri::command]
+pub fn create_new_catalog(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
+    if Path::new(&path).exists() {
+        return Err(format!(
+            "'{path}' existiert bereits — zum Öffnen eines bestehenden Katalogs „Katalog öffnen…“ verwenden"
+        ));
+    }
+    persist_catalog_choice_and_restart(&app, &state, &path)
+}
+
+/// Wechselt per Neustart zu einem bestehenden Katalog unter `path`.
+#[tauri::command]
+pub fn switch_active_catalog(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
+    persist_catalog_choice_and_restart(&app, &state, &path)
+}
+
+/// Führt `PRAGMA integrity_check` auf dem aktuell geöffneten Katalog aus
+/// (siehe `apx_catalog::Catalog::integrity_check`s Doku) — leere Liste =
+/// keine Probleme gefunden.
+#[tauri::command]
+pub fn run_catalog_integrity_check(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    state
+        .catalog
+        .integrity_check()
+        .map_err(|err| err.to_string())
+}
+
+/// Führt `VACUUM` auf dem aktuell geöffneten Katalog aus (siehe
+/// `apx_catalog::Catalog::vacuum`s Doku) — gibt durch Löschungen
+/// freigewordenen Speicherplatz zurück und defragmentiert die Datei.
+#[tauri::command]
+pub fn run_catalog_optimize(state: State<'_, AppState>) -> Result<(), String> {
+    state.catalog.vacuum().map_err(|err| err.to_string())
+}
+
+/// Sichert den aktuell geöffneten Katalog nach `destination_path` (siehe
+/// `apx_catalog::Catalog::backup_to`s Doku) — der Zielpfad wird über den
+/// bereits bestehenden generischen `pick_save_file_path`-Command im
+/// Frontend ausgewählt.
+#[tauri::command]
+pub fn run_catalog_backup(
+    state: State<'_, AppState>,
+    destination_path: String,
+) -> Result<(), String> {
+    state
+        .catalog
+        .backup_to(Path::new(&destination_path))
+        .map_err(|err| err.to_string())
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct PreviewCacheStatsDto {
     pub file_count: u64,
@@ -4761,10 +5594,52 @@ pub fn stack_hdr(
     )
 }
 
-/// Panorama-Zusammenführung (`apx_stacking::panorama`) — **v1 nur
-/// Verschiebungs-Registrierung** (siehe dessen Moduldoku), jedes Foto
-/// nach dem ersten wird per Phasenkorrelation gegen das erste
-/// ausgerichtet.
+/// Versucht das echte merkmalsbasierte Homographie-Stitching
+/// (`apx_stacking::homography_stitch`, Phase 13 Schritt 5) für die ganze
+/// Bilderserie — `None`, wenn für mindestens eines der Fotos ab dem
+/// zweiten keine verlässliche Homografie gefunden wurde (zu wenige/zu
+/// unzuverlässige Merkmalsübereinstimmungen). Bewusst alles-oder-nichts
+/// für die ganze Serie statt eines Fotos mit Homografie und eines mit
+/// reiner Verschiebung gemischt auf derselben Leinwand — eine echte
+/// Mischkomposition bräuchte eine gemeinsame Canvas-Berechnung über
+/// beide Positionierungsarten hinweg, siehe `stack_panorama`s Rückfall
+/// auf die gesamte Serie stattdessen.
+fn try_homography_panorama(
+    rendered: &[(u32, u32, Vec<u8>)],
+    width: u32,
+    height: u32,
+) -> Option<(u32, u32, Vec<u8>)> {
+    let reference = rendered[0].2.as_slice();
+    let others: Vec<&[u8]> = rendered[1..]
+        .iter()
+        .map(|(_, _, px)| px.as_slice())
+        .collect();
+    let homographies = apx_stacking::homography_stitch::estimate_pairwise_homographies_rgba8(
+        reference, &others, width, height,
+    );
+    let mut images = Vec::with_capacity(rendered.len());
+    images.push(apx_stacking::homography_stitch::HomographyPositionedImage {
+        pixels: reference,
+        homography: nalgebra::Matrix3::identity(),
+    });
+    for (pixels, homography) in others.into_iter().zip(homographies) {
+        images.push(apx_stacking::homography_stitch::HomographyPositionedImage {
+            pixels,
+            homography: homography?,
+        });
+    }
+    apx_stacking::homography_stitch::stitch_homography_rgba8(&images, width, height).ok()
+}
+
+/// Panorama-Zusammenführung — versucht zuerst echtes merkmalsbasiertes
+/// Homographie-Stitching (`apx_stacking::homography_stitch`, Phase 13
+/// Schritt 5, siehe `DECISIONS.md` ADR-0040-Nachtrag III), geeignet für
+/// Freihandaufnahmen mit Rotation/Perspektive/Parallaxe. Fällt auf die
+/// einfachere reine Verschiebungs-Registrierung (`apx_stacking::
+/// panorama`, Phasenkorrelation) zurück, wenn keine verlässliche
+/// Homografie gefunden wird — z. B. bei zu wenig Bildstruktur/
+/// Überlappung für genug Merkmalsübereinstimmungen, dann aber weiterhin
+/// für reine Stativaufnahmen ohne Kamerarotation geeignet.
 #[tauri::command]
 pub fn stack_panorama(
     state: State<'_, AppState>,
@@ -4776,6 +5651,14 @@ pub fn stack_panorama(
         .first()
         .map(|(w, h, _)| (*w, *h))
         .ok_or_else(|| "keine Fotos übergeben".to_string())?;
+
+    if let Some((out_width, out_height, stitched)) =
+        try_homography_panorama(&rendered, width, height)
+    {
+        return import_stack_result_photo(
+            &state, &ids, "Panorama", "panorama", out_width, out_height, &stitched,
+        );
+    }
 
     let reference = rendered[0].2.as_slice();
     let mut offsets: Vec<(i32, i32)> = vec![(0, 0)];
@@ -5295,6 +6178,153 @@ pub async fn tether_capture(
             .ok_or_else(|| "Keine Kamera verbunden — zuerst tether_connect aufrufen".to_string())?;
         backend
             .capture_and_download(&dest_dir)
+            .map_err(|err| err.to_string())?
+    };
+
+    let (mode, rename_pattern) =
+        resolve_tether_import_settings(&state.paths, preset_name.as_deref())?;
+
+    let catalog = state.catalog.clone();
+    let cache_root = state.paths.preview_cache_dir();
+    let app_for_blocking = app.clone();
+    let dest_dir_for_blocking = dest_dir.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let events = crate::import::TauriEvents(&app_for_blocking);
+        let cancel = tokio_util::sync::CancellationToken::new();
+        crate::import::run_with_mode(
+            &events,
+            &catalog,
+            &cache_root,
+            &dest_dir_for_blocking,
+            &cancel,
+            &mode,
+            rename_pattern.as_deref(),
+        );
+    })
+    .await
+    .map_err(|err| format!("Import-Task ist abgestürzt: {err}"))?;
+
+    let content_hash = crate::import::compute_content_hash(&downloaded_path)?;
+    let photo = state
+        .catalog
+        .find_photo_by_content_hash(&content_hash)
+        .map_err(|err| err.to_string())?;
+    Ok(photo.map(PhotoDto::from))
+}
+
+// ---- Direktimport von Speicherkarte/Kamera (Phase 13 Schritt 2) -----------
+//
+// Zwei unabhängige Wege: (1) Wechseldatenträger-Erkennung per `sysinfo`
+// (reine Bequemlichkeit — der Nutzer bestätigt weiterhin per Klick, kein
+// neuer Berechtigungsrahmen), (2) bereits auf einer verbundenen Kamera
+// vorhandene Dateien über `apx_tether`s `list_camera_files`/
+// `download_camera_file` (Phase 13 Schritt 2, dieselbe Kamera-Verbindung
+// wie beim Tethering oben, hier zum Abholen bereits aufgenommener Dateien
+// statt Live-Auslösen). Beide münden im bestehenden Import-Pfad
+// (`import::run_with_mode`, Phase 3/5), unverändert.
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RemovableVolumeDto {
+    pub mount_point: String,
+    pub name: String,
+    /// `true`, wenn der Datenträger einen `DCIM`-Ordner (groß- oder
+    /// kleingeschrieben) im Wurzelverzeichnis hat — die übliche
+    /// Speicherkarten-Konvention (DCF, siehe `sysinfo`s
+    /// `is_removable()`-Grenzen: nicht jede Plattform meldet SD-Karten-
+    /// Adapter zuverlässig als Wechseldatenträger, der `DCIM`-Fund ist
+    /// deshalb das stärkere Signal). Das Frontend sortiert/markiert
+    /// danach, filtert aber nicht hart heraus — ein Wechseldatenträger
+    /// ohne `DCIM` bleibt wählbar (z. B. eine bereits sortierte Karte).
+    pub has_dcim: bool,
+}
+
+/// Listet Wechseldatenträger auf (Phase 13 Schritt 2) — reine
+/// Erkennungs-Bequemlichkeit für `ImportDialog.tsx`, ersetzt keinen
+/// bestehenden Import-Weg (der Nutzer kann weiterhin jeden Ordner manuell
+/// wählen). Läuft synchron (`sysinfo::Disks::new_with_refreshed_list` ist
+/// ein schneller, lokaler Systemaufruf, kein Netzwerk/keine große E/A).
+#[tauri::command]
+pub fn list_removable_volumes() -> Vec<RemovableVolumeDto> {
+    let disks = sysinfo::Disks::new_with_refreshed_list();
+    disks
+        .list()
+        .iter()
+        .filter(|disk| disk.is_removable())
+        .map(|disk| {
+            let mount_point = disk.mount_point().to_path_buf();
+            let has_dcim = ["DCIM", "dcim"]
+                .iter()
+                .any(|name| mount_point.join(name).is_dir());
+            RemovableVolumeDto {
+                mount_point: mount_point.to_string_lossy().to_string(),
+                name: disk.name().to_string_lossy().to_string(),
+                has_dcim,
+            }
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CameraFileEntryDto {
+    pub folder: String,
+    pub name: String,
+}
+
+impl From<apx_tether::CameraFileEntry> for CameraFileEntryDto {
+    fn from(entry: apx_tether::CameraFileEntry) -> Self {
+        Self {
+            folder: entry.folder,
+            name: entry.name,
+        }
+    }
+}
+
+/// Listet bereits aufgenommene Dateien auf der über [`tether_connect`]
+/// verbundenen Kamera (Phase 13 Schritt 2) — im Unterschied zu
+/// [`tether_capture`], das eine **neue** Aufnahme auslöst. Ein Fehler,
+/// wenn zuvor kein `tether_connect` mit erkannter Kamera lief.
+#[tauri::command]
+pub fn list_camera_files(state: State<'_, AppState>) -> Result<Vec<CameraFileEntryDto>, String> {
+    let mut guard = state
+        .tether
+        .lock()
+        .map_err(|_| "Tethering-Status ist blockiert (vergiftete Sperre)".to_string())?;
+    let backend = guard
+        .as_deref_mut()
+        .ok_or_else(|| "Keine Kamera verbunden — zuerst tether_connect aufrufen".to_string())?;
+    Ok(backend
+        .list_camera_files()
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .map(CameraFileEntryDto::from)
+        .collect())
+}
+
+/// Lädt eine per [`list_camera_files`] gefundene Datei herunter und
+/// importiert sie über den bestehenden Import-Pfad (`import::
+/// run_with_mode`, Phase 3/5) — derselbe Ablauf wie [`tether_capture`],
+/// nur mit einer bereits vorhandenen statt einer neu ausgelösten Aufnahme.
+#[tauri::command]
+pub async fn import_from_camera(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    folder: String,
+    name: String,
+    preset_name: Option<String>,
+) -> Result<Option<PhotoDto>, String> {
+    let dest_dir = state.paths.tether_download_dir();
+    let entry = apx_tether::CameraFileEntry { folder, name };
+    let downloaded_path = {
+        let mut guard = state
+            .tether
+            .lock()
+            .map_err(|_| "Tethering-Status ist blockiert (vergiftete Sperre)".to_string())?;
+        let backend = guard
+            .as_deref_mut()
+            .ok_or_else(|| "Keine Kamera verbunden — zuerst tether_connect aufrufen".to_string())?;
+        backend
+            .download_camera_file(&entry, &dest_dir)
             .map_err(|err| err.to_string())?
     };
 

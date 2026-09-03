@@ -13,12 +13,52 @@ mod protocol;
 mod reconcile;
 mod state;
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use apx_catalog::Catalog;
 use apx_core::AppPaths;
 use state::AppState;
+
+/// Sucht die ONNX-Runtime-Bibliothek für `apx_ai::inpaint::
+/// init_environment` (Phase 13 Schritt 1, siehe `DECISIONS.md` ADR-0040)
+/// — `apx-ai` nutzt `ort`s `load-dynamic`-Feature statt `download-binaries`
+/// (siehe `apx-ai/Cargo.toml`s Begründung: funktioniert überall, verlangt
+/// aber, dass die Bibliothek zur Laufzeit gefunden wird):
+/// 1. `ORT_DYLIB_PATH`, falls gesetzt und die Datei existiert — derselbe
+///    Override, den `ort` selbst dokumentiert, z. B. für Entwicklung oder
+///    diese Sandbox (siehe `apx-ai/src/inpaint.rs`s Testhilfsfunktion).
+/// 2. Eine Datei mit dem plattformüblichen Namen direkt neben der
+///    ausführbaren Datei — der vorgesehene Ort für ein künftiges
+///    Installer-Bundling (siehe `PLAN.md` Phase 10 Schritt 11).
+///
+/// **Ehrliche Lücke:** das eigentliche Bundling (die Laufzeitbibliothek
+/// tatsächlich in den Installer packen) ist noch nicht umgesetzt — ohne
+/// diesen Schritt findet ein frisch installiertes Aperture X keine
+/// Laufzeit. `None` ist deshalb ein erwarteter, kein fehlerhafter Zustand:
+/// `main()` initialisiert die ONNX-Umgebung dann einfach nicht, KI-
+/// Ausfüllen bleibt mit einer klaren Fehlermeldung aus statt abzustürzen
+/// (derselbe „fehlt halt"-Umgang wie bei einem fehlenden GPU-Adapter an
+/// anderer Stelle in diesem Projekt).
+fn find_onnx_runtime_dylib() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("ORT_DYLIB_PATH") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let filename = if cfg!(target_os = "windows") {
+        "onnxruntime.dll"
+    } else if cfg!(target_os = "macos") {
+        "libonnxruntime.dylib"
+    } else {
+        "libonnxruntime.so"
+    };
+    let candidate = exe_dir.join(filename);
+    candidate.exists().then_some(candidate)
+}
 
 /// Der einzige Hintergrund-Worker für die Export-Warteschlange (Phase 8
 /// Schritt 2, siehe `state.rs`s Moduldoku) — fragt `queue` in einer
@@ -156,10 +196,51 @@ fn main() {
     let _log_guard =
         apx_core::init_logging(paths.log_dir()).expect("Logging konnte nicht initialisiert werden");
 
-    tracing::info!(catalog = %paths.default_catalog_file().display(), "Aperture X startet");
+    // Mehrere Kataloge (Phase 13 Schritt 6, siehe `DECISIONS.md`
+    // ADR-0040-Nachtrag IV): welcher Katalog beim Start geöffnet wird,
+    // ist seit dieser Sitzung tatsächlich `settings.catalog.
+    // last_opened_catalog` (das Feld existierte bereits seit Phase 10,
+    // wurde aber nie gelesen — reine Attrappe). Fällt auf den
+    // Standard-Katalog zurück, wenn kein Pfad hinterlegt ist ODER das
+    // Öffnen scheitert (Datei verschoben/gelöscht seit dem letzten
+    // Start) — ein Absturz beim Start wegen eines veralteten Pfads wäre
+    // schlimmer als eine stille, ehrliche Rückkehr zum Standardkatalog.
+    let startup_settings = apx_core::Settings::load_or_default(&paths.settings_file())
+        .unwrap_or_else(|err| {
+            tracing::warn!(%err, "Einstellungen beim Start nicht lesbar, verwende Standard-Katalog");
+            apx_core::Settings::default()
+        });
+    let requested_catalog_path = startup_settings
+        .catalog
+        .last_opened_catalog
+        .as_ref()
+        .filter(|p| !p.trim().is_empty())
+        .map(std::path::PathBuf::from);
 
-    let catalog = Catalog::open(&paths.default_catalog_file())
-        .expect("Katalog konnte nicht geöffnet/angelegt werden");
+    let catalog_path = requested_catalog_path
+        .clone()
+        .unwrap_or_else(|| paths.default_catalog_file());
+    tracing::info!(catalog = %catalog_path.display(), "Aperture X startet");
+
+    // Fällt bei einem Fehler auf den Standardpfad zurück (siehe oben) —
+    // `catalog_path` muss dann ebenfalls den tatsächlich geöffneten Pfad
+    // widerspiegeln, nicht den ursprünglich angeforderten.
+    let mut catalog_path = catalog_path;
+    let catalog = Catalog::open(&catalog_path).unwrap_or_else(|err| {
+        if requested_catalog_path.is_some() {
+            tracing::warn!(
+                %err,
+                requested = %catalog_path.display(),
+                fallback = %paths.default_catalog_file().display(),
+                "hinterlegter Katalog konnte nicht geöffnet werden, verwende den Standard-Katalog"
+            );
+            catalog_path = paths.default_catalog_file();
+            Catalog::open(&catalog_path)
+                .expect("Standard-Katalog konnte nicht geöffnet/angelegt werden")
+        } else {
+            panic!("Katalog konnte nicht geöffnet/angelegt werden: {err}");
+        }
+    });
 
     // Siehe DECISIONS.md ADR-0012: schlägt sowohl der bevorzugte
     // Hardware- als auch der Software-Fallback-Adapter fehl, gibt es
@@ -169,6 +250,20 @@ fn main() {
     let pipeline = apx_pipeline::GpuContext::new_blocking()
         .expect("wgpu-Gerätekontext konnte nicht aufgebaut werden (weder Hardware- noch Software-Adapter verfügbar)");
     tracing::info!(adapter = %pipeline.adapter_info.name, backend = ?pipeline.adapter_info.backend, "wgpu-Gerätekontext bereit");
+
+    // KI-Ausfüllen (Phase 13 Schritt 1, siehe `find_onnx_runtime_dylib`s
+    // Moduldoku) — bewusst kein `expect()`: eine fehlende ONNX-Laufzeit
+    // ist ein erwarteter Zustand (noch kein Installer-Bundling), keiner,
+    // der den ganzen Programmstart verhindern sollte.
+    match find_onnx_runtime_dylib() {
+        Some(dylib) => match apx_ai::inpaint::init_environment(&dylib) {
+            Ok(()) => tracing::info!(dylib = %dylib.display(), "ONNX-Laufzeit initialisiert (KI-Ausfüllen verfügbar)"),
+            Err(err) => tracing::warn!(%err, "ONNX-Laufzeit konnte nicht initialisiert werden — KI-Ausfüllen bleibt deaktiviert"),
+        },
+        None => tracing::info!(
+            "keine ONNX-Laufzeit gefunden — KI-Ausfüllen bleibt deaktiviert (siehe find_onnx_runtime_dylib-Moduldoku)"
+        ),
+    }
 
     let builder = protocol::register(tauri::Builder::default());
 
@@ -197,6 +292,7 @@ fn main() {
         .manage(AppState {
             paths,
             catalog,
+            catalog_path,
             active_import,
             pipeline,
             tile_cache: Arc::new(apx_pipeline::tile_cache::TileCache::new()),
@@ -219,6 +315,8 @@ fn main() {
             commands::current_develop_edit,
             commands::resolve_lens_profile,
             commands::calibrate_lens_distortion,
+            commands::detect_upright_correction,
+            commands::import_dcp_profile,
             commands::undo_develop_edit,
             commands::redo_develop_edit,
             commands::list_develop_history,
@@ -249,6 +347,13 @@ fn main() {
             commands::import_xmp_sidecar_from_file,
             commands::get_photo,
             commands::catalog_statistics,
+            commands::get_active_catalog_info,
+            commands::list_recent_catalogs,
+            commands::create_new_catalog,
+            commands::switch_active_catalog,
+            commands::run_catalog_integrity_check,
+            commands::run_catalog_optimize,
+            commands::run_catalog_backup,
             commands::preview_cache_stats,
             commands::clear_preview_cache,
             commands::generate_smart_previews,
@@ -266,6 +371,9 @@ fn main() {
             commands::resolve_share_conflict,
             commands::tether_connect,
             commands::tether_capture,
+            commands::list_removable_volumes,
+            commands::list_camera_files,
+            commands::import_from_camera,
             commands::create_collection,
             commands::create_smart_collection,
             commands::move_collection_to_folder,
@@ -318,6 +426,20 @@ fn main() {
             commands::detect_sensor_spots,
             commands::get_ai_settings,
             commands::set_anthropic_api_key,
+            commands::download_inpainting_model,
+            commands::clear_inpainting_model_path,
+            commands::run_ai_inpaint,
+            commands::download_people_models,
+            commands::clear_people_model_paths,
+            commands::detect_faces_for_photo,
+            commands::list_faces_for_photo,
+            commands::list_people,
+            commands::list_photos_for_person,
+            commands::create_person,
+            commands::rename_person,
+            commands::delete_person,
+            commands::assign_face_to_person,
+            commands::unassign_face,
             commands::get_ui_settings,
             commands::set_ui_settings,
             commands::get_watched_folder_settings,

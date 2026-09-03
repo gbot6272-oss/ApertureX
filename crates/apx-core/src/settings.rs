@@ -59,7 +59,33 @@ impl Default for UiSettings {
 #[serde(default)]
 pub struct CatalogSettings {
     /// Pfad zum zuletzt geöffneten Katalog. `None` beim allerersten Start.
+    /// Seit Phase 13 Schritt 6 (siehe `DECISIONS.md` ADR-0040-Nachtrag IV)
+    /// tatsächlich von `apx-app`s `main.rs` gelesen, um beim Start den
+    /// richtigen Katalog zu öffnen — vorher ein nie gelesenes Feld.
     pub last_opened_catalog: Option<String>,
+    /// Zuletzt verwendete Katalogpfade, neuester zuerst, `MAX_RECENT_
+    /// CATALOGS` Einträge — für eine "Zuletzt geöffnet"-Liste im
+    /// Katalog-Wechsler. Enthält auch nicht mehr existierende Pfade (das
+    /// Frontend blendet sie aus/markiert sie, statt sie hier
+    /// stillschweigend zu entfernen — sonst würde ein kurzzeitig
+    /// getrenntes Netzlaufwerk den Verlaufseintrag löschen).
+    pub recent_catalogs: Vec<String>,
+}
+
+/// Obergrenze für [`CatalogSettings::recent_catalogs`].
+const MAX_RECENT_CATALOGS: usize = 10;
+
+impl CatalogSettings {
+    /// Trägt `path` als zuletzt geöffneten Katalog ein: setzt
+    /// `last_opened_catalog`, hebt `path` in `recent_catalogs` an die
+    /// erste Stelle (entfernt einen vorhandenen Eintrag zuerst statt ihn
+    /// zu duplizieren) und kappt die Liste auf [`MAX_RECENT_CATALOGS`].
+    pub fn record_opened(&mut self, path: &str) {
+        self.last_opened_catalog = Some(path.to_string());
+        self.recent_catalogs.retain(|p| p != path);
+        self.recent_catalogs.insert(0, path.to_string());
+        self.recent_catalogs.truncate(MAX_RECENT_CATALOGS);
+    }
 }
 
 /// Einstellungen für die KI-Funktionen (Phase 7, siehe `DECISIONS.md`
@@ -73,6 +99,23 @@ pub struct CatalogSettings {
 #[serde(default)]
 pub struct AiSettings {
     pub anthropic_api_key: Option<String>,
+    /// Lokaler Pfad zum heruntergeladenen LaMa-Inpainting-ONNX-Modell
+    /// (Phase 13, siehe `DECISIONS.md` ADR-0040) — `None`, solange der
+    /// Nutzer den Download nicht ausdrücklich bestätigt hat (kein
+    /// mitgeliefertes ~208-MB-Modell im Installer, derselbe Opt-in wie
+    /// der Anthropic-Schlüssel oben).
+    pub inpainting_model_path: Option<String>,
+    /// Lokale Pfade zu den beiden für echte Personen-Wiedererkennung
+    /// nötigen `dlib`-Modelldateien (Phase 13 Schritt 8, siehe
+    /// `DECISIONS.md` ADR-0040-Nachtrag VI, `apx-ai::people`s Moduldoku)
+    /// — `people_landmark_model_path` muss auf
+    /// `shape_predictor_5_face_landmarks.dat` zeigen (**nicht** die
+    /// 68-Punkte-Variante, die kommerzielle Nutzung ausschließt),
+    /// `people_encoder_model_path` auf
+    /// `dlib_face_recognition_resnet_model_v1.dat`. Beide gemeinfrei,
+    /// vom Nutzer selbst heruntergeladen, kein Bundling im Installer.
+    pub people_landmark_model_path: Option<String>,
+    pub people_encoder_model_path: Option<String>,
 }
 
 /// Einstellungen für den beobachteten Ordner (Phase 12 Schritt 7, siehe
@@ -169,6 +212,28 @@ mod tests {
 
         let loaded = Settings::load_or_default(&path).expect("Laden darf nicht scheitern");
         assert_eq!(loaded, settings);
+    }
+
+    #[test]
+    fn record_opened_moves_an_existing_entry_to_the_front_instead_of_duplicating_it() {
+        let mut settings = CatalogSettings::default();
+        settings.record_opened("/a.sqlite");
+        settings.record_opened("/b.sqlite");
+        settings.record_opened("/a.sqlite");
+        assert_eq!(settings.last_opened_catalog, Some("/a.sqlite".to_string()));
+        assert_eq!(settings.recent_catalogs, vec!["/a.sqlite", "/b.sqlite"]);
+    }
+
+    #[test]
+    fn record_opened_caps_the_recent_list_at_ten_entries() {
+        let mut settings = CatalogSettings::default();
+        for i in 0..15 {
+            settings.record_opened(&format!("/katalog-{i}.sqlite"));
+        }
+        assert_eq!(settings.recent_catalogs.len(), 10);
+        // Neuester zuerst.
+        assert_eq!(settings.recent_catalogs[0], "/katalog-14.sqlite");
+        assert_eq!(settings.recent_catalogs[9], "/katalog-5.sqlite");
     }
 
     #[test]

@@ -16,7 +16,10 @@ uuid.workspace = true
 # Kein "time"-Feature: Zeitspalten sind laut Schema INTEGER (Unix-Sekunden),
 # rusqlites eingebaute OffsetDateTime-Konvertierung würde stattdessen TEXT
 # (RFC 3339) erwarten. Die Umwandlung passiert daher manuell in models.rs.
-rusqlite = { version = "0.32", features = ["bundled"] }
+# "backup" (Phase 13 Schritt 6): echte SQLite-Online-Backup-API
+# (Connection::backup), sicher gegen die noch offene Verbindung nutzbar,
+# statt die Datei roh zu kopieren.
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 # Ab Phase 5 auch zur Laufzeit gebraucht: `presets.tags_json` wird als
 # `Vec<String>` (de-)serialisiert (siehe repository/presets.rs) — anders
 # als `edit_history.edl_json`/`presets.conditions_json`/

@@ -11,11 +11,12 @@ pub(crate) mod v4;
 pub use migrate::{from_envelope, to_envelope};
 pub use v1::{EdlV1, WhiteBalanceAdjustment};
 pub use v2::{
-    BasicAdjustments, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel,
-    ColorMixerAdjustment, ColorMixerRegion, CropRect, CurveChannel, CurvePoint, CurvesAdjustment,
-    DetailsAdjustment, EdlV2, EffectsAdjustment, GeometryAdjustment, GridOverlay, GuidedLine,
-    HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, PrimaryColorAdjustment,
-    ProcessVersion, RepairMode, RepairPoint, RepairStroke, UprightMode,
+    AiFillPatch, BasicAdjustments, CalibrationAdjustment, ColorGradingAdjustment,
+    ColorGradingWheel, ColorMixerAdjustment, ColorMixerRegion, CropRect, CurveChannel, CurvePoint,
+    CurvesAdjustment, DcpProfileData, DetailsAdjustment, EdlV2, EffectsAdjustment,
+    GeometryAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment,
+    ManualTransform, PrimaryColorAdjustment, ProcessVersion, RepairMode, RepairPoint, RepairStroke,
+    UprightMode,
 };
 pub use v3::{
     AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, BrushStroke, Mask, MaskAdjustments,

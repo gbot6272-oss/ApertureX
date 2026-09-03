@@ -96,7 +96,10 @@ jobs:
             file \
             libxdo-dev \
             libssl-dev \
-            libgphoto2-dev
+            libgphoto2-dev \
+            libdlib-dev \
+            libblas-dev \
+            liblapack-dev
 
       # Installiert automatisch die in `rust-toolchain.toml` gepinnte
       # Version (1.94.1) samt rustfmt/clippy — kein separater
@@ -154,6 +157,22 @@ jobs:
       - name: cargo test -p apx-tether --features tethering (Linux)
         if: runner.os == 'Linux'
         run: cargo test -p apx-tether --features tethering -- --nocapture
+
+      # `people`-Feature nur auf Linux (siehe oben): baut/testet `apx-ai`/
+      # `apx-app` echt gegen die installierte `libdlib` (Phase 13 Schritt 8,
+      # siehe DECISIONS.md ADR-0040-Nachtrag VI) — derselbe Aufbau wie beim
+      # `tethering`-Feature direkt darüber. Der gezielte Test in
+      # `apx-ai::people` überspringt sich selbst, wenn die Modell-Umgebungs-
+      # variablen fehlen (kein Netzwerk-Download in CI, siehe `PLAN.md`
+      # Phase 13s Verifikations-Abschnitt) — läuft hier also nur als
+      # Kompilier-/Link-Prüfung gegen die echte Systembibliothek, nicht als
+      # echte Inferenz.
+      - name: cargo clippy -p apx-ai -p apx-app --features people (Linux)
+        if: runner.os == 'Linux'
+        run: cargo clippy -p apx-ai -p apx-app --features people --all-targets -- -D warnings -D clippy::unwrap_used
+      - name: cargo test -p apx-ai --features people (Linux)
+        if: runner.os == 'Linux'
+        run: cargo test -p apx-ai --features people -- --nocapture
 
       # `--nocapture` ist hier bewusst gesetzt (nicht nur bei Fehlschlag
       # aktiv): `apx-pipeline`s `gpu_matches_cpu`-artige Tests drucken bei

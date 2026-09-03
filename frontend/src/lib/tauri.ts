@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { UprightMode } from "./edl";
 
 /**
  * Dünne, typisierte Hülle um die Tauri-Commands aus
@@ -129,13 +130,47 @@ export interface GpxTrackPointDto {
 }
 
 /** Alle Felder optional — ein leeres Objekt liefert alle Fotos (siehe
- * `apx_catalog::FilterCriteria`). */
+ * `apx_catalog::FilterCriteria`). Bleibt für die Filterleiste/
+ * Stapelverarbeitungs-Konsole bestehen (immer flach UND-verknüpft ist dort
+ * ausreichend); für intelligente Sammlungen siehe `SmartCollectionLeaf`
+ * unten (Phase 13 Schritt 7). */
 export interface FilterCriteriaDto {
   rating_at_least?: number;
   flag?: number;
   color_label?: string;
   camera_model?: string;
 }
+
+/** Blatt-Bedingung für den intelligenten-Sammlung-Regelbaum (Phase 13
+ * Schritt 7, siehe `apx_catalog::{FilterField,FilterOperator,FilterCondition}`
+ * und `DECISIONS.md` ADR-0040-Nachtrag V). `value` ist immer ein String,
+ * auch für die numerischen Felder Bewertung/Flagge — `RuleTreeEditor.tsx`
+ * nutzt ohnehin ein Texteingabefeld. */
+export type SmartCollectionField = "rating" | "flag" | "color_label" | "camera_model";
+export type SmartCollectionOperator = "at_least" | "equals" | "not_equals" | "contains";
+export interface SmartCollectionLeaf {
+  field: SmartCollectionField;
+  op: SmartCollectionOperator;
+  value: string;
+}
+
+export const SMART_COLLECTION_FIELD_OPTIONS: ReadonlyArray<{ value: SmartCollectionField; label: string }> = [
+  { value: "rating", label: "Bewertung" },
+  { value: "flag", label: "Flagge (-1/0/1)" },
+  { value: "color_label", label: "Farbmarkierung" },
+  { value: "camera_model", label: "Kameramodell" },
+];
+
+/** Nicht jeder Operator ergibt für jedes Feld Sinn — `matches` auf der
+ * Rust-Seite (`apx_catalog::FilterCondition::matches`) behandelt eine
+ * unpassende Kombination (z. B. `contains` auf `rating`) konservativ als
+ * nicht erfüllt, statt sie im UI hart zu verbieten. */
+export const SMART_COLLECTION_OPERATOR_OPTIONS: ReadonlyArray<{ value: SmartCollectionOperator; label: string }> = [
+  { value: "at_least", label: ">=" },
+  { value: "equals", label: "=" },
+  { value: "not_equals", label: "≠" },
+  { value: "contains", label: "enthält" },
+];
 
 // ---- Presets (ab Phase 5, siehe DECISIONS.md ADR-0031) --------------------
 
@@ -318,6 +353,43 @@ export function calibrateLensDistortion(lines: Array<Array<{ x: number; y: numbe
   return invoke<number>("calibrate_lens_distortion", { lines });
 }
 
+// ---- Perspektive/Upright: automatische Kantenerkennung (Phase 13 Schritt 4,
+// siehe DECISIONS.md ADR-0040-Nachtrag II) -----------------------------------
+
+export interface UprightCorrectionDto {
+  rotate_degrees: number;
+  horizontal: number;
+}
+
+/** Findet gerade Kanten im Foto (Canny + Hough) und berechnet daraus die zu
+ * `mode` passende Dreh-/Scherungskorrektur — direkt in
+ * `LensCorrectionAdjustment.manual_transform.rotate_degrees`/`.horizontal`
+ * übernehmbar. Für `mode === "Off"`/`"Guided"` liefert der Befehl nur
+ * Nullen (dort gilt der bestehende manuelle bzw. `guided_lines`-
+ * Mechanismus), lehnt sie aber nicht ab. */
+export function detectUprightCorrection(photoId: string, mode: UprightMode): Promise<UprightCorrectionDto> {
+  return invoke<UprightCorrectionDto>("detect_upright_correction", { photoId, mode });
+}
+
+// ---- Adobe-DCP-Farbprofil-Import (Phase 13 Schritt 3) ----------------------
+
+export interface DcpProfileDataDto {
+  name: string;
+  hue_divisions: number;
+  sat_divisions: number;
+  val_divisions: number;
+  hue_sat_map: Array<[number, number, number]>;
+  tone_curve: Array<[number, number]>;
+}
+
+/** Öffnet einen Datei-Dialog für eine `.dcp`-Datei und parst sie — `null`,
+ * wenn der Dialog abgebrochen wurde. Wirft bei einer strukturell
+ * ungültigen Datei oder einer ohne HueSatMap-Daten (siehe
+ * `apx_pipeline::dcp_profile`s Moduldoku). */
+export function importDcpProfile(): Promise<DcpProfileDataDto | null> {
+  return invoke<DcpProfileDataDto | null>("import_dcp_profile");
+}
+
 // ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------------
 // Anders als der lineare Verlauf oben: siehe `crates/apx-app/src/commands.rs`s
 // Moduldoku für die Abgrenzung. Kein eigener "restore"-Aufruf — die
@@ -463,10 +535,12 @@ export function createCollection(name: string, folderId?: string): Promise<strin
   return invoke<string>("create_collection", { name, folderId: folderId ?? null });
 }
 
-/** Siehe `apx_catalog::Catalog::create_smart_collection`s Moduldoku für
- * die Vereinfachung (flache UND-Verknüpfung statt verschachtelter Regeln). */
-export function createSmartCollection(name: string, folderId: string | undefined, criteria: FilterCriteriaDto): Promise<string> {
-  return invoke<string>("create_smart_collection", { name, folderId: folderId ?? null, criteria });
+/** `criteriaJson` ist der serialisierte UND/ODER-Regelbaum (siehe
+ * `SmartCollectionLeaf` oben, `apx_catalog::FilterNode`) — vom Aufrufer
+ * per `JSON.stringify` erzeugt, hier als opakes JSON durchgereicht (siehe
+ * `apx_catalog::Catalog::create_smart_collection`s Moduldoku). */
+export function createSmartCollection(name: string, folderId: string | undefined, criteriaJson: string): Promise<string> {
+  return invoke<string>("create_smart_collection", { name, folderId: folderId ?? null, criteriaJson });
 }
 
 export function moveCollectionToFolder(collectionId: string, folderId: string | null): Promise<void> {
@@ -766,6 +840,17 @@ export function detectSensorSpots(photoId: string, sensitivity: number, maxSpots
 
 export interface AiSettingsDto {
   anthropic_api_key: string | null;
+  /** `null`, solange der Nutzer den Download nicht bestätigt hat (Phase 13
+   * Schritt 1, siehe `DECISIONS.md` ADR-0040). */
+  inpainting_model_path: string | null;
+  /** `null`, solange der Nutzer den Download nicht bestätigt hat (Phase 13
+   * Schritt 8, siehe `DECISIONS.md` ADR-0040-Nachtrag VI). */
+  people_landmark_model_path: string | null;
+  people_encoder_model_path: string | null;
+  /** `false`, wenn diese Build ohne das Cargo-Feature `people` kompiliert
+   * wurde — `PeopleView.tsx` zeigt dann einen Hinweis statt der Download-/
+   * Erkennungs-Aktionen. */
+  people_feature_compiled: boolean;
 }
 
 export function getAiSettings(): Promise<AiSettingsDto> {
@@ -775,6 +860,116 @@ export function getAiSettings(): Promise<AiSettingsDto> {
 /** `null`/leerer String löscht den hinterlegten Schlüssel. */
 export function setAnthropicApiKey(apiKey: string | null): Promise<void> {
   return invoke<void>("set_anthropic_api_key", { apiKey: apiKey || null });
+}
+
+// ---- KI: Ausfüllen (LaMa-Inpainting, Phase 13 Schritt 1) -------------------
+
+/** Lädt das ~208-MB-Modell herunter (Apache-2.0, `Carve/LaMa-ONNX`, siehe
+ * `DECISIONS.md` ADR-0040) — löst erst nach ausdrücklicher Nutzerbestätigung
+ * (Einstellungsdialog-Button). Liefert den lokalen Zielpfad zurück. */
+export function downloadInpaintingModel(): Promise<string> {
+  return invoke<string>("download_inpainting_model");
+}
+
+/** Entfernt nur den hinterlegten Pfad — löscht die heruntergeladene Datei
+ * selbst nicht (der Nutzer kann sie manuell entfernen). */
+export function clearInpaintingModelPath(): Promise<void> {
+  return invoke<void>("clear_inpainting_model_path");
+}
+
+// ---- KI: Echte Personen-Wiedererkennung (Phase 13 Schritt 8) ---------------
+
+export interface FaceDetectionDto {
+  id: string;
+  photo_id: string;
+  person_id: string | null;
+  rect_left: number;
+  rect_top: number;
+  rect_right: number;
+  rect_bottom: number;
+}
+
+export interface PersonDto {
+  id: string;
+  name: string | null;
+  cover_face_id: string | null;
+}
+
+/** Lädt beide gemeinfreien `dlib`-Modelldateien herunter (siehe
+ * `DECISIONS.md` ADR-0040-Nachtrag VI) — löst erst nach ausdrücklicher
+ * Nutzerbestätigung. */
+export function downloadPeopleModels(): Promise<void> {
+  return invoke<void>("download_people_models");
+}
+
+export function clearPeopleModelPaths(): Promise<void> {
+  return invoke<void>("clear_people_model_paths");
+}
+
+/** Erkennt alle Gesichter in `photoId`s Vorschau, speichert sie (ersetzt
+ * frühere Erkennungen desselben Fotos) und ordnet neue Gesichter
+ * automatisch bereits benannten Personen zu, wenn ähnlich genug. */
+export function detectFacesForPhoto(photoId: string): Promise<FaceDetectionDto[]> {
+  return invoke<FaceDetectionDto[]>("detect_faces_for_photo", { photoId });
+}
+
+export function listFacesForPhoto(photoId: string): Promise<FaceDetectionDto[]> {
+  return invoke<FaceDetectionDto[]>("list_faces_for_photo", { photoId });
+}
+
+export function listPeople(): Promise<PersonDto[]> {
+  return invoke<PersonDto[]>("list_people");
+}
+
+export function listPhotosForPerson(personId: string): Promise<PhotoDto[]> {
+  return invoke<PhotoDto[]>("list_photos_for_person", { personId });
+}
+
+export function createPerson(name: string | null): Promise<string> {
+  return invoke<string>("create_person", { name });
+}
+
+export function renamePerson(personId: string, name: string | null): Promise<void> {
+  return invoke<void>("rename_person", { personId, name });
+}
+
+export function deletePerson(personId: string): Promise<void> {
+  return invoke<void>("delete_person", { personId });
+}
+
+/** `personId: null` legt eine neue, unbenannte Person an und ordnet das
+ * Gesicht dieser zu — gibt die (ggf. neu angelegte) Personen-ID zurück. */
+export function assignFaceToPerson(faceId: string, personId: string | null): Promise<string> {
+  return invoke<string>("assign_face_to_person", { faceId, personId });
+}
+
+export function unassignFace(faceId: string): Promise<void> {
+  return invoke<void>("unassign_face", { faceId });
+}
+
+export interface AiFillPatchDto {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  bitmap_width: number;
+  bitmap_height: number;
+  /** Base64-kodiertes interleaved-RGB-`u8`-Ergebnis. */
+  pixels_base64: string;
+}
+
+/** Führt echte LaMa-Inferenz für ein normiertes Rechteck aus (`x`/`y`/
+ * `width`/`height`, `0.0..=1.0`) — braucht ein zuvor heruntergeladenes
+ * Modell (siehe [`downloadInpaintingModel`]), scheitert sonst mit einer
+ * klaren Fehlermeldung. */
+export function runAiInpaint(
+  photoId: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): Promise<AiFillPatchDto> {
+  return invoke<AiFillPatchDto>("run_ai_inpaint", { photoId, x, y, width, height });
 }
 
 // ---- UI-Einstellungen (Phase 10 Schritt 1) --------------------------------
@@ -964,6 +1159,60 @@ export function pickFilePath(filterName: string, extensions: string[]): Promise<
  * zurück, `null` wenn abgebrochen. */
 export function pickSaveFilePath(filterName: string, extensions: string[], defaultFileName: string): Promise<string | null> {
   return invoke<string | null>("pick_save_file_path", { filterName, extensions, defaultFileName });
+}
+
+// ---- Mehrere Kataloge + Katalog-Wartung (Phase 13 Schritt 6, siehe
+// DECISIONS.md ADR-0040-Nachtrag IV) -----------------------------------
+
+export interface CatalogInfoDto {
+  path: string;
+  file_size_bytes: number | null;
+}
+
+export function getActiveCatalogInfo(): Promise<CatalogInfoDto> {
+  return invoke<CatalogInfoDto>("get_active_catalog_info");
+}
+
+export interface RecentCatalogDto {
+  path: string;
+  file_name: string;
+  exists: boolean;
+  is_current: boolean;
+  file_size_bytes: number | null;
+}
+
+export function listRecentCatalogs(): Promise<RecentCatalogDto[]> {
+  return invoke<RecentCatalogDto[]>("list_recent_catalogs");
+}
+
+/** Legt unter `path` einen neuen, leeren Katalog an und startet die App
+ * neu, um ihn zu öffnen (kein Hot-Swap im laufenden Prozess, siehe
+ * `apx-app::commands`s Moduldoku) — die Zusage kommt praktisch nie beim
+ * Aufrufer an, da der Prozess kurz danach neu startet. */
+export function createNewCatalog(path: string): Promise<void> {
+  return invoke<void>("create_new_catalog", { path });
+}
+
+/** Wechselt per Neustart zu einem bestehenden Katalog unter `path`. */
+export function switchActiveCatalog(path: string): Promise<void> {
+  return invoke<void>("switch_active_catalog", { path });
+}
+
+/** `PRAGMA integrity_check` auf dem aktuell geöffneten Katalog — leere
+ * Liste = keine Probleme gefunden. */
+export function runCatalogIntegrityCheck(): Promise<string[]> {
+  return invoke<string[]>("run_catalog_integrity_check");
+}
+
+/** `VACUUM` auf dem aktuell geöffneten Katalog. */
+export function runCatalogOptimize(): Promise<void> {
+  return invoke<void>("run_catalog_optimize");
+}
+
+/** Sichert den aktuell geöffneten Katalog nach `destinationPath` (per
+ * {@link pickSaveFilePath} ausgewählt). */
+export function runCatalogBackup(destinationPath: string): Promise<void> {
+  return invoke<void>("run_catalog_backup", { destinationPath });
 }
 
 // ---- Drucken (Phase 8 Schritt 3) -------------------------------------------
@@ -1408,4 +1657,43 @@ export function tetherConnect(): Promise<CameraInfoDto | null> {
  * (Phase 3/5). `null`, wenn die heruntergeladene Datei nicht neu war. */
 export function tetherCapture(presetName?: string): Promise<PhotoDto | null> {
   return invoke<PhotoDto | null>("tether_capture", { presetName: presetName ?? null });
+}
+
+// ---- Direktimport von Speicherkarte/Kamera (Phase 13 Schritt 2) -----------
+
+export interface RemovableVolumeDto {
+  mount_point: string;
+  name: string;
+  /** `true`, wenn ein `DCIM`-Ordner gefunden wurde — das stärkere Signal
+   * für „Speicherkarte" als `is_removable()` allein (siehe Backend-Doku). */
+  has_dcim: boolean;
+}
+
+/** Reine Erkennungs-Bequemlichkeit — der Nutzer bestätigt weiterhin per
+ * Klick, ersetzt keinen bestehenden Import-Weg. */
+export function listRemovableVolumes(): Promise<RemovableVolumeDto[]> {
+  return invoke<RemovableVolumeDto[]>("list_removable_volumes");
+}
+
+export interface CameraFileEntryDto {
+  folder: string;
+  name: string;
+}
+
+/** Listet bereits aufgenommene Dateien auf der über [`tetherConnect`]
+ * verbundenen Kamera — im Unterschied zu [`tetherCapture`], das eine neue
+ * Aufnahme auslöst. */
+export function listCameraFiles(): Promise<CameraFileEntryDto[]> {
+  return invoke<CameraFileEntryDto[]>("list_camera_files");
+}
+
+/** Lädt eine per [`listCameraFiles`] gefundene Datei herunter und
+ * importiert sie über den bestehenden Import-Pfad — optional mit einem
+ * benannten Import-Preset (Phase 3/5). */
+export function importFromCamera(
+  folder: string,
+  name: string,
+  presetName?: string,
+): Promise<PhotoDto | null> {
+  return invoke<PhotoDto | null>("import_from_camera", { folder, name, presetName: presetName ?? null });
 }

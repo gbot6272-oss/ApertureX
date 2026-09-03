@@ -38,6 +38,13 @@ pub enum PipelineError {
     /// Anfrage für dasselbe Foto sie überholt hat).
     #[error("Abgebrochen: {0}")]
     Cancelled(String),
+
+    /// Eine `.dcp`-Kameraprofildatei (Phase 13 Schritt 3, siehe
+    /// `DECISIONS.md` ADR-0040-Nachtrag) konnte nicht gelesen werden — kein
+    /// gültiges TIFF/IFD-Format oder fehlendes Pflichtfeld
+    /// (`ColorMatrix1`).
+    #[error("DCP-Farbprofil: {message}")]
+    DcpProfile { message: String },
 }
 
 impl From<PipelineError> for AppError {

@@ -82,6 +82,61 @@ pub(crate) fn hsl_to_rgb(h_degrees: f32, s: f32, l: f32) -> (f32, f32, f32) {
     )
 }
 
+/// `r`/`g`/`b` in `0.0..=1.0` → `(Farbton in 0.0..6.0, Sättigung, Wert)` —
+/// **HSV**, nicht HSL (siehe [`rgb_to_hsl`] für die andernorts in diesem
+/// Projekt genutzte Variante). Der Farbton läuft bewusst `0.0..6.0` statt
+/// in Grad — dieselbe „Hexcone"-Parametrisierung, die Adobes DNG-SDK
+/// selbst für seine `ProfileHueSatMapData`-Tabellen nutzt (siehe
+/// [`super::super::dcp_profile`]s Moduldoku); diese Funktion ist eine
+/// direkte Portierung von `DNG_RGBtoHSV` (`dng_utils.h`, Adobe DNG SDK,
+/// BSD-artig lizenziert, gegen den echten Quelltext auf GitHub verifiziert
+/// — nicht aus dem Gedächtnis nachgebaut) statt der andernorts in diesem
+/// Projekt üblichen HSL-Formel, weil Phase 13 Schritt 3s DCP-HueSatMap-
+/// Anwendung exakt in diesem Farbraum/dieser Parametrisierung arbeiten
+/// muss, um mit echten Adobe-Profilen numerisch übereinzustimmen.
+pub(crate) fn rgb_to_hsv6(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let v = r.max(g).max(b);
+    let gap = v - r.min(g).min(b);
+    if gap <= 0.0 {
+        return (0.0, 0.0, v);
+    }
+    let h = if r == v {
+        let h = (g - b) / gap;
+        if h < 0.0 {
+            h + 6.0
+        } else {
+            h
+        }
+    } else if g == v {
+        2.0 + (b - r) / gap
+    } else {
+        4.0 + (r - g) / gap
+    };
+    (h, gap / v, v)
+}
+
+/// Kehrfunktion zu [`rgb_to_hsv6`] — ebenfalls eine direkte Portierung
+/// von Adobes `DNG_HSVtoRGB`.
+pub(crate) fn hsv6_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
+    if s <= 0.0 {
+        return (v, v, v);
+    }
+    let h = h.rem_euclid(6.0);
+    let i = h as i32;
+    let f = h - i as f32;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - s * f);
+    let t = v * (1.0 - s * (1.0 - f));
+    match i {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,5 +179,25 @@ mod tests {
     #[test]
     fn circular_distance_wraps_around_360() {
         assert!((circular_distance_degrees(5.0, 355.0) - 10.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn hsv6_to_rgb_and_back_roundtrips() {
+        for hue in [0.0, 1.5, 3.0, 4.5, 5.9] {
+            let (r, g, b) = hsv6_to_rgb(hue, 0.6, 0.4);
+            let (h2, s2, v2) = rgb_to_hsv6(r, g, b);
+            let hue_dist = (hue - h2).abs().min(6.0 - (hue - h2).abs());
+            assert!(hue_dist < 0.01, "hue={hue} h2={h2}");
+            assert!((s2 - 0.6).abs() < 1e-3, "s2={s2}");
+            assert!((v2 - 0.4).abs() < 1e-3, "v2={v2}");
+        }
+    }
+
+    #[test]
+    fn pure_red_is_hsv6_hue_zero_full_saturation_and_value() {
+        let (h, s, v) = rgb_to_hsv6(1.0, 0.0, 0.0);
+        assert!((h - 0.0).abs() < 1e-3);
+        assert!((s - 1.0).abs() < 1e-3);
+        assert!((v - 1.0).abs() < 1e-3);
     }
 }

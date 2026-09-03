@@ -509,8 +509,48 @@ pub struct CalibrationAdjustment {
     pub blue_primary: PrimaryColorAdjustment,
     /// Name eines Profils in der kleinen eingebauten Kameraprofil-Liste
     /// (kein DCP-Import, siehe `DECISIONS.md` ADR-0028), `None` =
-    /// Standardprofil.
+    /// Standardprofil. Ignoriert, solange [`Self::dcp_profile`] gesetzt
+    /// ist (echte Daten haben Vorrang vor dem Platzhalter-Bias).
     pub camera_profile: Option<String>,
+    /// Aus einer importierten `.dcp`-Datei einmalig ausgelesene
+    /// Profildaten (Phase 13 Schritt 3, siehe `DECISIONS.md` ADR-0040-Nachtrag) —
+    /// dasselbe „einmal auflösen, als reine Zahlen im EDL ablegen"-Muster
+    /// wie `AiFillPatch` (Phase 13 Schritt 1): die Pipeline öffnet nie
+    /// selbst eine Datei. `#[serde(default)]` statt Schema-Version-
+    /// Sprung, additiv wie `BrushStroke::auto_mask`.
+    #[serde(default)]
+    pub dcp_profile: Option<DcpProfileData>,
+}
+
+/// Aus einer Adobe-`.dcp`-Datei gelesene Farbprofildaten (Phase 13
+/// Schritt 3, siehe `DECISIONS.md` ADR-0040-Nachtrag und `apx_pipeline::
+/// dcp_profile`s Moduldoku für den Parser). Enthält nur, was `stages::
+/// calibration` tatsächlich anwendet — die echten HueSatMap-/
+/// Tonwertkurven-„Look"-Daten, dieselbe Art Anpassung, die
+/// [`CalibrationAdjustment::camera_profile`]s Handliste bisher nur grob
+/// nachahmte.
+///
+/// **Bewusst NICHT enthalten:** `ColorMatrix1`/`ForwardMatrix1` &c. — der
+/// Parser (`dcp_profile::DcpProfile`) liest sie zwar (siehe dessen
+/// Moduldoku), aber eine echte Farbmatrix-Umrechnung ist Aufgabe des
+/// Rohdaten-Decoders (`apx-raw`s `cam_to_srgb`-Matrix, bereits beim
+/// Dekodieren angewendet), nicht dieser Entwickeln-Stufe — dasselbe
+/// Scope-Argument wie `gamut-dng`s eigene „Farbwiedergabe ist Aufgabe
+/// eines Rohdaten-Prozessors"-Grenze.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DcpProfileData {
+    pub name: String,
+    pub hue_divisions: u32,
+    pub sat_divisions: u32,
+    pub val_divisions: u32,
+    /// `hue_divisions * sat_divisions * val_divisions` Einträge
+    /// `[hue_shift_degrees, sat_scale, val_scale]`, in Wert-Farbton-
+    /// Sättigung-Reihenfolge (außen nach innen) — dieselbe Anordnung wie
+    /// Adobes `dng_hue_sat_map` (siehe Parser-Moduldoku).
+    pub hue_sat_map: Vec<[f32; 3]>,
+    /// Tonwertkurven-Stützpunkte `[x, y]`, beide `0.0..=1.0`, aufsteigend
+    /// sortiert — leer, wenn die Datei keine `ProfileToneCurve` enthält.
+    pub tone_curve: Vec<[f32; 2]>,
 }
 
 impl CalibrationAdjustment {
@@ -521,6 +561,7 @@ impl CalibrationAdjustment {
         green_primary: PrimaryColorAdjustment::NEUTRAL,
         blue_primary: PrimaryColorAdjustment::NEUTRAL,
         camera_profile: None,
+        dcp_profile: None,
     };
 
     pub fn neutral() -> Self {
@@ -600,6 +641,54 @@ pub enum RepairMode {
     /// dabei ignoriert. Läuft als vereinfachtes PatchMatch **CPU-only**
     /// (siehe `stages::repair`s Moduldoku).
     ContentAwareFill,
+    /// Echtes KI-Ausfüllen per LaMa-Inferenz (Phase 13 Schritt 1, siehe
+    /// `DECISIONS.md` ADR-0040) — wie `ContentAwareFill` ignoriert dieser
+    /// Modus `source` (kein manueller Quellpunkt), liefert das Ergebnis
+    /// aber nicht live aus einer CPU-Heuristik, sondern aus einem einmalig
+    /// vorab berechneten [`RepairStroke::ai_fill`]-Patch (neuronale
+    /// Inferenz ist zu teuer für jeden Regler-Tick, siehe `stages::repair`s
+    /// Moduldoku). Ohne gesetztes `ai_fill` (z. B. direkt nach dem Malen,
+    /// bevor der Nutzer „Anwenden" bestätigt hat) bleibt der Strich ein
+    /// No-Op — derselbe „noch nicht berechnet"-Zustand wie eine frische
+    /// `MaskGeometry::AiGenerated` vor ihrem ersten Lauf.
+    AiInpaint,
+}
+
+/// Ergebnis eines einmaligen KI-Ausfüllen-Laufs (Phase 13 Schritt 1, siehe
+/// `DECISIONS.md` ADR-0040) — wie `edl::v3::MaskGeometry::AiGenerated` eine
+/// per `apx-ai` einmalig vorab berechnete Rasterfläche, die die Pipeline
+/// bei jedem Render-Tick nur noch günstig wieder einsetzt, statt die
+/// Inferenz erneut zu fahren.
+///
+/// Die Patch-**Position** (`x`/`y`/`width`/`height`) ist normiert
+/// (`0.0..=1.0`, Bruchteil der Bildbreite/-höhe) — dieselbe
+/// auflösungsunabhängige Konvention wie `RepairPoint`/`RepairStroke`s
+/// `radius`. Die gespeicherte `pixels`-Bitmap selbst hat dagegen ihre
+/// **eigene**, von der Analyse-Auflösung
+/// (`apx_ai::segmentation::ANALYSIS_MAX_EDGE`, derselbe Cap wie jede
+/// andere KI-Bildanalyse dieses Projekts) vorgegebene feste Größe
+/// (`bitmap_width`/`bitmap_height`) —
+/// kann von der tatsächlichen Render-Auflösung abweichen (Vorschau vs.
+/// Vollbildexport). `stages::repair` skaliert sie beim Einsetzen bilinear
+/// auf die Pixelgröße des normierten Zielrechtecks hoch — derselbe
+/// Kompromiss wie bei `MaskGeometry::AiGenerated`, aus demselben Grund
+/// (kein Re-Run der teuren Inferenz bei jedem Regler-Tick oder jeder
+/// Export-Auflösung).
+///
+/// `pixels` ist interleaved RGB (`0..=255`),
+/// `bitmap_width * bitmap_height * 3` Bytes lang — dieselbe
+/// unkomprimierte Roh-Array-in-JSON-Konvention wie
+/// `MaskGeometry::AiGenerated::alpha` (aufgebläht, aber etabliertes
+/// Projektmuster, kein neues Kompaktformat erfinden).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AiFillPatch {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub pixels: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -621,6 +710,14 @@ pub struct RepairStroke {
     pub radius: f32,
     pub feather: f32,
     pub opacity: f32,
+    /// Nur für `mode == RepairMode::AiInpaint` relevant — das Ergebnis des
+    /// einmaligen KI-Ausfüllen-Laufs (Phase 13 Schritt 1). `#[serde(default)]`
+    /// statt Schema-Version-Sprung, additiv wie `BrushStroke::auto_mask`
+    /// (siehe dessen Kommentar in `edl/v3.rs`) — ein gespeicherter Strich
+    /// ohne dieses Feld liest weiterhin als `None` (für jeden anderen
+    /// `mode` ohnehin der einzig sinnvolle Wert).
+    #[serde(default)]
+    pub ai_fill: Option<AiFillPatch>,
 }
 
 // ---- Der vollständige EDL v2 -----------------------------------------------

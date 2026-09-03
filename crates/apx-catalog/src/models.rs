@@ -5,9 +5,9 @@
 use std::path::PathBuf;
 
 use apx_core::{
-    AppError, CollectionFolderId, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId,
-    PhotoId, PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId, StackId, TagRuleId,
-    TemplateId,
+    AppError, CollectionFolderId, CollectionId, EditHistoryId, EdlEnvelope, FaceDetectionId,
+    FolderId, KeywordId, PersonId, PhotoId, PresetFolderId, PresetId, PresetVersionId, Result,
+    SnapshotId, StackId, TagRuleId, TemplateId,
 };
 use time::OffsetDateTime;
 
@@ -352,9 +352,66 @@ pub struct CatalogStatistics {
     pub top_lenses: Vec<(String, u64)>,
 }
 
+// ---- Echte Personen-Wiedererkennung (Phase 13 Schritt 8) -------------------
+
+/// Eine vom Nutzer benannte Person (siehe `migrations/0011_people.sql`s
+/// Moduldoku). `name: None` = automatisch erkannt (mindestens ein
+/// [`FaceDetection`] zeigt hierher), aber noch nicht benannt.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Person {
+    pub id: PersonId,
+    pub name: Option<String>,
+    pub cover_face_id: Option<FaceDetectionId>,
+    pub created_at: OffsetDateTime,
+}
+
+/// Ein einzelnes erkanntes Gesicht — Bounding-Box in Vorschaubild-
+/// Pixelkoordinaten plus 128-dimensionalem Embedding (`apx_ai::people`,
+/// hinter dem `people`-Cargo-Feature). `person_id: None` = noch keiner
+/// Person zugeordnet.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceDetection {
+    pub id: FaceDetectionId,
+    pub photo_id: PhotoId,
+    pub person_id: Option<PersonId>,
+    pub rect_left: i64,
+    pub rect_top: i64,
+    pub rect_right: i64,
+    pub rect_bottom: i64,
+    pub embedding: Vec<f64>,
+    pub created_at: OffsetDateTime,
+}
+
+/// Bounding-Box eines erkannten Gesichts (`left, top, right, bottom`),
+/// in Vorschaubild-Pixelkoordinaten — eigener Typalias statt eines
+/// anonymen Vier-Tupels an jeder Aufrufstelle (`clippy::type_complexity`).
+pub type FaceRect = (i64, i64, i64, i64);
+
+/// Von `dlib`s eigener Dokumentation empfohlener Schwellenwert für
+/// „dieselbe Person" (euklidischer Abstand zweier 128-dimensionaler
+/// Embeddings) — hier statt in `apx-ai::people` definiert (das hinter
+/// dem optionalen `people`-Feature steht), damit `repository::people`s
+/// Auto-Zuordnungslogik unabhängig vom `people`-Feature kompiliert (sie
+/// vergleicht nur bereits gespeicherte Embeddings, berechnet selbst
+/// keine neuen — das bleibt `apx-ai::people::PersonEmbedder` vorbehalten).
+pub const SAME_PERSON_EMBEDDING_THRESHOLD: f64 = 0.6;
+
+/// Euklidischer Abstand zweier Embeddings.
+pub fn embedding_distance(a: &[f64], b: &[f64]) -> f64 {
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).powi(2))
+        .sum::<f64>()
+        .sqrt()
+}
+
 /// Kombinierbare Filterkriterien für [`crate::Catalog::filter_photos`] —
 /// jedes `None`-Feld wird ignoriert, alle gesetzten Felder werden per UND
-/// verknüpft (siehe `PLAN.md` Phase 3, Schritt 2).
+/// verknüpft (siehe `PLAN.md` Phase 3, Schritt 2). Bleibt als schlanker,
+/// SQL-generierter Weg für die Filterleiste/Stapelverarbeitungs-Konsole
+/// bestehen (immer flach UND-verknüpft ist dort ausreichend); für
+/// intelligente Sammlungen ersetzt [`FilterNode`] diese Struktur seit
+/// Phase 13 Schritt 7 (siehe `DECISIONS.md` ADR-0040-Nachtrag V).
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FilterCriteria {
     /// Nur Fotos mit Bewertung >= diesem Wert.
@@ -362,6 +419,208 @@ pub struct FilterCriteria {
     pub flag: Option<i8>,
     pub color_label: Option<String>,
     pub camera_model: Option<String>,
+}
+
+// ---- Verschachtelter UND/ODER-Regelbaum (Phase 13 Schritt 7) --------------
+//
+// Ersetzt für intelligente Sammlungen die feste, ausschließlich UND-
+// verknüpfte `FilterCriteria` durch einen echten, beliebig tief
+// verschachtelbaren Regelbaum. Wird **in-memory ausgewertet** statt per
+// dynamischer SQL-Generierung ([`FilterNode::matches`] gegen bereits
+// geladene [`Photo`]s) — Kataloge in diesem Projekt sind
+// Einzelnutzer-Bibliotheken, keine Web-Anwendung mit Millionen Zeilen, eine
+// zweite dynamische WHERE-Klausel-Bauart neben [`build_filter_clause`]
+// (siehe `repository::search`) wäre unnötiger Aufwand für denselben
+// Nutzen. Dasselbe JSON-Schema (`{"type":"condition","condition":{...}}` /
+// `{"type":"group","operator":"and"|"or","children":[...]}`) wird auch vom
+// Frontend-`RuleTreeEditor.tsx` erzeugt/angezeigt — die Serde-Tags sind
+// bewusst so gewählt, dass sie ohne Übersetzungsschicht zum TypeScript-
+// Gegenstück (`frontend/src/lib/ruleTree.ts`) passen.
+
+/// Ein Blatt- oder Gruppenknoten im Regelbaum.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FilterNode {
+    Condition {
+        condition: FilterCondition,
+    },
+    Group {
+        operator: BoolOp,
+        children: Vec<FilterNode>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BoolOp {
+    And,
+    Or,
+}
+
+/// Dasselbe Vier-Felder-Vokabular wie bisher `FilterCriteria` (Bewertung,
+/// Pick/Reject-Flagge, Farbmarkierung, Kameramodell) — nur als einzelne
+/// Bedingung statt fester Struktur-Felder, damit beliebig viele Bedingungen
+/// desselben Felds in unterschiedlichen Zweigen des Baums vorkommen können
+/// (z. B. „Kameramodell = A ODER Kameramodell = B").
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct FilterCondition {
+    pub field: FilterField,
+    pub op: FilterOperator,
+    /// Immer als String übertragen (auch für die numerischen Felder
+    /// Bewertung/Flagge) — vereinfacht das Frontend-Formular, das ohnehin
+    /// ein Texteingabefeld verwendet; [`FilterCondition::matches`] parst
+    /// bei Bedarf.
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilterField {
+    Rating,
+    Flag,
+    ColorLabel,
+    CameraModel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilterOperator {
+    AtLeast,
+    Equals,
+    NotEquals,
+    Contains,
+}
+
+impl FilterCondition {
+    /// Prüft eine einzelne Bedingung gegen ein Foto. Ein zum Feld nicht
+    /// passender Operator (z. B. `contains` auf `rating`) oder ein nicht
+    /// parsbarer Wert gilt konservativ als nicht erfüllt — dieselbe
+    /// „unauswertbar = nicht erfüllt"-Konvention wie das Frontend-
+    /// Gegenstück in `presets.ts`s `evaluateCondition`.
+    pub fn matches(&self, photo: &Photo) -> bool {
+        match self.field {
+            FilterField::Rating => {
+                let Ok(expected) = self.value.parse::<u8>() else {
+                    return false;
+                };
+                match self.op {
+                    FilterOperator::AtLeast => photo.rating >= expected,
+                    FilterOperator::Equals => photo.rating == expected,
+                    FilterOperator::NotEquals => photo.rating != expected,
+                    FilterOperator::Contains => false,
+                }
+            }
+            FilterField::Flag => {
+                let Ok(expected) = self.value.parse::<i8>() else {
+                    return false;
+                };
+                match self.op {
+                    FilterOperator::Equals => photo.flag == expected,
+                    FilterOperator::NotEquals => photo.flag != expected,
+                    FilterOperator::AtLeast | FilterOperator::Contains => false,
+                }
+            }
+            FilterField::ColorLabel => match &photo.color_label {
+                Some(actual) => Self::matches_text(self.op, actual, &self.value),
+                None => false,
+            },
+            FilterField::CameraModel => match &photo.camera_model {
+                Some(actual) => Self::matches_text(self.op, actual, &self.value),
+                None => false,
+            },
+        }
+    }
+
+    fn matches_text(op: FilterOperator, actual: &str, expected: &str) -> bool {
+        match op {
+            FilterOperator::Equals => actual.eq_ignore_ascii_case(expected),
+            FilterOperator::NotEquals => !actual.eq_ignore_ascii_case(expected),
+            FilterOperator::Contains => actual.to_lowercase().contains(&expected.to_lowercase()),
+            FilterOperator::AtLeast => false,
+        }
+    }
+}
+
+impl FilterNode {
+    /// Wertet den Baum rekursiv gegen ein Foto aus. Eine Gruppe ohne Kinder
+    /// (z. B. ein gerade erst im Editor angelegter, noch leerer Zweig) ist
+    /// für UND vakuos wahr, für ODER vakuos falsch — dieselbe Konvention
+    /// wie in jeder klassischen Booleschen Algebra (leere Konjunktion/
+    /// Disjunktion).
+    pub fn matches(&self, photo: &Photo) -> bool {
+        match self {
+            FilterNode::Condition { condition } => condition.matches(photo),
+            FilterNode::Group { operator, children } => match operator {
+                BoolOp::And => children.iter().all(|child| child.matches(photo)),
+                BoolOp::Or => children.iter().any(|child| child.matches(photo)),
+            },
+        }
+    }
+}
+
+impl From<FilterCriteria> for FilterNode {
+    /// Migriert die alte, flache UND-Verknüpfung in die neue Baumform —
+    /// jedes gesetzte Feld wird eine Bedingung in einer UND-Gruppe. Ein
+    /// komplett leeres `FilterCriteria` (z. B. `Default`) wird zu einer
+    /// leeren UND-Gruppe, die laut [`FilterNode::matches`] auf jedes Foto
+    /// zutrifft — identisch zum bisherigen Verhalten „kein Kriterium
+    /// gesetzt = alle Fotos".
+    fn from(criteria: FilterCriteria) -> Self {
+        let mut children = Vec::new();
+        if let Some(min) = criteria.rating_at_least {
+            children.push(FilterNode::Condition {
+                condition: FilterCondition {
+                    field: FilterField::Rating,
+                    op: FilterOperator::AtLeast,
+                    value: min.to_string(),
+                },
+            });
+        }
+        if let Some(flag) = criteria.flag {
+            children.push(FilterNode::Condition {
+                condition: FilterCondition {
+                    field: FilterField::Flag,
+                    op: FilterOperator::Equals,
+                    value: flag.to_string(),
+                },
+            });
+        }
+        if let Some(color) = criteria.color_label {
+            children.push(FilterNode::Condition {
+                condition: FilterCondition {
+                    field: FilterField::ColorLabel,
+                    op: FilterOperator::Equals,
+                    value: color,
+                },
+            });
+        }
+        if let Some(model) = criteria.camera_model {
+            children.push(FilterNode::Condition {
+                condition: FilterCondition {
+                    field: FilterField::CameraModel,
+                    op: FilterOperator::Equals,
+                    value: model,
+                },
+            });
+        }
+        FilterNode::Group {
+            operator: BoolOp::And,
+            children,
+        }
+    }
+}
+
+/// Liest gespeichertes `smart_criteria_json`: akzeptiert die neue Baumform
+/// direkt, fällt sonst auf die alte flache `FilterCriteria` zurück (vor
+/// Phase 13 Schritt 7 angelegte intelligente Sammlungen) und migriert sie
+/// über [`FilterNode::from`] — siehe `DECISIONS.md` ADR-0040-Nachtrag V.
+pub fn parse_filter_node(json: &str) -> Result<FilterNode> {
+    if let Ok(node) = serde_json::from_str::<FilterNode>(json) {
+        return Ok(node);
+    }
+    let legacy: FilterCriteria = serde_json::from_str(json)
+        .map_err(|err| AppError::validation(format!("Gespeicherte Kriterien kaputt: {err}")))?;
+    Ok(FilterNode::from(legacy))
 }
 
 #[cfg(test)]

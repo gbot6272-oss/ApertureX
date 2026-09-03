@@ -696,6 +696,7 @@ mod tests {
                 radius: 0.03,
                 feather: 0.01,
                 opacity: 1.0,
+                ai_fill: None,
             }],
             masks: Vec::new(),
             mask_groups: Vec::new(),

@@ -2206,3 +2206,493 @@ wiederholter Lauf über denselben Ordner ist also von sich aus billig und
 idempotent — kein eigener "bereits gesehen"-Zustand nötig.
 
 **Entscheidung:** `FEATURES.md`/`PLAN.md` sind entsprechend aktualisiert.
+
+## ADR-0040: Phase 13 — echte ONNX-Laufzeit jetzt real verfügbar (korrigiert ADR-0033 Punkt 1); KI-Ausfüllen, Direktimport, DCP-Profile, klassische CV-Lücken
+
+**Status:** Angenommen
+**Kontext:** Aus der aktualisierten Lightroom-Lückenliste (Vergleichs-
+Artifact nach Phase 12) hat der Nutzer sechs Punkte ausgewählt:
+generatives/bearbeitendes KI-Ausfüllen, Import direkt von Speicherkarte/
+Kamera, Adobe-DCP-Farbprofil-Import (fest zugesagt); Perspektive/Upright-
+Kantenerkennung und Panorama-Homografie-Stitching (kostenlos geplant);
+mehrere Kataloge, ein echter UND/ODER-Regelbauer, echte Personen-
+Wiedererkennung ("vielleicht").
+
+**Korrektur an ADR-0033 Punkt 1:** ADR-0033 begründete den Verzicht auf
+echte ONNX-Runtime-Modellinferenz u. a. damit, es gebe "keinen
+bestätigten Zugriffsweg auf vorkompilierte ONNX-Runtime-Binaries" und
+"keinen legitimen Weg, ein trainiertes ... Modell zu beschaffen und
+mitzuliefern". Diese Sitzung hat beides real geprüft und beides ist
+inzwischen falsch:
+
+1. **Die Laufzeit ist real verfügbar** — per `cargo add --dry-run`
+   gegen die echte crates.io-Registry bestätigt: `ort` (2.0.0-rc.13,
+   ONNX-Runtime-Bindings) und `tract-onnx` (0.23.6, reines Rust, keine
+   C++-Abhängigkeit) sind beide echte, gepflegte Crates.
+2. **Für mindestens ein Modell ist auch die Gewichts-Beschaffung
+   real gelöst:** LaMa (Large Mask Inpainting, `advimman/lama`,
+   Apache-2.0-Code) hat ein echtes, als ONNX exportiertes Modell
+   öffentlich auf Hugging Face (`Carve/LaMa-ONNX`, `lama_fp32.onnx`,
+   208 MB, Apache-2.0, trainiert auf Places2/CC-BY-4.0) — real
+   herunterladbar, lizenzgeklärt, gegen einen veröffentlichten Hash
+   verifizierbar. Kein fabriziertes Modell, keine Behauptung ohne
+   Beleg — genau die Art Fund, die ADR-0033 damals nicht hatte.
+
+Für dieselbe klassische CV, aber ohne jedes Modellgewicht (Perspektive/
+Upright, Panorama-Stitching), sind ebenfalls real verfügbare, reine
+Rust-Crates gefunden: `imageproc` (Kantenerkennung/Hough-Transformation),
+sowie das `rust-cv`-Ökosystem `akaze`/`arrsac`/`sample-consensus`/
+`homography`/`eight-point`/`lambda-twist`/`cv-core`/`space`
+(Merkmalserkennung, robuste Homografie-Schätzung) — kein OpenCV nötig.
+Für Speicherkarten-Erkennung: `sysinfo` (0.38.4, plattformübergreifende
+Wechseldatenträger-Liste).
+
+**Für Gesichts-Wiedererkennung bleibt eine echte Lücke offen:** die
+Laufzeit ist dieselbe wie bei LaMa, aber ein gutes vortrainiertes
+Gesichts-Embedding-Modell mit wirklich permissiver Lizenz (nicht nur
+"Forschung, nicht kommerziell", wie viele InsightFace/ArcFace-
+Veröffentlichungen) ist bei dieser Recherche noch nicht bestätigt —
+Phase 13 Schritt 8 behandelt das als eigene, ergebnisoffene Prüfung
+statt es stillschweigend anzunehmen.
+
+**Entscheidung:** ADR-0033 Punkt 1 gilt als durch diesen Nachtrag
+korrigiert (nicht rückwirkend umgeschrieben — der ursprüngliche Text
+bleibt stehen, war zum damaligen Rechercheergebnis ehrlich). Phase 13
+setzt echte ONNX-Inferenz für das KI-Ausfüllen ein (Schritt 1) und
+klassische, gewichtsfreie CV für Perspektive/Panorama (Schritte 4/5).
+Vollständiger Schritt-für-Schritt-Plan in `PLAN.md`.
+
+## ADR-0040-Nachtrag: Schritt 3 — echter Adobe-DCP-Import; `ColorMatrix`
+geparst, aber bewusst nicht angewendet; `ProfileHueSatMap`/
+`ProfileToneCurve` real umgesetzt, direkt von Adobes eigenem
+Open-Source-DNG-SDK portiert
+
+**Status:** Angenommen
+**Kontext:** `stages::calibration`s bisherige `CAMERA_PROFILES`-Handliste
+(sechs feste Namen, je nur ein globaler Sättigungs-/Kontrast-Bias, siehe
+ADR-0028) sollte durch echten Import beliebiger Adobe-`.dcp`-Dateien
+ersetzt werden — derselbe Sprung wie Phase 12 Schritt 3 von einer
+Objektiv-Handliste zur echten LensFun-Datenbank.
+
+**Ergebnis der Recherche:** `.dcp`-Dateien sind reine TIFF/IFD-Container
+ohne Rohbild-Daten. `gamut-dng`s `DngDecoder::decode()` (bereits
+Abhängigkeit von `apx-export`) verlangt ein echtes Rohbild und scheitert
+deshalb an eigenständigen `.dcp`-Dateien. Die real verfügbare Lösung:
+`gamut-ifd` (2.0.1, dieselbe IFD-Lese-Grundlage, die `gamut-dng` selbst
+intern nutzt) direkt einbinden und nur die tatsächlich benötigten Tags
+lesen — per `cargo add --dry-run` gegen die echte crates.io-Registry
+bestätigt. Die Tag-Nummern (`ColorMatrix1` 50721 usw.) sind gegen
+`gamut-dng`s eigenes öffentliches `tags`-Modul **und** unabhängig davon
+gegen Adobes eigenes, quelloffenes DNG-SDK
+(`github.com/aizvorski/dng_sdk`) geprüft.
+
+**Zwei Ebenen, unterschiedlich behandelt:**
+
+1. **`ColorMatrix1`/`ColorMatrix2`/`ForwardMatrix1/2`/
+   `CameraCalibration1/2`** (die eigentliche Farbmatrix) — wird geparst
+   (`dcp_profile::DcpProfile`), aber **bewusst nicht in die Pipeline
+   eingespeist**. Eine echte Kamera→XYZ-Matrixumrechnung ist Aufgabe des
+   Rohdaten-Decoders (`apx-raw` hat dafür bereits eine eigene
+   `cam_to_srgb`-Matrix, einmalig beim Dekodieren angewendet) — ein
+   Matrixwechsel je Kalibrierungs-Regler würde eine erneute
+   Rohdaten-Dekodierung bei jedem Bearbeitungsschritt verlangen, was der
+   gesamten "einmal dekodieren, beliebig oft günstig entwickeln"-
+   Architektur widerspräche. Dieselbe Scope-Grenze, die `gamut-dng`
+   selbst für sich zieht ("Farbwiedergabe ist Aufgabe eines
+   Rohdaten-Prozessors").
+2. **`ProfileHueSatMapDims`/`ProfileHueSatMapData1`/`ProfileToneCurve`**
+   (die "Look"-Daten, die z. B. Adobes "Camera Landscape" von "Camera
+   Standard" unterscheiden) — wird **echt angewendet**, in
+   `stages::calibration`, anstelle der bisherigen Handlisten-Näherung.
+   Die PDF-Spezifikation selbst war von dieser Sandbox aus nicht
+   abrufbar (`docs.rs`, `huggingface.co`, `helpx.adobe.com`,
+   `paulbourke.net` — alle blockiert), aber Adobes eigenes DNG-SDK ist
+   auf GitHub quelloffen (`raw.githubusercontent.com` war erreichbar):
+   Indexierung, Interpolationsformel (trilinear, Farbton zirkulär) und
+   die HSV-Parametrisierung (`0.0..6.0` statt Grad) in
+   `stages::calibration::apply_hue_sat_map` sind eine direkte Portierung
+   von `dng_reference.cpp::RefBaselineHueSatMap` (samt
+   `dng_hue_sat_map.h/.cpp` für die Tabellen-Indexierung und
+   `dng_utils.h::DNG_RGBtoHSV/DNG_HSVtoRGB` für die HSV-Umrechnung,
+   letztere als `stages::color_math::rgb_to_hsv6`/`hsv6_to_rgb` portiert)
+   — nicht aus dem Gedächtnis nachgebaut. Bewusst ausgelassen: das
+   optionale `ProfileHueSatMapEncoding` (nichtlineare Wert-Kodierung, nur
+   bei wenigen Profilen gesetzt) und die Spline-Interpolation der
+   Tonwertkurve (stückweise linear stattdessen, siehe `apply_tone_curve`s
+   Kommentar).
+
+**CPU-only:** die HueSatMap-Tabelle ist variabel groß (bis zu Hunderten
+Einträgen), passt nicht in `calibration.rs`s festes GPU-Uniform-Layout —
+läuft aus demselben Grund CPU-seitig wie `ContentAwareFill`/`AiInpaint`
+(`stages::repair`).
+
+**Entscheidung:** Neues additives `CalibrationAdjustment::dcp_profile:
+Option<DcpProfileData>` (dasselbe "einmal auflösen, als Zahlen im EDL
+ablegen"-Muster wie `AiFillPatch`, Phase 13 Schritt 1) — hat Vorrang vor
+`camera_profile`s Handliste, die als Fallback bestehen bleibt, wenn kein
+`.dcp` importiert wurde. `apx-app`s `import_dcp_profile`-Command öffnet
+einen Datei-Dialog und parst — kein eingebautes Profil im Installer,
+derselbe Opt-in wie beim LensFun-Kalibrier-Assistenten.
+
+## ADR-0040-Nachtrag II: Schritt 4 — echte Perspektive/Upright-
+Kantenerkennung (`imageproc`); zwei erkannte Effekte statt vier
+unabhängiger, `Full` bewusst identisch zu `Auto`
+
+**Status:** Angenommen
+**Kontext:** `stages::lens_corrections`s vier Upright-Automatikmodi
+(`Auto`/`Level`/`Vertical`/`Full`) waren seit Phase 4 (ADR-0028)
+dokumentierte No-op-Platzhalter — wählbar, ohne Wirkung. Nur der
+„Guided"-Modus tat etwas: der Nutzer zieht selbst zwei Hilfslinien, ihr
+gemittelter Neigungswinkel wird zur Dreh-Korrektur.
+
+**Umsetzung:** `apx-ai::upright` (neues Modul, klassische CV ohne
+gelerntes Modell — dieselbe Handschrift wie `lens_calibration`, Phase 12
+Schritt 3 Teil B): `imageproc::edges::canny` findet Kanten,
+`imageproc::hough::detect_lines` findet darin gerade Linien
+(Normalform-Winkel `0..180°`). Statt vier unabhängige Automatiken zu
+bauen, macht das Modul **zwei echte Effekte** real und kombiniert sie je
+nach Modus:
+- **Level** (nahezu waagerechte erkannte Linien mitteln → `rotate_degrees`)
+  — exakt dieselbe Rechnung wie `guided_rotation_degrees`, nur mit
+  automatisch gefundenen statt vom Nutzer gezogenen Linien.
+- **Vertical** (nahezu senkrechte erkannte Linien mitteln →
+  `manual_transform.horizontal`-Scherung, die trotz des Namens die
+  *senkrechte* Kantenkonvergenz korrigiert) — die Zuordnung
+  Winkelabweichung → Scherungsreglerwert ist direkt aus
+  `lens_corrections.rs`s bestehender `undo_manual_transform`-Formel
+  hergeleitet (Koeffizientenvergleich, nicht geraten), und per
+  Vorzeichen-/Größenprobe an einer synthetischen Testkante nachgerechnet
+  (`upright.rs`s Testmodul) statt nur symbolisch behauptet — ein früherer
+  Testentwurf mit fehlerhafter Verifikationsformel hätte sonst einen
+  Vorzeichenfehler nicht aufgedeckt.
+- **Auto**/**Full**: beide Effekte kombiniert. Eine echte Trennung
+  zwischen Adobes moderater "Auto"-Automatik und einer vollen
+  Vier-Parameter-"Full"-Homografie bräuchte eine echte
+  Homografie-Schätzung aus mehreren, unabhängig konvergierenden
+  Linienscharen — außerhalb des Umfangs des bereits in ADR-0028/-0030 auf
+  ein einziges Scherungspaar vereinfachten Objektivkorrektur-Modells.
+  `Full` verhält sich deshalb bewusst identisch zu `Auto`, statt eine
+  durch die vorhandenen Daten nicht gedeckte zusätzliche Korrektur zu
+  erfinden — dieselbe Ehrlichkeit wie Schritt 3s unangewandte
+  DCP-Farbmatrix.
+
+**Architektur:** `apx-ai` (nicht `apx-pipeline`) bekommt die neue
+`imageproc`-Abhängigkeit (`default-features = false`, nur `rayon` —
+`text`/`fft` unnötig), da `apx-ai` bereits von `apx-pipeline` abhängt
+(nicht umgekehrt) und `lens_calibration` als Vorbild ebenfalls dort
+lebt. `apx-app`s `detect_upright_correction`-Command folgt demselben
+"Analyse-Auflösung über `TileCache` dekodieren"-Muster wie
+`generate_ai_mask`, obwohl es keine KI-Funktion im engeren Sinn ist.
+Frontend übernimmt nur die zum gewählten Modus passende Komponente in
+`manual_transform` (Level nur Rotation, Vertical nur Scherung) statt
+beide Felder blind zu überschreiben — sonst würde ein Klick im
+"Level"-Modus eine zuvor manuell gesetzte Scherungskorrektur
+stillschweigend auf 0 zurücksetzen.
+
+## ADR-0040-Nachtrag III: Schritt 5 — Panorama-Homografie-Stitching;
+das geplante rust-cv-Ökosystem kompiliert auf keinem aktuellen
+stabilen Rust, `imageproc`-FAST-Ecken + eigener BRIEF-Deskriptor +
+`homography`-Crate stattdessen
+
+**Status:** Angenommen
+**Kontext:** ADR-0040 hatte für Panorama-Stitching das `rust-cv`-
+Ökosystem (`akaze`, `cv-core`, `space`, `arrsac`, `sample-consensus`)
+als real verfügbar eingestuft — per `cargo add --dry-run` gegen die
+echte crates.io-Registry bestätigt. Dieser Schritt hat einen echten
+Einbindungsversuch unternommen, und `cargo add --dry-run` erwies sich
+als unzureichende Prüfung: es bestätigt nur, dass sich die Abhängigkeits-
+Metadaten auflösen lassen, nicht dass der resultierende Code tatsächlich
+kompiliert.
+
+**Der reale Befund:** `akaze` (letzte Veröffentlichung 2021) hängt
+transitiv an `bitarray 0.2`, dessen `src/lib.rs` unbedingt
+`#![feature(min_const_generics)]` setzt. Dieses Attribut selbst — nicht
+das längst stabile Feature dahinter — verlangt einen Nightly-Compiler
+und schlägt auf jedem aktuellen stabilen Rust mit `error[E0554]` fehl,
+real gegen `rustc 1.94.1` in dieser Sandbox getestet (`cargo test`
+brach mit exakt diesem Fehler ab). Das ganze `rust-cv`-Ökosystem ist
+damit auf stabilem Rust praktisch tot — unabhängig von den zusätzlich
+noch bestehenden Versions-Inkompatibilitäten, die bereits vor diesem
+Befund auffielen: `cv-core 0.15`/`nalgebra 0.21`/`space 0.10` (alle vom
+selben Autor, derselben Ära) vs. der aktiver gepflegten `homography`-
+Crate mit `nalgebra 0.33`; `homography` hängt zudem gar nicht von
+`sample-consensus` ab (kein `Estimator`-Trait-Impl, per `grep` in
+dessen `Cargo.toml` bestätigt) — `arrsac`/`sample-consensus`/`cv-core`/
+`space` hätten also ohnehin keinen echten Klebstoff zwischen `akaze`
+und `homography` geliefert.
+
+**Umsetzung stattdessen** (`apx-stacking::homography_stitch`, neues
+Modul, siehe dessen ausführliche Moduldoku): `imageproc::corners::
+corners_fast9` (dieselbe Crate, bereits in Schritt 4 real erprobt) für
+die Eckenerkennung; ein selbst geschriebener BRIEF-artiger 256-Bit-
+Deskriptor (klassische, publizierte Technik — Calonder et al. 2010,
+nicht fabriziert) statt eines externen Deskriptor-Crates; brute-force
+Hamming-Abstands-Matching mit Lowes Verhältnistest; ein eigener, kurzer
+RANSAC-Loop (Zufallsstichprobe → `homography`-Crates echte DLT-Schätzung
+per SVD → Inlier zählen → beste Stichprobe über alle Inlier
+verfeinern) statt der generischen `sample_consensus`/`arrsac`-
+Maschinerie. `homography` bekommt dieselbe `nalgebra`-Version (`0.33`)
+explizit in `apx-stacking` UND `apx-app` gepinnt — dieselbe Instanz im
+Abhängigkeitsgraph statt einer separaten Kopie, sonst wäre
+`homography`s `Matrix3<f64>` in eigenem Code ein anderer Typ.
+
+**Test-Vorsicht mit synthetischen Bildern:** ein Schachbrettmuster als
+Testbild schlug fehl — an dessen Kreuzungen treffen sich vier
+Quadranten in einem X-förmigen Sattelpunkt, den FAST grundsätzlich
+nicht erkennt (es braucht einen einzigen zusammenhängenden Bogen von
+mindestens neun der 16 Kreispunkte). Ein perfekt periodisches
+Punktraster schlug ebenfalls fehl — Lowes Verhältnistest verwirft zu
+Recht mehrdeutige Treffer, wenn viele Merkmale identische lokale
+Nachbarschaften haben. Beide Male kein Bug im Code, sondern ein
+unrealistisches Testbild; die endgültigen Tests nutzen verstreute,
+unterschiedlich große Quadrate an leicht versetzten Positionen.
+
+**Entscheidung:** `apx-app`s `stack_panorama`-Command versucht das
+echte Homografie-Stitching zuerst und fällt für die gesamte Fotoserie
+auf die bestehende reine Verschiebungs-Registrierung
+(`apx_stacking::panorama`, Phasenkorrelation) zurück, wenn für
+mindestens ein Foto keine verlässliche Homografie gefunden wird —
+bewusst alles-oder-nichts statt einer Mischkomposition aus beiden
+Positionierungsarten auf derselben Leinwand.
+
+## ADR-0040-Nachtrag IV: Schritt 6 — Mehrere Kataloge + Katalog-Wartung;
+Katalogwechsel per Neustart statt Hot-Swap der offenen Verbindung
+
+**Status:** Angenommen
+**Kontext:** `AppState::catalog: Arc<Catalog>` wird in `commands.rs` von
+praktisch jedem einzelnen Tauri-Command direkt referenziert oder
+geklont. Ein echtes Hot-Swap der offenen Katalogverbindung im
+laufenden Prozess hätte entweder jeden dieser Zugriffe hinter ein
+zusätzliches Lock verlegt (invasiv, hohes Fehlerrisiko quer durch eine
+~6000-Zeilen-Datei) oder den `Arc` selbst austauschbar gemacht
+(dieselbe Umbau-Größe) — für einen einzelnen Schritt nicht vertretbar.
+
+**Entscheidung:** dieselbe UX wie Adobe Lightroom Classics eigener
+Katalogwechsel ("Diese Änderung erfordert einen Neustart"): Wechseln
+oder Neuanlegen eines Katalogs speichert den Zielpfad in
+`Settings::catalog` und ruft `AppHandle::request_restart()` — die App
+startet neu und öffnet beim nächsten Start automatisch den neuen
+Pfad. Dafür genügt eine einzige, unauffällige Änderung an `main.rs`
+(liest `settings.catalog.last_opened_catalog` vor dem `Catalog::open`-
+Aufruf) statt eines Umbaus der gesamten Command-Schicht.
+
+**Fund:** `Settings::catalog::last_opened_catalog` existierte bereits
+seit Phase 10 (Settings-Fundament) im Datenmodell, wurde aber nie
+gelesen — `main.rs` öffnete unbedingt `paths.default_catalog_file()`.
+Reine Attrappe, jetzt tatsächlich verdrahtet (mit Rückfall auf den
+Standardkatalog, falls der hinterlegte Pfad seit dem letzten Start
+verschoben/gelöscht wurde — kein Absturz beim Start wegen eines
+veralteten Pfads).
+
+**Katalog-Wartung** braucht dagegen keinen Neustart — sie arbeitet auf
+der bereits offenen Verbindung: `apx_catalog::Catalog` bekommt
+`integrity_check` (`PRAGMA integrity_check`, SQLites eigene
+Standardprüfung auf strukturelle Schäden), `vacuum` (`VACUUM`) und
+`backup_to` (SQLites Online-Backup-API über `rusqlite`s `backup`-
+Feature — sicher neben der weiterhin offenen Verbindung nutzbar,
+anders als eine rohe Dateikopie, die bei gleichzeitigem Schreibzugriff
+eine inkonsistente Kopie ergeben könnte).
+
+**Kein neuer Dialog-Wechsel-Mechanismus fürs Frontend nötig:** die
+generischen `pick_file_path`/`pick_save_file_path`-Commands (bereits
+für Drucken/Buch/ICC-Profil-Auswahl vorhanden) übernehmen die
+Datei-Dialoge für "Neuer Katalog…"/"Katalog öffnen…"/"Sichern unter…"
+direkt — die neuen Rust-Commands nehmen nur noch den bereits gewählten
+Pfad entgegen.
+
+## ADR-0040-Nachtrag V: Schritt 7 — echter UND/ODER-Regelbaum für
+bedingte Presets und intelligente Sammlungen; in-memory statt
+dynamischer SQL-Generierung
+
+**Status:** Angenommen
+**Kontext:** Zwei getrennte Stellen kannten bisher nur eine flache,
+ausschließlich UND-verknüpfte Regelliste: bedingte Presets
+(`PresetCondition[]`, ADR-0031 Punkt 4, "kein ODER, keine
+Verschachtelung") und intelligente Sammlungen (`apx_catalog::
+FilterCriteria`, feste Struktur-Felder Bewertung/Flagge/Farbe/
+Kameramodell, ADR-0023). Beide werden bereits als opakes JSON
+gespeichert (`conditions_json`/`smart_criteria_json`) — kein
+Datenbankschema-Wechsel nötig, nur ein neues JSON-Schema.
+
+**Entscheidung:** ein gemeinsamer, generischer Regelbaum-Typ
+(`RuleNode<TLeaf> = { type: "condition"; condition: TLeaf } |
+{ type: "group"; operator: "and" | "or"; children: RuleNode<TLeaf>[] }`,
+`frontend/src/lib/ruleTree.ts`) mit einer rekursiven Auswertung
+(`evaluateRuleNode`) und einem generischen Editor
+(`RuleTreeEditor.tsx`, kennt das Blatt-Vokabular nicht — kommt per
+`renderLeaf`/`makeDefaultLeaf`-Props vom Aufrufer). Dasselbe
+JSON-Schema existiert auf der Rust-Seite als `apx_catalog::FilterNode`
+(`#[serde(tag = "type", rename_all = "snake_case")]`) — bewusst
+identisch zum TypeScript-Gegenstück gewählt, damit `create_smart_
+collection` den vom Frontend erzeugten JSON-String unverändert als
+opakes `criteria_json` durchreichen und rein per `serde_json`
+parsen kann, ganz ohne eigene Übersetzungsschicht zwischen den beiden
+Seiten.
+
+**Bedingte Presets bleiben reines Frontend:** `conditions_json` ist
+für `apx-catalog` schon vorher ein opaker String gewesen (unverändert:
+`Preset.conditions_json`), also brauchte dieser Teil **keine
+Rust-Änderung**. `PresetCondition`/`evaluateCondition`/
+`parseConditions`/`applyConditionsToSubset` (`lib/presets.ts`) bleiben
+unverändert bestehen — sie werden weiterhin von den Auto-
+Verschlagwortungsregeln (`MetadataDialog.tsx`s `createTagRule`, ein
+eigenes, außerhalb dieses Schritts liegendes Feature) benutzt und
+dienen als Migrationsquelle. Neu: `PresetRuleGroup { section:
+PresetSectionKey | null; node: RuleNode<PresetLeafCondition> }` — die
+Sektions-Gatter-Semantik (`section: null` = ganzes Preset, sonst nur
+diese Sektion; mehrere Regelgruppen bleiben untereinander
+UND-verknüpft) bleibt exakt wie zuvor, nur ist jede einzelne Regel
+jetzt ein ganzer UND/ODER-Baum statt einer einzelnen Bedingung.
+`parseRules` akzeptiert die neue Baumform direkt und migriert sonst
+über `migrateLegacyConditions` von der alten flachen Form — jede
+vorhandene, vor diesem Schritt gespeicherte Preset-Bedingung bleibt
+dadurch ohne Migrationsskript lesbar.
+
+**Intelligente Sammlungen werten in-memory aus, nicht per dynamischer
+SQL-Generierung:** `apx_catalog::FilterNode::matches(&Photo) -> bool`
+wird für jedes Foto einzeln aufgerufen, nachdem `repository::
+collections::list_photos` den gesamten Fotobestand bereits per SQL
+geladen hat (`filter_photos` mit leeren Kriterien, dieselbe Abfrage
+wie die Filterleiste). Eine zweite, rekursive WHERE-Klausel-
+Generierung neben der bestehenden in `repository::search::
+build_filter_clause` wäre für beliebig tiefe Verschachtelung deutlich
+aufwendiger gewesen, ohne einen echten Nutzen — Kataloge in diesem
+Projekt sind Einzelnutzer-Bibliotheken (siehe schon ADR-0040-Nachtrag
+III zur Panorama-Homografie: "kein Web-Maßstab"), keine Datenbank mit
+Millionen Zeilen, bei der ein voller Tabellenscan pro Sammlung
+spürbar würde. `FilterCriteria`/`build_filter_clause` bleiben für die
+Filterleiste/Stapelverarbeitungs-Konsole unverändert bestehen — dort
+reicht flach UND-verknüpft weiterhin aus, ein Umbau auf den Regelbaum
+hätte keinen Mehrwert gebracht.
+
+**Migration alter intelligenter Sammlungen:** `parse_filter_node`
+versucht zuerst, `smart_criteria_json` als `FilterNode` zu lesen; bei
+fehlendem `"type"`-Tag (vor diesem Schritt gespeicherte, flache
+`FilterCriteria`-Form) fällt es auf `FilterCriteria` zurück und
+migriert über `impl From<FilterCriteria> for FilterNode` (jedes
+gesetzte Feld wird eine Bedingung in einer UND-Gruppe) — dieselbe
+"lies alt, migriere beim Zugriff, kein Schreib-Migrationsskript"-
+Konvention wie bei den bedingten Presets oben.
+
+## ADR-0040-Nachtrag VI: Schritt 8 — echte Personen-Wiedererkennung;
+Lizenzprüfung verwirft InsightFace/SFace, `dlib`s öffentlich-erklärtes
+Modell trägt
+
+**Status:** Angenommen
+**Kontext:** `PLAN.md` verlangt für diesen Schritt ausdrücklich, die
+Lizenzprüfung selbst zum ersten Teilschritt zu machen, bevor Code
+entsteht — mit einem ehrlichen "kein passendes Modell gefunden" als
+zulässigem Ausgang (wie bei HEIF in Phase 11). Drei Kandidaten real
+recherchiert:
+
+- **InsightFace** (`buffalo_l`/`antelopev2`): Code MIT, aber die
+  mitgelieferten Modellgewichte laut InsightFaces eigener
+  Model-Zoo-Dokumentation ausdrücklich "für nicht-kommerzielle
+  Forschungszwecke" — kommerzielle Nutzung verlangt eine separate,
+  kostenpflichtige Lizenz von InsightFace selbst. **Verworfen**, genau
+  die Falle, vor der `PLAN.md` warnt.
+- **OpenCV Zoo `SFace`**: eine Apache-2.0-`LICENSE`-Datei liegt im
+  Repo-Verzeichnis, aber das ONNX-Modell wurde ursprünglich auf einer
+  von drei möglichen Datenbanken trainiert (CASIA-WebFace, VGGFace2
+  oder MS1MV2), und `opencv/opencv_zoo`s eigene Maintainer haben auf
+  direkte Nachfrage (Issues #124, `opencv/opencv#21192`) nie geklärt,
+  welche der auto-heruntergeladenen `.onnx`-Datei zugrunde liegt.
+  MS1MV2 leitet sich vom 2019 wegen Herkunfts-/Einwilligungsproblemen
+  zurückgezogenen `MS-Celeb-1M` ab — eine oberflächlich permissive
+  `LICENSE`-Datei klärt diese Herkunftsfrage nicht. **Verworfen**,
+  genau die im Kontext-Abschnitt des Plans beschriebene Nuance (nicht
+  blind einer Lizenzdatei vertrauen, ohne die Trainingsdaten-Herkunft
+  zu prüfen).
+- **`dlib`s eigenes Embedding-Netz**
+  (`dlib_face_recognition_resnet_model_v1.dat`): der Autor
+  (davisking, `davisking/dlib-models`-Repo-README) erklärt das
+  trainierte Modell ausdrücklich und persönlich als gemeinfrei
+  ("anyone can do whatever they want with these model files as I've
+  released them into the public domain") — trotz teils
+  nicht-kommerziell lizenzierter Trainingsquellen (Face Scrub). Das
+  trägt, weil der Autor als tatsächlicher Rechteinhaber des
+  *trainierten Modells* (eine eigenständige schöpferische Leistung,
+  nicht identisch mit den Trainingsdaten) diese Freigabe explizit und
+  öffentlich ausgesprochen hat — ein qualitativ anderer, stärkerer
+  Beleg als eine pauschale Repo-`LICENSE`-Datei ohne Herkunftsklärung
+  wie bei SFace oben. **Angenommen.**
+
+Für die zur Gesichts-Ausrichtung nötigen Landmarken **nicht** das im
+selben `dlib-models`-Repo mitgelieferte 68-Punkte-Modell
+(`shape_predictor_68_face_landmarks.dat`) — dessen README zitiert
+wörtlich einen Hinweis des Datensatz-Erstellers (Stefanos Zafeiriou),
+der kommerzielle Nutzung des daraus trainierten Modells ausdrücklich
+ausschließt. Stattdessen das 5-Punkte-Modell
+(`shape_predictor_5_face_landmarks.dat`, CC0-1.0/gemeinfrei, aus
+`dlib`s eigenem, separat erhobenem Datensatz) — `dlib`s
+`get_face_chip_details`-Funktion (intern von der `dlib-face-recognition`-
+Crate aufgerufen) unterstützt beide Landmarken-Zahlen gleichwertig zur
+Gesichtsausrichtung, dieselbe 5-Punkte-Ausrichtung, die z. B. auch
+`ageitgey/face_recognition` standardmäßig anbietet — keine
+Notlösung, ein etabliertes Muster.
+
+**Gesichts-*Erkennung*** (Bounding-Boxes, bevor überhaupt ein Embedding
+berechnet wird) läuft über `dlib::get_frontal_face_detector` —
+vollständig in `libdlib` selbst einkompiliert (Boost Software
+License 1.0, keine externe Modelldatei, keine eigene Lizenzfrage).
+
+**Entscheidung — Architektur:** `apx-ai::people::PersonEmbedder`
+(neues Modul, hinter dem standardmäßig ausgeschalteten Cargo-Feature
+`people`, dieselbe Konvention wie `apx-tether`s `tethering`/`gphoto2`)
+bindet `dlib-face-recognition` mit dessen `build-native`-Feature an
+die Systembibliothek `libdlib`. Die bestehende Hautton-Heuristik
+(`apx-ai::faces::detect_face_regions`, Phase 11 Schritt 5) bleibt
+unverändert als Fallback bestehen, wenn das Feature nicht kompiliert
+oder keine Modelle hinterlegt sind — additiv, nicht ersetzend, wie
+jede vergleichbare Erweiterung in diesem Projekt.
+
+**Echter, verifizierter Fund in der Abhängigkeitskette:**
+`dlib-face-recognition-sys`s `build.rs` (jede veröffentlichte Version
+bis mindestens 20.0.1) ruft in `main()` *unbedingt* `dlib`s eigenen
+Quellcode von `http://dlib.net` herunter, um ihn selbst zu kompilieren
+— *bevor* es den bereits im selben Modul vorhandenen pkg-config-Pfad
+gegen eine bereits installierte System-`libdlib` überhaupt versucht.
+Dieser pkg-config-Pfad ist dadurch in jeder Version toter Code. In
+dieser Sandbox zusätzlich verschärft: `dlib.net` ist vom
+Netzwerk-Proxy blockiert (HTTP 403), dasselbe Beschaffungsproblem wie
+`huggingface.co`/`cdn.pyke.io`/`docs.rs` an anderer Stelle in diesem
+Projekt. **Fix:** `vendor/dlib-face-recognition-sys/` — eine lokal
+gepatchte Kopie, die `main()` umsortiert (pkg-config zuerst probieren,
+nur bei Fehlschlag herunterladen — dieselben zwei bereits vorhandenen
+Codeblöcke, keine neue Logik), eingebunden über ein
+`[patch.crates-io]` im Workspace-`Cargo.toml`. Real gegen die per
+`apt install libdlib-dev libblas-dev liblapack-dev` installierte
+System-`libdlib` 19.24 kompiliert, gelinkt und getestet (nicht nur
+`cargo add --dry-run`).
+
+**Echt spike-verifiziert, nicht nur behauptet:** gegen drei echte
+Fotos (offizielle Weißes-Haus-Fotos von Pete Souza, US-Regierungswerk,
+gemeinfrei) lief die volle Kette Gesichtserkennung → 5-Punkt-
+Ausrichtung → 128-dimensionales Embedding → euklidischer Abstand.
+Zwei Fotos derselben Person (`obama1.jpg`/`obama2.jpg`) lagen bei
+Abstand 0.35 — unter der von `dlib`s eigener Dokumentation
+empfohlenen Schwelle 0.6 ("dieselbe Person"); ein drittes Foto einer
+anderen Person (`biden.jpg`) lag bei Abstand 0.85, klar darüber.
+Derselbe Test läuft jetzt als `apx-ai::people`s Unit-Test (übersprungen
+ohne lokale Modelldateien/Testfotos — kein Netzwerk-Download in CI,
+siehe `PLAN.md` Phase 13s Verifikations-Abschnitt).
+
+**Katalog-Schema** (`migrations/0011_people.sql`): zwei neue Tabellen,
+`people` (benannte Person, `name: NULL` = automatisch erkannt, aber
+unbenannt) und `face_detections` (Bounding-Box + Embedding als
+JSON-Array, `person_id: NULL` = unzugeordnet). Auto-Zuordnung neu
+erkannter Gesichter läuft — wie bei den intelligenten Sammlungen aus
+Schritt 7 — in-memory: `repository::people::save_detections_for_photo`
+lädt einmal alle bereits einer Person zugeordneten Gesichter und ordnet
+ein neues Gesicht der nächstliegenden Person zu, wenn deren
+euklidischer Abstand unter der Schwelle liegt; `SAME_PERSON_EMBEDDING_
+THRESHOLD`/`embedding_distance` liegen bewusst in `apx_catalog::models`
+statt in `apx-ai::people` (das hinter dem `people`-Feature steht),
+damit diese reine Vergleichslogik unabhängig vom Feature kompiliert.
+
+**Opt-in-Modell-Download, kein Bundling** (dasselbe Muster wie LaMa in
+Schritt 1): `download_people_models` lädt beide `.dat.bz2`-Dateien von
+`dlib.net` herunter und entpackt sie — **nicht in dieser Sitzung
+erreichbar/verifiziert** (`dlib.net` blockiert, siehe oben), dieselbe
+ehrliche Lücke wie beim LaMa-Modell; keine Hash-Prüfung aus demselben
+Grund (kein erreichbarer, verifizierbarer Hash in dieser Sitzung).

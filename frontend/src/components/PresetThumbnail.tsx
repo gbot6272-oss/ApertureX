@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useDevelopPreviewThumbnail } from "../hooks/useDevelopRender";
 import { buildEdlEnvelopeJson, type EdlPayload } from "../lib/edl";
-import { applyConditionsToSubset, mergeEdlSubset, parseConditions, parseEdlSubset, type PresetConditionPhotoMeta } from "../lib/presets";
+import { applyRulesToSubset, mergeEdlSubset, parseEdlSubset, parseRules, type PresetConditionPhotoMeta } from "../lib/presets";
 import { latestPresetVersion } from "../lib/tauri";
 
 const THUMBNAIL_MAX_EDGE = 64;
@@ -18,9 +18,9 @@ const THUMBNAIL_MAX_EDGE = 64;
  *
  * Wertet — wie `applyPreset`/die Hover-Vorschau — die Bedingungen des
  * Presets gegen `photoMeta` aus (`lib/presets.ts`s
- * `applyConditionsToSubset`): eine fürs ganze Preset fehlgeschlagene
- * Regel zeigt das unveränderte `currentEdl` (keine Vorschau-Wirkung),
- * eine sektionsbezogene Regel blendet nur diese Sektion aus.
+ * `applyRulesToSubset`): eine fürs ganze Preset fehlgeschlagene
+ * Regelgruppe zeigt das unveränderte `currentEdl` (keine Vorschau-Wirkung),
+ * eine sektionsbezogene Regelgruppe blendet nur diese Sektion aus.
  */
 export function PresetThumbnail({
   presetId,
@@ -47,8 +47,8 @@ export function PresetThumbnail({
         const version = await latestPresetVersion(presetId);
         if (cancelled) return;
         const rawSubset = parseEdlSubset(version.edl_subset_json);
-        const conditions = parseConditions(conditionsJson);
-        const subset = applyConditionsToSubset(rawSubset, conditions, photoMeta) ?? {};
+        const rules = parseRules(conditionsJson);
+        const subset = applyRulesToSubset(rawSubset, rules, photoMeta) ?? {};
         const merged = mergeEdlSubset(currentEdl, subset);
         setEdlJson(buildEdlEnvelopeJson(merged));
       } catch {

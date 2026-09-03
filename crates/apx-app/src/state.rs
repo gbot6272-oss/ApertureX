@@ -24,6 +24,12 @@ pub struct QueuedExport {
 pub struct AppState {
     pub paths: AppPaths,
     pub catalog: Arc<Catalog>,
+    /// Der Dateipfad des aktuell geöffneten Katalogs (Phase 13 Schritt 6,
+    /// siehe `DECISIONS.md` ADR-0040-Nachtrag IV) — separat von `catalog`
+    /// gehalten, da `Catalog` selbst keinen Pfad kennt (auch der
+    /// speicherresidente `open_in_memory`-Fall hat keinen). Für die
+    /// "Katalog-Informationen"-Anzeige und den Katalog-Wechsler.
+    pub catalog_path: PathBuf,
     /// Abbruch-Token des aktuell laufenden Imports, falls einer läuft.
     /// `None` bedeutet: kein Import aktiv. Ein `Arc<Mutex<_>>`, damit es
     /// unabhängig von der `State`-Lebenszeit in die `spawn_blocking`-Task

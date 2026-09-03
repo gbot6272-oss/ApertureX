@@ -85,6 +85,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         run: () => selectedPhotoId && void openSecondaryDisplay(selectedPhotoId),
       },
       { id: "fn:stats", label: "Statistik…", run: () => requestCommand("stats") },
+      { id: "fn:catalog", label: "Katalog…", run: () => requestCommand("catalog") },
       { id: "fn:settings", label: "Einstellungen…", run: () => setSettingsDialogOpen(true) },
       { id: "fn:onboarding", label: "Erste Schritte anzeigen", run: () => requestCommand("onboarding") },
       { id: "fn:cheatsheet", label: "Tastenkürzel-Übersicht anzeigen", run: () => requestCommand("cheatsheet-overlay") },

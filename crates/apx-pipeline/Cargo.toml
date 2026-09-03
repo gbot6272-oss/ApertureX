@@ -23,6 +23,12 @@ bytemuck = { version = "1", features = ["derive"] }
 # aufzuzwingen (apx-app nutzt Tokio, Tests/andere Aufrufer sollen das nicht müssen).
 pollster = "0.3"
 lensfun = "0.7"
+# Liest Adobe-.dcp-Kameraprofile (Phase 13 Schritt 3, siehe DECISIONS.md
+# ADR-0040-Nachtrag) — reine TIFF/IFD-Struktur, kein Rohbild nötig (anders als
+# gamut-dng's DngDecoder, das ein echtes Rohbild verlangt und daher an
+# eigenständigen .dcp-Dateien scheitert). Kein "bigtiff"-Feature — .dcp
+# nutzt klassisches TIFF.
+gamut-ifd = "2.0.1"
 
 [dev-dependencies]
 approx = "0.5"

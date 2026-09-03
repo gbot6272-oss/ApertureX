@@ -23,17 +23,18 @@ import {
 import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import {
-  applyConditionsToSubset,
+  applyRulesToSubset,
   buildPresetEdlSubset,
   mergeEdlSubset,
-  parseConditions,
   parseEdlSubset,
+  parseRules,
   PRESET_SECTION_KEYS,
   scalePresetEdlSubset,
   serializeConditions,
+  serializeRules,
   serializeEdlSubset,
 } from "../lib/presets";
-import type { PresetCondition, PresetConditionPhotoMeta, PresetEdlSubset, PresetSectionKey } from "../lib/presets";
+import type { PresetCondition, PresetConditionPhotoMeta, PresetEdlSubset, PresetRules, PresetSectionKey } from "../lib/presets";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
 import type { SoftProofIntent, SoftProofProfile } from "../lib/softProof";
@@ -47,6 +48,7 @@ import type {
   CollectionDto,
   ExportOutcomeDto,
   ExportPhotoOptions,
+  FaceDetectionDto,
   FilterCriteriaDto,
   FolderDto,
   HistoryPositionDto,
@@ -54,6 +56,7 @@ import type {
   ImportModeDto,
   ImportPresetDto,
   KeywordDto,
+  PersonDto,
   PhotoDto,
   PresetDto,
   PresetFolderDto,
@@ -66,6 +69,8 @@ import type {
   GpxTrackPointDto,
   CatalogStatisticsDto,
   CameraInfoDto,
+  CameraFileEntryDto,
+  RemovableVolumeDto,
   PreviewCacheStatsDto,
   StackDto,
   TagRuleDto,
@@ -75,10 +80,12 @@ import type {
   WebGalleryOutcomeDto,
   WorkflowTemplatePayload,
   SpotCandidateDto,
+  SmartCollectionLeaf,
   UiSettingsDto,
   WatchedFolderSettingsDto,
 } from "../lib/tauri";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import type { RuleNode } from "../lib/ruleTree";
 
 import * as undoStackLib from "../lib/undoStack";
 import type { UndoEntry } from "../lib/undoStack";
@@ -503,6 +510,15 @@ interface DevelopSlice {
    * committet sofort — ein Dropdown-Wechsel ist wie ein WB-Preset-Klick
    * eine abgeschlossene Aktion, kein Zwischenstand beim Ziehen. */
   setCalibrationCameraProfile: (value: string | null) => void;
+  /** Öffnet den Datei-Dialog für eine `.dcp`-Datei (Phase 13 Schritt 3,
+   * siehe `DECISIONS.md` ADR-0040-Nachtrag), parst sie und speichert das Ergebnis
+   * direkt in `calibration.dcp_profile` — committet sofort. No-op, wenn
+   * der Dialog abgebrochen wurde. */
+  importDcpProfile: () => Promise<void>;
+  /** Entfernt einen zuvor importierten `.dcp`-Profil — `camera_profile`s
+   * Handliste wird danach wieder maßgeblich. */
+  clearDcpProfile: () => void;
+  dcpProfileImporting: boolean;
   /** Setzt eines der zehn numerischen Details-Felder (Phase 4 Schritt 8)
    * — Zwischenstand beim Ziehen. */
   setDetailsField: (key: keyof Omit<DetailsAdjustment, "use_deconvolution_sharpen">, value: number) => void;
@@ -532,6 +548,17 @@ interface DevelopSlice {
   setLensCorrectionAutoCa: (value: boolean) => void;
   /** Setzt den Perspektive/Upright-Modus absolut und committet sofort. */
   setLensCorrectionUprightMode: (value: UprightMode) => void;
+  /** Automatische Kantenerkennung (Phase 13 Schritt 4, siehe
+   * `DECISIONS.md` ADR-0040-Nachtrag II) — analysiert das aktuelle Foto
+   * über `apx_ai::upright` und übernimmt das Ergebnis in
+   * `manual_transform`. Nur der zum aktuellen `upright_mode` passende
+   * Anteil wird ersetzt (`Level` nur `rotate_degrees`, `Vertical` nur
+   * `horizontal`, `Auto`/`Full` beide) — der jeweils andere bleibt
+   * unangetastet, statt eine bestehende manuelle Korrektur stillschweigend
+   * zu löschen. No-op für `Off`/`Guided` (dort gilt der bestehende
+   * manuelle bzw. `guided_lines`-Mechanismus). */
+  runUprightAutoDetect: () => Promise<void>;
+  uprightDetectLoading: boolean;
   /** Setzt ein Feld einer der zwei Guided-Hilfslinien (Phase 4 Schritt 9
    * — siehe `DECISIONS.md` ADR-0030: Zahlenfelder statt einer
    * Klick-Interaktion im Viewer) — legt die Linie mit Nullkoordinaten an,
@@ -579,6 +606,15 @@ interface DevelopSlice {
   addRepairStroke: (targetPath: RepairPoint[]) => void;
   /** Entfernt einen Reparatur-Strich per Index und committet sofort. */
   removeRepairStroke: (index: number) => void;
+  /** Läuft echte LaMa-Inferenz für einen bereits gemalten
+   * `RepairMode::AiInpaint`-Strich (Phase 13 Schritt 1, siehe
+   * `DECISIONS.md` ADR-0040) — das eigentliche „Anwenden": bis dahin ist
+   * der Strich (kein gesetztes `ai_fill`) ein reiner No-Op. `index`
+   * bezieht sich auf `developEdl.repair`. */
+  runAiInpaintForStroke: (index: number) => Promise<void>;
+  /** Läuft während [`runAiInpaintForStroke`] — der Index des gerade
+   * berechneten Strichs, sonst `null`. */
+  aiInpaintLoadingIndex: number | null;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
    * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
    * bei jedem Zwischenwert). */
@@ -752,7 +788,7 @@ interface PresetsSlice {
     folderId: string | null,
     tags: string[],
     sections: PresetSectionKey[],
-    conditions?: PresetCondition[],
+    rules?: PresetRules,
   ) => Promise<void>;
 
   /** Zustand für den nachträglich änderbaren Preset-Stärke-Regler
@@ -1081,6 +1117,11 @@ interface AiSlice {
   aiSettings: AiSettingsDto | null;
   loadAiSettings: () => Promise<void>;
   saveAnthropicApiKey: (apiKey: string) => Promise<void>;
+  /** Lädt das opt-in LaMa-Inpainting-Modell herunter (Phase 13 Schritt 1,
+   * siehe `DECISIONS.md` ADR-0040) — derselbe „Nutzer bestätigt zuerst
+   * ausdrücklich"-Ansatz wie beim Anthropic-Schlüssel. */
+  downloadInpaintingModel: () => Promise<void>;
+  inpaintingModelDownloading: boolean;
   presetGeneratorLoading: boolean;
   presetGeneratorPreview: PresetEdlSubset[];
   /** Index innerhalb `presetGeneratorPreview`, der gerade in der
@@ -1264,7 +1305,7 @@ interface LibraryBacklogSlice {
   createCollectionFolder: (name: string, parentId?: string) => Promise<void>;
   renameCollectionFolder: (folderId: string, name: string) => Promise<void>;
   deleteCollectionFolder: (folderId: string) => Promise<void>;
-  createSmartCollection: (name: string, folderId: string | undefined, criteria: FilterCriteriaDto) => Promise<void>;
+  createSmartCollection: (name: string, folderId: string | undefined, criteriaTree: RuleNode<SmartCollectionLeaf>) => Promise<void>;
   moveCollectionToFolder: (collectionId: string, folderId: string | null) => Promise<void>;
 
   stacks: StackDto[];
@@ -1307,6 +1348,29 @@ interface LibraryBacklogSlice {
   peopleGroups: PhotoDto[][];
   peopleGroupsLoading: boolean;
   loadPeopleGroups: () => Promise<void>;
+
+  /** Echte Personen-Wiedererkennung (Phase 13 Schritt 8, siehe
+   * `DECISIONS.md` ADR-0040-Nachtrag VI) — additiv zu `peopleGroups` oben
+   * (der Hautton-Heuristik-Gruppierung, die als Fallback bestehen
+   * bleibt). */
+  people: PersonDto[];
+  peopleLoading: boolean;
+  refreshPeople: () => Promise<void>;
+  personPhotos: Record<string, PhotoDto[]>;
+  loadPhotosForPerson: (personId: string) => Promise<void>;
+  facesForSelectedPhoto: FaceDetectionDto[];
+  facesLoading: boolean;
+  loadFacesForSelectedPhoto: () => Promise<void>;
+  detectingFaces: boolean;
+  detectFacesForSelectedPhoto: () => Promise<void>;
+  peopleModelsDownloading: boolean;
+  downloadPeopleModels: () => Promise<void>;
+  clearPeopleModelPaths: () => Promise<void>;
+  createPerson: (name: string | null) => Promise<string>;
+  renamePerson: (personId: string, name: string | null) => Promise<void>;
+  deletePerson: (personId: string) => Promise<void>;
+  assignFaceToPerson: (faceId: string, personId: string | null) => Promise<void>;
+  unassignFace: (faceId: string) => Promise<void>;
 
   /** Smart Previews (Phase 11 Schritt 4, siehe `DECISIONS.md` ADR-0038):
    * erzeugt für die aktuelle Auswahl (wie `createStackFromSelection`)
@@ -1438,6 +1502,22 @@ interface LibraryViewsSlice {
   tetherStatus: string | null;
   connectTetherCamera: () => Promise<void>;
   captureTetherPhoto: (presetName?: string) => Promise<void>;
+
+  /** Direktimport bereits vorhandener Aufnahmen (Phase 13 Schritt 2) —
+   * im Unterschied zu `captureTetherPhoto` (löst eine NEUE Aufnahme aus)
+   * listet dies bereits auf der verbundenen Kamera gespeicherte Dateien. */
+  cameraFiles: CameraFileEntryDto[];
+  cameraFilesLoading: boolean;
+  listCameraFilesAction: () => Promise<void>;
+  /** Importiert einen Eintrag aus `cameraFiles`, entfernt ihn danach aus
+   * der Liste (unabhängig davon, ob er wirklich neu war). */
+  importCameraFile: (entry: CameraFileEntryDto, presetName?: string) => Promise<void>;
+
+  /** Wechseldatenträger-Erkennung für den `ImportDialog.tsx`-Öffnen-
+   * Handler (Phase 13 Schritt 2) — reine Bequemlichkeit, kein neuer
+   * Berechtigungsrahmen. */
+  removableVolumes: RemovableVolumeDto[];
+  loadRemovableVolumes: () => Promise<void>;
 }
 
 export type AppStore = CatalogSlice &
@@ -2220,6 +2300,37 @@ export const useAppStore = create<AppStore>()(
       void get().commitDevelopEdit();
     },
 
+    dcpProfileImporting: false,
+
+    importDcpProfile: async () => {
+      set((state) => {
+        state.dcpProfileImporting = true;
+      });
+      try {
+        const profile = await api.importDcpProfile();
+        if (!profile) return; // Dialog abgebrochen.
+        set((state) => {
+          state.developEdl.calibration.dcp_profile = profile;
+        });
+        void get().commitDevelopEdit(`DCP-Profil „${profile.name}" importiert`);
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.dcpProfileImporting = false;
+        });
+      }
+    },
+
+    clearDcpProfile: () => {
+      set((state) => {
+        state.developEdl.calibration.dcp_profile = undefined;
+      });
+      void get().commitDevelopEdit();
+    },
+
     setDetailsField: (key, value) => {
       set((state) => {
         state.developEdl.details[key] = value;
@@ -2278,6 +2389,38 @@ export const useAppStore = create<AppStore>()(
         state.developEdl.lens_corrections.upright_mode = value;
       });
       void get().commitDevelopEdit();
+    },
+
+    uprightDetectLoading: false,
+
+    runUprightAutoDetect: async () => {
+      const { selectedPhotoId } = get();
+      const mode = get().developEdl.lens_corrections.upright_mode;
+      if (!selectedPhotoId || mode === "Off" || mode === "Guided") return;
+      set((state) => {
+        state.uprightDetectLoading = true;
+      });
+      try {
+        const dto = await api.detectUprightCorrection(selectedPhotoId, mode);
+        set((state) => {
+          const transform = state.developEdl.lens_corrections.manual_transform;
+          if (mode === "Level" || mode === "Auto" || mode === "Full") {
+            transform.rotate_degrees = dto.rotate_degrees;
+          }
+          if (mode === "Vertical" || mode === "Auto" || mode === "Full") {
+            transform.horizontal = dto.horizontal;
+          }
+        });
+        void get().commitDevelopEdit("Perspektive automatisch erkannt");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.uprightDetectLoading = false;
+        });
+      }
     },
 
     setLensCorrectionGuidedLineField: (lineIndex, field, value) => {
@@ -2382,12 +2525,16 @@ export const useAppStore = create<AppStore>()(
 
     addRepairStroke: (targetPath) => {
       const { repairPendingSource, repairDraftMode, repairDraftRadius, repairDraftFeather, repairDraftOpacity } = get();
-      // Inhaltsbasiertes Füllen (Phase 7) sucht seinen Füllinhalt selbst
-      // aus der Bildumgebung — anders als Klonen/Reparieren braucht es
+      // Inhaltsbasiertes Füllen (Phase 7) und KI-Ausfüllen (Phase 13
+      // Schritt 1) suchen ihren Füllinhalt selbst (aus der Bildumgebung
+      // bzw. per Inferenz) — anders als Klonen/Reparieren brauchen sie
       // keinen vom Nutzer gesetzten Quellpunkt (`source` wird von
-      // `apx-pipeline` für diesen Modus ignoriert, siehe ADR-0033 Punkt 4).
-      const isContentAwareFill = repairDraftMode === "ContentAwareFill";
-      if ((!repairPendingSource && !isContentAwareFill) || targetPath.length === 0) return;
+      // `apx-pipeline` für beide Modi ignoriert, siehe ADR-0033 Punkt 4
+      // bzw. ADR-0040). Ein frisch angelegter `AiInpaint`-Strich hat noch
+      // kein `ai_fill` — er bleibt ein No-Op, bis `runAiInpaintForStroke`
+      // ihn nach einem expliziten „Anwenden" berechnet.
+      const needsNoSource = repairDraftMode === "ContentAwareFill" || repairDraftMode === "AiInpaint";
+      if ((!repairPendingSource && !needsNoSource) || targetPath.length === 0) return;
       set((state) => {
         state.developEdl.repair.push({
           mode: repairDraftMode,
@@ -2407,6 +2554,55 @@ export const useAppStore = create<AppStore>()(
         state.developEdl.repair.splice(index, 1);
       });
       void get().commitDevelopEdit();
+    },
+
+    aiInpaintLoadingIndex: null,
+
+    runAiInpaintForStroke: async (index) => {
+      const { selectedPhotoId } = get();
+      const stroke = get().developEdl.repair[index];
+      if (!selectedPhotoId || !stroke || stroke.mode !== "AiInpaint") return;
+
+      // Normiertes Zielrechteck: Bounding-Box des gemalten Pfads, um
+      // `radius + feather` erweitert (derselbe Bereich, den der Pinsel
+      // visuell abdeckt) — dieselbe Marge wie `RepairOverlay.tsx`s
+      // Vorschau-Darstellung eines Strichs.
+      const margin = stroke.radius + stroke.feather;
+      const xs = stroke.target_path.map((p) => p.x);
+      const ys = stroke.target_path.map((p) => p.y);
+      const x0 = Math.max(0, Math.min(...xs) - margin);
+      const y0 = Math.max(0, Math.min(...ys) - margin);
+      const x1 = Math.min(1, Math.max(...xs) + margin);
+      const y1 = Math.min(1, Math.max(...ys) + margin);
+
+      set((state) => {
+        state.aiInpaintLoadingIndex = index;
+      });
+      try {
+        const dto = await api.runAiInpaint(selectedPhotoId, x0, y0, x1 - x0, y1 - y0);
+        set((state) => {
+          const current = state.developEdl.repair[index];
+          if (!current || current.mode !== "AiInpaint") return; // Strich wurde zwischenzeitlich entfernt.
+          current.ai_fill = {
+            x: dto.x,
+            y: dto.y,
+            width: dto.width,
+            height: dto.height,
+            bitmap_width: dto.bitmap_width,
+            bitmap_height: dto.bitmap_height,
+            pixels: base64ToByteArray(dto.pixels_base64),
+          };
+        });
+        void get().commitDevelopEdit("KI-Ausfüllen angewendet");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.aiInpaintLoadingIndex = null;
+        });
+      }
     },
 
     colorMixerPickerActive: false,
@@ -3140,12 +3336,12 @@ export const useAppStore = create<AppStore>()(
       }
     },
 
-    savePresetFromCurrentEdl: async (name, folderId, tags, sections, conditions = []) => {
+    savePresetFromCurrentEdl: async (name, folderId, tags, sections, rules = []) => {
       const trimmed = name.trim();
       if (!trimmed || sections.length === 0) return;
       try {
         const subset = buildPresetEdlSubset(get().developEdl, sections);
-        await api.createPreset(folderId, trimmed, tags, serializeConditions(conditions), serializeEdlSubset(subset));
+        await api.createPreset(folderId, trimmed, tags, serializeRules(rules), serializeEdlSubset(subset));
         await get().refreshPresets();
       } catch (err) {
         set((state) => {
@@ -3161,12 +3357,12 @@ export const useAppStore = create<AppStore>()(
         const version = await api.latestPresetVersion(presetId);
         const rawSubset = parseEdlSubset(version.edl_subset_json);
         const preset = get().presets.find((p) => p.id === presetId);
-        const conditions = parseConditions(preset?.conditions_json ?? "[]");
-        const subset = applyConditionsToSubset(rawSubset, conditions, selectPresetConditionMeta(get()));
+        const rules = parseRules(preset?.conditions_json ?? "[]");
+        const subset = applyRulesToSubset(rawSubset, rules, selectPresetConditionMeta(get()));
         if (subset === null) {
           // Bedingung fürs ganze Preset nicht erfüllt (`section: null`) —
           // Preset wird gar nicht angewendet (`lib/presets.ts`s
-          // `applyConditionsToSubset`).
+          // `applyRulesToSubset`).
           set((state) => {
             state.catalogError = `Preset „${preset?.name ?? presetId}" erfüllt die Bedingungen für dieses Foto nicht.`;
           });
@@ -3252,8 +3448,8 @@ export const useAppStore = create<AppStore>()(
           const version = await api.latestPresetVersion(presetId);
           const rawSubset: PresetEdlSubset = parseEdlSubset(version.edl_subset_json);
           const preset = presets.find((p) => p.id === presetId);
-          const conditions = parseConditions(preset?.conditions_json ?? "[]");
-          const subset = applyConditionsToSubset(rawSubset, conditions, meta);
+          const rules = parseRules(preset?.conditions_json ?? "[]");
+          const subset = applyRulesToSubset(rawSubset, rules, meta);
           if (subset === null) continue;
           merged = mergeEdlSubset(merged, subset);
         }
@@ -3276,8 +3472,8 @@ export const useAppStore = create<AppStore>()(
         const version = await api.latestPresetVersion(presetId);
         const rawSubset = parseEdlSubset(version.edl_subset_json);
         const preset = get().presets.find((p) => p.id === presetId);
-        const conditions = parseConditions(preset?.conditions_json ?? "[]");
-        const subset = applyConditionsToSubset(rawSubset, conditions, selectPresetConditionMeta(get()));
+        const rules = parseRules(preset?.conditions_json ?? "[]");
+        const subset = applyRulesToSubset(rawSubset, rules, selectPresetConditionMeta(get()));
         set((state) => {
           // `null` (Bedingung fürs ganze Preset nicht erfüllt) zeigt eine
           // leere Vorschau — entspricht dem tatsächlichen `applyPreset`-
@@ -3933,6 +4129,26 @@ export const useAppStore = create<AppStore>()(
       }
     },
 
+    inpaintingModelDownloading: false,
+
+    downloadInpaintingModel: async () => {
+      set((state) => {
+        state.inpaintingModelDownloading = true;
+      });
+      try {
+        await api.downloadInpaintingModel();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.inpaintingModelDownloading = false;
+        });
+      }
+    },
+
     presetGeneratorLoading: false,
     presetGeneratorPreview: [],
     presetGeneratorSelectedIndex: 0,
@@ -4513,10 +4729,10 @@ export const useAppStore = create<AppStore>()(
       await get().refreshCollections();
     },
 
-    createSmartCollection: async (name, folderId, criteria) => {
+    createSmartCollection: async (name, folderId, criteriaTree) => {
       const trimmed = name.trim();
       if (!trimmed) return;
-      await api.createSmartCollection(trimmed, folderId, criteria);
+      await api.createSmartCollection(trimmed, folderId, JSON.stringify(criteriaTree));
       await get().refreshCollections();
     },
 
@@ -4671,6 +4887,192 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.peopleGroupsLoading = false;
+        });
+      }
+    },
+
+    people: [],
+    peopleLoading: false,
+
+    refreshPeople: async () => {
+      set((state) => {
+        state.peopleLoading = true;
+      });
+      try {
+        const people = await api.listPeople();
+        set((state) => {
+          state.people = people;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.peopleLoading = false;
+        });
+      }
+    },
+
+    personPhotos: {},
+
+    loadPhotosForPerson: async (personId) => {
+      try {
+        const photos = await api.listPhotosForPerson(personId);
+        set((state) => {
+          state.personPhotos[personId] = photos;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    facesForSelectedPhoto: [],
+    facesLoading: false,
+
+    loadFacesForSelectedPhoto: async () => {
+      const photoId = get().selectedPhotoId;
+      if (!photoId) {
+        set((state) => {
+          state.facesForSelectedPhoto = [];
+        });
+        return;
+      }
+      set((state) => {
+        state.facesLoading = true;
+      });
+      try {
+        const faces = await api.listFacesForPhoto(photoId);
+        set((state) => {
+          state.facesForSelectedPhoto = faces;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.facesLoading = false;
+        });
+      }
+    },
+
+    detectingFaces: false,
+
+    detectFacesForSelectedPhoto: async () => {
+      const photoId = get().selectedPhotoId;
+      if (!photoId) return;
+      set((state) => {
+        state.detectingFaces = true;
+      });
+      try {
+        const faces = await api.detectFacesForPhoto(photoId);
+        set((state) => {
+          state.facesForSelectedPhoto = faces;
+        });
+        await get().refreshPeople();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.detectingFaces = false;
+        });
+      }
+    },
+
+    peopleModelsDownloading: false,
+
+    downloadPeopleModels: async () => {
+      set((state) => {
+        state.peopleModelsDownloading = true;
+      });
+      try {
+        await api.downloadPeopleModels();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.peopleModelsDownloading = false;
+        });
+      }
+    },
+
+    clearPeopleModelPaths: async () => {
+      try {
+        await api.clearPeopleModelPaths();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    createPerson: async (name) => {
+      try {
+        const id = await api.createPerson(name);
+        await get().refreshPeople();
+        return id;
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+        throw err;
+      }
+    },
+
+    renamePerson: async (personId, name) => {
+      try {
+        await api.renamePerson(personId, name);
+        await get().refreshPeople();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    deletePerson: async (personId) => {
+      try {
+        await api.deletePerson(personId);
+        await get().refreshPeople();
+        set((state) => {
+          delete state.personPhotos[personId];
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    assignFaceToPerson: async (faceId, personId) => {
+      try {
+        await api.assignFaceToPerson(faceId, personId);
+        await get().loadFacesForSelectedPhoto();
+        await get().refreshPeople();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    unassignFace: async (faceId) => {
+      try {
+        await api.unassignFace(faceId);
+        await get().loadFacesForSelectedPhoto();
+        await get().refreshPeople();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
         });
       }
     },
@@ -5166,6 +5568,72 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.tetherCapturing = false;
+        });
+      }
+    },
+
+    cameraFiles: [],
+    cameraFilesLoading: false,
+
+    listCameraFilesAction: async () => {
+      set((state) => {
+        state.cameraFilesLoading = true;
+      });
+      try {
+        const files = await api.listCameraFiles();
+        set((state) => {
+          state.cameraFiles = files;
+          state.tetherStatus = files.length === 0 ? "Keine Dateien auf der Kamera gefunden" : null;
+        });
+      } catch (err) {
+        set((state) => {
+          state.tetherStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.cameraFilesLoading = false;
+        });
+      }
+    },
+
+    importCameraFile: async (entry, presetName) => {
+      set((state) => {
+        state.tetherCapturing = true;
+      });
+      try {
+        const photo = await api.importFromCamera(entry.folder, entry.name, presetName);
+        set((state) => {
+          state.tetherStatus = photo ? `Importiert: ${photo.filename}` : "Datei war nicht neu";
+          state.cameraFiles = state.cameraFiles.filter(
+            (f) => !(f.folder === entry.folder && f.name === entry.name),
+          );
+        });
+        if (photo && get().selectedFolderId) await get().loadPhotosForFolder(get().selectedFolderId!);
+      } catch (err) {
+        set((state) => {
+          state.tetherStatus = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.tetherCapturing = false;
+        });
+      }
+    },
+
+    removableVolumes: [],
+
+    loadRemovableVolumes: async () => {
+      try {
+        const volumes = await api.listRemovableVolumes();
+        set((state) => {
+          state.removableVolumes = volumes;
+        });
+      } catch {
+        // Reine Bequemlichkeit — ein Fehlschlag hier (z. B. keine
+        // Berechtigung auf einer Sandbox-Plattform) darf den normalen
+        // Ordner-Import nicht blockieren, deshalb kein `catalogError`.
+        set((state) => {
+          state.removableVolumes = [];
         });
       }
     },

@@ -98,6 +98,18 @@ statt stillschweigend übergangen.
 |---|---|---|---|
 | `lensfun` | LGPL-3.0-or-later | Echte LensFun-Objektiv-/Kameradatenbank (`apx_pipeline::lens_profiles`, Schritt 0 Spike + Schritt 3) | Reines Rust, bit-exakt gegen die C++-Referenzbibliothek getesteter Port (laut Projekt-README 1.640 A/B-Testfälle, Abweichung 4,88×10⁻⁴ Pixel). Bundelt die echte, offene LensFun-XML-Datenbank (`Database::load_bundled()`, ~574 KB gzip) direkt eingebettet, keine Laufzeit-Dateisystemzugriffe. Einzige neue transitive Abhängigkeit: `roxmltree` (reines Rust, DOM-XML-Parser), keine C-Bindings/`bindgen`. LGPL-3.0-or-later gilt nur für die Bibliothek selbst (kein statisch gelinkter C-Code wie bei `lcms2`/`gamut-jxl`), dynamisches Linken/Aufrufen einer LGPL-Rust-Crate aus einem separaten Crate verlangt keine Lizenzänderung des aufrufenden Codes — analog zum bereits dokumentierten `gphoto2`/`libgphoto2`-Präzedenzfall (Phase 9) |
 
+## Rust — Phase 13 (siehe `DECISIONS.md` ADR-0040)
+
+Die in den Schritten 0–7 hinzugekommenen Abhängigkeiten (`ort`, `imageproc`,
+`akaze`-Ersatz/`homography`/`rand`, `sysinfo`, `gamut-ifd`, `bzip2` u. a.)
+wurden bei ihrer jeweiligen Einführung nicht in diese Datei eingetragen —
+ein Nachtrag für Schritte 0–7 steht noch aus. Schritt 8 (unten) beginnt
+diese Tabelle korrekt.
+
+| Crate | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `dlib-face-recognition` | BSD-3-Clause | Echte Personen-Wiedererkennung (`apx-ai::people`, Schritt 8), hinter Cargo-Feature `people` (standardmäßig aus) | Bindet an System-`libdlib`, das selbst **Boost Software License 1.0** ist (sehr permissiv, MIT-ähnlich, keine Ausnahme im Sinne von ADR-0002/ADR-0035 nötig). Verwendet bewusst **nicht** die von der Crate mitgelieferten Modell-Download-Features (`embed-lp` lädt das 68-Punkte-Landmarken-Modell, dessen README kommerzielle Nutzung ausdrücklich ausschließt) — stattdessen lädt der Nutzer selbst zwei nachweislich gemeinfreie `dlib.net`-Modelldateien herunter (`dlib_face_recognition_resnet_model_v1.dat`: Public Domain laut Autor; `shape_predictor_5_face_landmarks.dat`: CC0-1.0), siehe `apx-ai::people`s Moduldoku für die vollständige Lizenzprüfung. `dlib-face-recognition-sys` (transitiv, BSD-3-Clause) wird lokal gepatcht eingebunden (`vendor/dlib-face-recognition-sys/`) — ein echter, verifizierter Ordnungsfehler in dessen `build.rs` macht den vorhandenen pkg-config-Pfad gegen eine installierte System-`libdlib` sonst unerreichbar, siehe `VENDORED.md` dort |
+
 ## Frontend — geplant für Phase 1
 
 | Paket | Lizenz | Zweck | Hinweis |

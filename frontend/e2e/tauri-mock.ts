@@ -105,6 +105,24 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // (Testdefault) — ein Test, der den heruntergeladenen Zustand prüfen
     // will, überschreibt das per `setMockFixtures`.
     inpaintingModelPath: null as string | null,
+    // Phase 13 Schritt 8 (ADR-0040-Nachtrag VI): `false` als Testdefault —
+    // dieselbe ehrliche Annahme wie die reale, standardmäßig ohne das
+    // Cargo-Feature `people` gebaute App; ein Test, der die echte
+    // Personen-Wiedererkennungs-UI prüfen will, überschreibt das per
+    // `setMockFixtures`.
+    peopleFeatureCompiled: false,
+    peopleLandmarkModelPath: null as string | null,
+    peopleEncoderModelPath: null as string | null,
+    people: [] as Array<{ id: string; name: string | null; cover_face_id: string | null }>,
+    faceDetections: [] as Array<{
+      id: string;
+      photo_id: string;
+      person_id: string | null;
+      rect_left: number;
+      rect_top: number;
+      rect_right: number;
+      rect_bottom: number;
+    }>,
     // Phase 10 Schritt 1/9: `onboarding_seen: true` als Testdefault, damit
     // das automatische Onboarding-Overlay (App.tsx) nicht in jedem
     // e2e-Test ungefragt aufpoppt — ein Test, der das Onboarding gezielt
@@ -281,6 +299,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   const photoKeywords: Record<string, { id: string; name: string }[]> = {};
   let nextCollectionId = 1;
   let nextKeywordId = 1;
+  let nextFaceId = 1;
+  let nextPersonId = 1;
 
   // Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe DECISIONS.md
   // ADR-0038) — ein Journal fürs Undo, dasselbe Prinzip wie
@@ -534,6 +554,19 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       sensorSpots: Array<{ x: number; y: number; radius: number; strength: number }>;
       anthropicApiKey: string | null;
       inpaintingModelPath: string | null;
+      peopleFeatureCompiled: boolean;
+      peopleLandmarkModelPath: string | null;
+      peopleEncoderModelPath: string | null;
+      people: Array<{ id: string; name: string | null; cover_face_id: string | null }>;
+      faceDetections: Array<{
+        id: string;
+        photo_id: string;
+        person_id: string | null;
+        rect_left: number;
+        rect_top: number;
+        rect_right: number;
+        rect_bottom: number;
+      }>;
       uiSettings: {
         theme: "dark" | "light";
         accent_color: string | null;
@@ -1299,6 +1332,9 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return {
           anthropic_api_key: fixtures.anthropicApiKey,
           inpainting_model_path: fixtures.inpaintingModelPath,
+          people_landmark_model_path: fixtures.peopleLandmarkModelPath,
+          people_encoder_model_path: fixtures.peopleEncoderModelPath,
+          people_feature_compiled: fixtures.peopleFeatureCompiled,
         };
       case "download_inpainting_model":
         fixtures.inpaintingModelPath = "/mock/models/lama_fp32.onnx";
@@ -1306,6 +1342,77 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "clear_inpainting_model_path":
         fixtures.inpaintingModelPath = null;
         return null;
+
+      // ---- Echte Personen-Wiedererkennung (Phase 13 Schritt 8) -----------
+      case "download_people_models":
+        fixtures.peopleLandmarkModelPath = "/mock/models/shape_predictor_5_face_landmarks.dat";
+        fixtures.peopleEncoderModelPath = "/mock/models/dlib_face_recognition_resnet_model_v1.dat";
+        return null;
+      case "clear_people_model_paths":
+        fixtures.peopleLandmarkModelPath = null;
+        fixtures.peopleEncoderModelPath = null;
+        return null;
+      case "detect_faces_for_photo": {
+        // Feste Ein-Gesicht-Fixtur statt echter Erkennung — reicht für
+        // e2e-Tests, die den UI-Fluss prüfen, nicht die Bildanalyse
+        // selbst (dieselbe Vereinfachung wie bei jedem anderen
+        // KI-Mock-Fall in dieser Datei).
+        const photoId = args.photoId as string;
+        fixtures.faceDetections = fixtures.faceDetections.filter((f) => f.photo_id !== photoId);
+        const face = {
+          id: `face-${nextFaceId++}`,
+          photo_id: photoId,
+          person_id: null,
+          rect_left: 10,
+          rect_top: 10,
+          rect_right: 100,
+          rect_bottom: 100,
+        };
+        fixtures.faceDetections.push(face);
+        return [face];
+      }
+      case "list_faces_for_photo":
+        return fixtures.faceDetections.filter((f) => f.photo_id === (args.photoId as string));
+      case "list_people":
+        return fixtures.people;
+      case "list_photos_for_person": {
+        const personId = args.personId as string;
+        const photoIds = new Set(fixtures.faceDetections.filter((f) => f.person_id === personId).map((f) => f.photo_id));
+        return Object.values(fixtures.photosByFolder)
+          .flat()
+          .filter((p) => photoIds.has((p as { id: string }).id));
+      }
+      case "create_person": {
+        const id = `person-${nextPersonId++}`;
+        fixtures.people.push({ id, name: (args.name as string | null) ?? null, cover_face_id: null });
+        return id;
+      }
+      case "rename_person": {
+        const person = fixtures.people.find((p) => p.id === (args.personId as string));
+        if (person) person.name = (args.name as string | null) ?? null;
+        return null;
+      }
+      case "delete_person":
+        fixtures.people = fixtures.people.filter((p) => p.id !== (args.personId as string));
+        for (const face of fixtures.faceDetections) {
+          if (face.person_id === (args.personId as string)) face.person_id = null;
+        }
+        return null;
+      case "assign_face_to_person": {
+        let personId = args.personId as string | null;
+        if (!personId) {
+          personId = `person-${nextPersonId++}`;
+          fixtures.people.push({ id: personId, name: null, cover_face_id: null });
+        }
+        const face = fixtures.faceDetections.find((f) => f.id === (args.faceId as string));
+        if (face) face.person_id = personId;
+        return personId;
+      }
+      case "unassign_face": {
+        const face = fixtures.faceDetections.find((f) => f.id === (args.faceId as string));
+        if (face) face.person_id = null;
+        return null;
+      }
       case "run_ai_inpaint": {
         const w = 4;
         const h = 4;

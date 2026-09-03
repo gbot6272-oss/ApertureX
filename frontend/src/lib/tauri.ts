@@ -843,6 +843,14 @@ export interface AiSettingsDto {
   /** `null`, solange der Nutzer den Download nicht bestätigt hat (Phase 13
    * Schritt 1, siehe `DECISIONS.md` ADR-0040). */
   inpainting_model_path: string | null;
+  /** `null`, solange der Nutzer den Download nicht bestätigt hat (Phase 13
+   * Schritt 8, siehe `DECISIONS.md` ADR-0040-Nachtrag VI). */
+  people_landmark_model_path: string | null;
+  people_encoder_model_path: string | null;
+  /** `false`, wenn diese Build ohne das Cargo-Feature `people` kompiliert
+   * wurde — `PeopleView.tsx` zeigt dann einen Hinweis statt der Download-/
+   * Erkennungs-Aktionen. */
+  people_feature_compiled: boolean;
 }
 
 export function getAiSettings(): Promise<AiSettingsDto> {
@@ -867,6 +875,76 @@ export function downloadInpaintingModel(): Promise<string> {
  * selbst nicht (der Nutzer kann sie manuell entfernen). */
 export function clearInpaintingModelPath(): Promise<void> {
   return invoke<void>("clear_inpainting_model_path");
+}
+
+// ---- KI: Echte Personen-Wiedererkennung (Phase 13 Schritt 8) ---------------
+
+export interface FaceDetectionDto {
+  id: string;
+  photo_id: string;
+  person_id: string | null;
+  rect_left: number;
+  rect_top: number;
+  rect_right: number;
+  rect_bottom: number;
+}
+
+export interface PersonDto {
+  id: string;
+  name: string | null;
+  cover_face_id: string | null;
+}
+
+/** Lädt beide gemeinfreien `dlib`-Modelldateien herunter (siehe
+ * `DECISIONS.md` ADR-0040-Nachtrag VI) — löst erst nach ausdrücklicher
+ * Nutzerbestätigung. */
+export function downloadPeopleModels(): Promise<void> {
+  return invoke<void>("download_people_models");
+}
+
+export function clearPeopleModelPaths(): Promise<void> {
+  return invoke<void>("clear_people_model_paths");
+}
+
+/** Erkennt alle Gesichter in `photoId`s Vorschau, speichert sie (ersetzt
+ * frühere Erkennungen desselben Fotos) und ordnet neue Gesichter
+ * automatisch bereits benannten Personen zu, wenn ähnlich genug. */
+export function detectFacesForPhoto(photoId: string): Promise<FaceDetectionDto[]> {
+  return invoke<FaceDetectionDto[]>("detect_faces_for_photo", { photoId });
+}
+
+export function listFacesForPhoto(photoId: string): Promise<FaceDetectionDto[]> {
+  return invoke<FaceDetectionDto[]>("list_faces_for_photo", { photoId });
+}
+
+export function listPeople(): Promise<PersonDto[]> {
+  return invoke<PersonDto[]>("list_people");
+}
+
+export function listPhotosForPerson(personId: string): Promise<PhotoDto[]> {
+  return invoke<PhotoDto[]>("list_photos_for_person", { personId });
+}
+
+export function createPerson(name: string | null): Promise<string> {
+  return invoke<string>("create_person", { name });
+}
+
+export function renamePerson(personId: string, name: string | null): Promise<void> {
+  return invoke<void>("rename_person", { personId, name });
+}
+
+export function deletePerson(personId: string): Promise<void> {
+  return invoke<void>("delete_person", { personId });
+}
+
+/** `personId: null` legt eine neue, unbenannte Person an und ordnet das
+ * Gesicht dieser zu — gibt die (ggf. neu angelegte) Personen-ID zurück. */
+export function assignFaceToPerson(faceId: string, personId: string | null): Promise<string> {
+  return invoke<string>("assign_face_to_person", { faceId, personId });
+}
+
+export function unassignFace(faceId: string): Promise<void> {
+  return invoke<void>("unassign_face", { faceId });
 }
 
 export interface AiFillPatchDto {

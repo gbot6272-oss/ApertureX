@@ -105,6 +105,17 @@ pub struct AiSettings {
     /// mitgeliefertes ~208-MB-Modell im Installer, derselbe Opt-in wie
     /// der Anthropic-Schlüssel oben).
     pub inpainting_model_path: Option<String>,
+    /// Lokale Pfade zu den beiden für echte Personen-Wiedererkennung
+    /// nötigen `dlib`-Modelldateien (Phase 13 Schritt 8, siehe
+    /// `DECISIONS.md` ADR-0040-Nachtrag VI, `apx-ai::people`s Moduldoku)
+    /// — `people_landmark_model_path` muss auf
+    /// `shape_predictor_5_face_landmarks.dat` zeigen (**nicht** die
+    /// 68-Punkte-Variante, die kommerzielle Nutzung ausschließt),
+    /// `people_encoder_model_path` auf
+    /// `dlib_face_recognition_resnet_model_v1.dat`. Beide gemeinfrei,
+    /// vom Nutzer selbst heruntergeladen, kein Bundling im Installer.
+    pub people_landmark_model_path: Option<String>,
+    pub people_encoder_model_path: Option<String>,
 }
 
 /// Einstellungen für den beobachteten Ordner (Phase 12 Schritt 7, siehe

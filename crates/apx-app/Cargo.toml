@@ -53,6 +53,12 @@ image_hasher = "3.1.1"
 # siehe DECISIONS.md ADR-0040) — dieselbe rustls-tls-Variante wie
 # apx-ais Anthropic-Client (kein systemabhängiges OpenSSL).
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# Für den Download der bz2-komprimierten `dlib`-Modelldateien (Phase 13
+# Schritt 8) — unabhängig vom `people`-Feature nutzbar (reines Herunter-
+# laden/Entpacken, keine dlib-Bindung), dieselbe Erreichbarkeits-Lücke wie
+# bei jedem anderen Modell-Download in diesem Projekt: `dlib.net` ist von
+# dieser Sandbox aus blockiert (siehe `apx-ai::people`s Moduldoku).
+bzip2 = "0.4"
 # Wechseldatenträger-Erkennung für den Speicherkarten-Direktimport
 # (Phase 13 Schritt 2) — nur das "disk"-Feature, keine CPU-/Prozess-/
 # Netzwerk-Systeminfo, die dieses Projekt nicht braucht.
@@ -66,6 +72,10 @@ nalgebra = "0.33.0"
 # Standardmäßig aus — siehe apx-tether/src/lib.rs Moduldoku und
 # THIRD_PARTY.md: libgphoto2 fehlt in dieser Sandbox und im Standard-CI.
 tethering = ["apx-tether/tethering"]
+# Standardmäßig aus — siehe apx-ai/src/people.rs Moduldoku: libdlib/
+# libblas/liblapack fehlen in dieser Sandbox und im Standard-CI (dieselbe
+# Konvention wie `tethering` oben).
+people = ["apx-ai/people"]
 
 [dev-dependencies]
 tempfile = "3"

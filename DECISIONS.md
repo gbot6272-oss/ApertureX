@@ -2573,3 +2573,126 @@ migriert über `impl From<FilterCriteria> for FilterNode` (jedes
 gesetzte Feld wird eine Bedingung in einer UND-Gruppe) — dieselbe
 "lies alt, migriere beim Zugriff, kein Schreib-Migrationsskript"-
 Konvention wie bei den bedingten Presets oben.
+
+## ADR-0040-Nachtrag VI: Schritt 8 — echte Personen-Wiedererkennung;
+Lizenzprüfung verwirft InsightFace/SFace, `dlib`s öffentlich-erklärtes
+Modell trägt
+
+**Status:** Angenommen
+**Kontext:** `PLAN.md` verlangt für diesen Schritt ausdrücklich, die
+Lizenzprüfung selbst zum ersten Teilschritt zu machen, bevor Code
+entsteht — mit einem ehrlichen "kein passendes Modell gefunden" als
+zulässigem Ausgang (wie bei HEIF in Phase 11). Drei Kandidaten real
+recherchiert:
+
+- **InsightFace** (`buffalo_l`/`antelopev2`): Code MIT, aber die
+  mitgelieferten Modellgewichte laut InsightFaces eigener
+  Model-Zoo-Dokumentation ausdrücklich "für nicht-kommerzielle
+  Forschungszwecke" — kommerzielle Nutzung verlangt eine separate,
+  kostenpflichtige Lizenz von InsightFace selbst. **Verworfen**, genau
+  die Falle, vor der `PLAN.md` warnt.
+- **OpenCV Zoo `SFace`**: eine Apache-2.0-`LICENSE`-Datei liegt im
+  Repo-Verzeichnis, aber das ONNX-Modell wurde ursprünglich auf einer
+  von drei möglichen Datenbanken trainiert (CASIA-WebFace, VGGFace2
+  oder MS1MV2), und `opencv/opencv_zoo`s eigene Maintainer haben auf
+  direkte Nachfrage (Issues #124, `opencv/opencv#21192`) nie geklärt,
+  welche der auto-heruntergeladenen `.onnx`-Datei zugrunde liegt.
+  MS1MV2 leitet sich vom 2019 wegen Herkunfts-/Einwilligungsproblemen
+  zurückgezogenen `MS-Celeb-1M` ab — eine oberflächlich permissive
+  `LICENSE`-Datei klärt diese Herkunftsfrage nicht. **Verworfen**,
+  genau die im Kontext-Abschnitt des Plans beschriebene Nuance (nicht
+  blind einer Lizenzdatei vertrauen, ohne die Trainingsdaten-Herkunft
+  zu prüfen).
+- **`dlib`s eigenes Embedding-Netz**
+  (`dlib_face_recognition_resnet_model_v1.dat`): der Autor
+  (davisking, `davisking/dlib-models`-Repo-README) erklärt das
+  trainierte Modell ausdrücklich und persönlich als gemeinfrei
+  ("anyone can do whatever they want with these model files as I've
+  released them into the public domain") — trotz teils
+  nicht-kommerziell lizenzierter Trainingsquellen (Face Scrub). Das
+  trägt, weil der Autor als tatsächlicher Rechteinhaber des
+  *trainierten Modells* (eine eigenständige schöpferische Leistung,
+  nicht identisch mit den Trainingsdaten) diese Freigabe explizit und
+  öffentlich ausgesprochen hat — ein qualitativ anderer, stärkerer
+  Beleg als eine pauschale Repo-`LICENSE`-Datei ohne Herkunftsklärung
+  wie bei SFace oben. **Angenommen.**
+
+Für die zur Gesichts-Ausrichtung nötigen Landmarken **nicht** das im
+selben `dlib-models`-Repo mitgelieferte 68-Punkte-Modell
+(`shape_predictor_68_face_landmarks.dat`) — dessen README zitiert
+wörtlich einen Hinweis des Datensatz-Erstellers (Stefanos Zafeiriou),
+der kommerzielle Nutzung des daraus trainierten Modells ausdrücklich
+ausschließt. Stattdessen das 5-Punkte-Modell
+(`shape_predictor_5_face_landmarks.dat`, CC0-1.0/gemeinfrei, aus
+`dlib`s eigenem, separat erhobenem Datensatz) — `dlib`s
+`get_face_chip_details`-Funktion (intern von der `dlib-face-recognition`-
+Crate aufgerufen) unterstützt beide Landmarken-Zahlen gleichwertig zur
+Gesichtsausrichtung, dieselbe 5-Punkte-Ausrichtung, die z. B. auch
+`ageitgey/face_recognition` standardmäßig anbietet — keine
+Notlösung, ein etabliertes Muster.
+
+**Gesichts-*Erkennung*** (Bounding-Boxes, bevor überhaupt ein Embedding
+berechnet wird) läuft über `dlib::get_frontal_face_detector` —
+vollständig in `libdlib` selbst einkompiliert (Boost Software
+License 1.0, keine externe Modelldatei, keine eigene Lizenzfrage).
+
+**Entscheidung — Architektur:** `apx-ai::people::PersonEmbedder`
+(neues Modul, hinter dem standardmäßig ausgeschalteten Cargo-Feature
+`people`, dieselbe Konvention wie `apx-tether`s `tethering`/`gphoto2`)
+bindet `dlib-face-recognition` mit dessen `build-native`-Feature an
+die Systembibliothek `libdlib`. Die bestehende Hautton-Heuristik
+(`apx-ai::faces::detect_face_regions`, Phase 11 Schritt 5) bleibt
+unverändert als Fallback bestehen, wenn das Feature nicht kompiliert
+oder keine Modelle hinterlegt sind — additiv, nicht ersetzend, wie
+jede vergleichbare Erweiterung in diesem Projekt.
+
+**Echter, verifizierter Fund in der Abhängigkeitskette:**
+`dlib-face-recognition-sys`s `build.rs` (jede veröffentlichte Version
+bis mindestens 20.0.1) ruft in `main()` *unbedingt* `dlib`s eigenen
+Quellcode von `http://dlib.net` herunter, um ihn selbst zu kompilieren
+— *bevor* es den bereits im selben Modul vorhandenen pkg-config-Pfad
+gegen eine bereits installierte System-`libdlib` überhaupt versucht.
+Dieser pkg-config-Pfad ist dadurch in jeder Version toter Code. In
+dieser Sandbox zusätzlich verschärft: `dlib.net` ist vom
+Netzwerk-Proxy blockiert (HTTP 403), dasselbe Beschaffungsproblem wie
+`huggingface.co`/`cdn.pyke.io`/`docs.rs` an anderer Stelle in diesem
+Projekt. **Fix:** `vendor/dlib-face-recognition-sys/` — eine lokal
+gepatchte Kopie, die `main()` umsortiert (pkg-config zuerst probieren,
+nur bei Fehlschlag herunterladen — dieselben zwei bereits vorhandenen
+Codeblöcke, keine neue Logik), eingebunden über ein
+`[patch.crates-io]` im Workspace-`Cargo.toml`. Real gegen die per
+`apt install libdlib-dev libblas-dev liblapack-dev` installierte
+System-`libdlib` 19.24 kompiliert, gelinkt und getestet (nicht nur
+`cargo add --dry-run`).
+
+**Echt spike-verifiziert, nicht nur behauptet:** gegen drei echte
+Fotos (offizielle Weißes-Haus-Fotos von Pete Souza, US-Regierungswerk,
+gemeinfrei) lief die volle Kette Gesichtserkennung → 5-Punkt-
+Ausrichtung → 128-dimensionales Embedding → euklidischer Abstand.
+Zwei Fotos derselben Person (`obama1.jpg`/`obama2.jpg`) lagen bei
+Abstand 0.35 — unter der von `dlib`s eigener Dokumentation
+empfohlenen Schwelle 0.6 ("dieselbe Person"); ein drittes Foto einer
+anderen Person (`biden.jpg`) lag bei Abstand 0.85, klar darüber.
+Derselbe Test läuft jetzt als `apx-ai::people`s Unit-Test (übersprungen
+ohne lokale Modelldateien/Testfotos — kein Netzwerk-Download in CI,
+siehe `PLAN.md` Phase 13s Verifikations-Abschnitt).
+
+**Katalog-Schema** (`migrations/0011_people.sql`): zwei neue Tabellen,
+`people` (benannte Person, `name: NULL` = automatisch erkannt, aber
+unbenannt) und `face_detections` (Bounding-Box + Embedding als
+JSON-Array, `person_id: NULL` = unzugeordnet). Auto-Zuordnung neu
+erkannter Gesichter läuft — wie bei den intelligenten Sammlungen aus
+Schritt 7 — in-memory: `repository::people::save_detections_for_photo`
+lädt einmal alle bereits einer Person zugeordneten Gesichter und ordnet
+ein neues Gesicht der nächstliegenden Person zu, wenn deren
+euklidischer Abstand unter der Schwelle liegt; `SAME_PERSON_EMBEDDING_
+THRESHOLD`/`embedding_distance` liegen bewusst in `apx_catalog::models`
+statt in `apx-ai::people` (das hinter dem `people`-Feature steht),
+damit diese reine Vergleichslogik unabhängig vom Feature kompiliert.
+
+**Opt-in-Modell-Download, kein Bundling** (dasselbe Muster wie LaMa in
+Schritt 1): `download_people_models` lädt beide `.dat.bz2`-Dateien von
+`dlib.net` herunter und entpackt sie — **nicht in dieser Sitzung
+erreichbar/verifiziert** (`dlib.net` blockiert, siehe oben), dieselbe
+ehrliche Lücke wie beim LaMa-Modell; keine Hash-Prüfung aus demselben
+Grund (kein erreichbarer, verifizierbarer Hash in dieser Sitzung).

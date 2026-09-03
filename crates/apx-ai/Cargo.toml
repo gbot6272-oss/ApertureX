@@ -42,6 +42,25 @@ ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "n
 ndarray = "0.17"
 imageproc = { version = "0.27.0", default-features = false, features = ["rayon"] }
 image.workspace = true
+# Echte Personen-Wiedererkennung (Phase 13 Schritt 8, siehe DECISIONS.md
+# ADR-0040-Nachtrag VI) — bindet an die Systembibliothek `libdlib`
+# (Boost Software License 1.0) über deren `build-native`-Feature, hinter
+# dem standardmäßig ausgeschalteten Cargo-Feature `people` (dieselbe
+# Konvention wie `apx-tether`s `tethering`-Feature/`gphoto2`, siehe
+# THIRD_PARTY.md). Verwendet NICHT die von diesem Crate mitgelieferten
+# Modelldateien (`embed-*`-Features) — deren Standard-Landmark-Modell
+# (`shape_predictor_68_face_landmarks.dat`) schließt kommerzielle Nutzung
+# ausdrücklich aus (Autoren-Hinweis in `davisking/dlib-models`); stattdessen
+# lädt der Nutzer selbst zwei nachweislich gemeinfreie Modelldateien herunter
+# (`dlib_face_recognition_resnet_model_v1.dat`, `shape_predictor_5_face_landmarks.dat`
+# — CC0/Public Domain, siehe `apx-ai::people`s Moduldoku).
+dlib-face-recognition = { version = "0.3.2", default-features = false, features = ["build-native"], optional = true }
+
+[features]
+# Standardmäßig aus: `libdlib`+`libblas`+`liblapack` fehlen in dieser
+# Sandbox und im Standard-CI-Job (derselbe Grund wie `apx-tether`s
+# `tethering`-Feature).
+people = ["dep:dlib-face-recognition"]
 
 [dev-dependencies]
 tempfile = "3"

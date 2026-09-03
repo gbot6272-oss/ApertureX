@@ -107,6 +107,11 @@ define_id_type!(TagRuleId);
 // Massenvorgang mit echtem Undo (siehe
 // `apx_catalog::repository::batch`s Moduldoku).
 define_id_type!(BatchOperationId);
+// Phase 13 Schritt 8: echte Personen-Wiedererkennung — eine benannte
+// Person und ein einzelnes erkanntes Gesicht (siehe
+// `apx_catalog::repository::people`s Moduldoku).
+define_id_type!(PersonId);
+define_id_type!(FaceDetectionId);
 
 #[cfg(test)]
 mod tests {

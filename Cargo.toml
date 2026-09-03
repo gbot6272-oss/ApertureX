@@ -64,3 +64,10 @@ opt-level = 1
 [profile.release]
 opt-level = 3
 lto = "thin"
+
+# Lokal gepatchte `dlib-face-recognition-sys` (Phase 13 Schritt 8, siehe
+# `vendor/dlib-face-recognition-sys/VENDORED.md`) — behebt einen echten
+# Ordnungsfehler in deren `build.rs`, der den vorhandenen pkg-config-Pfad
+# gegen eine installierte System-`libdlib` unerreichbar macht.
+[patch.crates-io]
+dlib-face-recognition-sys = { path = "vendor/dlib-face-recognition-sys" }

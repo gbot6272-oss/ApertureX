@@ -48,6 +48,7 @@ import type {
   CollectionDto,
   ExportOutcomeDto,
   ExportPhotoOptions,
+  FaceDetectionDto,
   FilterCriteriaDto,
   FolderDto,
   HistoryPositionDto,
@@ -55,6 +56,7 @@ import type {
   ImportModeDto,
   ImportPresetDto,
   KeywordDto,
+  PersonDto,
   PhotoDto,
   PresetDto,
   PresetFolderDto,
@@ -1346,6 +1348,29 @@ interface LibraryBacklogSlice {
   peopleGroups: PhotoDto[][];
   peopleGroupsLoading: boolean;
   loadPeopleGroups: () => Promise<void>;
+
+  /** Echte Personen-Wiedererkennung (Phase 13 Schritt 8, siehe
+   * `DECISIONS.md` ADR-0040-Nachtrag VI) — additiv zu `peopleGroups` oben
+   * (der Hautton-Heuristik-Gruppierung, die als Fallback bestehen
+   * bleibt). */
+  people: PersonDto[];
+  peopleLoading: boolean;
+  refreshPeople: () => Promise<void>;
+  personPhotos: Record<string, PhotoDto[]>;
+  loadPhotosForPerson: (personId: string) => Promise<void>;
+  facesForSelectedPhoto: FaceDetectionDto[];
+  facesLoading: boolean;
+  loadFacesForSelectedPhoto: () => Promise<void>;
+  detectingFaces: boolean;
+  detectFacesForSelectedPhoto: () => Promise<void>;
+  peopleModelsDownloading: boolean;
+  downloadPeopleModels: () => Promise<void>;
+  clearPeopleModelPaths: () => Promise<void>;
+  createPerson: (name: string | null) => Promise<string>;
+  renamePerson: (personId: string, name: string | null) => Promise<void>;
+  deletePerson: (personId: string) => Promise<void>;
+  assignFaceToPerson: (faceId: string, personId: string | null) => Promise<void>;
+  unassignFace: (faceId: string) => Promise<void>;
 
   /** Smart Previews (Phase 11 Schritt 4, siehe `DECISIONS.md` ADR-0038):
    * erzeugt für die aktuelle Auswahl (wie `createStackFromSelection`)
@@ -4862,6 +4887,192 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.peopleGroupsLoading = false;
+        });
+      }
+    },
+
+    people: [],
+    peopleLoading: false,
+
+    refreshPeople: async () => {
+      set((state) => {
+        state.peopleLoading = true;
+      });
+      try {
+        const people = await api.listPeople();
+        set((state) => {
+          state.people = people;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.peopleLoading = false;
+        });
+      }
+    },
+
+    personPhotos: {},
+
+    loadPhotosForPerson: async (personId) => {
+      try {
+        const photos = await api.listPhotosForPerson(personId);
+        set((state) => {
+          state.personPhotos[personId] = photos;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    facesForSelectedPhoto: [],
+    facesLoading: false,
+
+    loadFacesForSelectedPhoto: async () => {
+      const photoId = get().selectedPhotoId;
+      if (!photoId) {
+        set((state) => {
+          state.facesForSelectedPhoto = [];
+        });
+        return;
+      }
+      set((state) => {
+        state.facesLoading = true;
+      });
+      try {
+        const faces = await api.listFacesForPhoto(photoId);
+        set((state) => {
+          state.facesForSelectedPhoto = faces;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.facesLoading = false;
+        });
+      }
+    },
+
+    detectingFaces: false,
+
+    detectFacesForSelectedPhoto: async () => {
+      const photoId = get().selectedPhotoId;
+      if (!photoId) return;
+      set((state) => {
+        state.detectingFaces = true;
+      });
+      try {
+        const faces = await api.detectFacesForPhoto(photoId);
+        set((state) => {
+          state.facesForSelectedPhoto = faces;
+        });
+        await get().refreshPeople();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.detectingFaces = false;
+        });
+      }
+    },
+
+    peopleModelsDownloading: false,
+
+    downloadPeopleModels: async () => {
+      set((state) => {
+        state.peopleModelsDownloading = true;
+      });
+      try {
+        await api.downloadPeopleModels();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.peopleModelsDownloading = false;
+        });
+      }
+    },
+
+    clearPeopleModelPaths: async () => {
+      try {
+        await api.clearPeopleModelPaths();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    createPerson: async (name) => {
+      try {
+        const id = await api.createPerson(name);
+        await get().refreshPeople();
+        return id;
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+        throw err;
+      }
+    },
+
+    renamePerson: async (personId, name) => {
+      try {
+        await api.renamePerson(personId, name);
+        await get().refreshPeople();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    deletePerson: async (personId) => {
+      try {
+        await api.deletePerson(personId);
+        await get().refreshPeople();
+        set((state) => {
+          delete state.personPhotos[personId];
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    assignFaceToPerson: async (faceId, personId) => {
+      try {
+        await api.assignFaceToPerson(faceId, personId);
+        await get().loadFacesForSelectedPhoto();
+        await get().refreshPeople();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    unassignFace: async (faceId) => {
+      try {
+        await api.unassignFace(faceId);
+        await get().loadFacesForSelectedPhoto();
+        await get().refreshPeople();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
         });
       }
     },

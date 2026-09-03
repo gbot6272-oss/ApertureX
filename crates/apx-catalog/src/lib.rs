@@ -31,17 +31,18 @@ use std::sync::{Mutex, MutexGuard};
 
 use apx_core::{
     AppError, BatchOperationId, CollectionFolderId, CollectionId, EditHistoryId, EdlEnvelope,
-    FolderId, KeywordId, PhotoId, PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId,
-    StackId, TagRuleId, TemplateId,
+    FaceDetectionId, FolderId, KeywordId, PersonId, PhotoId, PresetFolderId, PresetId,
+    PresetVersionId, Result, SnapshotId, StackId, TagRuleId, TemplateId,
 };
 use rusqlite::Connection;
 use time::OffsetDateTime;
 
 pub use models::{
-    parse_filter_node, BoolOp, CatalogStatistics, Collection, CollectionFolder,
-    ColorLabelDefinition, EditHistoryEntry, FilterCondition, FilterCriteria, FilterField,
-    FilterNode, FilterOperator, Folder, HistoryPosition, Keyword, NewPhoto, Photo, Preset,
-    PresetFolder, PresetVersion, Preview, PreviewLevel, Snapshot, Stack, TagRule, Template,
+    embedding_distance, parse_filter_node, BoolOp, CatalogStatistics, Collection, CollectionFolder,
+    ColorLabelDefinition, EditHistoryEntry, FaceDetection, FaceRect, FilterCondition,
+    FilterCriteria, FilterField, FilterNode, FilterOperator, Folder, HistoryPosition, Keyword,
+    NewPhoto, Person, Photo, Preset, PresetFolder, PresetVersion, Preview, PreviewLevel, Snapshot,
+    Stack, TagRule, Template, SAME_PERSON_EMBEDDING_THRESHOLD,
 };
 pub use repository::batch::BatchAction;
 pub use repository::share::ShareDiff;
@@ -643,6 +644,69 @@ impl Catalog {
             window_seconds,
             OffsetDateTime::now_utc(),
         )
+    }
+
+    // ---- Echte Personen-Wiedererkennung (Phase 13 Schritt 8) ----------------
+
+    /// Ersetzt alle bisherigen Gesichtserkennungen von `photo_id` — siehe
+    /// [`repository::people::save_detections_for_photo`]s Moduldoku für
+    /// die Auto-Zuordnungslogik.
+    pub fn save_face_detections(
+        &self,
+        photo_id: PhotoId,
+        detections: &[(FaceRect, Vec<f64>)],
+    ) -> Result<Vec<FaceDetection>> {
+        let conn = self.lock()?;
+        repository::people::save_detections_for_photo(
+            &conn,
+            photo_id,
+            detections,
+            OffsetDateTime::now_utc(),
+        )
+    }
+
+    pub fn list_faces_for_photo(&self, photo_id: PhotoId) -> Result<Vec<FaceDetection>> {
+        let conn = self.lock()?;
+        repository::people::list_for_photo(&conn, photo_id)
+    }
+
+    pub fn list_faces_for_person(&self, person_id: PersonId) -> Result<Vec<FaceDetection>> {
+        let conn = self.lock()?;
+        repository::people::list_for_person(&conn, person_id)
+    }
+
+    pub fn assign_face_to_person(
+        &self,
+        face_id: FaceDetectionId,
+        person_id: PersonId,
+    ) -> Result<()> {
+        let conn = self.lock()?;
+        repository::people::assign_face(&conn, face_id, person_id)
+    }
+
+    pub fn unassign_face(&self, face_id: FaceDetectionId) -> Result<()> {
+        let conn = self.lock()?;
+        repository::people::unassign_face(&conn, face_id)
+    }
+
+    pub fn create_person(&self, name: Option<&str>) -> Result<PersonId> {
+        let conn = self.lock()?;
+        repository::people::create_person(&conn, name, OffsetDateTime::now_utc())
+    }
+
+    pub fn rename_person(&self, id: PersonId, name: Option<&str>) -> Result<()> {
+        let conn = self.lock()?;
+        repository::people::rename_person(&conn, id, name)
+    }
+
+    pub fn delete_person(&self, id: PersonId) -> Result<()> {
+        let conn = self.lock()?;
+        repository::people::delete_person(&conn, id)
+    }
+
+    pub fn list_people(&self) -> Result<Vec<Person>> {
+        let conn = self.lock()?;
+        repository::people::list_people(&conn)
     }
 
     // ---- Erweiterbare Farbmarkierungen (Phase 9 Schritt 1) -----------------

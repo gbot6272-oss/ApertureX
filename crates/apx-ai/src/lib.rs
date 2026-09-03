@@ -39,6 +39,8 @@ pub mod error;
 pub mod faces;
 pub mod inpaint;
 pub mod lens_calibration;
+#[cfg(feature = "people")]
+pub mod people;
 pub mod preset_generator;
 pub mod repair_analysis;
 pub mod segmentation;

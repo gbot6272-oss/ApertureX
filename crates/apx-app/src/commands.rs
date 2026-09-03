@@ -2697,7 +2697,7 @@ pub fn detect_sensor_spots(
 pub struct AiSettingsDto {
     /// Liegt im Klartext in der Einstellungsdatei — dieselbe
     /// Vertrauensgrenze wie z. B. `last_opened_catalog`, siehe
-    /// `apx_core::settings::AiSettings`s Moduldoku. Wird dem Frontend
+    /// `apx_core::AiSettings`s Moduldoku. Wird dem Frontend
     /// unverändert zurückgegeben, damit das Eingabefeld den hinterlegten
     /// Schlüssel zur Kontrolle/Bearbeitung zeigen kann (maskiert per
     /// `type="password"`, nicht serverseitig verborgen — ein lokaler,
@@ -2706,6 +2706,15 @@ pub struct AiSettingsDto {
     /// `Some`, sobald der Nutzer den Download bestätigt und er
     /// erfolgreich war (Phase 13 Schritt 1, siehe [`download_inpainting_model`]).
     pub inpainting_model_path: Option<String>,
+    /// `Some`, sobald der Nutzer den Download beider Personen-
+    /// Wiedererkennungs-Modelle bestätigt hat und er erfolgreich war
+    /// (Phase 13 Schritt 8, siehe [`download_people_models`]).
+    pub people_landmark_model_path: Option<String>,
+    pub people_encoder_model_path: Option<String>,
+    /// `true`, wenn diese Build mit dem Cargo-Feature `people` kompiliert
+    /// wurde — das Frontend zeigt sonst einen Hinweis statt der Download-
+    /// /Erkennungs-Aktionen (siehe `apx-ai::people`s Moduldoku).
+    pub people_feature_compiled: bool,
 }
 
 #[tauri::command]
@@ -2715,6 +2724,9 @@ pub fn get_ai_settings(state: State<'_, AppState>) -> Result<AiSettingsDto, Stri
     Ok(AiSettingsDto {
         anthropic_api_key: settings.ai.anthropic_api_key,
         inpainting_model_path: settings.ai.inpainting_model_path,
+        people_landmark_model_path: settings.ai.people_landmark_model_path,
+        people_encoder_model_path: settings.ai.people_encoder_model_path,
+        people_feature_compiled: cfg!(feature = "people"),
     })
 }
 
@@ -2733,7 +2745,7 @@ pub fn set_anthropic_api_key(
 // ---- KI: Ausfüllen (LaMa-Inpainting, Phase 13 Schritt 1) -------------------
 //
 // Opt-in, kein Bundling im Installer (siehe `DECISIONS.md` ADR-0040 und
-// `apx_core::settings::AiSettings::inpainting_model_path`s Moduldoku) —
+// `apx_core::AiSettings::inpainting_model_path`s Moduldoku) —
 // derselbe Ansatz wie der Anthropic-API-Schlüssel oben: der Nutzer
 // bestätigt den ~208-MB-Download ausdrücklich im Einstellungsdialog,
 // bevor irgendetwas heruntergeladen wird.
@@ -2915,6 +2927,344 @@ pub fn run_ai_inpaint(
         bitmap_height: ph,
         pixels_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &filled),
     })
+}
+
+// ---- KI: Echte Personen-Wiedererkennung (Phase 13 Schritt 8, siehe
+// DECISIONS.md ADR-0040-Nachtrag VI) -----------------------------------------
+//
+// Opt-in, kein Bundling im Installer (dasselbe Muster wie das LaMa-
+// Inpainting-Modell oben): der Nutzer bestätigt den Download der beiden
+// gemeinfreien `dlib`-Modelldateien ausdrücklich im Einstellungsdialog.
+// Die eigentliche `dlib`-Bindung steckt hinter dem standardmäßig
+// ausgeschalteten Cargo-Feature `people` (siehe `apx-ai::people`s
+// Moduldoku, `apx-tether`s `tethering`-Feature für dieselbe Konvention);
+// `detect_faces_for_photo` gibt ohne dieses Feature einen klaren Fehler
+// statt eines stillen No-Ops zurück.
+
+const PEOPLE_LANDMARK_MODEL_URL: &str =
+    "http://dlib.net/files/shape_predictor_5_face_landmarks.dat.bz2";
+const PEOPLE_ENCODER_MODEL_URL: &str =
+    "http://dlib.net/files/dlib_face_recognition_resnet_model_v1.dat.bz2";
+
+async fn download_and_decompress_bz2(url: &str, dest: &Path) -> Result<(), String> {
+    let response = reqwest::get(url)
+        .await
+        .map_err(|err| format!("Download von '{url}' fehlgeschlagen: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Download von '{url}' fehlgeschlagen: HTTP {}",
+            response.status()
+        ));
+    }
+    let compressed = response
+        .bytes()
+        .await
+        .map_err(|err| format!("Antwort konnte nicht gelesen werden: {err}"))?;
+    let mut decoder = bzip2::read::BzDecoder::new(compressed.as_ref());
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut decoder, &mut bytes)
+        .map_err(|err| format!("bz2-Dekompression fehlgeschlagen: {err}"))?;
+    std::fs::write(dest, &bytes).map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+/// Lädt beide für Personen-Wiedererkennung nötigen Modelle herunter
+/// (siehe [`PEOPLE_LANDMARK_MODEL_URL`]/[`PEOPLE_ENCODER_MODEL_URL`]s
+/// Herkunft in `apx-ai::people`s Moduldoku — **nicht in dieser Sitzung
+/// erreichbar/verifiziert**, `dlib.net` ist von dieser Entwicklungs-
+/// Sandbox aus blockiert, siehe `apx-ai::people`s Moduldoku) und
+/// hinterlegt beide Pfade in den Einstellungen. **Keine Hash-Prüfung**
+/// — dieselbe ehrliche Lücke wie beim LaMa-Modell oben, aus demselben
+/// Grund (kein erreichbarer, verifizierbarer Hash in dieser Sitzung).
+#[tauri::command]
+pub async fn download_people_models(state: State<'_, AppState>) -> Result<(), String> {
+    let dest_dir = state.paths.models_dir();
+    std::fs::create_dir_all(&dest_dir).map_err(|err| err.to_string())?;
+    let landmark_path = dest_dir.join("shape_predictor_5_face_landmarks.dat");
+    let encoder_path = dest_dir.join("dlib_face_recognition_resnet_model_v1.dat");
+
+    download_and_decompress_bz2(PEOPLE_LANDMARK_MODEL_URL, &landmark_path).await?;
+    download_and_decompress_bz2(PEOPLE_ENCODER_MODEL_URL, &encoder_path).await?;
+
+    let settings_path = state.paths.settings_file();
+    let mut settings =
+        apx_core::Settings::load_or_default(&settings_path).map_err(|err| err.to_string())?;
+    settings.ai.people_landmark_model_path = Some(landmark_path.to_string_lossy().to_string());
+    settings.ai.people_encoder_model_path = Some(encoder_path.to_string_lossy().to_string());
+    settings.save(&settings_path).map_err(|err| err.to_string())
+}
+
+/// Entfernt beide hinterlegten Modellpfade (löscht die Dateien selbst
+/// nicht, siehe [`clear_inpainting_model_path`]s Begründung).
+#[tauri::command]
+pub fn clear_people_model_paths(state: State<'_, AppState>) -> Result<(), String> {
+    let path = state.paths.settings_file();
+    let mut settings = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    settings.ai.people_landmark_model_path = None;
+    settings.ai.people_encoder_model_path = None;
+    settings.save(&path).map_err(|err| err.to_string())
+}
+
+#[cfg(feature = "people")]
+fn build_person_embedder(
+    settings: &apx_core::AiSettings,
+) -> Result<apx_ai::people::PersonEmbedder, String> {
+    let landmark_path = settings
+        .people_landmark_model_path
+        .as_deref()
+        .filter(|p| !p.trim().is_empty())
+        .ok_or_else(|| {
+            "Kein Landmarken-Modell heruntergeladen — siehe Einstellungen → KI.".to_string()
+        })?;
+    let encoder_path = settings
+        .people_encoder_model_path
+        .as_deref()
+        .filter(|p| !p.trim().is_empty())
+        .ok_or_else(|| {
+            "Kein Embedding-Modell heruntergeladen — siehe Einstellungen → KI.".to_string()
+        })?;
+    apx_ai::people::PersonEmbedder::new(Path::new(landmark_path), Path::new(encoder_path))
+        .map_err(|err| err.to_string())
+}
+
+#[cfg(not(feature = "people"))]
+fn build_person_embedder(
+    _settings: &apx_core::AiSettings,
+) -> Result<std::convert::Infallible, String> {
+    Err(
+        "Diese Aperture-X-Build wurde ohne echte Personen-Wiedererkennung kompiliert (Cargo-Feature \"people\" fehlt — libdlib/libblas/liblapack sind nicht in jeder Umgebung installiert)."
+            .to_string(),
+    )
+}
+
+#[cfg(feature = "people")]
+fn detect_faces_with_embedder(
+    embedder: &apx_ai::people::PersonEmbedder,
+    img: &image::RgbImage,
+) -> Result<Vec<(apx_catalog::FaceRect, Vec<f64>)>, String> {
+    let detected = embedder
+        .detect_and_embed(img.as_raw(), img.width(), img.height())
+        .map_err(|err| err.to_string())?;
+    Ok(detected
+        .into_iter()
+        .map(|face| {
+            (
+                (face.left, face.top, face.right, face.bottom),
+                face.embedding,
+            )
+        })
+        .collect())
+}
+
+#[cfg(not(feature = "people"))]
+fn detect_faces_with_embedder(
+    embedder: &std::convert::Infallible,
+    _img: &image::RgbImage,
+) -> Result<Vec<(apx_catalog::FaceRect, Vec<f64>)>, String> {
+    match *embedder {}
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FaceDetectionDto {
+    pub id: String,
+    pub photo_id: String,
+    pub person_id: Option<String>,
+    pub rect_left: i64,
+    pub rect_top: i64,
+    pub rect_right: i64,
+    pub rect_bottom: i64,
+}
+
+impl From<apx_catalog::FaceDetection> for FaceDetectionDto {
+    fn from(face: apx_catalog::FaceDetection) -> Self {
+        Self {
+            id: face.id.to_string(),
+            photo_id: face.photo_id.to_string(),
+            person_id: face.person_id.map(|id| id.to_string()),
+            rect_left: face.rect_left,
+            rect_top: face.rect_top,
+            rect_right: face.rect_right,
+            rect_bottom: face.rect_bottom,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PersonDto {
+    pub id: String,
+    pub name: Option<String>,
+    pub cover_face_id: Option<String>,
+}
+
+impl From<apx_catalog::Person> for PersonDto {
+    fn from(person: apx_catalog::Person) -> Self {
+        Self {
+            id: person.id.to_string(),
+            name: person.name,
+            cover_face_id: person.cover_face_id.map(|id| id.to_string()),
+        }
+    }
+}
+
+/// Erkennt alle Gesichter in `photo_id`s bereits gerenderter Standard-
+/// Vorschau (`apx_catalog::PreviewLevel::Standard` — dieselbe
+/// Auflösungsbegrenzung wie jede andere KI-Analyse in diesem Projekt),
+/// speichert sie (ersetzt frühere Erkennungen desselben Fotos) und
+/// ordnet neue Gesichter automatisch bereits benannten Personen zu, wenn
+/// deren Embedding-Abstand unter der Schwelle liegt (siehe
+/// `apx_catalog::Catalog::save_face_detections`s Moduldoku).
+#[tauri::command]
+pub fn detect_faces_for_photo(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<Vec<FaceDetectionDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let embedder = build_person_embedder(&settings.ai)?;
+
+    let preview = state
+        .catalog
+        .get_preview(photo_id, apx_catalog::PreviewLevel::Standard)
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| {
+            "Keine Vorschau für dieses Foto vorhanden — zuerst öffnen/entwickeln.".to_string()
+        })?;
+    let img = image::open(&preview.path)
+        .map_err(|err| format!("Vorschau konnte nicht gelesen werden: {err}"))?
+        .to_rgb8();
+
+    let detections = detect_faces_with_embedder(&embedder, &img)?;
+
+    let saved = state
+        .catalog
+        .save_face_detections(photo_id, &detections)
+        .map_err(|err| err.to_string())?;
+    Ok(saved.into_iter().map(FaceDetectionDto::from).collect())
+}
+
+#[tauri::command]
+pub fn list_faces_for_photo(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<Vec<FaceDetectionDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let faces = state
+        .catalog
+        .list_faces_for_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    Ok(faces.into_iter().map(FaceDetectionDto::from).collect())
+}
+
+#[tauri::command]
+pub fn list_people(state: State<'_, AppState>) -> Result<Vec<PersonDto>, String> {
+    let people = state.catalog.list_people().map_err(|err| err.to_string())?;
+    Ok(people.into_iter().map(PersonDto::from).collect())
+}
+
+/// Alle Fotos, die mindestens ein `person_id` zugeordnetes Gesicht
+/// enthalten — nach Dateiname sortiert wie andere Foto-Listen in diesem
+/// Projekt, doppelte Fotos (mehrere Gesichter derselben Person auf einem
+/// Foto) werden herausgefiltert.
+#[tauri::command]
+pub fn list_photos_for_person(
+    state: State<'_, AppState>,
+    person_id: String,
+) -> Result<Vec<PhotoDto>, String> {
+    let person_id: apx_core::PersonId = person_id
+        .parse()
+        .map_err(|_| "Ungültige Personen-ID".to_string())?;
+    let faces = state
+        .catalog
+        .list_faces_for_person(person_id)
+        .map_err(|err| err.to_string())?;
+    let mut seen = std::collections::HashSet::new();
+    let mut photos = Vec::new();
+    for face in faces {
+        if !seen.insert(face.photo_id) {
+            continue;
+        }
+        if let Ok(photo) = state.catalog.get_photo(face.photo_id) {
+            photos.push(PhotoDto::from(photo));
+        }
+    }
+    photos.sort_by(|a, b| a.filename.cmp(&b.filename));
+    Ok(photos)
+}
+
+#[tauri::command]
+pub fn create_person(state: State<'_, AppState>, name: Option<String>) -> Result<String, String> {
+    let id = state
+        .catalog
+        .create_person(name.as_deref().filter(|n| !n.trim().is_empty()))
+        .map_err(|err| err.to_string())?;
+    Ok(id.to_string())
+}
+
+#[tauri::command]
+pub fn rename_person(
+    state: State<'_, AppState>,
+    person_id: String,
+    name: Option<String>,
+) -> Result<(), String> {
+    let person_id: apx_core::PersonId = person_id
+        .parse()
+        .map_err(|_| "Ungültige Personen-ID".to_string())?;
+    state
+        .catalog
+        .rename_person(person_id, name.as_deref().filter(|n| !n.trim().is_empty()))
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn delete_person(state: State<'_, AppState>, person_id: String) -> Result<(), String> {
+    let person_id: apx_core::PersonId = person_id
+        .parse()
+        .map_err(|_| "Ungültige Personen-ID".to_string())?;
+    state
+        .catalog
+        .delete_person(person_id)
+        .map_err(|err| err.to_string())
+}
+
+/// Ordnet ein Gesicht manuell einer Person zu — `person_id: None` legt
+/// eine neue, noch unbenannte Person an und ordnet das Gesicht dieser
+/// zu (derselbe Ablauf wie „Als neue Person markieren" in Adobe
+/// Lightroom Classics Personenansicht).
+#[tauri::command]
+pub fn assign_face_to_person(
+    state: State<'_, AppState>,
+    face_id: String,
+    person_id: Option<String>,
+) -> Result<String, String> {
+    let face_id: apx_core::FaceDetectionId = face_id
+        .parse()
+        .map_err(|_| "Ungültige Gesichts-ID".to_string())?;
+    let person_id = match person_id {
+        Some(id) => id
+            .parse()
+            .map_err(|_| "Ungültige Personen-ID".to_string())?,
+        None => state
+            .catalog
+            .create_person(None)
+            .map_err(|err| err.to_string())?,
+    };
+    state
+        .catalog
+        .assign_face_to_person(face_id, person_id)
+        .map_err(|err| err.to_string())?;
+    Ok(person_id.to_string())
+}
+
+#[tauri::command]
+pub fn unassign_face(state: State<'_, AppState>, face_id: String) -> Result<(), String> {
+    let face_id: apx_core::FaceDetectionId = face_id
+        .parse()
+        .map_err(|_| "Ungültige Gesichts-ID".to_string())?;
+    state
+        .catalog
+        .unassign_face(face_id)
+        .map_err(|err| err.to_string())
 }
 
 // ---- UI: Einstellungen (Phase 10 Schritt 1) --------------------------------

@@ -5,9 +5,9 @@
 use std::path::PathBuf;
 
 use apx_core::{
-    AppError, CollectionFolderId, CollectionId, EditHistoryId, EdlEnvelope, FolderId, KeywordId,
-    PhotoId, PresetFolderId, PresetId, PresetVersionId, Result, SnapshotId, StackId, TagRuleId,
-    TemplateId,
+    AppError, CollectionFolderId, CollectionId, EditHistoryId, EdlEnvelope, FaceDetectionId,
+    FolderId, KeywordId, PersonId, PhotoId, PresetFolderId, PresetId, PresetVersionId, Result,
+    SnapshotId, StackId, TagRuleId, TemplateId,
 };
 use time::OffsetDateTime;
 
@@ -350,6 +350,59 @@ pub struct CatalogStatistics {
     /// `(Kameramodell, Anzahl)`, absteigend nach Anzahl, höchstens 8 Einträge.
     pub top_camera_models: Vec<(String, u64)>,
     pub top_lenses: Vec<(String, u64)>,
+}
+
+// ---- Echte Personen-Wiedererkennung (Phase 13 Schritt 8) -------------------
+
+/// Eine vom Nutzer benannte Person (siehe `migrations/0011_people.sql`s
+/// Moduldoku). `name: None` = automatisch erkannt (mindestens ein
+/// [`FaceDetection`] zeigt hierher), aber noch nicht benannt.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Person {
+    pub id: PersonId,
+    pub name: Option<String>,
+    pub cover_face_id: Option<FaceDetectionId>,
+    pub created_at: OffsetDateTime,
+}
+
+/// Ein einzelnes erkanntes Gesicht — Bounding-Box in Vorschaubild-
+/// Pixelkoordinaten plus 128-dimensionalem Embedding (`apx_ai::people`,
+/// hinter dem `people`-Cargo-Feature). `person_id: None` = noch keiner
+/// Person zugeordnet.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceDetection {
+    pub id: FaceDetectionId,
+    pub photo_id: PhotoId,
+    pub person_id: Option<PersonId>,
+    pub rect_left: i64,
+    pub rect_top: i64,
+    pub rect_right: i64,
+    pub rect_bottom: i64,
+    pub embedding: Vec<f64>,
+    pub created_at: OffsetDateTime,
+}
+
+/// Bounding-Box eines erkannten Gesichts (`left, top, right, bottom`),
+/// in Vorschaubild-Pixelkoordinaten — eigener Typalias statt eines
+/// anonymen Vier-Tupels an jeder Aufrufstelle (`clippy::type_complexity`).
+pub type FaceRect = (i64, i64, i64, i64);
+
+/// Von `dlib`s eigener Dokumentation empfohlener Schwellenwert für
+/// „dieselbe Person" (euklidischer Abstand zweier 128-dimensionaler
+/// Embeddings) — hier statt in `apx-ai::people` definiert (das hinter
+/// dem optionalen `people`-Feature steht), damit `repository::people`s
+/// Auto-Zuordnungslogik unabhängig vom `people`-Feature kompiliert (sie
+/// vergleicht nur bereits gespeicherte Embeddings, berechnet selbst
+/// keine neuen — das bleibt `apx-ai::people::PersonEmbedder` vorbehalten).
+pub const SAME_PERSON_EMBEDDING_THRESHOLD: f64 = 0.6;
+
+/// Euklidischer Abstand zweier Embeddings.
+pub fn embedding_distance(a: &[f64], b: &[f64]) -> f64 {
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).powi(2))
+        .sum::<f64>()
+        .sqrt()
 }
 
 /// Kombinierbare Filterkriterien für [`crate::Catalog::filter_photos`] —

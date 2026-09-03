@@ -307,6 +307,16 @@ pub fn render_rgba8(
         }
     };
 
+    // Halation-/Bloom-Simulation (Phase 14 Schritt 4) — bewusst CPU-only,
+    // unabhängig vom GPU-/CPU-Dispatch oben (siehe `stages::effects`s
+    // Moduldoku), deshalb ein eigener Kurzschluss statt Teil desselben
+    // `apply_gpu`/`apply_cpu`-Aufrufs.
+    let effected = if !stages.effects || edl.effects.halation_amount <= 0.0 {
+        effected
+    } else {
+        effects::apply_halation(&effected, linear.width, linear.height, &edl.effects)
+    };
+
     let masked = if !stages.masks || edl.masks.is_empty() {
         // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
         // oder keine Masken vorhanden sind (Regelfall) — siehe

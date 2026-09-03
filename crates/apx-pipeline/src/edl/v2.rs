@@ -456,6 +456,27 @@ pub struct EffectsAdjustment {
     pub grain_amount: f32,
     pub grain_size: f32,
     pub grain_roughness: f32,
+    /// Echte Halation-/Bloom-Simulation (Phase 14 Schritt 4, siehe
+    /// `DECISIONS.md` ADR-0041 — Lightroom Classic "cannot create true
+    /// film halation, only a soft bloom approximation"). Additiv,
+    /// `#[serde(default)]`: ein gespeichertes `EffectsAdjustment` ohne
+    /// diese drei Felder liest `halation_amount` als `0.0` (aus,
+    /// unverändertes bisheriges Verhalten) — `halation_radius`/
+    /// `halation_hue` sind bei `amount == 0.0` ohnehin wirkungslos, ihr
+    /// Default-Wert `0.0` ist also unproblematisch. `0.0..=100.0`.
+    #[serde(default)]
+    pub halation_amount: f32,
+    /// Bruchteil der Bildbreite für den Bloom-Weichzeichnungsradius
+    /// (`0.0..=100.0`, wie ein Prozent-Regler — intern auf einen
+    /// Pixel-Radius umgerechnet, siehe `stages::effects::apply_halation`).
+    #[serde(default)]
+    pub halation_radius: f32,
+    /// Farbton des Bloom-Einfärbens in Grad (`0.0..=360.0`, HSV-Farbrad)
+    /// — echte Filmhalation ist charakteristisch rot-orange (Rückseiten-
+    /// Reflexion an der Filmbasis), daher liegt der sinnvolle Bereich
+    /// meist bei kleinen Werten (`0..40`), aber jeder Farbton ist erlaubt.
+    #[serde(default)]
+    pub halation_hue: f32,
 }
 
 impl EffectsAdjustment {
@@ -467,6 +488,9 @@ impl EffectsAdjustment {
         post_vignette_highlights: 0.0,
         grain_amount: 0.0,
         grain_size: 25.0,
+        halation_amount: 0.0,
+        halation_radius: 30.0,
+        halation_hue: 15.0,
         grain_roughness: 50.0,
     };
 }

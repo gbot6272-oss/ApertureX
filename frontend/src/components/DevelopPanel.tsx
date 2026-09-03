@@ -15,6 +15,7 @@ import {
   CURVE_CHANNEL_TABS,
   GRAIN_SLIDER_SPECS,
   GRID_OVERLAY_OPTIONS,
+  HALATION_SLIDER_SPECS,
   HSL_BAND_SLIDER_SPECS,
   HSL_BAND_TABS,
   LENS_CA_SLIDER_SPECS,
@@ -1277,6 +1278,21 @@ export function DevelopPanel() {
             </div>
             <div className="flex flex-col gap-2">
               {GRAIN_SLIDER_SPECS.map((spec) => (
+                <DevelopSlider
+                  key={spec.key}
+                  spec={spec}
+                  value={effects[spec.key as keyof EffectsAdjustment]}
+                  onChange={(value) => setEffectsField(spec.key as keyof EffectsAdjustment, value)}
+                  onCommit={() => void commitDevelopEdit()}
+                />
+              ))}
+            </div>
+            {/* Echte Halation-/Bloom-Simulation (Phase 14 Schritt 4,
+                ADR-0041): Lightroom Classic "cannot create true film
+                halation, only a soft bloom approximation". */}
+            <div className="flex flex-col gap-2 border-t border-border pt-2">
+              <p className="text-xs text-text-muted">Halation (Lichter-Ausblutung, z. B. Filmlook)</p>
+              {HALATION_SLIDER_SPECS.map((spec) => (
                 <DevelopSlider
                   key={spec.key}
                   spec={spec}

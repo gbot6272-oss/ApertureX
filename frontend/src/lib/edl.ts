@@ -522,6 +522,16 @@ export interface EffectsAdjustment {
   grain_amount: number;
   grain_size: number;
   grain_roughness: number;
+  /** Echte Halation-/Bloom-Simulation (Phase 14 Schritt 4, siehe
+   * `DECISIONS.md` ADR-0041) — Lightroom Classic "cannot create true
+   * film halation, only a soft bloom approximation". `0..=100`. */
+  halation_amount: number;
+  /** Bruchteil der Bildbreite für den Bloom-Weichzeichnungsradius,
+   * `0..=100` (Prozent-Regler). */
+  halation_radius: number;
+  /** Farbton der Bloom-Einfärbung in Grad (`0..=360`) — echte
+   * Filmhalation ist charakteristisch rot-orange. */
+  halation_hue: number;
 }
 
 export const NEUTRAL_EFFECTS: EffectsAdjustment = {
@@ -533,6 +543,9 @@ export const NEUTRAL_EFFECTS: EffectsAdjustment = {
   grain_amount: 0,
   grain_size: 25,
   grain_roughness: 50,
+  halation_amount: 0,
+  halation_radius: 30,
+  halation_hue: 15,
 };
 
 export const POST_VIGNETTE_SLIDER_SPECS: readonly SliderSpec[] = [
@@ -547,6 +560,21 @@ export const GRAIN_SLIDER_SPECS: readonly SliderSpec[] = [
   { key: "grain_amount", label: "Körnung: Betrag", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
   { key: "grain_size", label: "Körnung: Größe", min: 1, max: 100, fineStep: 1, coarseStep: 10, neutral: 25 },
   { key: "grain_roughness", label: "Körnung: Unregelmäßigkeit", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 },
+];
+
+/** Lightroom Classic "cannot create true film halation, only a soft
+ * bloom approximation" (siehe `DECISIONS.md` ADR-0041, Recherche-Tabelle
+ * Punkt 8). */
+export const HALATION_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "halation_amount", label: "Halation: Betrag", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+  { key: "halation_radius", label: "Halation: Radius", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 30 },
+  // Label bewusst als "Farbton (Halation)" statt "Halation: Farbton" —
+  // sonst wäre der zugängliche Name "Halation: Farbton (Zahlenwert)" eine
+  // Teilzeichenkette von "Farbton (Zahlenwert)" (Playwrights `name`-Option
+  // matcht standardmäßig als Teilstring) und würde bestehende
+  // `.nth()`-Disambiguierungen wie in `masks-flow.spec.ts` verschieben —
+  // dasselbe Muster wie "Farbton (Rot)" bei der HSL-/Kalibrierungs-Zeile.
+  { key: "halation_hue", label: "Farbton (Halation)", min: 0, max: 360, fineStep: 1, coarseStep: 15, neutral: 15 },
 ];
 
 // ---- Kalibrierung -----------------------------------------------------------
@@ -880,7 +908,7 @@ export function neutralMaskAdjustments(): MaskAdjustments {
 
 /** `SPEC.md` §5: „Normal" plus die namentlich genannten Beispiele
  * (Multiplizieren, Weiches Licht, Farbe, Luminanz). */
-export type BlendMode = "Normal" | "Multiply" | "SoftLight" | "Color" | "Luminosity";
+export type BlendMode = "Normal" | "Multiply" | "SoftLight" | "Color" | "Luminosity" | "Screen";
 
 export const BLEND_MODE_OPTIONS: ReadonlyArray<{ value: BlendMode; label: string }> = [
   { value: "Normal", label: "Normal" },
@@ -888,6 +916,7 @@ export const BLEND_MODE_OPTIONS: ReadonlyArray<{ value: BlendMode; label: string
   { value: "SoftLight", label: "Weiches Licht" },
   { value: "Color", label: "Farbe" },
   { value: "Luminosity", label: "Luminanz" },
+  { value: "Screen", label: "Negativ multiplizieren" },
 ];
 
 export type OverlayColor = "Red" | "Green" | "Blue" | "Yellow" | "Magenta";

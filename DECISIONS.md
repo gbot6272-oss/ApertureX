@@ -2948,3 +2948,84 @@ Muster von `masks-flow.spec.ts`): eine Ebene aus einem zweiten
 Katalog-Foto hinzufügen, Blend-Modus wechseln, Sichtbarkeit umschalten,
 entfernen — jeweils mit Prüfung des tatsächlich committeten
 `composite_layers`-Inhalts im EDL, nicht nur der UI-Anzeige.
+
+### Nachtrag IV (Phase 14 Schritt 4): Echte Halation-/Bloom-Simulation
+— `BlendMode::Screen` nachgezogen, CPU-only-Kurzschluss statt Teil des
+Vignette-/Korn-GPU-Dispatchs, ein real gefundener Playwright-Locator-
+Konflikt
+
+Punkt 8 der Recherche-Tabelle ist mit einem Original-Zitat belegt:
+"Lightroom Classic cannot create true film halation, only a soft bloom
+approximation." Umgesetzt als weitere Effekt-Variante direkt in
+`crates/apx-pipeline/src/stages/effects.rs` (dieselbe Datei wie
+Vignette/Korn): Lichter-Maske per `smoothstep`-Schwellenwert nahe Weiß
+(bewusst mit weicher Kante, `HALATION_THRESHOLD_SOFTNESS`, statt einer
+harten Schwelle — sonst risse die Bloom-Kante sichtbar), sofort per
+neuem `hsv_to_rgb` warm eingefärbt, dann mit demselben separierbaren
+Box-Weichzeichner wie `masks::feather_alpha`/`frequency_separation`
+(erneut bewusst eigenständig implementiert statt geteilt — dieselbe
+"kleine, in sich geschlossene Funktion"-Begründung wie in den beiden
+vorherigen Schritten) verwaschen und additiv per
+`blend_pixel(base, glow, BlendMode::Screen)` zurückgemischt, gewichtet
+mit dem Betrag-Regler. `BlendMode::Screen` fehlte bisher in `edl/v3.rs`
+— Schritt 3s Compositing-Stufe nutzte nur die vier damals schon
+vorhandenen Modi — und wird hier nachgezogen, `masks::blend_pixel` dafür
+um eine weitere Formel-Verzweigung ergänzt (`1.0 - (1.0-base)*(1.0-
+adjusted)`, die Standard-Screen-Formel).
+
+**Bewusst CPU-only, unabhängig vom GPU-/CPU-Dispatch der Vignette/Korn
+direkt davor:** Halation ist wie `apply_content_aware_fill` und
+`frequency_separation` eine mehrstufige, radiusabhängige
+Nachbarschaftsoperation (zwei Blur-Durchgänge über das gesamte Bild),
+kein per-Pixel-Vorgang, der in ein festes WGSL-Shader-Modell passt —
+dieselbe bereits etablierte Grenze wie bei den beiden Vorgängern. In
+`develop.rs` deshalb ein eigener, unmittelbar nach dem
+Vignette-/Korn-`apply_gpu`/`apply_cpu`-Aufruf eingefügter Kurzschritt
+(`if !stages.effects || edl.effects.halation_amount <= 0.0 { effected }
+else { effects::apply_halation(...) }`), keine Erweiterung desselben
+Dispatch-Aufrufs.
+
+**Test-Skalierungsfalle real gefunden, kein Vorab-Design:** die ersten
+drei neuen Unit-Tests scheiterten zweimal in Folge an zu kleinen
+Testbildern statt an einem echten Logikfehler. Erster Fehlschlag:
+`HALATION_MAX_RADIUS_FRACTION = 8 %` ergab bei einem 31-Pixel-Testbild
+und mittlerem Radius-Reglerwert einen gerundeten Blur-Radius von genau 1
+Pixel — zu klein, um 3 Pixel entfernte Testpunkte überhaupt zu erreichen
+(Ergebnis bitweise identisch mit der Eingabe). Behoben durch Anhebung auf
+15 % und größere Testbilder (121/161 statt 31/41 Pixel), damit die
+Bruchteilsformel bei realistischen Testabständen genug absolute Pixel
+zur Verfügung hat. Zweiter Fehlschlag danach: ein einzelner heller
+Testpixel wurde vom zweifachen Box-Blur-Mittelwert (Divisor rund 23 in
+jedem der zwei Durchgänge, zusammen rund 529) auf ein am Nachbarpixel
+nicht mehr messbares Signal verdünnt — unrealistisch gegenüber einer
+echten, flächigen Lichtquelle. Behoben durch einen 7×7-Testblock statt
+eines Einzelpixels. Beide Korrekturen wurden jeweils durch einen
+tatsächlichen `cargo test`-Lauf verifiziert, nicht nur durch
+Code-Inspektion angenommen.
+
+**Ein während der Umsetzung real gefundener, nicht nur vermuteter
+Playwright-Locator-Konflikt:** das neue Farbton-Feld hieß zunächst
+"Halation: Farbton" (analog zu "Halation: Betrag"/"Halation: Radius").
+Playwrights `getByRole(..., {name})` matcht einen String-Namen jedoch
+standardmäßig als Teilstring, nicht exakt — der resultierende
+zugängliche Name "Halation: Farbton (Zahlenwert)" enthält damit den
+bestehenden bloßen Namen "Farbton (Zahlenwert)" vollständig als
+Teilzeichenkette. Der bereits bestehende Test
+`masks-flow.spec.ts`s "Sechs-Sektionen-Regler …" nutzt genau diesen
+bloßen Namen mit `.nth(1)`, um zwischen dem globalen und dem
+maskeneigenen HSL-Farbton-Regler zu unterscheiden — durch das neue,
+dazwischenliegende dritte Element verschob sich `.nth(1)` auf den
+falschen (globalen Halation-)Regler, wodurch der eigentlich gewollte
+Maskenregler nie den erwarteten Wert committete. Real reproduziert (der
+Test schlägt isoliert fehl, nicht nur im Batch) und root-caused per
+Playwright-Snapshot der zugänglichen Baumstruktur zum Fehlschlagzeitpunkt
+— nicht durch bloßes erneutes Lesen des Testcodes vermutet. Behoben durch
+Umbenennung zu "Farbton (Halation)", demselben bereits im Projekt
+etablierten Klammer-Suffix-Muster wie "Farbton (Rot)"/"Farbton (Grün)"/
+"Farbton (Blau)" bei HSL-Bändern und "Farbton (${row.label})" bei der
+Kalibrierung — der Qualifizierer steht dabei grundsätzlich *nach*
+"Farbton", nie davor, damit kein neuer bloßer Name je zufällig ein
+Präfix eines anderen wird. Lehre für künftige Schritte: ein neues
+Reglerlabel, dessen letztes Wort mit einem bereits an anderer Stelle
+bloß verwendeten Label übereinstimmt, braucht denselben Klammer-Suffix,
+bevor ein Test dafür geschrieben wird.

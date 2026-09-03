@@ -207,6 +207,11 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     perceptualDuplicateGroups: [] as unknown[][],
     // Personenansicht (Phase 11 Schritt 5).
     peopleGroups: [] as unknown[][],
+    // Stil-Konsistenz-Check fürs Shooting (Phase 14 Schritt 5) — die
+    // echte Lab-Statistik ist bereits in `apx-ai::style_consistency`s
+    // Rust-Unit-Tests abgedeckt, hier steuert die Fixture direkt das
+    // Ergebnis, das `analyze_style_consistency` zurückgäbe.
+    styleConsistencyResult: [] as unknown[],
     // Adobe-XMP-Sidecar (Phase 9 Schritt 2).
     exportedXmpSidecarPath: "/mock/photos/IMG_0001.xmp" as string,
     xmpImportApplies: true as boolean,
@@ -604,6 +609,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       importedTemplateFile: { kind: string; name: string; payload_json: string } | null;
       perceptualDuplicateGroups: unknown[][];
       peopleGroups: unknown[][];
+      styleConsistencyResult: unknown[];
     };
 
     switch (cmd) {
@@ -1048,6 +1054,10 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return fixtures.perceptualDuplicateGroups;
       case "list_people_groups":
         return fixtures.peopleGroups;
+
+      // ---- Stil-Konsistenz-Check fürs Shooting (Phase 14 Schritt 5) --------
+      case "analyze_style_consistency":
+        return fixtures.styleConsistencyResult;
 
       // ---- Bibliothek: Suche/Filter (ab Phase 3) ---------------------------
       case "search_photos": {

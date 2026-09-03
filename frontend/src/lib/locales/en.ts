@@ -388,6 +388,7 @@ export const en: Record<keyof typeof de, string> = {
   "libraryOrganizeDialog.tabCopies": "Virtual copies",
   "libraryOrganizeDialog.tabColors": "Color labels",
   "libraryOrganizeDialog.tabDuplicates": "Duplicates",
+  "libraryOrganizeDialog.tabStyle": "Style Consistency",
   "libraryOrganizeDialog.collectionSets": "Collection sets",
   "libraryOrganizeDialog.delete": "Delete",
   "libraryOrganizeDialog.noCollectionSets": "No collection sets",
@@ -426,6 +427,15 @@ export const en: Record<keyof typeof de, string> = {
   "libraryOrganizeDialog.generateSmartPreviews": "Generate smart previews",
   "libraryOrganizeDialog.generatedCount": "{count} generated",
   "libraryOrganizeDialog.close": "Close",
+  "libraryOrganizeDialog.styleNoFolderSelected": "No folder open — the style consistency check compares the photos in the currently open folder (shoot).",
+  "libraryOrganizeDialog.styleCheckRunning": "Checking…",
+  "libraryOrganizeDialog.styleCheckRun": "Check shoot",
+  "libraryOrganizeDialog.styleTooFewPhotos": "Too few photos for a meaningful analysis (at least 3 needed).",
+  "libraryOrganizeDialog.styleNoOutliers": "No outliers found — this shoot is stylistically consistent.",
+  "libraryOrganizeDialog.styleOutlierBadge": "Outlier",
+  "libraryOrganizeDialog.styleDistance": "Distance {distance}",
+  "libraryOrganizeDialog.styleAlign": "Align to shoot",
+  "libraryOrganizeDialog.styleAligning": "Aligning…",
 
   // ExportDialog.tsx (Phase 11 Schritt 11)
   "exportDialog.title": "Export",

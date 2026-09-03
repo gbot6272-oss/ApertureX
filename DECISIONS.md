@@ -3029,3 +3029,97 @@ Präfix eines anderen wird. Lehre für künftige Schritte: ein neues
 Reglerlabel, dessen letztes Wort mit einem bereits an anderer Stelle
 bloß verwendeten Label übereinstimmt, braucht denselben Klammer-Suffix,
 bevor ein Test dafür geschrieben wird.
+
+### Nachtrag V (Phase 14 Schritt 5): Automatischer Stil-Konsistenz-Check
+fürs Shooting — Plan-Annahme einer vorhandenen Lab-Umrechnung war falsch,
+eigenständige CIE-Formeln statt Wiederverwendung
+
+Punkt 6 der Recherche-Tabelle: Lightroom kennt nur das manuelle "Sync
+Settings" zwischen genau zwei Fotos, keinen automatischen
+Konsistenzabgleich über ein ganzes Shooting. Der ursprüngliche Plan nahm
+an, `apx-pipeline::stages::calibration`/`color_math.rs` rechne bereits in
+CIE-Lab und diese Umrechnung könne wiederverwendet werden — eine
+Prüfung zu Beginn dieses Schritts zeigte, dass es weder eine Datei
+`color_math.rs` noch irgendeine sRGB->Lab-Umrechnung im gesamten
+Workspace gibt (`stages::calibration` rechnet auf den kameraeigenen
+Primärfarben, nicht in Lab). Statt die Plan-Annahme stillschweigend zu
+korrigieren, ist das hier festgehalten: die Standard-CIE-Formeln
+(D65-Referenzweiß) sind in `crates/apx-ai/src/style_consistency.rs`
+eigenständig aus öffentlich dokumentierter Mathematik neu geschrieben —
+dieselbe Vorgehensweise wie `stages::effects::hsv_to_rgb` in Schritt 4,
+kein Lizenzrisiko, weil es sich um eine feste mathematische Definition
+handelt, kein übernommener Code.
+
+**Warum Lab statt sRGB-Mittelwert:** CIE-Lab ist wahrnehmungsnäher als
+roher sRGB-Kanalmittelwert (gleicher Grund, warum Adobe seine eigenen
+Weißabgleich-/Histogramm-Werkzeuge intern auf ähnlichen
+wahrnehmungsbasierten Räumen aufbaut) — eine `L*`-Mittelwertdifferenz
+korreliert direkter mit wahrgenommener Belichtungsdifferenz als ein
+roher RGB-Mittelwert, und die `a*`/`b*`-Achsen trennen sauber
+Grün/Magenta- von Blau/Gelb-Verschiebungen, exakt die beiden Halbachsen,
+die `tint_shift`/`temp_shift_kelvin` bereits repräsentieren.
+
+**Ausreißer-Metrik:** ein auf die jeweilige Achsen-Streuung der Gruppe
+normierter kombinierter Abstand (`analyze_group`) — ein vereinfachter
+Mahalanobis-Abstand mit Diagonal-Kovarianz statt der vollen
+Kovarianzmatrix. Für drei grob unabhängige Lab-Achsen eine vertretbare
+Vereinfachung (eine volle 3×3-Kovarianzmatrix-Inversion wäre für den
+Nutzen hier unverhältnismäßig). Der Schwellenwert
+(`OUTLIER_DISTANCE_THRESHOLD = 1.5`) ist wie
+`stages::effects::HALATION_THRESHOLD` ein bewusst gewählter Wert, kein
+strikt hergeleiteter p-Wert — dieselbe ehrliche Einordnung wie bei jeder
+anderen Heuristik-Konstante in diesem Projekt. Unter drei Fotos
+(`MIN_GROUP_SIZE_FOR_ANALYSIS`) ist eine Streuung statistisch nicht
+aussagekräftig — `analyze_group` markiert dann bewusst keine Ausreißer
+und schlägt keine Angleichung vor, statt aus der Streuung eines
+Extremfalls von ein bis zwei Fotos einen bedeutungslosen "Ausreißer" zu
+erfinden.
+
+**Angleichungs-Vorschlag, keine neue Pixel-Operation:** `suggest_alignment`
+berechnet Deltas für die bereits bestehenden
+`WhiteBalanceAdjustment`/`BasicAdjustment::exposure_ev`-Regler statt eine
+neue EDL-Operation einzuführen — dieselbe "berechnet Werte für
+bestehende Regler"-Philosophie wie `frontend/src/lib/autoTone.ts`s
+Auto-Ton. Die Umrechnung von `L*` in eine Blendenstufen-Korrektur nutzt
+dieselbe bereits im Projekt etablierte "^2.2-Näherung" wie Auto-Ton
+(dort für gamma-kodiert<->linear); die Umrechnung von `a*`/`b*` in
+`tint_shift`/`temp_shift_kelvin` ist eine bewusst benannte Heuristik-
+Skalierung, keine photometrische Herleitung. Alle drei Deltas sind auf
+einen Höchstwert gekappt, damit ein extremer Ausreißer (z. B. ein
+versehentlich mitfotografiertes komplett anderes Motiv) keinen die
+Regler-Obergrenze sprengenden Vorschlag erzeugt.
+
+**Command-Ebene:** `apx-app::commands::analyze_style_consistency`
+arbeitet wie `list_perceptual_duplicate_groups`/`list_people_groups` auf
+dem bereits vorhandenen Thumbnail-Vorschau-Cache eines einzelnen Ordners
+(des "Shootings") statt jedes Foto neu von der RAW-Datei zu dekodieren —
+dieselbe Fotomenge, die der Plan mit "einer gewählten Fotomenge" meint:
+ein Ordner ist im bestehenden Datenmodell bereits die natürliche
+Shooting-Einheit (ein Import-Vorgang).
+
+**Frontend:** neuer "Stil-Konsistenz"-Reiter im "Bibliothek
+organisieren"-Dialog (`LibraryOrganizeDialog.tsx`), nach demselben
+"scannen, Ergebnis anzeigen, an ausgewählten Fotos wirken"-Muster wie
+der bestehende Duplikat-Assistent — zeigt nur Ausreißer an (konsistente
+Fotos werden nicht extra aufgelistet, das Shooting ist bei keinem
+Ausreißer bereits "fertig"). "An Shooting angleichen" liest/schreibt
+direkt über `currentDevelopEdit`/`applyDevelopEdit` (exakt wie
+`syncSettingsToSelection` aus Phase 8), funktioniert also auch für
+Fotos, die gerade nicht im Entwickeln-Modul geöffnet sind — trägt damit
+sowohl den vom Plan geforderten Massenbearbeitungs- als auch den
+Einzelfoto-Anwendungsfall, ohne eine zweite Anwendungs-UI zu bauen.
+
+**Ein während der Umsetzung real gefundener, nicht nur vermuteter
+Fehler:** die erste Fassung von `alignPhotoStyleToShoot` wies direkt auf
+Felder des von `edlFromHistoryPosition` bei `{kind: "Neutral"}`
+zurückgegebenen Objekts zu (`payload.basic.white_balance.
+temp_shift_kelvin = ...`) — das schlug beim tatsächlichen e2e-Testlauf
+mit `TypeError: Cannot assign to read only property 'temp_shift_kelvin'`
+fehl. Ursache: `neutralEdlPayload()` gibt die geteilten `NEUTRAL_*`-
+Konstanten aus `lib/edl.ts` per Referenz zurück, und Immer friert
+Objekte, die es einmal innerhalb eines `set()`-Aufrufs verwaltet hat,
+zur Laufzeit ein (Entwicklungsmodus-Sicherheitsnetz gegen genau solche
+versehentlichen Mutationen). Behoben durch frische, gespreadete
+`basic`-/`white_balance`-Objekte statt In-Place-Mutation — real per
+Playwright-Konsolen-Log reproduziert und verifiziert, nicht nur durch
+Code-Inspektion vermutet.

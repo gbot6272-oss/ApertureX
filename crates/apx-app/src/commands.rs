@@ -2499,6 +2499,92 @@ pub fn list_people_groups(state: State<'_, AppState>) -> Result<Vec<Vec<PhotoDto
         .collect())
 }
 
+/// Ein Foto innerhalb eines analysierten Shootings, siehe
+/// [`analyze_style_consistency`].
+#[derive(Debug, Clone, Serialize)]
+pub struct StylePhotoAnalysisDto {
+    pub photo: PhotoDto,
+    pub mean_l: f32,
+    pub mean_a: f32,
+    pub mean_b: f32,
+    pub distance_from_group: f32,
+    pub is_outlier: bool,
+    pub suggested_exposure_ev_delta: f32,
+    pub suggested_temp_shift_kelvin_delta: f32,
+    pub suggested_tint_shift_delta: f32,
+}
+
+/// Automatischer Stil-Konsistenz-Check fürs Shooting (Phase 14 Schritt 5,
+/// siehe `DECISIONS.md` ADR-0041 Nachtrag V): Lightroom hat dafür kein
+/// Äquivalent, nur das manuelle "Sync Settings" zwischen zwei Fotos. Die
+/// eigentliche Lab-Statistik lebt in `apx_ai::style_consistency` (rein,
+/// unit-getestet) — dieser Command löst nur die Fotos eines Ordners auf
+/// und arbeitet wie [`list_perceptual_duplicate_groups`]/
+/// [`list_people_groups`] auf dem bereits vorhandenen Thumbnail-
+/// Vorschau-Cache statt jedes Foto neu von der RAW-Datei zu dekodieren.
+/// Fotos ohne bereits generierte Miniaturansicht werden übersprungen wie
+/// bei den beiden genannten Vorbildern.
+#[tauri::command]
+pub fn analyze_style_consistency(
+    state: State<'_, AppState>,
+    folder_id: String,
+) -> Result<Vec<StylePhotoAnalysisDto>, String> {
+    let folder_id: apx_core::FolderId = folder_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    let photos = state
+        .catalog
+        .list_photos_by_folder(folder_id)
+        .map_err(|err| err.to_string())?;
+
+    let mut with_signatures: Vec<(
+        apx_catalog::Photo,
+        apx_ai::style_consistency::StyleSignature,
+    )> = Vec::new();
+    for photo in photos {
+        let Ok(Some(preview)) = state
+            .catalog
+            .get_preview(photo.id, apx_catalog::PreviewLevel::Thumbnail)
+        else {
+            continue;
+        };
+        let Ok(img) = image::open(&preview.path) else {
+            continue;
+        };
+        let rgb = img.to_rgb8();
+        let (width, height) = rgb.dimensions();
+        let pixels: Vec<f32> = rgb
+            .into_raw()
+            .iter()
+            .map(|&v| f32::from(v) / 255.0)
+            .collect();
+        let signature = apx_ai::style_consistency::compute_style_signature(&pixels, width, height);
+        with_signatures.push((photo, signature));
+    }
+
+    let signatures: Vec<apx_ai::style_consistency::StyleSignature> = with_signatures
+        .iter()
+        .map(|(_, signature)| *signature)
+        .collect();
+    let analyses = apx_ai::style_consistency::analyze_group(&signatures);
+
+    Ok(with_signatures
+        .into_iter()
+        .zip(analyses)
+        .map(|((photo, _), analysis)| StylePhotoAnalysisDto {
+            photo: PhotoDto::from(photo),
+            mean_l: analysis.signature.mean_l,
+            mean_a: analysis.signature.mean_a,
+            mean_b: analysis.signature.mean_b,
+            distance_from_group: analysis.distance_from_group,
+            is_outlier: analysis.is_outlier,
+            suggested_exposure_ev_delta: analysis.suggestion.exposure_ev_delta,
+            suggested_temp_shift_kelvin_delta: analysis.suggestion.temp_shift_kelvin_delta,
+            suggested_tint_shift_delta: analysis.suggestion.tint_shift_delta,
+        })
+        .collect())
+}
+
 // ---- KI-Funktionen (Phase 7, siehe `DECISIONS.md` ADR-0033) ---------------
 //
 // Alle Analyse-Algorithmen selbst leben in `apx-ai` (klassische

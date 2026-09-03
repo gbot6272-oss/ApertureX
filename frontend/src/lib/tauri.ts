@@ -646,6 +646,29 @@ export function listPeopleGroups(): Promise<PhotoDto[][]> {
   return invoke<PhotoDto[][]>("list_people_groups");
 }
 
+// ---- Stil-Konsistenz-Check fürs Shooting (Phase 14 Schritt 5, siehe
+// DECISIONS.md ADR-0041 Nachtrag V) ------------------------------------
+
+export interface StylePhotoAnalysisDto {
+  photo: PhotoDto;
+  mean_l: number;
+  mean_a: number;
+  mean_b: number;
+  distance_from_group: number;
+  is_outlier: boolean;
+  suggested_exposure_ev_delta: number;
+  suggested_temp_shift_kelvin_delta: number;
+  suggested_tint_shift_delta: number;
+}
+
+/** Siehe `apx-app`s `analyze_style_consistency`-Command-Moduldoku:
+ * arbeitet wie `listPerceptualDuplicateGroups`/`listPeopleGroups` auf dem
+ * bereits vorhandenen Thumbnail-Vorschau-Cache eines einzelnen Ordners
+ * (des "Shootings"), keine erneute RAW-Dekodierung. */
+export function analyzeStyleConsistency(folderId: string): Promise<StylePhotoAnalysisDto[]> {
+  return invoke<StylePhotoAnalysisDto[]>("analyze_style_consistency", { folderId });
+}
+
 // ---- Presets (ab Phase 5, siehe DECISIONS.md ADR-0031) --------------------
 
 export function createPresetFolder(name: string, parentId: string | null): Promise<string> {

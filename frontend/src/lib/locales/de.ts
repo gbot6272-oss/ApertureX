@@ -396,6 +396,7 @@ export const de = {
   "libraryOrganizeDialog.tabCopies": "Virtuelle Kopien",
   "libraryOrganizeDialog.tabColors": "Farbmarkierungen",
   "libraryOrganizeDialog.tabDuplicates": "Duplikate",
+  "libraryOrganizeDialog.tabStyle": "Stil-Konsistenz",
   "libraryOrganizeDialog.collectionSets": "Sammlungssätze",
   "libraryOrganizeDialog.delete": "Löschen",
   "libraryOrganizeDialog.noCollectionSets": "Keine Sammlungssätze",
@@ -434,6 +435,15 @@ export const de = {
   "libraryOrganizeDialog.generateSmartPreviews": "Smart Previews erzeugen",
   "libraryOrganizeDialog.generatedCount": "{count} erzeugt",
   "libraryOrganizeDialog.close": "Schließen",
+  "libraryOrganizeDialog.styleNoFolderSelected": "Kein Ordner geöffnet — der Stil-Konsistenz-Check vergleicht die Fotos des aktuell geöffneten Ordners (Shootings).",
+  "libraryOrganizeDialog.styleCheckRunning": "Prüfe…",
+  "libraryOrganizeDialog.styleCheckRun": "Shooting prüfen",
+  "libraryOrganizeDialog.styleTooFewPhotos": "Zu wenige Fotos für eine aussagekräftige Analyse (mindestens 3 nötig).",
+  "libraryOrganizeDialog.styleNoOutliers": "Keine Ausreißer gefunden — das Shooting ist stilistisch konsistent.",
+  "libraryOrganizeDialog.styleOutlierBadge": "Ausreißer",
+  "libraryOrganizeDialog.styleDistance": "Abstand {distance}",
+  "libraryOrganizeDialog.styleAlign": "An Shooting angleichen",
+  "libraryOrganizeDialog.styleAligning": "Wird angeglichen…",
 
   // ExportDialog.tsx (Phase 11 Schritt 11)
   "exportDialog.title": "Exportieren",

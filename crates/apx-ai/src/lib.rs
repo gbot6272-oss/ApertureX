@@ -31,6 +31,9 @@
 //! - `preset_generator` (Schritt 4): LLM-Anfrage, Referenzbild-Modus,
 //!   Variationen-Generator, Preset aus Bearbeitung lernen.
 //! - `tagging` (Schritt 5): regelbasierte Auto-Tagging-Vorschläge.
+//! - [`style_consistency`] (Phase 14 Schritt 5): Lab-Signatur je Foto,
+//!   statistische Ausreißer-Erkennung und Angleichungs-Vorschläge für ein
+//!   ganzes Shooting — kein neuronales Netz, klassische Farbstatistik.
 
 pub mod blur;
 pub mod color;
@@ -44,6 +47,7 @@ pub mod people;
 pub mod preset_generator;
 pub mod repair_analysis;
 pub mod segmentation;
+pub mod style_consistency;
 pub mod tagging;
 pub mod upright;
 pub mod upscale;

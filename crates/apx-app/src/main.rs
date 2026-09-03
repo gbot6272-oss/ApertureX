@@ -421,6 +421,7 @@ fn main() {
             commands::list_duplicate_photo_groups,
             commands::list_perceptual_duplicate_groups,
             commands::list_people_groups,
+            commands::analyze_style_consistency,
             commands::generate_ai_mask,
             commands::suggest_repair_source,
             commands::detect_sensor_spots,

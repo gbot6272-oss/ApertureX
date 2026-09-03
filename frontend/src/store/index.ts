@@ -4,7 +4,9 @@ import { immer } from "zustand/middleware/immer";
 import {
   AI_MASK_KIND_LABELS,
   base64ToByteArray,
+  BASIC_SLIDER_SPECS,
   buildEdlEnvelopeJson,
+  clampSliderValue,
   defaultBlurDepthApproxGeometry,
   defaultColorRangeGeometry,
   defaultLinearGradientGeometry,
@@ -82,6 +84,7 @@ import type {
   WorkflowTemplatePayload,
   SpotCandidateDto,
   SmartCollectionLeaf,
+  StylePhotoAnalysisDto,
   UiSettingsDto,
   WatchedFolderSettingsDto,
 } from "../lib/tauri";
@@ -1372,6 +1375,22 @@ interface LibraryBacklogSlice {
   perceptualDuplicateGroups: PhotoDto[][];
   perceptualDuplicatesRunning: boolean;
   runPerceptualDuplicateDetection: (maxDistance: number) => Promise<void>;
+
+  /** Automatischer Stil-Konsistenz-Check fürs Shooting (Phase 14
+   * Schritt 5, siehe `DECISIONS.md` ADR-0041 Nachtrag V) — arbeitet auf
+   * dem aktuell geöffneten Ordner (`selectedFolderId`) als "Shooting",
+   * dieselbe „bereits vorhandene Miniaturansicht"-Vereinfachung wie
+   * `perceptualDuplicateGroups`/`peopleGroups`. */
+  styleConsistencyResult: StylePhotoAnalysisDto[] | null;
+  styleConsistencyRunning: boolean;
+  runStyleConsistencyCheck: () => Promise<void>;
+  /** Übernimmt den in `analyzeStyleConsistency`s Antwort vorgeschlagenen
+   * Weißabgleichs-/Belichtungs-Delta für ein einzelnes Foto — additiv auf
+   * dessen *aktuellem* Bearbeitungsstand (nicht absolut gesetzt), auch
+   * wenn das Foto gerade nicht im Entwickeln-Modul geöffnet ist (liest/
+   * schreibt direkt über `currentDevelopEdit`/`applyDevelopEdit`, exakt
+   * wie `syncSettingsToSelection`). */
+  alignPhotoStyleToShoot: (analysis: StylePhotoAnalysisDto) => Promise<void>;
 
   /** Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
    * `DECISIONS.md` ADR-0038): eine Regel = `libraryFilter` (wiederverwendet,
@@ -4927,6 +4946,8 @@ export const useAppStore = create<AppStore>()(
     colorLabelDefinitions: [],
     perceptualDuplicateGroups: [],
     perceptualDuplicatesRunning: false,
+    styleConsistencyResult: null,
+    styleConsistencyRunning: false,
 
     refreshCollectionFolders: async () => {
       const folders = await api.listCollectionFolders();
@@ -5043,6 +5064,61 @@ export const useAppStore = create<AppStore>()(
         set((state) => {
           state.perceptualDuplicatesRunning = false;
         });
+      }
+    },
+
+    runStyleConsistencyCheck: async () => {
+      const { selectedFolderId } = get();
+      if (!selectedFolderId) return;
+      set((state) => {
+        state.styleConsistencyRunning = true;
+      });
+      try {
+        const result = await api.analyzeStyleConsistency(selectedFolderId);
+        set((state) => {
+          state.styleConsistencyResult = result;
+        });
+      } finally {
+        set((state) => {
+          state.styleConsistencyRunning = false;
+        });
+      }
+    },
+
+    alignPhotoStyleToShoot: async (analysis) => {
+      const photoId = analysis.photo.id;
+      const tempSpec = BASIC_SLIDER_SPECS.find((spec) => spec.key === "temp_shift_kelvin")!;
+      const tintSpec = BASIC_SLIDER_SPECS.find((spec) => spec.key === "tint_shift")!;
+      const exposureSpec = BASIC_SLIDER_SPECS.find((spec) => spec.key === "exposure_ev")!;
+      try {
+        const position = await api.currentDevelopEdit(photoId);
+        const base = edlFromHistoryPosition(position);
+        // `edlFromHistoryPosition` gibt bei "Neutral" die geteilten, von
+        // Immer eingefrorenen `NEUTRAL_*`-Konstanten aus `lib/edl.ts` per
+        // Referenz zurück (siehe `neutralEdlPayload`) — ein direktes
+        // Zuweisen auf ein Feld davon wirft zur Laufzeit
+        // "Cannot assign to read only property". Deshalb hier frische
+        // `basic`-/`white_balance`-Objekte statt In-Place-Mutation.
+        const payload: EdlPayload = {
+          ...base,
+          basic: {
+            ...base.basic,
+            white_balance: {
+              ...base.basic.white_balance,
+              temp_shift_kelvin: clampSliderValue(base.basic.white_balance.temp_shift_kelvin + analysis.suggested_temp_shift_kelvin_delta, tempSpec),
+              tint_shift: clampSliderValue(base.basic.white_balance.tint_shift + analysis.suggested_tint_shift_delta, tintSpec),
+            },
+            exposure_ev: clampSliderValue(base.basic.exposure_ev + analysis.suggested_exposure_ev_delta, exposureSpec),
+          },
+        };
+        await api.applyDevelopEdit(photoId, buildEdlEnvelopeJson(payload), "Stil an Shooting-Durchschnitt angeglichen");
+        if (get().developPhotoId === photoId) {
+          set((state) => {
+            state.developEdl = payload;
+          });
+        }
+      } catch (err) {
+        console.error(`Stil-Angleichung für Foto ${photoId} fehlgeschlagen:`, err);
       }
     },
 

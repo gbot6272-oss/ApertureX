@@ -3425,3 +3425,19 @@ voneinander herunterladbare Modelle. `patch` ist wie
 `virtual_aperture.depth_map` bewusst NICHT Teil eines Presets
 (`lib/presets.ts`) — für ein bestimmtes Foto berechnet, auf ein anderes
 übertragen schlicht falsch.
+
+### Nachtrag X (Phase 14 Schritt 10): Himmelsaustausch — klassischer
+Algorithmus, minimaler Umsetzungsaufwand auf Nutzerwunsch
+
+Punkt 4 der Recherche-Tabelle. Kein neues KI-Modell: die Himmel-Maske
+kommt aus der bereits bestehenden `apx_ai::segmentation::sky_alpha`-
+Heuristik. `apx_ai::sky_replace::composite()` ersetzt den maskierten
+Bereich durch das vom Nutzer gewählte Foto und skaliert den Vordergrund
+je Kanal grob auf die mittlere Farbe des neuen Himmels (RGB-Mittelwert-
+Verhältnis, geklemmt `0.5..2.0`) statt eines vollen Lab-Transfers —
+bewusst vereinfacht, auf ausdrücklichen Nutzerwunsch mit minimalem
+Aufwand umgesetzt (kein Unit-/e2e-Test, sehr wenige Kommentare). Dieselbe
+Patch-Architektur wie Schritt 8/9: `apx-app::commands::replace_sky`
+berechnet das fertige Vollbild einmal, `stages::sky_replace` ersetzt
+beim Rendern nur noch die RGB-Kanäle (kein Deckkraft-Regler, anders als
+`style_transfer`).

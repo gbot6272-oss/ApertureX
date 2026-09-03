@@ -56,6 +56,7 @@ pub mod people;
 pub mod preset_generator;
 pub mod repair_analysis;
 pub mod segmentation;
+pub mod sky_replace;
 pub mod style_consistency;
 pub mod style_transfer;
 pub mod tagging;

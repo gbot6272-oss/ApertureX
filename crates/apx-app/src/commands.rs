@@ -3646,6 +3646,70 @@ pub fn stylize_photo(
     })
 }
 
+// ---- Himmelsaustausch mit automatischer Neubelichtung (Phase 14
+// Schritt 10) — klassischer Algorithmus, kein ONNX-Modell. -----------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkyReplacePatchDto {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub pixels_base64: String,
+}
+
+/// Ersetzt den Himmel in `photo_id` durch das Foto unter `sky_image_path`
+/// und gleicht den Vordergrund grob an dessen Farbtemperatur/Helligkeit
+/// an (`apx_ai::sky_replace::composite`).
+#[tauri::command]
+pub fn replace_sky(
+    state: State<'_, AppState>,
+    photo_id: String,
+    sky_image_path: String,
+) -> Result<SkyReplacePatchDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let max_edge = apx_ai::segmentation::ANALYSIS_MAX_EDGE;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let linear =
+        apx_raw::decode_linear(&source_path, Some(max_edge)).map_err(|err| err.to_string())?;
+    let alpha = apx_ai::segmentation::sky_alpha(&linear.pixels, linear.width, linear.height)
+        .map_err(|err| err.to_string())?;
+    let rgba =
+        apx_pipeline::color::linear_camera_rgb_to_srgb_rgba8(&linear.pixels, linear.cam_to_srgb);
+    let pixel_count = (linear.width as usize) * (linear.height as usize);
+    let mut rgb = vec![0u8; pixel_count * 3];
+    for i in 0..pixel_count {
+        rgb[i * 3] = rgba[i * 4];
+        rgb[i * 3 + 1] = rgba[i * 4 + 1];
+        rgb[i * 3 + 2] = rgba[i * 4 + 2];
+    }
+
+    let sky_img = image::open(&sky_image_path)
+        .map_err(|err| {
+            format!("Himmel-Foto '{sky_image_path}' konnte nicht geladen werden: {err}")
+        })?
+        .into_rgb8();
+    let sky_img = downsample_rgb_image(sky_img, max_edge);
+    let (sky_w, sky_h) = (sky_img.width(), sky_img.height());
+
+    let composited = apx_ai::sky_replace::composite(
+        &rgb,
+        linear.width,
+        linear.height,
+        &alpha,
+        sky_img.as_raw(),
+        sky_w,
+        sky_h,
+    );
+
+    Ok(SkyReplacePatchDto {
+        bitmap_width: linear.width,
+        bitmap_height: linear.height,
+        pixels_base64: base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            &composited,
+        ),
+    })
+}
+
 // ---- KI: Echte Personen-Wiedererkennung (Phase 13 Schritt 8, siehe
 // DECISIONS.md ADR-0040-Nachtrag VI) -----------------------------------------
 //

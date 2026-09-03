@@ -60,6 +60,7 @@ import { CanvasExtendDialog } from "./CanvasExtendDialog";
 import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import { PaletteFrame } from "./PaletteFrame";
 import { SavePresetDialog } from "./SavePresetDialog";
+import { SkyReplacePanel } from "./SkyReplacePanel";
 import { StyleTransferPanel } from "./StyleTransferPanel";
 import { VirtualAperturePanel } from "./VirtualAperturePanel";
 
@@ -111,6 +112,7 @@ const STAGE_ANCHOR_IDS: Record<keyof StageEnabled, string> = {
   composite: "stage-composite",
   virtual_aperture: "stage-virtual_aperture",
   style_transfer: "stage-style_transfer",
+  sky_replace: "stage-sky_replace",
   geometry: "stage-geometry",
 };
 
@@ -1443,6 +1445,11 @@ export function DevelopPanel() {
           <fieldset id="stage-style_transfer" className="flex flex-col gap-2">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Stiltransfer</legend>
             <StyleTransferPanel />
+          </fieldset>
+
+          <fieldset id="stage-sky_replace" className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Himmelsaustausch</legend>
+            <SkyReplacePanel />
           </fieldset>
 
           <fieldset id="stage-geometry" className="flex flex-col gap-3">

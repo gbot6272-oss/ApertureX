@@ -69,6 +69,10 @@ pub struct StageEnabled {
     /// `default_true`-Begründung wie `composite`/`virtual_aperture` oben.
     #[serde(default = "default_true")]
     pub style_transfer: bool,
+    /// Himmelsaustausch (Phase 14 Schritt 10) — läuft nach `style_transfer`,
+    /// vor `geometry`.
+    #[serde(default = "default_true")]
+    pub sky_replace: bool,
     pub geometry: bool,
 }
 
@@ -95,6 +99,7 @@ impl StageEnabled {
         composite: true,
         virtual_aperture: true,
         style_transfer: true,
+        sky_replace: true,
         geometry: true,
     };
 }
@@ -245,6 +250,18 @@ impl Default for StyleTransferAdjustment {
     }
 }
 
+// ---- Himmelsaustausch (Phase 14 Schritt 10) --------------------------------
+
+/// Einmalig per `apx_ai::sky_replace::composite` berechnetes, bereits
+/// belichtungsangeglichenes Vollbild (Himmel ersetzt) — `None` = kein
+/// Austausch berechnet.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkyReplacePatch {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub pixels: Vec<u8>,
+}
+
 // ---- Der vollständige EDL v4 -----------------------------------------------
 
 /// Die konkrete EDL-Struktur für Schema-Version 4 — siehe
@@ -288,6 +305,9 @@ pub struct EdlV4 {
     /// bisheriges Verhalten, kein Stiltransfer berechnet).
     #[serde(default)]
     pub style_transfer: StyleTransferAdjustment,
+    /// Himmelsaustausch (Phase 14 Schritt 10) — additiv, `#[serde(default)]`.
+    #[serde(default)]
+    pub sky_replace: Option<SkyReplacePatch>,
 }
 
 impl EdlV4 {
@@ -314,6 +334,7 @@ impl EdlV4 {
             composite_layers: Vec::new(),
             virtual_aperture: VirtualApertureAdjustment::NEUTRAL,
             style_transfer: StyleTransferAdjustment::NEUTRAL,
+            sky_replace: None,
         }
     }
 
@@ -343,6 +364,7 @@ impl EdlV4 {
             composite_layers: Vec::new(),
             virtual_aperture: VirtualApertureAdjustment::NEUTRAL,
             style_transfer: StyleTransferAdjustment::NEUTRAL,
+            sky_replace: None,
         }
     }
 }

@@ -439,6 +439,7 @@ fn main() {
             commands::download_style_transfer_model,
             commands::clear_style_transfer_model_path,
             commands::stylize_photo,
+            commands::replace_sky,
             commands::download_people_models,
             commands::clear_people_model_paths,
             commands::detect_faces_for_photo,

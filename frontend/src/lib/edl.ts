@@ -1181,6 +1181,7 @@ export interface StageEnabled {
    * `composite`, vor `geometry`, im fertig entwickelten sRGB-RGBA8-Bild
    * (siehe `stages::style_transfer`s Moduldoku). */
   style_transfer: boolean;
+  sky_replace: boolean;
   geometry: boolean;
 }
 
@@ -1200,6 +1201,7 @@ export const NEUTRAL_STAGE_ENABLED: StageEnabled = {
   composite: true,
   virtual_aperture: true,
   style_transfer: true,
+  sky_replace: true,
   geometry: true,
 };
 
@@ -1347,6 +1349,7 @@ export const STAGE_NODE_SPECS: readonly StageNodeSpec[] = [
   { key: "composite", label: "Compositing" },
   { key: "virtual_aperture", label: "Virtuelle Blende" },
   { key: "style_transfer", label: "Stiltransfer" },
+  { key: "sky_replace", label: "Himmelsaustausch" },
   { key: "geometry", label: "Geometrie" },
 ] as const;
 
@@ -1372,6 +1375,7 @@ export interface EdlPayload {
   composite_layers: CompositeLayer[];
   virtual_aperture: VirtualApertureAdjustment;
   style_transfer: StyleTransferAdjustment;
+  sky_replace: SkyReplacePatch | null;
 }
 
 export function neutralEdlPayload(): EdlPayload {
@@ -1395,6 +1399,7 @@ export function neutralEdlPayload(): EdlPayload {
     composite_layers: [],
     virtual_aperture: NEUTRAL_VIRTUAL_APERTURE,
     style_transfer: NEUTRAL_STYLE_TRANSFER,
+    sky_replace: null,
   };
 }
 
@@ -1545,4 +1550,10 @@ export function writeBasicField(basic: BasicAdjustments, key: string, value: num
     return;
   }
   basic[key as Exclude<keyof BasicAdjustments, "white_balance">] = value;
+}
+
+export interface SkyReplacePatch {
+  bitmap_width: number;
+  bitmap_height: number;
+  pixels: string;
 }

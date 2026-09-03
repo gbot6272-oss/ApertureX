@@ -1451,6 +1451,11 @@ interface LibraryBacklogSlice {
    * Fehlermeldung (`catalogError`). */
   stylizePhotoWithStyle: (style: string) => Promise<void>;
 
+  /** Himmelsaustausch (Phase 14 Schritt 10). */
+  skyReplacing: boolean;
+  replaceSkyForCurrentPhoto: (skyImagePath: string) => Promise<void>;
+  clearSkyReplace: () => void;
+
   /** Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
    * `DECISIONS.md` ADR-0038): eine Regel = `libraryFilter` (wiederverwendet,
    * wie beim normalen Filter-Panel) + eine `BatchAction`. */
@@ -5363,6 +5368,42 @@ export const useAppStore = create<AppStore>()(
           state.styleTransferStylizing = false;
         });
       }
+    },
+
+    skyReplacing: false,
+
+    replaceSkyForCurrentPhoto: async (skyImagePath) => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.skyReplacing = true;
+      });
+      try {
+        const dto = await api.replaceSky(developPhotoId, skyImagePath);
+        set((state) => {
+          state.developEdl.sky_replace = {
+            bitmap_width: dto.bitmap_width,
+            bitmap_height: dto.bitmap_height,
+            pixels: dto.pixels_base64,
+          };
+        });
+        void get().commitDevelopEdit("Himmel ersetzt");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.skyReplacing = false;
+        });
+      }
+    },
+
+    clearSkyReplace: () => {
+      set((state) => {
+        state.developEdl.sky_replace = null;
+      });
+      void get().commitDevelopEdit("Himmelsaustausch entfernt");
     },
 
     batchPreview: [],

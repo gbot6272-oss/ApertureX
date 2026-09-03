@@ -20,8 +20,8 @@ use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
     basic_fused, bw_mixer, calibration, color_grading, composite, curves, details, effects,
-    geometry, hsl_color_mixer, lens_corrections, local_contrast, masks, repair, style_transfer,
-    virtual_aperture, white_balance,
+    geometry, hsl_color_mixer, lens_corrections, local_contrast, masks, repair, sky_replace,
+    style_transfer, virtual_aperture, white_balance,
 };
 
 /// Das Ergebnis von [`render_rgba8`] — `width`/`height` beschreiben
@@ -399,14 +399,20 @@ pub fn render_rgba8(
         )
     };
 
+    let skied = if !stages.sky_replace || edl.sky_replace.is_none() {
+        styled
+    } else {
+        sky_replace::apply(&styled, linear.width, linear.height, &edl.sky_replace)
+    };
+
     let (width, height, pixels) = if !stages.geometry || edl.geometry == GeometryAdjustment::NEUTRAL
     {
         // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
         // oder weder Drehung noch Zuschnitt etwas zu tun haben
         // (Regelfall).
-        (linear.width, linear.height, styled)
+        (linear.width, linear.height, skied)
     } else {
-        geometry::apply(&styled, linear.width, linear.height, &edl.geometry)
+        geometry::apply(&skied, linear.width, linear.height, &edl.geometry)
     };
 
     Ok(RenderedImage {
@@ -807,6 +813,7 @@ mod tests {
             composite_layers: Vec::new(),
             virtual_aperture: crate::edl::v4::VirtualApertureAdjustment::NEUTRAL,
             style_transfer: crate::edl::v4::StyleTransferAdjustment::NEUTRAL,
+            sky_replace: None,
         };
 
         if let Some(ctx) = &ctx {

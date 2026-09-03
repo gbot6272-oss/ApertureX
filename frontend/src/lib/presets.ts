@@ -47,6 +47,7 @@ export type PresetSectionKey = Exclude<
   | "stage_enabled"
   | "virtual_aperture"
   | "style_transfer"
+  | "sky_replace"
 >;
 
 export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [

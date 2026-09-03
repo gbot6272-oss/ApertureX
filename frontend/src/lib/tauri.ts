@@ -994,6 +994,18 @@ export function stylizePhoto(photoId: string, style: string): Promise<StyleTrans
   return invoke<StyleTransferPatchDto>("stylize_photo", { photoId, style });
 }
 
+// ---- Himmelsaustausch (Phase 14 Schritt 10) --------------------------------
+
+export interface SkyReplacePatchDto {
+  bitmap_width: number;
+  bitmap_height: number;
+  pixels_base64: string;
+}
+
+export function replaceSky(photoId: string, skyImagePath: string): Promise<SkyReplacePatchDto> {
+  return invoke<SkyReplacePatchDto>("replace_sky", { photoId, skyImagePath });
+}
+
 // ---- KI: Echte Personen-Wiedererkennung (Phase 13 Schritt 8) ---------------
 
 export interface FaceDetectionDto {

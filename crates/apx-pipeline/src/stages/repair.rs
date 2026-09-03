@@ -33,10 +33,19 @@
 //! - **Versatz:** ein einziger fester Versatz (`source - target_path[0]`)
 //!   gilt für den gesamten Strich (wie ein klassisches Stempel-Werkzeug),
 //!   kein perspektivisch/skaliert angepasster Versatz.
+//!
+//! **Frequenztrennung (Phase 14 Schritt 2, siehe `DECISIONS.md`
+//! ADR-0041):** ein Strich mit `layer != RepairLayer::Normal` wirkt nicht
+//! direkt auf das volle Bild, sondern nur auf eine per
+//! [`super::frequency_separation`] isolierte Tief- oder
+//! Hochfrequenz-Ebene — `apply_stroke_cpu`/`apply_stroke_gpu` zerlegen,
+//! wenden den Strich unverändert per `apply_stroke_cpu_to_layer`/
+//! `apply_stroke_gpu_to_layer` auf die gewählte Ebene an und setzen beide
+//! Ebenen sofort wieder zusammen.
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::edl::v2::{RepairMode, RepairPoint, RepairStroke};
+use crate::edl::v2::{RepairLayer, RepairMode, RepairPoint, RepairStroke};
 use crate::error::Result;
 use crate::gpu::{dispatch, GpuContext};
 
@@ -670,9 +679,16 @@ fn apply_ai_fill(pixels: &[f32], width: u32, height: u32, stroke: &RepairStroke)
     out
 }
 
-/// CPU-Fallback für einen einzelnen Strich — dieselbe Formel wie
-/// `repair.wgsl`.
-fn apply_stroke_cpu(pixels: &[f32], width: u32, height: u32, stroke: &RepairStroke) -> Vec<f32> {
+/// CPU-Fallback für einen einzelnen Strich, angewendet direkt auf
+/// `pixels` (volles Bild oder — bei einem frequenzgetrennten Strich, siehe
+/// [`apply_stroke_cpu`] — eine isolierte Tief-/Hochfrequenz-Ebene) —
+/// dieselbe Formel wie `repair.wgsl`.
+fn apply_stroke_cpu_to_layer(
+    pixels: &[f32],
+    width: u32,
+    height: u32,
+    stroke: &RepairStroke,
+) -> Vec<f32> {
     if stroke.mode == RepairMode::AiInpaint {
         return apply_ai_fill(pixels, width, height, stroke);
     }
@@ -695,7 +711,32 @@ fn apply_stroke_cpu(pixels: &[f32], width: u32, height: u32, stroke: &RepairStro
     out
 }
 
-fn apply_stroke_gpu(
+/// Wendet einen einzelnen Strich auf `pixels` an — bei
+/// `stroke.layer == RepairLayer::Normal` (der weit überwiegende Regelfall)
+/// unverändert wie vor Phase 14 Schritt 2. Bei `LowFrequency`/
+/// `HighFrequency` zerlegt diese Funktion `pixels` zuerst per
+/// [`frequency_separation::split`], wendet den Strich (dieselbe Logik wie
+/// immer, siehe [`apply_stroke_cpu_to_layer`]) nur auf die gewählte Ebene
+/// an und setzt beide Ebenen sofort per [`frequency_separation::combine`]
+/// wieder zu einem vollen Bild zusammen — die jeweils andere Ebene bleibt
+/// dabei unangetastet (siehe `RepairStroke::layer`s Moduldoku).
+fn apply_stroke_cpu(pixels: &[f32], width: u32, height: u32, stroke: &RepairStroke) -> Vec<f32> {
+    match stroke.layer {
+        RepairLayer::Normal => apply_stroke_cpu_to_layer(pixels, width, height, stroke),
+        RepairLayer::LowFrequency => {
+            let (low, high) = crate::stages::frequency_separation::split(pixels, width, height);
+            let low = apply_stroke_cpu_to_layer(&low, width, height, stroke);
+            crate::stages::frequency_separation::combine(&low, &high)
+        }
+        RepairLayer::HighFrequency => {
+            let (low, high) = crate::stages::frequency_separation::split(pixels, width, height);
+            let high = apply_stroke_cpu_to_layer(&high, width, height, stroke);
+            crate::stages::frequency_separation::combine(&low, &high)
+        }
+    }
+}
+
+fn apply_stroke_gpu_to_layer(
     ctx: &GpuContext,
     pixels: &[f32],
     width: u32,
@@ -711,10 +752,37 @@ fn apply_stroke_gpu(
     // — für einen eigenen Compute-Shader dafür gibt es keinen Grund,
     // läuft aus demselben Grund CPU-seitig.
     if stroke.mode == RepairMode::ContentAwareFill || stroke.mode == RepairMode::AiInpaint {
-        return Ok(apply_stroke_cpu(pixels, width, height, stroke));
+        return Ok(apply_stroke_cpu_to_layer(pixels, width, height, stroke));
     }
     let params = RepairParams::new(width, height, stroke);
     dispatch::run_compute_f32(ctx, "repair", SHADER, "main", params, pixels, 64)
+}
+
+/// GPU-Gegenstück zu [`apply_stroke_cpu`] — die Frequenz-Zerlegung/
+/// -Zusammensetzung selbst läuft immer CPU-seitig (`frequency_separation`
+/// nutzt `rayon`, keinen eigenen Compute-Shader — derselbe Kompromiss wie
+/// bei inhaltsbasiertem Füllen/KI-Ausfüllen oben), nur der eigentliche
+/// Strich auf der isolierten Ebene läuft ggf. per GPU-Dispatch.
+fn apply_stroke_gpu(
+    ctx: &GpuContext,
+    pixels: &[f32],
+    width: u32,
+    height: u32,
+    stroke: &RepairStroke,
+) -> Result<Vec<f32>> {
+    match stroke.layer {
+        RepairLayer::Normal => apply_stroke_gpu_to_layer(ctx, pixels, width, height, stroke),
+        RepairLayer::LowFrequency => {
+            let (low, high) = crate::stages::frequency_separation::split(pixels, width, height);
+            let low = apply_stroke_gpu_to_layer(ctx, &low, width, height, stroke)?;
+            Ok(crate::stages::frequency_separation::combine(&low, &high))
+        }
+        RepairLayer::HighFrequency => {
+            let (low, high) = crate::stages::frequency_separation::split(pixels, width, height);
+            let high = apply_stroke_gpu_to_layer(ctx, &high, width, height, stroke)?;
+            Ok(crate::stages::frequency_separation::combine(&low, &high))
+        }
+    }
 }
 
 /// Wendet alle Striche aus `strokes` nacheinander an (siehe Moduldoku) —
@@ -781,6 +849,7 @@ mod tests {
             feather: 0.01,
             opacity: 1.0,
             ai_fill: None,
+            layer: RepairLayer::Normal,
         };
         let result = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
         let target_px = (0.75 * size as f32) as usize;
@@ -807,6 +876,7 @@ mod tests {
             feather: 0.02,
             opacity: 0.0,
             ai_fill: None,
+            layer: RepairLayer::Normal,
         };
         let result = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
         assert_eq!(result, pixels);
@@ -826,6 +896,7 @@ mod tests {
             feather: 0.01,
             opacity: 1.0,
             ai_fill: None,
+            layer: RepairLayer::Normal,
         };
         let result = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
         // Eine weit vom Pfad entfernte Ecke sollte unverändert bleiben.
@@ -854,6 +925,7 @@ mod tests {
             feather: 0.02,
             opacity: 1.0,
             ai_fill: None,
+            layer: RepairLayer::Normal,
         };
         let clone_stroke = RepairStroke {
             mode: RepairMode::Clone,
@@ -888,6 +960,7 @@ mod tests {
                 feather: 0.03,
                 opacity: 0.8,
                 ai_fill: None,
+                layer: RepairLayer::Normal,
             },
             RepairStroke {
                 mode: RepairMode::Heal,
@@ -897,6 +970,7 @@ mod tests {
                 feather: 0.02,
                 opacity: 1.0,
                 ai_fill: None,
+                layer: RepairLayer::Normal,
             },
         ];
         let cpu = apply_cpu(&pixels, size, size, &strokes);
@@ -930,6 +1004,7 @@ mod tests {
             feather: 0.01,
             opacity: 1.0,
             ai_fill: None,
+            layer: RepairLayer::Normal,
         };
         let filled = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
         let center = ((24 * size + 24) * 3) as usize;
@@ -966,6 +1041,7 @@ mod tests {
             feather: 0.02,
             opacity: 1.0,
             ai_fill: None,
+            layer: RepairLayer::Normal,
         };
         let first = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
         let second = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
@@ -984,6 +1060,7 @@ mod tests {
             feather: 0.02,
             opacity: 0.0,
             ai_fill: None,
+            layer: RepairLayer::Normal,
         };
         let filled = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
         assert_eq!(filled, pixels);
@@ -1004,6 +1081,7 @@ mod tests {
             feather: 0.02,
             opacity: 1.0,
             ai_fill: None,
+            layer: RepairLayer::Normal,
         };
         let result = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
         assert_eq!(result, pixels);
@@ -1037,6 +1115,7 @@ mod tests {
             feather: 0.0,
             opacity: 1.0,
             ai_fill: Some(patch),
+            layer: RepairLayer::Normal,
         };
         let result = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
 
@@ -1050,5 +1129,73 @@ mod tests {
         // Außerhalb des Patch-Rechtecks: unverändert grau.
         let outside_idx = 0usize;
         assert!((result[outside_idx] - pixels[outside_idx]).abs() < 1e-6);
+    }
+
+    /// Phase 14 Schritt 2 (Frequenztrennung, siehe `DECISIONS.md`
+    /// ADR-0041): ein Strich mit `layer: HighFrequency` soll einen
+    /// lokalen Fleck entfernen (dieselbe sichtbare Wirkung wie ein
+    /// normaler Klon-Strich), dabei aber den umgebenden **Ton**
+    /// unangetastet lassen — anders als ein `Normal`-Strich, der bei einer
+    /// tonlich abweichenden Quelle auch die Tieffrequenz mitzieht.
+    #[test]
+    fn high_frequency_only_stroke_removes_a_blemish_while_preserving_the_underlying_tone() {
+        let size = 40u32;
+        let mut pixels = flat_gray(size, size, 0.5);
+
+        // Dunkler Fleck am Zielpunkt.
+        let target_px = (0.7 * size as f32) as usize;
+        let target_idx = (target_px * size as usize + target_px) * 3;
+        pixels[target_idx] = 0.1;
+        pixels[target_idx + 1] = 0.1;
+        pixels[target_idx + 2] = 0.1;
+
+        // Quellregion: flach, aber deutlich HELLER (kein Fleck dort) — ein
+        // paar Pixel breit, damit der Box-Tiefpass dort tatsächlich eine
+        // flache Umgebung sieht (nicht nur einen einzelnen Pixel).
+        let source_px = (0.1 * size as f32) as i32;
+        for dy in -1i32..=1 {
+            for dx in -1i32..=1 {
+                let x = (source_px + dx).clamp(0, size as i32 - 1) as usize;
+                let y = (source_px + dy).clamp(0, size as i32 - 1) as usize;
+                let i = (y * size as usize + x) * 3;
+                pixels[i] = 0.9;
+                pixels[i + 1] = 0.9;
+                pixels[i + 2] = 0.9;
+            }
+        }
+
+        let stroke = RepairStroke {
+            mode: RepairMode::Clone,
+            source: point(0.1, 0.1),
+            target_path: vec![point(0.7, 0.7)],
+            radius: 0.05,
+            feather: 0.01,
+            opacity: 1.0,
+            ai_fill: None,
+            layer: RepairLayer::HighFrequency,
+        };
+        let high_freq_result = apply_cpu(&pixels, size, size, std::slice::from_ref(&stroke));
+        let normal_stroke = RepairStroke {
+            layer: RepairLayer::Normal,
+            ..stroke.clone()
+        };
+        let normal_result = apply_cpu(&pixels, size, size, std::slice::from_ref(&normal_stroke));
+
+        assert!(
+            high_freq_result[target_idx] > 0.3,
+            "Fleck sollte auch bei reinem Hochfrequenz-Klonen entfernt sein, war {}",
+            high_freq_result[target_idx]
+        );
+        assert!(
+            high_freq_result[target_idx] < 0.7,
+            "Ton sollte bei reinem Hochfrequenz-Klonen NICHT Richtung Quelle (0.9) gezogen werden, war {}",
+            high_freq_result[target_idx]
+        );
+        assert!(
+            normal_result[target_idx] > high_freq_result[target_idx],
+            "normales Klonen sollte den Zielton stärker Richtung Quelle ziehen als reines Hochfrequenz-Klonen (normal={} hochfrequenz={})",
+            normal_result[target_idx],
+            high_freq_result[target_idx]
+        );
     }
 }

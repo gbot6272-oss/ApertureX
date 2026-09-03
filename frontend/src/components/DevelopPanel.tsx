@@ -38,6 +38,7 @@ import {
   type HslAdjustment,
   type LensCorrectionAdjustment,
   type ManualTransform,
+  type RepairLayer,
   type RepairMode,
   type SliderSpec,
   type StageEnabled,
@@ -52,6 +53,7 @@ import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
 import { LensCalibrationDialog } from "./LensCalibrationDialog";
 import { CanvasExtendDialog } from "./CanvasExtendDialog";
+import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import { PaletteFrame } from "./PaletteFrame";
 import { SavePresetDialog } from "./SavePresetDialog";
 
@@ -109,6 +111,16 @@ const REPAIR_MODE_OPTIONS: ReadonlyArray<{ value: RepairMode; label: string }> =
   // Quellpunkt, braucht aber zusätzlich einen expliziten „Anwenden"-Klick
   // (`runAiInpaintForStroke`) — der Strich bleibt bis dahin ein No-Op.
   { value: "AiInpaint", label: "KI-Ausfüllen" },
+];
+
+// Frequenztrennung (Phase 14 Schritt 2, ADR-0041): lässt Klonen/
+// Reparieren/Inhaltsbasiert-füllen/KI-Ausfüllen gezielt nur auf Ton/
+// Farbe (Tieffrequenz) oder Textur/Poren/Kanten (Hochfrequenz) statt
+// direkt auf dem vollen Bild wirken.
+const REPAIR_LAYER_OPTIONS: ReadonlyArray<{ value: RepairLayer; label: string }> = [
+  { value: "Normal", label: "Ganzes Bild" },
+  { value: "LowFrequency", label: "Nur Tieffrequenz (Ton/Farbe)" },
+  { value: "HighFrequency", label: "Nur Hochfrequenz (Textur/Poren)" },
 ];
 
 // ---- Preset-Stärke (Phase 5 Schritt 5, siehe SPEC.md §3.5) -----------------
@@ -277,6 +289,10 @@ export function DevelopPanel() {
   const toggleRepairActive = useAppStore((s) => s.toggleRepairActive);
   const repairDraftMode = useAppStore((s) => s.repairDraftMode);
   const setRepairDraftMode = useAppStore((s) => s.setRepairDraftMode);
+  const repairDraftLayer = useAppStore((s) => s.repairDraftLayer);
+  const setRepairDraftLayer = useAppStore((s) => s.setRepairDraftLayer);
+  const frequencyViewMode = useAppStore((s) => s.frequencyViewMode);
+  const setFrequencyViewMode = useAppStore((s) => s.setFrequencyViewMode);
   const repairDraftRadius = useAppStore((s) => s.repairDraftRadius);
   const repairDraftFeather = useAppStore((s) => s.repairDraftFeather);
   const repairDraftOpacity = useAppStore((s) => s.repairDraftOpacity);
@@ -1324,6 +1340,25 @@ export function DevelopPanel() {
 
           <fieldset id="stage-repair" className="flex flex-col gap-3">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Reparatur (Klonen/Reparieren)</legend>
+
+            {/* Frequenztrennungs-Ansichtsmodus (Phase 14 Schritt 2,
+                ADR-0041): zeigt Tieffrequenz/Hochfrequenz statt des
+                normalen Bilds im Viewer — reine Anzeige, verändert
+                developEdl nicht. */}
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              Ansicht
+              <select
+                aria-label="Frequenztrennungs-Ansicht"
+                value={frequencyViewMode}
+                onChange={(event) => setFrequencyViewMode(event.target.value as FrequencyViewMode)}
+                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+              >
+                <option value="Normal">Normal</option>
+                <option value="LowFrequency">Tieffrequenz (Ton/Farbe)</option>
+                <option value="HighFrequency">Hochfrequenz (Textur/Poren)</option>
+              </select>
+            </label>
+
             <button
               type="button"
               aria-pressed={repairActive}
@@ -1359,6 +1394,26 @@ export function DevelopPanel() {
                 className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
               >
                 {REPAIR_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {/* Frequenztrennung (Phase 14 Schritt 2, ADR-0041): Lightroom
+                hat kein eingebautes Frequenztrennungs-Werkzeug wie
+                Photoshop — lässt den Strich gezielt nur auf Ton/Farbe
+                oder nur auf Textur wirken, siehe stages::repair. */}
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              Ebene
+              <select
+                aria-label="Frequenz-Ebene"
+                value={repairDraftLayer}
+                onChange={(event) => setRepairDraftLayer(event.target.value as RepairLayer)}
+                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+              >
+                {REPAIR_LAYER_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>

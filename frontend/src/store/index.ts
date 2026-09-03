@@ -20,8 +20,9 @@ import {
   writeBasicField,
   writeBwMixerField,
 } from "../lib/edl";
-import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
+import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairLayer, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
+import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import {
   applyRulesToSubset,
   buildPresetEdlSubset,
@@ -594,8 +595,21 @@ interface DevelopSlice {
   repairDraftRadius: number;
   repairDraftFeather: number;
   repairDraftOpacity: number;
+  /** Welche Frequenz-Ebene der *nächste* Strich betrifft (Phase 14
+   * Schritt 2, siehe `DECISIONS.md` ADR-0041) — dieselbe „nur für neue
+   * Striche"-Konvention wie die übrigen Pinsel-Einstellungen oben. */
+  repairDraftLayer: RepairLayer;
   setRepairDraftMode: (mode: RepairMode) => void;
+  setRepairDraftLayer: (layer: RepairLayer) => void;
   setRepairDraftField: (key: "radius" | "feather" | "opacity", value: number) => void;
+  /** Reiner Anzeige-Modus im Viewer (Phase 14 Schritt 2) — zeigt
+   * Tieffrequenz (Ton/Farbe, unscharf) oder Hochfrequenz (Textur/Poren,
+   * Mittelgrau-verschoben) statt des normalen Bilds, berechnet
+   * clientseitig aus `developFrame.pixels` (siehe `lib/
+   * frequencySeparation.ts`). Verändert `developEdl` nicht — reine
+   * Anzeige-Hilfe wie der Clipping-Overlay. */
+  frequencyViewMode: FrequencyViewMode;
+  setFrequencyViewMode: (mode: FrequencyViewMode) => void;
   /** Der nach dem ersten Klick gesetzte Quellpunkt eines neuen Strichs,
    * bis der Zielpfad fertig gemalt ist (`null` = als Nächstes wird der
    * Quellpunkt gesetzt). */
@@ -2515,10 +2529,24 @@ export const useAppStore = create<AppStore>()(
     repairDraftRadius: 0.05,
     repairDraftFeather: 0.02,
     repairDraftOpacity: 1,
+    repairDraftLayer: "Normal",
 
     setRepairDraftMode: (mode) => {
       set((state) => {
         state.repairDraftMode = mode;
+      });
+    },
+
+    setRepairDraftLayer: (layer) => {
+      set((state) => {
+        state.repairDraftLayer = layer;
+      });
+    },
+
+    frequencyViewMode: "Normal",
+    setFrequencyViewMode: (mode) => {
+      set((state) => {
+        state.frequencyViewMode = mode;
       });
     },
 
@@ -2545,7 +2573,7 @@ export const useAppStore = create<AppStore>()(
     },
 
     addRepairStroke: (targetPath) => {
-      const { repairPendingSource, repairDraftMode, repairDraftRadius, repairDraftFeather, repairDraftOpacity } = get();
+      const { repairPendingSource, repairDraftMode, repairDraftRadius, repairDraftFeather, repairDraftOpacity, repairDraftLayer } = get();
       // Inhaltsbasiertes Füllen (Phase 7) und KI-Ausfüllen (Phase 13
       // Schritt 1) suchen ihren Füllinhalt selbst (aus der Bildumgebung
       // bzw. per Inferenz) — anders als Klonen/Reparieren brauchen sie
@@ -2564,6 +2592,7 @@ export const useAppStore = create<AppStore>()(
           radius: repairDraftRadius,
           feather: repairDraftFeather,
           opacity: repairDraftOpacity,
+          layer: repairDraftLayer,
         });
         state.repairPendingSource = null;
       });
@@ -4087,6 +4116,7 @@ export const useAppStore = create<AppStore>()(
           radius: spot.radius,
           feather: Math.min(spot.radius * 0.3, 0.05),
           opacity: 1,
+          layer: "Normal",
         });
         state.sensorSpotCandidates = state.sensorSpotCandidates.filter((candidate) => candidate !== spot);
       });

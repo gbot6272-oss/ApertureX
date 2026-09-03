@@ -748,6 +748,24 @@ pub struct RepairPoint {
     pub y: f32,
 }
 
+/// Welche Frequenz-Ebene ein Strich betrifft (Phase 14 Schritt 2, siehe
+/// `DECISIONS.md` ADR-0041, `stages::frequency_separation`s Moduldoku) —
+/// `Normal` ist das bisherige Verhalten (Strich wirkt direkt auf das
+/// volle Bild). Bei `LowFrequency`/`HighFrequency` zerlegt
+/// `stages::repair` das Bild vor diesem Strich per Box-Tiefpass in
+/// Ton/Farbe (Tieffrequenz) und Textur/Kanten (Hochfrequenz), wendet den
+/// Strich nur auf die gewählte Ebene an und setzt beide Ebenen danach
+/// wieder zusammen — dieselbe Retusche-Technik wie Photoshops
+/// „Frequenztrennung", die Lightroom selbst nicht bietet (siehe
+/// ADR-0041s Recherche-Tabelle, Punkt 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum RepairLayer {
+    #[default]
+    Normal,
+    LowFrequency,
+    HighFrequency,
+}
+
 /// Ein einzelner Klon-/Reparatur-Pinselzug — jeder Strich ist einzeln
 /// entfernbar/undo-fähig (siehe `PLAN.md` Phase 4 Schritt 12). Bewusst
 /// **nicht** Teil dieses Schritts: Auto-Quellenfindung, inhaltsbasiertes
@@ -769,6 +787,11 @@ pub struct RepairStroke {
     /// `mode` ohnehin der einzig sinnvolle Wert).
     #[serde(default)]
     pub ai_fill: Option<AiFillPatch>,
+    /// Frequenztrennung (Phase 14 Schritt 2) — additiv, `#[serde(default)]`
+    /// liest einen älteren gespeicherten Strich ohne dieses Feld als
+    /// `RepairLayer::Normal` (unverändertes bisheriges Verhalten).
+    #[serde(default)]
+    pub layer: RepairLayer,
 }
 
 // ---- Der vollständige EDL v2 -----------------------------------------------

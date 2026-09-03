@@ -720,6 +720,14 @@ export const GRID_OVERLAY_OPTIONS: ReadonlyArray<{ value: GridOverlay; label: st
  * gesetzt wird — bis dahin ist der Strich ein No-Op. */
 export type RepairMode = "Clone" | "Heal" | "ContentAwareFill" | "AiInpaint";
 
+/** Welche Frequenz-Ebene ein Strich betrifft (Phase 14 Schritt 2, siehe
+ * `DECISIONS.md` ADR-0041) — `"Normal"` ist das bisherige Verhalten
+ * (Strich wirkt direkt auf das volle Bild). `"LowFrequency"`/
+ * `"HighFrequency"` lassen ihn stattdessen gezielt nur auf Ton/Farbe
+ * bzw. Textur/Kanten wirken (`stages::frequency_separation`, siehe
+ * `edl/v2.rs`s `RepairLayer`-Kommentar). */
+export type RepairLayer = "Normal" | "LowFrequency" | "HighFrequency";
+
 export interface RepairPoint {
   x: number;
   y: number;
@@ -757,6 +765,8 @@ export interface RepairStroke {
    * im Rust-Backend als `None` (additives Feld, siehe `edl/v2.rs`s
    * `RepairStroke::ai_fill`-Kommentar). */
   ai_fill?: AiFillPatch;
+  /** Frequenztrennung (Phase 14 Schritt 2) — siehe `RepairLayer`s Doku. */
+  layer: RepairLayer;
 }
 
 // ---- Masken (Phase 6, siehe DECISIONS.md ADR-0032) --------------------------

@@ -15,8 +15,8 @@ pub use v2::{
     ColorGradingWheel, ColorMixerAdjustment, ColorMixerRegion, CropRect, CurveChannel, CurvePoint,
     CurvesAdjustment, DcpProfileData, DetailsAdjustment, EdlV2, EffectsAdjustment,
     GeometryAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment,
-    ManualTransform, PrimaryColorAdjustment, ProcessVersion, RepairMode, RepairPoint, RepairStroke,
-    UprightMode,
+    ManualTransform, PrimaryColorAdjustment, ProcessVersion, RepairLayer, RepairMode, RepairPoint,
+    RepairStroke, UprightMode,
 };
 pub use v3::{
     AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, BrushStroke, Mask, MaskAdjustments,

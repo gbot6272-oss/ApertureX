@@ -2822,3 +2822,49 @@ eigentlichen Inferenz). Dieselbe ehrliche Grenze wie bei jeder anderen
 KI-Analyse dieses Projekts: läuft auf dem rohen,
 `ANALYSIS_MAX_EDGE`-gedeckelten Dekodierergebnis, ohne eine im
 Entwickeln-Modul bereits gesetzte Drehung/Zuschnitt zu berücksichtigen.
+
+### Nachtrag II (Phase 14 Schritt 2): Frequenztrennung als Retusche-Ziel
+statt eigener Pipeline-Stufe
+
+Punkt 2 der Recherche-Tabelle ist mit einem Original-Zitat belegt:
+"Adobe Lightroom doesn't have a built-in frequency separation feature
+like Photoshop does." Die naheliegende Umsetzung — eine neue,
+eigenständige Pipeline-Stufe, die das ganze Bild bei jedem Rendern in
+zwei Ebenen zerlegt — wäre gegen die in `edl/v4.rs`s Moduldoku
+festgehaltene Garantie des Node-Editors verstoßen ("ein Knoten je Stufe,
+in genau dieser Reihenfolge … das erhält die Renderpfad-Garantie, auf
+die jedes andere Modul angewiesen ist"). Stattdessen ist Frequenztrennung
+hier ein **Retusche-Ziel**, kein Rendering-Schritt: `RepairStroke`
+bekommt additiv (`#[serde(default)]`, dieselbe Konvention wie
+`ai_fill`) ein `layer: RepairLayer`-Feld (Normal/LowFrequency/
+HighFrequency, `#[derive(Default)]` auf `Normal`). `stages/repair.rs`
+zerlegt das Bild nur für einen so markierten Strich (per neuem
+`stages::frequency_separation::split`/`combine`, separierbarer
+Box-Tiefpass — dieselbe „Box statt echte Gauß-Unschärfe"-Vereinfachung
+wie `masks::feather_alpha` und `details.rs`s Unsharp-Masking-
+Referenzweichzeichner, hier aber dreikanalig statt auf einem
+Ein-Kanal-Alpha-Puffer und mit größerem, für Textur-/Hautretusche
+sinnvollem Vorgabe-Radius), wendet die *komplett unveränderte*
+bestehende Klon-/Reparatur-/Füll-Logik nur auf die gewählte Ebene an und
+setzt beide Ebenen sofort wieder zusammen. Kein neuer Knoten, keine neue
+`StageEnabled`-Flagge, keine Änderung an `develop::render_rgba8`s fester
+Kette — nur eine zusätzliche interne Verzweigung innerhalb der bereits
+bestehenden Reparatur-Stufe.
+
+`SPLIT_RADIUS_FRACTION` (2 % der Bildbreite) ist bewusst ein fester
+Vorgabewert statt eines eigenen Reglers in diesem Schritt — ein
+zusätzlicher Radius-Regler wäre eine sinnvolle spätere Ergänzung, aber
+kein Kernbestandteil der Recherche-Lücke. Der reine Anzeige-Modus im
+Viewer (Normal/Tieffrequenz/Hochfrequenz) ist unabhängig davon eine
+clientseitige Berechnung über den bereits gerenderten Vorschau-Puffer
+(`frontend/src/lib/frequencySeparation.ts`), exakt nach dem in Phase 9
+etablierten Muster von `lib/histogram.ts` — kein neuer Backend-Command,
+verändert `developEdl` nicht.
+
+Real getestet (nicht nur durch Code-Inspektion behauptet): ein
+`RepairMode::Clone`-Strich mit `layer: HighFrequency`, der aus einer
+tonlich deutlich helleren, aber sonst flachen Quellregion klont, entfernt
+einen lokalen dunklen Fleck am Ziel, ohne dessen umgebenden Ton Richtung
+der helleren Quelle zu ziehen — anders als derselbe Strich mit
+`layer: Normal`, der den Ton sichtbar mitzieht
+(`stages::repair::tests::high_frequency_only_stroke_removes_a_blemish_while_preserving_the_underlying_tone`).

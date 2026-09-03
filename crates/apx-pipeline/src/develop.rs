@@ -587,7 +587,7 @@ mod tests {
             CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerAdjustment,
             ColorMixerRegion, CurveChannel, CurvesAdjustment, DetailsAdjustment, EffectsAdjustment,
             GeometryAdjustment, GridOverlay, HslAdjustment, HslBand, LensCorrectionAdjustment,
-            PrimaryColorAdjustment, RepairMode, RepairPoint, RepairStroke,
+            PrimaryColorAdjustment, RepairLayer, RepairMode, RepairPoint, RepairStroke,
         };
 
         let edl = EdlV4 {
@@ -697,6 +697,7 @@ mod tests {
                 feather: 0.01,
                 opacity: 1.0,
                 ai_fill: None,
+                layer: RepairLayer::Normal,
             }],
             masks: Vec::new(),
             mask_groups: Vec::new(),

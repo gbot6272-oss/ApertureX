@@ -12,6 +12,7 @@ import { computeMaskPinPosition } from "../lib/maskPins";
 import { matchesBinding } from "../lib/keybindings";
 import { imageUrl, previewUrl } from "../lib/media";
 import { mergeEdlSubset } from "../lib/presets";
+import { applyFrequencyView } from "../lib/frequencySeparation";
 import { applyPaperWhite, type SoftProofSettings } from "../lib/softProof";
 import { clampZoom, computeBaseScale, imageOrigin, nextZoomStep, panForZoomAtCursor } from "../lib/viewerMath";
 import { QuadRenderer } from "../lib/webgl";
@@ -60,6 +61,7 @@ export function Viewer() {
   const softProofIntent = useAppStore((s) => s.softProofIntent);
   const softProofGamutWarning = useAppStore((s) => s.softProofGamutWarning);
   const softProofPaperWhite = useAppStore((s) => s.softProofPaperWhite);
+  const frequencyViewMode = useAppStore((s) => s.frequencyViewMode);
   const hoverPresetSubset = useAppStore((s) => s.hoverPresetSubset);
   const wbPickerActive = useAppStore((s) => s.wbPickerActive);
   const pickWhiteBalanceAt = useAppStore((s) => s.pickWhiteBalanceAt);
@@ -208,7 +210,11 @@ export function Viewer() {
       // die unveränderte `developFrame`-Vorschau stehen, statt kurz
       // etwas Falsches oder Leeres zu zeigen.
       const proofed = softProofActive ? softProofFrame : null;
-      const pixels = proofed ? (softProofPaperWhite ? applyPaperWhite(proofed) : proofed.pixels) : developFrame.pixels;
+      const basePixels = proofed ? (softProofPaperWhite ? applyPaperWhite(proofed) : proofed.pixels) : developFrame.pixels;
+      // Frequenztrennungs-Ansichtsmodus (Phase 14 Schritt 2, siehe
+      // `DECISIONS.md` ADR-0041) — reine Anzeige-Transformation über den
+      // bereits gerenderten Puffer, verändert `developEdl` nicht.
+      const pixels = applyFrequencyView(basePixels, developFrame.width, developFrame.height, frequencyViewMode);
       renderer.uploadRgba8(developFrame.width, developFrame.height, pixels);
     } else if (activeBitmap && drawSource === activeBitmap) {
       renderer.uploadImageBitmap(activeBitmap);
@@ -234,6 +240,7 @@ export function Viewer() {
     softProofActive,
     softProofFrame,
     softProofPaperWhite,
+    frequencyViewMode,
   ]);
 
   // ---- Maus: Zoom zum Cursor, Pan per Ziehen ---------------------------

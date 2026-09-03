@@ -543,6 +543,17 @@ interface DevelopSlice {
   setLensCorrectionAutoCa: (value: boolean) => void;
   /** Setzt den Perspektive/Upright-Modus absolut und committet sofort. */
   setLensCorrectionUprightMode: (value: UprightMode) => void;
+  /** Automatische Kantenerkennung (Phase 13 Schritt 4, siehe
+   * `DECISIONS.md` ADR-0040-Nachtrag II) — analysiert das aktuelle Foto
+   * über `apx_ai::upright` und übernimmt das Ergebnis in
+   * `manual_transform`. Nur der zum aktuellen `upright_mode` passende
+   * Anteil wird ersetzt (`Level` nur `rotate_degrees`, `Vertical` nur
+   * `horizontal`, `Auto`/`Full` beide) — der jeweils andere bleibt
+   * unangetastet, statt eine bestehende manuelle Korrektur stillschweigend
+   * zu löschen. No-op für `Off`/`Guided` (dort gilt der bestehende
+   * manuelle bzw. `guided_lines`-Mechanismus). */
+  runUprightAutoDetect: () => Promise<void>;
+  uprightDetectLoading: boolean;
   /** Setzt ein Feld einer der zwei Guided-Hilfslinien (Phase 4 Schritt 9
    * — siehe `DECISIONS.md` ADR-0030: Zahlenfelder statt einer
    * Klick-Interaktion im Viewer) — legt die Linie mit Nullkoordinaten an,
@@ -2350,6 +2361,38 @@ export const useAppStore = create<AppStore>()(
         state.developEdl.lens_corrections.upright_mode = value;
       });
       void get().commitDevelopEdit();
+    },
+
+    uprightDetectLoading: false,
+
+    runUprightAutoDetect: async () => {
+      const { selectedPhotoId } = get();
+      const mode = get().developEdl.lens_corrections.upright_mode;
+      if (!selectedPhotoId || mode === "Off" || mode === "Guided") return;
+      set((state) => {
+        state.uprightDetectLoading = true;
+      });
+      try {
+        const dto = await api.detectUprightCorrection(selectedPhotoId, mode);
+        set((state) => {
+          const transform = state.developEdl.lens_corrections.manual_transform;
+          if (mode === "Level" || mode === "Auto" || mode === "Full") {
+            transform.rotate_degrees = dto.rotate_degrees;
+          }
+          if (mode === "Vertical" || mode === "Auto" || mode === "Full") {
+            transform.horizontal = dto.horizontal;
+          }
+        });
+        void get().commitDevelopEdit("Perspektive automatisch erkannt");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.uprightDetectLoading = false;
+        });
+      }
     },
 
     setLensCorrectionGuidedLineField: (lineIndex, field, value) => {

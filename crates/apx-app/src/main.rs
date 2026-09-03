@@ -273,6 +273,7 @@ fn main() {
             commands::current_develop_edit,
             commands::resolve_lens_profile,
             commands::calibrate_lens_distortion,
+            commands::detect_upright_correction,
             commands::import_dcp_profile,
             commands::undo_develop_edit,
             commands::redo_develop_edit,

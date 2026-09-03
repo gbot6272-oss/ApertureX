@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { UprightMode } from "./edl";
 
 /**
  * Dünne, typisierte Hülle um die Tauri-Commands aus
@@ -316,6 +317,24 @@ export function resolveLensProfile(lens: string | null): Promise<LensProfileSugg
  * `LensCorrectionAdjustment.custom_distortion_k1`). */
 export function calibrateLensDistortion(lines: Array<Array<{ x: number; y: number }>>): Promise<number> {
   return invoke<number>("calibrate_lens_distortion", { lines });
+}
+
+// ---- Perspektive/Upright: automatische Kantenerkennung (Phase 13 Schritt 4,
+// siehe DECISIONS.md ADR-0040-Nachtrag II) -----------------------------------
+
+export interface UprightCorrectionDto {
+  rotate_degrees: number;
+  horizontal: number;
+}
+
+/** Findet gerade Kanten im Foto (Canny + Hough) und berechnet daraus die zu
+ * `mode` passende Dreh-/Scherungskorrektur — direkt in
+ * `LensCorrectionAdjustment.manual_transform.rotate_degrees`/`.horizontal`
+ * übernehmbar. Für `mode === "Off"`/`"Guided"` liefert der Befehl nur
+ * Nullen (dort gilt der bestehende manuelle bzw. `guided_lines`-
+ * Mechanismus), lehnt sie aber nicht ab. */
+export function detectUprightCorrection(photoId: string, mode: UprightMode): Promise<UprightCorrectionDto> {
+  return invoke<UprightCorrectionDto>("detect_upright_correction", { photoId, mode });
 }
 
 // ---- Adobe-DCP-Farbprofil-Import (Phase 13 Schritt 3) ----------------------

@@ -2333,3 +2333,58 @@ ablegen"-Muster wie `AiFillPatch`, Phase 13 Schritt 1) — hat Vorrang vor
 `.dcp` importiert wurde. `apx-app`s `import_dcp_profile`-Command öffnet
 einen Datei-Dialog und parst — kein eingebautes Profil im Installer,
 derselbe Opt-in wie beim LensFun-Kalibrier-Assistenten.
+
+## ADR-0040-Nachtrag II: Schritt 4 — echte Perspektive/Upright-
+Kantenerkennung (`imageproc`); zwei erkannte Effekte statt vier
+unabhängiger, `Full` bewusst identisch zu `Auto`
+
+**Status:** Angenommen
+**Kontext:** `stages::lens_corrections`s vier Upright-Automatikmodi
+(`Auto`/`Level`/`Vertical`/`Full`) waren seit Phase 4 (ADR-0028)
+dokumentierte No-op-Platzhalter — wählbar, ohne Wirkung. Nur der
+„Guided"-Modus tat etwas: der Nutzer zieht selbst zwei Hilfslinien, ihr
+gemittelter Neigungswinkel wird zur Dreh-Korrektur.
+
+**Umsetzung:** `apx-ai::upright` (neues Modul, klassische CV ohne
+gelerntes Modell — dieselbe Handschrift wie `lens_calibration`, Phase 12
+Schritt 3 Teil B): `imageproc::edges::canny` findet Kanten,
+`imageproc::hough::detect_lines` findet darin gerade Linien
+(Normalform-Winkel `0..180°`). Statt vier unabhängige Automatiken zu
+bauen, macht das Modul **zwei echte Effekte** real und kombiniert sie je
+nach Modus:
+- **Level** (nahezu waagerechte erkannte Linien mitteln → `rotate_degrees`)
+  — exakt dieselbe Rechnung wie `guided_rotation_degrees`, nur mit
+  automatisch gefundenen statt vom Nutzer gezogenen Linien.
+- **Vertical** (nahezu senkrechte erkannte Linien mitteln →
+  `manual_transform.horizontal`-Scherung, die trotz des Namens die
+  *senkrechte* Kantenkonvergenz korrigiert) — die Zuordnung
+  Winkelabweichung → Scherungsreglerwert ist direkt aus
+  `lens_corrections.rs`s bestehender `undo_manual_transform`-Formel
+  hergeleitet (Koeffizientenvergleich, nicht geraten), und per
+  Vorzeichen-/Größenprobe an einer synthetischen Testkante nachgerechnet
+  (`upright.rs`s Testmodul) statt nur symbolisch behauptet — ein früherer
+  Testentwurf mit fehlerhafter Verifikationsformel hätte sonst einen
+  Vorzeichenfehler nicht aufgedeckt.
+- **Auto**/**Full**: beide Effekte kombiniert. Eine echte Trennung
+  zwischen Adobes moderater "Auto"-Automatik und einer vollen
+  Vier-Parameter-"Full"-Homografie bräuchte eine echte
+  Homografie-Schätzung aus mehreren, unabhängig konvergierenden
+  Linienscharen — außerhalb des Umfangs des bereits in ADR-0028/-0030 auf
+  ein einziges Scherungspaar vereinfachten Objektivkorrektur-Modells.
+  `Full` verhält sich deshalb bewusst identisch zu `Auto`, statt eine
+  durch die vorhandenen Daten nicht gedeckte zusätzliche Korrektur zu
+  erfinden — dieselbe Ehrlichkeit wie Schritt 3s unangewandte
+  DCP-Farbmatrix.
+
+**Architektur:** `apx-ai` (nicht `apx-pipeline`) bekommt die neue
+`imageproc`-Abhängigkeit (`default-features = false`, nur `rayon` —
+`text`/`fft` unnötig), da `apx-ai` bereits von `apx-pipeline` abhängt
+(nicht umgekehrt) und `lens_calibration` als Vorbild ebenfalls dort
+lebt. `apx-app`s `detect_upright_correction`-Command folgt demselben
+"Analyse-Auflösung über `TileCache` dekodieren"-Muster wie
+`generate_ai_mask`, obwohl es keine KI-Funktion im engeren Sinn ist.
+Frontend übernimmt nur die zum gewählten Modus passende Komponente in
+`manual_transform` (Level nur Rotation, Vertical nur Scherung) statt
+beide Felder blind zu überschreiben — sonst würde ein Klick im
+"Level"-Modus eine zuvor manuell gesetzte Scherungskorrektur
+stillschweigend auf 0 zurücksetzen.

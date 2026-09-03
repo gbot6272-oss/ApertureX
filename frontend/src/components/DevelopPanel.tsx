@@ -258,6 +258,8 @@ export function DevelopPanel() {
   const setLensCalibrationDialogOpen = useAppStore((s) => s.setLensCalibrationDialogOpen);
   const setLensCorrectionAutoCa = useAppStore((s) => s.setLensCorrectionAutoCa);
   const setLensCorrectionUprightMode = useAppStore((s) => s.setLensCorrectionUprightMode);
+  const runUprightAutoDetect = useAppStore((s) => s.runUprightAutoDetect);
+  const uprightDetectLoading = useAppStore((s) => s.uprightDetectLoading);
   const setLensCorrectionGuidedLineField = useAppStore((s) => s.setLensCorrectionGuidedLineField);
   const effects = useAppStore((s) => s.developEdl.effects);
   const setEffectsField = useAppStore((s) => s.setEffectsField);
@@ -1156,6 +1158,20 @@ export function DevelopPanel() {
                 ))}
               </select>
             </label>
+
+            {(lensCorrections.upright_mode === "Level" ||
+              lensCorrections.upright_mode === "Vertical" ||
+              lensCorrections.upright_mode === "Auto" ||
+              lensCorrections.upright_mode === "Full") && (
+              <button
+                type="button"
+                disabled={uprightDetectLoading}
+                onClick={() => void runUprightAutoDetect()}
+                className="rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {uprightDetectLoading ? "Erkennt Kanten…" : "Automatisch erkennen"}
+              </button>
+            )}
 
             {lensCorrections.upright_mode === "Guided" && (
               <div className="flex flex-col gap-2">

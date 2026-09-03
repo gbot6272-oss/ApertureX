@@ -850,6 +850,61 @@ pub fn calibrate_lens_distortion(lines: Vec<Vec<CalibrationPointDto>>) -> Result
     apx_ai::lens_calibration::calibrate_distortion_k1(&lines).map_err(|err| err.to_string())
 }
 
+// ---- Perspektive/Upright: automatische Kantenerkennung (Phase 13 Schritt 4,
+// siehe DECISIONS.md ADR-0040-Nachtrag II) -----------------------------------
+
+fn parse_upright_mode(mode: &str) -> Result<apx_pipeline::edl::UprightMode, String> {
+    match mode {
+        "Off" => Ok(apx_pipeline::edl::UprightMode::Off),
+        "Auto" => Ok(apx_pipeline::edl::UprightMode::Auto),
+        "Level" => Ok(apx_pipeline::edl::UprightMode::Level),
+        "Vertical" => Ok(apx_pipeline::edl::UprightMode::Vertical),
+        "Full" => Ok(apx_pipeline::edl::UprightMode::Full),
+        "Guided" => Ok(apx_pipeline::edl::UprightMode::Guided),
+        other => Err(format!("unbekannter Upright-Modus '{other}'")),
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UprightCorrectionDto {
+    pub rotate_degrees: f32,
+    pub horizontal: f32,
+}
+
+/// Automatische Perspektive/Upright-Kantenerkennung — dünner Wrapper um
+/// `apx_ai::upright::detect_from_linear_rgb` (dasselbe Analyse-Auflösung-
+/// über-`TileCache`-Muster wie `generate_ai_mask` oben, obwohl dies keine
+/// KI-Funktion im engeren Sinn ist, siehe dessen Moduldoku zu Canny/Hough).
+/// `mode` muss einer von `UprightMode`s sechs Werten sein; für `"Off"`/
+/// `"Guided"` liefert die Analyse ohnehin nur Nullen (siehe
+/// `apx_ai::upright::detect`s Doku) — der Befehl nimmt sie trotzdem an,
+/// statt sie als Fehler abzulehnen, für einen einfacheren Aufrufer.
+#[tauri::command]
+pub fn detect_upright_correction(
+    state: State<'_, AppState>,
+    photo_id: String,
+    mode: String,
+) -> Result<UprightCorrectionDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let mode = parse_upright_mode(&mode)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let correction =
+        apx_ai::upright::detect_from_linear_rgb(&linear.pixels, linear.width, linear.height, mode);
+    Ok(UprightCorrectionDto {
+        rotate_degrees: correction.rotate_degrees,
+        horizontal: correction.horizontal,
+    })
+}
+
 // ---- Adobe-DCP-Farbprofil-Import (Phase 13 Schritt 3) ----------------------
 
 #[derive(Debug, Clone, Serialize)]

@@ -43,6 +43,7 @@ pub mod preset_generator;
 pub mod repair_analysis;
 pub mod segmentation;
 pub mod tagging;
+pub mod upright;
 pub mod upscale;
 
 pub use error::{AiError, Result};

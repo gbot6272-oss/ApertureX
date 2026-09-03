@@ -40,6 +40,8 @@ tokio = { version = "1", features = ["rt"] }
 # nutzt, entscheidet Schritt 1.
 ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "load-dynamic"] }
 ndarray = "0.17"
+imageproc = { version = "0.27.0", default-features = false, features = ["rayon"] }
+image.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

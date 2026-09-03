@@ -1493,6 +1493,12 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return created;
       }
 
+      case "detect_upright_correction":
+        // Kein e2e-Test deckt Phase 13 Schritt 4 bisher ab — liefert eine
+        // plausible Nullkorrektur statt eines unbekannten-Befehl-Fehlers,
+        // falls doch einmal ausgelöst.
+        return { rotate_degrees: 0, horizontal: 0 };
+
       case "import_dcp_profile":
         // Kein Fixture-Feld nötig — der Dialog wird in Tests nie
         // ausgelöst (kein e2e-Test deckt Phase 13 Schritt 3 bisher ab);

@@ -116,6 +116,11 @@ pub struct AiSettings {
     /// vom Nutzer selbst heruntergeladen, kein Bundling im Installer.
     pub people_landmark_model_path: Option<String>,
     pub people_encoder_model_path: Option<String>,
+    /// Lokaler Pfad zum heruntergeladenen MiDaS-v2.1-small-ONNX-Modell
+    /// (Phase 14 Schritt 8, siehe `DECISIONS.md` ADR-0041 Nachtrag VIII)
+    /// — `None`, solange der Nutzer den Download nicht ausdrücklich
+    /// bestätigt hat, derselbe Opt-in wie `inpainting_model_path` oben.
+    pub depth_model_path: Option<String>,
 }
 
 /// Einstellungen für den beobachteten Ordner (Phase 12 Schritt 7, siehe

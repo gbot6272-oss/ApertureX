@@ -55,6 +55,13 @@ pub struct StageEnabled {
     /// `true` startet.
     #[serde(default = "default_true")]
     pub composite: bool,
+    /// KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8,
+    /// siehe `DECISIONS.md` ADR-0041 Nachtrag VIII) — läuft nach
+    /// `effects` (Halation), vor `masks`, noch im linearen Arbeitsraum
+    /// (siehe `stages::virtual_aperture`s Moduldoku). Dieselbe
+    /// `default_true`-Begründung wie `composite` oben.
+    #[serde(default = "default_true")]
+    pub virtual_aperture: bool,
     pub geometry: bool,
 }
 
@@ -79,6 +86,7 @@ impl StageEnabled {
         treatment: true,
         curves: true,
         composite: true,
+        virtual_aperture: true,
         geometry: true,
     };
 }
@@ -131,6 +139,56 @@ pub struct CompositeLayer {
     pub source: CompositeLayerSource,
 }
 
+// ---- KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8) ----
+
+/// Einmalig vorab per `apx_ai::depth::DepthSession::estimate_rgb8`
+/// berechnete, `0..=255`-normierte Tiefenkarte (`255` = am nächsten) —
+/// dasselbe „einmal berechnen, bei jedem Rendern nur noch skalieren"-
+/// Muster wie `v2::AiFillPatch`/`CompositeLayerSource`. `depth` ist EIN
+/// Byte je Pixel (kein RGB), `bitmap_width * bitmap_height` Bytes lang.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DepthMapPatch {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub depth: Vec<u8>,
+}
+
+/// KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8,
+/// siehe `DECISIONS.md` ADR-0041 Nachtrag VIII, Recherche-Tabelle
+/// Punkt 1): Lightroom hat keine KI-Tiefenschätzung/synthetisches Bokeh
+/// — nur die vorhandene grobe Unschärfe-Heuristik in ApertureX selbst
+/// (Laplace-Varianz, `stages::masks`s `MaskGeometry::BlurDepthApprox`,
+/// Phase 11 Schritt 7). `focus_x`/`focus_y` sind normierte
+/// Bildkoordinaten (`0.0..=1.0`) des angeklickten Fokuspunkts, `amount`
+/// (`0.0..=100.0`) die "Blendenöffnung" — je größer, desto stärker
+/// blendet der Unschärferadius mit wachsendem Tiefenabstand vom
+/// Fokuspunkt auf. Ohne `depth_map` (Tiefenkarte noch nicht berechnet)
+/// bleibt die Stufe ein No-Op — dieselbe „noch nicht berechnet"-
+/// Konvention wie `v2::RepairStroke::ai_fill`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VirtualApertureAdjustment {
+    pub focus_x: f32,
+    pub focus_y: f32,
+    pub amount: f32,
+    #[serde(default)]
+    pub depth_map: Option<DepthMapPatch>,
+}
+
+impl VirtualApertureAdjustment {
+    pub const NEUTRAL: Self = Self {
+        focus_x: 0.5,
+        focus_y: 0.5,
+        amount: 0.0,
+        depth_map: None,
+    };
+}
+
+impl Default for VirtualApertureAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
 // ---- Der vollständige EDL v4 -----------------------------------------------
 
 /// Die konkrete EDL-Struktur für Schema-Version 4 — siehe
@@ -161,6 +219,13 @@ pub struct EdlV4 {
     /// Verhalten).
     #[serde(default)]
     pub composite_layers: Vec<CompositeLayer>,
+    /// KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14
+    /// Schritt 8) — additiv, `#[serde(default)]` liest ein gespeichertes
+    /// `EdlV4` ohne dieses Feld als
+    /// `VirtualApertureAdjustment::NEUTRAL` (unverändertes bisheriges
+    /// Verhalten, keine Tiefenkarte berechnet).
+    #[serde(default)]
+    pub virtual_aperture: VirtualApertureAdjustment,
 }
 
 impl EdlV4 {
@@ -185,6 +250,7 @@ impl EdlV4 {
             bw_mixer: BlackAndWhiteMixerAdjustment::NEUTRAL,
             stage_enabled: StageEnabled::ALL,
             composite_layers: Vec::new(),
+            virtual_aperture: VirtualApertureAdjustment::NEUTRAL,
         }
     }
 
@@ -212,6 +278,7 @@ impl EdlV4 {
             bw_mixer: old.bw_mixer,
             stage_enabled: StageEnabled::ALL,
             composite_layers: Vec::new(),
+            virtual_aperture: VirtualApertureAdjustment::NEUTRAL,
         }
     }
 }

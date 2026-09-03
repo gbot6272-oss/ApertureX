@@ -1410,6 +1410,28 @@ interface LibraryBacklogSlice {
    * Commit für alle betroffenen Bänder zusammen, kein Commit je Band. */
   harmonizeToTarget: (harmony: HarmonyType, baseHueDegrees: number) => void;
 
+  /** KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8,
+   * siehe `DECISIONS.md` ADR-0041 Nachtrag VIII) — MiDaS v2.1 small,
+   * derselbe Opt-in-Download wie `downloadInpaintingModel`. */
+  downloadDepthModel: () => Promise<void>;
+  depthModelDownloading: boolean;
+  clearDepthModelPath: () => Promise<void>;
+  /** `true`, während auf einen Bildklick für den Fokuspunkt gewartet
+   * wird — analog zu `aiMaskClickPickerActive`. */
+  virtualApertureFocusPickerActive: boolean;
+  toggleVirtualApertureFocusPicker: () => void;
+  /** Setzt den normierten Fokuspunkt (`0.0..=1.0`), schließt den Picker
+   * und committet sofort. */
+  setVirtualApertureFocusPoint: (x: number, y: number) => void;
+  setVirtualApertureAmount: (value: number) => void;
+  depthEstimating: boolean;
+  /** Ruft `apx_ai::depth::DepthSession` für das aktuell im
+   * Entwickeln-Modul geöffnete Foto ab und legt das Ergebnis in
+   * `developEdl.virtual_aperture.depth_map` ab — braucht ein zuvor
+   * heruntergeladenes Modell (siehe `downloadDepthModel`), scheitert
+   * sonst mit einer klaren Fehlermeldung (`catalogError`). */
+  estimateDepthForCurrentPhoto: () => Promise<void>;
+
   /** Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
    * `DECISIONS.md` ADR-0038): eine Regel = `libraryFilter` (wiederverwendet,
    * wie beim normalen Filter-Panel) + eine `BatchAction`. */
@@ -5173,6 +5195,89 @@ export const useAppStore = create<AppStore>()(
         }
       });
       void get().commitDevelopEdit("Farb-Harmonie angewendet");
+    },
+
+    depthModelDownloading: false,
+
+    downloadDepthModel: async () => {
+      set((state) => {
+        state.depthModelDownloading = true;
+      });
+      try {
+        await api.downloadDepthModel();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.depthModelDownloading = false;
+        });
+      }
+    },
+
+    clearDepthModelPath: async () => {
+      try {
+        await api.clearDepthModelPath();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    virtualApertureFocusPickerActive: false,
+
+    toggleVirtualApertureFocusPicker: () => {
+      set((state) => {
+        state.virtualApertureFocusPickerActive = !state.virtualApertureFocusPickerActive;
+      });
+    },
+
+    setVirtualApertureFocusPoint: (x, y) => {
+      set((state) => {
+        state.developEdl.virtual_aperture.focus_x = x;
+        state.developEdl.virtual_aperture.focus_y = y;
+        state.virtualApertureFocusPickerActive = false;
+      });
+      void get().commitDevelopEdit("Fokuspunkt gesetzt");
+    },
+
+    setVirtualApertureAmount: (value) => {
+      set((state) => {
+        state.developEdl.virtual_aperture.amount = value;
+      });
+    },
+
+    depthEstimating: false,
+
+    estimateDepthForCurrentPhoto: async () => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.depthEstimating = true;
+      });
+      try {
+        const dto = await api.estimatePhotoDepth(developPhotoId);
+        set((state) => {
+          state.developEdl.virtual_aperture.depth_map = {
+            bitmap_width: dto.bitmap_width,
+            bitmap_height: dto.bitmap_height,
+            depth: dto.depth_base64,
+          };
+        });
+        void get().commitDevelopEdit("Tiefenkarte berechnet");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.depthEstimating = false;
+        });
+      }
     },
 
     batchPreview: [],

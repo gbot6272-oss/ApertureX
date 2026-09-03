@@ -28,5 +28,6 @@ pub mod lens_corrections;
 pub mod local_contrast;
 pub mod masks;
 pub mod repair;
+pub mod virtual_aperture;
 pub mod white_balance;
 pub mod whites_blacks;

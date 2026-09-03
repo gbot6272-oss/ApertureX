@@ -25,9 +25,21 @@ import type { RuleNode } from "./ruleTree";
 // sich per Kopieren/Einfügen/Synchronisieren genau wie jede andere
 // Reglergruppe auf viele Fotos übertragen lässt (siehe `PLAN.md` Phase 14
 // Schritt 3, „Batch-Fähigkeit").
+//
+// `virtual_aperture` (Phase 14 Schritt 8) ist dagegen wie `repair`/`masks`
+// AUSGESCHLOSSEN: `depth_map` ist eine für genau ein Foto berechnete
+// Tiefenkarte (MiDaS-Inferenz über dessen konkreten Bildinhalt) — auf ein
+// anderes Foto übertragen wäre sie schlicht falsch, genau wie ein
+// Pinselstrich an einer bestimmten Bildposition.
 export type PresetSectionKey = Exclude<
   keyof EdlPayload,
-  "repair" | "masks" | "mask_groups" | "treatment" | "bw_mixer" | "stage_enabled"
+  | "repair"
+  | "masks"
+  | "mask_groups"
+  | "treatment"
+  | "bw_mixer"
+  | "stage_enabled"
+  | "virtual_aperture"
 >;
 
 export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [

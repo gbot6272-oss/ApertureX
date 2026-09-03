@@ -217,6 +217,19 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // steuert die Fixture direkt das Ergebnis, das
     // `extract_color_palette` zurückgäbe.
     colorPaletteResult: [] as unknown[],
+    // KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8) —
+    // `null` = kein Modell heruntergeladen (Testdefault), dasselbe Muster
+    // wie `inpaintingModelPath`. `depthMapResult` steuert direkt das
+    // Ergebnis, das `estimate_photo_depth` zurückgäbe (die echte
+    // MiDaS-Inferenz ist bereits in `apx-ai::depth`s Rust-Unit-Tests
+    // abgedeckt).
+    depthModelPath: null as string | null,
+    depthMapResult: {
+      bitmap_width: 4,
+      bitmap_height: 4,
+      // 16 Bytes, alle 128 — Base64 von `Uint8Array(16).fill(128)`.
+      depth_base64: "gICAgICAgICAgICAgICAgA==",
+    },
     // Adobe-XMP-Sidecar (Phase 9 Schritt 2).
     exportedXmpSidecarPath: "/mock/photos/IMG_0001.xmp" as string,
     xmpImportApplies: true as boolean,
@@ -616,6 +629,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       peopleGroups: unknown[][];
       styleConsistencyResult: unknown[];
       colorPaletteResult: unknown[];
+      depthModelPath: string | null;
+      depthMapResult: { bitmap_width: number; bitmap_height: number; depth_base64: string };
     };
 
     switch (cmd) {
@@ -1355,6 +1370,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           people_landmark_model_path: fixtures.peopleLandmarkModelPath,
           people_encoder_model_path: fixtures.peopleEncoderModelPath,
           people_feature_compiled: fixtures.peopleFeatureCompiled,
+          depth_model_path: fixtures.depthModelPath,
         };
       case "download_inpainting_model":
         fixtures.inpaintingModelPath = "/mock/models/lama_fp32.onnx";
@@ -1362,6 +1378,18 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "clear_inpainting_model_path":
         fixtures.inpaintingModelPath = null;
         return null;
+
+      // ---- KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14
+      // Schritt 8) — die echte MiDaS-Inferenz ist bereits in
+      // `apx-ai::depth`s Rust-Unit-Tests abgedeckt. ------------------------
+      case "download_depth_model":
+        fixtures.depthModelPath = "/mock/models/midas_v21_small.onnx";
+        return fixtures.depthModelPath;
+      case "clear_depth_model_path":
+        fixtures.depthModelPath = null;
+        return null;
+      case "estimate_photo_depth":
+        return fixtures.depthMapResult;
 
       // ---- Echte Personen-Wiedererkennung (Phase 13 Schritt 8) -----------
       case "download_people_models":

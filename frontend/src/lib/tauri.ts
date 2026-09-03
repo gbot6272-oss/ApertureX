@@ -895,6 +895,9 @@ export interface AiSettingsDto {
    * wurde — `PeopleView.tsx` zeigt dann einen Hinweis statt der Download-/
    * Erkennungs-Aktionen. */
   people_feature_compiled: boolean;
+  /** `null`, solange der Nutzer den Download nicht bestätigt hat (Phase 14
+   * Schritt 8, siehe `DECISIONS.md` ADR-0041 Nachtrag VIII). */
+  depth_model_path: string | null;
 }
 
 export function getAiSettings(): Promise<AiSettingsDto> {
@@ -919,6 +922,38 @@ export function downloadInpaintingModel(): Promise<string> {
  * selbst nicht (der Nutzer kann sie manuell entfernen). */
 export function clearInpaintingModelPath(): Promise<void> {
   return invoke<void>("clear_inpainting_model_path");
+}
+
+// ---- KI: Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8,
+// siehe DECISIONS.md ADR-0041 Nachtrag VIII) --------------------------------
+
+/** Lädt das ~66-MB-Modell herunter (MIT, `isl-org/MiDaS` v2.1 small,
+ * SHA-256-geprüft) — löst erst nach ausdrücklicher Nutzerbestätigung
+ * (Einstellungsdialog-Button). Liefert den lokalen Zielpfad zurück. */
+export function downloadDepthModel(): Promise<string> {
+  return invoke<string>("download_depth_model");
+}
+
+/** Entfernt nur den hinterlegten Pfad — löscht die heruntergeladene Datei
+ * selbst nicht (der Nutzer kann sie manuell entfernen). */
+export function clearDepthModelPath(): Promise<void> {
+  return invoke<void>("clear_depth_model_path");
+}
+
+export interface DepthMapDto {
+  bitmap_width: number;
+  bitmap_height: number;
+  /** Base64-kodiertes Graustufen-`u8`-Ergebnis, näher = heller. */
+  depth_base64: string;
+}
+
+/** Führt echte monokulare Tiefenschätzung (MiDaS v2.1 small) für ein Foto
+ * aus — braucht ein zuvor heruntergeladenes Modell (siehe
+ * [`downloadDepthModel`]), scheitert sonst mit einer klaren
+ * Fehlermeldung. Das Ergebnis wird unverändert in
+ * `EdlPayload.virtual_aperture.depth_map` abgelegt. */
+export function estimatePhotoDepth(photoId: string): Promise<DepthMapDto> {
+  return invoke<DepthMapDto>("estimate_photo_depth", { photoId });
 }
 
 // ---- KI: Echte Personen-Wiedererkennung (Phase 13 Schritt 8) ---------------

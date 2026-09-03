@@ -60,6 +60,7 @@ import { CanvasExtendDialog } from "./CanvasExtendDialog";
 import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import { PaletteFrame } from "./PaletteFrame";
 import { SavePresetDialog } from "./SavePresetDialog";
+import { VirtualAperturePanel } from "./VirtualAperturePanel";
 
 // ---- Reparatur (Klonen/Reparieren) — Phase 4 Schritt 12 --------------------
 //
@@ -107,6 +108,7 @@ const STAGE_ANCHOR_IDS: Record<keyof StageEnabled, string> = {
   treatment: "stage-treatment",
   curves: "stage-curves",
   composite: "stage-composite",
+  virtual_aperture: "stage-virtual_aperture",
   geometry: "stage-geometry",
 };
 
@@ -1420,6 +1422,17 @@ export function DevelopPanel() {
                 </li>
               ))}
             </ul>
+          </fieldset>
+
+          {/* KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14
+              Schritt 8, ADR-0041 Nachtrag VIII) — läuft nach dem
+              Halation-Kurzschluss, vor `masks` (siehe `develop.rs`s
+              Moduldoku), in der Anzeige aber neben `composite` platziert
+              (dieselbe Vereinfachung wie bei allen übrigen Knoten:
+              Anzeigereihenfolge = `STAGE_NODE_SPECS`). */}
+          <fieldset id="stage-virtual_aperture" className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Virtuelle Blende</legend>
+            <VirtualAperturePanel />
           </fieldset>
 
           <fieldset id="stage-geometry" className="flex flex-col gap-3">

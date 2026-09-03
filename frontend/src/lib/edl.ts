@@ -577,6 +577,15 @@ export const HALATION_SLIDER_SPECS: readonly SliderSpec[] = [
   { key: "halation_hue", label: "Farbton (Halation)", min: 0, max: 360, fineStep: 1, coarseStep: 15, neutral: 15 },
 ];
 
+/** KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8) —
+ * Lightroom hat "keine KI-Tiefenschätzung/synthetisches Bokeh" (siehe
+ * `DECISIONS.md` ADR-0041, Recherche-Tabelle Punkt 1). Wie
+ * `REPAIR_RADIUS_SPEC` (`0..=100` UI-Skala für einen intern
+ * `0.0..=1.0`-Bruchteil, siehe `VirtualApertureAdjustment.amount`). */
+export const VIRTUAL_APERTURE_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "amount", label: "Virtuelle Blende: Betrag", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+];
+
 // ---- Kalibrierung -----------------------------------------------------------
 
 export type ProcessVersion = "V1";
@@ -1154,6 +1163,12 @@ export interface StageEnabled {
   /** Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3) — läuft
    * nach `curves`, vor `geometry`. */
   composite: boolean;
+  /** KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8) —
+   * läuft nach dem Halation-Kurzschluss, vor `masks` (siehe `develop.rs`s
+   * Moduldoku). Vorne in der Deklaration platziert wie auf der Rust-Seite
+   * (`edl/v4.rs`s `StageEnabled`), auch wenn die tatsächliche
+   * Rendering-Reihenfolge eine andere ist. */
+  virtual_aperture: boolean;
   geometry: boolean;
 }
 
@@ -1171,6 +1186,7 @@ export const NEUTRAL_STAGE_ENABLED: StageEnabled = {
   treatment: true,
   curves: true,
   composite: true,
+  virtual_aperture: true,
   geometry: true,
 };
 
@@ -1203,6 +1219,44 @@ export interface CompositeLayer {
   source: CompositeLayerSource;
 }
 
+/** Eine einmalig berechnete Tiefenkarte (Phase 14 Schritt 8, MiDaS v2.1
+ * small) — dasselbe „einmal per Command auflösen, bei jedem Rendern nur
+ * noch skalieren"-Muster wie `CompositeLayerSource`. `depth_base64` ist
+ * base64-kodiertes Graustufen-Rohmaterial (`bitmap_width * bitmap_height`
+ * Bytes, `0..=255`, näher = heller) — die Frontend-Seite dekodiert das
+ * nicht selbst, sondern reicht es nur unverändert an die Rust-Seite
+ * zurück (`VirtualApertureAdjustment.depth_map`), die es beim Rendern
+ * bilinear auf die tatsächliche Bildgröße skaliert. */
+export interface DepthMapPatch {
+  bitmap_width: number;
+  bitmap_height: number;
+  /** Auf der Rust-Seite `Vec<u8>` (`depth`), hier als base64-String
+   * transportiert — siehe `DepthMapDto` in `lib/tauri.ts`. */
+  depth: string;
+}
+
+/** KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8) —
+ * spiegelt `apx_pipeline::edl::v4::VirtualApertureAdjustment`.
+ * `focus_x`/`focus_y`: normierter Fokuspunkt (`0.0..=1.0`), per Klick ins
+ * Bild gesetzt (dasselbe Muster wie `ClickRegion`-KI-Masken). `amount`:
+ * `0.0..=1.0`, virtueller Blendenwert (0 = keine Wirkung). Ohne
+ * berechnete Tiefenkarte (`depth_map === null`) bleibt die Stufe
+ * wirkungslos, selbst bei `amount > 0` (siehe `virtual_aperture.rs`s
+ * Moduldoku). */
+export interface VirtualApertureAdjustment {
+  focus_x: number;
+  focus_y: number;
+  amount: number;
+  depth_map: DepthMapPatch | null;
+}
+
+export const NEUTRAL_VIRTUAL_APERTURE: VirtualApertureAdjustment = {
+  focus_x: 0.5,
+  focus_y: 0.5,
+  amount: 0.0,
+  depth_map: null,
+};
+
 /** Ein Knoten im Node-Editor — Anzeigereihenfolge identisch zur
  * tatsächlichen Rendering-Reihenfolge (siehe `develop.rs`s Moduldoku).
  * `panel` benennt das bereits bestehende Bedienfeld, das ein Klick auf
@@ -1227,6 +1281,7 @@ export const STAGE_NODE_SPECS: readonly StageNodeSpec[] = [
   { key: "treatment", label: "Behandlung (SW-Mixer)" },
   { key: "curves", label: "Kurven" },
   { key: "composite", label: "Compositing" },
+  { key: "virtual_aperture", label: "Virtuelle Blende" },
   { key: "geometry", label: "Geometrie" },
 ] as const;
 
@@ -1250,6 +1305,7 @@ export interface EdlPayload {
   bw_mixer: BlackAndWhiteMixerAdjustment;
   stage_enabled: StageEnabled;
   composite_layers: CompositeLayer[];
+  virtual_aperture: VirtualApertureAdjustment;
 }
 
 export function neutralEdlPayload(): EdlPayload {
@@ -1271,6 +1327,7 @@ export function neutralEdlPayload(): EdlPayload {
     bw_mixer: NEUTRAL_BW_MIXER,
     stage_enabled: NEUTRAL_STAGE_ENABLED,
     composite_layers: [],
+    virtual_aperture: NEUTRAL_VIRTUAL_APERTURE,
   };
 }
 

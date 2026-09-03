@@ -36,10 +36,13 @@
 //!   ganzes Shooting — kein neuronales Netz, klassische Farbstatistik.
 //! - [`palette`] (Phase 14 Schritt 7): k-means-Farbpaletten-Extraktion
 //!   (`kmeans_colors`) für das Farb-Harmonie-Rad.
+//! - [`depth`] (Phase 14 Schritt 8): echte monokulare Tiefenschätzung
+//!   (MiDaS v2.1 small) für den KI-Tiefenschärfe-Simulator.
 
 pub mod blur;
 pub mod color;
 pub mod denoise;
+pub mod depth;
 pub mod error;
 pub mod faces;
 pub mod inpaint;

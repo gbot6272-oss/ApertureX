@@ -20,7 +20,8 @@ use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
     basic_fused, bw_mixer, calibration, color_grading, composite, curves, details, effects,
-    geometry, hsl_color_mixer, lens_corrections, local_contrast, masks, repair, white_balance,
+    geometry, hsl_color_mixer, lens_corrections, local_contrast, masks, repair, virtual_aperture,
+    white_balance,
 };
 
 /// Das Ergebnis von [`render_rgba8`] — `width`/`height` beschreiben
@@ -315,6 +316,22 @@ pub fn render_rgba8(
         effected
     } else {
         effects::apply_halation(&effected, linear.width, linear.height, &edl.effects)
+    };
+
+    // KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8) —
+    // bewusst CPU-only, unabhängig vom GPU-/CPU-Dispatch der Vignette/
+    // Korn (siehe `stages::virtual_aperture`s Moduldoku, dieselbe
+    // Begründung wie Halation in Schritt 4), deshalb ein eigener
+    // Kurzschluss statt Teil desselben `apply_gpu`/`apply_cpu`-Aufrufs.
+    let effected = if !stages.virtual_aperture || edl.virtual_aperture.amount <= 0.0 {
+        effected
+    } else {
+        virtual_aperture::apply(
+            &effected,
+            linear.width,
+            linear.height,
+            &edl.virtual_aperture,
+        )
     };
 
     let masked = if !stages.masks || edl.masks.is_empty() {
@@ -773,6 +790,7 @@ mod tests {
             bw_mixer: crate::edl::BlackAndWhiteMixerAdjustment::NEUTRAL,
             stage_enabled: crate::edl::StageEnabled::ALL,
             composite_layers: Vec::new(),
+            virtual_aperture: crate::edl::v4::VirtualApertureAdjustment::NEUTRAL,
         };
 
         if let Some(ctx) = &ctx {

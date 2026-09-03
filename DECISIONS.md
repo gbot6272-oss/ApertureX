@@ -3265,3 +3265,107 @@ traf deshalb zunächst beide Knöpfe gleichzeitig. Behoben mit
 richtigen, etablierten Farbtheorie-Fachbegriffe sind — eine Umbenennung
 hätte die Benennung verschlechtert, um ein reines Test-Locator-Problem
 zu lösen.
+
+### Nachtrag VIII (Phase 14 Schritt 8): KI-Tiefenschärfe-Simulator
+"Virtuelle Blende" — echtes MiDaS v2.1 small statt der bestehenden
+Laplace-Varianz-Heuristik, precomputed Tiefenkarte als EDL-Patch
+
+Punkt 1 der Recherche-Tabelle: Lightroom hat keine KI-Tiefenschätzung/
+kein synthetisches Bokeh — nur ApertureX' eigene, deutlich gröbere
+Laplace-Varianz-Heuristik (`stages::masks::relative_sharpness_map`,
+Phase 11 Schritt 7, `BlurDepthApprox`-Maskentyp). Die neue "Virtuelle
+Blende" baut eine echte monokulare Tiefenkarte per MiDaS v2.1 small
+(isl-org/MiDaS, MIT) statt einer reinen Schärfe-Heuristik.
+
+**Real heruntergeladen und geprüft, nicht nur aus dem Gedächtnis
+behauptet** (`https://github.com/isl-org/MiDaS/releases/download/v2_1/
+model-small.onnx`): exakt 66.764.249 Byte, SHA-256
+`2d8c6cb8f415229daf1eb041024208e2608c9f98e17c81cc7c6ecb449c56fd58`
+(im Gegensatz zu LaMa, wo `ADR-0040` einen fehlenden veröffentlichten
+Hash ehrlich dokumentiert, ist bei MiDaS ein echter Hash verfügbar —
+`download_depth_model` lehnt einen Download mit falschem Hash deshalb
+hart ab, statt ihn wie bei LaMa nur zu speichern). Ein-/Ausgabe-Form per
+echtem `onnxruntime`-Python-Introspektionslauf gegen die reale Datei
+bestätigt: Eingabe `"0"` fest `[1,3,256,256]` (anders als LaMa keine
+dynamische Auflösung), Ausgabe `"797"` `[1,256,256]` (ein Kanal, kein
+Batch-loser Kanal-Index wie bei LaMas `(1,3,H,W)`-Ausgabe). Die
+Normalisierungskonstanten (`mean=[0.485,0.456,0.406]`,
+`std=[0.229,0.224,0.225]`, erst Skalierung auf `0..1`, dann
+ImageNet-Normalisierung) stammen aus MiDaS' echtem `hubconf.py`/
+`transforms.py` (real von GitHub abgerufen, nicht aus dem Gedächtnis
+rekonstruiert). Ein einmaliger echter Inferenzlauf gegen `opencv/
+opencv`s echtes `fruits.jpg` über den tatsächlichen `depth.rs`-Code
+bestätigte eine plausible Tiefenkarte (helle scharfe Frucht-Silhouetten,
+dunkler weicher Hintergrund) — dieser Testfall wurde vor dem Commit
+wieder entfernt (`PLAN.md`-Regel: Modell-Download nicht Teil des
+CI-Testlaufs, siehe auch `ADR-0040`s LaMa-Präzedenzfall). Die
+eingecheckten `apx-ai::depth`-Rust-Unit-Tests laufen stattdessen gegen
+eine mitgelieferte 153-Byte-ONNX-Testfixture
+(`tests/fixtures/mean_channel_depth.onnx`, per Python `onnx.helper`
+gebaut): dieselbe Ein-/Ausgabe-Topologie wie das echte Modell
+(`ReduceMean` über die Kanalachse statt echter MiDaS-Gewichte).
+
+**`apx-pipeline` darf nicht von `apx-ai` abhängen** (die Abhängigkeit
+verläuft bereits umgekehrt) — genau dieselbe Beschränkung, die schon
+`AiFillPatch`/`CanvasExtensionPatch`/`CompositeLayerSource` gelöst
+haben: die Tiefenkarte wird einmal in `apx-app` (hängt von beiden
+Crates ab) per `estimate_photo_depth`-Command berechnet und als fertige
+Bitmap (`DepthMapPatch { bitmap_width, bitmap_height, depth: Vec<u8> }`)
+im EDL abgelegt — `stages::virtual_aperture` selbst sieht nie ein
+ONNX-Modell, nur eine Graustufen-Bitmap, die es per
+`apx_core::raster::bilinear_resize_u8` auf die tatsächliche
+Bildauflösung skaliert, exakt dasselbe "einmal auflösen, beim Rendern
+nur noch skalieren"-Muster wie bei den drei genannten Vorgängern.
+
+**Blur-Level-Blend statt echter Radius-pro-Pixel-Faltung:** eine
+Gauß-/Box-Unschärfe mit einem *pro Pixel unterschiedlichen* Radius ist
+kein separierbarer Filter mehr (die getrennten horizontalen/vertikalen
+Durchgänge, die jedes andere Unschärfe-Modul dieses Projekts nutzt,
+setzen einen konstanten Radius voraus). Stattdessen: `BLUR_LEVELS = 5`
+zunehmend stärker geweichzeichnete Fassungen des Originalbilds
+vorab berechnen (jede Stufe direkt vom Original aus, nicht kaskadiert),
+pro Pixel aus der Tiefendifferenz zum per Klick gesetzten Fokuspunkt
+einen `defocus`-Bruchteil (`0..1`) bestimmen und zwischen den zwei
+nächstgelegenen Stufen linear interpolieren — eine reale, in
+Bokeh-Simulatoren verwendete Näherung, kein Kompromiss ohne Vorbild.
+`box_blur_1d` in `stages::virtual_aperture` ist erneut eine eigene
+Kopie (kein Wiederverwenden von `effects.rs::halation_box_blur_1d`) —
+dieselbe "jedes Modul reimplementiert seinen eigenen Blur"-Konvention
+wie überall sonst in diesem Projekt (siehe `SPEC.md` §6).
+
+**Testdaten-Skalierungslehre wiederholt sich, wie schon bei Schritt 4s
+Halation-Test:** `a_pixel_far_from_the_focus_depth_gets_visibly_blurred`
+schlug zunächst zweimal real fehl — zuerst bei `size=40`/
+`MAX_BLUR_RADIUS_FRACTION=0.03` mit exakt null Änderung (der berechnete
+Radius rundete auf 1px, zu klein, um den 3px entfernten Nachbarn
+überhaupt zu erreichen), dann nach Anheben der Fraktion auf `0.08`
+erneut mit einer messbaren, aber unter der geforderten Schwelle
+liegenden Änderung (ein einzelner 3×3-Fleck wird vom zweifachen
+Box-Blur-Mittelwert zu stark verdünnt). Behoben wie bei Schritt 4: ein
+größerer 7×7-Testfleck, ein größeres Testbild (`size=80`), ein weiter
+vom Fleck entfernter Messpunkt (`spot_x - 6` statt `spot_x - 3`) — exakt
+dieselbe Lehre, kein neuer Mechanismus.
+
+**Farbraum-Entscheidung: rohe lineare Pixel statt sRGB-Gamma-Wandlung**
+— `estimate_photo_depth` reicht `linear.pixels` direkt (nur `0..1`
+geklemmt und auf `u8` skaliert) an `DepthSession::estimate_rgb8`
+weiter, genau wie `run_ai_inpaint`/`generate_ai_mask`/
+`suggest_repair_source`/`run_ai_outpaint` — bewusst NICHT der
+"korrektere" Gamma-gewandelte Pfad aus
+`prepare_composite_layer_source` (Schritt 3), obwohl MiDaS eigentlich
+auf sRGB-Fotos trainiert wurde. Konsistenz mit der Mehrheit der
+Einzelfoto-KI-Commands wiegt hier schwerer als die letzte
+Genauigkeitsstufe — derselbe ehrlich dokumentierte Kompromiss, den
+`ADR-0040` für `run_ai_inpaint` bereits eingeht.
+
+**Frontend:** Fokuspunkt-Picker (`virtualApertureFocusPickerActive`)
+spiegelt exakt `aiMaskClickPickerActive`s Bildklick-Muster (normierte
+Klickposition, keine Farbe, statischer Knopftext, nur `aria-pressed`/
+Rahmenfarbe ändert sich, dazu ein `"Klicken Sie ins Bild…"`-Hinweistext
+— dieselbe Konvention wie bei allen übrigen Bildklick-Werkzeugen in
+`MasksPanel.tsx`, damit `getByRole("button", { name: … })`-Locator in
+Tests über den ganzen Ablauf stabil bleiben). `depth_map` ist wie
+`repair`/`masks` bewusst NICHT Teil eines Presets (`lib/presets.ts`) —
+eine für ein bestimmtes Foto berechnete Tiefenkarte ist auf ein anderes
+Foto übertragen schlicht falsch, derselbe Grund wie bei einem
+Reparatur-Pinselstrich an einer festen Bildposition.

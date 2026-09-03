@@ -2861,6 +2861,10 @@ pub struct AiSettingsDto {
     /// wurde — das Frontend zeigt sonst einen Hinweis statt der Download-
     /// /Erkennungs-Aktionen (siehe `apx-ai::people`s Moduldoku).
     pub people_feature_compiled: bool,
+    /// `Some`, sobald der Nutzer den Download des MiDaS-Tiefenschätzungs-
+    /// Modells bestätigt hat und er erfolgreich war (Phase 14 Schritt 8,
+    /// siehe [`download_depth_model`]).
+    pub depth_model_path: Option<String>,
 }
 
 #[tauri::command]
@@ -2873,6 +2877,7 @@ pub fn get_ai_settings(state: State<'_, AppState>) -> Result<AiSettingsDto, Stri
         people_landmark_model_path: settings.ai.people_landmark_model_path,
         people_encoder_model_path: settings.ai.people_encoder_model_path,
         people_feature_compiled: cfg!(feature = "people"),
+        depth_model_path: settings.ai.depth_model_path,
     })
 }
 
@@ -3294,6 +3299,160 @@ pub fn prepare_composite_layer_source(
         bitmap_width: width,
         bitmap_height: height,
         pixels_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &rgb),
+    })
+}
+
+// ---- KI: Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8,
+// siehe DECISIONS.md ADR-0041 Nachtrag VIII) ---------------------------------
+//
+// Opt-in, kein Bundling im Installer (dasselbe Muster wie das LaMa-
+// Inpainting-Modell oben): der Nutzer bestätigt den ~64-MB-Download
+// ausdrücklich im Einstellungsdialog, bevor irgendetwas heruntergeladen
+// wird.
+
+/// Öffentliche Download-URL des in `DECISIONS.md` ADR-0041 (Schritt 0 +
+/// Nachtrag VIII) recherchierten Modells (`isl-org/MiDaS`, MIT,
+/// GitHub-Release-Asset). **Anders als beim LaMa-Modell in dieser
+/// Sitzung tatsächlich real heruntergeladen und geprüft** — siehe
+/// [`MIDAS_MODEL_SHA256`].
+const MIDAS_MODEL_URL: &str =
+    "https://github.com/isl-org/MiDaS/releases/download/v2_1/model-small.onnx";
+/// SHA-256 der real heruntergeladenen Datei (siehe `apx_ai::depth`s
+/// Moduldoku für den genauen Verifikationsweg) — anders als beim
+/// LaMa-Modell (`huggingface.co` aus dieser Sandbox nicht erreichbar)
+/// hier eine echte Prüfsumme statt einer offenen Lücke.
+const MIDAS_MODEL_SHA256: &str = "2d8c6cb8f415229daf1eb041024208e2608c9f98e17c81cc7c6ecb449c56fd58";
+
+/// Lädt das MiDaS-Tiefenschätzungs-Modell herunter, prüft die Prüfsumme
+/// gegen [`MIDAS_MODEL_SHA256`] und hinterlegt den Pfad in den
+/// Einstellungen — nur bei erfolgreicher Prüfung, sonst wird die Datei
+/// verworfen (kein potenziell manipuliertes/beschädigtes Modell landet
+/// je in den Einstellungen).
+#[tauri::command]
+pub async fn download_depth_model(state: State<'_, AppState>) -> Result<String, String> {
+    let response = reqwest::get(MIDAS_MODEL_URL)
+        .await
+        .map_err(|err| format!("Download von '{MIDAS_MODEL_URL}' fehlgeschlagen: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Download von '{MIDAS_MODEL_URL}' fehlgeschlagen: HTTP {}",
+            response.status()
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| format!("Antwort konnte nicht gelesen werden: {err}"))?;
+
+    use sha2::Digest as _;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(&bytes);
+    let actual_hash = format!("{:x}", hasher.finalize());
+    if actual_hash != MIDAS_MODEL_SHA256 {
+        return Err(format!(
+            "Prüfsumme stimmt nicht überein (erwartet {MIDAS_MODEL_SHA256}, erhalten {actual_hash}) — Download verworfen."
+        ));
+    }
+
+    let dest_dir = state.paths.models_dir();
+    std::fs::create_dir_all(&dest_dir).map_err(|err| err.to_string())?;
+    let dest_path = dest_dir.join("midas_v21_small.onnx");
+    std::fs::write(&dest_path, &bytes).map_err(|err| err.to_string())?;
+
+    let path_string = dest_path.to_string_lossy().to_string();
+    let settings_path = state.paths.settings_file();
+    let mut settings =
+        apx_core::Settings::load_or_default(&settings_path).map_err(|err| err.to_string())?;
+    settings.ai.depth_model_path = Some(path_string.clone());
+    settings
+        .save(&settings_path)
+        .map_err(|err| err.to_string())?;
+
+    Ok(path_string)
+}
+
+/// Entfernt den hinterlegten Modellpfad (löscht die Datei selbst nicht —
+/// dieselbe Zurückhaltung wie [`clear_inpainting_model_path`]).
+#[tauri::command]
+pub fn clear_depth_model_path(state: State<'_, AppState>) -> Result<(), String> {
+    let path = state.paths.settings_file();
+    let mut settings = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    settings.ai.depth_model_path = None;
+    settings.save(&path).map_err(|err| err.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DepthMapDto {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    /// Base64-kodierte `0..=255`-Tiefenkarte (`255` = am nächsten), ein
+    /// Byte je Pixel — dieselbe Übertragungskonvention wie
+    /// `AiMaskAlphaDto::alpha_base64`.
+    pub depth_base64: String,
+}
+
+/// Berechnet einmalig eine echte monokulare Tiefenkarte für `photo_id`
+/// per MiDaS v2.1 small (Phase 14 Schritt 8) — das Frontend ruft diesen
+/// Command nur auf ausdrücklichen Nutzerwunsch ("Tiefenkarte berechnen")
+/// auf, nicht bei jedem Regler-Tick, und speichert das Ergebnis als
+/// `VirtualApertureAdjustment::depth_map` in der EDL (dasselbe „einmal
+/// berechnen"-Muster wie [`run_ai_inpaint`]).
+///
+/// **Ehrliche Grenze, dieselbe wie [`run_ai_inpaint`]:** läuft auf dem
+/// linearen Kamera-RGB-Dekodierergebnis (`decode_linear`), nicht auf
+/// entwickelten sRGB-Pixeln — MiDaS wurde vermutlich auf gewöhnlichen
+/// (sRGB-artigen) Fotos trainiert, ein linearer Farbraum ist eine
+/// Näherung, keine exakte Übereinstimmung mit den Trainingsdaten
+/// (dieselbe Art Kompromiss wie bei jeder anderen KI-Heuristik dieses
+/// Projekts, die auf demselben Dekodierergebnis arbeitet).
+#[tauri::command]
+pub fn estimate_photo_depth(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<DepthMapDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let model_path = settings
+        .ai
+        .depth_model_path
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| {
+            "Kein Tiefenschätzungs-Modell heruntergeladen — siehe Einstellungen → KI.".to_string()
+        })?;
+
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let pixel_count = (linear.width as usize) * (linear.height as usize);
+    let rgb_u8: Vec<u8> = linear.pixels[..pixel_count * 3]
+        .iter()
+        .map(|&v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+        .collect();
+
+    // Session wird pro Aufruf frisch geladen (dieselbe Begründung wie
+    // `run_ai_inpaint`: einfacher, für einen Ein-Klick-Vorgang
+    // akzeptabel).
+    let mut session =
+        apx_ai::depth::DepthSession::load(Path::new(&model_path)).map_err(|err| err.to_string())?;
+    let depth = session
+        .estimate_rgb8(&rgb_u8, linear.width, linear.height)
+        .map_err(|err| err.to_string())?;
+    let depth_u8: Vec<u8> = depth
+        .iter()
+        .map(|&v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+        .collect();
+
+    Ok(DepthMapDto {
+        bitmap_width: linear.width,
+        bitmap_height: linear.height,
+        depth_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &depth_u8),
     })
 }
 

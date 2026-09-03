@@ -73,6 +73,8 @@ export function Viewer() {
   const addMaskColorMixerRegionAt = useAppStore((s) => s.addMaskColorMixerRegionAt);
   const aiMaskClickPickerActive = useAppStore((s) => s.aiMaskClickPickerActive);
   const addAiMask = useAppStore((s) => s.addAiMask);
+  const virtualApertureFocusPickerActive = useAppStore((s) => s.virtualApertureFocusPickerActive);
+  const setVirtualApertureFocusPoint = useAppStore((s) => s.setVirtualApertureFocusPoint);
   const tatMode = useAppStore((s) => s.tatMode);
   const tatCurveChannel = useAppStore((s) => s.tatCurveChannel);
   const setTatMode = useAppStore((s) => s.setTatMode);
@@ -80,7 +82,12 @@ export function Viewer() {
   const setCurveChannel = useAppStore((s) => s.setCurveChannel);
   const setHslBandField = useAppStore((s) => s.setHslBandField);
   const pickerActive =
-    wbPickerActive || colorMixerPickerActive || maskColorRangePickerActive || maskColorMixerPickerActive || aiMaskClickPickerActive;
+    wbPickerActive ||
+    colorMixerPickerActive ||
+    maskColorRangePickerActive ||
+    maskColorMixerPickerActive ||
+    aiMaskClickPickerActive ||
+    virtualApertureFocusPickerActive;
   const geometryCropActive = useAppStore((s) => s.geometryCropActive);
   const setGeometryCrop = useAppStore((s) => s.setGeometryCrop);
   const repairActive = useAppStore((s) => s.repairActive);
@@ -522,6 +529,11 @@ export function Viewer() {
         // übrigen Bild-Klick-Werkzeuge oben keine Farbe, sondern nur die
         // normierte Klickposition als Startpunkt fürs Region-Growing.
         void addAiMask("ClickRegion", { x: imageX / imgW, y: imageY / imgH });
+      } else if (virtualApertureFocusPickerActive) {
+        // Fokuspunkt der "Virtuellen Blende" (Phase 14 Schritt 8) —
+        // genau wie bei `ClickRegion` oben nur die normierte
+        // Klickposition, keine Farbe.
+        setVirtualApertureFocusPoint(imageX / imgW, imageY / imgH);
       }
     },
     [
@@ -532,6 +544,8 @@ export function Viewer() {
       maskColorMixerPickerActive,
       aiMaskClickPickerActive,
       addAiMask,
+      virtualApertureFocusPickerActive,
+      setVirtualApertureFocusPoint,
       selectedMask,
       developFrame,
       imgW,

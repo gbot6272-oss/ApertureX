@@ -638,6 +638,37 @@ export interface CropRect {
 /** Das ganze Bild, kein Beschnitt. */
 export const FULL_CROP_RECT: CropRect = { x: 0, y: 0, width: 1, height: 1 };
 
+/** Vorab von `run_ai_outpaint` berechnetes, bereits zusammengesetztes
+ * Bitmap der erweiterten Leinwand (Original + KI-erzeugter Rand) — wird
+ * bei jedem Rendern nur noch auf die tatsächliche Zielgröße hoch-/
+ * herunterskaliert (dasselbe „einmal berechnen, immer wieder
+ * skalieren"-Muster wie `AiFillPatch`, siehe `CanvasExtension`s Doku
+ * unten). */
+export interface CanvasExtensionPatch {
+  bitmap_width: number;
+  bitmap_height: number;
+  pixels: number[];
+}
+
+/** KI-Ausfüllen über die Bildränder hinaus (Phase 14 Schritt 1, siehe
+ * `DECISIONS.md` ADR-0041). `margin_left`/`margin_top`/`margin_right`/
+ * `margin_bottom` sind normierte Bruchteile der *aktuellen* Bildbreite/
+ * -höhe (`0.0..=1.0`, dieselbe Konvention wie `CropRect`) — anders als
+ * `CanvasExtensionPatch::bitmap_width/height` (eine feste
+ * Speicherauflösung, die bei jedem Rendern passend skaliert wird) legen
+ * die Margen unmittelbar das neue Seitenverhältnis fest und müssen daher
+ * mit dem Bild mitskalieren statt eine absolute Pixelzahl zu sein. Ohne
+ * `patch` (Ränder gewählt, aber „Anwenden" noch nicht ausgelöst) bleibt
+ * die Erweiterung ein No-Op — dieselbe Konvention wie ein frischer
+ * `AiInpaint`-Reparaturstrich ohne `ai_fill`. */
+export interface CanvasExtension {
+  margin_left: number;
+  margin_top: number;
+  margin_right: number;
+  margin_bottom: number;
+  patch: CanvasExtensionPatch | null;
+}
+
 export interface GeometryAdjustment {
   crop: CropRect;
   /** `null` = freie Seitenverhältniswahl, sonst Breite/Höhe-Verhältnis. */
@@ -646,6 +677,9 @@ export interface GeometryAdjustment {
   overlay: GridOverlay;
   /** Vereinfachte Auto-Ausrichtung: nur EXIF-Orientierung, siehe ADR-0028. */
   auto_horizon: boolean;
+  /** `null`, solange keine Leinwand-Erweiterung gewählt wurde (Phase 14
+   * Schritt 1) — additiv, siehe `CanvasExtension`s Doku. */
+  canvas_extension: CanvasExtension | null;
 }
 
 export const NEUTRAL_GEOMETRY: GeometryAdjustment = {
@@ -654,6 +688,7 @@ export const NEUTRAL_GEOMETRY: GeometryAdjustment = {
   angle_degrees: 0,
   overlay: "None",
   auto_horizon: false,
+  canvas_extension: null,
 };
 
 export const ASPECT_RATIO_PRESETS: ReadonlyArray<{ value: number | null; label: string }> = [

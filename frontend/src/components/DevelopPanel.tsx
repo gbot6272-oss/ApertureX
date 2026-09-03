@@ -51,6 +51,7 @@ import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
 import { LensCalibrationDialog } from "./LensCalibrationDialog";
+import { CanvasExtendDialog } from "./CanvasExtendDialog";
 import { PaletteFrame } from "./PaletteFrame";
 import { SavePresetDialog } from "./SavePresetDialog";
 
@@ -256,6 +257,7 @@ export function DevelopPanel() {
   const manuallyDetectLensProfile = useAppStore((s) => s.manuallyDetectLensProfile);
   const setLensCorrectionCustomDistortionK1 = useAppStore((s) => s.setLensCorrectionCustomDistortionK1);
   const setLensCalibrationDialogOpen = useAppStore((s) => s.setLensCalibrationDialogOpen);
+  const setCanvasExtendDialogOpen = useAppStore((s) => s.setCanvasExtendDialogOpen);
   const setLensCorrectionAutoCa = useAppStore((s) => s.setLensCorrectionAutoCa);
   const setLensCorrectionUprightMode = useAppStore((s) => s.setLensCorrectionUprightMode);
   const runUprightAutoDetect = useAppStore((s) => s.runUprightAutoDetect);
@@ -1309,6 +1311,15 @@ export function DevelopPanel() {
               />
               Automatische Ausrichtung (nur EXIF-Ausrichtung, siehe ADR-0028)
             </label>
+
+            <button
+              type="button"
+              onClick={() => setCanvasExtendDialogOpen(true)}
+              title="Leinwand per KI-Ausfüllen über den Bildrand hinaus erweitern (Phase 14 Schritt 1, siehe DECISIONS.md ADR-0041)"
+              className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:border-accent"
+            >
+              Leinwand erweitern (KI)…
+            </button>
           </fieldset>
 
           <fieldset id="stage-repair" className="flex flex-col gap-3">
@@ -1530,6 +1541,7 @@ export function DevelopPanel() {
     </PaletteFrame>
     <SavePresetDialog open={savePresetOpen} onClose={() => setSavePresetOpen(false)} />
     <LensCalibrationDialog />
+    <CanvasExtendDialog />
     </>
   );
 }

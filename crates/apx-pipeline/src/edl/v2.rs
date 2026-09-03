@@ -601,7 +601,7 @@ impl CropRect {
     };
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GeometryAdjustment {
     pub crop: CropRect,
     /// `None` = freie Seitenverhältniswahl, sonst Breite/Höhe-Verhältnis.
@@ -611,6 +611,13 @@ pub struct GeometryAdjustment {
     /// Vereinfachte Auto-Ausrichtung: nur EXIF-Orientierung, kein echtes
     /// Kantenerkennungs-Verfahren (siehe `DECISIONS.md` ADR-0028).
     pub auto_horizon: bool,
+    /// KI-Ausfüllen über die Bildränder hinaus (Phase 14 Schritt 1, siehe
+    /// `DECISIONS.md` ADR-0041) — additiv statt Schema-Version-Sprung
+    /// (`#[serde(default)]`, dieselbe Konvention wie `RepairStroke::
+    /// ai_fill`): ein gespeichertes EDL ohne dieses Feld liest weiterhin
+    /// als `None` (keine Erweiterung).
+    #[serde(default)]
+    pub canvas_extension: Option<CanvasExtension>,
 }
 
 impl GeometryAdjustment {
@@ -620,6 +627,7 @@ impl GeometryAdjustment {
         angle_degrees: 0.0,
         overlay: GridOverlay::None,
         auto_horizon: false,
+        canvas_extension: None,
     };
 }
 
@@ -627,6 +635,49 @@ impl Default for GeometryAdjustment {
     fn default() -> Self {
         Self::NEUTRAL
     }
+}
+
+/// Leinwand-Erweiterung über die ursprünglichen Bildränder hinaus (Phase 14
+/// Schritt 1, siehe `DECISIONS.md` ADR-0041) — läuft am **Ende** der
+/// Geometrie-Stufe, nach Drehung und Zuschnitt (dieselbe Stelle, an der
+/// laut dieser Moduldoku bereits die einzige größenverändernde Operation
+/// der ganzen Pipeline sitzt). Die vier Ränder sind — wie `CropRect`s
+/// Koordinaten — als Bruchteil (`0.0..`) der jeweils **aktuellen**
+/// (gedrehten/zugeschnittenen) Breite (`margin_left`/`margin_right`)
+/// bzw. Höhe (`margin_top`/`margin_bottom`) angegeben, nicht in
+/// absoluten Pixeln — ein Bruchteil skaliert bei jeder Export-/
+/// Vorschau-Auflösung gleichermaßen sinnvoll mit, absolute Pixel würden
+/// bei doppelter Export-Auflösung nur noch halb so breit wirken.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CanvasExtension {
+    pub margin_left: f32,
+    pub margin_top: f32,
+    pub margin_right: f32,
+    pub margin_bottom: f32,
+    /// Einmalig vorab per `apx_ai::inpaint::InpaintSession::fill_rgb8`
+    /// berechnetes Ergebnis (analog zu [`AiFillPatch`]) — `None` heißt
+    /// „Ränder gewählt, aber „Anwenden" noch nicht bestätigt", dieselbe
+    /// „noch nicht berechnet"-Konvention wie `RepairStroke::ai_fill`.
+    /// Ohne Patch bleibt die Stufe ein No-Op (keine neue, ungefüllte
+    /// Leinwand ohne KI-Ergebnis).
+    #[serde(default)]
+    pub patch: Option<CanvasExtensionPatch>,
+}
+
+/// `pixels` ist die **gesamte** erweiterte Leinwand (nicht nur die neuen
+/// Ränder) als interleaved RGB (`0..=255`), `bitmap_width *
+/// bitmap_height * 3` Bytes — beim Rendern liefert die Bildmitte immer
+/// das live gerenderte Bild, aus dieser Bitmap wird nur der Rand-Bereich
+/// entnommen (bilinear auf die tatsächliche Zielgröße hochskaliert,
+/// dieselbe Technik wie `AiFillPatch`). Eine einzige Bitmap statt vier
+/// Rand-Rechtecken, weil LaMas Inferenz ohnehin über die ganze Leinwand
+/// läuft (siehe `apx_ai::inpaint`) und die Ecken sonst an den
+/// Rand-Nahtstellen sichtbar unstetig wären.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CanvasExtensionPatch {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub pixels: Vec<u8>,
 }
 
 // ---- Reparatur (Klonen/Reparieren) ------------------------------------------

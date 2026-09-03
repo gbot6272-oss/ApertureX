@@ -544,6 +544,9 @@ interface DevelopSlice {
   setLensCorrectionCustomDistortionK1: (value: number | null) => void;
   lensCalibrationDialogOpen: boolean;
   setLensCalibrationDialogOpen: (open: boolean) => void;
+  /** Öffnet/schließt den Leinwand-Erweiterungs-Dialog (Phase 14 Schritt 1). */
+  canvasExtendDialogOpen: boolean;
+  setCanvasExtendDialogOpen: (open: boolean) => void;
   /** Schaltet die automatische CA-Korrektur um und committet sofort. */
   setLensCorrectionAutoCa: (value: boolean) => void;
   /** Setzt den Perspektive/Upright-Modus absolut und committet sofort. */
@@ -615,6 +618,17 @@ interface DevelopSlice {
   /** Läuft während [`runAiInpaintForStroke`] — der Index des gerade
    * berechneten Strichs, sonst `null`. */
   aiInpaintLoadingIndex: number | null;
+  /** Erweitert die Leinwand um die übergebenen Ränder (normierte
+   * Bruchteile, `0.0..=1.0`) und lässt LaMa den neuen Rand füllen (Phase
+   * 14 Schritt 1) — dasselbe „Anwenden"-Muster wie
+   * [`runAiInpaintForStroke`], nur auf `developEdl.geometry.
+   * canvas_extension` statt einem Reparatur-Strich. */
+  runAiOutpaint: (marginLeft: number, marginTop: number, marginRight: number, marginBottom: number) => Promise<void>;
+  /** `true`, während [`runAiOutpaint`] läuft. */
+  aiOutpaintLoading: boolean;
+  /** Entfernt eine gewählte/angewendete Leinwand-Erweiterung wieder
+   * (zurück auf die Original-Bildgröße) und committet sofort. */
+  clearCanvasExtension: () => void;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
    * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
    * bei jedem Zwischenwert). */
@@ -2377,6 +2391,13 @@ export const useAppStore = create<AppStore>()(
       });
     },
 
+    canvasExtendDialogOpen: false,
+    setCanvasExtendDialogOpen: (open) => {
+      set((state) => {
+        state.canvasExtendDialogOpen = open;
+      });
+    },
+
     setLensCorrectionAutoCa: (value) => {
       set((state) => {
         state.developEdl.lens_corrections.auto_ca = value;
@@ -2603,6 +2624,50 @@ export const useAppStore = create<AppStore>()(
           state.aiInpaintLoadingIndex = null;
         });
       }
+    },
+
+    aiOutpaintLoading: false,
+
+    runAiOutpaint: async (marginLeft, marginTop, marginRight, marginBottom) => {
+      const { selectedPhotoId } = get();
+      if (!selectedPhotoId) return;
+      if (marginLeft <= 0 && marginTop <= 0 && marginRight <= 0 && marginBottom <= 0) return;
+
+      set((state) => {
+        state.aiOutpaintLoading = true;
+      });
+      try {
+        const dto = await api.runAiOutpaint(selectedPhotoId, marginLeft, marginTop, marginRight, marginBottom);
+        set((state) => {
+          state.developEdl.geometry.canvas_extension = {
+            margin_left: dto.margin_left,
+            margin_top: dto.margin_top,
+            margin_right: dto.margin_right,
+            margin_bottom: dto.margin_bottom,
+            patch: {
+              bitmap_width: dto.bitmap_width,
+              bitmap_height: dto.bitmap_height,
+              pixels: base64ToByteArray(dto.pixels_base64),
+            },
+          };
+        });
+        void get().commitDevelopEdit("Leinwand erweitert");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.aiOutpaintLoading = false;
+        });
+      }
+    },
+
+    clearCanvasExtension: () => {
+      set((state) => {
+        state.developEdl.geometry.canvas_extension = null;
+      });
+      void get().commitDevelopEdit("Leinwand-Erweiterung entfernt");
     },
 
     colorMixerPickerActive: false,

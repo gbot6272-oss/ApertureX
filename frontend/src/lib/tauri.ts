@@ -972,6 +972,41 @@ export function runAiInpaint(
   return invoke<AiFillPatchDto>("run_ai_inpaint", { photoId, x, y, width, height });
 }
 
+// ---- KI: Leinwand-Erweiterung / Outpainting (Phase 14 Schritt 1) ----------
+
+export interface CanvasExtensionPatchDto {
+  margin_left: number;
+  margin_top: number;
+  margin_right: number;
+  margin_bottom: number;
+  bitmap_width: number;
+  bitmap_height: number;
+  /** Base64-kodiertes interleaved-RGB-`u8`-Ergebnis der gesamten
+   * erweiterten Leinwand (Original + KI-erzeugter Rand). */
+  pixels_base64: string;
+}
+
+/** Erweitert die Leinwand um `marginLeft`/`marginTop`/`marginRight`/
+ * `marginBottom` (normierte Bruchteile der aktuellen Bildbreite/-höhe,
+ * `0.0..=1.0`) und füllt den neuen Rand per LaMa-Inferenz — dasselbe
+ * heruntergeladene Modell wie [`runAiInpaint`], braucht also denselben
+ * vorherigen Download. */
+export function runAiOutpaint(
+  photoId: string,
+  marginLeft: number,
+  marginTop: number,
+  marginRight: number,
+  marginBottom: number,
+): Promise<CanvasExtensionPatchDto> {
+  return invoke<CanvasExtensionPatchDto>("run_ai_outpaint", {
+    photoId,
+    marginLeft,
+    marginTop,
+    marginRight,
+    marginBottom,
+  });
+}
+
 // ---- UI-Einstellungen (Phase 10 Schritt 1) --------------------------------
 
 export type Theme = "dark" | "light";

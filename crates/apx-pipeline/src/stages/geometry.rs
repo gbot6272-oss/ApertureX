@@ -41,7 +41,7 @@
 
 use rayon::prelude::*;
 
-use crate::edl::v2::{CropRect, GeometryAdjustment};
+use crate::edl::v2::{CanvasExtension, CropRect, GeometryAdjustment};
 
 fn sample_rgba_at(rgba: &[u8], width: usize, height: usize, x: i32, y: i32) -> [u8; 4] {
     let cx = x.clamp(0, width as i32 - 1) as usize;
@@ -131,9 +131,112 @@ fn crop_rgba(rgba: &[u8], width: u32, height: u32, crop: &CropRect) -> (u32, u32
     (out_w as u32, out_h as u32, out)
 }
 
-/// Wendet Drehung + Zuschnitt an — die einzige Funktion, die
-/// `develop::render_rgba8` aus diesem Modul aufruft. Gibt die
-/// tatsächliche (u. U. gegenüber `width`/`height` verkleinerte)
+/// Zerlegt eine interleaved-RGB-`u8`-Bitmap (wie
+/// `CanvasExtensionPatch::pixels`) in drei Ein-Kanal-Puffer — dieselbe
+/// Aufteilung wie `stages::repair`s private `split_patch_channels`
+/// (dort für `AiFillPatch`), hier separat gehalten statt über ein
+/// gemeinsames Hilfsmodul geteilt (kleine, in sich geschlossene
+/// Funktion).
+fn split_patch_rgb(pixels: &[u8], width: u32, height: u32) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let n = (width as usize) * (height as usize);
+    let mut r = vec![0u8; n];
+    let mut g = vec![0u8; n];
+    let mut b = vec![0u8; n];
+    for i in 0..n.min(pixels.len() / 3) {
+        r[i] = pixels[i * 3];
+        g[i] = pixels[i * 3 + 1];
+        b[i] = pixels[i * 3 + 2];
+    }
+    (r, g, b)
+}
+
+/// Vergrößert die Leinwand um `extension`s vier Ränder (Phase 14
+/// Schritt 1, siehe `DECISIONS.md` ADR-0041) — die Bildmitte kommt
+/// unverändert vom bereits gedrehten/zugeschnittenen `rgba`, die neuen
+/// Ränder aus der einmalig vorab per KI berechneten
+/// `extension.patch`-Bitmap (bilinear auf die tatsächliche neue
+/// Leinwandgröße hochskaliert, dieselbe Technik wie `stages::repair`s
+/// `apply_ai_fill`). Ohne berechneten Patch (Ränder gewählt, aber noch
+/// nicht „angewendet") ein No-Op — dieselbe Konvention wie ein frischer
+/// `RepairMode::AiInpaint`-Strich ohne `ai_fill`.
+fn extend_canvas(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    extension: &CanvasExtension,
+) -> (u32, u32, Vec<u8>) {
+    let Some(patch) = &extension.patch else {
+        return (width, height, rgba.to_vec());
+    };
+    if patch.bitmap_width == 0 || patch.bitmap_height == 0 {
+        return (width, height, rgba.to_vec());
+    }
+    // Bruchteile der aktuellen Breite/Höhe in Pixel umrechnen (siehe
+    // `CanvasExtension`s Typdoku für die Begründung).
+    let margin_left = (extension.margin_left.max(0.0) * width as f32).round() as u32;
+    let margin_right = (extension.margin_right.max(0.0) * width as f32).round() as u32;
+    let margin_top = (extension.margin_top.max(0.0) * height as f32).round() as u32;
+    let margin_bottom = (extension.margin_bottom.max(0.0) * height as f32).round() as u32;
+    let new_width = width + margin_left + margin_right;
+    let new_height = height + margin_top + margin_bottom;
+    if new_width == 0 || new_height == 0 {
+        return (width, height, rgba.to_vec());
+    }
+
+    let (patch_r, patch_g, patch_b) =
+        split_patch_rgb(&patch.pixels, patch.bitmap_width, patch.bitmap_height);
+    let patch_r = apx_core::raster::bilinear_resize_u8(
+        &patch_r,
+        patch.bitmap_width,
+        patch.bitmap_height,
+        new_width,
+        new_height,
+    );
+    let patch_g = apx_core::raster::bilinear_resize_u8(
+        &patch_g,
+        patch.bitmap_width,
+        patch.bitmap_height,
+        new_width,
+        new_height,
+    );
+    let patch_b = apx_core::raster::bilinear_resize_u8(
+        &patch_b,
+        patch.bitmap_width,
+        patch.bitmap_height,
+        new_width,
+        new_height,
+    );
+
+    let (nw, nh) = (new_width as usize, new_height as usize);
+    let mut out = vec![0u8; nw * nh * 4];
+    for y in 0..new_height {
+        for x in 0..new_width {
+            let dst = ((y as usize) * nw + x as usize) * 4;
+            let in_center = x >= margin_left
+                && x < margin_left + width
+                && y >= margin_top
+                && y < margin_top + height;
+            if in_center {
+                let src_x = (x - margin_left) as usize;
+                let src_y = (y - margin_top) as usize;
+                let src = (src_y * width as usize + src_x) * 4;
+                out[dst..dst + 4].copy_from_slice(&rgba[src..src + 4]);
+            } else {
+                let pidx = (y as usize) * nw + x as usize;
+                out[dst] = patch_r[pidx];
+                out[dst + 1] = patch_g[pidx];
+                out[dst + 2] = patch_b[pidx];
+                out[dst + 3] = 255;
+            }
+        }
+    }
+    (new_width, new_height, out)
+}
+
+/// Wendet Drehung + Zuschnitt + optionale Leinwand-Erweiterung an — die
+/// einzige Funktion, die `develop::render_rgba8` aus diesem Modul
+/// aufruft. Gibt die tatsächliche (u. U. gegenüber `width`/`height`
+/// verkleinerte oder — seit Phase 14 Schritt 1 — vergrößerte)
 /// Ausgabegröße zurück.
 pub fn apply(
     rgba: &[u8],
@@ -142,16 +245,21 @@ pub fn apply(
     adjustment: &GeometryAdjustment,
 ) -> (u32, u32, Vec<u8>) {
     let rotated = rotate_rgba(rgba, width, height, adjustment.angle_degrees);
-    if adjustment.crop == CropRect::FULL {
+    let (w, h, cropped) = if adjustment.crop == CropRect::FULL {
         (width, height, rotated)
     } else {
         crop_rgba(&rotated, width, height, &adjustment.crop)
+    };
+    match &adjustment.canvas_extension {
+        Some(extension) => extend_canvas(&cropped, w, h, extension),
+        None => (w, h, cropped),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::edl::v2::CanvasExtensionPatch;
 
     /// Baut ein `size`×`size`-RGBA8-Testbild mit einer eindeutigen
     /// Markierung an einer bestimmten Pixelposition.
@@ -256,5 +364,68 @@ mod tests {
         assert_eq!(w, (0.4 * 30.0_f32).round() as u32);
         assert_eq!(h, (0.3 * 30.0_f32).round() as u32);
         assert_eq!(result.len(), (w * h * 4) as usize);
+    }
+
+    /// Ohne berechneten Patch bleibt eine gewählte Leinwand-Erweiterung
+    /// ein No-Op — dieselbe "Ränder gewählt, aber noch nicht
+    /// angewendet"-Konvention wie ein frischer `RepairMode::AiInpaint`-
+    /// Strich ohne `ai_fill` (siehe `CanvasExtension::patch`s Doku).
+    #[test]
+    fn canvas_extension_without_a_computed_patch_is_a_no_op() {
+        let pixels = marked_image(10, 4, 4);
+        let adjustment = GeometryAdjustment {
+            canvas_extension: Some(CanvasExtension {
+                margin_left: 0.5,
+                margin_top: 0.5,
+                margin_right: 0.5,
+                margin_bottom: 0.5,
+                patch: None,
+            }),
+            ..GeometryAdjustment::NEUTRAL
+        };
+        let (w, h, result) = apply(&pixels, 10, 10, &adjustment);
+        assert_eq!((w, h), (10, 10));
+        assert_eq!(result, pixels);
+    }
+
+    /// Mit berechnetem Patch wächst die Leinwand um genau die vier
+    /// Ränder, das Original bleibt unverändert mittig eingebettet, und
+    /// die neuen Randpixel kommen erkennbar aus dem Patch (hier eine
+    /// gleichmäßig grüne Patch-Bitmap) statt aus dem Original.
+    #[test]
+    fn canvas_extension_with_a_patch_grows_the_canvas_and_keeps_the_original_centered() {
+        let pixels = marked_image(10, 4, 4); // grau (128) mit einem roten Markierungspixel
+        let patch_pixels = vec![0u8, 200, 0]; // 1x1 grüne Patch-Bitmap, hochskaliert
+        let adjustment = GeometryAdjustment {
+            canvas_extension: Some(CanvasExtension {
+                margin_left: 0.3,
+                margin_top: 0.2,
+                margin_right: 0.3,
+                margin_bottom: 0.2,
+                patch: Some(CanvasExtensionPatch {
+                    bitmap_width: 1,
+                    bitmap_height: 1,
+                    pixels: patch_pixels,
+                }),
+            }),
+            ..GeometryAdjustment::NEUTRAL
+        };
+        let (w, h, result) = apply(&pixels, 10, 10, &adjustment);
+        assert_eq!((w, h), (16, 14));
+        assert_eq!(result.len(), (w * h * 4) as usize);
+
+        // Originalbild sitzt bei (3, 2), unverändert (auch das Alpha des
+        // `marked_image`-Testbilds bleibt bei 128, siehe dessen Doku).
+        let center_idx = ((2usize * w as usize) + 3) * 4;
+        assert_eq!(&result[center_idx..center_idx + 4], &[128, 128, 128, 128]);
+        // Die rote Markierung des Originals bei (4, 4) sitzt jetzt bei
+        // (3 + 4, 2 + 4) = (7, 6).
+        let mark_idx = ((6usize * w as usize) + 7) * 4;
+        assert_eq!(&result[mark_idx..mark_idx + 4], &[255, 0, 0, 255]);
+
+        // Rand-Pixel (außerhalb des eingebetteten Originals) kommt vom
+        // grünen Patch, nicht vom grauen Original.
+        let border_idx = 0; // (0, 0) liegt außerhalb des Original-Bereichs
+        assert_eq!(&result[border_idx..border_idx + 4], &[0, 200, 0, 255]);
     }
 }

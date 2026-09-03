@@ -2782,3 +2782,43 @@ Vorschau-Puffer (Vektorskop/Wellenform, kein neuer Backend-Command),
 die bestehenden Hautton-/Saliency-Heuristiken in `apx-ai::segmentation`
 (Himmel-Segmentierung), `kmeans_colors` (real per `cargo add --dry-run`
 geprüft, v0.7.1, MIT/Apache — Farb-Harmonie-Rad).
+
+### Nachtrag I (Phase 14 Schritt 1): Canvas-Erweiterung/Outpainting —
+Margen als normierte Bruchteile statt absoluter Pixel
+
+`GeometryAdjustment` bekommt additiv (`#[serde(default)]`, dieselbe
+Konvention wie `RepairStroke::ai_fill`) ein `canvas_extension:
+Option<CanvasExtension>` mit vier Rändern und einem optionalen,
+vorab berechneten `CanvasExtensionPatch` (Bitmap + eigene
+Speicherauflösung — dasselbe „einmal berechnen, bei jedem Rendern nur
+noch skalieren"-Muster wie `AiFillPatch`). Die vier Ränder wurden zuerst
+als `u32`-Pixelzahl entworfen (lose Analogie zu
+`AiFillPatch::bitmap_width`), das war aber die falsche Einheit: eine
+Speicherauflösung wie `bitmap_width` wird bei jedem Rendern ohnehin auf
+die Zielgröße skaliert, ein *Rand* legt dagegen unmittelbar das neue
+Seitenverhältnis der Leinwand fest und muss deshalb — wie `CropRect`s
+normierte `0.0..=1.0`-Koordinaten — mit dem Bild mitskalieren. Korrigiert
+auf `f32`-Bruchteile der jeweils aktuellen Bildbreite/-höhe, noch bevor
+irgendein Test geschrieben wurde. `GeometryAdjustment` verliert dabei
+`Copy` (der neue Patch trägt `Vec<u8>>`) — nichts im Rest der Codebasis
+verließ sich auf `Copy` (`cargo check -p apx-pipeline` bestätigt sauber).
+
+`stages/geometry.rs::extend_canvas` läuft als letzter Teilschritt in
+`apply()` nach Drehung/Zuschnitt, rechnet die Bruchteile in Pixel um,
+bettet das Original unverändert mittig ein und füllt den Rand aus dem
+bilinear auf die tatsächliche neue Leinwandgröße hochskalierten Patch —
+ohne Patch (Ränder gewählt, „Anwenden" aber noch nicht ausgelöst) bleibt
+die Erweiterung ein reiner No-Op, exakt wie ein frischer
+`RepairMode::AiInpaint`-Strich ohne `ai_fill`.
+
+`apx-app::commands::run_ai_outpaint` braucht **kein** neues Modell und
+**keinen** neuen Download-Command: dieselbe bereits bestehende
+`apx_ai::inpaint::InpaintSession::fill_rgb8` (Phase 13 Schritt 1) nimmt
+beliebige gleich große Pixel-/Maskenpaare entgegen, der Command baut nur
+eine andere Maskenform — das gesamte gewählte Randgebiet statt eines
+gemalten Pinselstrichs, Randpixel per Kanten-Klemmung vorbefüllt statt
+mit einer harten Flächenfarbe (weniger sichtbare Kanten-Artefakte vor der
+eigentlichen Inferenz). Dieselbe ehrliche Grenze wie bei jeder anderen
+KI-Analyse dieses Projekts: läuft auf dem rohen,
+`ANALYSIS_MAX_EDGE`-gedeckelten Dekodierergebnis, ohne eine im
+Entwickeln-Modul bereits gesetzte Drehung/Zuschnitt zu berücksichtigen.

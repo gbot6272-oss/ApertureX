@@ -2929,6 +2929,132 @@ pub fn run_ai_inpaint(
     })
 }
 
+// ---- KI: Leinwand-Erweiterung (Outpainting, Phase 14 Schritt 1, siehe
+// DECISIONS.md ADR-0041) -----------------------------------------------------
+//
+// Dieselbe LaMa-Session wie `run_ai_inpaint` oben (kein zweites Modell,
+// kein zweiter Download-Command) — nur eine andere Maskenform: statt
+// eines gemalten Pinselstrichs ist die gesamte neue Randfläche rund um
+// das zentrierte Original als „auszufüllen" markiert. Das Ergebnis ist
+// bereits die vollständig zusammengesetzte, erweiterte Leinwand (Original
+// + KI-Rand) — `stages::geometry::extend_canvas` braucht den Rand-Anteil
+// nicht separat, weil sie den Original-Bereich beim Rendern ohnehin durch
+// die exakten Original-Pixel ersetzt (siehe deren Doku) und das
+// zurückgegebene Bitmap unverändert als `CanvasExtensionPatch::pixels`
+// übernommen werden kann — dasselbe „einmal berechnen, bei jedem Rendern
+// nur noch skalieren"-Muster wie `AiFillPatch`.
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CanvasExtensionPatchDto {
+    pub margin_left: f32,
+    pub margin_top: f32,
+    pub margin_right: f32,
+    pub margin_bottom: f32,
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    /// Base64-kodiertes interleaved-RGB-`u8`-Ergebnis, `bitmap_width *
+    /// bitmap_height * 3` Bytes nach dem Dekodieren — dasselbe
+    /// Übertragungsmuster wie `AiFillPatchDto::pixels_base64`.
+    pub pixels_base64: String,
+}
+
+/// Ersetzt den Rand einer um `margin_left`/`margin_top`/`margin_right`/
+/// `margin_bottom` (normierte Bruchteile der aktuellen Bildbreite/-höhe,
+/// `0.0..=1.0`, dieselbe Konvention wie `CanvasExtension`s Feldtypen)
+/// erweiterten Leinwand durch echte LaMa-Inferenz (Phase 14 Schritt 1).
+/// Läuft — wie `run_ai_inpaint` — auf dem linearen, auf
+/// `apx_ai::segmentation::ANALYSIS_MAX_EDGE` gedeckelten Dekodierergebnis,
+/// **ohne** eine bereits im Entwickeln-Modul gesetzte Drehung/Zuschnitt zu
+/// berücksichtigen — dieselbe ehrliche Vereinfachung wie bei jeder
+/// anderen KI-Analyse in diesem Projekt (`generate_ai_mask`,
+/// `suggest_repair_source`, …), die ebenfalls auf dem rohen
+/// Dekodierergebnis statt der entwickelten Vorschau arbeitet.
+#[tauri::command]
+pub fn run_ai_outpaint(
+    state: State<'_, AppState>,
+    photo_id: String,
+    margin_left: f32,
+    margin_top: f32,
+    margin_right: f32,
+    margin_bottom: f32,
+) -> Result<CanvasExtensionPatchDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let model_path = settings
+        .ai
+        .inpainting_model_path
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| {
+            "Kein KI-Ausfüllen-Modell heruntergeladen — siehe Einstellungen → KI.".to_string()
+        })?;
+
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let width = linear.width;
+    let height = linear.height;
+    let ml = (margin_left.max(0.0) * width as f32).round() as u32;
+    let mr = (margin_right.max(0.0) * width as f32).round() as u32;
+    let mt = (margin_top.max(0.0) * height as f32).round() as u32;
+    let mb = (margin_bottom.max(0.0) * height as f32).round() as u32;
+    let new_width = width + ml + mr;
+    let new_height = height + mt + mb;
+    if new_width == 0 || new_height == 0 || (ml == 0 && mr == 0 && mt == 0 && mb == 0) {
+        return Err("Leinwand-Erweiterung braucht mindestens einen Rand größer als 0.".to_string());
+    }
+
+    // Original als `u8`-RGB in die Bildmitte der neuen Leinwand kopieren;
+    // der neue Rand wird per Kanten-Klemmung (nächstliegender Original-
+    // Pixel) vorbefüllt statt mit einer harten Flächenfarbe — reduziert
+    // sichtbare Kanten-Artefakte, bevor LaMa den Rand tatsächlich neu
+    // erzeugt (dieselbe Näherung, mit der auch andere Inpainting-Tools
+    // ihre Startfüllung wählen).
+    let (nw, nh) = (new_width as usize, new_height as usize);
+    let mut extended_u8 = vec![0u8; nw * nh * 3];
+    let mut mask = vec![255u8; nw * nh];
+    for y in 0..new_height {
+        for x in 0..new_width {
+            let src_x = x.saturating_sub(ml).min(width.saturating_sub(1));
+            let src_y = y.saturating_sub(mt).min(height.saturating_sub(1));
+            let src = (src_y as usize * width as usize + src_x as usize) * 3;
+            let dst = (y as usize * nw + x as usize) * 3;
+            for c in 0..3 {
+                let value = linear.pixels[src + c].clamp(0.0, 1.0);
+                extended_u8[dst + c] = (value * 255.0).round() as u8;
+            }
+            let in_center = x >= ml && x < ml + width && y >= mt && y < mt + height;
+            if in_center {
+                mask[y as usize * nw + x as usize] = 0;
+            }
+        }
+    }
+
+    // Session wird pro Aufruf frisch geladen — dieselbe akzeptierte
+    // Vereinfachung wie in `run_ai_inpaint` oben (siehe dort).
+    let mut session = apx_ai::inpaint::InpaintSession::load(Path::new(&model_path))
+        .map_err(|err| err.to_string())?;
+    let filled = session
+        .fill_rgb8(&extended_u8, new_width, new_height, &mask)
+        .map_err(|err| err.to_string())?;
+
+    Ok(CanvasExtensionPatchDto {
+        margin_left,
+        margin_top,
+        margin_right,
+        margin_bottom,
+        bitmap_width: new_width,
+        bitmap_height: new_height,
+        pixels_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &filled),
+    })
+}
+
 // ---- KI: Echte Personen-Wiedererkennung (Phase 13 Schritt 8, siehe
 // DECISIONS.md ADR-0040-Nachtrag VI) -----------------------------------------
 //

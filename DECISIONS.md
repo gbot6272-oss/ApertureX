@@ -2454,3 +2454,48 @@ auf die bestehende reine Verschiebungs-Registrierung
 mindestens ein Foto keine verlässliche Homografie gefunden wird —
 bewusst alles-oder-nichts statt einer Mischkomposition aus beiden
 Positionierungsarten auf derselben Leinwand.
+
+## ADR-0040-Nachtrag IV: Schritt 6 — Mehrere Kataloge + Katalog-Wartung;
+Katalogwechsel per Neustart statt Hot-Swap der offenen Verbindung
+
+**Status:** Angenommen
+**Kontext:** `AppState::catalog: Arc<Catalog>` wird in `commands.rs` von
+praktisch jedem einzelnen Tauri-Command direkt referenziert oder
+geklont. Ein echtes Hot-Swap der offenen Katalogverbindung im
+laufenden Prozess hätte entweder jeden dieser Zugriffe hinter ein
+zusätzliches Lock verlegt (invasiv, hohes Fehlerrisiko quer durch eine
+~6000-Zeilen-Datei) oder den `Arc` selbst austauschbar gemacht
+(dieselbe Umbau-Größe) — für einen einzelnen Schritt nicht vertretbar.
+
+**Entscheidung:** dieselbe UX wie Adobe Lightroom Classics eigener
+Katalogwechsel ("Diese Änderung erfordert einen Neustart"): Wechseln
+oder Neuanlegen eines Katalogs speichert den Zielpfad in
+`Settings::catalog` und ruft `AppHandle::request_restart()` — die App
+startet neu und öffnet beim nächsten Start automatisch den neuen
+Pfad. Dafür genügt eine einzige, unauffällige Änderung an `main.rs`
+(liest `settings.catalog.last_opened_catalog` vor dem `Catalog::open`-
+Aufruf) statt eines Umbaus der gesamten Command-Schicht.
+
+**Fund:** `Settings::catalog::last_opened_catalog` existierte bereits
+seit Phase 10 (Settings-Fundament) im Datenmodell, wurde aber nie
+gelesen — `main.rs` öffnete unbedingt `paths.default_catalog_file()`.
+Reine Attrappe, jetzt tatsächlich verdrahtet (mit Rückfall auf den
+Standardkatalog, falls der hinterlegte Pfad seit dem letzten Start
+verschoben/gelöscht wurde — kein Absturz beim Start wegen eines
+veralteten Pfads).
+
+**Katalog-Wartung** braucht dagegen keinen Neustart — sie arbeitet auf
+der bereits offenen Verbindung: `apx_catalog::Catalog` bekommt
+`integrity_check` (`PRAGMA integrity_check`, SQLites eigene
+Standardprüfung auf strukturelle Schäden), `vacuum` (`VACUUM`) und
+`backup_to` (SQLites Online-Backup-API über `rusqlite`s `backup`-
+Feature — sicher neben der weiterhin offenen Verbindung nutzbar,
+anders als eine rohe Dateikopie, die bei gleichzeitigem Schreibzugriff
+eine inkonsistente Kopie ergeben könnte).
+
+**Kein neuer Dialog-Wechsel-Mechanismus fürs Frontend nötig:** die
+generischen `pick_file_path`/`pick_save_file_path`-Commands (bereits
+für Drucken/Buch/ICC-Profil-Auswahl vorhanden) übernehmen die
+Datei-Dialoge für "Neuer Katalog…"/"Katalog öffnen…"/"Sichern unter…"
+direkt — die neuen Rust-Commands nehmen nur noch den bereits gewählten
+Pfad entgegen.

@@ -92,6 +92,58 @@ impl Catalog {
         Ok(result)
     }
 
+    // ---- Katalog-Wartung (Phase 13 Schritt 6, siehe `DECISIONS.md`
+    // ADR-0040-Nachtrag IV) ------------------------------------------
+
+    /// Führt SQLites eigene `PRAGMA integrity_check` aus — die
+    /// Standardmethode, um eine SQLite-Datei auf strukturelle Schäden zu
+    /// prüfen (defekte Seiten, kaputte Indizes usw.), ohne sie
+    /// tatsächlich zu reparieren. Leerer Vektor = alles in Ordnung (die
+    /// echte Ausgabe bei Erfolg ist die einzeilige Zeichenkette `"ok"`,
+    /// die hier statt eines künstlichen leeren Erfolgsmarkers
+    /// herausgefiltert wird); jede andere Zeile beschreibt einen
+    /// gefundenen Fehler.
+    pub fn integrity_check(&self) -> Result<Vec<String>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare("PRAGMA integrity_check")
+            .map_err(error::map_sqlite_err)?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(error::map_sqlite_err)?;
+        let mut problems = Vec::new();
+        for row in rows {
+            let line = row.map_err(error::map_sqlite_err)?;
+            if line != "ok" {
+                problems.push(line);
+            }
+        }
+        Ok(problems)
+    }
+
+    /// Führt `VACUUM` aus — baut die Datenbankdatei komplett neu auf,
+    /// verwirft dabei durch Löschungen freigewordenen, aber noch
+    /// belegten Speicherplatz (SQLite gibt ihn sonst nicht von selbst an
+    /// das Dateisystem zurück) und defragmentiert die Seitenanordnung.
+    /// Läuft in einer eigenen, impliziten Transaktion — `VACUUM`
+    /// akzeptiert keine umschließende Transaktion.
+    pub fn vacuum(&self) -> Result<()> {
+        let conn = self.lock()?;
+        conn.execute_batch("VACUUM").map_err(error::map_sqlite_err)
+    }
+
+    /// Sichert den Katalog per SQLites Online-Backup-API nach `dest` —
+    /// sicher neben der weiterhin offenen Verbindung nutzbar (anders als
+    /// eine rohe Dateikopie, die bei gleichzeitigem Schreibzugriff eine
+    /// inkonsistente Kopie ergeben könnte). Überschreibt `dest`, falls
+    /// die Datei bereits existiert (`rusqlite::Connection::backup`s
+    /// eigenes Verhalten).
+    pub fn backup_to(&self, dest: &Path) -> Result<()> {
+        let conn = self.lock()?;
+        conn.backup(rusqlite::DatabaseName::Main, dest, None)
+            .map_err(error::map_sqlite_err)
+    }
+
     // ---- Ordner ------------------------------------------------------
 
     pub fn insert_folder(&self, path: &Path, parent_id: Option<FolderId>) -> Result<FolderId> {
@@ -923,6 +975,49 @@ mod tests {
                 .expect("Foto sollte noch da sein");
             assert_eq!(photo.filename, "IMG_0001.CR2");
         }
+    }
+
+    #[test]
+    fn integrity_check_reports_no_problems_on_a_healthy_catalog() {
+        let catalog = Catalog::open_in_memory().expect("sollte öffnen");
+        let problems = catalog.integrity_check().expect("sollte laufen");
+        assert!(
+            problems.is_empty(),
+            "frisch angelegter Katalog sollte keine Integritätsprobleme haben: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn vacuum_runs_without_error_and_keeps_data_intact() {
+        let catalog = Catalog::open_in_memory().expect("sollte öffnen");
+        let folder_id = catalog
+            .insert_folder(Path::new("/fotos"), None)
+            .expect("ok");
+        catalog.vacuum().expect("VACUUM sollte gelingen");
+        let folder = catalog.get_folder(folder_id).expect("sollte noch da sein");
+        assert_eq!(folder.path, PathBuf::from("/fotos"));
+    }
+
+    #[test]
+    fn backup_to_produces_a_file_with_the_same_data() {
+        let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
+        let db_path = tmp.path().join("catalog.sqlite");
+        let backup_path = tmp.path().join("backup.sqlite");
+
+        let catalog = Catalog::open(&db_path).expect("sollte öffnen");
+        let folder_id = catalog
+            .insert_folder(Path::new("/fotos"), None)
+            .expect("ok");
+        catalog
+            .backup_to(&backup_path)
+            .expect("Backup sollte gelingen");
+        assert!(backup_path.is_file());
+
+        let restored = Catalog::open(&backup_path).expect("Backup sollte sich öffnen lassen");
+        let folder = restored
+            .get_folder(folder_id)
+            .expect("Backup sollte denselben Ordner enthalten");
+        assert_eq!(folder.path, PathBuf::from("/fotos"));
     }
 
     /// SPEC.md §7 Definition-of-Done, Punkt 6: "In der EDL serialisierbar

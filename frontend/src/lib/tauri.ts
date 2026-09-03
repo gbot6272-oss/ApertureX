@@ -1047,6 +1047,60 @@ export function pickSaveFilePath(filterName: string, extensions: string[], defau
   return invoke<string | null>("pick_save_file_path", { filterName, extensions, defaultFileName });
 }
 
+// ---- Mehrere Kataloge + Katalog-Wartung (Phase 13 Schritt 6, siehe
+// DECISIONS.md ADR-0040-Nachtrag IV) -----------------------------------
+
+export interface CatalogInfoDto {
+  path: string;
+  file_size_bytes: number | null;
+}
+
+export function getActiveCatalogInfo(): Promise<CatalogInfoDto> {
+  return invoke<CatalogInfoDto>("get_active_catalog_info");
+}
+
+export interface RecentCatalogDto {
+  path: string;
+  file_name: string;
+  exists: boolean;
+  is_current: boolean;
+  file_size_bytes: number | null;
+}
+
+export function listRecentCatalogs(): Promise<RecentCatalogDto[]> {
+  return invoke<RecentCatalogDto[]>("list_recent_catalogs");
+}
+
+/** Legt unter `path` einen neuen, leeren Katalog an und startet die App
+ * neu, um ihn zu öffnen (kein Hot-Swap im laufenden Prozess, siehe
+ * `apx-app::commands`s Moduldoku) — die Zusage kommt praktisch nie beim
+ * Aufrufer an, da der Prozess kurz danach neu startet. */
+export function createNewCatalog(path: string): Promise<void> {
+  return invoke<void>("create_new_catalog", { path });
+}
+
+/** Wechselt per Neustart zu einem bestehenden Katalog unter `path`. */
+export function switchActiveCatalog(path: string): Promise<void> {
+  return invoke<void>("switch_active_catalog", { path });
+}
+
+/** `PRAGMA integrity_check` auf dem aktuell geöffneten Katalog — leere
+ * Liste = keine Probleme gefunden. */
+export function runCatalogIntegrityCheck(): Promise<string[]> {
+  return invoke<string[]>("run_catalog_integrity_check");
+}
+
+/** `VACUUM` auf dem aktuell geöffneten Katalog. */
+export function runCatalogOptimize(): Promise<void> {
+  return invoke<void>("run_catalog_optimize");
+}
+
+/** Sichert den aktuell geöffneten Katalog nach `destinationPath` (per
+ * {@link pickSaveFilePath} ausgewählt). */
+export function runCatalogBackup(destinationPath: string): Promise<void> {
+  return invoke<void>("run_catalog_backup", { destinationPath });
+}
+
 // ---- Drucken (Phase 8 Schritt 3) -------------------------------------------
 
 export type PrintLayoutKind = "single" | "contact_sheet" | "custom_grid" | "picture_package";

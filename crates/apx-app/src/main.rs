@@ -196,10 +196,51 @@ fn main() {
     let _log_guard =
         apx_core::init_logging(paths.log_dir()).expect("Logging konnte nicht initialisiert werden");
 
-    tracing::info!(catalog = %paths.default_catalog_file().display(), "Aperture X startet");
+    // Mehrere Kataloge (Phase 13 Schritt 6, siehe `DECISIONS.md`
+    // ADR-0040-Nachtrag IV): welcher Katalog beim Start geöffnet wird,
+    // ist seit dieser Sitzung tatsächlich `settings.catalog.
+    // last_opened_catalog` (das Feld existierte bereits seit Phase 10,
+    // wurde aber nie gelesen — reine Attrappe). Fällt auf den
+    // Standard-Katalog zurück, wenn kein Pfad hinterlegt ist ODER das
+    // Öffnen scheitert (Datei verschoben/gelöscht seit dem letzten
+    // Start) — ein Absturz beim Start wegen eines veralteten Pfads wäre
+    // schlimmer als eine stille, ehrliche Rückkehr zum Standardkatalog.
+    let startup_settings = apx_core::Settings::load_or_default(&paths.settings_file())
+        .unwrap_or_else(|err| {
+            tracing::warn!(%err, "Einstellungen beim Start nicht lesbar, verwende Standard-Katalog");
+            apx_core::Settings::default()
+        });
+    let requested_catalog_path = startup_settings
+        .catalog
+        .last_opened_catalog
+        .as_ref()
+        .filter(|p| !p.trim().is_empty())
+        .map(std::path::PathBuf::from);
 
-    let catalog = Catalog::open(&paths.default_catalog_file())
-        .expect("Katalog konnte nicht geöffnet/angelegt werden");
+    let catalog_path = requested_catalog_path
+        .clone()
+        .unwrap_or_else(|| paths.default_catalog_file());
+    tracing::info!(catalog = %catalog_path.display(), "Aperture X startet");
+
+    // Fällt bei einem Fehler auf den Standardpfad zurück (siehe oben) —
+    // `catalog_path` muss dann ebenfalls den tatsächlich geöffneten Pfad
+    // widerspiegeln, nicht den ursprünglich angeforderten.
+    let mut catalog_path = catalog_path;
+    let catalog = Catalog::open(&catalog_path).unwrap_or_else(|err| {
+        if requested_catalog_path.is_some() {
+            tracing::warn!(
+                %err,
+                requested = %catalog_path.display(),
+                fallback = %paths.default_catalog_file().display(),
+                "hinterlegter Katalog konnte nicht geöffnet werden, verwende den Standard-Katalog"
+            );
+            catalog_path = paths.default_catalog_file();
+            Catalog::open(&catalog_path)
+                .expect("Standard-Katalog konnte nicht geöffnet/angelegt werden")
+        } else {
+            panic!("Katalog konnte nicht geöffnet/angelegt werden: {err}");
+        }
+    });
 
     // Siehe DECISIONS.md ADR-0012: schlägt sowohl der bevorzugte
     // Hardware- als auch der Software-Fallback-Adapter fehl, gibt es
@@ -251,6 +292,7 @@ fn main() {
         .manage(AppState {
             paths,
             catalog,
+            catalog_path,
             active_import,
             pipeline,
             tile_cache: Arc::new(apx_pipeline::tile_cache::TileCache::new()),
@@ -305,6 +347,13 @@ fn main() {
             commands::import_xmp_sidecar_from_file,
             commands::get_photo,
             commands::catalog_statistics,
+            commands::get_active_catalog_info,
+            commands::list_recent_catalogs,
+            commands::create_new_catalog,
+            commands::switch_active_catalog,
+            commands::run_catalog_integrity_check,
+            commands::run_catalog_optimize,
+            commands::run_catalog_backup,
             commands::preview_cache_stats,
             commands::clear_preview_cache,
             commands::generate_smart_previews,

@@ -824,6 +824,19 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       }
       case "catalog_statistics":
         return fixtures.catalogStatistics;
+      case "get_active_catalog_info":
+        // Kein e2e-Test deckt Phase 13 Schritt 6 bisher ab — ein
+        // plausibler fester Wert reicht als Platzhalter.
+        return { path: "/tmp/apx-test/catalog.sqlite", file_size_bytes: 1_048_576 };
+      case "list_recent_catalogs":
+        return [];
+      case "create_new_catalog":
+      case "switch_active_catalog":
+      case "run_catalog_optimize":
+      case "run_catalog_backup":
+        return null;
+      case "run_catalog_integrity_check":
+        return [];
       case "preview_cache_stats":
         return fixtures.previewCacheStats;
       case "clear_preview_cache":

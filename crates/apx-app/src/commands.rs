@@ -4612,6 +4612,169 @@ pub fn catalog_statistics(state: State<'_, AppState>) -> Result<CatalogStatistic
         .map_err(|err| err.to_string())
 }
 
+// ---- Mehrere Kataloge + Katalog-Wartung (Phase 13 Schritt 6, siehe
+// DECISIONS.md ADR-0040-Nachtrag IV) -----------------------------------
+//
+// **Kein Hot-Swap der offenen Katalogverbindung im laufenden Prozess:**
+// `AppState::catalog` ist ein `Arc<Catalog>`, von dem praktisch jeder
+// Command in dieser Datei eine Kopie hält oder direkt referenziert — ein
+// echtes Austauschen der Verbindung würde entweder jeden dieser
+// Zugriffe hinter ein zusätzliches Lock verlegen (invasiv, hohes
+// Fehlerrisiko quer durch die ganze Datei) oder den `Arc` selbst
+// austauschbar machen (bringt dieselbe Umbau-Größe). Stattdessen exakt
+// dieselbe UX wie Adobe Lightroom Classics eigener Katalogwechsel:
+// „Diese Änderung erfordert einen Neustart" — Wechseln/Neuanlegen
+// speichert den Zielpfad in den Einstellungen und startet die App über
+// `AppHandle::request_restart` neu, die beim nächsten Start (siehe
+// `main.rs`) automatisch den neuen Pfad öffnet.
+
+/// Informationen zum aktuell geöffneten Katalog — für eine
+/// "Katalog-Informationen"-Anzeige, ergänzend zu [`catalog_statistics`].
+#[derive(Debug, Clone, Serialize)]
+pub struct CatalogInfoDto {
+    pub path: String,
+    /// `None`, wenn die Dateigröße nicht ermittelbar ist (sollte für den
+    /// aktuell offenen Katalog praktisch nie vorkommen).
+    pub file_size_bytes: Option<u64>,
+}
+
+#[tauri::command]
+pub fn get_active_catalog_info(state: State<'_, AppState>) -> CatalogInfoDto {
+    CatalogInfoDto {
+        path: state.catalog_path.display().to_string(),
+        file_size_bytes: std::fs::metadata(&state.catalog_path)
+            .map(|meta| meta.len())
+            .ok(),
+    }
+}
+
+/// Ein Eintrag der "Zuletzt geöffnet"-Liste (`Settings::catalog::
+/// recent_catalogs`) — `exists`/`file_size_bytes` live vom Dateisystem
+/// abgefragt statt in den Einstellungen mitgeführt, damit ein seit dem
+/// letzten Öffnen verändertes/gelöschtes/wieder aufgetauchtes Netzlaufwerk
+/// sich sofort korrekt widerspiegelt.
+#[derive(Debug, Clone, Serialize)]
+pub struct RecentCatalogDto {
+    pub path: String,
+    pub file_name: String,
+    pub exists: bool,
+    pub is_current: bool,
+    pub file_size_bytes: Option<u64>,
+}
+
+#[tauri::command]
+pub fn list_recent_catalogs(state: State<'_, AppState>) -> Result<Vec<RecentCatalogDto>, String> {
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    Ok(settings
+        .catalog
+        .recent_catalogs
+        .into_iter()
+        .map(|path| {
+            let path_buf = PathBuf::from(&path);
+            let metadata = std::fs::metadata(&path_buf).ok();
+            RecentCatalogDto {
+                file_name: path_buf
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.clone()),
+                exists: metadata.is_some(),
+                is_current: path_buf == state.catalog_path,
+                file_size_bytes: metadata.map(|meta| meta.len()),
+                path,
+            }
+        })
+        .collect())
+}
+
+/// Öffnet `path` kurz zur Prüfung (das lässt bei einer bestehenden
+/// fremden, nicht-Aperture-X-SQLite-Datei den Wechsel ehrlich mit einem
+/// echten SQL-Fehler scheitern, statt sie erst beim nächsten Start
+/// kaputtzumachen), trägt ihn dann als zuletzt geöffneten Katalog ein und
+/// startet die App neu.
+fn persist_catalog_choice_and_restart(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    path: &str,
+) -> Result<(), String> {
+    apx_catalog::Catalog::open(Path::new(path)).map_err(|err| err.to_string())?;
+
+    let settings_path = state.paths.settings_file();
+    let mut settings =
+        apx_core::Settings::load_or_default(&settings_path).map_err(|err| err.to_string())?;
+    settings.catalog.record_opened(path);
+    settings
+        .save(&settings_path)
+        .map_err(|err| err.to_string())?;
+
+    app.request_restart();
+    Ok(())
+}
+
+/// Legt einen neuen, leeren Katalog unter `path` an (frisches Schema per
+/// Migrationen, siehe `apx_catalog::Catalog::open`) und wechselt per
+/// Neustart zu ihm. Lehnt einen bereits existierenden Pfad ab — sonst
+/// könnte ein Nutzer versehentlich eine fremde Datei auswählen und sie
+/// überschreiben; zum Öffnen eines bestehenden Katalogs ist
+/// [`switch_active_catalog`] da.
+#[tauri::command]
+pub fn create_new_catalog(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
+    if Path::new(&path).exists() {
+        return Err(format!(
+            "'{path}' existiert bereits — zum Öffnen eines bestehenden Katalogs „Katalog öffnen…“ verwenden"
+        ));
+    }
+    persist_catalog_choice_and_restart(&app, &state, &path)
+}
+
+/// Wechselt per Neustart zu einem bestehenden Katalog unter `path`.
+#[tauri::command]
+pub fn switch_active_catalog(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
+    persist_catalog_choice_and_restart(&app, &state, &path)
+}
+
+/// Führt `PRAGMA integrity_check` auf dem aktuell geöffneten Katalog aus
+/// (siehe `apx_catalog::Catalog::integrity_check`s Doku) — leere Liste =
+/// keine Probleme gefunden.
+#[tauri::command]
+pub fn run_catalog_integrity_check(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    state
+        .catalog
+        .integrity_check()
+        .map_err(|err| err.to_string())
+}
+
+/// Führt `VACUUM` auf dem aktuell geöffneten Katalog aus (siehe
+/// `apx_catalog::Catalog::vacuum`s Doku) — gibt durch Löschungen
+/// freigewordenen Speicherplatz zurück und defragmentiert die Datei.
+#[tauri::command]
+pub fn run_catalog_optimize(state: State<'_, AppState>) -> Result<(), String> {
+    state.catalog.vacuum().map_err(|err| err.to_string())
+}
+
+/// Sichert den aktuell geöffneten Katalog nach `destination_path` (siehe
+/// `apx_catalog::Catalog::backup_to`s Doku) — der Zielpfad wird über den
+/// bereits bestehenden generischen `pick_save_file_path`-Command im
+/// Frontend ausgewählt.
+#[tauri::command]
+pub fn run_catalog_backup(
+    state: State<'_, AppState>,
+    destination_path: String,
+) -> Result<(), String> {
+    state
+        .catalog
+        .backup_to(Path::new(&destination_path))
+        .map_err(|err| err.to_string())
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct PreviewCacheStatsDto {
     pub file_count: u64,

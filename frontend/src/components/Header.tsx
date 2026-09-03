@@ -18,6 +18,7 @@ import { ShareDialog } from "./ShareDialog";
 import { TetherDialog } from "./TetherDialog";
 import { MetadataDialog } from "./MetadataDialog";
 import { StatsCacheDialog } from "./StatsCacheDialog";
+import { CatalogDialog } from "./CatalogDialog";
 
 export function Header() {
   const t = useT();
@@ -61,6 +62,7 @@ export function Header() {
   const [tetherDialogOpen, setTetherDialogOpen] = useState(false);
   const [metadataDialogOpen, setMetadataDialogOpen] = useState(false);
   const [statsDialogOpen, setStatsDialogOpen] = useState(false);
+  const [catalogDialogOpen, setCatalogDialogOpen] = useState(false);
   const openCompareView = useAppStore((s) => s.openCompareView);
   const openVersionsCompareView = useAppStore((s) => s.openVersionsCompareView);
   const openSecondaryDisplay = useAppStore((s) => s.openSecondaryDisplay);
@@ -123,6 +125,9 @@ export function Header() {
         break;
       case "stats":
         setStatsDialogOpen(true);
+        break;
+      case "catalog":
+        setCatalogDialogOpen(true);
         break;
       default:
         return;
@@ -463,7 +468,16 @@ export function Header() {
         {t("header.stats")}
       </button>
 
+      <button
+        type="button"
+        onClick={() => setCatalogDialogOpen(true)}
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
+      >
+        {t("header.catalog")}
+      </button>
+
       <StatsCacheDialog open={statsDialogOpen} onClose={() => setStatsDialogOpen(false)} />
+      <CatalogDialog open={catalogDialogOpen} onClose={() => setCatalogDialogOpen(false)} />
       </nav>
 
       <div className="ml-auto flex items-center gap-4">

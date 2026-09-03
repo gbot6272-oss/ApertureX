@@ -669,6 +669,27 @@ export function analyzeStyleConsistency(folderId: string): Promise<StylePhotoAna
   return invoke<StylePhotoAnalysisDto[]>("analyze_style_consistency", { folderId });
 }
 
+// ---- Farb-Harmonie-Rad (Phase 14 Schritt 7, siehe DECISIONS.md
+// ADR-0041 Nachtrag VII) ------------------------------------------------
+
+export interface PaletteColorDto {
+  r: number;
+  g: number;
+  b: number;
+  hue_degrees: number;
+  chroma: number;
+  lightness: number;
+  percentage: number;
+}
+
+/** Siehe `apx-app`s `extract_color_palette`-Command-Moduldoku: arbeitet
+ * wie `analyzeStyleConsistency`/`listPerceptualDuplicateGroups` auf dem
+ * bereits vorhandenen Thumbnail-Vorschau-Cache, keine erneute RAW-
+ * Dekodierung. */
+export function extractColorPalette(photoId: string, k?: number): Promise<PaletteColorDto[]> {
+  return invoke<PaletteColorDto[]>("extract_color_palette", { photoId, k });
+}
+
 // ---- Presets (ab Phase 5, siehe DECISIONS.md ADR-0031) --------------------
 
 export function createPresetFolder(name: string, parentId: string | null): Promise<string> {

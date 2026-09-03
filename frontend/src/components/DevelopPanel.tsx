@@ -51,6 +51,7 @@ import { PRESET_SECTION_KEYS, PRESET_SECTION_LABELS, type PresetSectionKey } fro
 import { SOFT_PROOF_INTENT_LABELS, SOFT_PROOF_PROFILE_LABELS, type SoftProofIntent, type SoftProofProfile } from "../lib/softProof";
 import { pickFilePath } from "../lib/tauri";
 import { selectActivePhotos, useAppStore } from "../store";
+import { ColorHarmonyWheel } from "./ColorHarmonyWheel";
 import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
@@ -842,6 +843,11 @@ export function DevelopPanel() {
                 );
               })}
             </div>
+          </fieldset>
+
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Farb-Harmonie-Rad</legend>
+            <ColorHarmonyWheel />
           </fieldset>
 
           <fieldset id="stage-treatment" className="flex flex-col gap-2">

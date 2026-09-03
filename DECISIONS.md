@@ -3179,3 +3179,89 @@ Neuer Reiter-Wechsel-Test in `e2e/develop-analysis-flow.spec.ts`
 (Berechnungslogik selbst bereits vollständig in
 `lib/vectorscope.test.ts`/`lib/waveform.test.ts` abgedeckt): die jeweils
 aktive Analyse-Canvas erscheint, die anderen beiden verschwinden.
+
+### Nachtrag VII (Phase 14 Schritt 7): Farb-Harmonie-Rad — `palette` als
+zusätzliche direkte Abhängigkeit nötig, Harmonie-Mathematik bewusst im
+Frontend statt in Rust
+
+Punkt 10 der Recherche-Tabelle: Color-Grading-Räder sind in Lightroom
+rein manuell, keine automatische Paletten-Extraktion mit Harmonie-
+Vorschlag gefunden. `kmeans_colors` (real per `cargo add --dry-run`
+geprüft, v0.7.1, MIT/Apache-2.0) mit
+`--no-default-features --features palette_color` spart die drei CLI-
+Abhängigkeiten (`app`/`structopt`/`image`-Feature) — dieses Projekt
+dekodiert Bilder bereits selbst über seine eigene `image`-Abhängigkeit.
+
+**Ein während der Einbindung real gefundenes Detail, kein Vorab-Design:**
+`kmeans_colors`s `palette_color`-Feature zieht `palette` selbst nur
+*transitiv*. `crates/apx-ai/src/palette.rs` (das neue Modul heißt
+bewusst genauso wie die externe Kiste, siehe unten) benennt aber
+`palette`s eigene Typen (`Lab`/`Lch`/`Srgb`) direkt für die Umrechnung
+Pixel->Lab->Farbton — Rusts Extern-Prelude macht dabei aus Rust-2018-
+Editionsregeln nur *direkte* Abhängigkeiten unter ihrem Cargo-Namen
+sichtbar, keine transitiven. Erster Versuch (`use palette::{...}`)
+schlug mit "unresolved import" fehl, weil das Modul selbst `palette`
+heißt und der Import sich gegen `crate::palette` statt der externen
+Kiste auflöste — auch der absolute Pfad `use ::palette::{...}` half
+zunächst nicht, weil `palette` schlicht noch keine direkte Abhängigkeit
+war. Behoben durch `palette` als zweite, direkte
+`crates/apx-ai/Cargo.toml`-Abhängigkeit (`--no-default-features
+--features std`, kein `named`/`serde`/`approx` — nichts davon wird
+gebraucht) *und* den absoluten `::palette`-Importpfad im Modul selbst
+(nötig, weil das Modul und die Kiste gleich heißen).
+
+**k-means läuft mehrfach mit unterschiedlichem Seed** (`KMEANS_RUNS =
+3`), das Ergebnis mit dem kleinsten `score` gewinnt — k-means++
+initialisiert zufällig und kann sich in einem suboptimalen lokalen
+Minimum verfangen, dieselbe von `kmeans_colors`s eigener Moduldoku
+empfohlene Vorgehensweise.
+
+**Harmonie-Berechnung bewusst im Frontend, nicht in Rust:** anders als
+die k-means-Analyse selbst (braucht echte Pixeldaten, nur in Rust
+sinnvoll) ist die Zuordnung von Komplementär-/Triade-/Split-
+Komplementär-/Analog-Zielfarbtönen zu einer bereits extrahierten Palette
+reine Farbtheorie-Mathematik ohne Bildzugriff — dieselbe Arbeitsteilung
+wie Schritt 6s Vektorskop/Wellenform (Bildanalyse in Rust, reine
+Zahlen-Mathematik im Frontend). `frontend/src/lib/colorHarmony.ts`
+nutzt dabei bewusst das bereits bestehende `nearestHslBand` aus `edl.ts`
+(Phase 11 Schritt 6, zielgerichtetes Anpassungswerkzeug) wieder, statt
+eine zweite Zuordnungslogik von Farbton zu den acht festen HSL-Bändern
+zu schreiben — beide lösen exakt dasselbe Problem (nächstgelegenes Band
+zu einem gegebenen Farbton).
+
+**"Harmonisieren" verschiebt additiv, nicht absolut:** für jede
+hinreichend bunte Palettenfarbe (Buntheit unter `MIN_CHROMA_FOR_HARMONIZE
+= 8` wird ignoriert — praktisch neutrales Grau hat keinen aussagekräftigen
+Farbton) wird das nächstgelegene HSL-Band bestimmt und dessen Farbton-
+Regler um genau das Delta verschoben, das die tatsächliche Bildfarbe auf
+ihren nächstgelegenen Harmonie-Zielfarbton einrasten lässt (auf die
+Regler-Obergrenze `MAX_HUE_SHIFT_DEGREES = 60°` gekappt, siehe
+`hsl_color_mixer.rs`). Additiv auf dem *aktuellen* Reglerwert, nicht
+absolut gesetzt — ein Foto, das in einem Band schon manuell nachjustiert
+wurde, wird nicht stillschweigend überschrieben. Landen zwei
+Palettenfarben im selben Band, gewinnt die mit dem größeren Bildanteil
+(keine Mittelung unterschiedlicher tatsächlicher Farbtöne). Alle
+betroffenen Bänder werden in einem einzigen `set()`-Aufruf verändert und
+mit einem einzigen `commitDevelopEdit()` committet, kein Commit je Band.
+
+**Neues `ColorHarmonyWheel.tsx` bewusst als Reglerabschnitt in
+`DevelopPanel.tsx`, keine eigene dauerhafte Palette** — dieselbe
+Lehre wie Schritt 3s real gefundener Viewport-Kollisions-Fehler
+(ADR-0041 Nachtrag III): platziert direkt nach dem HSL-Fieldset.
+Wiederverwendet `ColorWheel.tsx`s "0° oben, im Uhrzeigersinn"-Konvention
+und dessen `lib/colorWheelMath.ts::hueSaturationToPixelOffset`-Geometrie
+für die Positionierung der Palettenfarb-Punkte (Winkel = Farbton,
+Abstand vom Zentrum = auf `CHROMA_NORMALIZATION = 100` normierte
+Buntheit) und der Harmonie-Zielmarkierungen auf dem Radrand.
+
+Real per Playwright-Testlauf gefunden (nicht nur vermutet): die vier
+Harmonietyp-Knöpfe "Komplementär"/"Triade"/"Split-Komplementär"/"Analog"
+wiederholen exakt dasselbe Teilstring-Muster wie Schritt 4s
+"Farbton"-Kollision — "Komplementär" ist eine Teilzeichenkette von
+"Split-Komplementär", `getByRole("button", { name: "Komplementär" })`
+traf deshalb zunächst beide Knöpfe gleichzeitig. Behoben mit
+`exact: true` statt einer Umbenennung, weil hier (anders als bei Schritt
+4s Regler-Namen) beide Knopfbeschriftungen bereits die inhaltlich
+richtigen, etablierten Farbtheorie-Fachbegriffe sind — eine Umbenennung
+hätte die Benennung verschlechtert, um ein reines Test-Locator-Problem
+zu lösen.

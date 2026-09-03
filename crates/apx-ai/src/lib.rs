@@ -34,6 +34,8 @@
 //! - [`style_consistency`] (Phase 14 Schritt 5): Lab-Signatur je Foto,
 //!   statistische Ausreißer-Erkennung und Angleichungs-Vorschläge für ein
 //!   ganzes Shooting — kein neuronales Netz, klassische Farbstatistik.
+//! - [`palette`] (Phase 14 Schritt 7): k-means-Farbpaletten-Extraktion
+//!   (`kmeans_colors`) für das Farb-Harmonie-Rad.
 
 pub mod blur;
 pub mod color;
@@ -42,6 +44,7 @@ pub mod error;
 pub mod faces;
 pub mod inpaint;
 pub mod lens_calibration;
+pub mod palette;
 #[cfg(feature = "people")]
 pub mod people;
 pub mod preset_generator;

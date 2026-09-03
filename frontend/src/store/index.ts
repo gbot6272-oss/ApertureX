@@ -13,6 +13,7 @@ import {
   defaultLuminanceRangeGeometry,
   defaultRadialGradientGeometry,
   emptyBrushGeometry,
+  HSL_BAND_SLIDER_SPECS,
   MAX_COLOR_MIXER_REGIONS,
   neutralEdlPayload,
   newColorMixerRegion,
@@ -25,6 +26,8 @@ import {
 import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairLayer, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import type { FrequencyViewMode } from "../lib/frequencySeparation";
+import { computeHarmonizeShifts } from "../lib/colorHarmony";
+import type { HarmonyType } from "../lib/colorHarmony";
 import {
   applyRulesToSubset,
   buildPresetEdlSubset,
@@ -84,6 +87,7 @@ import type {
   WorkflowTemplatePayload,
   SpotCandidateDto,
   SmartCollectionLeaf,
+  PaletteColorDto,
   StylePhotoAnalysisDto,
   UiSettingsDto,
   WatchedFolderSettingsDto,
@@ -1391,6 +1395,20 @@ interface LibraryBacklogSlice {
    * schreibt direkt über `currentDevelopEdit`/`applyDevelopEdit`, exakt
    * wie `syncSettingsToSelection`). */
   alignPhotoStyleToShoot: (analysis: StylePhotoAnalysisDto) => Promise<void>;
+
+  /** Farb-Harmonie-Rad (Phase 14 Schritt 7, siehe `DECISIONS.md`
+   * ADR-0041 Nachtrag VII) — Palette des aktuell im Entwickeln-Modul
+   * geöffneten Fotos (`developPhotoId`), dieselbe „bereits vorhandene
+   * Miniaturansicht"-Vereinfachung wie `styleConsistencyResult`. */
+  colorPalette: PaletteColorDto[] | null;
+  colorPaletteLoading: boolean;
+  extractColorPaletteForCurrentPhoto: () => Promise<void>;
+  /** Verschiebt die Farbton-Regler der acht festen HSL-Bänder (siehe
+   * `lib/colorHarmony.ts`s `computeHarmonizeShifts`) additiv auf ihrem
+   * *aktuellen* Wert, damit die extrahierte Palette auf die gewählte
+   * Harmonie relativ zu `baseHueDegrees` einrastet — ein einziger
+   * Commit für alle betroffenen Bänder zusammen, kein Commit je Band. */
+  harmonizeToTarget: (harmony: HarmonyType, baseHueDegrees: number) => void;
 
   /** Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
    * `DECISIONS.md` ADR-0038): eine Regel = `libraryFilter` (wiederverwendet,
@@ -4948,6 +4966,8 @@ export const useAppStore = create<AppStore>()(
     perceptualDuplicatesRunning: false,
     styleConsistencyResult: null,
     styleConsistencyRunning: false,
+    colorPalette: null,
+    colorPaletteLoading: false,
 
     refreshCollectionFolders: async () => {
       const folders = await api.listCollectionFolders();
@@ -5120,6 +5140,39 @@ export const useAppStore = create<AppStore>()(
       } catch (err) {
         console.error(`Stil-Angleichung für Foto ${photoId} fehlgeschlagen:`, err);
       }
+    },
+
+    extractColorPaletteForCurrentPhoto: async () => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.colorPaletteLoading = true;
+      });
+      try {
+        const palette = await api.extractColorPalette(developPhotoId);
+        set((state) => {
+          state.colorPalette = palette;
+        });
+      } finally {
+        set((state) => {
+          state.colorPaletteLoading = false;
+        });
+      }
+    },
+
+    harmonizeToTarget: (harmony, baseHueDegrees) => {
+      const { colorPalette, developEdl } = get();
+      if (!colorPalette || colorPalette.length === 0) return;
+      const shifts = computeHarmonizeShifts(colorPalette, baseHueDegrees, harmony);
+      if (shifts.length === 0) return;
+      const hueSpec = HSL_BAND_SLIDER_SPECS.find((spec) => spec.key === "hue")!;
+      set((state) => {
+        for (const shift of shifts) {
+          const current = developEdl.hsl[shift.band].hue;
+          state.developEdl.hsl[shift.band].hue = clampSliderValue(current + shift.hueRegler, hueSpec);
+        }
+      });
+      void get().commitDevelopEdit("Farb-Harmonie angewendet");
     },
 
     batchPreview: [],

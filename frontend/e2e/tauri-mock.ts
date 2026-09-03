@@ -212,6 +212,11 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // Rust-Unit-Tests abgedeckt, hier steuert die Fixture direkt das
     // Ergebnis, das `analyze_style_consistency` zurückgäbe.
     styleConsistencyResult: [] as unknown[],
+    // Farb-Harmonie-Rad (Phase 14 Schritt 7) — die echte k-means-Analyse
+    // ist bereits in `apx-ai::palette`s Rust-Unit-Tests abgedeckt, hier
+    // steuert die Fixture direkt das Ergebnis, das
+    // `extract_color_palette` zurückgäbe.
+    colorPaletteResult: [] as unknown[],
     // Adobe-XMP-Sidecar (Phase 9 Schritt 2).
     exportedXmpSidecarPath: "/mock/photos/IMG_0001.xmp" as string,
     xmpImportApplies: true as boolean,
@@ -610,6 +615,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       perceptualDuplicateGroups: unknown[][];
       peopleGroups: unknown[][];
       styleConsistencyResult: unknown[];
+      colorPaletteResult: unknown[];
     };
 
     switch (cmd) {
@@ -1058,6 +1064,10 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       // ---- Stil-Konsistenz-Check fürs Shooting (Phase 14 Schritt 5) --------
       case "analyze_style_consistency":
         return fixtures.styleConsistencyResult;
+
+      // ---- Farb-Harmonie-Rad (Phase 14 Schritt 7) ---------------------------
+      case "extract_color_palette":
+        return fixtures.colorPaletteResult;
 
       // ---- Bibliothek: Suche/Filter (ab Phase 3) ---------------------------
       case "search_photos": {

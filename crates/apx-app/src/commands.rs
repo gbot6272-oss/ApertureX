@@ -2585,6 +2585,66 @@ pub fn analyze_style_consistency(
         .collect())
 }
 
+/// Eine dominante Farbe der extrahierten Palette, siehe
+/// [`extract_color_palette`].
+#[derive(Debug, Clone, Serialize)]
+pub struct PaletteColorDto {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub hue_degrees: f32,
+    pub chroma: f32,
+    pub lightness: f32,
+    pub percentage: f32,
+}
+
+/// Farb-Harmonie-Rad: automatische Paletten-Extraktion (Phase 14
+/// Schritt 7, siehe `DECISIONS.md` ADR-0041 Nachtrag VII). Die eigentliche
+/// k-means-Analyse lebt in `apx_ai::palette` (rein, unit-getestet) —
+/// dieser Command arbeitet wie [`list_perceptual_duplicate_groups`]/
+/// [`analyze_style_consistency`] auf dem bereits vorhandenen Thumbnail-
+/// Vorschau-Cache statt jedes Mal neu von der RAW-Datei zu dekodieren.
+/// Dieselbe ehrliche Grenze wie bei jeder anderen Analyse auf Basis
+/// dieses Caches: spiegelt bereits im Entwickeln-Modul gesetzte, aber
+/// noch nicht in eine neue Vorschau gebackene Anpassungen nicht wider.
+#[tauri::command]
+pub fn extract_color_palette(
+    state: State<'_, AppState>,
+    photo_id: String,
+    k: Option<usize>,
+) -> Result<Vec<PaletteColorDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let preview = state
+        .catalog
+        .get_preview(photo_id, apx_catalog::PreviewLevel::Thumbnail)
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| "Keine Vorschau für dieses Foto vorhanden".to_string())?;
+    let img = image::open(&preview.path).map_err(|err| err.to_string())?;
+    let rgb = img.to_rgb8();
+    let (width, height) = rgb.dimensions();
+    let pixels: Vec<f32> = rgb
+        .into_raw()
+        .iter()
+        .map(|&v| f32::from(v) / 255.0)
+        .collect();
+
+    let k = k.unwrap_or(apx_ai::palette::DEFAULT_PALETTE_SIZE);
+    let colors = apx_ai::palette::extract_palette(&pixels, width, height, k);
+
+    Ok(colors
+        .into_iter()
+        .map(|color| PaletteColorDto {
+            r: color.r,
+            g: color.g,
+            b: color.b,
+            hue_degrees: color.hue_degrees,
+            chroma: color.chroma,
+            lightness: color.lightness,
+            percentage: color.percentage,
+        })
+        .collect())
+}
+
 // ---- KI-Funktionen (Phase 7, siehe `DECISIONS.md` ADR-0033) ---------------
 //
 // Alle Analyse-Algorithmen selbst leben in `apx-ai` (klassische

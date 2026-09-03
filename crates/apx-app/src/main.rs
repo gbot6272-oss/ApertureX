@@ -422,6 +422,7 @@ fn main() {
             commands::list_perceptual_duplicate_groups,
             commands::list_people_groups,
             commands::analyze_style_consistency,
+            commands::extract_color_palette,
             commands::generate_ai_mask,
             commands::suggest_repair_source,
             commands::detect_sensor_spots,

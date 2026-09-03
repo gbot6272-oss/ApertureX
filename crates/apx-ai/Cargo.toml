@@ -55,6 +55,19 @@ image.workspace = true
 # (`dlib_face_recognition_resnet_model_v1.dat`, `shape_predictor_5_face_landmarks.dat`
 # — CC0/Public Domain, siehe `apx-ai::people`s Moduldoku).
 dlib-face-recognition = { version = "0.3.2", default-features = false, features = ["build-native"], optional = true }
+# Farb-Harmonie-Rad (Phase 14 Schritt 7, siehe `apx_ai::palette`s
+# Moduldoku) — real per `cargo add --dry-run` geprüft, v0.7.1, MIT/
+# Apache-2.0. `default-features = false` spart die CLI-Abhängigkeiten
+# (`app`/`structopt`/das `image`-Feature — dieses Projekt dekodiert
+# Bilder bereits selbst über die eigene `image`-Abhängigkeit), nur
+# `palette_color` (Trait-Implementierungen für `palette::Lab`/`Rgb`).
+kmeans_colors = { version = "0.7.1", default-features = false, features = ["palette_color"] }
+# `kmeans_colors`s `palette_color`-Feature zieht `palette` nur transitiv
+# — als direkte Abhängigkeit hier nötig, weil `apx_ai::palette` selbst
+# `palette`s Typen (`Lab`/`Lch`/`Srgb`) benennt, nicht nur `kmeans_colors`
+# aufruft. Minimalfeatures (`std` allein): keine benannten CSS-Farben
+# (`named`), kein `serde`, nichts davon wird gebraucht.
+palette = { version = "0.7.7", default-features = false, features = ["std"] }
 
 [features]
 # Standardmäßig aus: `libdlib`+`libblas`+`liblapack` fehlen in dieser

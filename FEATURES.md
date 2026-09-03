@@ -330,6 +330,21 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Onboarding — Phase 10 — Status: Fertig (siehe PLAN.md Schritt 9) — `OnboardingDialog.tsx`, einmaliges automatisches Erstanzeigen über `uiSettings.onboarding_seen`, jederzeit erneut über die Befehlspalette aufrufbar
 - [x] Installer und Signierung für alle drei Plattformen — Phase 10/11 — Status: Fertig (abweichend, siehe PLAN.md Schritt 11 und Phase 11 Schritt 11) — `@tauri-apps/cli` + neuer CI-`release`-Job auf dem bestehenden 3-OS-Matrix (nur bei Tag-Push/`workflow_dispatch`), Signierungskonfiguration strukturell vorbereitet und konditional auf GitHub-Secrets (macOS: Zertifikat+Notarisierung direkt aus der Umgebung gelesen; Windows: PFX-Import + Fingerabdruck-Config-Override) — überspringt sich selbst ohne Fehlschlag, wenn Secrets fehlen. Phase 11 Schritt 11 hat den betriebssystemunabhängigen Teil der Mechanik lokal nachgewiesen (selbstsigniertes Test-Zertifikat per `openssl` erzeugt, Base64-Rundreise byte-identisch bestätigt, SHA1-Fingerabdruck ermittelt — genau die Schritte, die `ci.yml`s PowerShell-Import vor dem eigentlichen `Import-PfxCertificate`-Aufruf durchläuft). **Ehrlich begrenzt:** kein echtes Zertifikat/Apple-Developer-Konto beschaffbar; ein echter `Import-PfxCertificate`-Lauf in einen Windows-Zertifikatspeicher und das Setzen eines echten GitHub-Actions-Secrets liegen außerhalb der Werkzeuge/Ausführungsumgebung dieser Sitzung (keine Windows-Runner, kein Secret-Schreibzugriff) — erzeugte Installer bleiben bis zur Hinterlegung eigener Secrets durch den Nutzer unsigniert
 
+## Alleinstellungsmerkmale (Phase 14 — jenseits von Lightroom)
+
+Zehn eigenständige Fähigkeiten ohne Lightroom-Entsprechung (siehe `DECISIONS.md` ADR-0041 für die Recherche-Belege je Punkt).
+
+- [x] KI-Ausfüllen über Bildränder hinaus (Canvas-Erweiterung/Outpainting) — Phase 14 Schritt 1 — Status: Fertig — dieselbe LaMa-Inpainting-Inferenz wie der Reparaturpinsel, nur mit einer bis zum neuen Rand erweiterten Maske
+- [x] Frequenztrennung für Präzisions-Retusche — Phase 14 Schritt 2 — Status: Fertig — Tief-/Hochfrequenz-Zerlegung, Klon-/Ausbesserstriche wirken wahlweise nur auf eine Ebene, plus ein reiner Anzeige-Modus im Viewer
+- [x] Mehrfachbelichtung & Layer-Blend-Modi — Phase 14 Schritt 3 — Status: Fertig — beliebig viele Ebenen (Katalog-Foto oder Textur) mit Blend-Modus/Deckkraft/Skalierung/Versatz übereinandergelegt
+- [x] Echte Halation-/Bloom-Simulation — Phase 14 Schritt 4 — Status: Fertig — Lichter-Maske → Einfärbung → Weichzeichnung → Screen-Rückmischung, Radius/Betrag/Farbton regelbar
+- [x] Automatischer Stil-Konsistenz-Check fürs Shooting — Phase 14 Schritt 5 — Status: Fertig — Lab-Signatur je Foto, Ausreißer-Erkennung über eine Fotomenge, Angleichungs-Vorschlag per Weißabgleich/Belichtung
+- [x] Vektorskop + Wellenform-Monitor — Phase 14 Schritt 6 — Status: Fertig — reine Frontend-Analyse neben dem bestehenden Histogramm, kein neuer Backend-Command
+- [x] Farb-Harmonie-Rad — Phase 14 Schritt 7 — Status: Fertig — k-means-Paletten-Extraktion (CIE-Lab), Komplementär-/Triade-/Split-Komplementär-/Analog-Harmonie, "Harmonisieren" verschiebt die HSL-Farbton-Regler
+- [x] KI-Tiefenschärfe-Simulator "Virtuelle Blende" — Phase 14 Schritt 8 — Status: Fertig — echte monokulare Tiefenschätzung (MiDaS v2.1 small), Fokuspunkt per Klick, variabler Unschärferadius nach Tiefendifferenz
+- [x] KI-Stiltransfer zwischen Fotos — Phase 14 Schritt 9 — Status: Fertig (eingeschränkt) — fünf real lizenzierte feste `fast_neural_style`-Stile statt eines beliebigen Referenzfotos (kein lizenzklares Modell dafür gefunden, siehe ADR-0041 Nachtrag IX)
+- [x] Himmelsaustausch mit automatischer Neubelichtung — Phase 14 Schritt 10 — Status: Fertig (minimaler Umfang) — klassische Segmentierungs-Heuristik + Nutzerfoto als neuer Himmel, grobe Farbangleichung des Vordergrunds; ohne Deckkraft-Regler und mit reduzierter Testabdeckung
+
 ## Technische Grundlage (Phase 1, keine Endnutzer-Features)
 
 - [x] Rust-Workspace mit Crate-Grenzen (`apx-core`, `apx-raw`, `apx-catalog`, `apx-app`) — Phase 1 — Status: Fertig

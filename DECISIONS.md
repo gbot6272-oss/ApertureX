@@ -3441,3 +3441,14 @@ Patch-Architektur wie Schritt 8/9: `apx-app::commands::replace_sky`
 berechnet das fertige Vollbild einmal, `stages::sky_replace` ersetzt
 beim Rendern nur noch die RGB-Kanäle (kein Deckkraft-Regler, anders als
 `style_transfer`).
+
+### Nachtrag XI (Phase 14 Schritt 11): Abschluss mit reduziertem Umfang
+auf Nutzervorgabe
+
+Bei knappem verbleibenden Budget bewusst eingeschränkt: nur die beiden
+später öffentlich sichtbaren Dokumente aktualisiert (`FEATURES.md`
+"Alleinstellungsmerkmale"-Rubrik, `THIRD_PARTY.md` Phase-14-Sektion),
+kein Duplikat der bereits in ADR-0041/PLAN.md stehenden Details. Zwei
+gezielte Tests für das bis dahin ungetestete `apx-ai::sky_replace`
+(Schritt 10) nachgezogen — keine volle `cargo fmt/clippy/test
+--workspace`- oder Playwright-Suite, nur `tsc -b`.

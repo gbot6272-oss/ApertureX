@@ -71,3 +71,24 @@ pub fn composite(
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_alpha_leaves_the_photo_unchanged() {
+        let photo = vec![100u8; 2 * 2 * 3];
+        let alpha = vec![0u8; 2 * 2];
+        let sky = vec![200u8; 2 * 2 * 3];
+        assert_eq!(composite(&photo, 2, 2, &alpha, &sky, 2, 2), photo);
+    }
+
+    #[test]
+    fn full_alpha_replaces_with_the_new_sky() {
+        let photo = vec![100u8; 2 * 2 * 3];
+        let alpha = vec![255u8; 2 * 2];
+        let sky = vec![200u8; 2 * 2 * 3];
+        assert_eq!(composite(&photo, 2, 2, &alpha, &sky, 2, 2), sky);
+    }
+}

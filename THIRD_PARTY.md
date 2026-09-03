@@ -110,6 +110,14 @@ diese Tabelle korrekt.
 |---|---|---|---|
 | `dlib-face-recognition` | BSD-3-Clause | Echte Personen-Wiedererkennung (`apx-ai::people`, Schritt 8), hinter Cargo-Feature `people` (standardmäßig aus) | Bindet an System-`libdlib`, das selbst **Boost Software License 1.0** ist (sehr permissiv, MIT-ähnlich, keine Ausnahme im Sinne von ADR-0002/ADR-0035 nötig). Verwendet bewusst **nicht** die von der Crate mitgelieferten Modell-Download-Features (`embed-lp` lädt das 68-Punkte-Landmarken-Modell, dessen README kommerzielle Nutzung ausdrücklich ausschließt) — stattdessen lädt der Nutzer selbst zwei nachweislich gemeinfreie `dlib.net`-Modelldateien herunter (`dlib_face_recognition_resnet_model_v1.dat`: Public Domain laut Autor; `shape_predictor_5_face_landmarks.dat`: CC0-1.0), siehe `apx-ai::people`s Moduldoku für die vollständige Lizenzprüfung. `dlib-face-recognition-sys` (transitiv, BSD-3-Clause) wird lokal gepatcht eingebunden (`vendor/dlib-face-recognition-sys/`) — ein echter, verifizierter Ordnungsfehler in dessen `build.rs` macht den vorhandenen pkg-config-Pfad gegen eine installierte System-`libdlib` sonst unerreichbar, siehe `VENDORED.md` dort |
 
+## Rust — Phase 14 (siehe `DECISIONS.md` ADR-0041)
+
+| Crate/Modell | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `kmeans_colors` + `palette` | MIT/Apache-2.0 | Farb-Harmonie-Rad (Schritt 7) | k-means-Clustering im CIE-Lab-Raum |
+| MiDaS v2.1 small (`isl-org/MiDaS`) | MIT | KI-Tiefenschärfe-Simulator (Schritt 8) | ONNX-Release-Asset, Opt-in-Download, SHA-256-geprüft |
+| `fast_neural_style` (`onnx/models`, 5 Stile) | MIT | KI-Stiltransfer (Schritt 9) | Opt-in-Download je Stil, SHA-256-geprüft |
+
 ## Frontend — geplant für Phase 1
 
 | Paket | Lizenz | Zweck | Hinweis |

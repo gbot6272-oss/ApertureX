@@ -1,15 +1,17 @@
 //! Panorama-Zusammenführung (Phase 9 Schritt 8, siehe `PLAN.md`/
-//! `DECISIONS.md` ADR-0035 Punkt 2) — **v1 nur Verschiebungs-Registrierung
+//! `DECISIONS.md` ADR-0035 Punkt 2) — **reine Verschiebungs-Registrierung
 //! per 2D-Phasenkorrelation** (reines Rust über `rustfft`) für Stativ-/
 //! gleicher-Blickpunkt-Aufnahmen mit rein translatorischem Versatz.
+//! Liefert nur `dx`/`dy`, keine Rotation/Skalierung/Perspektive.
 //!
-//! **Bewusste Vereinfachung**: echtes merkmalsbasiertes Homographie-
-//! Stitching (Freihandaufnahmen mit Rotation/Perspektive/Parallaxe)
-//! bleibt zurückgestellt — dafür gibt es in dieser Sandbox keine
-//! verifizierte reine-Rust-Pipeline (`opencv` bräuchte eine fehlende
-//! Systembibliothek, dasselbe Beschaffungsproblem wie in ADR-0035s
-//! Kontext-Recherche). Phasenkorrelation liefert nur eine reine
-//! Verschiebung (`dx`, `dy`), keine Rotation/Skalierung/Perspektive.
+//! Seit Phase 13 Schritt 5 (siehe `DECISIONS.md` ADR-0040-Nachtrag III)
+//! gibt es mit [`super::homography_stitch`] eine zweite, leistungsfähigere
+//! Registrierung für Freihandaufnahmen mit Rotation/Perspektive/
+//! Parallaxe — `apx-app`s `stack_panorama`-Command versucht diese zuerst
+//! und fällt hierher zurück, wenn keine verlässliche Homografie gefunden
+//! wird. Dieses Modul bleibt trotzdem bestehen: einfacher, schneller und
+//! für reine Stativaufnahmen ausreichend, außerdem weiterhin die
+//! Registrierungsgrundlage für [`super::astro`].
 
 use rustfft::num_complex::Complex32;
 use rustfft::FftPlanner;
@@ -87,7 +89,7 @@ pub fn estimate_shift_rgba8(a: &[u8], b: &[u8], width: u32, height: u32) -> Resu
     let mut cross: Vec<Complex32> = fa
         .iter()
         .zip(fb.iter())
-        .map(|(&x, &y)| {
+        .map(|(&x, &y): (&Complex32, &Complex32)| {
             // `fb * conj(fa)` statt `fa * conj(fb)` — die empirisch
             // richtige Multiplikationsreihenfolge für die hier gewählte
             // Vorzeichenkonvention (positives `dx`/`dy` = „b liegt

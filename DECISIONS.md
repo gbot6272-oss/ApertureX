@@ -2388,3 +2388,69 @@ Frontend übernimmt nur die zum gewählten Modus passende Komponente in
 beide Felder blind zu überschreiben — sonst würde ein Klick im
 "Level"-Modus eine zuvor manuell gesetzte Scherungskorrektur
 stillschweigend auf 0 zurücksetzen.
+
+## ADR-0040-Nachtrag III: Schritt 5 — Panorama-Homografie-Stitching;
+das geplante rust-cv-Ökosystem kompiliert auf keinem aktuellen
+stabilen Rust, `imageproc`-FAST-Ecken + eigener BRIEF-Deskriptor +
+`homography`-Crate stattdessen
+
+**Status:** Angenommen
+**Kontext:** ADR-0040 hatte für Panorama-Stitching das `rust-cv`-
+Ökosystem (`akaze`, `cv-core`, `space`, `arrsac`, `sample-consensus`)
+als real verfügbar eingestuft — per `cargo add --dry-run` gegen die
+echte crates.io-Registry bestätigt. Dieser Schritt hat einen echten
+Einbindungsversuch unternommen, und `cargo add --dry-run` erwies sich
+als unzureichende Prüfung: es bestätigt nur, dass sich die Abhängigkeits-
+Metadaten auflösen lassen, nicht dass der resultierende Code tatsächlich
+kompiliert.
+
+**Der reale Befund:** `akaze` (letzte Veröffentlichung 2021) hängt
+transitiv an `bitarray 0.2`, dessen `src/lib.rs` unbedingt
+`#![feature(min_const_generics)]` setzt. Dieses Attribut selbst — nicht
+das längst stabile Feature dahinter — verlangt einen Nightly-Compiler
+und schlägt auf jedem aktuellen stabilen Rust mit `error[E0554]` fehl,
+real gegen `rustc 1.94.1` in dieser Sandbox getestet (`cargo test`
+brach mit exakt diesem Fehler ab). Das ganze `rust-cv`-Ökosystem ist
+damit auf stabilem Rust praktisch tot — unabhängig von den zusätzlich
+noch bestehenden Versions-Inkompatibilitäten, die bereits vor diesem
+Befund auffielen: `cv-core 0.15`/`nalgebra 0.21`/`space 0.10` (alle vom
+selben Autor, derselben Ära) vs. der aktiver gepflegten `homography`-
+Crate mit `nalgebra 0.33`; `homography` hängt zudem gar nicht von
+`sample-consensus` ab (kein `Estimator`-Trait-Impl, per `grep` in
+dessen `Cargo.toml` bestätigt) — `arrsac`/`sample-consensus`/`cv-core`/
+`space` hätten also ohnehin keinen echten Klebstoff zwischen `akaze`
+und `homography` geliefert.
+
+**Umsetzung stattdessen** (`apx-stacking::homography_stitch`, neues
+Modul, siehe dessen ausführliche Moduldoku): `imageproc::corners::
+corners_fast9` (dieselbe Crate, bereits in Schritt 4 real erprobt) für
+die Eckenerkennung; ein selbst geschriebener BRIEF-artiger 256-Bit-
+Deskriptor (klassische, publizierte Technik — Calonder et al. 2010,
+nicht fabriziert) statt eines externen Deskriptor-Crates; brute-force
+Hamming-Abstands-Matching mit Lowes Verhältnistest; ein eigener, kurzer
+RANSAC-Loop (Zufallsstichprobe → `homography`-Crates echte DLT-Schätzung
+per SVD → Inlier zählen → beste Stichprobe über alle Inlier
+verfeinern) statt der generischen `sample_consensus`/`arrsac`-
+Maschinerie. `homography` bekommt dieselbe `nalgebra`-Version (`0.33`)
+explizit in `apx-stacking` UND `apx-app` gepinnt — dieselbe Instanz im
+Abhängigkeitsgraph statt einer separaten Kopie, sonst wäre
+`homography`s `Matrix3<f64>` in eigenem Code ein anderer Typ.
+
+**Test-Vorsicht mit synthetischen Bildern:** ein Schachbrettmuster als
+Testbild schlug fehl — an dessen Kreuzungen treffen sich vier
+Quadranten in einem X-förmigen Sattelpunkt, den FAST grundsätzlich
+nicht erkennt (es braucht einen einzigen zusammenhängenden Bogen von
+mindestens neun der 16 Kreispunkte). Ein perfekt periodisches
+Punktraster schlug ebenfalls fehl — Lowes Verhältnistest verwirft zu
+Recht mehrdeutige Treffer, wenn viele Merkmale identische lokale
+Nachbarschaften haben. Beide Male kein Bug im Code, sondern ein
+unrealistisches Testbild; die endgültigen Tests nutzen verstreute,
+unterschiedlich große Quadrate an leicht versetzten Positionen.
+
+**Entscheidung:** `apx-app`s `stack_panorama`-Command versucht das
+echte Homografie-Stitching zuerst und fällt für die gesamte Fotoserie
+auf die bestehende reine Verschiebungs-Registrierung
+(`apx_stacking::panorama`, Phasenkorrelation) zurück, wenn für
+mindestens ein Foto keine verlässliche Homografie gefunden wird —
+bewusst alles-oder-nichts statt einer Mischkomposition aus beiden
+Positionierungsarten auf derselben Leinwand.

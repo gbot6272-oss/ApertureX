@@ -5,10 +5,29 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Aperture X — Fokus-/HDR-/Panorama-/Astro-Stacking (Phase 9 Schritt 8, siehe PLAN.md, DECISIONS.md ADR-0035 Punkt 2): reine, deterministische Bildverarbeitung, keine externe Registrierungs-Bibliothek. Hängt nur von apx-core ab, wie apx-ai/apx-export."
+description = "Aperture X — Fokus-/HDR-/Panorama-/Astro-Stacking (Phase 9 Schritt 8, siehe PLAN.md, DECISIONS.md ADR-0035 Punkt 2) + echtes Homographie-Stitching (Phase 13 Schritt 5, ADR-0040-Nachtrag III): reine, deterministische Bildverarbeitung, kein OpenCV. Hängt nur von apx-core ab, wie apx-ai/apx-export."
 
 [dependencies]
 apx-core.workspace = true
 thiserror.workspace = true
 rayon.workspace = true
+# Merkmalsbasiertes Homographie-Stitching (Phase 13 Schritt 5, siehe
+# DECISIONS.md ADR-0040-Nachtrag III) — Kanten-/Eckenerkennung
+# (`corners::corners_fast9`) für die eigene BRIEF-artige Deskriptor-
+# Extraktion (siehe homography_stitch.rs' Moduldoku, u. a. wieso NICHT
+# das rust-cv-Ökosystem/`akaze` genutzt wird — dessen `bitarray`-
+# Abhängigkeit kompiliert auf keinem aktuellen stabilen Rust).
+imageproc = { version = "0.27.0", default-features = false, features = ["rayon"] }
+# DLT-Homographie-Schätzung per SVD — reine Punkt-/Linien-Korrespondenzen,
+# kein RANSAC/keine Merkmalserkennung selbst (das übernimmt unser eigener
+# Code unten).
+homography = "0.2.0"
+# Exakt dieselbe nalgebra-Version, die `homography` selbst intern nutzt
+# (^0.33) — dieselbe Instanz im Abhängigkeitsgraph statt einer separaten
+# Kopie, sonst wäre `homography`s `Matrix3<f64>` ein anderer Typ als
+# unser eigener.
+nalgebra = "0.33.0"
+# Für den BRIEF-Abtastmuster (deterministisch geseedet, siehe
+# homography_stitch.rs) und unseren eigenen RANSAC-Loop.
+rand = "0.9"
 rustfft = "6"

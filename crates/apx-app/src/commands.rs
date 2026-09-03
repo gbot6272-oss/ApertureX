@@ -5077,10 +5077,52 @@ pub fn stack_hdr(
     )
 }
 
-/// Panorama-Zusammenführung (`apx_stacking::panorama`) — **v1 nur
-/// Verschiebungs-Registrierung** (siehe dessen Moduldoku), jedes Foto
-/// nach dem ersten wird per Phasenkorrelation gegen das erste
-/// ausgerichtet.
+/// Versucht das echte merkmalsbasierte Homographie-Stitching
+/// (`apx_stacking::homography_stitch`, Phase 13 Schritt 5) für die ganze
+/// Bilderserie — `None`, wenn für mindestens eines der Fotos ab dem
+/// zweiten keine verlässliche Homografie gefunden wurde (zu wenige/zu
+/// unzuverlässige Merkmalsübereinstimmungen). Bewusst alles-oder-nichts
+/// für die ganze Serie statt eines Fotos mit Homografie und eines mit
+/// reiner Verschiebung gemischt auf derselben Leinwand — eine echte
+/// Mischkomposition bräuchte eine gemeinsame Canvas-Berechnung über
+/// beide Positionierungsarten hinweg, siehe `stack_panorama`s Rückfall
+/// auf die gesamte Serie stattdessen.
+fn try_homography_panorama(
+    rendered: &[(u32, u32, Vec<u8>)],
+    width: u32,
+    height: u32,
+) -> Option<(u32, u32, Vec<u8>)> {
+    let reference = rendered[0].2.as_slice();
+    let others: Vec<&[u8]> = rendered[1..]
+        .iter()
+        .map(|(_, _, px)| px.as_slice())
+        .collect();
+    let homographies = apx_stacking::homography_stitch::estimate_pairwise_homographies_rgba8(
+        reference, &others, width, height,
+    );
+    let mut images = Vec::with_capacity(rendered.len());
+    images.push(apx_stacking::homography_stitch::HomographyPositionedImage {
+        pixels: reference,
+        homography: nalgebra::Matrix3::identity(),
+    });
+    for (pixels, homography) in others.into_iter().zip(homographies) {
+        images.push(apx_stacking::homography_stitch::HomographyPositionedImage {
+            pixels,
+            homography: homography?,
+        });
+    }
+    apx_stacking::homography_stitch::stitch_homography_rgba8(&images, width, height).ok()
+}
+
+/// Panorama-Zusammenführung — versucht zuerst echtes merkmalsbasiertes
+/// Homographie-Stitching (`apx_stacking::homography_stitch`, Phase 13
+/// Schritt 5, siehe `DECISIONS.md` ADR-0040-Nachtrag III), geeignet für
+/// Freihandaufnahmen mit Rotation/Perspektive/Parallaxe. Fällt auf die
+/// einfachere reine Verschiebungs-Registrierung (`apx_stacking::
+/// panorama`, Phasenkorrelation) zurück, wenn keine verlässliche
+/// Homografie gefunden wird — z. B. bei zu wenig Bildstruktur/
+/// Überlappung für genug Merkmalsübereinstimmungen, dann aber weiterhin
+/// für reine Stativaufnahmen ohne Kamerarotation geeignet.
 #[tauri::command]
 pub fn stack_panorama(
     state: State<'_, AppState>,
@@ -5092,6 +5134,14 @@ pub fn stack_panorama(
         .first()
         .map(|(w, h, _)| (*w, *h))
         .ok_or_else(|| "keine Fotos übergeben".to_string())?;
+
+    if let Some((out_width, out_height, stitched)) =
+        try_homography_panorama(&rendered, width, height)
+    {
+        return import_stack_result_photo(
+            &state, &ids, "Panorama", "panorama", out_width, out_height, &stitched,
+        );
+    }
 
     let reference = rendered[0].2.as_slice();
     let mut offsets: Vec<(i32, i32)> = vec![(0, 0)];

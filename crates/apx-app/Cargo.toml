@@ -57,6 +57,10 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # (Phase 13 Schritt 2) — nur das "disk"-Feature, keine CPU-/Prozess-/
 # Netzwerk-Systeminfo, die dieses Projekt nicht braucht.
 sysinfo = { version = "0.38", default-features = false, features = ["disk"] }
+# Dieselbe Version wie apx-stacking (dessen Matrix3<f64> stack_panorama
+# hier direkt konstruiert, für die Referenzbild-Identität) — muss exakt
+# matchen, sonst wäre es ein anderer Typ, siehe apx-stacking/Cargo.toml.
+nalgebra = "0.33.0"
 
 [features]
 # Standardmäßig aus — siehe apx-tether/src/lib.rs Moduldoku und

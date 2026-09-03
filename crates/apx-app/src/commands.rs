@@ -3055,6 +3055,102 @@ pub fn run_ai_outpaint(
     })
 }
 
+// ---- Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3, siehe
+// DECISIONS.md ADR-0041) ------------------------------------------------------
+//
+// Kein KI-Modell nötig — reine Verdrahtung + Bilddekodierung. Löst
+// entweder ein weiteres Katalog-Foto (`photo_id`) oder eine vom Nutzer
+// per `pick_file_path` gewählte Textur-Datei (`texture_path`) EINMALIG
+// zu einer fertigen RGB-Bitmap auf, die das Frontend danach unverändert
+// in `CompositeLayer::source` ablegt — dasselbe „einmal auflösen, bei
+// jedem Rendern nur noch skalieren"-Muster wie [`run_ai_inpaint`]/
+// [`run_ai_outpaint`] oben. `apx-pipeline` selbst hat keinen Katalog-/
+// Dateisystemzugriff (siehe `edl::v4::CompositeLayerSource`s Moduldoku)
+// — das Auflösen passiert bewusst hier, nicht dort.
+
+fn downsample_rgb_image(img: image::RgbImage, max_edge: u32) -> image::RgbImage {
+    let (width, height) = (img.width(), img.height());
+    if width.max(height) <= max_edge {
+        return img;
+    }
+    let scale = max_edge as f32 / width.max(height) as f32;
+    let new_width = ((width as f32) * scale).round().max(1.0) as u32;
+    let new_height = ((height as f32) * scale).round().max(1.0) as u32;
+    image::imageops::resize(
+        &img,
+        new_width,
+        new_height,
+        image::imageops::FilterType::Triangle,
+    )
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CompositeLayerSourceDto {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    /// Base64-kodiertes interleaved-RGB-`u8`-Ergebnis, `bitmap_width *
+    /// bitmap_height * 3` Bytes nach dem Dekodieren — dasselbe
+    /// Übertragungsmuster wie `AiFillPatchDto::pixels_base64`.
+    pub pixels_base64: String,
+}
+
+/// Löst genau eine der beiden Quellen zu einer fertigen RGB-Bitmap auf
+/// (`photo_id` **oder** `texture_path`, nie beide/keines) — auf
+/// `apx_ai::segmentation::ANALYSIS_MAX_EDGE` gedeckelt, dieselbe
+/// Auflösungsgrenze wie jede andere in der EDL gespeicherte Bitmap
+/// dieses Projekts.
+#[tauri::command]
+pub fn prepare_composite_layer_source(
+    state: State<'_, AppState>,
+    photo_id: Option<String>,
+    texture_path: Option<String>,
+) -> Result<CompositeLayerSourceDto, String> {
+    let max_edge = apx_ai::segmentation::ANALYSIS_MAX_EDGE;
+
+    let (width, height, rgb) = match (photo_id, texture_path) {
+        (Some(photo_id), None) => {
+            let photo_id = parse_photo_id(photo_id)?;
+            let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+            let linear = apx_raw::decode_linear(&source_path, Some(max_edge))
+                .map_err(|err| err.to_string())?;
+            let rgba = apx_pipeline::color::linear_camera_rgb_to_srgb_rgba8(
+                &linear.pixels,
+                linear.cam_to_srgb,
+            );
+            let pixel_count = (linear.width as usize) * (linear.height as usize);
+            let mut rgb = vec![0u8; pixel_count * 3];
+            for i in 0..pixel_count {
+                rgb[i * 3] = rgba[i * 4];
+                rgb[i * 3 + 1] = rgba[i * 4 + 1];
+                rgb[i * 3 + 2] = rgba[i * 4 + 2];
+            }
+            (linear.width, linear.height, rgb)
+        }
+        (None, Some(texture_path)) => {
+            let img = image::open(&texture_path)
+                .map_err(|err| {
+                    format!("Textur '{texture_path}' konnte nicht geladen werden: {err}")
+                })?
+                .into_rgb8();
+            let img = downsample_rgb_image(img, max_edge);
+            let (width, height) = (img.width(), img.height());
+            (width, height, img.into_raw())
+        }
+        _ => {
+            return Err(
+                "Entweder photo_id oder texture_path muss angegeben werden (nicht beides, nicht keines)."
+                    .to_string(),
+            );
+        }
+    };
+
+    Ok(CompositeLayerSourceDto {
+        bitmap_width: width,
+        bitmap_height: height,
+        pixels_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &rgb),
+    })
+}
+
 // ---- KI: Echte Personen-Wiedererkennung (Phase 13 Schritt 8, siehe
 // DECISIONS.md ADR-0040-Nachtrag VI) -----------------------------------------
 //

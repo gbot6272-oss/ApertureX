@@ -93,6 +93,7 @@ const STAGE_ANCHOR_IDS: Record<keyof StageEnabled, string> = {
   masks: "stage-masks",
   treatment: "stage-treatment",
   curves: "stage-curves",
+  composite: "stage-composite",
   geometry: "stage-geometry",
 };
 

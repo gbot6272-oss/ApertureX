@@ -19,8 +19,8 @@ use crate::edl::{
 use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
-    basic_fused, bw_mixer, calibration, color_grading, curves, details, effects, geometry,
-    hsl_color_mixer, lens_corrections, local_contrast, masks, repair, white_balance,
+    basic_fused, bw_mixer, calibration, color_grading, composite, curves, details, effects,
+    geometry, hsl_color_mixer, lens_corrections, local_contrast, masks, repair, white_balance,
 };
 
 /// Das Ergebnis von [`render_rgba8`] — `width`/`height` beschreiben
@@ -347,14 +347,24 @@ pub fn render_rgba8(
         curves::apply_rgba8(&treated, &edl.curves)
     };
 
+    let composited = if !stages.composite || edl.composite_layers.is_empty() {
+        // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
+        // oder keine Compositing-Ebenen vorhanden sind (Regelfall) —
+        // siehe `stages::composite`s Moduldoku für die Pipeline-Position
+        // (nach `curves`, im fertig entwickelten sRGB-RGBA8-Bild).
+        curved
+    } else {
+        composite::apply_all(&curved, linear.width, linear.height, &edl.composite_layers)
+    };
+
     let (width, height, pixels) = if !stages.geometry || edl.geometry == GeometryAdjustment::NEUTRAL
     {
         // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
         // oder weder Drehung noch Zuschnitt etwas zu tun haben
         // (Regelfall).
-        (linear.width, linear.height, curved)
+        (linear.width, linear.height, composited)
     } else {
-        geometry::apply(&curved, linear.width, linear.height, &edl.geometry)
+        geometry::apply(&composited, linear.width, linear.height, &edl.geometry)
     };
 
     Ok(RenderedImage {
@@ -415,6 +425,54 @@ mod tests {
         assert_eq!(
             with_stage_off.pixels[0], neutral.pixels[0],
             "eine deaktivierte Stufe darf keine Wirkung mehr haben, egal was ihre Regler sagen"
+        );
+    }
+
+    /// Phase 14 Schritt 3 (Mehrfachbelichtung/Compositing): eine
+    /// Compositing-Ebene aus `edl.composite_layers` muss tatsächlich in
+    /// `render_rgba8`s fester Kette ankommen (nicht nur in
+    /// `stages::composite`s eigenen isolierten Tests funktionieren) —
+    /// und `stage_enabled.composite = false` muss sie wieder abschalten,
+    /// derselbe Node-Editor-Vertrag wie jede andere Stufe.
+    #[test]
+    fn a_composite_layer_reaches_the_final_render_and_can_be_disabled() {
+        let linear = flat_gray_linear_image(0.2);
+        let layer = crate::edl::CompositeLayer {
+            visible: true,
+            blend_mode: crate::edl::BlendMode::Normal,
+            opacity: 1.0,
+            scale: 1.0,
+            offset_x: 0.5,
+            offset_y: 0.5,
+            source: crate::edl::CompositeLayerSource {
+                bitmap_width: 1,
+                bitmap_height: 1,
+                pixels: vec![250, 250, 250],
+            },
+        };
+        let edl = EdlV4 {
+            composite_layers: vec![layer],
+            ..EdlV4::neutral()
+        };
+        let rendered = render_rgba8(None, &linear, &edl).expect("rendern");
+        assert!(
+            rendered.pixels[0] > 200,
+            "die volldeckende Compositing-Ebene sollte das dunkle Basisbild überschreiben, war {}",
+            rendered.pixels[0]
+        );
+
+        let disabled_edl = EdlV4 {
+            stage_enabled: crate::edl::StageEnabled {
+                composite: false,
+                ..crate::edl::StageEnabled::ALL
+            },
+            ..edl
+        };
+        let with_stage_off = render_rgba8(None, &linear, &disabled_edl).expect("rendern");
+        let neutral = render_rgba8(None, &linear, &EdlV4::neutral()).expect("rendern");
+        assert_eq!(
+            with_stage_off.pixels[0], neutral.pixels[0],
+            "deaktiviertes Compositing darf keine Wirkung mehr haben"
         );
     }
 
@@ -704,6 +762,7 @@ mod tests {
             treatment: crate::edl::Treatment::Color,
             bw_mixer: crate::edl::BlackAndWhiteMixerAdjustment::NEUTRAL,
             stage_enabled: crate::edl::StageEnabled::ALL,
+            composite_layers: Vec::new(),
         };
 
         if let Some(ctx) = &ctx {

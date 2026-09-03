@@ -1007,6 +1007,22 @@ export function runAiOutpaint(
   });
 }
 
+// ---- Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3) ------------
+
+export interface CompositeLayerSourceDto {
+  bitmap_width: number;
+  bitmap_height: number;
+  /** Base64-kodiertes interleaved-RGB-`u8`-Ergebnis. */
+  pixels_base64: string;
+}
+
+/** Löst genau eine der beiden Quellen zu einer fertigen RGB-Bitmap auf
+ * (`photoId` **oder** `texturePath`, nie beide/keines) — für
+ * `CompositeLayer::source`. */
+export function prepareCompositeLayerSource(photoId: string | null, texturePath: string | null): Promise<CompositeLayerSourceDto> {
+  return invoke<CompositeLayerSourceDto>("prepare_composite_layer_source", { photoId, texturePath });
+}
+
 // ---- UI-Einstellungen (Phase 10 Schritt 1) --------------------------------
 
 export type Theme = "dark" | "light";

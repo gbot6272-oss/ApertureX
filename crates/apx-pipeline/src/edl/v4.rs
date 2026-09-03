@@ -20,7 +20,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::v2;
-use super::v3::{self, BlackAndWhiteMixerAdjustment, Mask, MaskGroup, Treatment};
+use super::v3::{self, BlackAndWhiteMixerAdjustment, BlendMode, Mask, MaskGroup, Treatment};
 
 // ---- Stufen-Aktivierung (Node-Editor) --------------------------------------
 
@@ -43,7 +43,23 @@ pub struct StageEnabled {
     pub masks: bool,
     pub treatment: bool,
     pub curves: bool,
+    /// Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3, siehe
+    /// `DECISIONS.md` ADR-0041) — läuft nach `curves`, vor `geometry`
+    /// (siehe `stages::composite`s Moduldoku für die Begründung).
+    /// `#[serde(default = "default_true")]` statt eines bloßen
+    /// `#[serde(default)]`: ein gespeichertes `StageEnabled`-Objekt von
+    /// vor diesem Feld muss weiterhin als „diese (damals noch nicht
+    /// existierende) Stufe war aktiv" gelesen werden, nicht als
+    /// „deaktiviert" (`bool`s eigener `Default` wäre `false`) —
+    /// dieselbe Konvention wie [`StageEnabled::ALL`], wo jede Stufe
+    /// `true` startet.
+    #[serde(default = "default_true")]
+    pub composite: bool,
     pub geometry: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl StageEnabled {
@@ -62,6 +78,7 @@ impl StageEnabled {
         masks: true,
         treatment: true,
         curves: true,
+        composite: true,
         geometry: true,
     };
 }
@@ -70,6 +87,48 @@ impl Default for StageEnabled {
     fn default() -> Self {
         Self::ALL
     }
+}
+
+// ---- Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3) -------------
+
+/// Ein einmalig aufgelöstes Foto oder eine Textur, als fertige Bitmap
+/// gespeichert (Phase 14 Schritt 3, siehe `DECISIONS.md` ADR-0041) —
+/// dasselbe „einmal per Command auflösen, bei jedem Rendern nur noch
+/// skalieren"-Muster wie `v2::AiFillPatch`/`v2::CanvasExtensionPatch`.
+/// Diese Crate hat keinen Katalog-/Dateisystemzugriff — das Auflösen
+/// eines `photo_id`-Verweises oder einer vom Nutzer gewählten
+/// Textur-Datei passiert außerhalb, in `apx-app`s Tauri-Commands; hier
+/// kommt nur noch das fertige Ergebnis an. `pixels` ist interleaved RGB
+/// (`0..=255`), `bitmap_width * bitmap_height * 3` Zahlen lang —
+/// dieselbe Konvention wie `AiFillPatch::pixels`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CompositeLayerSource {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub pixels: Vec<u8>,
+}
+
+/// Eine einzelne Ebene für Mehrfachbelichtung/Compositing — Lightroom
+/// Classic selbst hat "keine klassischen Ebenen-Kompositionsfähigkeiten
+/// wie Photoshop" (siehe `DECISIONS.md` ADR-0041s Recherche-Tabelle,
+/// Punkt 5). Wiederverwendet dieselben Blend-Modi wie die Masken-Stufe
+/// (`v3::BlendMode`, `stages::masks::blend_pixel`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CompositeLayer {
+    pub visible: bool,
+    pub blend_mode: BlendMode,
+    /// `0.0..=1.0`.
+    pub opacity: f32,
+    /// Bruchteil der Leinwandgröße, um den die Ebene skaliert wird —
+    /// `1.0` deckt die Leinwand (an ihrem eigenen Seitenverhältnis
+    /// gestreckt) exakt ab, dieselbe Größenreferenz wie
+    /// `v2::CanvasExtension`s normierte Bruchteile.
+    pub scale: f32,
+    /// Normierte Position (`0.0..=1.0`) des Ebenen-**Mittelpunkts** auf
+    /// der Leinwand — `0.5`/`0.5` zentriert die Ebene.
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub source: CompositeLayerSource,
 }
 
 // ---- Der vollständige EDL v4 -----------------------------------------------
@@ -96,6 +155,12 @@ pub struct EdlV4 {
     /// Node-Editor (Phase 9 Schritt 7) — additiv, siehe Moduldoku oben.
     #[serde(default)]
     pub stage_enabled: StageEnabled,
+    /// Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3) —
+    /// additiv, `#[serde(default)]` liest ein gespeichertes `EdlV4` ohne
+    /// dieses Feld als leere Ebenenliste (unverändertes bisheriges
+    /// Verhalten).
+    #[serde(default)]
+    pub composite_layers: Vec<CompositeLayer>,
 }
 
 impl EdlV4 {
@@ -119,6 +184,7 @@ impl EdlV4 {
             treatment: Treatment::Color,
             bw_mixer: BlackAndWhiteMixerAdjustment::NEUTRAL,
             stage_enabled: StageEnabled::ALL,
+            composite_layers: Vec::new(),
         }
     }
 
@@ -145,6 +211,7 @@ impl EdlV4 {
             treatment: old.treatment,
             bw_mixer: old.bw_mixer,
             stage_enabled: StageEnabled::ALL,
+            composite_layers: Vec::new(),
         }
     }
 }

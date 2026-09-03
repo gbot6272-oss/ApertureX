@@ -430,6 +430,7 @@ fn main() {
             commands::clear_inpainting_model_path,
             commands::run_ai_inpaint,
             commands::run_ai_outpaint,
+            commands::prepare_composite_layer_source,
             commands::download_people_models,
             commands::clear_people_model_paths,
             commands::detect_faces_for_photo,

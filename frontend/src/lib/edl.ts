@@ -1122,6 +1122,9 @@ export interface StageEnabled {
   masks: boolean;
   treatment: boolean;
   curves: boolean;
+  /** Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3) — läuft
+   * nach `curves`, vor `geometry`. */
+  composite: boolean;
   geometry: boolean;
 }
 
@@ -1138,8 +1141,38 @@ export const NEUTRAL_STAGE_ENABLED: StageEnabled = {
   masks: true,
   treatment: true,
   curves: true,
+  composite: true,
   geometry: true,
 };
+
+/** Ein einmalig aufgelöstes Foto oder eine Textur, als fertige Bitmap
+ * gespeichert (Phase 14 Schritt 3, siehe `DECISIONS.md` ADR-0041) —
+ * dasselbe „einmal per Command auflösen, bei jedem Rendern nur noch
+ * skalieren"-Muster wie `AiFillPatch`/`CanvasExtensionPatch`. `pixels`
+ * ist interleaved RGB (`0..=255`), `bitmap_width * bitmap_height * 3`
+ * Zahlen lang. */
+export interface CompositeLayerSource {
+  bitmap_width: number;
+  bitmap_height: number;
+  pixels: number[];
+}
+
+/** Eine einzelne Ebene für Mehrfachbelichtung/Compositing — Lightroom
+ * Classic hat "keine klassischen Ebenen-Kompositionsfähigkeiten wie
+ * Photoshop" (siehe `DECISIONS.md` ADR-0041). Wiederverwendet dieselben
+ * Blend-Modi wie die Masken-Stufe. `scale`: Bruchteil der Leinwandgröße
+ * (`1.0` deckt die Leinwand ab). `offset_x`/`offset_y`: normierte
+ * Position (`0.0..=1.0`) des Ebenen-*Mittelpunkts* (`0.5`/`0.5` =
+ * zentriert). */
+export interface CompositeLayer {
+  visible: boolean;
+  blend_mode: BlendMode;
+  opacity: number;
+  scale: number;
+  offset_x: number;
+  offset_y: number;
+  source: CompositeLayerSource;
+}
 
 /** Ein Knoten im Node-Editor — Anzeigereihenfolge identisch zur
  * tatsächlichen Rendering-Reihenfolge (siehe `develop.rs`s Moduldoku).
@@ -1164,6 +1197,7 @@ export const STAGE_NODE_SPECS: readonly StageNodeSpec[] = [
   { key: "masks", label: "Masken" },
   { key: "treatment", label: "Behandlung (SW-Mixer)" },
   { key: "curves", label: "Kurven" },
+  { key: "composite", label: "Compositing" },
   { key: "geometry", label: "Geometrie" },
 ] as const;
 
@@ -1186,6 +1220,7 @@ export interface EdlPayload {
   treatment: Treatment;
   bw_mixer: BlackAndWhiteMixerAdjustment;
   stage_enabled: StageEnabled;
+  composite_layers: CompositeLayer[];
 }
 
 export function neutralEdlPayload(): EdlPayload {
@@ -1206,6 +1241,7 @@ export function neutralEdlPayload(): EdlPayload {
     treatment: "Color",
     bw_mixer: NEUTRAL_BW_MIXER,
     stage_enabled: NEUTRAL_STAGE_ENABLED,
+    composite_layers: [],
   };
 }
 

@@ -643,6 +643,23 @@ interface DevelopSlice {
   /** Entfernt eine gewählte/angewendete Leinwand-Erweiterung wieder
    * (zurück auf die Original-Bildgröße) und committet sofort. */
   clearCanvasExtension: () => void;
+
+  // ---- Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3) --------
+  /** Löst `photoId`/`texturePath` per `prepare_composite_layer_source`
+   * auf und hängt eine neue, sichtbare Ebene (Normal-Blend, volle
+   * Deckkraft, `scale: 1.0`, zentriert) an `developEdl.composite_layers`
+   * an — dieselbe „Anwenden löst die eine teure Auflösung aus, danach
+   * nur noch schnelle lokale Regler"-Trennung wie `runAiOutpaint`. */
+  addCompositeLayerFromPhoto: (photoId: string) => Promise<void>;
+  addCompositeLayerFromTexture: (texturePath: string) => Promise<void>;
+  /** `true`, während eine der beiden `addCompositeLayer*`-Aktionen läuft. */
+  compositeLayerLoading: boolean;
+  removeCompositeLayer: (index: number) => void;
+  setCompositeLayerField: (
+    index: number,
+    field: "visible" | "blend_mode" | "opacity" | "scale" | "offset_x" | "offset_y",
+    value: boolean | BlendMode | number,
+  ) => void;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
    * Phase 2 Schritt 5/6: ausgelöst beim Loslassen eines Reglers, nicht
    * bei jedem Zwischenwert). */
@@ -2697,6 +2714,109 @@ export const useAppStore = create<AppStore>()(
         state.developEdl.geometry.canvas_extension = null;
       });
       void get().commitDevelopEdit("Leinwand-Erweiterung entfernt");
+    },
+
+    compositeLayerLoading: false,
+
+    addCompositeLayerFromPhoto: async (photoId) => {
+      set((state) => {
+        state.compositeLayerLoading = true;
+      });
+      try {
+        const dto = await api.prepareCompositeLayerSource(photoId, null);
+        set((state) => {
+          state.developEdl.composite_layers.push({
+            visible: true,
+            blend_mode: "Normal",
+            opacity: 1,
+            scale: 1,
+            offset_x: 0.5,
+            offset_y: 0.5,
+            source: {
+              bitmap_width: dto.bitmap_width,
+              bitmap_height: dto.bitmap_height,
+              pixels: base64ToByteArray(dto.pixels_base64),
+            },
+          });
+        });
+        void get().commitDevelopEdit("Compositing-Ebene hinzugefügt");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.compositeLayerLoading = false;
+        });
+      }
+    },
+
+    addCompositeLayerFromTexture: async (texturePath) => {
+      set((state) => {
+        state.compositeLayerLoading = true;
+      });
+      try {
+        const dto = await api.prepareCompositeLayerSource(null, texturePath);
+        set((state) => {
+          state.developEdl.composite_layers.push({
+            visible: true,
+            blend_mode: "Normal",
+            opacity: 1,
+            scale: 1,
+            offset_x: 0.5,
+            offset_y: 0.5,
+            source: {
+              bitmap_width: dto.bitmap_width,
+              bitmap_height: dto.bitmap_height,
+              pixels: base64ToByteArray(dto.pixels_base64),
+            },
+          });
+        });
+        void get().commitDevelopEdit("Compositing-Ebene hinzugefügt");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.compositeLayerLoading = false;
+        });
+      }
+    },
+
+    removeCompositeLayer: (index) => {
+      set((state) => {
+        state.developEdl.composite_layers.splice(index, 1);
+      });
+      void get().commitDevelopEdit("Compositing-Ebene entfernt");
+    },
+
+    setCompositeLayerField: (index, field, value) => {
+      set((state) => {
+        const layer = state.developEdl.composite_layers[index];
+        if (!layer) return;
+        switch (field) {
+          case "visible":
+            layer.visible = value as boolean;
+            break;
+          case "blend_mode":
+            layer.blend_mode = value as BlendMode;
+            break;
+          case "opacity":
+            layer.opacity = value as number;
+            break;
+          case "scale":
+            layer.scale = value as number;
+            break;
+          case "offset_x":
+            layer.offset_x = value as number;
+            break;
+          case "offset_y":
+            layer.offset_y = value as number;
+            break;
+        }
+      });
+      void get().commitDevelopEdit();
     },
 
     colorMixerPickerActive: false,

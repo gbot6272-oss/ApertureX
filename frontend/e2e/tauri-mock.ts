@@ -866,7 +866,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           name: args.name as string,
           folder_id: (args.folderId as string | null) ?? null,
           is_smart: true,
-          smart_criteria_json: JSON.stringify(args.criteria),
+          smart_criteria_json: args.criteriaJson as string,
         });
         collectionPhotoIds[id] = [];
         return id;

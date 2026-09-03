@@ -2499,3 +2499,77 @@ für Drucken/Buch/ICC-Profil-Auswahl vorhanden) übernehmen die
 Datei-Dialoge für "Neuer Katalog…"/"Katalog öffnen…"/"Sichern unter…"
 direkt — die neuen Rust-Commands nehmen nur noch den bereits gewählten
 Pfad entgegen.
+
+## ADR-0040-Nachtrag V: Schritt 7 — echter UND/ODER-Regelbaum für
+bedingte Presets und intelligente Sammlungen; in-memory statt
+dynamischer SQL-Generierung
+
+**Status:** Angenommen
+**Kontext:** Zwei getrennte Stellen kannten bisher nur eine flache,
+ausschließlich UND-verknüpfte Regelliste: bedingte Presets
+(`PresetCondition[]`, ADR-0031 Punkt 4, "kein ODER, keine
+Verschachtelung") und intelligente Sammlungen (`apx_catalog::
+FilterCriteria`, feste Struktur-Felder Bewertung/Flagge/Farbe/
+Kameramodell, ADR-0023). Beide werden bereits als opakes JSON
+gespeichert (`conditions_json`/`smart_criteria_json`) — kein
+Datenbankschema-Wechsel nötig, nur ein neues JSON-Schema.
+
+**Entscheidung:** ein gemeinsamer, generischer Regelbaum-Typ
+(`RuleNode<TLeaf> = { type: "condition"; condition: TLeaf } |
+{ type: "group"; operator: "and" | "or"; children: RuleNode<TLeaf>[] }`,
+`frontend/src/lib/ruleTree.ts`) mit einer rekursiven Auswertung
+(`evaluateRuleNode`) und einem generischen Editor
+(`RuleTreeEditor.tsx`, kennt das Blatt-Vokabular nicht — kommt per
+`renderLeaf`/`makeDefaultLeaf`-Props vom Aufrufer). Dasselbe
+JSON-Schema existiert auf der Rust-Seite als `apx_catalog::FilterNode`
+(`#[serde(tag = "type", rename_all = "snake_case")]`) — bewusst
+identisch zum TypeScript-Gegenstück gewählt, damit `create_smart_
+collection` den vom Frontend erzeugten JSON-String unverändert als
+opakes `criteria_json` durchreichen und rein per `serde_json`
+parsen kann, ganz ohne eigene Übersetzungsschicht zwischen den beiden
+Seiten.
+
+**Bedingte Presets bleiben reines Frontend:** `conditions_json` ist
+für `apx-catalog` schon vorher ein opaker String gewesen (unverändert:
+`Preset.conditions_json`), also brauchte dieser Teil **keine
+Rust-Änderung**. `PresetCondition`/`evaluateCondition`/
+`parseConditions`/`applyConditionsToSubset` (`lib/presets.ts`) bleiben
+unverändert bestehen — sie werden weiterhin von den Auto-
+Verschlagwortungsregeln (`MetadataDialog.tsx`s `createTagRule`, ein
+eigenes, außerhalb dieses Schritts liegendes Feature) benutzt und
+dienen als Migrationsquelle. Neu: `PresetRuleGroup { section:
+PresetSectionKey | null; node: RuleNode<PresetLeafCondition> }` — die
+Sektions-Gatter-Semantik (`section: null` = ganzes Preset, sonst nur
+diese Sektion; mehrere Regelgruppen bleiben untereinander
+UND-verknüpft) bleibt exakt wie zuvor, nur ist jede einzelne Regel
+jetzt ein ganzer UND/ODER-Baum statt einer einzelnen Bedingung.
+`parseRules` akzeptiert die neue Baumform direkt und migriert sonst
+über `migrateLegacyConditions` von der alten flachen Form — jede
+vorhandene, vor diesem Schritt gespeicherte Preset-Bedingung bleibt
+dadurch ohne Migrationsskript lesbar.
+
+**Intelligente Sammlungen werten in-memory aus, nicht per dynamischer
+SQL-Generierung:** `apx_catalog::FilterNode::matches(&Photo) -> bool`
+wird für jedes Foto einzeln aufgerufen, nachdem `repository::
+collections::list_photos` den gesamten Fotobestand bereits per SQL
+geladen hat (`filter_photos` mit leeren Kriterien, dieselbe Abfrage
+wie die Filterleiste). Eine zweite, rekursive WHERE-Klausel-
+Generierung neben der bestehenden in `repository::search::
+build_filter_clause` wäre für beliebig tiefe Verschachtelung deutlich
+aufwendiger gewesen, ohne einen echten Nutzen — Kataloge in diesem
+Projekt sind Einzelnutzer-Bibliotheken (siehe schon ADR-0040-Nachtrag
+III zur Panorama-Homografie: "kein Web-Maßstab"), keine Datenbank mit
+Millionen Zeilen, bei der ein voller Tabellenscan pro Sammlung
+spürbar würde. `FilterCriteria`/`build_filter_clause` bleiben für die
+Filterleiste/Stapelverarbeitungs-Konsole unverändert bestehen — dort
+reicht flach UND-verknüpft weiterhin aus, ein Umbau auf den Regelbaum
+hätte keinen Mehrwert gebracht.
+
+**Migration alter intelligenter Sammlungen:** `parse_filter_node`
+versucht zuerst, `smart_criteria_json` als `FilterNode` zu lesen; bei
+fehlendem `"type"`-Tag (vor diesem Schritt gespeicherte, flache
+`FilterCriteria`-Form) fällt es auf `FilterCriteria` zurück und
+migriert über `impl From<FilterCriteria> for FilterNode` (jedes
+gesetzte Feld wird eine Bedingung in einer UND-Gruppe) — dieselbe
+"lies alt, migriere beim Zugriff, kein Schreib-Migrationsskript"-
+Konvention wie bei den bedingten Presets oben.

@@ -3,17 +3,22 @@ import { describe, expect, it } from "vitest";
 import { neutralEdlPayload } from "./edl";
 import {
   applyConditionsToSubset,
+  applyRulesToSubset,
   buildPresetEdlSubset,
   diffEdlSubsets,
   evaluateCondition,
   mergeEdlSubset,
   parseConditions,
   parseEdlSubset,
+  parseRules,
   scalePresetEdlSubset,
   serializeConditions,
   serializeEdlSubset,
+  serializeRules,
 } from "./presets";
-import type { PresetCondition, PresetConditionPhotoMeta, PresetEdlSubset } from "./presets";
+import type { PresetCondition, PresetConditionPhotoMeta, PresetEdlSubset, PresetLeafCondition, PresetRules } from "./presets";
+import type { RuleNode } from "./ruleTree";
+import { evaluateRuleNode } from "./ruleTree";
 
 // `neutralEdlPayload()` teilt sich für einige Sektionen (`basic`, `hsl`,
 // `color_grading`, `effects`, `geometry`) eine gemeinsame Konstante statt
@@ -243,6 +248,97 @@ describe("applyConditionsToSubset", () => {
   it("treats a null photo (no selection) conservatively — every condition fails", () => {
     const conditions: PresetCondition[] = [{ field: "iso", op: ">", value: "0", section: null }];
     expect(applyConditionsToSubset(subset, conditions, null)).toBeNull();
+  });
+});
+
+describe("evaluateRuleNode + applyRulesToSubset (Phase 13 Schritt 7, echter UND/ODER-Baum)", () => {
+  const photo: PresetConditionPhotoMeta = { iso: 200, aperture: 4, focal_length: 50, camera_model: "EOS R5", lens: "RF 24-70mm" };
+  const subset: PresetEdlSubset = {
+    basic: { ...neutralEdlPayload().basic, exposure_ev: 0.5 },
+    curves: neutralEdlPayload().curves,
+  };
+
+  it("evaluates an OR group as true when only one branch matches", () => {
+    const node: RuleNode<PresetLeafCondition> = {
+      type: "group",
+      operator: "or",
+      children: [
+        { type: "condition", condition: { field: "iso", op: ">", value: "10000" } }, // falsch
+        { type: "condition", condition: { field: "camera_model", op: "contains", value: "r5" } }, // wahr
+      ],
+    };
+    const rules: PresetRules = [{ section: null, node }];
+    expect(applyRulesToSubset(subset, rules, photo)).toEqual(subset);
+  });
+
+  it("evaluates a nested AND-inside-OR group correctly", () => {
+    // (iso > 10000) ODER (Blende = 4 UND Brennweite = 50) — nur der
+    // verschachtelte UND-Zweig trifft zu.
+    const node: RuleNode<PresetLeafCondition> = {
+      type: "group",
+      operator: "or",
+      children: [
+        { type: "condition", condition: { field: "iso", op: ">", value: "10000" } },
+        {
+          type: "group",
+          operator: "and",
+          children: [
+            { type: "condition", condition: { field: "aperture", op: "=", value: "4" } },
+            { type: "condition", condition: { field: "focal_length", op: "=", value: "50" } },
+          ],
+        },
+      ],
+    };
+    const rules: PresetRules = [{ section: "curves", node }];
+    const result = applyRulesToSubset(subset, rules, photo);
+    expect(result?.curves).toEqual(subset.curves);
+  });
+
+  it("excludes a section when its OR group has no matching branch", () => {
+    const node: RuleNode<PresetLeafCondition> = {
+      type: "group",
+      operator: "or",
+      children: [
+        { type: "condition", condition: { field: "iso", op: ">", value: "10000" } },
+        { type: "condition", condition: { field: "aperture", op: "=", value: "22" } },
+      ],
+    };
+    const rules: PresetRules = [{ section: "curves", node }];
+    const result = applyRulesToSubset(subset, rules, photo);
+    expect(result?.curves).toBeUndefined();
+    expect(result?.basic).toEqual(subset.basic);
+  });
+
+  it("an empty AND group is vacuously true, an empty OR group is vacuously false", () => {
+    expect(evaluateRuleNode({ type: "group", operator: "and", children: [] }, () => false)).toBe(true);
+    expect(evaluateRuleNode({ type: "group", operator: "or", children: [] }, () => true)).toBe(false);
+  });
+});
+
+describe("parseRules — Migration alter, flacher Presets (Phase 13 Schritt 7)", () => {
+  it("migrates a legacy flat PresetCondition[] into one AND-group rule per condition", () => {
+    const legacy: PresetCondition[] = [
+      { field: "iso", op: "<", value: "400", section: null },
+      { field: "aperture", op: ">", value: "8", section: "curves" },
+    ];
+    const rules = parseRules(JSON.stringify(legacy));
+    expect(rules).toHaveLength(2);
+    expect(rules[0]).toEqual({ section: null, node: { type: "condition", condition: { field: "iso", op: "<", value: "400" } } });
+    expect(rules[1]).toEqual({ section: "curves", node: { type: "condition", condition: { field: "aperture", op: ">", value: "8" } } });
+  });
+
+  it("round-trips a new-format tree unchanged through serializeRules/parseRules", () => {
+    const rules: PresetRules = [
+      {
+        section: null,
+        node: { type: "group", operator: "or", children: [{ type: "condition", condition: { field: "iso", op: ">", value: "100" } }] },
+      },
+    ];
+    expect(parseRules(serializeRules(rules))).toEqual(rules);
+  });
+
+  it("treats unparseable JSON the same conservative way as parseConditions (empty)", () => {
+    expect(parseRules("{not valid json")).toEqual([]);
   });
 });
 

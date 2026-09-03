@@ -1601,18 +1601,22 @@ pub fn create_collection(
 }
 
 /// Legt eine intelligente Sammlung an — siehe `Catalog::create_smart_collection`s
-/// Moduldoku.
+/// Moduldoku. `criteria_json` ist seit Phase 13 Schritt 7 der serialisierte
+/// UND/ODER-Regelbaum (`apx_catalog::FilterNode`, vom Frontend-
+/// `RuleTreeEditor.tsx` erzeugt) statt der alten flachen `FilterCriteriaDto`
+/// — als opakes JSON durchgereicht, wie `conditions_json` bei Presets.
 #[tauri::command]
 pub fn create_smart_collection(
     state: State<'_, AppState>,
     name: String,
     folder_id: Option<String>,
-    criteria: FilterCriteriaDto,
+    criteria_json: String,
 ) -> Result<String, String> {
     let folder_id = folder_id.map(parse_collection_folder_id).transpose()?;
+    let node = apx_catalog::parse_filter_node(&criteria_json).map_err(|err| err.to_string())?;
     let id = state
         .catalog
-        .create_smart_collection(&name, folder_id, &criteria.into())
+        .create_smart_collection(&name, folder_id, &node)
         .map_err(|err| err.to_string())?;
     Ok(id.to_string())
 }

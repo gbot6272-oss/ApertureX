@@ -130,13 +130,47 @@ export interface GpxTrackPointDto {
 }
 
 /** Alle Felder optional — ein leeres Objekt liefert alle Fotos (siehe
- * `apx_catalog::FilterCriteria`). */
+ * `apx_catalog::FilterCriteria`). Bleibt für die Filterleiste/
+ * Stapelverarbeitungs-Konsole bestehen (immer flach UND-verknüpft ist dort
+ * ausreichend); für intelligente Sammlungen siehe `SmartCollectionLeaf`
+ * unten (Phase 13 Schritt 7). */
 export interface FilterCriteriaDto {
   rating_at_least?: number;
   flag?: number;
   color_label?: string;
   camera_model?: string;
 }
+
+/** Blatt-Bedingung für den intelligenten-Sammlung-Regelbaum (Phase 13
+ * Schritt 7, siehe `apx_catalog::{FilterField,FilterOperator,FilterCondition}`
+ * und `DECISIONS.md` ADR-0040-Nachtrag V). `value` ist immer ein String,
+ * auch für die numerischen Felder Bewertung/Flagge — `RuleTreeEditor.tsx`
+ * nutzt ohnehin ein Texteingabefeld. */
+export type SmartCollectionField = "rating" | "flag" | "color_label" | "camera_model";
+export type SmartCollectionOperator = "at_least" | "equals" | "not_equals" | "contains";
+export interface SmartCollectionLeaf {
+  field: SmartCollectionField;
+  op: SmartCollectionOperator;
+  value: string;
+}
+
+export const SMART_COLLECTION_FIELD_OPTIONS: ReadonlyArray<{ value: SmartCollectionField; label: string }> = [
+  { value: "rating", label: "Bewertung" },
+  { value: "flag", label: "Flagge (-1/0/1)" },
+  { value: "color_label", label: "Farbmarkierung" },
+  { value: "camera_model", label: "Kameramodell" },
+];
+
+/** Nicht jeder Operator ergibt für jedes Feld Sinn — `matches` auf der
+ * Rust-Seite (`apx_catalog::FilterCondition::matches`) behandelt eine
+ * unpassende Kombination (z. B. `contains` auf `rating`) konservativ als
+ * nicht erfüllt, statt sie im UI hart zu verbieten. */
+export const SMART_COLLECTION_OPERATOR_OPTIONS: ReadonlyArray<{ value: SmartCollectionOperator; label: string }> = [
+  { value: "at_least", label: ">=" },
+  { value: "equals", label: "=" },
+  { value: "not_equals", label: "≠" },
+  { value: "contains", label: "enthält" },
+];
 
 // ---- Presets (ab Phase 5, siehe DECISIONS.md ADR-0031) --------------------
 
@@ -501,10 +535,12 @@ export function createCollection(name: string, folderId?: string): Promise<strin
   return invoke<string>("create_collection", { name, folderId: folderId ?? null });
 }
 
-/** Siehe `apx_catalog::Catalog::create_smart_collection`s Moduldoku für
- * die Vereinfachung (flache UND-Verknüpfung statt verschachtelter Regeln). */
-export function createSmartCollection(name: string, folderId: string | undefined, criteria: FilterCriteriaDto): Promise<string> {
-  return invoke<string>("create_smart_collection", { name, folderId: folderId ?? null, criteria });
+/** `criteriaJson` ist der serialisierte UND/ODER-Regelbaum (siehe
+ * `SmartCollectionLeaf` oben, `apx_catalog::FilterNode`) — vom Aufrufer
+ * per `JSON.stringify` erzeugt, hier als opakes JSON durchgereicht (siehe
+ * `apx_catalog::Catalog::create_smart_collection`s Moduldoku). */
+export function createSmartCollection(name: string, folderId: string | undefined, criteriaJson: string): Promise<string> {
+  return invoke<string>("create_smart_collection", { name, folderId: folderId ?? null, criteriaJson });
 }
 
 export function moveCollectionToFolder(collectionId: string, folderId: string | null): Promise<void> {

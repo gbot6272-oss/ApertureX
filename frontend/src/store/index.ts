@@ -23,17 +23,18 @@ import {
 import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import {
-  applyConditionsToSubset,
+  applyRulesToSubset,
   buildPresetEdlSubset,
   mergeEdlSubset,
-  parseConditions,
   parseEdlSubset,
+  parseRules,
   PRESET_SECTION_KEYS,
   scalePresetEdlSubset,
   serializeConditions,
+  serializeRules,
   serializeEdlSubset,
 } from "../lib/presets";
-import type { PresetCondition, PresetConditionPhotoMeta, PresetEdlSubset, PresetSectionKey } from "../lib/presets";
+import type { PresetCondition, PresetConditionPhotoMeta, PresetEdlSubset, PresetRules, PresetSectionKey } from "../lib/presets";
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
 import type { SoftProofIntent, SoftProofProfile } from "../lib/softProof";
@@ -77,10 +78,12 @@ import type {
   WebGalleryOutcomeDto,
   WorkflowTemplatePayload,
   SpotCandidateDto,
+  SmartCollectionLeaf,
   UiSettingsDto,
   WatchedFolderSettingsDto,
 } from "../lib/tauri";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import type { RuleNode } from "../lib/ruleTree";
 
 import * as undoStackLib from "../lib/undoStack";
 import type { UndoEntry } from "../lib/undoStack";
@@ -783,7 +786,7 @@ interface PresetsSlice {
     folderId: string | null,
     tags: string[],
     sections: PresetSectionKey[],
-    conditions?: PresetCondition[],
+    rules?: PresetRules,
   ) => Promise<void>;
 
   /** Zustand für den nachträglich änderbaren Preset-Stärke-Regler
@@ -1300,7 +1303,7 @@ interface LibraryBacklogSlice {
   createCollectionFolder: (name: string, parentId?: string) => Promise<void>;
   renameCollectionFolder: (folderId: string, name: string) => Promise<void>;
   deleteCollectionFolder: (folderId: string) => Promise<void>;
-  createSmartCollection: (name: string, folderId: string | undefined, criteria: FilterCriteriaDto) => Promise<void>;
+  createSmartCollection: (name: string, folderId: string | undefined, criteriaTree: RuleNode<SmartCollectionLeaf>) => Promise<void>;
   moveCollectionToFolder: (collectionId: string, folderId: string | null) => Promise<void>;
 
   stacks: StackDto[];
@@ -3308,12 +3311,12 @@ export const useAppStore = create<AppStore>()(
       }
     },
 
-    savePresetFromCurrentEdl: async (name, folderId, tags, sections, conditions = []) => {
+    savePresetFromCurrentEdl: async (name, folderId, tags, sections, rules = []) => {
       const trimmed = name.trim();
       if (!trimmed || sections.length === 0) return;
       try {
         const subset = buildPresetEdlSubset(get().developEdl, sections);
-        await api.createPreset(folderId, trimmed, tags, serializeConditions(conditions), serializeEdlSubset(subset));
+        await api.createPreset(folderId, trimmed, tags, serializeRules(rules), serializeEdlSubset(subset));
         await get().refreshPresets();
       } catch (err) {
         set((state) => {
@@ -3329,12 +3332,12 @@ export const useAppStore = create<AppStore>()(
         const version = await api.latestPresetVersion(presetId);
         const rawSubset = parseEdlSubset(version.edl_subset_json);
         const preset = get().presets.find((p) => p.id === presetId);
-        const conditions = parseConditions(preset?.conditions_json ?? "[]");
-        const subset = applyConditionsToSubset(rawSubset, conditions, selectPresetConditionMeta(get()));
+        const rules = parseRules(preset?.conditions_json ?? "[]");
+        const subset = applyRulesToSubset(rawSubset, rules, selectPresetConditionMeta(get()));
         if (subset === null) {
           // Bedingung fürs ganze Preset nicht erfüllt (`section: null`) —
           // Preset wird gar nicht angewendet (`lib/presets.ts`s
-          // `applyConditionsToSubset`).
+          // `applyRulesToSubset`).
           set((state) => {
             state.catalogError = `Preset „${preset?.name ?? presetId}" erfüllt die Bedingungen für dieses Foto nicht.`;
           });
@@ -3420,8 +3423,8 @@ export const useAppStore = create<AppStore>()(
           const version = await api.latestPresetVersion(presetId);
           const rawSubset: PresetEdlSubset = parseEdlSubset(version.edl_subset_json);
           const preset = presets.find((p) => p.id === presetId);
-          const conditions = parseConditions(preset?.conditions_json ?? "[]");
-          const subset = applyConditionsToSubset(rawSubset, conditions, meta);
+          const rules = parseRules(preset?.conditions_json ?? "[]");
+          const subset = applyRulesToSubset(rawSubset, rules, meta);
           if (subset === null) continue;
           merged = mergeEdlSubset(merged, subset);
         }
@@ -3444,8 +3447,8 @@ export const useAppStore = create<AppStore>()(
         const version = await api.latestPresetVersion(presetId);
         const rawSubset = parseEdlSubset(version.edl_subset_json);
         const preset = get().presets.find((p) => p.id === presetId);
-        const conditions = parseConditions(preset?.conditions_json ?? "[]");
-        const subset = applyConditionsToSubset(rawSubset, conditions, selectPresetConditionMeta(get()));
+        const rules = parseRules(preset?.conditions_json ?? "[]");
+        const subset = applyRulesToSubset(rawSubset, rules, selectPresetConditionMeta(get()));
         set((state) => {
           // `null` (Bedingung fürs ganze Preset nicht erfüllt) zeigt eine
           // leere Vorschau — entspricht dem tatsächlichen `applyPreset`-
@@ -4701,10 +4704,10 @@ export const useAppStore = create<AppStore>()(
       await get().refreshCollections();
     },
 
-    createSmartCollection: async (name, folderId, criteria) => {
+    createSmartCollection: async (name, folderId, criteriaTree) => {
       const trimmed = name.trim();
       if (!trimmed) return;
-      await api.createSmartCollection(trimmed, folderId, criteria);
+      await api.createSmartCollection(trimmed, folderId, JSON.stringify(criteriaTree));
       await get().refreshCollections();
     },
 

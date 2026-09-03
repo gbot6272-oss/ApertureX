@@ -1,5 +1,7 @@
 import { neutralEdlPayload } from "./edl";
 import type { EdlPayload } from "./edl";
+import { conditionNode, evaluateRuleNode } from "./ruleTree";
+import type { RuleNode } from "./ruleTree";
 
 /**
  * Presets (Phase 5, siehe `DECISIONS.md` ADR-0031) — ein Preset speichert
@@ -255,6 +257,109 @@ export const PRESET_CONDITION_OPERATOR_OPTIONS: ReadonlyArray<{ value: PresetCon
   { value: "=", label: "=" },
   { value: "contains", label: "enthält" },
 ];
+
+// ---- Echter UND/ODER-Regelbaum für bedingte Presets (Phase 13 Schritt 7,
+// siehe DECISIONS.md ADR-0040-Nachtrag V) -----------------------------------
+//
+// Löst die Beschränkung „mehrere Regeln in einem Preset sind immer
+// UND-verknüpft (kein ODER, keine Verschachtelung)" (ADR-0031 Punkt 4,
+// s.o.) ab — `PresetCondition`/`evaluateCondition`/`parseConditions`/
+// `applyConditionsToSubset` bleiben unverändert bestehen (weiterhin
+// genutzt von den Auto-Verschlagwortungsregeln in `MetadataDialog.tsx`,
+// die außerhalb dieses Schritts liegen, und als Migrationsquelle unten).
+//
+// Die Sektions-Zuordnung (`section: null` = ganzes Preset, sonst nur diese
+// Sektion) bleibt pro Regel bestehen — nur ist die Regel jetzt ein ganzer
+// `RuleNode`-Baum statt einer einzelnen Bedingung, sodass z. B. „Sektion
+// Kurven nur, wenn Kameramodell = A ODER Kameramodell = B" ausdrückbar
+// wird.
+
+export type PresetLeafCondition = Omit<PresetCondition, "section">;
+
+/** Eine Regel — ein ganzer UND/ODER-Baum, der eine Sektion (oder das
+ * ganze Preset, bei `section: null`) gattert. Mehrere Einträge in
+ * `PresetRules` bleiben wie bisher untereinander UND-verknüpft (jede
+ * muss für ihre jeweilige Sektion zutreffen); die eigentliche ODER-Logik
+ * kommt jetzt innerhalb eines einzelnen `node`-Baums zum Tragen. */
+export interface PresetRuleGroup {
+  section: PresetSectionKey | null;
+  node: RuleNode<PresetLeafCondition>;
+}
+
+export type PresetRules = PresetRuleGroup[];
+
+/** Wie [`evaluateCondition`], aber für ein Blatt ohne `section` (die liegt
+ * jetzt auf [`PresetRuleGroup`]-Ebene). */
+export function evaluateLeafCondition(condition: PresetLeafCondition, photo: PresetConditionPhotoMeta): boolean {
+  return evaluateCondition({ ...condition, section: null }, photo);
+}
+
+/** Wie [`applyConditionsToSubset`], aber je Regel ein ganzer Baum statt
+ * einer einzelnen Bedingung — siehe dessen Dokumentation für die
+ * Sektions-Gatter-Semantik, die unverändert bleibt. */
+export function applyRulesToSubset(
+  subset: PresetEdlSubset,
+  rules: readonly PresetRuleGroup[],
+  photo: PresetConditionPhotoMeta | null,
+): PresetEdlSubset | null {
+  if (rules.length === 0) return subset;
+  const meta: PresetConditionPhotoMeta = photo ?? { iso: null, aperture: null, focal_length: null, camera_model: null, lens: null };
+  const evalNode = (node: RuleNode<PresetLeafCondition>) => evaluateRuleNode(node, (leaf) => evaluateLeafCondition(leaf, meta));
+
+  for (const rule of rules) {
+    if (rule.section === null && !evalNode(rule.node)) return null;
+  }
+
+  const excludedSections = new Set<PresetSectionKey>();
+  for (const rule of rules) {
+    if (rule.section !== null && !evalNode(rule.node)) {
+      excludedSections.add(rule.section);
+    }
+  }
+  if (excludedSections.size === 0) return subset;
+
+  const result: Record<string, unknown> = { ...subset };
+  for (const section of excludedSections) {
+    delete result[section];
+  }
+  return result as PresetEdlSubset;
+}
+
+function isLegacyConditionArray(value: unknown): value is PresetCondition[] {
+  return Array.isArray(value) && value.every((item) => item !== null && typeof item === "object" && "field" in item && !("node" in item));
+}
+
+/** Migriert eine alte flache `PresetCondition[]` (vor Phase 13 Schritt 7
+ * gespeicherte Presets) in `PresetRules` — jede Bedingung wird ihr
+ * eigenes Ein-Blatt-„UND"-Regel-Objekt, mit derselben `section` wie
+ * zuvor. Verhält sich für den Sonderfall identisch zur alten
+ * `applyConditionsToSubset`-Auswertung. */
+export function migrateLegacyConditions(conditions: readonly PresetCondition[]): PresetRules {
+  return conditions.map(({ field, op, value, section }) => ({
+    section,
+    node: conditionNode<PresetLeafCondition>({ field, op, value }),
+  }));
+}
+
+/** Liest gespeichertes `conditions_json`: akzeptiert die neue Baumform
+ * direkt, fällt sonst (kaputtes/leeres JSON oder die alte flache Form)
+ * auf [`parseConditions`] zurück und migriert über
+ * [`migrateLegacyConditions`]. */
+export function parseRules(json: string): PresetRules {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    if (Array.isArray(parsed) && !isLegacyConditionArray(parsed)) {
+      return parsed as PresetRules;
+    }
+  } catch {
+    // fällt unten auf die alte, ebenfalls fehlertolerante Auswertung zurück
+  }
+  return migrateLegacyConditions(parseConditions(json));
+}
+
+export function serializeRules(rules: PresetRules): string {
+  return JSON.stringify(rules);
+}
 
 // ---- Versionierung + Diff-Ansicht (Phase 5 Schritt 8) -----------------------
 

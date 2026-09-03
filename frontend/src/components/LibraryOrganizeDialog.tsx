@@ -2,8 +2,16 @@ import { useEffect, useState } from "react";
 
 import { useT } from "../lib/i18n";
 import { suggestBestPhoto } from "../lib/duplicates";
-import type { FilterCriteriaDto } from "../lib/tauri";
+import { SMART_COLLECTION_FIELD_OPTIONS, SMART_COLLECTION_OPERATOR_OPTIONS } from "../lib/tauri";
+import type { SmartCollectionLeaf } from "../lib/tauri";
+import { conditionNode, groupNode } from "../lib/ruleTree";
+import type { RuleNode } from "../lib/ruleTree";
+import { RuleTreeEditor } from "./RuleTreeEditor";
 import { useAppStore } from "../store";
+
+function makeDefaultSmartLeaf(): SmartCollectionLeaf {
+  return { field: "rating", op: "at_least", value: "4" };
+}
 
 interface LibraryOrganizeDialogProps {
   open: boolean;
@@ -67,8 +75,7 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
 
   const [newFolderName, setNewFolderName] = useState("");
   const [newSmartName, setNewSmartName] = useState("");
-  const [smartRatingAtLeast, setSmartRatingAtLeast] = useState<number | "">("");
-  const [smartColorLabel, setSmartColorLabel] = useState("");
+  const [smartCriteria, setSmartCriteria] = useState<RuleNode<SmartCollectionLeaf>>(() => groupNode("and", [conditionNode(makeDefaultSmartLeaf())]));
   const [newStackName, setNewStackName] = useState("");
   const [autoStackWindow, setAutoStackWindow] = useState(30);
   const [newLabelName, setNewLabelName] = useState("");
@@ -95,12 +102,9 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
 
   async function handleCreateSmartCollection() {
     if (!newSmartName.trim()) return;
-    const criteria: FilterCriteriaDto = {
-      rating_at_least: smartRatingAtLeast === "" ? undefined : smartRatingAtLeast,
-      color_label: smartColorLabel || undefined,
-    };
-    await createSmartCollection(newSmartName.trim(), undefined, criteria);
+    await createSmartCollection(newSmartName.trim(), undefined, smartCriteria);
     setNewSmartName("");
+    setSmartCriteria(groupNode("and", [conditionNode(makeDefaultSmartLeaf())]));
   }
 
   const virtualCopies = selectedPhotoId ? (virtualCopiesByPhotoId[selectedPhotoId] ?? []) : [];
@@ -178,15 +182,47 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
             <div className="rounded border border-border p-2">
               <p className="mb-2 text-xs font-semibold text-text-secondary">{t("libraryOrganizeDialog.newSmartCollection")}</p>
               <input type="text" value={newSmartName} onChange={(e) => setNewSmartName(e.target.value)} placeholder={t("libraryOrganizeDialog.name")} className="mb-2 w-full rounded border border-border bg-bg-panel px-2 py-1 text-xs" />
-              <div className="mb-2 flex gap-2">
-                <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
-                  {t("libraryOrganizeDialog.ratingAtLeast")}
-                  <input type="number" min={0} max={5} value={smartRatingAtLeast} onChange={(e) => setSmartRatingAtLeast(e.target.value === "" ? "" : Number(e.target.value))} className="rounded border border-border bg-bg-panel px-2 py-1" />
-                </label>
-                <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
-                  {t("libraryOrganizeDialog.colorLabel")}
-                  <input type="text" value={smartColorLabel} onChange={(e) => setSmartColorLabel(e.target.value)} placeholder={t("libraryOrganizeDialog.colorLabelPlaceholder")} className="rounded border border-border bg-bg-panel px-2 py-1" />
-                </label>
+              <div className="mb-2">
+                <RuleTreeEditor
+                  node={smartCriteria}
+                  onChange={setSmartCriteria}
+                  makeDefaultLeaf={makeDefaultSmartLeaf}
+                  renderLeaf={(leaf, onLeafChange) => (
+                    <>
+                      <select
+                        aria-label="Feld"
+                        value={leaf.field}
+                        onChange={(e) => onLeafChange({ ...leaf, field: e.target.value as SmartCollectionLeaf["field"] })}
+                        className="min-w-0 rounded border border-border bg-bg-panel px-1 py-0.5"
+                      >
+                        {SMART_COLLECTION_FIELD_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        aria-label="Operator"
+                        value={leaf.op}
+                        onChange={(e) => onLeafChange({ ...leaf, op: e.target.value as SmartCollectionLeaf["op"] })}
+                        className="min-w-0 rounded border border-border bg-bg-panel px-1 py-0.5"
+                      >
+                        {SMART_COLLECTION_OPERATOR_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        aria-label="Wert"
+                        value={leaf.value}
+                        onChange={(e) => onLeafChange({ ...leaf, value: e.target.value })}
+                        className="w-16 min-w-0 rounded border border-border bg-bg-panel px-1 py-0.5"
+                      />
+                    </>
+                  )}
+                />
               </div>
               <button type="button" onClick={() => void handleCreateSmartCollection()} className="w-full rounded border border-accent bg-accent/10 px-2 py-1 text-xs text-accent">
                 {t("libraryOrganizeDialog.createSmartCollection")}

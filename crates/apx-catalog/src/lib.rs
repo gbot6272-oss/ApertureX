@@ -38,9 +38,10 @@ use rusqlite::Connection;
 use time::OffsetDateTime;
 
 pub use models::{
-    CatalogStatistics, Collection, CollectionFolder, ColorLabelDefinition, EditHistoryEntry,
-    FilterCriteria, Folder, HistoryPosition, Keyword, NewPhoto, Photo, Preset, PresetFolder,
-    PresetVersion, Preview, PreviewLevel, Snapshot, Stack, TagRule, Template,
+    parse_filter_node, BoolOp, CatalogStatistics, Collection, CollectionFolder,
+    ColorLabelDefinition, EditHistoryEntry, FilterCondition, FilterCriteria, FilterField,
+    FilterNode, FilterOperator, Folder, HistoryPosition, Keyword, NewPhoto, Photo, Preset,
+    PresetFolder, PresetVersion, Preview, PreviewLevel, Snapshot, Stack, TagRule, Template,
 };
 pub use repository::batch::BatchAction;
 pub use repository::share::ShareDiff;
@@ -490,14 +491,16 @@ impl Catalog {
         repository::collections::create(&conn, name, folder_id, OffsetDateTime::now_utc())
     }
 
-    /// Legt eine intelligente Sammlung an — siehe
-    /// [`repository::collections::create_smart`] für die
-    /// Vereinfachung gegenüber verschachtelten UND/ODER-Regeln.
+    /// Legt eine intelligente Sammlung an — `criteria` ist seit Phase 13
+    /// Schritt 7 ein echter, beliebig verschachtelbarer UND/ODER-Regelbaum
+    /// (siehe [`FilterNode`], `DECISIONS.md` ADR-0040-Nachtrag V; vorher
+    /// eine flache, ausschließlich UND-verknüpfte [`FilterCriteria`], siehe
+    /// [`repository::collections::create_smart`]).
     pub fn create_smart_collection(
         &self,
         name: &str,
         folder_id: Option<CollectionFolderId>,
-        criteria: &FilterCriteria,
+        criteria: &FilterNode,
     ) -> Result<CollectionId> {
         let conn = self.lock()?;
         repository::collections::create_smart(

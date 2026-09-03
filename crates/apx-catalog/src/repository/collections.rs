@@ -10,7 +10,9 @@ use rusqlite::{params, Connection};
 use time::OffsetDateTime;
 
 use crate::error::map_sqlite_err;
-use crate::models::{from_unix, to_unix, Collection, CollectionFolder, FilterCriteria};
+use crate::models::{
+    from_unix, parse_filter_node, to_unix, Collection, CollectionFolder, FilterCriteria, FilterNode,
+};
 use crate::repository::photos::{raw_to_photo, row_to_raw, SELECT_COLUMNS};
 use crate::repository::search::filter_photos;
 use crate::Photo;
@@ -152,15 +154,17 @@ pub(crate) fn create(
 }
 
 /// Legt eine intelligente Sammlung an — Mitgliedschaft wird bei jedem
-/// Zugriff live über `criteria` berechnet (siehe [`list_photos`]),
-/// **bewusste Vereinfachung**: flache UND-Verknüpfung der bestehenden
-/// `FilterCriteria`-Felder statt verschachtelter UND/ODER-Regeln (siehe
-/// `migrations/0007_library_backlog.sql`s Moduldoku).
+/// Zugriff live über `criteria` berechnet (siehe [`list_photos`]).
+/// `criteria` ist seit Phase 13 Schritt 7 ein echter, beliebig
+/// verschachtelbarer UND/ODER-Regelbaum ([`FilterNode`]) — vorher eine
+/// flache UND-Verknüpfung der `FilterCriteria`-Felder (siehe
+/// `migrations/0007_library_backlog.sql`s Moduldoku und `DECISIONS.md`
+/// ADR-0040-Nachtrag V).
 pub(crate) fn create_smart(
     conn: &Connection,
     name: &str,
     folder_id: Option<CollectionFolderId>,
-    criteria: &FilterCriteria,
+    criteria: &FilterNode,
     created_at: OffsetDateTime,
 ) -> Result<CollectionId> {
     let id = CollectionId::new();
@@ -299,20 +303,29 @@ pub(crate) fn remove_photo(
 }
 
 /// Bei einer intelligenten Sammlung: live aus `smart_criteria_json`
-/// berechnet (`repository::search::filter_photos`, dieselbe Logik wie
-/// Phase 3s Filterleiste). Sonst: die manuell gepflegte Mitgliederliste
-/// in `collection_photos`, nach `position` sortiert.
+/// berechnet — der gesamte Fotobestand wird per SQL geladen
+/// (`repository::search::filter_photos` mit leeren Kriterien, dieselbe
+/// Abfrage wie Phase 3s Filterleiste) und der Regelbaum dann **in-memory**
+/// je Foto ausgewertet ([`FilterNode::matches`], siehe `DECISIONS.md`
+/// ADR-0040-Nachtrag V — keine dynamische SQL-Generierung für beliebig
+/// tief verschachtelte UND/ODER-Gruppen nötig, Kataloge hier sind
+/// Einzelnutzer-Bibliotheken). Sonst: die manuell gepflegte
+/// Mitgliederliste in `collection_photos`, nach `position` sortiert.
 pub(crate) fn list_photos(conn: &Connection, collection_id: CollectionId) -> Result<Vec<Photo>> {
     let collection = get(conn, collection_id)?;
     if collection.is_smart {
-        let criteria: FilterCriteria = collection
-            .smart_criteria_json
-            .as_deref()
-            .map(serde_json::from_str)
-            .transpose()
-            .map_err(|err| AppError::validation(format!("Gespeicherte Kriterien kaputt: {err}")))?
-            .unwrap_or_default();
-        return filter_photos(conn, &criteria);
+        let node = match collection.smart_criteria_json.as_deref() {
+            Some(json) => parse_filter_node(json)?,
+            None => FilterNode::Group {
+                operator: crate::models::BoolOp::And,
+                children: Vec::new(),
+            },
+        };
+        let all_photos = filter_photos(conn, &FilterCriteria::default())?;
+        return Ok(all_photos
+            .into_iter()
+            .filter(|photo| node.matches(photo))
+            .collect());
     }
     let sql = format!(
         "SELECT {SELECT_COLUMNS} FROM collection_photos cp \
@@ -528,9 +541,12 @@ mod tests {
         let photo_b = second_photo(&conn, folder_id);
         photos::set_rating(&conn, photo_b, 1).expect("ok");
 
-        let criteria = FilterCriteria {
-            rating_at_least: Some(4),
-            ..Default::default()
+        let criteria = FilterNode::Condition {
+            condition: crate::models::FilterCondition {
+                field: crate::models::FilterField::Rating,
+                op: crate::models::FilterOperator::AtLeast,
+                value: "4".to_string(),
+            },
         };
         let collection_id = create_smart(
             &conn,
@@ -558,10 +574,132 @@ mod tests {
             &conn,
             "Alle",
             None,
-            &FilterCriteria::default(),
+            &FilterNode::Group {
+                operator: crate::models::BoolOp::And,
+                children: Vec::new(),
+            },
             OffsetDateTime::now_utc(),
         )
         .expect("ok");
         assert!(add_photo(&conn, collection_id, photo_id).is_err());
+    }
+
+    /// Echter Regelbaum mit ODER-Verknüpfung und Verschachtelung (Phase 13
+    /// Schritt 7): „Bewertung >= 4 ODER (Farbe = rot UND Kameramodell
+    /// enthält 'Test')" — deckt sowohl die ODER-Gruppierung als auch das
+    /// Verschachteln einer UND-Gruppe innerhalb einer ODER-Gruppe ab, was
+    /// die alte flache `FilterCriteria` nicht ausdrücken konnte.
+    #[test]
+    fn smart_collection_evaluates_nested_and_or_groups() {
+        use crate::models::{BoolOp, FilterCondition, FilterField, FilterOperator};
+
+        let (conn, photo_a) = setup();
+        let folder_id = photos::get(&conn, photo_a).expect("ok").folder_id;
+        let photo_c = second_photo(&conn, folder_id);
+        // camera_model kommt normalerweise aus dem EXIF-Import (kein
+        // eigener Setter), daher hier direkt per `NewPhoto`/`upsert`.
+        let photo_b = photos::upsert(
+            &conn,
+            &NewPhoto {
+                folder_id,
+                filename: "c.cr2".to_string(),
+                file_size: 300,
+                file_mtime: OffsetDateTime::now_utc()
+                    .replace_nanosecond(0)
+                    .expect("gültig"),
+                content_hash: None,
+                width: None,
+                height: None,
+                orientation: 1,
+                camera_make: None,
+                camera_model: Some("Meine Testkamera".to_string()),
+                lens: None,
+                iso: None,
+                shutter: None,
+                aperture: None,
+                focal_length: None,
+                captured_at: None,
+                gps_lat: None,
+                gps_lon: None,
+            },
+            OffsetDateTime::now_utc(),
+        )
+        .expect("ok")
+        .0;
+
+        photos::set_rating(&conn, photo_a, 5).expect("ok"); // trifft über die Bewertung
+        photos::set_rating(&conn, photo_b, 1).expect("ok");
+        photos::set_color_label(&conn, photo_b, Some("red")).expect("ok"); // trifft über die verschachtelte UND-Gruppe
+        photos::set_rating(&conn, photo_c, 1).expect("ok"); // trifft gar nicht
+
+        let node = FilterNode::Group {
+            operator: BoolOp::Or,
+            children: vec![
+                FilterNode::Condition {
+                    condition: FilterCondition {
+                        field: FilterField::Rating,
+                        op: FilterOperator::AtLeast,
+                        value: "4".to_string(),
+                    },
+                },
+                FilterNode::Group {
+                    operator: BoolOp::And,
+                    children: vec![
+                        FilterNode::Condition {
+                            condition: FilterCondition {
+                                field: FilterField::ColorLabel,
+                                op: FilterOperator::Equals,
+                                value: "red".to_string(),
+                            },
+                        },
+                        FilterNode::Condition {
+                            condition: FilterCondition {
+                                field: FilterField::CameraModel,
+                                op: FilterOperator::Contains,
+                                value: "Test".to_string(),
+                            },
+                        },
+                    ],
+                },
+            ],
+        };
+        let collection_id =
+            create_smart(&conn, "Auswahl", None, &node, OffsetDateTime::now_utc()).expect("ok");
+
+        let members = list_photos(&conn, collection_id).expect("ok");
+        let member_ids: std::collections::HashSet<_> = members.iter().map(|p| p.id).collect();
+        assert_eq!(member_ids.len(), 2);
+        assert!(member_ids.contains(&photo_a));
+        assert!(member_ids.contains(&photo_b));
+        assert!(!member_ids.contains(&photo_c));
+    }
+
+    /// Vor Phase 13 Schritt 7 angelegte intelligente Sammlungen speichern
+    /// `smart_criteria_json` in der alten flachen `FilterCriteria`-Form
+    /// (kein `"type"`-Tag) — [`list_photos`] muss diese unverändert lesen
+    /// können (siehe [`crate::models::parse_filter_node`]s Migration).
+    #[test]
+    fn smart_collection_reads_legacy_flat_criteria_json() {
+        let (conn, photo_a) = setup();
+        photos::set_rating(&conn, photo_a, 5).expect("ok");
+        let folder_id = photos::get(&conn, photo_a).expect("ok").folder_id;
+        let photo_b = second_photo(&conn, folder_id);
+        photos::set_rating(&conn, photo_b, 1).expect("ok");
+
+        let id = CollectionId::new();
+        conn.execute(
+            "INSERT INTO collections (id, name, created_at, folder_id, is_smart, smart_criteria_json) \
+             VALUES (?1, 'Legacy', ?2, NULL, 1, ?3)",
+            params![
+                id.to_string(),
+                to_unix(OffsetDateTime::now_utc()),
+                r#"{"rating_at_least":4}"#,
+            ],
+        )
+        .expect("ok");
+
+        let members = list_photos(&conn, id).expect("ok");
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].id, photo_a);
     }
 }

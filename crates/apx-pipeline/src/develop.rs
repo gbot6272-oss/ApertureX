@@ -20,8 +20,8 @@ use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
     basic_fused, bw_mixer, calibration, color_grading, composite, curves, details, effects,
-    geometry, hsl_color_mixer, lens_corrections, local_contrast, masks, repair, virtual_aperture,
-    white_balance,
+    geometry, hsl_color_mixer, lens_corrections, local_contrast, masks, repair, style_transfer,
+    virtual_aperture, white_balance,
 };
 
 /// Das Ergebnis von [`render_rgba8`] — `width`/`height` beschreiben
@@ -384,14 +384,29 @@ pub fn render_rgba8(
         composite::apply_all(&curved, linear.width, linear.height, &edl.composite_layers)
     };
 
+    // KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — läuft nach
+    // `composite`, vor `geometry`, im selben fertig entwickelten
+    // sRGB-RGBA8-Bild wie Compositing (siehe `stages::style_transfer`s
+    // Moduldoku).
+    let styled = if !stages.style_transfer || edl.style_transfer.amount <= 0.0 {
+        composited
+    } else {
+        style_transfer::apply(
+            &composited,
+            linear.width,
+            linear.height,
+            &edl.style_transfer,
+        )
+    };
+
     let (width, height, pixels) = if !stages.geometry || edl.geometry == GeometryAdjustment::NEUTRAL
     {
         // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
         // oder weder Drehung noch Zuschnitt etwas zu tun haben
         // (Regelfall).
-        (linear.width, linear.height, composited)
+        (linear.width, linear.height, styled)
     } else {
-        geometry::apply(&composited, linear.width, linear.height, &edl.geometry)
+        geometry::apply(&styled, linear.width, linear.height, &edl.geometry)
     };
 
     Ok(RenderedImage {
@@ -791,6 +806,7 @@ mod tests {
             stage_enabled: crate::edl::StageEnabled::ALL,
             composite_layers: Vec::new(),
             virtual_aperture: crate::edl::v4::VirtualApertureAdjustment::NEUTRAL,
+            style_transfer: crate::edl::v4::StyleTransferAdjustment::NEUTRAL,
         };
 
         if let Some(ctx) = &ctx {

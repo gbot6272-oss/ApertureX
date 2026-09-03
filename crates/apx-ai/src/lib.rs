@@ -38,6 +38,9 @@
 //!   (`kmeans_colors`) für das Farb-Harmonie-Rad.
 //! - [`depth`] (Phase 14 Schritt 8): echte monokulare Tiefenschätzung
 //!   (MiDaS v2.1 small) für den KI-Tiefenschärfe-Simulator.
+//! - [`style_transfer`] (Phase 14 Schritt 9): fünf feste, real
+//!   lizenzierte `fast_neural_style`-ONNX-Modelle für den KI-Stiltransfer
+//!   zwischen Fotos.
 
 pub mod blur;
 pub mod color;
@@ -54,6 +57,7 @@ pub mod preset_generator;
 pub mod repair_analysis;
 pub mod segmentation;
 pub mod style_consistency;
+pub mod style_transfer;
 pub mod tagging;
 pub mod upright;
 pub mod upscale;

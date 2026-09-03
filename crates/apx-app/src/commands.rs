@@ -2865,6 +2865,12 @@ pub struct AiSettingsDto {
     /// Modells bestätigt hat und er erfolgreich war (Phase 14 Schritt 8,
     /// siehe [`download_depth_model`]).
     pub depth_model_path: Option<String>,
+    /// Je Stil (`apx_ai::style_transfer::StyleKind::id()` als Schlüssel)
+    /// der lokale Pfad, sobald der Nutzer dessen Download bestätigt hat
+    /// und er erfolgreich war (Phase 14 Schritt 9, siehe
+    /// [`download_style_transfer_model`]) — ein fehlender Schlüssel
+    /// heißt „dieser Stil noch nicht heruntergeladen".
+    pub style_transfer_model_paths: std::collections::BTreeMap<String, String>,
 }
 
 #[tauri::command]
@@ -2878,6 +2884,7 @@ pub fn get_ai_settings(state: State<'_, AppState>) -> Result<AiSettingsDto, Stri
         people_encoder_model_path: settings.ai.people_encoder_model_path,
         people_feature_compiled: cfg!(feature = "people"),
         depth_model_path: settings.ai.depth_model_path,
+        style_transfer_model_paths: settings.ai.style_transfer_model_paths,
     })
 }
 
@@ -3453,6 +3460,189 @@ pub fn estimate_photo_depth(
         bitmap_width: linear.width,
         bitmap_height: linear.height,
         depth_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &depth_u8),
+    })
+}
+
+// ---- KI: Stiltransfer zwischen Fotos (Phase 14 Schritt 9, siehe
+// DECISIONS.md ADR-0041 Nachtrag IX) -----------------------------------------
+//
+// Opt-in, kein Bundling im Installer (dasselbe Muster wie MiDaS/LaMa
+// oben) — fünf unabhängig voneinander herunterladbare feste Stile
+// (`apx_ai::style_transfer::StyleKind`), jeweils real per SHA-256
+// geprüft.
+
+/// Basis-URL für alle fünf `fast_neural_style`-Modelle — derselbe echte
+/// Git-LFS-Auslieferungs-Host wie bei MiDaS' Recherche identifiziert
+/// (`media.githubusercontent.com/media/...`, `raw.githubusercontent.com`
+/// liefert für LFS-Dateien nur den Zeiger-Text, siehe `DECISIONS.md`
+/// ADR-0041).
+const STYLE_TRANSFER_BASE_URL: &str = "https://media.githubusercontent.com/media/onnx/models/main/validated/vision/style_transfer/fast_neural_style/model";
+
+/// Real berechnete SHA-256-Hashes je Stil (alle fünf Dateien in dieser
+/// Sitzung tatsächlich heruntergeladen, je exakt 6 728 029 Byte — siehe
+/// `apx_ai::style_transfer`s Moduldoku) — wie bei MiDaS eine echte
+/// Prüfsumme statt der bei LaMa dokumentierten offenen Lücke.
+fn style_transfer_model_sha256(style: apx_ai::style_transfer::StyleKind) -> &'static str {
+    use apx_ai::style_transfer::StyleKind;
+    match style {
+        StyleKind::Candy => "9d11a3529d1e547da6ae07201d93484dbab2ec0a3614535752c8f40f0fe2968a",
+        StyleKind::Mosaic => "fa646dedade881243f8d5a2ceb7de2b93675b21fc24f7482894ac4851a9a0a47",
+        StyleKind::RainPrincess => {
+            "4162912e6f75fedef6f810ae989b9e10d3d5d43308dab34b027c850cf255e152"
+        }
+        StyleKind::Udnie => "8656b6ce7dec8f22ee13c2d557d6b67bd6f550dde88d0f2e7c9972aeb765cc0d",
+        StyleKind::Pointilism => "5ee2b8d4d6bc60a777f54e0fe96a1b717360a004b79d56c67390d4a975b14d98",
+    }
+}
+
+/// Lädt das ONNX-Modell für genau einen Stil herunter, prüft die
+/// Prüfsumme gegen [`style_transfer_model_sha256`] und hinterlegt den
+/// Pfad in den Einstellungen (unter `style.id()` als Schlüssel) — nur
+/// bei erfolgreicher Prüfung, sonst wird die Datei verworfen.
+#[tauri::command]
+pub async fn download_style_transfer_model(
+    state: State<'_, AppState>,
+    style: String,
+) -> Result<String, String> {
+    let kind = apx_ai::style_transfer::StyleKind::from_id(&style)
+        .ok_or_else(|| format!("Unbekannter Stil '{style}'."))?;
+    let url = format!("{STYLE_TRANSFER_BASE_URL}/{}-9.onnx", kind.id());
+    let response = reqwest::get(&url)
+        .await
+        .map_err(|err| format!("Download von '{url}' fehlgeschlagen: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Download von '{url}' fehlgeschlagen: HTTP {}",
+            response.status()
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| format!("Antwort konnte nicht gelesen werden: {err}"))?;
+
+    use sha2::Digest as _;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(&bytes);
+    let actual_hash = format!("{:x}", hasher.finalize());
+    let expected_hash = style_transfer_model_sha256(kind);
+    if actual_hash != expected_hash {
+        return Err(format!(
+            "Prüfsumme stimmt nicht überein (erwartet {expected_hash}, erhalten {actual_hash}) — Download verworfen."
+        ));
+    }
+
+    let dest_dir = state.paths.models_dir();
+    std::fs::create_dir_all(&dest_dir).map_err(|err| err.to_string())?;
+    let dest_path = dest_dir.join(format!("style_transfer_{}.onnx", kind.id()));
+    std::fs::write(&dest_path, &bytes).map_err(|err| err.to_string())?;
+
+    let path_string = dest_path.to_string_lossy().to_string();
+    let settings_path = state.paths.settings_file();
+    let mut settings =
+        apx_core::Settings::load_or_default(&settings_path).map_err(|err| err.to_string())?;
+    settings
+        .ai
+        .style_transfer_model_paths
+        .insert(kind.id().to_string(), path_string.clone());
+    settings
+        .save(&settings_path)
+        .map_err(|err| err.to_string())?;
+
+    Ok(path_string)
+}
+
+/// Entfernt den hinterlegten Pfad für genau einen Stil (löscht die Datei
+/// selbst nicht — dieselbe Zurückhaltung wie [`clear_depth_model_path`]).
+#[tauri::command]
+pub fn clear_style_transfer_model_path(
+    state: State<'_, AppState>,
+    style: String,
+) -> Result<(), String> {
+    let kind = apx_ai::style_transfer::StyleKind::from_id(&style)
+        .ok_or_else(|| format!("Unbekannter Stil '{style}'."))?;
+    let path = state.paths.settings_file();
+    let mut settings = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    settings.ai.style_transfer_model_paths.remove(kind.id());
+    settings.save(&path).map_err(|err| err.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StyleTransferPatchDto {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    /// Base64-kodiertes interleaved-RGB-`u8`-Ergebnis — dasselbe
+    /// Übertragungsmuster wie `CompositeLayerSourceDto::pixels_base64`.
+    pub pixels_base64: String,
+}
+
+/// Berechnet einmalig das stilisierte Ergebnis für `photo_id` mit dem
+/// gewählten `style` (Phase 14 Schritt 9) — das Frontend ruft diesen
+/// Command nur auf ausdrücklichen Nutzerwunsch auf, nicht bei jedem
+/// Regler-Tick, und speichert das Ergebnis als
+/// `StyleTransferAdjustment::patch` in der EDL (dasselbe „einmal
+/// berechnen"-Muster wie [`estimate_photo_depth`]/[`run_ai_inpaint`]).
+///
+/// **Anders als `estimate_photo_depth`/`run_ai_inpaint`: läuft auf dem
+/// bereits nach sRGB konvertierten Dekodierergebnis**, nicht auf rohen
+/// linearen Pixeln — dieselbe Farbraum-Wahl wie
+/// [`prepare_composite_layer_source`] (Schritt 3), weil das Ergebnis
+/// hier direkt als sichtbares Bild ins fertig entwickelte Foto
+/// zurückgeblendet wird (`stages::style_transfer::apply`), nicht nur
+/// als Zwischengröße für eine weitere Berechnung dient wie eine
+/// Tiefenkarte — ein linearer Kompromiss wäre hier ein sichtbarer
+/// Tonwert-Fehler, keine bloße Ungenauigkeit.
+#[tauri::command]
+pub fn stylize_photo(
+    state: State<'_, AppState>,
+    photo_id: String,
+    style: String,
+) -> Result<StyleTransferPatchDto, String> {
+    let kind = apx_ai::style_transfer::StyleKind::from_id(&style)
+        .ok_or_else(|| format!("Unbekannter Stil '{style}'."))?;
+    let photo_id = parse_photo_id(photo_id)?;
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let model_path = settings
+        .ai
+        .style_transfer_model_paths
+        .get(kind.id())
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| {
+            format!(
+                "Stil '{}' noch nicht heruntergeladen — siehe Einstellungen → KI.",
+                kind.id()
+            )
+        })?
+        .clone();
+
+    let max_edge = apx_ai::segmentation::ANALYSIS_MAX_EDGE;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let linear =
+        apx_raw::decode_linear(&source_path, Some(max_edge)).map_err(|err| err.to_string())?;
+    let rgba =
+        apx_pipeline::color::linear_camera_rgb_to_srgb_rgba8(&linear.pixels, linear.cam_to_srgb);
+    let pixel_count = (linear.width as usize) * (linear.height as usize);
+    let mut rgb = vec![0u8; pixel_count * 3];
+    for i in 0..pixel_count {
+        rgb[i * 3] = rgba[i * 4];
+        rgb[i * 3 + 1] = rgba[i * 4 + 1];
+        rgb[i * 3 + 2] = rgba[i * 4 + 2];
+    }
+
+    // Session wird pro Aufruf frisch geladen (dieselbe Begründung wie
+    // `run_ai_inpaint`/`estimate_photo_depth`: einfacher, für einen
+    // Ein-Klick-Vorgang akzeptabel).
+    let mut session = apx_ai::style_transfer::StyleTransferSession::load(Path::new(&model_path))
+        .map_err(|err| err.to_string())?;
+    let styled = session
+        .stylize_rgb8(&rgb, linear.width, linear.height)
+        .map_err(|err| err.to_string())?;
+
+    Ok(StyleTransferPatchDto {
+        bitmap_width: linear.width,
+        bitmap_height: linear.height,
+        pixels_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &styled),
     })
 }
 

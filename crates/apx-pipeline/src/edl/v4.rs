@@ -62,6 +62,13 @@ pub struct StageEnabled {
     /// `default_true`-Begründung wie `composite` oben.
     #[serde(default = "default_true")]
     pub virtual_aperture: bool,
+    /// KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9, siehe
+    /// `DECISIONS.md` ADR-0041 Nachtrag IX) — läuft nach `composite`,
+    /// vor `geometry`, im fertig entwickelten sRGB-RGBA8-Bild (siehe
+    /// `stages::style_transfer`s Moduldoku). Dieselbe
+    /// `default_true`-Begründung wie `composite`/`virtual_aperture` oben.
+    #[serde(default = "default_true")]
+    pub style_transfer: bool,
     pub geometry: bool,
 }
 
@@ -87,6 +94,7 @@ impl StageEnabled {
         curves: true,
         composite: true,
         virtual_aperture: true,
+        style_transfer: true,
         geometry: true,
     };
 }
@@ -189,6 +197,54 @@ impl Default for VirtualApertureAdjustment {
     }
 }
 
+// ---- KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) -------------------
+
+/// Einmalig vorab per `apx_ai::style_transfer::StyleTransferSession::
+/// stylize_rgb8` berechnetes stilisiertes Bild — dasselbe „einmal
+/// berechnen, bei jedem Rendern nur noch skalieren"-Muster wie
+/// `CompositeLayerSource`/`DepthMapPatch`. `pixels` ist interleaved RGB
+/// (`0..=255`), `bitmap_width * bitmap_height * 3` Zahlen lang.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StyleTransferPatch {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub pixels: Vec<u8>,
+}
+
+/// KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9, siehe
+/// `DECISIONS.md` ADR-0041 Nachtrag IX, Recherche-Tabelle Punkt 7):
+/// Lightroom hat dafür kein Äquivalent. Anders als ursprünglich erhofft
+/// (ein *beliebiges* Referenzfoto als Stilvorlage) bewusst auf fünf
+/// fest lizenzierte `fast_neural_style`-Netze beschränkt (siehe
+/// `apx_ai::style_transfer`s Moduldoku) — welcher der fünf Stile gewählt
+/// ist, steckt bereits im vorab berechneten `patch` und muss dieser
+/// Crate (die keinen Modell-/Katalogzugriff hat) nicht bekannt sein.
+/// `amount` (`0.0..=1.0`) blendet linear zwischen dem unveränderten
+/// Bild (`0.0`) und dem vollen Stiltransfer-Ergebnis (`1.0`) — dieselbe
+/// Deckkraft-Konvention wie `CompositeLayer::opacity`, hier aber
+/// global statt pro Ebene. Ohne `patch` (noch nicht berechnet) bleibt
+/// die Stufe ein No-Op — dieselbe „noch nicht berechnet"-Konvention wie
+/// `VirtualApertureAdjustment::depth_map`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StyleTransferAdjustment {
+    pub amount: f32,
+    #[serde(default)]
+    pub patch: Option<StyleTransferPatch>,
+}
+
+impl StyleTransferAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        patch: None,
+    };
+}
+
+impl Default for StyleTransferAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
 // ---- Der vollständige EDL v4 -----------------------------------------------
 
 /// Die konkrete EDL-Struktur für Schema-Version 4 — siehe
@@ -226,6 +282,12 @@ pub struct EdlV4 {
     /// Verhalten, keine Tiefenkarte berechnet).
     #[serde(default)]
     pub virtual_aperture: VirtualApertureAdjustment,
+    /// KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — additiv,
+    /// `#[serde(default)]` liest ein gespeichertes `EdlV4` ohne dieses
+    /// Feld als `StyleTransferAdjustment::NEUTRAL` (unverändertes
+    /// bisheriges Verhalten, kein Stiltransfer berechnet).
+    #[serde(default)]
+    pub style_transfer: StyleTransferAdjustment,
 }
 
 impl EdlV4 {
@@ -251,6 +313,7 @@ impl EdlV4 {
             stage_enabled: StageEnabled::ALL,
             composite_layers: Vec::new(),
             virtual_aperture: VirtualApertureAdjustment::NEUTRAL,
+            style_transfer: StyleTransferAdjustment::NEUTRAL,
         }
     }
 
@@ -279,6 +342,7 @@ impl EdlV4 {
             stage_enabled: StageEnabled::ALL,
             composite_layers: Vec::new(),
             virtual_aperture: VirtualApertureAdjustment::NEUTRAL,
+            style_transfer: StyleTransferAdjustment::NEUTRAL,
         }
     }
 }

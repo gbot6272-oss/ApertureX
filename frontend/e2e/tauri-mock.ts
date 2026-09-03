@@ -230,6 +230,20 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       // 16 Bytes, alle 128 — Base64 von `Uint8Array(16).fill(128)`.
       depth_base64: "gICAgICAgICAgICAgICAgA==",
     },
+    // KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — leeres Objekt
+    // = kein Stil heruntergeladen (Testdefault), dasselbe Muster wie
+    // `depthModelPath`, hier aber je Stil-ID ein eigener Eintrag.
+    // `styleTransferPatchResult` steuert direkt das Ergebnis, das
+    // `stylize_photo` zurückgäbe (die echte `fast_neural_style`-
+    // Inferenz ist bereits in `apx-ai::style_transfer`s Rust-Unit-Tests
+    // abgedeckt).
+    styleTransferModelPaths: {} as Record<string, string>,
+    styleTransferPatchResult: {
+      bitmap_width: 2,
+      bitmap_height: 2,
+      // 12 Bytes (2x2 RGB), alle 222 — Base64 von `Uint8Array(12).fill(222)`.
+      pixels_base64: "3t7e3t7e3t7e3t7e",
+    },
     // Adobe-XMP-Sidecar (Phase 9 Schritt 2).
     exportedXmpSidecarPath: "/mock/photos/IMG_0001.xmp" as string,
     xmpImportApplies: true as boolean,
@@ -631,6 +645,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       colorPaletteResult: unknown[];
       depthModelPath: string | null;
       depthMapResult: { bitmap_width: number; bitmap_height: number; depth_base64: string };
+      styleTransferModelPaths: Record<string, string>;
+      styleTransferPatchResult: { bitmap_width: number; bitmap_height: number; pixels_base64: string };
     };
 
     switch (cmd) {
@@ -1371,6 +1387,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           people_encoder_model_path: fixtures.peopleEncoderModelPath,
           people_feature_compiled: fixtures.peopleFeatureCompiled,
           depth_model_path: fixtures.depthModelPath,
+          style_transfer_model_paths: fixtures.styleTransferModelPaths,
         };
       case "download_inpainting_model":
         fixtures.inpaintingModelPath = "/mock/models/lama_fp32.onnx";
@@ -1390,6 +1407,22 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return null;
       case "estimate_photo_depth":
         return fixtures.depthMapResult;
+
+      // ---- KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — die
+      // echte fast_neural_style-Inferenz ist bereits in
+      // `apx-ai::style_transfer`s Rust-Unit-Tests abgedeckt. ---------------
+      case "download_style_transfer_model": {
+        const style = args.style as string;
+        fixtures.styleTransferModelPaths[style] = `/mock/models/style_transfer_${style}.onnx`;
+        return fixtures.styleTransferModelPaths[style];
+      }
+      case "clear_style_transfer_model_path": {
+        const style = args.style as string;
+        delete fixtures.styleTransferModelPaths[style];
+        return null;
+      }
+      case "stylize_photo":
+        return fixtures.styleTransferPatchResult;
 
       // ---- Echte Personen-Wiedererkennung (Phase 13 Schritt 8) -----------
       case "download_people_models":

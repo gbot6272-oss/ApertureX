@@ -31,6 +31,12 @@ import type { RuleNode } from "./ruleTree";
 // Tiefenkarte (MiDaS-Inferenz über dessen konkreten Bildinhalt) — auf ein
 // anderes Foto übertragen wäre sie schlicht falsch, genau wie ein
 // Pinselstrich an einer bestimmten Bildposition.
+//
+// `style_transfer` (Phase 14 Schritt 9) ist aus demselben Grund
+// AUSGESCHLOSSEN: `patch` ist ein für genau ein Foto berechnetes
+// stilisiertes Ergebnis (Stiltransfer-Inferenz über dessen konkreten
+// Bildinhalt) — auf ein anderes Foto übertragen wäre es exakt so falsch
+// wie `virtual_aperture.depth_map`.
 export type PresetSectionKey = Exclude<
   keyof EdlPayload,
   | "repair"
@@ -40,6 +46,7 @@ export type PresetSectionKey = Exclude<
   | "bw_mixer"
   | "stage_enabled"
   | "virtual_aperture"
+  | "style_transfer"
 >;
 
 export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [

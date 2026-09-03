@@ -586,6 +586,14 @@ export const VIRTUAL_APERTURE_SLIDER_SPECS: readonly SliderSpec[] = [
   { key: "amount", label: "Virtuelle Blende: Betrag", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
 ];
 
+/** KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — Lightroom hat
+ * dafür kein Äquivalent. Wie `VIRTUAL_APERTURE_SLIDER_SPECS` (`0..=100`
+ * UI-Skala für einen intern `0.0..=1.0`-Bruchteil, siehe
+ * `StyleTransferAdjustment.amount`). */
+export const STYLE_TRANSFER_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "amount", label: "Stiltransfer: Betrag", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+];
+
 // ---- Kalibrierung -----------------------------------------------------------
 
 export type ProcessVersion = "V1";
@@ -1169,6 +1177,10 @@ export interface StageEnabled {
    * (`edl/v4.rs`s `StageEnabled`), auch wenn die tatsächliche
    * Rendering-Reihenfolge eine andere ist. */
   virtual_aperture: boolean;
+  /** KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — läuft nach
+   * `composite`, vor `geometry`, im fertig entwickelten sRGB-RGBA8-Bild
+   * (siehe `stages::style_transfer`s Moduldoku). */
+  style_transfer: boolean;
   geometry: boolean;
 }
 
@@ -1187,6 +1199,7 @@ export const NEUTRAL_STAGE_ENABLED: StageEnabled = {
   curves: true,
   composite: true,
   virtual_aperture: true,
+  style_transfer: true,
   geometry: true,
 };
 
@@ -1257,6 +1270,57 @@ export const NEUTRAL_VIRTUAL_APERTURE: VirtualApertureAdjustment = {
   depth_map: null,
 };
 
+/** Einmalig berechnetes Stiltransfer-Ergebnis (Phase 14 Schritt 9) —
+ * dasselbe „einmal per Command auflösen, bei jedem Rendern nur noch
+ * skalieren"-Muster wie `CompositeLayerSource`/`DepthMapPatch`.
+ * `pixels` ist interleaved RGB (`0..=255`), base64-kodiert — die
+ * Frontend-Seite dekodiert das nicht selbst, sondern reicht es nur
+ * unverändert an die Rust-Seite zurück (`StyleTransferAdjustment.patch`),
+ * die es beim Rendern bilinear auf die tatsächliche Bildgröße skaliert. */
+export interface StyleTransferPatch {
+  bitmap_width: number;
+  bitmap_height: number;
+  /** Auf der Rust-Seite `Vec<u8>` (`pixels`), hier als base64-String
+   * transportiert — siehe `StyleTransferPatchDto` in `lib/tauri.ts`. */
+  pixels: string;
+}
+
+/** KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — spiegelt
+ * `apx_pipeline::edl::v4::StyleTransferAdjustment`. `amount`:
+ * `0.0..=1.0`, blendet linear zwischen unverändertem Bild (`0.0`) und
+ * vollem Stiltransfer-Ergebnis (`1.0`). Ohne berechnetes Ergebnis
+ * (`patch === null`) bleibt die Stufe wirkungslos, selbst bei
+ * `amount > 0` (siehe `style_transfer.rs`s Moduldoku) — welcher der
+ * fünf festen Stile zuletzt gewählt wurde, steckt bereits im
+ * berechneten `patch` und ist hier nicht separat nachgeführt. */
+export interface StyleTransferAdjustment {
+  amount: number;
+  patch: StyleTransferPatch | null;
+}
+
+export const NEUTRAL_STYLE_TRANSFER: StyleTransferAdjustment = {
+  amount: 0.0,
+  patch: null,
+};
+
+/** Die fünf real lizenzierten, festen Stile (`onnx/models`, MIT,
+ * `fast_neural_style`, siehe `apx_ai::style_transfer::StyleKind`) — kein
+ * beliebiges Referenzfoto als Stilvorlage (siehe `DECISIONS.md`
+ * ADR-0041 Nachtrag IX für die Begründung). `id` spiegelt
+ * `StyleKind::id()` exakt. */
+export interface StyleTransferStyle {
+  id: string;
+  label: string;
+}
+
+export const STYLE_TRANSFER_STYLES: readonly StyleTransferStyle[] = [
+  { id: "candy", label: "Candy" },
+  { id: "mosaic", label: "Mosaik" },
+  { id: "rain-princess", label: "Rain Princess" },
+  { id: "udnie", label: "Udnie" },
+  { id: "pointilism", label: "Pointillismus" },
+] as const;
+
 /** Ein Knoten im Node-Editor — Anzeigereihenfolge identisch zur
  * tatsächlichen Rendering-Reihenfolge (siehe `develop.rs`s Moduldoku).
  * `panel` benennt das bereits bestehende Bedienfeld, das ein Klick auf
@@ -1282,6 +1346,7 @@ export const STAGE_NODE_SPECS: readonly StageNodeSpec[] = [
   { key: "curves", label: "Kurven" },
   { key: "composite", label: "Compositing" },
   { key: "virtual_aperture", label: "Virtuelle Blende" },
+  { key: "style_transfer", label: "Stiltransfer" },
   { key: "geometry", label: "Geometrie" },
 ] as const;
 
@@ -1306,6 +1371,7 @@ export interface EdlPayload {
   stage_enabled: StageEnabled;
   composite_layers: CompositeLayer[];
   virtual_aperture: VirtualApertureAdjustment;
+  style_transfer: StyleTransferAdjustment;
 }
 
 export function neutralEdlPayload(): EdlPayload {
@@ -1328,6 +1394,7 @@ export function neutralEdlPayload(): EdlPayload {
     stage_enabled: NEUTRAL_STAGE_ENABLED,
     composite_layers: [],
     virtual_aperture: NEUTRAL_VIRTUAL_APERTURE,
+    style_transfer: NEUTRAL_STYLE_TRANSFER,
   };
 }
 

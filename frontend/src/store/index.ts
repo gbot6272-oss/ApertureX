@@ -1432,6 +1432,25 @@ interface LibraryBacklogSlice {
    * sonst mit einer klaren Fehlermeldung (`catalogError`). */
   estimateDepthForCurrentPhoto: () => Promise<void>;
 
+  /** KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9, siehe
+   * `DECISIONS.md` ADR-0041 Nachtrag IX) — fünf feste Stile
+   * (`STYLE_TRANSFER_STYLES`), jeder einzeln per Stil-ID herunterladbar. */
+  downloadStyleTransferModel: (style: string) => Promise<void>;
+  /** Die Stil-ID, deren Modell gerade heruntergeladen wird — `null`,
+   * wenn keine läuft (nur ein Download gleichzeitig, wie bei allen
+   * anderen Opt-in-Downloads dieses Projekts). */
+  styleTransferModelDownloading: string | null;
+  clearStyleTransferModelPath: (style: string) => Promise<void>;
+  setStyleTransferAmount: (value: number) => void;
+  styleTransferStylizing: boolean;
+  /** Ruft `apx_ai::style_transfer::StyleTransferSession` für das aktuell
+   * im Entwickeln-Modul geöffnete Foto mit `style` ab und legt das
+   * Ergebnis in `developEdl.style_transfer.patch` ab — braucht ein zuvor
+   * für diesen Stil heruntergeladenes Modell (siehe
+   * `downloadStyleTransferModel`), scheitert sonst mit einer klaren
+   * Fehlermeldung (`catalogError`). */
+  stylizePhotoWithStyle: (style: string) => Promise<void>;
+
   /** Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
    * `DECISIONS.md` ADR-0038): eine Regel = `libraryFilter` (wiederverwendet,
    * wie beim normalen Filter-Panel) + eine `BatchAction`. */
@@ -5276,6 +5295,72 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.depthEstimating = false;
+        });
+      }
+    },
+
+    styleTransferModelDownloading: null,
+
+    downloadStyleTransferModel: async (style) => {
+      set((state) => {
+        state.styleTransferModelDownloading = style;
+      });
+      try {
+        await api.downloadStyleTransferModel(style);
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.styleTransferModelDownloading = null;
+        });
+      }
+    },
+
+    clearStyleTransferModelPath: async (style) => {
+      try {
+        await api.clearStyleTransferModelPath(style);
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    setStyleTransferAmount: (value) => {
+      set((state) => {
+        state.developEdl.style_transfer.amount = value;
+      });
+    },
+
+    styleTransferStylizing: false,
+
+    stylizePhotoWithStyle: async (style) => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.styleTransferStylizing = true;
+      });
+      try {
+        const dto = await api.stylizePhoto(developPhotoId, style);
+        set((state) => {
+          state.developEdl.style_transfer.patch = {
+            bitmap_width: dto.bitmap_width,
+            bitmap_height: dto.bitmap_height,
+            pixels: dto.pixels_base64,
+          };
+        });
+        void get().commitDevelopEdit("Stiltransfer angewendet");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.styleTransferStylizing = false;
         });
       }
     },

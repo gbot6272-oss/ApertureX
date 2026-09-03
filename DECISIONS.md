@@ -3369,3 +3369,59 @@ Tests über den ganzen Ablauf stabil bleiben). `depth_map` ist wie
 eine für ein bestimmtes Foto berechnete Tiefenkarte ist auf ein anderes
 Foto übertragen schlicht falsch, derselbe Grund wie bei einem
 Reparatur-Pinselstrich an einer festen Bildposition.
+
+### Nachtrag IX (Phase 14 Schritt 9): KI-Stiltransfer zwischen Fotos —
+fünf feste `fast_neural_style`-Stile statt beliebiger Referenzbilder,
+Fixgröße 224×224 real widerlegt "dynamische Eingabe"
+
+Punkt 7 der Recherche-Tabelle: Lightroom hat kein Äquivalent. Wie schon
+in Schritt 0 dokumentiert, bleibt ein lizenzklares Modell für *beliebige*
+Referenzbilder als Stilvorlage unerreichbar (Googles Magenta nur als
+TFLite, der einzige ONNX-Nachbau ohne Lizenzangabe auf Google Drive) —
+Schritt 9 bleibt deshalb bewusst auf die fünf real lizenzierten festen
+`onnx/models`-Stile beschränkt (candy/mosaic/rain-princess/udnie/
+pointilism, MIT, `fast_neural_style`).
+
+**Real heruntergeladen und geprüft:** alle fünf `<stil>-9.onnx`-Dateien
+in dieser Sitzung tatsächlich über `media.githubusercontent.com/media/
+onnx/models/main/validated/vision/style_transfer/fast_neural_style/
+model/<stil>-9.onnx` geladen, jede exakt 6 728 029 Byte, mit fünf real
+berechneten, unterschiedlichen SHA-256-Hashes (siehe
+`apx-app::commands::style_transfer_model_sha256`) — wie bei MiDaS ein
+echter Hash statt LaMas dokumentierter Lücke.
+
+**Korrektur-Fund, real per `onnxruntime`-Introspektion gefunden:**
+Schritt 0s Spike vermutete "dynamische NCHW-Eingabe" (der damalige
+Testlauf probierte nur 224×224). Ein echter Introspektionslauf in
+dieser Sitzung zeigt: nur `input1` ist ein echter Laufzeit-Feed (alle
+übrigen ONNX-"Inputs" sind per Initializer belegte Netzgewichte), mit
+FEST codierter Form `[1,3,224,224]`. Ein echter Inferenzlauf mit
+`100×150` schlägt mit einer expliziten ONNX-Runtime-Fehlermeldung fehl
+— dieselbe Lehre wie MiDaS in Schritt 8 (herunterskalieren, inferieren,
+zurückskalieren, siehe `apx_ai::style_transfer`s Moduldoku).
+
+**Architektur wie Schritt 8:** `apx-pipeline` darf nicht von `apx-ai`
+abhängen — das stilisierte Ergebnis wird einmal per
+`apx-app::commands::stylize_photo` berechnet und als fertige Bitmap
+(`StyleTransferPatch`) im EDL abgelegt. `stages::style_transfer::apply`
+blendet dieses Ergebnis linear (`amount`-Deckkraft) über das bereits
+fertig entwickelte sRGB-RGBA8-Bild, direkt nach `composite`, vor
+`geometry` — anders als `virtual_aperture` (linearer Arbeitsraum) im
+selben display-referred Farbraum wie Compositing, weil das Ergebnis
+hier unmittelbar sichtbare Pixel sind.
+
+**Farbraum-Entscheidung bewusst anders als bei Tiefenschätzung:**
+`stylize_photo` konvertiert erst nach sRGB (`linear_camera_rgb_to_srgb_
+rgba8`, dasselbe Muster wie `prepare_composite_layer_source` aus
+Schritt 3), bevor das Bild ins Netz geht — anders als
+`estimate_photo_depth`s bewusst in Kauf genommene lineare Näherung, weil
+ein Tonwert-Fehler hier ein sichtbares Ergebnis verfälscht, nicht nur
+eine Zwischengröße.
+
+**Frontend:** `style_transfer_model_paths` als `BTreeMap`/`Record`
+(einer von fünf Stilen als Schlüssel) statt fünf einzelner
+`Option<String>`-Felder wie bei MiDaS/LaMa — fünf unabhängig
+voneinander herunterladbare Modelle. `patch` ist wie
+`virtual_aperture.depth_map` bewusst NICHT Teil eines Presets
+(`lib/presets.ts`) — für ein bestimmtes Foto berechnet, auf ein anderes
+übertragen schlicht falsch.

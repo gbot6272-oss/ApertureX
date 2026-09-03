@@ -104,11 +104,12 @@ impl DepthSession {
 
         let outputs = self
             .session
-            .run(ort::inputs![ort::value::TensorRef::from_array_view(&image_array).map_err(
-                |err| AiError::Model {
-                    message: format!("Bild-Tensor konnte nicht erzeugt werden: {err}"),
-                }
-            )?])
+            .run(ort::inputs![ort::value::TensorRef::from_array_view(
+                &image_array
+            )
+            .map_err(|err| AiError::Model {
+                message: format!("Bild-Tensor konnte nicht erzeugt werden: {err}"),
+            })?])
             .map_err(|err| AiError::Model {
                 message: format!("Inferenz fehlgeschlagen: {err}"),
             })?;
@@ -125,7 +126,9 @@ impl DepthSession {
         // funktioniert, ohne die Achsenzahl exakt hart zu kodieren.
         if output_shape.len() < 2 {
             return Err(AiError::Model {
-                message: format!("unerwartete Ausgabeform {output_shape:?}, erwartet mind. 2 Achsen (H, W)"),
+                message: format!(
+                    "unerwartete Ausgabeform {output_shape:?}, erwartet mind. 2 Achsen (H, W)"
+                ),
             });
         }
         let out_h = output_shape[output_shape.len() - 2] as u32;
@@ -141,14 +144,18 @@ impl DepthSession {
 
         // Relative Disparität -> 0..1 normiert (1.0 = am nächsten).
         let min = output_data.iter().copied().fold(f32::INFINITY, f32::min);
-        let max = output_data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let max = output_data
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
         let range = (max - min).max(1e-6);
         let normalized_u8: Vec<u8> = output_data
             .iter()
             .map(|&v| (((v - min) / range) * 255.0).round().clamp(0.0, 255.0) as u8)
             .collect();
 
-        let resized = apx_core::raster::bilinear_resize_u8(&normalized_u8, out_w, out_h, width, height);
+        let resized =
+            apx_core::raster::bilinear_resize_u8(&normalized_u8, out_w, out_h, width, height);
         Ok(resized.into_iter().map(|v| f32::from(v) / 255.0).collect())
     }
 }
@@ -211,7 +218,8 @@ mod tests {
             eprintln!("übersprungen: keine ONNX-Runtime-Bibliothek in dieser Umgebung gefunden");
             return;
         };
-        crate::inpaint::init_environment(&dylib).expect("ONNX-Umgebung sollte sich initialisieren lassen");
+        crate::inpaint::init_environment(&dylib)
+            .expect("ONNX-Umgebung sollte sich initialisieren lassen");
 
         let model_bytes = include_bytes!("../tests/fixtures/mean_channel_depth.onnx");
         let session = ort::session::Session::builder()
@@ -239,7 +247,8 @@ mod tests {
             eprintln!("übersprungen: keine ONNX-Runtime-Bibliothek in dieser Umgebung gefunden");
             return;
         };
-        crate::inpaint::init_environment(&dylib).expect("ONNX-Umgebung sollte sich initialisieren lassen");
+        crate::inpaint::init_environment(&dylib)
+            .expect("ONNX-Umgebung sollte sich initialisieren lassen");
 
         let model_bytes = include_bytes!("../tests/fixtures/mean_channel_depth.onnx");
         let session = ort::session::Session::builder()

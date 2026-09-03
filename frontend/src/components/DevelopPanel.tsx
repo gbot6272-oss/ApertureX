@@ -60,6 +60,7 @@ import { CanvasExtendDialog } from "./CanvasExtendDialog";
 import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import { PaletteFrame } from "./PaletteFrame";
 import { SavePresetDialog } from "./SavePresetDialog";
+import { StyleTransferPanel } from "./StyleTransferPanel";
 import { VirtualAperturePanel } from "./VirtualAperturePanel";
 
 // ---- Reparatur (Klonen/Reparieren) — Phase 4 Schritt 12 --------------------
@@ -109,6 +110,7 @@ const STAGE_ANCHOR_IDS: Record<keyof StageEnabled, string> = {
   curves: "stage-curves",
   composite: "stage-composite",
   virtual_aperture: "stage-virtual_aperture",
+  style_transfer: "stage-style_transfer",
   geometry: "stage-geometry",
 };
 
@@ -1433,6 +1435,14 @@ export function DevelopPanel() {
           <fieldset id="stage-virtual_aperture" className="flex flex-col gap-2">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Virtuelle Blende</legend>
             <VirtualAperturePanel />
+          </fieldset>
+
+          {/* KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9,
+              ADR-0041 Nachtrag IX) — läuft nach `composite`, vor
+              `geometry` (siehe `stages::style_transfer`s Moduldoku). */}
+          <fieldset id="stage-style_transfer" className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Stiltransfer</legend>
+            <StyleTransferPanel />
           </fieldset>
 
           <fieldset id="stage-geometry" className="flex flex-col gap-3">

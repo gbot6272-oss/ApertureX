@@ -898,6 +898,11 @@ export interface AiSettingsDto {
   /** `null`, solange der Nutzer den Download nicht bestätigt hat (Phase 14
    * Schritt 8, siehe `DECISIONS.md` ADR-0041 Nachtrag VIII). */
   depth_model_path: string | null;
+  /** Je Stil (`STYLE_TRANSFER_STYLES`-ID als Schlüssel, `lib/edl.ts`) der
+   * lokale Pfad, sobald heruntergeladen (Phase 14 Schritt 9, siehe
+   * `DECISIONS.md` ADR-0041 Nachtrag IX) — ein fehlender Schlüssel heißt
+   * „dieser Stil noch nicht heruntergeladen". */
+  style_transfer_model_paths: Record<string, string>;
 }
 
 export function getAiSettings(): Promise<AiSettingsDto> {
@@ -954,6 +959,39 @@ export interface DepthMapDto {
  * `EdlPayload.virtual_aperture.depth_map` abgelegt. */
 export function estimatePhotoDepth(photoId: string): Promise<DepthMapDto> {
   return invoke<DepthMapDto>("estimate_photo_depth", { photoId });
+}
+
+// ---- KI: Stiltransfer zwischen Fotos (Phase 14 Schritt 9, siehe
+// DECISIONS.md ADR-0041 Nachtrag IX) -----------------------------------------
+
+/** Lädt das ~6,7-MB-ONNX-Modell für genau einen Stil herunter (MIT,
+ * `onnx/models` `fast_neural_style`, SHA-256-geprüft) — `style` ist eine
+ * der `STYLE_TRANSFER_STYLES`-IDs (`lib/edl.ts`). Löst erst nach
+ * ausdrücklicher Nutzerbestätigung. Liefert den lokalen Zielpfad zurück. */
+export function downloadStyleTransferModel(style: string): Promise<string> {
+  return invoke<string>("download_style_transfer_model", { style });
+}
+
+/** Entfernt nur den hinterlegten Pfad für `style` — löscht die
+ * heruntergeladene Datei selbst nicht. */
+export function clearStyleTransferModelPath(style: string): Promise<void> {
+  return invoke<void>("clear_style_transfer_model_path", { style });
+}
+
+export interface StyleTransferPatchDto {
+  bitmap_width: number;
+  bitmap_height: number;
+  /** Base64-kodiertes interleaved-RGB-`u8`-Ergebnis. */
+  pixels_base64: string;
+}
+
+/** Führt echten Stiltransfer für `photoId` mit dem gewählten `style` aus
+ * — braucht ein zuvor heruntergeladenes Modell für diesen Stil (siehe
+ * [`downloadStyleTransferModel`]), scheitert sonst mit einer klaren
+ * Fehlermeldung. Das Ergebnis wird unverändert in
+ * `EdlPayload.style_transfer.patch` abgelegt. */
+export function stylizePhoto(photoId: string, style: string): Promise<StyleTransferPatchDto> {
+  return invoke<StyleTransferPatchDto>("stylize_photo", { photoId, style });
 }
 
 // ---- KI: Echte Personen-Wiedererkennung (Phase 13 Schritt 8) ---------------

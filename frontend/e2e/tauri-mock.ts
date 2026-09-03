@@ -1432,6 +1432,46 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           pixels_base64: btoa(binary),
         };
       }
+      case "run_ai_outpaint": {
+        // Phase 14 Schritt 1: dieselbe graue Platzhalter-Logik wie
+        // `run_ai_inpaint` oben, nur als bereits zusammengesetzte
+        // erweiterte Leinwand (siehe `CanvasExtensionPatch`s Doku).
+        const w = 6;
+        const h = 6;
+        const pixels = new Uint8Array(w * h * 3).fill(128);
+        let binary = "";
+        for (const byte of pixels) binary += String.fromCharCode(byte);
+        return {
+          margin_left: args.marginLeft,
+          margin_top: args.marginTop,
+          margin_right: args.marginRight,
+          margin_bottom: args.marginBottom,
+          bitmap_width: w,
+          bitmap_height: h,
+          pixels_base64: btoa(binary),
+        };
+      }
+      case "prepare_composite_layer_source": {
+        // Phase 14 Schritt 3: feste, deutlich von Grau unterscheidbare
+        // 2×2-Platzhalter-Bitmap (kräftiges Grün) — reicht aus, um den
+        // "Ebene hinzugefügt"-Fluss zu prüfen, ohne eine echte Bilddatei
+        // ins Repo aufzunehmen.
+        const w = 2;
+        const h = 2;
+        const pixels = new Uint8Array(w * h * 3);
+        for (let i = 0; i < pixels.length; i += 3) {
+          pixels[i] = 40;
+          pixels[i + 1] = 200;
+          pixels[i + 2] = 60;
+        }
+        let binary = "";
+        for (const byte of pixels) binary += String.fromCharCode(byte);
+        return {
+          bitmap_width: w,
+          bitmap_height: h,
+          pixels_base64: btoa(binary),
+        };
+      }
       case "get_ui_settings":
         return fixtures.uiSettings;
       case "set_ui_settings":

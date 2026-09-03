@@ -2816,7 +2816,16 @@ export const useAppStore = create<AppStore>()(
             break;
         }
       });
-      void get().commitDevelopEdit();
+      // `visible`/`blend_mode` sind abgeschlossene Einzelklicks (wie
+      // `setMaskVisible`/`setMaskBlendMode`) und committen sofort;
+      // `opacity`/`scale`/`offset_x`/`offset_y` sind Regler-Zwischenwerte
+      // beim Ziehen (wie `setMaskOpacity`/`setBasicField`) — dort löst
+      // erst `DevelopSlider`s `onCommit` beim Loslassen den eigentlichen
+      // Commit aus, sonst würde jeder Zwischenwert einen eigenen
+      // Verlaufs-Schritt erzeugen.
+      if (field === "visible" || field === "blend_mode") {
+        void get().commitDevelopEdit();
+      }
     },
 
     colorMixerPickerActive: false,

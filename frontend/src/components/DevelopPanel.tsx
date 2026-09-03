@@ -4,6 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 import {
   ASPECT_RATIO_PRESETS,
   BASIC_SLIDER_SPECS,
+  BLEND_MODE_OPTIONS,
   BW_MIXER_BAND_TABS,
   BW_MIXER_SLIDER_SPEC,
   CALIBRATION_PRIMARY_ROWS,
@@ -29,6 +30,7 @@ import {
   UPRIGHT_MODE_OPTIONS,
   WHITE_BALANCE_PRESETS,
   type BlackAndWhiteMixerAdjustment,
+  type BlendMode,
   type ColorMixerRegion,
   type CurvesAdjustment,
   type DetailsSliderKey,
@@ -68,6 +70,15 @@ import { SavePresetDialog } from "./SavePresetDialog";
 const REPAIR_RADIUS_SPEC: SliderSpec = { key: "radius", label: "Radius (% der Bildbreite)", min: 1, max: 50, fineStep: 0.5, coarseStep: 5, neutral: 5 };
 const REPAIR_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Weiche Kante (% der Bildbreite)", min: 0, max: 25, fineStep: 0.5, coarseStep: 2, neutral: 2 };
 const REPAIR_OPACITY_SPEC: SliderSpec = { key: "opacity", label: "Deckkraft (%)", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 100 };
+
+// ---- Mehrfachbelichtung/Layer-Compositing — Phase 14 Schritt 3, siehe
+// DECISIONS.md ADR-0041 (Lightroom Classic hat "keine klassischen
+// Ebenen-Kompositionsfähigkeiten wie Photoshop") --------------------------
+const COMPOSITE_OPACITY_SPEC: SliderSpec = { key: "opacity", label: "Deckkraft (%)", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 100 };
+const COMPOSITE_SCALE_SPEC: SliderSpec = { key: "scale", label: "Skalierung (%)", min: 10, max: 300, fineStep: 1, coarseStep: 10, neutral: 100 };
+const COMPOSITE_OFFSET_X_SPEC: SliderSpec = { key: "offset_x", label: "Position X (%)", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 };
+const COMPOSITE_OFFSET_Y_SPEC: SliderSpec = { key: "offset_y", label: "Position Y (%)", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 };
+
 // ---- Node-Editor (Phase 9 Schritt 7, siehe DECISIONS.md ADR-0035) ---------
 //
 // Kein `@xyflow/react`-Graph-Canvas: die Rendering-Reihenfolge ist fest
@@ -196,6 +207,13 @@ export function DevelopPanel() {
   }
   const activePhotos = useAppStore(useShallow(selectActivePhotos));
   const otherPhotosForReference = activePhotos.filter((p) => p.id !== selectedPhotoId);
+  const compositeLayers = useAppStore((s) => s.developEdl.composite_layers);
+  const compositeLayerLoading = useAppStore((s) => s.compositeLayerLoading);
+  const addCompositeLayerFromPhoto = useAppStore((s) => s.addCompositeLayerFromPhoto);
+  const addCompositeLayerFromTexture = useAppStore((s) => s.addCompositeLayerFromTexture);
+  const removeCompositeLayer = useAppStore((s) => s.removeCompositeLayer);
+  const setCompositeLayerField = useAppStore((s) => s.setCompositeLayerField);
+  const [compositeSourcePhotoId, setCompositeSourcePhotoId] = useState("");
   const copiedEdlSubset = useAppStore((s) => s.copiedEdlSubset);
   const copyDevelopSettings = useAppStore((s) => s.copyDevelopSettings);
   const pasteDevelopSettings = useAppStore((s) => s.pasteDevelopSettings);
@@ -1268,6 +1286,118 @@ export function DevelopPanel() {
                 />
               ))}
             </div>
+          </fieldset>
+
+          <fieldset id="stage-composite" className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Compositing</legend>
+            <p className="text-xs text-text-muted">Mehrfachbelichtung: legt ein weiteres Foto oder eine Textur (z. B. ein Lichtleck) über das aktuelle Bild.</p>
+
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              Foto
+              <select
+                aria-label="Ebenen-Quellfoto"
+                value={compositeSourcePhotoId}
+                onChange={(event) => setCompositeSourcePhotoId(event.target.value)}
+                className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-1.5 py-0.5"
+              >
+                <option value="">Foto wählen…</option>
+                {otherPhotosForReference.map((photo) => (
+                  <option key={photo.id} value={photo.id}>
+                    {photo.filename}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                onClick={() => compositeSourcePhotoId && void addCompositeLayerFromPhoto(compositeSourcePhotoId)}
+                disabled={!compositeSourcePhotoId || compositeLayerLoading}
+                className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                + Ebene aus Foto
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void (async () => {
+                    const path = await pickFilePath("Bild", ["png", "jpg", "jpeg", "webp", "tiff", "bmp"]);
+                    if (path) void addCompositeLayerFromTexture(path);
+                  })();
+                }}
+                disabled={compositeLayerLoading}
+                className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                + Ebene aus Textur…
+              </button>
+            </div>
+            {compositeLayerLoading && <p className="text-xs text-text-muted">Löst Ebenenquelle auf…</p>}
+
+            {compositeLayers.length === 0 && <p className="text-xs text-text-muted">Keine Compositing-Ebenen vorhanden.</p>}
+
+            <ul className="flex flex-col gap-2">
+              {compositeLayers.map((layer, index) => (
+                <li key={index} className="flex flex-col gap-2 rounded border border-border px-2 py-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setCompositeLayerField(index, "visible", !layer.visible)}
+                      aria-label={layer.visible ? `Ebene ${index + 1} ausblenden` : `Ebene ${index + 1} einblenden`}
+                      aria-pressed={layer.visible}
+                      className={`shrink-0 ${layer.visible ? "text-accent" : "text-text-muted"}`}
+                      title="Sichtbarkeit"
+                    >
+                      {layer.visible ? "👁" : "🚫"}
+                    </button>
+                    <span className="min-w-0 flex-1 truncate text-xs text-text-primary">Ebene {index + 1}</span>
+                    <button type="button" onClick={() => removeCompositeLayer(index)} className="shrink-0 text-danger" aria-label={`Ebene ${index + 1} löschen`}>
+                      ×
+                    </button>
+                  </div>
+
+                  <label className="flex items-center gap-2 text-xs text-text-secondary">
+                    Blend-Modus
+                    <select
+                      aria-label={`Blend-Modus Ebene ${index + 1}`}
+                      value={layer.blend_mode}
+                      onChange={(event) => setCompositeLayerField(index, "blend_mode", event.target.value as BlendMode)}
+                      className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-1.5 py-0.5"
+                    >
+                      {BLEND_MODE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <DevelopSlider
+                    spec={COMPOSITE_OPACITY_SPEC}
+                    value={layer.opacity * 100}
+                    onChange={(value) => setCompositeLayerField(index, "opacity", value / 100)}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
+                  <DevelopSlider
+                    spec={COMPOSITE_SCALE_SPEC}
+                    value={layer.scale * 100}
+                    onChange={(value) => setCompositeLayerField(index, "scale", value / 100)}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
+                  <DevelopSlider
+                    spec={COMPOSITE_OFFSET_X_SPEC}
+                    value={layer.offset_x * 100}
+                    onChange={(value) => setCompositeLayerField(index, "offset_x", value / 100)}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
+                  <DevelopSlider
+                    spec={COMPOSITE_OFFSET_Y_SPEC}
+                    value={layer.offset_y * 100}
+                    onChange={(value) => setCompositeLayerField(index, "offset_y", value / 100)}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
+                </li>
+              ))}
+            </ul>
           </fieldset>
 
           <fieldset id="stage-geometry" className="flex flex-col gap-3">

@@ -2868,3 +2868,83 @@ einen lokalen dunklen Fleck am Ziel, ohne dessen umgebenden Ton Richtung
 der helleren Quelle zu ziehen — anders als derselbe Strich mit
 `layer: Normal`, der den Ton sichtbar mitzieht
 (`stages::repair::tests::high_frequency_only_stroke_removes_a_blemish_while_preserving_the_underlying_tone`).
+
+### Nachtrag III (Phase 14 Schritt 3): Mehrfachbelichtung/Layer-
+Compositing — display-referred statt linear, kein Katalogzugriff in
+`apx-pipeline`, kein dritter dauerhafter Seitenpalette
+
+Punkt 5 der Recherche-Tabelle ist mit einem Original-Zitat belegt:
+"Lightroom Classic itself doesn't have traditional layer compositing
+capabilities like Photoshop does." Umgesetzt als neue Stufe
+`apx-pipeline::stages::composite::apply_all()`, die beliebig viele
+`CompositeLayer`s sequenziell über das Bild legt — bewusst **nach**
+`curves` in `develop::render_rgba8`s fester Kette, also auf dem bereits
+fertig entwickelten, display-referred sRGB-RGBA8-Ergebnis, nicht auf dem
+linearen Szenen-referred Arbeitsraum (in dem z. B. `stages::masks` selbst
+noch rechnet). Blend-Modi wie "Multiplizieren" sind eine visuelle
+Konvention aus Photoshop/Lightrooms eigener Farbwelt (gamma-kodierte
+Werte) — dieselbe Formel im linearen Arbeitsraum angewendet ergäbe ein
+physikalisch anderes, für Nutzer überraschendes Ergebnis. Reihenfolge in
+`StageEnabled`/`develop.rs`: `..., curves, composite, geometry` — die neue
+Stufe läuft also auch vor Zuschnitt/Leinwand-Erweiterung, eine
+Compositing-Ebene wird mit zugeschnitten/erweitert wie der Rest des
+Bildes.
+
+`StageEnabled.composite` ist additiv wie `stage_enabled` selbst, aber mit
+`#[serde(default = "default_true")]` statt eines bloßen
+`#[serde(default)]` auf dem *ganzen* Feld: `stage_enabled` selbst ist
+schon additiv zum gesamten `EdlV2`→`EdlV4`-Sprung, aber innerhalb eines
+bereits vorhandenen `StageEnabled`-Objekts (aus einem v4-Umschlag, der
+vor diesem Schritt gespeichert wurde) fehlt der Schlüssel `composite`
+komplett — ohne einen expliziten Default-Wert für *dieses eine Feld*
+würde `bool`s eigener bool default (`false`) greifen und die neue Stufe
+für jede historische Bearbeitung fälschlich abschalten.
+
+**Architekturentscheidung, kein Katalogzugriff in `apx-pipeline`:** eine
+Compositing-Ebene braucht Pixel aus einem *anderen* Foto oder einer vom
+Nutzer gewählten Datei — `apx-pipeline` selbst kennt aber weder den
+Katalog noch das Dateisystem (reine Bildverarbeitungs-Crate). Deshalb
+trägt `CompositeLayer::source` (`CompositeLayerSource`) bereits eine
+fertige RGB-Bitmap, genau wie `AiFillPatch`/`CanvasExtensionPatch` aus
+Phase 13/14 Schritt 1 — aufgelöst von einem neuen, dedizierten
+`apx-app::commands::prepare_composite_layer_source`-Command (kein
+KI-Modell nötig: ein weiteres Katalog-Foto läuft über `decode_linear` +
+das bereits bestehende `apx_pipeline::color::
+linear_camera_rgb_to_srgb_rgba8`, eine Textur-Datei über `image::open` +
+eine neue, einfache `downsample_rgb_image`-Hilfsfunktion — beide auf
+`apx_ai::segmentation::ANALYSIS_MAX_EDGE` gedeckelt, dieselbe Grenze wie
+jede andere in der EDL gespeicherte Bitmap dieses Projekts).
+
+**Ein während der Umsetzung real gefundener, nicht nur vermuteter
+Layout-Fehler:** die erste Fassung setzte die Compositing-Bedienung als
+eigene, dauerhaft sichtbare dritte rechte `PaletteFrame`-Palette um
+(neben `DevelopPanel`/`MasksPanel`, analog zu deren Aufbau). Im
+Standard-Testviewport (1280×720) verdrängten drei gleichzeitig offene
+Paletten den Foto-Viewer (`<main>`) so weit, dass er nicht mehr sichtbar/
+klickbar war — drei bestehende `masks-flow.spec.ts`-Tests, die auf einen
+`<main>`-Klick angewiesen sind, schlugen dadurch tatsächlich fehl (nicht
+nur eine theoretische Sorge, siehe die Diagnose in derselben Sitzung
+anhand echter Playwright-Screenshots). Behoben durch Rückbau auf einen
+Regler-Abschnitt direkt innerhalb von `DevelopPanel.tsx` (zwischen den
+Effekte- und Geometrie-Reglern, passend zur Pipeline-Position) statt
+einer eigenen Palette — kein zusätzlicher, immer Platz beanspruchender
+Spaltenraum. Alle 16 zuvor betroffenen Tests (drei Fehlschläge plus 13
+weitere zur Kontrolle) laufen seither wieder grün.
+
+`composite_layers` ist bewusst **in** `PRESET_SECTION_KEYS`
+aufgenommen, obwohl es wie `repair`/`masks` eine `Vec`-Sektion ist (die
+sonst grundsätzlich ausgeschlossen sind): anders als ein Reparatur-
+Strich oder eine Maske (an eine konkrete Bildposition im *aktuellen*
+Foto gebunden) trägt jede Ebene bereits ihre eigene fertige Bitmap — eine
+feste Ebenen-„Rezeptur" (z. B. eine Lichtleck-Textur bei 30 % Screen,
+sobald Schritt 4 den `Screen`-Blend-Modus ergänzt) ist ein portabler
+„Look", der sich über die bestehende Kopieren/Einfügen/Synchronisieren-
+Mechanik genau wie jede andere Reglergruppe auf viele Fotos übertragen
+lässt — das erfüllt den vom `PLAN.md` geforderten Batch-Anwendungsfall,
+ohne eine eigene neue Stapelverarbeitungs-Funktion zu bauen.
+
+Neuer echter End-zu-Ende-Test `e2e/composite-flow.spec.ts` (nach dem
+Muster von `masks-flow.spec.ts`): eine Ebene aus einem zweiten
+Katalog-Foto hinzufügen, Blend-Modus wechseln, Sichtbarkeit umschalten,
+entfernen — jeweils mit Prüfung des tatsächlich committeten
+`composite_layers`-Inhalts im EDL, nicht nur der UI-Anzeige.

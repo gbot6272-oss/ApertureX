@@ -3123,3 +3123,59 @@ versehentlichen Mutationen). Behoben durch frische, gespreadete
 `basic`-/`white_balance`-Objekte statt In-Place-Mutation — real per
 Playwright-Konsolen-Log reproduziert und verifiziert, nicht nur durch
 Code-Inspektion vermutet.
+
+### Nachtrag VI (Phase 14 Schritt 6): Vektorskop + Wellenform-Monitor —
+`putImageData` statt `fillRect`-Schleifen, nur die sichtbare Analyse wird
+berechnet
+
+Punkt 9 der Recherche-Tabelle ist mit einem Original-Zitat belegt:
+Lightroom "doesn't yet have vectorscope and waveform features", seit
+mindestens 2012 in Adobes eigenem Feedback-Forum nachgefragt. Beide
+Werkzeuge sind reine Frontend-Erweiterungen nach dem in Phase 9 Schritt 4
+etablierten Histogramm-Muster: `lib/vectorscope.ts`/`lib/waveform.ts`
+rechnen direkt über den bereits gerenderten `DevelopFrame.pixels`-Puffer
+(`useDevelopRender`), kein neuer Backend-Command, keine neue
+`apply_develop_edit`-Nutzlast.
+
+**Vektorskop:** Cb/Cr-Dichte-Raster (`GRID_SIZE = 128`) nach ITU-R BT.601
+— dieselben Koeffizienten wie `apx_ai::color::rgb_to_ycbcr` (Phase 7),
+hier aber auf `0..255`-Bytes statt `0..1`-normierten Kanälen angewandt.
+Der Ursprung (Grau/unbunt) liegt bei Cb=Cr=128, dem exakten
+Chroma-Nullpunkt — bewusst *nicht* als exakt mittige Rasterzelle
+angenommen (real beim Testen aufgefallen: `128/255` ist kein exaktes
+Vielfaches von `1/(size-1)`, die gerundete Zielzelle kann deshalb um ein
+bis zwei Zellen von der rechnerischen Mitte abweichen; der Test prüft
+"nahe der Mitte", nicht exakt mittig).
+
+**Wellenform:** RGB-Parade je Bildspalten-Bucket (`COLUMN_BUCKETS = 256`,
+`VALUE_BUCKETS = 256` — dieselbe Werte-Auflösung wie `lib/histogram.ts`).
+Die Bildbreite selbst kann beliebig groß sein, mehrere Bildspalten werden
+deshalb je Ausgabespalte zusammengefasst — dieselbe Rasterungs-Idee wie
+beim Vektorskop, nur eindimensional statt zweidimensional.
+
+**Zeichenmethode bewusst `putImageData` statt `HistogramCanvas`s
+`fillRect`-Schleife:** ein Vektorskop-Raster hat `128 * 128 = 16384`
+Zellen, eine Wellenform `256 * 256 = 65536` Zellen je Kanal — bei dieser
+Größenordnung wäre ein `fillRect`-Aufruf pro Zelle (wie beim
+256-Balken-Histogramm) spürbar langsamer als ein einziger
+`putImageData`-Aufruf mit direkt beschriebenem Pixelpuffer. Nachteil:
+`putImageData` kennt keinen `globalCompositeOperation`-Blend-Modus wie
+`HistogramCanvas`s `"lighten"` — die Wellenform kombiniert deshalb die
+drei Kanalfarben von Hand per Komponenten-Maximum (jeder Kanal mischt
+seine eigene Grundfarbe additiv über den dunklen Hintergrund, die drei
+Ergebnisse werden anschließend kanalweise maximiert) — eine praktisch
+gleichwertige Näherung an "lighten" für rein additive, nie abdunkelnde
+Overlays.
+
+**Performance-Entscheidung:** `DevelopAnalysisPanel` berechnet wie schon
+`computeHistogram`/`countClipping` unmemoisiert bei jedem Render — aber
+Vektorskop/Wellenform werden nur berechnet, wenn ihr Reiter tatsächlich
+aktiv ist (`analysisTab === "vectorscope" ? computeVectorscope(...) :
+null`), nicht alle drei bei jedem Regler-Tick. Beide sind eine volle
+Bildschleife je Kanal, spürbar teurer als das einfache 256er-Array-Update
+des Histogramms.
+
+Neuer Reiter-Wechsel-Test in `e2e/develop-analysis-flow.spec.ts`
+(Berechnungslogik selbst bereits vollständig in
+`lib/vectorscope.test.ts`/`lib/waveform.test.ts` abgedeckt): die jeweils
+aktive Analyse-Canvas erscheint, die anderen beiden verschwinden.

@@ -33,4 +33,35 @@ test.describe("Entwickeln-Analysewerkzeuge (Phase 9 Schritt 4)", () => {
     // (180/140/100) — siehe `tauri-mock.ts`s Moduldoku dazu.
     await expect(page.getByText(/R 180 · G 140 · B 100/)).toBeVisible();
   });
+
+  /**
+   * Deckt Phase 14 Schritt 6 ab (`DECISIONS.md` ADR-0041): Vektorskop +
+   * Wellenform-Monitor als neue Reiter neben dem Histogramm — die
+   * Berechnungslogik selbst (`computeVectorscope`/`computeWaveform`) ist
+   * bereits vollständig in `lib/vectorscope.test.ts`/`lib/waveform.test.ts`
+   * abgedeckt, hier bewusst nur der Reiter-Wechsel: die jeweils aktive
+   * Analyse-Canvas erscheint, die anderen beiden verschwinden.
+   */
+  test("Vektorskop- und Wellenform-Reiter zeigen ihre jeweils eigene Canvas, das Histogramm verschwindet dabei", async ({ page }) => {
+    await installTauriMock(page, { folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }], photosByFolder: { [FOLDER_ID]: [PHOTO] } });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Urlaub/ }).click();
+    await page.getByRole("img", { name: PHOTO.filename }).click();
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    await expect(page.getByLabel("Histogramm")).toBeVisible();
+
+    await page.getByRole("button", { name: "Vektorskop" }).click();
+    await expect(page.getByLabel("Vektorskop")).toBeVisible();
+    await expect(page.getByLabel("Histogramm")).not.toBeVisible();
+    await expect(page.getByLabel("Wellenform")).not.toBeVisible();
+
+    await page.getByRole("button", { name: "Wellenform" }).click();
+    await expect(page.getByLabel("Wellenform")).toBeVisible();
+    await expect(page.getByLabel("Vektorskop")).not.toBeVisible();
+
+    await page.getByRole("button", { name: "Histogramm" }).click();
+    await expect(page.getByLabel("Histogramm")).toBeVisible();
+    await expect(page.getByLabel("Wellenform")).not.toBeVisible();
+  });
 });

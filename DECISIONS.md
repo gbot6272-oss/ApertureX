@@ -2696,3 +2696,89 @@ Schritt 1): `download_people_models` lädt beide `.dat.bz2`-Dateien von
 erreichbar/verifiziert** (`dlib.net` blockiert, siehe oben), dieselbe
 ehrliche Lücke wie beim LaMa-Modell; keine Hash-Prüfung aus demselben
 Grund (kein erreichbarer, verifizierbarer Hash in dieser Sitzung).
+
+## ADR-0041: Phase 14 — zehn Alleinstellungsmerkmale jenseits von
+Lightroom; echte MiDaS-Tiefenschätzung und fast-neural-style-Stiltransfer
+diesmal end-zu-Ende gegen ein echtes Foto verifiziert
+
+**Status:** Angenommen
+**Kontext:** Phase 13 hat die letzte Lücke gegen Lightroom geschlossen
+(Vergleichs-Artifact, Stand Phase 13). Der Nutzer erklärt "so nah wie
+möglich an Lightroom" (Ziel A) damit für erreicht und gibt ein neues
+Ziel B vor: zehn eigenständige, visuell beeindruckende Fähigkeiten ohne
+Lightroom-Entsprechung, je zur Hälfte klassisch/KI-gestützt (kostenlose
+lokale Inferenz, keine bezahlten Cloud-APIs), jede sowohl für
+Massenbearbeitung als auch Präzisionsarbeit tauglich. Der vollständige
+Plan mit allen zehn Punkten steht in `PLAN.md` Phase 14.
+
+**Recherche-Disziplin:** jede "Lightroom hat das nicht"-Behauptung im
+Plan wurde per echter Web-Suche gegengeprüft (siehe Zitate in `PLAN.md`
+Phase 14), nicht aus dem Gedächtnis behauptet. Ein ursprünglich erwogener
+zehnter Kandidat ("Smart-Crop-Vorschläge") wurde verworfen, weil Adobe
+"Suggested Crop" bereits in Lightroom Web ausliefert — zu nah an einer
+bestehenden Adobe-Funktion für eine klare Abgrenzung.
+
+**Schritt-0-Spikes, diesmal beide echt gegen ein reales Foto
+verifiziert** (anders als der LaMa-Spike in Phase 13 Schritt 0, der
+mangels erreichbarem `huggingface.co` nur gegen ein winziges
+`Y = X + 1`-Modell lief): `huggingface.co` bleibt blockiert
+(`subscribe_forbidden`/`403` auf jeden `CONNECT`-Versuch), aber
+`github.com`, `raw.githubusercontent.com`, `release-assets.
+githubusercontent.com` und — wichtiger Einzelfund — `media.
+githubusercontent.com/media/...` (der echte Git-LFS-Auslieferungs-Host,
+`raw.githubusercontent.com` liefert für LFS-Dateien nur den
+128-Byte-Zeiger-Text) sind aus dieser Sandbox heraus erreichbar. Beide
+Modelle unten wurden probehalber gegen `opencv/opencv`s eigenes
+`samples/data/fruits.jpg` (ein echtes, im selben verifizierten Repo
+liegendes Foto, keine Fabrikation) inferiert und das Ergebnis visuell
+geprüft:
+
+- **MiDaS v2.1 small** (`isl-org/MiDaS`, MIT, ONNX-Release-Asset,
+  66 764 249 Bytes, `github.com/isl-org/MiDaS/releases/download/v2_1/
+  model-small.onnx`): trotz symbolischer (scheinbar dynamischer)
+  Tensor-Dimensionen im ONNX-Graph verlangt das Modell tatsächlich fest
+  256×256 Eingabe (ein zu großer Testlauf schlägt mit einer expliziten
+  ONNX-Runtime-Fehlermeldung fehl, kein stiller Fallback) — wichtig für
+  Schritt 8, feste Skalierung auf 256×256 vor der Inferenz nötig. Die
+  resultierende Tiefenkarte zeigt exakt die erwartete Struktur: eine
+  helle (nahe), scharf konturierte Obst-Silhouette mit plausibler
+  3D-Schattierung (spitze vs. runde Früchte unterscheidbar) vor einem
+  durchgehend dunklen (fernen) Hintergrund — echte, korrekt
+  funktionierende monokulare Tiefenschätzung, kein Zufallsrauschen.
+- **fast-neural-style "mosaic"** (`onnx/models`, MIT,
+  `validated/vision/style_transfer/fast_neural_style/model/mosaic-9.
+  onnx`, 6 728 029 Bytes über den LFS-Media-Host geladen, Hash-Größe
+  stimmt exakt mit dem Git-LFS-Zeiger überein): erwartet dynamische
+  NCHW-Eingabe in `0..255` (kein ImageNet-Normalisieren, anders als
+  MiDaS), Ausgabe ist ein 224×224-RGB-Bild mit derselben Auflösung wie
+  die Eingabe. Ergebnis ist ein echtes, klar erkennbares
+  Mosaik-/Glasfenster-Stilbild derselben Obstschale — funktioniert.
+
+**Offene Frage ehrlich beantwortet (Spike B, "arbitrary style
+transfer"):** ein permissiv lizenziertes Modell für *beliebige*
+Referenzbilder als Stilvorlage (statt fünf fest einprogrammierter Stile)
+existiert real — Googles Magenta-Projekt (`magenta/magenta`,
+Apache-2.0, `arbitrary_image_stylization`) —, aber nur als
+TensorFlow/TFLite-Checkpoint, nicht als ONNX-Export. Die einzige
+gefundene ONNX-Variante eines AdaIN-basierten Modells (`rapidrabbit76/
+Arbitrary-Style-Transfer-...-pytorch-lightning`) liegt auf Google Drive
+(in dieser Sandbox ebenso unerreichbar wie huggingface.co) und ist ein
+inoffizieller Nachbau ohne eigene, im Repo genannte Lizenzdatei für die
+selbst trainierten Gewichte — genau die Art unklarer Herkunft, die
+`ADR-0040-Nachtrag VI`s SFace-Ablehnung schon einmal begründet hat.
+**Ergebnis, kein Workaround erzwungen:** Schritt 9 bleibt auf die fünf
+sicher lizenzierten, real verifizierten festen `onnx/models`-Stile
+beschränkt (candy/mosaic/rain-princess/udnie/pointilism) — ein
+lizenzklares Modell für echte beliebige Referenzbild-Übertragung wäre
+eine eigene, spätere Untersuchung wert, wird hier aber nicht durch eine
+fragwürdige Google-Drive-Quelle ersetzt.
+
+**Wiederverwendete Bausteine statt Neuaufbau** (Details je Schritt in
+`PLAN.md` Phase 14): `blend_pixel()` aus `apx-pipeline::stages::masks`
+(Mehrfachbelichtung, Halation), `frontend/src/lib/histogram.ts`s
+Client-seitiges Berechnungsmuster über den bereits vorhandenen
+Vorschau-Puffer (Vektorskop/Wellenform, kein neuer Backend-Command),
+`apx-ai::inpaint::InpaintSession`/`RepairStroke` (Canvas-Erweiterung),
+die bestehenden Hautton-/Saliency-Heuristiken in `apx-ai::segmentation`
+(Himmel-Segmentierung), `kmeans_colors` (real per `cargo add --dry-run`
+geprüft, v0.7.1, MIT/Apache — Farb-Harmonie-Rad).

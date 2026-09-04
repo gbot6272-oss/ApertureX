@@ -519,6 +519,24 @@ export interface TimelineItemInput {
   speed?: number;
 }
 
+/** Ein Text-/Titel-Overlay über einer Zeitspanne der fertigen Sequenz
+ * (Phase 17 Schritt 4, siehe `DECISIONS.md` ADR-0045) — Zeiten
+ * beziehen sich auf die verkettete Gesamt-Sequenz, nicht auf einen
+ * einzelnen Eintrag. `position` folgt demselben Vertrag wie das
+ * bestehende Bild-/Text-Wasserzeichen beim Foto-Export
+ * (`"top_left"`/`"top_right"`/`"bottom_left"`/`"bottom_right"`/
+ * `"center"`). Siehe `apx_app::commands::TimelineTextOverlayInput`s
+ * Moduldoku. */
+export interface TimelineTextOverlayInput {
+  text: string;
+  position: "top_left" | "top_right" | "bottom_left" | "bottom_right" | "center";
+  startSeconds: number;
+  endSeconds: number;
+  fontPath: string;
+  fontSize?: number;
+  colorRgb?: [number, number, number];
+}
+
 export interface VideoTimelineOptions {
   width: number;
   height: number;
@@ -527,6 +545,7 @@ export interface VideoTimelineOptions {
   transitions: string[];
   transitionSeconds?: number;
   musicPath?: string;
+  textOverlays?: TimelineTextOverlayInput[];
 }
 
 /** Rendert `items` zu einer neuen Video-Zeitachse und legt sie als

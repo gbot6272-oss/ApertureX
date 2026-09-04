@@ -1727,6 +1727,54 @@ pub struct VideoTimelineOptions {
     pub transitions: Vec<String>,
     pub transition_seconds: Option<f32>,
     pub music_path: Option<String>,
+    /// Text-/Titel-Overlays (Phase 17 Schritt 4, siehe `DECISIONS.md`
+    /// ADR-0045) — Zeiten beziehen sich auf die fertige, verkettete
+    /// Sequenz.
+    pub text_overlays: Option<Vec<TimelineTextOverlayInput>>,
+}
+
+/// Ein Text-Overlay-Eintrag (Phase 17 Schritt 4) — `position` folgt
+/// [`parse_watermark_position`]s Vertrag (`"top_left"` u. Ä.), `font_path`
+/// ist wie bei den Diashow-Intro-/Outro-Titelkarten Pflicht (keine
+/// eingebettete Schriftart, siehe `watermark`s Moduldoku).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineTextOverlayInput {
+    pub text: String,
+    pub position: String,
+    pub start_seconds: f32,
+    pub end_seconds: f32,
+    pub font_path: String,
+    pub font_size: Option<f32>,
+    pub color_rgb: Option<[u8; 3]>,
+}
+
+fn build_timeline_text_overlays(
+    overlays: &[TimelineTextOverlayInput],
+) -> Result<Vec<apx_export::timeline::TimelineTextOverlay>, String> {
+    overlays
+        .iter()
+        .map(|overlay| {
+            if overlay.end_seconds <= overlay.start_seconds {
+                return Err("Text-Overlay: Ende muss nach dem Start liegen".to_string());
+            }
+            let font_bytes = std::fs::read(&overlay.font_path).map_err(|err| {
+                format!(
+                    "Schriftdatei '{}' konnte nicht gelesen werden: {err}",
+                    overlay.font_path
+                )
+            })?;
+            Ok(apx_export::timeline::TimelineTextOverlay {
+                text: overlay.text.clone(),
+                position: parse_watermark_position(&overlay.position)?,
+                start_seconds: overlay.start_seconds,
+                end_seconds: overlay.end_seconds,
+                font_bytes,
+                font_size_px: overlay.font_size.unwrap_or(48.0),
+                text_color: overlay.color_rgb.unwrap_or([255, 255, 255]),
+            })
+        })
+        .collect()
 }
 
 /// Rendert `items` zu einer neuen Video-Zeitachse (siehe
@@ -1825,11 +1873,14 @@ pub fn render_video_timeline(
         .map_err(|err| err.to_string())?;
     let dest_path = unique_timeline_dest_path(&folder.path);
 
+    let text_overlays =
+        build_timeline_text_overlays(options.text_overlays.as_deref().unwrap_or_default())?;
     let timeline_options = apx_export::timeline::TimelineExportOptions {
         output_width: options.width,
         output_height: options.height,
         fps: options.fps,
         audio_path: options.music_path.as_ref().map(PathBuf::from),
+        text_overlays,
     };
 
     apx_export::timeline::render_video_timeline(

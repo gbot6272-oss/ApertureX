@@ -1166,7 +1166,7 @@ Volle Suite gebündelt erst im letzten Schritt.
 - [x] 1. Mehrspur-Timeline-Grundgerüst (Zeitachsen-Dialog, Segment-Rendering + Concat/Übergänge) — `apx_export::timeline` (Zwei-Stufen-Rendering: Segment je Eintrag, Verkettung per `xfade`-Filterkette für Schnitt *und* Überblendung), neuer `render_video_timeline`-Command, neuer `VideoTimelineDialog.tsx` (Reihenfolge/Trim/Haltedauer/Übergang/Auflösung/Musik), Einstiegspunkt „Zeitachse…“ in `Header.tsx`
 - [x] 2. Geschwindigkeits-Regler pro Clip (Zeitlupe/Zeitraffer) — `TimelineItem::VideoClip.speed` + `setpts`-Filter, Tempo-Dropdown je Video-Eintrag in `VideoTimelineDialog.tsx`
 - [x] 3. Mehr Übergänge (Wisch-/Blende-Varianten über `xfade`) — `TimelineTransitionKind` (8 Varianten), Übergangs-Auswahl je Lücke in `VideoTimelineDialog.tsx`
-- [ ] 4. Text-/Titel-Overlays mit Zeitspanne/Position
+- [x] 4. Text-/Titel-Overlays mit Zeitspanne/Position — `TimelineTextOverlay` (Rust-Text-Rasterisierung + `ffmpeg`-`overlay`-Filter statt `drawtext`), Overlay-Editor in `VideoTimelineDialog.tsx`
 - [ ] 5. Automatische Untertitel (Whisper, Opt-in-Download)
 - [ ] 6. Social-Media-Export-Presets (9:16/1:1/16:9)
 - [ ] 7. Bild-in-Bild / Split-Screen

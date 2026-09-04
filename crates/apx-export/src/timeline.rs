@@ -33,6 +33,32 @@ use crate::video::{
     default_ken_burns, export_slideshow_video, ffmpeg_available, TimelineSlide, TransitionKind,
     VideoExportOptions,
 };
+use crate::watermark::{self, WatermarkPosition};
+
+/// Ein Text-/Titel-Overlay über einer Zeitspanne der fertigen Sequenz
+/// (Phase 17 Schritt 4, siehe `DECISIONS.md` ADR-0045) — Zeiten
+/// beziehen sich auf die **verkettete** Sequenz, nicht auf einen
+/// einzelnen Eintrag (ein Overlay kann z. B. über einen Übergang
+/// hinweg sichtbar bleiben). Rendering läuft bewusst NICHT über
+/// `ffmpeg`s `drawtext`-Filter (bräuchte Systemschriften/`fontconfig`
+/// oder eine gebündelte Schriftart) — stattdessen wird der Text wie
+/// bei Titelkarten/Wasserzeichen rein in Rust über
+/// [`watermark::apply_text_watermark`] auf einen transparenten
+/// Vollbild-Kanal gerastert, als PNG zwischengespeichert und per
+/// `ffmpeg`s `overlay`-Filter mit `enable='between(t,start,end)'`
+/// zeitlich eingeblendet (siehe [`apply_text_overlays`]) — dieselbe
+/// Text-Rasterisierung wie überall sonst im Projekt, kein zweiter
+/// Textpfad nur für Video.
+#[derive(Debug, Clone)]
+pub struct TimelineTextOverlay {
+    pub text: String,
+    pub position: WatermarkPosition,
+    pub start_seconds: f32,
+    pub end_seconds: f32,
+    pub font_bytes: Vec<u8>,
+    pub font_size_px: f32,
+    pub text_color: [u8; 3],
+}
 
 /// Übergangsart zwischen zwei Zeitachsen-Einträgen (Phase 17 Schritt 3,
 /// siehe `DECISIONS.md` ADR-0045) — bewusst ein eigener, reicherer Typ
@@ -131,6 +157,9 @@ pub struct TimelineExportOptions {
     /// Optionale Hintergrundmusik — siehe Moduldoku zur bewussten
     /// Vereinfachung ggü. Audio je Clip.
     pub audio_path: Option<PathBuf>,
+    /// Text-/Titel-Overlays (Phase 17 Schritt 4) — angewendet auf die
+    /// bereits verkettete Sequenz, vor dem Einmischen der Musik.
+    pub text_overlays: Vec<TimelineTextOverlay>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -202,7 +231,7 @@ pub fn render_video_timeline(
         })
         .collect();
 
-    let video_only_path = if segment_paths.len() == 1 {
+    let mut video_only_path = if segment_paths.len() == 1 {
         segment_paths[0].clone()
     } else {
         let concatenated = tmp_dir.path().join("concatenated.mp4");
@@ -216,6 +245,20 @@ pub fn render_video_timeline(
         )?;
         concatenated
     };
+
+    if !options.text_overlays.is_empty() {
+        let overlaid = tmp_dir.path().join("overlaid.mp4");
+        apply_text_overlays(
+            &video_only_path,
+            &options.text_overlays,
+            options.output_width,
+            options.output_height,
+            options.fps,
+            tmp_dir.path(),
+            &overlaid,
+        )?;
+        video_only_path = overlaid;
+    }
 
     if let Some(audio_path) = &options.audio_path {
         mux_audio(&video_only_path, audio_path, dest_path)?;
@@ -400,6 +443,85 @@ fn concat_with_xfade(
             message: format!("ffmpeg nicht startbar (ist ffmpeg installiert?): {err}"),
         })?;
     check_ffmpeg_output(output, "Zeitachse verketten")
+}
+
+/// Brennt `overlays` in `video_path` ein (siehe [`TimelineTextOverlay`]s
+/// Dokumentation für den Ansatz) — jedes Overlay wird zu einem
+/// transparenten Vollbild-PNG gerastert (Text bereits an der richtigen
+/// Stelle, siehe [`watermark::apply_text_watermark`]s Positionierung),
+/// dann per `ffmpeg`-`overlay`-Filterkette mit `enable`-Zeitfenster
+/// nacheinander über das Video gelegt.
+fn apply_text_overlays(
+    video_path: &Path,
+    overlays: &[TimelineTextOverlay],
+    width: u32,
+    height: u32,
+    fps: u32,
+    tmp_dir: &Path,
+    dest_path: &Path,
+) -> Result<()> {
+    let mut overlay_paths = Vec::with_capacity(overlays.len());
+    for (index, overlay) in overlays.iter().enumerate() {
+        let mut pixels = vec![0u8; width as usize * height as usize * 4];
+        watermark::apply_text_watermark(
+            width,
+            height,
+            &mut pixels,
+            &overlay.font_bytes,
+            &overlay.text,
+            overlay.font_size_px,
+            overlay.text_color,
+            overlay.position,
+            1.0,
+            24,
+        )?;
+        let png_path = tmp_dir.join(format!("overlay_{index}.png"));
+        let buf = image::ImageBuffer::<image::Rgba<u8>, Vec<u8>>::from_raw(width, height, pixels)
+            .ok_or_else(|| ExportError::Video {
+            message: "Overlay-Puffer hat die falsche Größe".to_string(),
+        })?;
+        buf.save(&png_path).map_err(|err| ExportError::Video {
+            message: format!("Overlay-Bild konnte nicht geschrieben werden: {err}"),
+        })?;
+        overlay_paths.push(png_path);
+    }
+
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-y").arg("-i").arg(video_path);
+    for path in &overlay_paths {
+        cmd.arg("-i").arg(path);
+    }
+
+    let mut filter = String::new();
+    let mut prev_label = "0:v".to_string();
+    for (index, overlay) in overlays.iter().enumerate() {
+        let out_label = if index == overlays.len() - 1 {
+            "vout".to_string()
+        } else {
+            format!("t{index}")
+        };
+        filter.push_str(&format!(
+            "[{prev_label}][{}:v]overlay=0:0:enable='between(t,{:.3},{:.3})'[{out_label}];",
+            index + 1,
+            overlay.start_seconds,
+            overlay.end_seconds
+        ));
+        prev_label = out_label;
+    }
+    filter.pop(); // trailing ';'
+
+    let output = cmd
+        .arg("-filter_complex")
+        .arg(&filter)
+        .args(["-map", "[vout]", "-r"])
+        .arg(fps.to_string())
+        .args(["-c:v", "libx264", "-pix_fmt", "yuv420p"])
+        .arg(dest_path)
+        .output()
+        .map_err(|err| ExportError::Video {
+            message: format!("ffmpeg nicht startbar (ist ffmpeg installiert?): {err}"),
+        })?;
+    check_ffmpeg_output(output, "Text-Overlays einblenden")
 }
 
 fn mux_audio(video_path: &Path, audio_path: &Path, dest_path: &Path) -> Result<()> {

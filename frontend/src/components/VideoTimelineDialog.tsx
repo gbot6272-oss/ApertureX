@@ -4,6 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 import {
   pickFilePath,
   type TimelineItemInput,
+  type TimelineTextOverlayInput,
   type VideoTimelineOptions,
 } from "../lib/tauri";
 import { selectActivePhotos, useAppStore } from "../store";
@@ -58,6 +59,45 @@ const TRANSITION_OPTIONS: { value: string; label: string }[] = [
   { value: "circle_open", label: "Kreis-Blende" },
 ];
 const DEFAULT_TRANSITION = "fade";
+
+/** Positionswahl für Text-Overlays (Phase 17 Schritt 4) — derselbe
+ * Fünf-Positionen-Vertrag wie beim bestehenden Text-Wasserzeichen des
+ * Foto-Exports (`ExportDialog.tsx`), statt eines freien x/y-Reglers. */
+const OVERLAY_POSITIONS: {
+  value: TimelineTextOverlayInput["position"];
+  label: string;
+}[] = [
+  { value: "top_left", label: "Oben links" },
+  { value: "top_right", label: "Oben rechts" },
+  { value: "center", label: "Mitte" },
+  { value: "bottom_left", label: "Unten links" },
+  { value: "bottom_right", label: "Unten rechts" },
+];
+
+/** Ein Text-Overlay-Entwurf — Zeiten in Sekunden ab Beginn der
+ * fertigen Sequenz (nicht relativ zu einem einzelnen Eintrag). Alle
+ * Overlays teilen sich eine Schriftdatei (`overlayFontPath` im
+ * Dialog-Zustand) — dasselbe bewusste "eine Schriftart genügt"-Muster
+ * wie Intro-/Outro-Titelkarten in `SlideshowDialog.tsx`. */
+interface DraftOverlay {
+  text: string;
+  position: TimelineTextOverlayInput["position"];
+  startSeconds: number;
+  endSeconds: number;
+  fontSize: number;
+  color: string;
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const match = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!match) return [255, 255, 255];
+  // Drei Fanggruppen im Muster oben, also bei einem Treffer immer gefüllt.
+  return [
+    parseInt(match[1]!, 16),
+    parseInt(match[2]!, 16),
+    parseInt(match[3]!, 16),
+  ];
+}
 
 function buildTimelineItems(
   items: DraftItem[],
@@ -118,6 +158,8 @@ export function VideoTimelineDialog({
   const [musicPath, setMusicPath] = useState("");
   const [resolution, setResolution] = useState<Resolution>("1920x1080");
   const [fps, setFps] = useState(30);
+  const [overlays, setOverlays] = useState<DraftOverlay[]>([]);
+  const [overlayFontPath, setOverlayFontPath] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -139,6 +181,7 @@ export function VideoTimelineDialog({
     setGapTransitions(
       new Array(Math.max(0, photoIds.length - 1)).fill(DEFAULT_TRANSITION),
     );
+    setOverlays([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, photoIds]);
 
@@ -196,6 +239,37 @@ export function VideoTimelineDialog({
     if (path) setMusicPath(path);
   }
 
+  async function handlePickOverlayFont() {
+    const path = await pickFilePath("Schriftdatei", ["ttf", "otf"]);
+    if (path) setOverlayFontPath(path);
+  }
+
+  function addOverlay() {
+    setOverlays((prev) => [
+      ...prev,
+      {
+        text: "",
+        position: "bottom_left",
+        startSeconds: 0,
+        endSeconds: 3,
+        fontSize: 48,
+        color: "#ffffff",
+      },
+    ]);
+  }
+
+  function updateOverlay(index: number, patch: Partial<DraftOverlay>) {
+    setOverlays((prev) =>
+      prev.map((overlay, i) =>
+        i === index ? { ...overlay, ...patch } : overlay,
+      ),
+    );
+  }
+
+  function removeOverlay(index: number) {
+    setOverlays((prev) => prev.filter((_, i) => i !== index));
+  }
+
   async function handleRender() {
     if (items.length === 0) return;
     const { width, height } = RESOLUTIONS[resolution];
@@ -211,6 +285,18 @@ export function VideoTimelineDialog({
       ),
       transitionSeconds,
       musicPath: musicPath || undefined,
+      textOverlays:
+        overlays.length > 0 && overlayFontPath
+          ? overlays.map((overlay) => ({
+              text: overlay.text,
+              position: overlay.position,
+              startSeconds: overlay.startSeconds,
+              endSeconds: overlay.endSeconds,
+              fontPath: overlayFontPath,
+              fontSize: overlay.fontSize,
+              colorRgb: hexToRgb(overlay.color),
+            }))
+          : undefined,
     };
     await renderVideoTimeline(timelineItems, options);
   }
@@ -364,6 +450,150 @@ export function VideoTimelineDialog({
               Keine Einträge — Dialog schließen und Fotos/Videos auswählen.
             </p>
           )}
+        </div>
+
+        <div className="mb-3 rounded border border-border p-2">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-semibold text-text-secondary">
+              Text-Overlays
+            </span>
+            <button
+              type="button"
+              onClick={addOverlay}
+              className="rounded border border-border px-2 py-0.5 text-xs hover:border-accent"
+            >
+              + Hinzufügen
+            </button>
+          </div>
+          {overlays.length > 0 && (
+            <div className="mb-2 flex flex-col gap-1 text-xs text-text-secondary">
+              <span>Schriftdatei (für alle Overlays)</span>
+              <div className="flex gap-1">
+                <input
+                  type="text"
+                  readOnly
+                  value={overlayFontPath}
+                  placeholder="Keine ausgewählt"
+                  className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handlePickOverlayFont()}
+                  className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent"
+                >
+                  Datei wählen…
+                </button>
+              </div>
+              {!overlayFontPath && (
+                <span className="text-danger">
+                  Ohne Schriftdatei werden Overlays beim Rendern ignoriert.
+                </span>
+              )}
+            </div>
+          )}
+          <div className="flex flex-col gap-2">
+            {overlays.map((overlay, index) => (
+              <div key={index} className="rounded border border-border p-2">
+                <div className="mb-1 flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Text"
+                    value={overlay.text}
+                    onChange={(e) =>
+                      updateOverlay(index, { text: e.target.value })
+                    }
+                    className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeOverlay(index)}
+                    className="shrink-0 rounded border border-border px-1.5 py-0.5 text-xs text-danger hover:border-danger"
+                  >
+                    Entfernen
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                    Start (s)
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      value={overlay.startSeconds}
+                      onChange={(e) =>
+                        updateOverlay(index, {
+                          startSeconds: Number(e.target.value),
+                        })
+                      }
+                      className="w-20 rounded border border-border bg-bg-panel px-2 py-1"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                    Ende (s)
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      value={overlay.endSeconds}
+                      onChange={(e) =>
+                        updateOverlay(index, {
+                          endSeconds: Number(e.target.value),
+                        })
+                      }
+                      className="w-20 rounded border border-border bg-bg-panel px-2 py-1"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                    Position
+                    <select
+                      value={overlay.position}
+                      onChange={(e) =>
+                        updateOverlay(index, {
+                          position: e.target
+                            .value as TimelineTextOverlayInput["position"],
+                        })
+                      }
+                      className="rounded border border-border bg-bg-panel px-2 py-1"
+                    >
+                      {OVERLAY_POSITIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                    Größe
+                    <input
+                      type="number"
+                      min={8}
+                      step={2}
+                      value={overlay.fontSize}
+                      onChange={(e) =>
+                        updateOverlay(index, {
+                          fontSize: Number(e.target.value),
+                        })
+                      }
+                      className="w-16 rounded border border-border bg-bg-panel px-2 py-1"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                    Farbe
+                    <input
+                      type="color"
+                      value={overlay.color}
+                      onChange={(e) =>
+                        updateOverlay(index, { color: e.target.value })
+                      }
+                    />
+                  </label>
+                </div>
+              </div>
+            ))}
+            {overlays.length === 0 && (
+              <p className="text-xs text-text-muted">Kein Overlay.</p>
+            )}
+          </div>
         </div>
 
         <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">

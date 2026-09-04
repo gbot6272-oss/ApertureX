@@ -4141,3 +4141,41 @@ geladen war (Effekt-Abhängigkeitsliste fehlte `mapMode`); (2) die
 angezeigte Zoomstufe war eingefroren (aus einer Ref statt reaktivem
 State gelesen, aktualisierte sich nie nach dem ersten Render). Beide
 behoben, vor dem Commit erneut visuell bestätigt.
+
+## ADR-0045: Phase 17 — Video-Editor-Erweiterung (Timeline, Text/Untertitel, Tempo, Greenscreen, Bild-in-Bild, Stabilisierung)
+
+**Kontext:** Phase 16 lieferte "Basis-Videoschnitt" (Schneiden, Szenenerkennung, Entrauschen, Musik, LUT, Ähnliche-Videos — alles **Ein-Clip**-Operationen, jede erzeugt genau eine neue Katalogzeile). Nutzerwunsch: deutlich ausweiten — "nicht so krass wie CapCut, aber dass man guten Content erstellen kann". Nach Rückfrage (siehe Sitzungsverlauf) sollen zusätzlich zu den naheliegenden Kernfunktionen auch automatische Untertitel, Greenscreen, Bild-in-Bild/Split-Screen und Stabilisierung rein — alle vier explizit vom Nutzer bestätigt.
+
+### Architektur-Entscheidung: Timeline-Dialog statt persistentem Projekt-Katalogobjekt
+
+Eine "echte" Mehrspur-Zeitachse bräuchte ein neues, dauerhaft speicherbares/wiederöffenbares Katalogobjekt (eigene Tabelle, CRUD-Lebenszyklus, Autosave) — deutlich mehr neue Infrastruktur als der Rest dieser App braucht. Stattdessen wird **dasselbe bewährte Muster wie `SlideshowDialog.tsx`/`ContentAwareScaleDialog.tsx`** verwendet: ein Dialog baut eine Sequenz aus Fotos/Videos + Übergängen + Overlays zusammen und rendert sie **in einem Rutsch** zu einer neuen Videodatei (wie die Diashow bereits Fotos zu einem Video rendert) — kein editierbarer Zwischenzustand über Sitzungen hinweg, aber alles, was für "guten Content erstellen" gebraucht wird. `apx_export::video`s bestehende `TimelineSlide`/`TransitionKind`/`build_frame_plan`-Infrastruktur (Diashow-Export, Phase 8) ist der direkte Vorläufer und wird für Foto-/Titelkarten-Einträge weiterhin genutzt.
+
+**Neu für Video-Einträge in der Zeitachse:** anders als Fotos (ein einzelner vorab gerenderter RGBA8-Puffer) hat ein Video-Clip selbst hunderte/tausende Frames — er passt nicht in `TimelineSlide`s "einmal rendern, dann aus dem Speicher abspielen"-Modell. Deshalb ein **zweistufiger** Rendering-Ansatz in einem neuen `apx_export::timeline`-Modul:
+1. Jeder Zeitachsen-Eintrag wird zuerst zu einem eigenen kurzen Temp-Video-Segment gerendert — ein Video-Clip per Trim+Tempo-Filter (`-ss`/`-t`/`setpts`/`atempo`, dieselbe `ffmpeg`-Subprozess-Technik wie `trim_video`/`denoise_video_audio`), ein Foto/eine Titelkarte per bereits vorhandener Ein-Folie-Diashow-Rendering (`export_slideshow_video` mit genau einem Slide).
+2. Alle Segmente werden per `ffmpeg`-`concat`-Demuxer (reine Schnitte) bzw. `xfade`/`acrossfade`-Filterkette (Überblendungen — natives `ffmpeg`-Feature seit 4.3, kein eigener Pixel-Blend-Code nötig) zur finalen Sequenz zusammengefügt.
+
+Text-/Untertitel-Overlays und Bild-in-Bild laufen als **zusätzlicher** `ffmpeg`-Filter-Pass über das fertige Sequenz-Video (`drawtext`/`overlay`-Filter — beides Bordmittel, kein neuer Rust-Bildverarbeitungscode).
+
+**Greenscreen und Stabilisierung sind bewusst KEINE Zeitachsen-Features, sondern zwei weitere Ein-Clip-Commands** (wie `apply_lut_filter_to_video`/`denoise_video_audio`) — sie verarbeiten einen einzelnen Clip zu einem neuen Katalog-Video, das man danach wie jedes andere Video als Zeitachsen-Eintrag verwenden kann. Das hält beide bei der bereits bewährten, einfachen "Ein-Clip rein, ein neues Katalog-Video raus"-Architektur statt einer weiteren Sonderlogik in der Zeitachse.
+
+### Recherche-Ergebnisse (echte Lizenzprüfung, keine Annahme aus dem Training)
+
+| Funktion | Lösung | Befund |
+|---|---|---|
+| Automatische Untertitel | OpenAI Whisper (Modellgewichte + Code) | **MIT-Lizenz**, real gegen `github.com/openai/whisper/blob/main/LICENSE` geprüft. Rust-Anbindung `whisper-rs` (Bindings an `whisper.cpp`) ist **Unlicense** (gemeinfrei-äquivalent); `whisper.cpp` selbst real gegen dessen `LICENSE`-Datei geprüft: **MIT**. Modelldateien im ggml-Format (von `whisper.cpp`s Maintainer aus den MIT-lizenzierten OpenAI-Gewichten konvertiert) — Opt-in-Download wie MiDaS/LaMa, SHA-256 beim tatsächlichen Download-Schritt geprüft |
+| Greenscreen/Hintergrund entfernen | **Nicht** RobustVideoMatting (RVM) — real gegen dessen `LICENSE`-Datei geprüft: **GPL-3.0**, Bruch mit der durchgehend permissiven Linie dieses Projekts (dieselbe Ablehnung wie `seamcarving` in Phase 15). Stattdessen **MediaPipe Selfie Segmentation** (Google) — real geprüft: **Apache-2.0**, klein (454 KB TFLite, ONNX-Konvertierung community-verfügbar), produktionserprobt (Google Meet u. Ä.) | Opt-in-Download wie die übrigen ONNX-Modelle dieses Projekts |
+| Bild-in-Bild/Split-Screen | nativer `ffmpeg`-`overlay`-Filter | Bordmittel, kein neuer Code/Abhängigkeit |
+| Mehr Übergänge | nativer `ffmpeg`-`xfade`-Filter (mehrere Übergangsarten: `wipeleft`, `slideup`, `dissolve` u. a.) | Bordmittel |
+| Video-Stabilisierung | Wiederverwendung von `apx-stacking::homography_stitch`s bereits vorhandener Merkmalserkennung/-zuordnung/RANSAC-Homografie-Schätzung (Phase 13, Panorama-Stitching) für Frame-zu-Frame-Bewegungsschätzung, plus neuer Pfad-Glättung (gleitender Durchschnitt über die kumulierten Transformationen) und Korrektur-Warp | Kein neues Crate — klassischer, gut dokumentierter Algorithmus (dieselbe Zwei-Bild-Homografie-Schätzung, die Panorama-Stitching bereits verifiziert korrekt berechnet, nur auf aufeinanderfolgende Video-Frames statt Panorama-Teilbilder angewendet) |
+
+### Testdisziplin (fortgeführt aus Phase 16, Nutzervorgabe bleibt in Kraft)
+
+Ausschließlich `cargo check`/`tsc -b` nach den einzelnen Schritten — kein `cargo test`, kein Vitest, keine Playwright-Läufe zwischendurch. Volle Suite gebündelt erst im letzten Schritt.
+
+### Nicht Teil dieser Phase
+
+Ein editierbares, wiederöffenbares Zeitachsen-Projekt (Autosave, mehrfaches Nachbearbeiten) — der Dialog rendert in einem Rutsch, wie die Diashow. Mehrspur-Audio-Mischpult mit beliebig vielen Musik-/Sprachspuren gleichzeitig (bleibt bei der bestehenden Ein-Spur-Mix/Ersetzen-Logik aus Phase 16 Schritt 8, jetzt zusätzlich pro Zeitachsen-Segment nutzbar). Cloud-Spracherkennung/-APIs (durchgehend lokal, dieselbe Linie wie jede KI-Funktion dieses Projekts).
+
+### Reihenfolge (elf Schritte, siehe PLAN.md)
+
+Erst das Zeitachsen-Grundgerüst (Schritt 1, trägt alle folgenden Schritte), dann die kleineren Erweiterungen der Zeitachse selbst (Tempo, Übergänge, Text, Untertitel, Format-Presets, Bild-in-Bild — alle bauen auf Schritt 1 auf), zuletzt die beiden unabhängigen Ein-Clip-Commands (Greenscreen, Stabilisierung), die keine Zeitachse voraussetzen.

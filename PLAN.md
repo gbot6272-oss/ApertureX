@@ -1143,3 +1143,34 @@ zusammenhängende UI-Erweiterung der bestehenden Kartenansicht) — siehe
 - [x] Dunkle Kartenkacheln — CARTOs "Dark Matter" statt der ursprünglichen hellen OSM-Standard-Kacheln, passend zum technisch-dunklen Anspruch
 - [x] `map-flow.spec.ts` angepasst (Globus ist jetzt der Standard-Einstieg statt der flachen Karte, ein neuer Test deckt den Globus→Karte-Wechsel ab) — real per Playwright-Screenshot visuell verifiziert (echte Kontinent-Silhouette, funktionierende Heatmap-Farbverläufe), dabei zwei echte Bugs gefunden und behoben (Heatmap-Punkte wurden beim Moduswechsel nicht übertragen; die angezeigte Zoomstufe war eingefroren)
 - [x] `tsc -b`, volle `vitest run`-Suite (251 Tests, 28 neue), `map-flow.spec.ts` grün
+
+## Aktuelle Phase: Phase 17 — Video-Editor-Erweiterung
+
+Nutzerwunsch nach Phase 16s "Basis-Videoschnitt": deutlich mehr
+Funktionen, "nicht so krass wie CapCut aber dass man guten Content
+erstellen kann". Nach Rückfrage zusätzlich bestätigt: automatische
+Untertitel, Greenscreen, Bild-in-Bild/Split-Screen, Stabilisierung.
+Siehe `DECISIONS.md` ADR-0045 für die vollständige Architektur-/
+Lizenzrecherche. Kernentscheidung: ein Zeitachsen-**Dialog** (wie
+`SlideshowDialog.tsx`, rendert in einem Rutsch) statt eines
+persistenten, wiederöffenbaren Projekt-Katalogobjekts — Video-Clips
+werden zu Temp-Segmenten gerendert (Trim+Tempo), dann per `ffmpeg`-
+`concat`/`xfade` zusammengefügt; Greenscreen/Stabilisierung bleiben
+zwei weitere Ein-Clip-Commands wie `apply_lut_filter_to_video`.
+Testdisziplin (fortgeführt aus Phase 16, weiterhin in Kraft):
+ausschließlich `cargo check`/`tsc -b` nach den einzelnen Schritten —
+kein `cargo test`, kein Vitest, keine Playwright-Läufe zwischendurch.
+Volle Suite gebündelt erst im letzten Schritt.
+
+- [ ] 0. Scope festzurren, ADR-0045
+- [ ] 1. Mehrspur-Timeline-Grundgerüst (Zeitachsen-Dialog, Segment-Rendering + Concat/Übergänge)
+- [ ] 2. Geschwindigkeits-Regler pro Clip (Zeitlupe/Zeitraffer)
+- [ ] 3. Mehr Übergänge (Wisch-/Blende-Varianten über `xfade`)
+- [ ] 4. Text-/Titel-Overlays mit Zeitspanne/Position
+- [ ] 5. Automatische Untertitel (Whisper, Opt-in-Download)
+- [ ] 6. Social-Media-Export-Presets (9:16/1:1/16:9)
+- [ ] 7. Bild-in-Bild / Split-Screen
+- [ ] 8. Greenscreen/Hintergrund entfernen (MediaPipe Selfie Segmentation)
+- [ ] 9. Video-Stabilisierung (Wiederverwendung `apx-stacking`-Homografie)
+- [ ] 10. Dokumentation, volle Verifikation, Abnahme
+- [x] `tsc -b`, volle `vitest run`-Suite (251 Tests, 28 neue), `map-flow.spec.ts` grün

@@ -558,6 +558,41 @@ export function renderVideoTimeline(items: TimelineItemInput[], options: VideoTi
   return invoke<PhotoDto>("render_video_timeline", { items, options });
 }
 
+// ---- Automatische Untertitel (Phase 17 Schritt 5, siehe DECISIONS.md ------
+// ADR-0045) -------------------------------------------------------------------
+
+/** Lädt das ~142-MB-Whisper-`base.en`-Modell herunter (MIT, `whisper.cpp`,
+ * SHA1-geprüft) — löst erst nach ausdrücklicher Nutzerbestätigung. Liefert
+ * den lokalen Zielpfad zurück. */
+export function downloadWhisperModel(): Promise<string> {
+  return invoke<string>("download_whisper_model");
+}
+
+/** Entfernt nur den hinterlegten Pfad — löscht die heruntergeladene Datei
+ * selbst nicht. */
+export function clearWhisperModelPath(): Promise<void> {
+  return invoke<void>("clear_whisper_model_path");
+}
+
+/** Ein transkribierter Zeitabschnitt — siehe
+ * `apx_ai::subtitles::SubtitleSegment`s Moduldoku. */
+export interface SubtitleSegmentDto {
+  start_ms: number;
+  end_ms: number;
+  text: string;
+}
+
+/** Transkribiert die Tonspur des Videos `photoId` per Whisper — braucht
+ * ein zuvor heruntergeladenes Modell (siehe [`downloadWhisperModel`]).
+ * `language`: ISO-639-1-Kürzel (z. B. `"de"`) oder `undefined` für
+ * Auto-Erkennung. Die zurückgegebenen Zeitabschnitte sind relativ zum
+ * Beginn der Tonspur des jeweiligen Videos — `VideoTimelineDialog.tsx`
+ * verschiebt sie beim Übernehmen in Text-Overlays um die Startposition
+ * des Eintrags in der Gesamt-Sequenz. */
+export function transcribeVideoAudio(photoId: string, language?: string): Promise<SubtitleSegmentDto[]> {
+  return invoke<SubtitleSegmentDto[]>("transcribe_video_audio", { photoId, language: language ?? null });
+}
+
 // ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------------
 // Anders als der lineare Verlauf oben: siehe `crates/apx-app/src/commands.rs`s
 // Moduldoku für die Abgrenzung. Kein eigener "restore"-Aufruf — die
@@ -1071,6 +1106,13 @@ export interface AiSettingsDto {
    * `DECISIONS.md` ADR-0041 Nachtrag IX) — ein fehlender Schlüssel heißt
    * „dieser Stil noch nicht heruntergeladen". */
   style_transfer_model_paths: Record<string, string>;
+  /** `null`, solange der Nutzer den Download nicht bestätigt hat (Phase 17
+   * Schritt 5, siehe `DECISIONS.md` ADR-0045). */
+  whisper_model_path: string | null;
+  /** `false`, wenn diese Build ohne das Cargo-Feature `subtitles`
+   * kompiliert wurde — `VideoTimelineDialog.tsx` zeigt dann einen Hinweis
+   * statt der Untertitel-Aktionen. */
+  subtitles_feature_compiled: boolean;
 }
 
 export function getAiSettings(): Promise<AiSettingsDto> {

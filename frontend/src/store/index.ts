@@ -81,6 +81,7 @@ import type {
   PreviewCacheStatsDto,
   StackDto,
   TagRuleDto,
+  SubtitleSegmentDto,
   TemplateDto,
   TemplateKind,
   TimelineItemInput,
@@ -1855,6 +1856,19 @@ interface VideoSlice {
   videoTimelineError: string | null;
   videoTimelineOutcome: PhotoDto | null;
   renderVideoTimeline: (items: TimelineItemInput[], options: VideoTimelineOptions) => Promise<void>;
+
+  /** Automatische Untertitel (Phase 17 Schritt 5, siehe `DECISIONS.md`
+   * ADR-0045) — Opt-in-Whisper-Modell-Download, dasselbe Muster wie
+   * `downloadDepthModel`. */
+  whisperModelDownloading: boolean;
+  downloadWhisperModel: () => Promise<void>;
+  clearWhisperModelPath: () => Promise<void>;
+  videoTranscribing: boolean;
+  videoTranscribeError: string | null;
+  /** Gibt die transkribierten Zeitabschnitte direkt zurück (statt nur im
+   * Store abzulegen) — `VideoTimelineDialog.tsx` baut daraus sofort neue
+   * Text-Overlay-Einträge. */
+  transcribeVideoAudio: (photoId: string, language?: string) => Promise<SubtitleSegmentDto[]>;
 }
 
 export type AppStore = CatalogSlice &
@@ -7068,6 +7082,59 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.videoTimelineRunning = false;
+        });
+      }
+    },
+
+    whisperModelDownloading: false,
+
+    downloadWhisperModel: async () => {
+      set((state) => {
+        state.whisperModelDownloading = true;
+      });
+      try {
+        await api.downloadWhisperModel();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.whisperModelDownloading = false;
+        });
+      }
+    },
+
+    clearWhisperModelPath: async () => {
+      try {
+        await api.clearWhisperModelPath();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    videoTranscribing: false,
+    videoTranscribeError: null,
+
+    transcribeVideoAudio: async (photoId, language) => {
+      set((state) => {
+        state.videoTranscribing = true;
+        state.videoTranscribeError = null;
+      });
+      try {
+        return await api.transcribeVideoAudio(photoId, language);
+      } catch (err) {
+        set((state) => {
+          state.videoTranscribeError = err instanceof Error ? err.message : String(err);
+        });
+        return [];
+      } finally {
+        set((state) => {
+          state.videoTranscribing = false;
         });
       }
     },

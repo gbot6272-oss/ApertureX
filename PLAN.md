@@ -1167,7 +1167,7 @@ Volle Suite gebündelt erst im letzten Schritt.
 - [x] 2. Geschwindigkeits-Regler pro Clip (Zeitlupe/Zeitraffer) — `TimelineItem::VideoClip.speed` + `setpts`-Filter, Tempo-Dropdown je Video-Eintrag in `VideoTimelineDialog.tsx`
 - [x] 3. Mehr Übergänge (Wisch-/Blende-Varianten über `xfade`) — `TimelineTransitionKind` (8 Varianten), Übergangs-Auswahl je Lücke in `VideoTimelineDialog.tsx`
 - [x] 4. Text-/Titel-Overlays mit Zeitspanne/Position — `TimelineTextOverlay` (Rust-Text-Rasterisierung + `ffmpeg`-`overlay`-Filter statt `drawtext`), Overlay-Editor in `VideoTimelineDialog.tsx`
-- [ ] 5. Automatische Untertitel (Whisper, Opt-in-Download)
+- [x] 5. Automatische Untertitel (Whisper, Opt-in-Download) — `apx_ai::subtitles` hinter Cargo-Feature `subtitles` (real mit `--features subtitles` kompiliert), `ggml-base.en.bin` (SHA1 real aus whisper.cpp-README), Transkription -> Text-Overlay-Einträge in `VideoTimelineDialog.tsx`
 - [ ] 6. Social-Media-Export-Presets (9:16/1:1/16:9)
 - [ ] 7. Bild-in-Bild / Split-Screen
 - [ ] 8. Greenscreen/Hintergrund entfernen (MediaPipe Selfie Segmentation)

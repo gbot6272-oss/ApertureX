@@ -68,12 +68,23 @@ kmeans_colors = { version = "0.7.1", default-features = false, features = ["pale
 # aufruft. Minimalfeatures (`std` allein): keine benannten CSS-Farben
 # (`named`), kein `serde`, nichts davon wird gebraucht.
 palette = { version = "0.7.7", default-features = false, features = ["std"] }
+# Automatische Untertitel (Phase 17 Schritt 5, siehe DECISIONS.md
+# ADR-0045) — Rust-Bindings an `whisper.cpp` (MIT), selbst Unlicense
+# (real geprüft, siehe ADR-0045s Recherche-Tabelle). Baut `whisper.cpp`s
+# gebündelten C/C++-Quellcode lokal per `cmake` (kein Netzwerkzugriff
+# beim Bauen, anders als `ort`s `download-binaries`), aber ein
+# spürbarer zusätzlicher Compile-Schritt — hinter dem standardmäßig
+# ausgeschalteten Cargo-Feature `subtitles` (dieselbe Konvention wie
+# `people`/`apx-tether`s `tethering` oben), damit der normale
+# `cargo check --workspace` unverändert schnell bleibt.
+whisper-rs = { version = "0.16", default-features = false, optional = true }
 
 [features]
 # Standardmäßig aus: `libdlib`+`libblas`+`liblapack` fehlen in dieser
 # Sandbox und im Standard-CI-Job (derselbe Grund wie `apx-tether`s
 # `tethering`-Feature).
 people = ["dep:dlib-face-recognition"]
+subtitles = ["dep:whisper-rs"]
 
 [dev-dependencies]
 tempfile = "3"

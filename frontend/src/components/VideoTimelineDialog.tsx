@@ -116,6 +116,52 @@ function buildTimelineItems(
   });
 }
 
+/** Effektive Länge eines Eintrags in der Ausgabe-Sequenz (Sekunden) —
+ * für Video-Einträge der getrimmte Bereich geteilt durch das Tempo,
+ * für Foto-/Titel-Einträge die Haltedauer. */
+function draftItemDurationSeconds(item: DraftItem, isVideo: boolean): number {
+  if (isVideo)
+    return (
+      Math.max(0, item.outSeconds - item.inSeconds) / Math.max(0.01, item.speed)
+    );
+  return item.holdSeconds;
+}
+
+/** Überblendungsdauer einer Lücke — `"cut"` läuft serverseitig über eine
+ * für das Auge nicht wahrnehmbare Dauer (siehe `apx_export::timeline`s
+ * `CUT_TRANSITION_SECONDS`), hier zur Offset-Berechnung als `0` genähert. */
+function gapDurationSeconds(
+  transition: string,
+  transitionSeconds: number,
+): number {
+  return transition === "cut" ? 0 : Math.max(0, transitionSeconds);
+}
+
+/** Wo `items[targetIndex]` in der fertig verketteten Sequenz beginnt —
+ * dieselbe kumulative Überlappungs-Rechnung wie
+ * `apx_export::timeline::xfade_offsets`/`total_duration_after_xfade`
+ * (hier in TS dupliziert, weil die Zeitachse erst nach dem Rendern
+ * bekannt wäre — Untertitel-Overlays brauchen die Startposition aber
+ * schon beim Anlegen im Dialog). */
+function itemStartOffsetSeconds(
+  items: DraftItem[],
+  isVideo: (id: string) => boolean,
+  gapTransitions: string[],
+  transitionSeconds: number,
+  targetIndex: number,
+): number {
+  let cumulative = 0;
+  for (let i = 0; i < targetIndex; i++) {
+    const gap = gapDurationSeconds(
+      gapTransitions[i] ?? DEFAULT_TRANSITION,
+      transitionSeconds,
+    );
+    cumulative +=
+      draftItemDurationSeconds(items[i]!, isVideo(items[i]!.photoId)) - gap;
+  }
+  return Math.max(0, cumulative);
+}
+
 /**
  * Video-Zeitachse (Phase 17 Schritt 1, siehe `PLAN.md`/`DECISIONS.md`
  * ADR-0045) — kombiniert mehrere Fotos/Videos in einer selbst
@@ -140,6 +186,14 @@ export function VideoTimelineDialog({
   const videoTimelineOutcome = useAppStore((s) => s.videoTimelineOutcome);
   const renderVideoTimeline = useAppStore((s) => s.renderVideoTimeline);
   const activePhotos = useAppStore(useShallow(selectActivePhotos));
+  const aiSettings = useAppStore((s) => s.aiSettings);
+  const loadAiSettings = useAppStore((s) => s.loadAiSettings);
+  const whisperModelDownloading = useAppStore((s) => s.whisperModelDownloading);
+  const downloadWhisperModel = useAppStore((s) => s.downloadWhisperModel);
+  const clearWhisperModelPath = useAppStore((s) => s.clearWhisperModelPath);
+  const videoTranscribing = useAppStore((s) => s.videoTranscribing);
+  const videoTranscribeError = useAppStore((s) => s.videoTranscribeError);
+  const transcribeVideoAudio = useAppStore((s) => s.transcribeVideoAudio);
 
   const photoById = useMemo(
     () => new Map(activePhotos.map((p) => [p.id, p])),
@@ -188,6 +242,10 @@ export function VideoTimelineDialog({
   useEffect(() => {
     if (open && ffmpegAvailable === null) void checkFfmpegAvailability();
   }, [open, ffmpegAvailable, checkFfmpegAvailability]);
+
+  useEffect(() => {
+    if (open && aiSettings === null) void loadAiSettings();
+  }, [open, aiSettings, loadAiSettings]);
 
   if (!open) return null;
 
@@ -242,6 +300,35 @@ export function VideoTimelineDialog({
   async function handlePickOverlayFont() {
     const path = await pickFilePath("Schriftdatei", ["ttf", "otf"]);
     if (path) setOverlayFontPath(path);
+  }
+
+  /** Transkribiert die Tonspur von `items[index]` (muss ein Video sein)
+   * und übernimmt jeden erkannten Abschnitt als neues Text-Overlay,
+   * verschoben um die Startposition des Eintrags in der Gesamt-Sequenz
+   * (siehe `itemStartOffsetSeconds`). */
+  async function handleTranscribeItem(index: number) {
+    const item = items[index];
+    if (!item) return;
+    const segments = await transcribeVideoAudio(item.photoId);
+    if (segments.length === 0) return;
+    const offset = itemStartOffsetSeconds(
+      items,
+      isVideo,
+      gapTransitions,
+      transitionSeconds,
+      index,
+    );
+    setOverlays((prev) => [
+      ...prev,
+      ...segments.map((segment) => ({
+        text: segment.text,
+        position: "bottom_left" as const,
+        startSeconds: offset + segment.start_ms / 1000,
+        endSeconds: offset + segment.end_ms / 1000,
+        fontSize: 36,
+        color: "#ffffff",
+      })),
+    ]);
   }
 
   function addOverlay() {
@@ -408,7 +495,20 @@ export function VideoTimelineDialog({
                         </select>
                       </label>
                     </div>
-                  ) : (
+                  ) : null}
+                  {video && aiSettings?.whisper_model_path && (
+                    <button
+                      type="button"
+                      onClick={() => void handleTranscribeItem(index)}
+                      disabled={videoTranscribing}
+                      className="mt-2 rounded border border-border px-2 py-0.5 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {videoTranscribing
+                        ? "Transkribiert…"
+                        : "🎙️ Untertitel automatisch generieren"}
+                    </button>
+                  )}
+                  {!video && (
                     <label className="flex flex-col gap-1 text-xs text-text-secondary">
                       Haltedauer (s)
                       <input
@@ -465,6 +565,44 @@ export function VideoTimelineDialog({
               + Hinzufügen
             </button>
           </div>
+
+          <p className="mb-2 rounded border border-border px-2 py-1 text-xs text-text-secondary">
+            {aiSettings === null ? (
+              "Lädt…"
+            ) : !aiSettings.subtitles_feature_compiled ? (
+              "Diese Build wurde ohne automatische Untertitel kompiliert."
+            ) : aiSettings.whisper_model_path ? (
+              <>
+                Untertitel-Modell installiert.{" "}
+                <button
+                  type="button"
+                  onClick={() => void clearWhisperModelPath()}
+                  className="text-text-muted underline hover:text-danger"
+                >
+                  Entfernen
+                </button>
+              </>
+            ) : (
+              <>
+                Kein Untertitel-Modell installiert — Whisper base.en (MIT, ~142
+                MB, lokal, kein Cloud-Aufruf).{" "}
+                <button
+                  type="button"
+                  disabled={whisperModelDownloading}
+                  onClick={() => void downloadWhisperModel()}
+                  className="text-accent underline disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {whisperModelDownloading ? "Lädt herunter…" : "Herunterladen"}
+                </button>
+              </>
+            )}
+          </p>
+          {videoTranscribeError && (
+            <p className="mb-2 text-xs text-danger">
+              Fehler: {videoTranscribeError}
+            </p>
+          )}
+
           {overlays.length > 0 && (
             <div className="mb-2 flex flex-col gap-1 text-xs text-text-secondary">
               <span>Schriftdatei (für alle Overlays)</span>

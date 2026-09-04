@@ -1909,6 +1909,201 @@ fn unique_timeline_dest_path(folder_path: &Path) -> PathBuf {
     dest_path
 }
 
+// ---- Automatische Untertitel (Phase 17 Schritt 5, siehe DECISIONS.md ------
+// ADR-0045) — lokal per Whisper (`apx_ai::subtitles`), hinter dem
+// Cargo-Feature `subtitles` (siehe dessen Moduldoku für die Begründung).
+// Opt-in-Modell-Download wie das MiDaS-/LaMa-Modell oben.
+
+/// Öffentliche Download-URL des `ggml-base.en`-Modells (whisper.cpp), real
+/// aus dessen eigenem `models/download-ggml-model.sh` übernommen
+/// (`src="https://huggingface.co/ggerganov/whisper.cpp"`,
+/// `pfx="resolve/main/ggml"` -> `ggml-base.en.bin`). **Nicht in dieser
+/// Sitzung erreichbar/verifiziert** — `huggingface.co` ist von dieser
+/// Entwicklungs-Sandbox aus blockiert, genau wie beim LaMa-Modell
+/// (Phase 13, [`LAMA_MODEL_URL`]).
+const WHISPER_MODEL_URL: &str =
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin";
+/// SHA1 der `base.en`-Modelldatei — anders als beim LaMa-Modell **real
+/// aus `whisper.cpp`s eigenem `models/README.md` übernommen** (dessen
+/// Prüfsummen-Tabelle, `github.com` ist in dieser Sitzung erreichbar,
+/// `huggingface.co` selbst nicht). **Nur SHA1** (40 Hex-Zeichen) — anders
+/// als [`MIDAS_MODEL_SHA256`] u. Ä. veröffentlicht `whisper.cpp` für seine
+/// Modelle ausschließlich SHA1, keine erfundene SHA-256-Ersatzprüfsumme.
+const WHISPER_MODEL_SHA1: &str = "137c40403d78fd54d454da0f9bd998f78703390c";
+
+/// Lädt das Whisper-`base.en`-Untertitel-Modell herunter, prüft die
+/// Prüfsumme gegen [`WHISPER_MODEL_SHA1`] und hinterlegt den Pfad in den
+/// Einstellungen — dieselbe Verwerfen-bei-Fehlschlag-Logik wie
+/// [`download_depth_model`].
+#[tauri::command]
+pub async fn download_whisper_model(state: State<'_, AppState>) -> Result<String, String> {
+    let response = reqwest::get(WHISPER_MODEL_URL)
+        .await
+        .map_err(|err| format!("Download von '{WHISPER_MODEL_URL}' fehlgeschlagen: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Download von '{WHISPER_MODEL_URL}' fehlgeschlagen: HTTP {}",
+            response.status()
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| format!("Antwort konnte nicht gelesen werden: {err}"))?;
+
+    use sha1::Digest as _;
+    let mut hasher = sha1::Sha1::new();
+    hasher.update(&bytes);
+    // `sha1`s `Digest::finalize()` gibt kein `LowerHex`-fähiges Array
+    // zurück (anders als `sha2` oben) — Byte-für-Byte selbst formatieren.
+    let actual_hash = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    if actual_hash != WHISPER_MODEL_SHA1 {
+        return Err(format!(
+            "Prüfsumme stimmt nicht überein (erwartet {WHISPER_MODEL_SHA1}, erhalten {actual_hash}) — Download verworfen."
+        ));
+    }
+
+    let dest_dir = state.paths.models_dir();
+    std::fs::create_dir_all(&dest_dir).map_err(|err| err.to_string())?;
+    let dest_path = dest_dir.join("ggml-base.en.bin");
+    std::fs::write(&dest_path, &bytes).map_err(|err| err.to_string())?;
+
+    let path_string = dest_path.to_string_lossy().to_string();
+    let settings_path = state.paths.settings_file();
+    let mut settings =
+        apx_core::Settings::load_or_default(&settings_path).map_err(|err| err.to_string())?;
+    settings.ai.whisper_model_path = Some(path_string.clone());
+    settings
+        .save(&settings_path)
+        .map_err(|err| err.to_string())?;
+
+    Ok(path_string)
+}
+
+/// Entfernt den hinterlegten Modellpfad (löscht die Datei selbst nicht,
+/// siehe [`clear_depth_model_path`]s Begründung).
+#[tauri::command]
+pub fn clear_whisper_model_path(state: State<'_, AppState>) -> Result<(), String> {
+    let path = state.paths.settings_file();
+    let mut settings = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    settings.ai.whisper_model_path = None;
+    settings.save(&path).map_err(|err| err.to_string())
+}
+
+/// Extrahiert die Tonspur von `source_path` als rohes `f32`-PCM, 16 kHz,
+/// mono — Whisper verlangt exakt dieses Format (siehe
+/// `apx_ai::subtitles`s Moduldoku). Läuft über `ffmpeg`s Stdout-Pipe
+/// (`-f f32le -` statt einer Zwischendatei) — dieselbe Subprozess-Technik
+/// wie jeder andere `ffmpeg`-Aufruf dieser Datei, nur mit `stdout` statt
+/// einer Zieldatei als Ausgabe.
+fn extract_audio_pcm_f32(source_path: &Path) -> Result<Vec<f32>, String> {
+    let output = std::process::Command::new("ffmpeg")
+        .arg("-i")
+        .arg(source_path)
+        .args(["-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-"])
+        .output()
+        .map_err(|err| format!("ffmpeg nicht startbar (ist ffmpeg installiert?): {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Tonspur-Extraktion fehlgeschlagen: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    if output.stdout.len() % 4 != 0 {
+        return Err("ffmpeg-Ausgabe ist keine gültige f32-PCM-Folge".to_string());
+    }
+    Ok(output
+        .stdout
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SubtitleSegmentDto {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub text: String,
+}
+
+#[cfg(feature = "subtitles")]
+fn transcribe_pcm(
+    model_path: &Path,
+    samples: &[f32],
+    language: Option<&str>,
+) -> Result<Vec<SubtitleSegmentDto>, String> {
+    let session =
+        apx_ai::subtitles::WhisperSession::load(model_path).map_err(|err| err.to_string())?;
+    let segments = session
+        .transcribe(samples, language)
+        .map_err(|err| err.to_string())?;
+    Ok(segments
+        .into_iter()
+        .map(|s| SubtitleSegmentDto {
+            start_ms: s.start_ms,
+            end_ms: s.end_ms,
+            text: s.text,
+        })
+        .collect())
+}
+
+#[cfg(not(feature = "subtitles"))]
+fn transcribe_pcm(
+    _model_path: &Path,
+    _samples: &[f32],
+    _language: Option<&str>,
+) -> Result<Vec<SubtitleSegmentDto>, String> {
+    Err(
+        "Diese Aperture-X-Build wurde ohne automatische Untertitel kompiliert (Cargo-Feature \"subtitles\" fehlt — baut whisper.cpp lokal per cmake, siehe apx-ai::subtitles)."
+            .to_string(),
+    )
+}
+
+/// Transkribiert die Tonspur des Videos `photo_id` per Whisper zu
+/// zeitversehenen Text-Abschnitten — direkt weiterverwendbar als
+/// Text-Overlays (Phase 17 Schritt 4, `TimelineTextOverlayInput`), das
+/// Frontend übernimmt die Zeitstempel/Texte unverändert in den
+/// Overlay-Editor statt sie hier schon als fertige Overlays anzulegen
+/// (Position/Schriftart/Größe bleiben bewusst manuell wählbar).
+/// `language`: ISO-639-1-Kürzel oder `None` für Auto-Erkennung.
+#[tauri::command]
+pub fn transcribe_video_audio(
+    state: State<'_, AppState>,
+    photo_id: String,
+    language: Option<String>,
+) -> Result<Vec<SubtitleSegmentDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    if photo.media_kind != "video" {
+        return Err("Automatische Untertitel funktionieren nur bei Videos".to_string());
+    }
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let model_path = settings
+        .ai
+        .whisper_model_path
+        .filter(|p| !p.trim().is_empty())
+        .ok_or_else(|| {
+            "Kein Untertitel-Modell heruntergeladen — siehe Einstellungen → KI.".to_string()
+        })?;
+
+    let samples = extract_audio_pcm_f32(&source_path)?;
+    transcribe_pcm(Path::new(&model_path), &samples, language.as_deref())
+}
+
 /// Geht einen Bearbeitungsschritt zurück. `None`, wenn schon am
 /// Ausgangszustand (kein Rückgängig möglich) — kein Fehler, siehe
 /// `apx_catalog::Catalog::undo_edit`.
@@ -3891,6 +4086,14 @@ pub struct AiSettingsDto {
     /// [`download_style_transfer_model`]) — ein fehlender Schlüssel
     /// heißt „dieser Stil noch nicht heruntergeladen".
     pub style_transfer_model_paths: std::collections::BTreeMap<String, String>,
+    /// `Some`, sobald der Nutzer den Download des Whisper-Untertitel-
+    /// Modells bestätigt hat und er erfolgreich war (Phase 17 Schritt 5,
+    /// siehe [`download_whisper_model`]).
+    pub whisper_model_path: Option<String>,
+    /// `true`, wenn diese Build mit dem Cargo-Feature `subtitles`
+    /// kompiliert wurde (siehe `apx-ai::subtitles`s Moduldoku) —
+    /// analog zu `people_feature_compiled` oben.
+    pub subtitles_feature_compiled: bool,
 }
 
 #[tauri::command]
@@ -3905,6 +4108,8 @@ pub fn get_ai_settings(state: State<'_, AppState>) -> Result<AiSettingsDto, Stri
         people_feature_compiled: cfg!(feature = "people"),
         depth_model_path: settings.ai.depth_model_path,
         style_transfer_model_paths: settings.ai.style_transfer_model_paths,
+        whisper_model_path: settings.ai.whisper_model_path,
+        subtitles_feature_compiled: cfg!(feature = "subtitles"),
     })
 }
 

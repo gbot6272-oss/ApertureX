@@ -60,6 +60,8 @@ pub mod segmentation;
 pub mod sky_replace;
 pub mod style_consistency;
 pub mod style_transfer;
+#[cfg(feature = "subtitles")]
+pub mod subtitles;
 pub mod tagging;
 pub mod upright;
 pub mod upscale;

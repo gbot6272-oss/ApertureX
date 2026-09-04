@@ -483,6 +483,24 @@ export function applyLutFilterToVideo(photoId: string, lut: LutFilterDataDto, st
   return invoke<PhotoDto>("apply_lut_filter_to_video", { photoId, lut, strength });
 }
 
+/** Ein Video innerhalb einer `listSimilarVideoGroups`-Gruppe —
+ * `folder_id` steht hier separat (nicht auf `PhotoDto` selbst, siehe
+ * dessen Rust-Gegenstück `SimilarVideoDto`s Moduldoku), weil nur diese
+ * eine Funktion wissen muss, in welchem Ordner ein ähnliches Video
+ * liegt (zum Dorthin-Springen, siehe `store`s `jumpToVideo`). */
+export interface SimilarVideoDto {
+  photo: PhotoDto;
+  folder_id: string;
+}
+
+/** Ähnliche Videos finden (Phase 16 Schritt 10, siehe `DECISIONS.md`
+ * ADR-0043) — arbeitet wie `listPerceptualDuplicateGroups`, aber auf
+ * Videos beschränkt (siehe `apx_app::commands::list_similar_video_groups`s
+ * Moduldoku). */
+export function listSimilarVideoGroups(maxDistance: number): Promise<SimilarVideoDto[][]> {
+  return invoke<SimilarVideoDto[][]>("list_similar_video_groups", { maxDistance });
+}
+
 // ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------------
 // Anders als der lineare Verlauf oben: siehe `crates/apx-app/src/commands.rs`s
 // Moduldoku für die Abgrenzung. Kein eigener "restore"-Aufruf — die

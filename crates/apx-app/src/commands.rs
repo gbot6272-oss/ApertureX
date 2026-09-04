@@ -3158,6 +3158,92 @@ pub fn list_perceptual_duplicate_groups(
         .collect())
 }
 
+/// Ähnliche Videos finden (Phase 16 Schritt 10, siehe `DECISIONS.md`
+/// ADR-0043) — arbeitet **exakt** wie
+/// [`list_perceptual_duplicate_groups`] (derselbe Hasher, dieselbe
+/// O(n²)-Gruppierung gegen den jeweils ersten Gruppen-Vertreter),
+/// beschränkt auf `media_kind == "video"` und deren bereits bei Import
+/// per `ffmpeg` extrahiertes Vorschau-Frame (`extract_video_frame`,
+/// Phase 16 Schritt 4) als Hash-Grundlage — kein neuer Hashing-
+/// Algorithmus, kein zweiter Keyframe-Extraktionsweg. Nur ein einzelnes
+/// Frame pro Video (dieselbe Vereinfachung wie bei Fotos: "genügt für
+/// einen auf Abruf gestarteten Assistenten", keine Szenen-übergreifende
+/// Analyse).
+#[tauri::command]
+pub fn list_similar_video_groups(
+    state: State<'_, AppState>,
+    max_distance: u32,
+) -> Result<Vec<Vec<SimilarVideoDto>>, String> {
+    let photos = state
+        .catalog
+        .search_and_filter_photos(None, &apx_catalog::FilterCriteria::default())
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .filter(|photo| photo.media_kind == "video");
+
+    let hasher = image_hasher::HasherConfig::new().to_hasher();
+    let mut hashed: Vec<(apx_catalog::Photo, image_hasher::ImageHash)> = Vec::new();
+    for photo in photos {
+        let Ok(Some(preview)) = state
+            .catalog
+            .get_preview(photo.id, apx_catalog::PreviewLevel::Thumbnail)
+        else {
+            continue;
+        };
+        let Ok(img) = image::open(&preview.path) else {
+            continue;
+        };
+        let hash = hasher.hash_image(&img);
+        hashed.push((photo, hash));
+    }
+
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for (index, (_, hash)) in hashed.iter().enumerate() {
+        let mut placed = false;
+        for group in groups.iter_mut() {
+            if hashed[group[0]].1.dist(hash) <= max_distance {
+                group.push(index);
+                placed = true;
+                break;
+            }
+        }
+        if !placed {
+            groups.push(vec![index]);
+        }
+    }
+
+    Ok(groups
+        .into_iter()
+        .filter(|group| group.len() >= 2)
+        .map(|group| {
+            group
+                .into_iter()
+                .map(|i| {
+                    let photo = hashed[i].0.clone();
+                    SimilarVideoDto {
+                        folder_id: photo.folder_id.to_string(),
+                        photo: photo.into(),
+                    }
+                })
+                .collect()
+        })
+        .collect())
+}
+
+/// Ein Video innerhalb einer [`list_similar_video_groups`]-Gruppe —
+/// `PhotoDto` selbst trägt bewusst kein `folder_id` (in dieser breit
+/// genutzten zentralen Struktur wäre das eine deutlich größere
+/// Änderung mit vielen Testfixture-Anpassungen, siehe Phase 16
+/// Schritt 4s Erfahrung mit den 23 `NewPhoto`/`Photo`-Konstruktions-
+/// stellen) — hier reicht ein schlanker Wrapper, weil das Frontend nur
+/// für *diese eine* Funktion (zu einem ähnlichen Video in einem anderen
+/// Ordner springen) wissen muss, in welchem Ordner es liegt.
+#[derive(Debug, Clone, Serialize)]
+pub struct SimilarVideoDto {
+    pub photo: PhotoDto,
+    pub folder_id: String,
+}
+
 /// Personenansicht (Phase 11 Schritt 5, siehe `DECISIONS.md` ADR-0038):
 /// grobe Vorsortierung von Fotos mit erkannten Gesichtsregionen nach
 /// Ähnlichkeit (Blob-Anzahl/-Fläche als grobe „Signatur") — **keine

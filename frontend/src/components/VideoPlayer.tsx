@@ -56,6 +56,12 @@ export function VideoPlayer() {
   const videoLutError = useAppStore((s) => s.videoLutError);
   const applyLutFilterToCurrentVideo = useAppStore((s) => s.applyLutFilterToCurrentVideo);
 
+  const similarVideoGroups = useAppStore((s) => s.similarVideoGroups);
+  const similarVideosLoading = useAppStore((s) => s.similarVideosLoading);
+  const similarVideosError = useAppStore((s) => s.similarVideosError);
+  const findSimilarVideos = useAppStore((s) => s.findSimilarVideos);
+  const jumpToVideo = useAppStore((s) => s.jumpToVideo);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -142,6 +148,9 @@ export function VideoPlayer() {
   }, []);
 
   if (!photo) return null;
+
+  const similarGroup = similarVideoGroups?.find((group) => group.some((entry) => entry.photo.id === photo.id));
+  const otherSimilarVideos = similarGroup?.filter((entry) => entry.photo.id !== photo.id) ?? [];
 
   const progress = duration > 0 ? currentTime / duration : 0;
   const trimStartProgress =
@@ -440,6 +449,42 @@ export function VideoPlayer() {
           ) : null}
         </div>
         {videoLutError ? <p className="text-xs text-red-500">{videoLutError}</p> : null}
+
+        {/* Ähnliche Videos finden (Phase 16 Schritt 10): läuft über den
+            ganzen Katalog (nicht nur den aktuellen Ordner), siehe
+            `list_similar_video_groups`s Moduldoku. Klick auf ein
+            gefundenes Video springt dorthin — auch über Ordnergrenzen
+            hinweg (`jumpToVideo`). */}
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-xs">
+          <button
+            type="button"
+            onClick={() => void findSimilarVideos(10)}
+            disabled={similarVideosLoading}
+            className="rounded border border-border px-2 py-0.5 text-text-primary hover:border-accent disabled:opacity-40"
+          >
+            {similarVideosLoading ? "Suche…" : "Ähnliche Videos finden"}
+          </button>
+          {similarVideoGroups ? (
+            otherSimilarVideos.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1">
+                {otherSimilarVideos.map((entry) => (
+                  <button
+                    key={entry.photo.id}
+                    type="button"
+                    onClick={() => void jumpToVideo(entry)}
+                    className="rounded border border-border px-2 py-0.5 text-text-primary hover:border-accent"
+                    title={entry.photo.filename}
+                  >
+                    {entry.photo.filename}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <span className="text-text-muted">keine ähnlichen Videos gefunden</span>
+            )
+          ) : null}
+        </div>
+        {similarVideosError ? <p className="text-xs text-red-500">{similarVideosError}</p> : null}
       </div>
     </div>
   );

@@ -3956,3 +3956,29 @@ fehlt dieser Sitzung mangels eines echten Test-Videos mit bekannten
 Referenzwerten in der Sandbox — wird ehrlich als offen benannt statt
 stillschweigend als geprüft ausgegeben; siehe Schritt 11 für eine
 Nachprüfung, falls dort ein Testclip verfügbar wird.
+
+**Nachtrag (Schritt 10, Ähnliche Videos finden):** wie in ADR-0043s
+Recherche vorab festgehalten ("Ähnliche-Fotos-Erkennung ist direkt auf
+Video übertragbar") — neuer Command `list_similar_video_groups`
+arbeitet **exakt** wie der bestehende Perceptual-Hash-Duplikat-
+Assistent für Fotos (`list_perceptual_duplicate_groups`, Phase 9
+Schritt 1: derselbe `image_hasher`, dieselbe O(n²)-Gruppierung),
+beschränkt auf `media_kind == "video"`. Kein neuer Hashing-Algorithmus,
+kein zweiter Keyframe-Extraktionsweg: die gehashte Grundlage ist
+dasselbe Vorschau-Frame, das bereits bei Import per `ffmpeg` extrahiert
+wird (`extract_video_frame`, Phase 16 Schritt 4) und ohnehin im
+`PreviewLevel::Thumbnail`-Cache liegt.
+
+**Kleine, bewusste DTO-Erweiterung statt einer großen:** `PhotoDto`
+selbst trägt kein `folder_id`-Feld — es wird an Dutzenden Stellen im
+gesamten Frontend verwendet, eine Erweiterung hätte (wie die 23
+`NewPhoto`/`Photo`-Konstruktionsstellen in Schritt 4) viele
+Testfixturen berührt, für einen einzigen neuen Anwendungsfall
+unverhältnismäßig. Stattdessen ein schlanker neuer Wrapper-Typ
+`SimilarVideoDto { photo: PhotoDto, folder_id: String }`, nur für
+diesen einen Command — das Frontend braucht den Ordner ausschließlich,
+um bei einem gefundenen ähnlichen Video (das in einem *anderen* Ordner
+liegen kann) per neuer `jumpToVideo`-Store-Aktion dorthin zu
+wechseln (`selectFolder`+`loadPhotosForFolder`, dann `selectPhoto`) —
+`selectPhoto` allein hätte nicht gereicht, weil `VideoPlayer.tsx` das
+aktuelle Foto über `photosByFolder[selectedFolderId]` auflöst.

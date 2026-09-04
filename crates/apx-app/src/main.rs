@@ -427,6 +427,7 @@ fn main() {
             commands::undo_batch_operation,
             commands::list_duplicate_photo_groups,
             commands::list_perceptual_duplicate_groups,
+            commands::list_similar_video_groups,
             commands::list_people_groups,
             commands::analyze_style_consistency,
             commands::extract_color_palette,

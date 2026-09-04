@@ -65,6 +65,7 @@ import type {
   PersonDto,
   PhotoDto,
   PresetDto,
+  SimilarVideoDto,
   PresetFolderDto,
   PrintLayoutOptions,
   SlideshowVideoOptions,
@@ -1824,6 +1825,20 @@ interface VideoSlice {
   videoLutBusy: boolean;
   videoLutError: string | null;
   applyLutFilterToCurrentVideo: (lut: LutFilterData, strength: number) => Promise<void>;
+
+  /** Ähnliche Videos finden (Phase 16 Schritt 10, siehe `DECISIONS.md`
+   * ADR-0043) — arbeitet wie der bestehende Perceptual-Hash-Duplikat-
+   * Assistent (Phase 9 Schritt 1), auf Videos beschränkt. Läuft über
+   * den *ganzen* Katalog, nicht nur den aktuell geöffneten Ordner. */
+  similarVideoGroups: SimilarVideoDto[][] | null;
+  similarVideosLoading: boolean;
+  similarVideosError: string | null;
+  findSimilarVideos: (maxDistance: number) => Promise<void>;
+  /** Wechselt zu `entry.photo` — anders als `selectPhoto` (setzt nur
+   * `selectedPhotoId` im *aktuell* gewählten Ordner) wechselt dies bei
+   * Bedarf zuerst den Ordner, weil ein ähnliches Video aus
+   * `similarVideoGroups` in einem völlig anderen Ordner liegen kann. */
+  jumpToVideo: (entry: SimilarVideoDto) => Promise<void>;
 }
 
 export type AppStore = CatalogSlice &
@@ -6964,6 +6979,41 @@ export const useAppStore = create<AppStore>()(
           state.videoLutBusy = false;
         });
       }
+    },
+
+    similarVideoGroups: null,
+    similarVideosLoading: false,
+    similarVideosError: null,
+
+    findSimilarVideos: async (maxDistance) => {
+      set((state) => {
+        state.similarVideosLoading = true;
+        state.similarVideosError = null;
+      });
+      try {
+        const groups = await api.listSimilarVideoGroups(maxDistance);
+        set((state) => {
+          state.similarVideoGroups = groups;
+        });
+      } catch (err) {
+        set((state) => {
+          state.similarVideosError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.similarVideosLoading = false;
+        });
+      }
+    },
+
+    jumpToVideo: async (entry) => {
+      if (entry.folder_id !== get().selectedFolderId) {
+        await get().loadPhotosForFolder(entry.folder_id);
+        set((state) => {
+          state.selectedFolderId = entry.folder_id;
+        });
+      }
+      get().selectPhoto(entry.photo.id);
     },
     };
   }),

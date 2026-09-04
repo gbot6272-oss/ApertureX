@@ -37,6 +37,16 @@ import type { RuleNode } from "./ruleTree";
 // stilisiertes Ergebnis (Stiltransfer-Inferenz über dessen konkreten
 // Bildinhalt) — auf ein anderes Foto übertragen wäre es exakt so falsch
 // wie `virtual_aperture.depth_map`.
+//
+// `liquify_strokes` (Phase 15 Schritt 3) ist wie `repair`/`masks`
+// AUSGESCHLOSSEN: jeder Strich ist an konkrete gemalte Bildkoordinaten
+// gebunden, kein auf andere Fotos übertragbarer „Look".
+//
+// `skin_smoothing` (Phase 15 Schritt 5) ist aus demselben Grund wie
+// `virtual_aperture`/`style_transfer` AUSGESCHLOSSEN: `patch` ist ein
+// für genau ein Foto berechnetes Ergebnis (Gesichtserkennung +
+// Frequenztrennung über dessen konkreten Bildinhalt) — auf ein anderes
+// Foto übertragen wäre es exakt so falsch.
 export type PresetSectionKey = Exclude<
   keyof EdlPayload,
   | "repair"
@@ -48,6 +58,8 @@ export type PresetSectionKey = Exclude<
   | "virtual_aperture"
   | "style_transfer"
   | "sky_replace"
+  | "liquify_strokes"
+  | "skin_smoothing"
 >;
 
 export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [
@@ -62,6 +74,13 @@ export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [
   "calibration",
   "geometry",
   "composite_layers",
+  // Phase 16 Schritt 3: jetzt wählbar — der Mechanismus für
+  // Batch-Anwendung eines Filters auf viele Fotos ist einfach "als
+  // Preset speichern (nur diese Sektion), auf Mehrfachauswahl anwenden",
+  // dieselbe bestehende Preset-Infrastruktur wie jede andere Sektion
+  // hier (siehe `PRESET_SECTION_LABELS`s Kommentar zur Begründung, warum
+  // `lut_filter` überhaupt preset-fähig ist).
+  "lut_filter",
 ];
 
 export const PRESET_SECTION_LABELS: Record<PresetSectionKey, string> = {
@@ -76,6 +95,14 @@ export const PRESET_SECTION_LABELS: Record<PresetSectionKey, string> = {
   calibration: "Kalibrierung",
   geometry: "Geometrie",
   composite_layers: "Compositing-Ebenen",
+  // `lut_filter` (Phase 16 Schritt 1) ist bewusst NICHT von
+  // `PresetSectionKey` ausgeschlossen (anders als `skin_smoothing`/
+  // `style_transfer`/`sky_replace` oben): die vollen `.cube`-Rasterdaten
+  // sind fotounabhängig, dieselbe Datei lässt sich unverändert auf jedes
+  // andere Foto anwenden — genau das ist der Mechanismus für
+  // Batch-Anwendung auf viele Fotos (Phase 16 Schritt 3, siehe
+  // `DECISIONS.md` ADR-0043).
+  lut_filter: "Filter",
 };
 
 /** Die eigentliche gespeicherte EDL-Teilmenge — für `apx-catalog`/
@@ -91,6 +118,16 @@ export type PresetEdlSubset = Partial<Pick<EdlPayload, PresetSectionKey>>;
 export function buildPresetEdlSubset(edl: EdlPayload, sections: readonly PresetSectionKey[]): PresetEdlSubset {
   const subset: Record<string, unknown> = {};
   for (const key of sections) {
+    if (key === "lut_filter") {
+      // `strokes` sind Bildpositionen für GENAU dieses Foto gemalt
+      // (dieselbe „nicht auf ein anderes Foto übertragbar"-Begründung
+      // wie `liquify_strokes`/`repair`, die deshalb ganz von
+      // `PresetSectionKey` ausgeschlossen sind) — anders als `lut`/
+      // `strength` (fotounabhängig) gehören sie nicht in ein Preset.
+      // Ein Preset trägt deshalb nur die globale Filter-Anwendung.
+      subset[key] = { strength: edl.lut_filter.strength, lut: edl.lut_filter.lut, strokes: [] };
+      continue;
+    }
     subset[key] = edl[key];
   }
   return subset as PresetEdlSubset;

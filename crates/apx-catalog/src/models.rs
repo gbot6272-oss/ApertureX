@@ -62,6 +62,15 @@ pub struct NewPhoto {
     pub captured_at: Option<OffsetDateTime>,
     pub gps_lat: Option<f64>,
     pub gps_lon: Option<f64>,
+    /// "photo" oder "video" (Phase 16 Schritt 4, siehe `DECISIONS.md`
+    /// ADR-0043) — bewusst kein Rust-Enum: eine reine DB-Textspalte wie
+    /// `color_label`, keine EDL-/Serialisierungsanforderung, die ein
+    /// Enum rechtfertigen würde.
+    pub media_kind: String,
+    pub duration_ms: Option<i64>,
+    pub video_codec: Option<String>,
+    pub has_audio: Option<bool>,
+    pub frame_rate: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -116,6 +125,13 @@ pub struct Photo {
     /// entfernt statt als leerer String gehalten (siehe
     /// `Catalog::set_photo_custom_metadata`).
     pub custom_metadata: std::collections::BTreeMap<String, String>,
+    /// Video als Katalog-Asset (Phase 16 Schritt 4) — siehe
+    /// `NewPhoto::media_kind`s Moduldoku.
+    pub media_kind: String,
+    pub duration_ms: Option<i64>,
+    pub video_codec: Option<String>,
+    pub has_audio: Option<bool>,
+    pub frame_rate: Option<f32>,
 }
 
 /// Auflösungsstufe eines Vorschaubilds, siehe `PHASE1_PROMPT.md` Abschnitt 5.

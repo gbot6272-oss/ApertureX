@@ -39,6 +39,7 @@
 mod cache;
 mod route;
 
+use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 
 use apx_catalog::{Catalog, PreviewLevel};
@@ -54,6 +55,11 @@ use crate::state::AppState;
 
 const THUMBNAIL_EDGE: u32 = 256;
 const STANDARD_EDGE: u32 = 2048;
+/// Obergrenze je Video-Antwort (Phase 16 Schritt 5) — auch bei einer
+/// offenen oder fehlenden `Range`-Anfrage wird nie mehr als das hier auf
+/// einmal in den Speicher gelesen; der Browser holt den Rest selbst über
+/// weitere Range-Anfragen nach, siehe `handle_video_request`s Moduldoku.
+const MAX_VIDEO_CHUNK: u64 = 8 * 1024 * 1024;
 
 /// Registriert den `apx://`-Handler auf dem Tauri-`Builder`. Läuft in
 /// einem eigenen OS-Thread pro Anfrage (asynchroner Handler), damit die
@@ -129,6 +135,16 @@ fn handle_inner<R: Runtime>(
         route::parse(request.uri().path()).map_err(|err| HandlerError::bad_request(err.0))?;
     let state = app.state::<AppState>();
     let catalog = state.catalog.clone();
+
+    // Video läuft komplett am `ImageCache`-Muster ("einmal berechnen,
+    // ganz im Speicher halten") vorbei — braucht echtes HTTP-Range-
+    // Streaming fürs `<video>`-Element-Seeking, siehe
+    // `ImageRequest::Video`s Moduldoku.
+    if let ImageRequest::Video { photo_id } = &parsed {
+        let paths = state.paths.clone();
+        return handle_video_request(&catalog, &paths, *photo_id, request);
+    }
+
     let pipeline = state.pipeline.clone();
     let tile_cache = state.tile_cache.clone();
     let paths = state.paths.clone();
@@ -151,6 +167,125 @@ fn handle_inner<R: Runtime>(
         .header(header::CACHE_CONTROL, "private, max-age=86400")
         .body((*bytes).clone())
         .map_err(|err| HandlerError::internal(err.to_string()))
+}
+
+/// Streamt die Original-Videodatei eines Katalog-Assets mit echter
+/// HTTP-Range-Unterstützung (Phase 16 Schritt 5, siehe `DECISIONS.md`
+/// ADR-0043) — läuft bewusst an `ImageCache` vorbei: ein Video kann
+/// hunderte MB/GB groß sein, ein einmal berechnetes, komplett im
+/// Speicher gehaltenes Ergebnis (wie bei jeder anderen Anfrageart hier)
+/// wäre der falsche Ansatz. `MAX_VIDEO_CHUNK` begrenzt jede einzelne
+/// Antwort — der Browser holt den Rest über weitere Range-Anfragen nach,
+/// sobald er aus `Accept-Ranges: bytes` weiß, dass das geht (Standard-
+/// `<video>`-Streamingverhalten, dasselbe Prinzip wie jeder normale
+/// Video-Streaming-Server).
+fn handle_video_request(
+    catalog: &Catalog,
+    paths: &apx_core::AppPaths,
+    photo_id: PhotoId,
+    request: &Request<Vec<u8>>,
+) -> Result<Response<Vec<u8>>, HandlerError> {
+    let source_path = resolve_source_path(catalog, paths, photo_id)?;
+    let mut file = std::fs::File::open(&source_path).map_err(|err| {
+        HandlerError::not_found(format!(
+            "Videodatei '{}' nicht lesbar: {err}",
+            source_path.display()
+        ))
+    })?;
+    let file_size = file
+        .metadata()
+        .map_err(|err| HandlerError::internal(err.to_string()))?
+        .len();
+    if file_size == 0 {
+        return Err(HandlerError::internal(format!(
+            "Videodatei '{}' ist leer",
+            source_path.display()
+        )));
+    }
+
+    let requested_range = request
+        .headers()
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(parse_range_header);
+
+    let (start, logical_end) = match requested_range {
+        Some((start, _)) if start >= file_size => {
+            // Start jenseits der Dateigröße — RFC 7233: 416.
+            return Response::builder()
+                .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                .header(header::CONTENT_RANGE, format!("bytes */{file_size}"))
+                .body(Vec::new())
+                .map_err(|err| HandlerError::internal(err.to_string()));
+        }
+        Some((start, end)) => (
+            start,
+            end.map(|e| e.min(file_size - 1)).unwrap_or(file_size - 1),
+        ),
+        None => (0, file_size - 1),
+    };
+
+    let capped_end = start.saturating_add(MAX_VIDEO_CHUNK - 1).min(logical_end);
+    let length = capped_end - start + 1;
+
+    file.seek(SeekFrom::Start(start))
+        .map_err(|err| HandlerError::internal(err.to_string()))?;
+    let mut buffer = vec![0u8; length as usize];
+    file.read_exact(&mut buffer)
+        .map_err(|err| HandlerError::internal(err.to_string()))?;
+
+    let is_full_response = requested_range.is_none() && start == 0 && capped_end == file_size - 1;
+    let status = if is_full_response {
+        StatusCode::OK
+    } else {
+        StatusCode::PARTIAL_CONTENT
+    };
+
+    Response::builder()
+        .status(status)
+        .header(header::CONTENT_TYPE, video_mime_type(&source_path))
+        .header(header::ACCEPT_RANGES, "bytes")
+        .header(header::CONTENT_LENGTH, length.to_string())
+        .header(
+            header::CONTENT_RANGE,
+            format!("bytes {start}-{capped_end}/{file_size}"),
+        )
+        .header(header::CACHE_CONTROL, "private, max-age=86400")
+        .body(buffer)
+        .map_err(|err| HandlerError::internal(err.to_string()))
+}
+
+/// Parst einen `Range`-Header-Wert (`"bytes=START-END"` oder
+/// `"bytes=START-"`) — nur das einfache Ein-Bereich-Format, das jeder
+/// Browser fürs `<video>`-Seeking sendet, keine Multipart-Ranges.
+fn parse_range_header(value: &str) -> Option<(u64, Option<u64>)> {
+    let spec = value.strip_prefix("bytes=")?;
+    let (start_str, end_str) = spec.split_once('-')?;
+    let start: u64 = start_str.parse().ok()?;
+    let end = if end_str.is_empty() {
+        None
+    } else {
+        end_str.parse::<u64>().ok()
+    };
+    Some((start, end))
+}
+
+/// Grober Dateiendungs→MIME-Typ-Rateversuch für Videodateien, dieselbe
+/// "kein echtes Format-Sniffing nötig"-Begründung wie `audio_mime_type`.
+fn video_mime_type(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("mp4") | Some("m4v") => "video/mp4",
+        Some("mov") => "video/quicktime",
+        Some("webm") => "video/webm",
+        Some("mkv") => "video/x-matroska",
+        Some("avi") => "video/x-msvideo",
+        _ => "application/octet-stream",
+    }
 }
 
 fn response_meta(request: &ImageRequest) -> (&'static str, String) {
@@ -185,6 +320,12 @@ fn response_meta(request: &ImageRequest) -> (&'static str, String) {
         ),
         ImageRequest::Music { path } => {
             (audio_mime_type(path), format!("music:{}", path.display()))
+        }
+        // `handle_inner` fängt `Video` ab, bevor `response_meta`/`compute`
+        // überhaupt aufgerufen werden (siehe dort) — dieser Zweig ist nur
+        // wegen der erschöpfenden `match`-Prüfung nötig.
+        ImageRequest::Video { .. } => {
+            unreachable!("ImageRequest::Video wird in handle_inner separat behandelt")
         }
     }
 }
@@ -239,6 +380,9 @@ fn compute(
             catalog, pipeline, tile_cache, paths, *photo_id, *max_edge, soft_proof, edl_json,
         ),
         ImageRequest::Music { path } => compute_music(path),
+        ImageRequest::Video { .. } => {
+            unreachable!("ImageRequest::Video wird in handle_inner separat behandelt")
+        }
     }
 }
 
@@ -485,6 +629,11 @@ mod tests {
                 captured_at: None,
                 gps_lat: None,
                 gps_lon: None,
+                media_kind: "photo".to_string(),
+                duration_ms: None,
+                video_codec: None,
+                has_audio: None,
+                frame_rate: None,
             })
             .expect("Foto anlegbar");
         photo_id

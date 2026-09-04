@@ -19,6 +19,7 @@
 
 #![deny(clippy::unwrap_used)]
 
+pub mod builtin_luts;
 pub mod color;
 pub mod dcp_profile;
 pub mod develop;
@@ -26,6 +27,7 @@ pub mod edl;
 pub mod error;
 pub mod gpu;
 pub mod lens_profiles;
+pub mod lut_cube;
 pub mod stages;
 #[cfg(test)]
 mod test_support;

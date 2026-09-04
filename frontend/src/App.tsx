@@ -18,6 +18,7 @@ import { PeopleView } from "./components/PeopleView";
 import { PresetsPanel } from "./components/PresetsPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
+import { VideoPlayer } from "./components/VideoPlayer";
 import { Viewer } from "./components/Viewer";
 import { useImportEvents } from "./hooks/useImportEvents";
 import { matchesBinding } from "./lib/keybindings";
@@ -56,6 +57,19 @@ export default function App() {
   const stepSelection = useAppStore((s) => s.stepSelection);
   const centerView = useAppStore((s) => s.centerView);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
+  // Video als Katalog-Asset (Phase 16 Schritt 5, siehe `DECISIONS.md`
+  // ADR-0043): dieselbe Foto-Nachschlage-Konvention wie `Viewer.tsx` —
+  // entscheidet, ob der Einzel-Element-Fallback-Zweig unten `Viewer`
+  // (Foto) oder `VideoPlayer` (Video) zeigt. Bewusst KEIN eigener
+  // `centerView`-Wert: es gibt in dieser App keine automatische
+  // Grid→Einzelansicht-Navigation beim Öffnen (ADR-0037) — die einzige
+  // Stelle, die zwischen der Einzel-Element-Ansicht und den
+  // Alternativ-Ansichten (Raster/Karte/Personen) unterscheidet, ist
+  // bereits dieser Fallback-Zweig, den es nur content-bewusst zu machen
+  // gilt.
+  const selectedFolderId = useAppStore((s) => s.selectedFolderId);
+  const activeFolderPhotos = useAppStore((s) => (selectedFolderId ? s.photosByFolder[selectedFolderId] : undefined));
+  const selectedPhotoIsVideo = activeFolderPhotos?.find((p) => p.id === selectedPhotoId)?.media_kind === "video";
   const setPhotoRating = useAppStore((s) => s.setPhotoRating);
   const setPhotoFlag = useAppStore((s) => s.setPhotoFlag);
   const developPanelOpen = useAppStore((s) => s.developPanelOpen);
@@ -220,6 +234,8 @@ export default function App() {
           <MapView />
         ) : centerView === "people" ? (
           <PeopleView />
+        ) : selectedPhotoIsVideo ? (
+          <VideoPlayer />
         ) : (
           <Viewer />
         )}

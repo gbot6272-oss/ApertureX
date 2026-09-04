@@ -26,6 +26,45 @@ use crate::edl::v4::CompositeLayer;
 /// bzw. `stages::geometry`s `split_patch_rgb`, hier wieder separat
 /// gehalten statt geteilt (kleine, in sich geschlossene Funktion, siehe
 /// deren Begründung).
+/// Photoshop-/W3C-Compositing-„Lum"-Gewichtung (Rec.601-Luminanzgewichte)
+/// — eigene Kopie statt Wiederverwendung von `stages::masks::luminosity`
+/// (`fn`-privat dort, dieselbe "jedes Modul reimplementiert seine
+/// kleinen Helfer statt Sichtbarkeit querzuschneiden"-Konvention wie
+/// überall sonst in diesem Projekt, siehe `SPEC.md` §6).
+fn luminosity(c: [f32; 3]) -> f32 {
+    0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]
+}
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    if edge1 <= edge0 {
+        return if x < edge0 { 0.0 } else { 1.0 };
+    }
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Feste Rampenbreite für Blend-If (Photoshop-Funktion, Phase 15
+/// Schritt 2) — Photoshops einfacher Ein-Schieberegler-Modus schneidet
+/// hart ab (nur Alt-Ziehen zum Split-Regler erzeugt einen weichen
+/// Übergang); hier bewusst immer weich (fester Rampenbreite statt
+/// zweier unabhängiger Regler pro Seite, siehe `DECISIONS.md`
+/// ADR-0042) — vermeidet sichtbare Treppenstufen-Kanten im Ergebnis.
+/// Die Rampe liegt jeweils *innerhalb* des ausgeblendeten Bereichs
+/// (unterhalb von `shadow_cutoff`, oberhalb von `highlight_cutoff`),
+/// deshalb bleiben die Neutralwerte `0.0`/`1.0` ein echtes No-Op.
+const BLEND_IF_RAMP: f32 = 0.08;
+
+/// Gewichtet `opacity` zusätzlich nach der Luminanz des Basis-Pixels
+/// (Blend-If) — `1.0` bei Neutralwerten (`shadow_cutoff = 0.0`,
+/// `highlight_cutoff = 1.0`), siehe [`BLEND_IF_RAMP`].
+fn blend_if_weight(base_rgb: [f32; 3], shadow_cutoff: f32, highlight_cutoff: f32) -> f32 {
+    let lum = luminosity(base_rgb);
+    let shadow_weight = smoothstep(shadow_cutoff - BLEND_IF_RAMP, shadow_cutoff, lum);
+    let highlight_weight =
+        1.0 - smoothstep(highlight_cutoff, highlight_cutoff + BLEND_IF_RAMP, lum);
+    shadow_weight * highlight_weight
+}
+
 fn split_rgb(pixels: &[u8], width: u32, height: u32) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let n = (width as usize) * (height as usize);
     let mut r = vec![0u8; n];
@@ -115,8 +154,14 @@ fn composite_layer(base: &[u8], width: u32, height: u32, layer: &CompositeLayer)
                 layer_b[src_i] as f32 / 255.0,
             ];
             let blended = blend_pixel(base_rgb, layer_rgb, layer.blend_mode);
+            let blend_if = blend_if_weight(
+                base_rgb,
+                layer.blend_if_shadow_cutoff,
+                layer.blend_if_highlight_cutoff,
+            );
+            let final_opacity = opacity * blend_if;
             for c in 0..3 {
-                let value = base_rgb[c] + (blended[c] - base_rgb[c]) * opacity;
+                let value = base_rgb[c] + (blended[c] - base_rgb[c]) * final_opacity;
                 out[dst + c] = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
             }
             // Alpha bleibt unverändert (`out[dst + 3]` war bereits das
@@ -162,6 +207,8 @@ mod tests {
             offset_x: 0.5,
             offset_y: 0.5,
             source,
+            blend_if_shadow_cutoff: 0.0,
+            blend_if_highlight_cutoff: 1.0,
         }
     }
 
@@ -242,5 +289,39 @@ mod tests {
         // Normal-Blend bei 50 % Deckkraft: Mittelwert aus Basis (0) und
         // Ebene (200), also 100.
         assert_eq!(result[0], 100);
+    }
+
+    #[test]
+    fn blend_if_shadow_cutoff_hides_the_layer_over_dark_base_pixels() {
+        let base = flat_rgba(4, 4, 10);
+        let layer = CompositeLayer {
+            blend_if_shadow_cutoff: 0.5,
+            ..neutral_layer(CompositeLayerSource {
+                bitmap_width: 1,
+                bitmap_height: 1,
+                pixels: vec![200, 200, 200],
+            })
+        };
+        let result = apply_all(&base, 4, 4, std::slice::from_ref(&layer));
+        // Die Basis-Luminanz (~0.04) liegt weit unter `shadow_cutoff`
+        // (0.5) — die Ebene bleibt hier vollständig ausgeblendet.
+        assert_eq!(result, base);
+    }
+
+    #[test]
+    fn blend_if_highlight_cutoff_hides_the_layer_over_bright_base_pixels() {
+        let base = flat_rgba(4, 4, 250);
+        let layer = CompositeLayer {
+            blend_if_highlight_cutoff: 0.5,
+            ..neutral_layer(CompositeLayerSource {
+                bitmap_width: 1,
+                bitmap_height: 1,
+                pixels: vec![10, 10, 10],
+            })
+        };
+        let result = apply_all(&base, 4, 4, std::slice::from_ref(&layer));
+        // Die Basis-Luminanz (~0.98) liegt weit über `highlight_cutoff`
+        // (0.5) — die Ebene bleibt hier vollständig ausgeblendet.
+        assert_eq!(result, base);
     }
 }

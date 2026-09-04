@@ -74,7 +74,12 @@ pub(super) fn generate(
     error_count.into_inner()
 }
 
-fn generate_one(
+/// `pub(crate)` (statt nur modulintern), weil Phase 16 Schritt 6
+/// (Video-Trimmen, `apx-app::commands::trim_video`) für das neu
+/// entstandene, getrimmte Video-Asset genau dasselbe Ein-Datei-
+/// Thumbnail außerhalb eines vollen Batch-Imports braucht, statt den
+/// ganzen Worker-Pool aus [`generate`] dafür aufzuziehen.
+pub(crate) fn generate_one(
     catalog: &Catalog,
     cache_root: &Path,
     photo_id: PhotoId,
@@ -102,8 +107,14 @@ fn generate_one(
 /// Ist keine vorhanden oder schlägt die Extraktion fehl, wird stattdessen
 /// über `apx_raw::decode` mit `max_edge = THUMBNAIL_EDGE` dekodiert — für
 /// RAWs nutzt das intern den günstigeren Half-Size-Pfad (siehe
-/// `apx-raw`s `pipeline`-Modul).
+/// `apx-raw`s `pipeline`-Modul). Für Videos (Phase 16 Schritt 4) wird
+/// stattdessen ein einzelnes Frame per `ffmpeg` extrahiert (siehe
+/// `extract_video_frame`s Moduldoku) — `apx_raw` kennt keine
+/// Video-Container.
 fn load_source_image(source_path: &Path) -> Result<DynamicImage, String> {
+    if super::video::is_video_extension(source_path) {
+        return extract_video_frame(source_path);
+    }
     match apx_raw::extract_embedded_preview(source_path) {
         Ok(Some(preview)) => Ok(preview),
         Ok(None) => decode_fallback(source_path),
@@ -112,6 +123,42 @@ fn load_source_image(source_path: &Path) -> Result<DynamicImage, String> {
             decode_fallback(source_path)
         }
     }
+}
+
+/// Extrahiert ein einzelnes repräsentatives Frame aus einem Video per
+/// `ffmpeg` (dasselbe Subprozess-Muster wie `apx_export::video`, ADR-0034
+/// — kein Bündeln, System-Installation vorausgesetzt). Sucht eine Sekunde
+/// ins Video (`-ss 00:00:01`, vor `-i` für schnelles Grobsuchen) statt
+/// Frame 0 — die allerersten Frames sind bei vielen Kameras/Schnittfolgen
+/// oft schwarz/unscharf; ist das Video kürzer, klemmt ffmpeg selbst auf
+/// den letzten verfügbaren Frame. Gibt JPEG-Bytes über `-f image2pipe`
+/// direkt auf `stdout` aus statt über eine temporäre Datei.
+fn extract_video_frame(source_path: &Path) -> Result<DynamicImage, String> {
+    let output = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-ss", "00:00:01", "-i"])
+        .arg(source_path)
+        .args([
+            "-frames:v",
+            "1",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "mjpeg",
+            "-",
+        ])
+        .output()
+        .map_err(|err| format!("ffmpeg nicht startbar (ist ffmpeg installiert?): {err}"))?;
+
+    if !output.status.success() || output.stdout.is_empty() {
+        return Err(format!(
+            "ffmpeg konnte kein Vorschau-Frame aus '{}' extrahieren: {}",
+            source_path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    image::load_from_memory_with_format(&output.stdout, image::ImageFormat::Jpeg)
+        .map_err(|err| format!("Extrahiertes Video-Frame nicht dekodierbar: {err}"))
 }
 
 fn decode_fallback(source_path: &Path) -> Result<DynamicImage, String> {

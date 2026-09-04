@@ -3452,3 +3452,579 @@ kein Duplikat der bereits in ADR-0041/PLAN.md stehenden Details. Zwei
 gezielte Tests für das bis dahin ungetestete `apx-ai::sky_replace`
 (Schritt 10) nachgezogen — keine volle `cargo fmt/clippy/test
 --workspace`- oder Playwright-Suite, nur `tsc -b`.
+
+## ADR-0042: Phase 15 — fünf Photoshop-Funktionen, die es in Lightroom
+nicht gibt
+
+**Status:** Angenommen
+**Kontext:** Phase 14 hat zehn eigenständige Alleinstellungsmerkmale
+ohne Lightroom-Entsprechung geliefert (ADR-0041). Der Nutzer möchte
+jetzt gezielt echte Photoshop-exklusive Fähigkeiten nachziehen — Dinge,
+die es in Lightroom nachweislich nicht gibt, sich aber sauber in die
+bestehende ApertureX-Architektur einfügen und einen spürbaren, visuell
+beeindruckenden Funktionszuwachs bringen. Dieselbe "kostenlos/lokal
+statt bezahlter Cloud-API"-Linie wie Phase 13/14, wo KI zum Einsatz
+kommt.
+
+**Recherche-Disziplin wie in jeder vorherigen Phase:** jede "Lightroom
+hat das nicht"-Behauptung unten wurde per echter Web-Suche gegengeprüft.
+
+| # | Funktion | Befund |
+|---|---|---|
+| 1 | Content-Aware Move | Photoshop-exklusiv, bestätigt per offenem Adobe-Community-Feature-Request "Content Aware Move for Lightroom" — Lightroom hat nur "Content-Aware Remove"/"Generative Remove" (Entfernen), kein Verschieben mit automatischer Neubefüllung der Ausgangsstelle |
+| 2 | Blend-If (Tonwertbereich-Blending) | Photoshop-exklusiv — Adobe-Community-Quelle: "Blend If sliders ... aren't directly replicated in Lightroom's interface" |
+| 3 | Verflüssigen (Liquify) | Photoshop-exklusiv, bestätigt per Adobe-Community-Thread "Come on Adobe, We need liquify in Lightroom already!" |
+| 4 | Inhaltssensitives Skalieren (Content-Aware Scale/Seam Carving) | Photoshop-exklusiv seit CS4 (Adobe lizenzierte die Seam-Carving-Technologie von MERL) — "only Photoshop CS4 supports content aware scaling" |
+| 5 | Automatisches Hautglätten (gesichtsbewusst) | Photoshops "Skin Smoothing"/"Smart Portrait"-Neural-Filter sind Photoshop-exklusiv (teils cloud-pflichtig) — Lightroom hat nur den manuellen Anpassungspinsel, kein automatisches gesichtserkennungsgestütztes Glätten |
+
+**Architektur-Entscheidung — vier von fünf Funktionen ohne jede neue
+Abhängigkeit, durch Wiederverwendung bereits bestehender Bausteine**
+(real in dieser Sitzung gegen den aktuellen Code verifiziert, nicht aus
+Erinnerung an frühere Phasen behauptet):
+
+- `apx_ai::inpaint::InpaintSession::fill_rgb8` (Phase 13 Schritt 1) und
+  `CompositeLayer`/`CompositeLayerSource` (Phase 14 Schritt 3) tragen
+  Schritt 1 (Content-Aware Move) zusammen, ganz ohne neuen EDL-Typ —
+  ein Fill-Patch für die Ausgangsstelle plus eine neue Compositing-
+  Ebene für das verschobene Objekt an der Zielposition.
+- `apx_ai::segmentation::person_alpha` (Hautton-Heuristik, Phase 14
+  Schritt 10 als Vorbild für `sky_alpha`) und
+  `apx_ai::faces::detect_face_regions` (Phase 11 Schritt 5, kein
+  Feature-Gate) plus `stages::frequency_separation::{split,combine}`
+  (Phase 14 Schritt 2, bereits mit frei wählbarem `radius_px`) tragen
+  zusammen Schritt 5 (automatisches Hautglätten) — drei bestehende
+  Bausteine zu einem neuen Automatik-Feature kombiniert.
+- **Real geprüfter Namensunterschied zur ursprünglichen Annahme:** die
+  Hautton-Heuristik heißt `person_alpha`, nicht `skin_alpha`. Das
+  feature-gated `apx_ai::people::PersonEmbedder` liefert Bounding-Box +
+  Embedding, aber **keine Landmark-Koordinaten nach außen** — für
+  Schritt 5 reicht die Bounding-Box aus `faces.rs`, echte Landmarken
+  sind nicht nötig.
+
+**Seam-Carving-Lizenzprüfung (Schritt 4), echter Befund statt
+Annahme:** `seamcarving` (crates.io v0.2.3) existiert und lädt sich per
+`cargo add --dry-run` sauber, ist aber **LGPL-3.0-or-later** lizenziert
+— ein Copyleft mit echten Verlinkungs-/Weitergabepflichten für ein
+statisch gelinktes Rust-Binary, ein Bruch mit der durchgehend
+permissiven Linie (MIT/Apache-2.0/BSD-3-Clause) jeder bisher gewählten
+Abhängigkeit laut `THIRD_PARTY.md`. Kein anderer Treffer auf crates.io.
+**Entscheidung:** Seam Carving selbst implementieren (klassischer, gut
+dokumentierter Algorithmus, Avidan & Shamir, SIGGRAPH 2007) — kein
+Lizenzrisiko, keine neue Abhängigkeit für ganz Phase 15.
+
+**Testdisziplin, explizite Nutzervorgabe für diese Phase:** anders als
+Phase 9–14 kein Test nach den einzelnen Schritten 0–5 (dort nur
+`cargo check`/`tsc -b`-Kompilierprüfung, Commit+Push je Schritt) — die
+komplette Testausführung läuft gebündelt erst einmalig in Schritt 6.
+
+**Nicht Teil dieser Phase:** volle Photoshop-Parität (Vektor-
+Ebenenmasken, Smart Objects, Aktionen/Skript-Recorder, Fluchtpunkt,
+Puppenstock-Verzerrung) — eigene, größere Ausbaustufen.
+
+**Nachtrag (Schritt 6, Abnahme):** alle fünf Funktionen wie geplant
+gebaut, keine Abweichung von der oben skizzierten Architektur. Gezielte
+Unit-Tests je neuem Modul ergänzt (`stages::composite::blend_if_weight`,
+`stages::liquify`, `stages::geometry::apply_content_aware_scale`,
+`stages::skin_smoothing`, `apx_ai::seam_carving` — inklusive eines
+Tests, der belegt, dass eine vollständig geschützte Bildfläche einen
+Breiten-Schrumpf tatsächlich übersteht). `cargo fmt/clippy/test
+--workspace`, `tsc -b`, Vitest und die volle Playwright-Suite laufen
+grün — bis auf einen einzelnen `tat-flow.spec.ts`-Fehlschlag
+(Vektorskop-Panel überlagert per `pointer-events` einen TAT-Knopf), der
+real gegen den Phase-14-Endstand (`e6ec6e1`, per Git-Worktree isoliert
+nachgestellt) identisch reproduziert und damit nachweislich phasenfremd
+ist — keine Regression dieser Phase, nicht behoben (außerhalb des
+Scopes).
+
+Nebenbei bei der vollen Testausführung einen echten, seit Phase 14
+Schritt 9/10 bestehenden Bug gefunden und behoben (kein Ergebnis dieser
+Phase, aber blockierte deren „volle Suite grün"-Abnahmekriterium):
+`StyleTransferPatch`/`SkyReplacePatch.pixels` legten im Frontend den
+rohen Base64-String statt eines dekodierten Byte-Arrays ab — Rusts
+`Vec<u8>` kann eine JSON-Zeichenkette nicht deserialisieren (per
+`serde_json`-Testfall real bestätigt: „invalid type: string ...,
+expected a sequence"). Committen eines Stiltransfer- oder
+Himmelsaustausch-Ergebnisses hätte an dieser Stelle real fehlschlagen
+müssen; der zugehörige Playwright-Test bestand dennoch, weil er
+gegen die gemockte Tauri-IPC-Schicht läuft, nicht gegen echte
+Rust-Deserialisierung. Behoben durch `base64ToByteArray` an beiden
+Store-Stellen, TS-Typen auf `number[]` korrigiert (dieselbe Konvention
+wie `CompositeLayerSource`/`ContentAwareScalePatch`), betroffener
+Playwright-Test entsprechend angepasst.
+
+## ADR-0043: Phase 16 — Filter-/LUT-Bibliothek + Video als Katalog-Asset
+mit Basis-Schnitt
+
+**Status:** Angenommen
+**Kontext:** Nutzerwunsch (siehe Sitzungsverlauf): direkt anwendbare
+Foto-Filter/-Effekte aus einer möglichst großen öffentlichen
+Bibliothek, punktuell mit Pinseln einsetzbar, auf viele Fotos auf
+einmal anwendbar mit regelbarer Stärke — dieselben Filter auch für
+Video, dazu Basis-Videoschnitt (Ausschneiden, Länge anpassen,
+automatisches Zuschneiden auf passende Stellen, Geräuschreduktion,
+Musik/Sounds hinzufügen, ähnliche Videos finden) — "eine sehr
+abgespeckte CapCut-Variante". Vor der Umsetzung wurde die bestehende
+Architektur real gegen den aktuellen Code geprüft (nicht aus
+Erinnerung an frühere Phasen behauptet) und öffentlich nach
+lizenzsauberen Filter-/Video-Werkzeugen recherchiert.
+
+**Architektur-Befund (real gegen den Code geprüft):**
+
+- Es gibt **keinen** Lightroom-artigen Modul-Vollbild-Umschalter. Statt
+  dessen zwei getrennte Mechanismen (bewusste Vereinfachung, ADR-0037):
+  `centerView: "viewer" | "grid" | "map" | "overview" | "people"`
+  (`frontend/src/store/index.ts:767`) bekommt echte Leinwandfläche;
+  Drucken/Buch/Web-Galerie/Diashow/Stapelverarbeitung sind dagegen
+  Modal-Dialoge, angestoßen aus `Header.tsx`. Video-Bearbeitung braucht
+  eine dauerhafte, interaktive Zeitleisten-Oberfläche — passt zu
+  keinem der beiden bestehenden Muster exakt, am ehesten zum ersten.
+  **Entscheidung:** neuer `centerView`-Wert `"video"`, strukturell
+  gleichrangig mit `"viewer"`, kein neuer Modal-Dialog und keine neue
+  Kompartment-Sektion im bestehenden Entwickeln-Panel.
+- **Kein Video-Import existiert.** `RAW_EXTENSIONS`/`FALLBACK_EXTENSIONS`
+  (`crates/apx-raw/src/format.rs:8-10`) sind rein bildbasiert, `Photo`
+  (`crates/apx-catalog/src/models.rs`) hat keine Dauer-/Codec-/Audio-
+  Felder. Video als Katalog-Asset ist echtes Neuland, keine Erweiterung
+  eines bestehenden Feldes.
+- **Kein LUT-/3D-Filter-Konzept existiert.** Presets
+  (`frontend/src/lib/presets.ts`) sind laut ADR-0031/ADR-0032 strikt
+  numerische EDL-Teilmengen; "LUT" kommt im Code bisher nur als interne
+  1D-Lookup-Table der Gradationskurven-Stage vor
+  (`stages/curves.rs::build_points_lut`), kein `.cube`-Import.
+- **Masken-System ist direkt wiederverwendbar:** jede Maske
+  (`MaskGeometry` in `crates/apx-pipeline/src/edl/v3.rs` — Pinsel/
+  Linear-/Radialverlauf/KI-Auswahl) wendet in `stages/masks.rs` ein
+  eigenes EDL-Werkzeug-Subset auf ihre Alpha-Region an und blendet
+  zurück. Ein Filter/LUT wird ein weiteres Werkzeug in diesem Muster —
+  punktuelle Pinsel-Anwendung ist damit keine neue Architektur, sondern
+  Wiederverwendung.
+- **Foto-Batch-Anwendung ist direkt wiederverwendbar:**
+  `syncSettingsToSelection` (`frontend/src/store/index.ts:365`) und die
+  bereits mehrfach getestete Preset-Stapel-Anwendung übertragen EDL-
+  Abschnitte auf eine Mehrfachauswahl — ein Filter ist einfach ein
+  Preset mit optionaler LUT-Referenz.
+- **Ähnliche-Fotos-Erkennung ist direkt auf Video übertragbar:**
+  Phase-9-Perceptual-Hashing (`image_hasher`-Crate, gehashter 256px-
+  Thumbnail, Hamming-Distanz-Gruppierung) in
+  `list_perceptual_duplicate_groups`
+  (`crates/apx-app/src/commands.rs:2391-2441`) — für Video genügt
+  derselbe Hash auf einen repräsentativen, per `ffmpeg` extrahierten
+  Keyframe.
+- **ffmpeg-Grundsatzentscheidung (ADR-0034) bleibt tragend:** kein
+  Bündeln, System-Binary vorausgesetzt, `Command`-Subprozess-Aufruf
+  (`crates/apx-export/src/video.rs`), weil kein brauchbarer reiner
+  Rust-H.264-Encoder existiert und Bündeln GPL-Lizenzpflichten nach
+  sich zöge. Alle neuen Video-Fähigkeiten in dieser Phase folgen
+  demselben Muster — **keine neue Rust-Video-Abhängigkeit**.
+
+**LUT-Filter-Engine — real recherchierter Lizenzbefund statt Annahme:**
+eine "öffentliche Bibliothek mit Tausenden einheitlich lizenzierten
+Effekten" existiert real nicht — freie LUT-Pakete sind über Dutzende
+Quellen verstreut mit uneinheitlicher Lizenzlage (CC0, CC-BY, viele nur
+vage "kostenlos nutzbar" ohne echte OSI-Lizenz), dasselbe Muster wie
+beim Stiltransfer in Phase 14 (ADR-0041). Vorhandene Rust-Crates für
+`.cube`-Anwendung (`wagahai_lut`, `lut-cube`) sind kaum verbreitet,
+Wartungsstatus unklar. **Entscheidung, dieselbe Linie wie Seam Carving
+in Phase 15:** die Anwendungs-Engine (trilineare Interpolation über ein
+`.cube`-Raster, gut dokumentierter, einfacher Algorithmus) wird selbst
+implementiert — kein Lizenzrisiko, keine Wartungsabhängigkeit von
+einem kaum genutzten Drittanbieter-Crate. `.cube` ist ein offenes,
+patentfreies Textdateiformat (Industriestandard, u. a. von Lightroom,
+Premiere, DaVinci Resolve, Capture One genutzt) — das Format selbst ist
+nicht schutzfähig. Statt eines großen gebündelten Presets: ein kleines,
+**einzeln lizenzgeprüftes** Starter-Set (nach demselben "Opt-in-
+Download, geprüfte Herkunft"-Muster wie MiDaS/Stiltransfer-Modelle in
+Phase 14, in `THIRD_PARTY.md` je Quelle dokumentiert) **plus** freier
+Import beliebiger eigener `.cube`-Dateien — dadurch wird "Hunderte/
+Tausende Effekte" real erreichbar, ohne dass ApertureX selbst
+fragwürdig lizenzierte Presets bündelt/redistribuiert.
+
+**Video-Werkzeuge — reale ffmpeg-Filter-Verifikation statt Annahme:**
+
+| Funktion | Lösung | Befund |
+|---|---|---|
+| Schneiden/Trimmen, Länge anpassen | `ffmpeg -ss/-to`, bei kompatiblem Codec verlustfreier Stream-Copy (`-c copy`), sonst Re-Encode | dieselbe Subprozess-Technik wie `video.rs` |
+| Automatisches Zuschneiden | nativer ffmpeg-`scdet`-Filter (Szenenwechsel-Metadaten `lavfi.scd.score`, seit ffmpeg 4.3) | echte, verifizierte native Funktion, kein externes Modell |
+| Geräuschreduktion | native ffmpeg-Filter `afftdn` (reine FFT-Entrauschung, kein Modell nötig) als Standard; `arnndn` (RNN-basiert, Modell von `github.com/richardpl/arnndn-models`, aufbauend auf Xiph.org RNNoise, **BSD-3-Clause**) als stärkere Opt-in-Variante | verifiziert; Modell-Lizenz beim tatsächlichen Download-Schritt erneut gegen die dann aktuelle Repo-Lizenzdatei geprüft, nicht nur aus dieser Recherche übernommen |
+| Musik/Sounds hinzufügen | dieselbe Audio-Mix-Technik wie die Diashow-Musikuntermalung (ADR-0034 Punkt 3: Vorschau über `<audio>`, Export-Mix über ffmpeg) | bestehendes Muster |
+
+**Ehrlich benannte Grenze:** "automatisch die besten/interessantesten
+Momente finden" (wie kommerzielle Tools wie CapCut es bewerben) ist ein
+deutlich härteres ML-Problem — keine lizenzklare, fertige Lösung
+gefunden. Schritt 7 liefert Szenenwechsel-Erkennung + einfache
+Heuristiken (statische Passagen, Stille), **nicht** echte KI-
+Highlight-Erkennung; das wird explizit nicht versprochen.
+
+**Performance-Grenze, ebenfalls offen benannt:** die Foto-Pipeline
+(`apx-pipeline`) ist reines CPU-Rust ohne GPU-Shader. Filter framegenau
+auf Video anzuwenden (Schritt 9) ist für kurze Clips bei moderater
+Auflösung machbar, kann bei langen/hochauflösenden Videos spürbar
+langsam werden — Skalierungsgrenzen werden in Schritt 9/11 gemessen
+und dokumentiert statt stillschweigend vorausgesetzt.
+
+**Zuschnitt in elf Schritten** (siehe PLAN.md), in drei unabhängig
+lieferbaren Blöcken: (1) Schritt 1–3 LUT-/Filter-Engine — funktioniert
+komplett unabhängig von Video, liefert sofort Wert für Fotos; (2)
+Schritt 4–5 Video-Fundament (Katalog-Asset, Wiedergabe) — noch ohne
+Bearbeitung; (3) Schritt 6–10 Video-Bearbeitungsfunktionen, bauen auf
+Block 2 auf.
+
+**Testdisziplin (Nachtrag: expliziter als Phase 15 gefasst, Nutzervorgabe
+während Schritt 1):** ausschließlich `cargo check`/`tsc -b` nach den
+einzelnen Schritten 1–10 — kein `cargo test`, kein Vitest, keine
+Playwright-Läufe zwischendurch, auch nicht an einem Zwischen-
+Kontrollpunkt. Unit-Tests werden weiterhin je Modul geschrieben (wie in
+Schritt 1), aber erst in Schritt 11 gesammelt ausgeführt.
+
+**Nicht Teil dieser Phase:** vollwertiger Videoschnitt (Multi-Track,
+Übergänge, Titel-Grafiken jenseits der bestehenden Diashow-Intro-
+Funktion), echte KI-Highlight-Erkennung, Video-Farbverwaltung/HDR,
+GPU-beschleunigte Video-Pipeline.
+
+**Nachtrag (Schritt 2, Starter-LUT-Set):** wie oben real recherchiert
+keine einzelne, sauber lizenzierte "Hunderte/Tausende Filter"-Quelle
+gefunden — die freien LUT-Pakete, die sich fanden (Q-DDL, RocketStock
+u. a.), haben uneinheitliche/unklare Lizenzbedingungen, und ein
+konkreter Download-Versuch scheiterte zusätzlich an der
+Netzwerk-Sandbox dieser Sitzung (mehrere Kandidaten-Domains vom
+Egress-Proxy blockiert, nicht real verifizierbar). Statt eines
+unverifizierten externen Downloads: fünf **selbst erstellte** parametrische
+Farbverläufe (`apx_pipeline::builtin_luts` — Warm/Kühl/Kontrastreich
+S/W/Verblasst/Kino Teal-Orange, reine Mathematik, kein fremdes Werk
+enthalten) — dieselbe Rolle wie Lightrooms eigene mitgelieferte
+"Creative"-Profile, kein Redistributions-/Lizenzrisiko. Der freie
+`.cube`-Import aus Schritt 1 bleibt der Weg zu "Hunderte/Tausende
+Effekte" — dafür bringt der Nutzer eigene Dateien mit, ApertureX selbst
+redistribuiert kein fremdes Preset-Paket.
+
+**Nachtrag (Schritt 3, Pinsel-Integration):** bewusst NICHT über die
+bestehende `Mask`/`MaskAdjustments`-Infrastruktur gelöst, obwohl sie
+strukturell naheliegend wäre. `MaskAdjustments` läuft in
+`stages::masks` noch im **linearen** Arbeitsraum (vor der Farbraum-
+Konvertierung), ein `.cube`-LUT ist aber für gamma-kodierte,
+bildschirmreferenzierte Werte gedacht — eine LUT-Anwendung auf
+Szenen-linearen Werten würde ein anderes (falsches) Ergebnis liefern
+als auf denselben Werten nach sRGB-Kodierung. Denselben Bruch löst das
+Projekt an anderer Stelle bereits nicht durch Farbraum-Hin-und-Her-
+Konvertierung, sondern durch eine eigene, für die jeweilige
+Pipeline-Position passende Implementierung (`curves::apply_linear_rgb`
+für Masken vs. der globalen sRGB-`curves`-Stufe). Konsequent
+übertragen: `LutFilterAdjustment` bekommt eigene `strokes`
+(`LutFilterStroke` — `center_path`/`radius`/`strength`, exakt dieselbe
+Form wie `LiquifyStroke`), angewendet an derselben späten
+sRGB-Pipeline-Position wie die globale `strength`-Anwendung, per
+Abstand-zum-Pfad-Gewichtung (dieselbe `nearest_on_path`+`smoothstep`-
+Idee wie `stages::liquify`). Leere `strokes` bleiben das bisherige
+globale Verhalten (Rückwärtskompatibilität), nicht-leere beschränken
+die Anwendung auf die gemalten Bereiche.
+
+Batch-Anwendung auf viele Fotos brauchte dagegen **keine** neue
+Architektur: `lut_filter` in `PRESET_SECTION_KEYS` aufgenommen (treibt
+sowohl den Preset-Speichern-Dialog als auch "Synchronisieren"/"Vorherige
+übernehmen" — dieselbe eine Liste). Ein wichtiger Unterschied zu
+`lut`/`strength` (fotounabhängig, siehe oben): `strokes` SIND
+bildpositions-spezifisch (dieselbe Begründung, aus der
+`liquify_strokes`/`repair`/`masks` ganz von `PresetSectionKey`
+ausgeschlossen sind) — `buildPresetEdlSubset` schneidet sie deshalb beim
+Sektions-Kopieren explizit heraus (Preset trägt nur die globale
+Filter-Anwendung, nie gemalte Bereiche eines fremden Fotos).
+
+**Nachtrag (Schritt 4, Video als Katalog-Asset):** wie in Schritt 0
+festgelegt, erweitert eine neue Migration (`0012_video.sql`) die
+bestehende `photos`-Tabelle um fünf nullable Spalten
+(`media_kind`/`duration_ms`/`video_codec`/`has_audio`/`frame_rate`)
+statt eine eigene `videos`-Tabelle einzuführen — ein Video bleibt eine
+ganz normale Katalogzeile, Sammlungen/Schlagworte/Sterne/Filter/
+Duplikat-Erkennung/Batch-Verarbeitung funktionieren automatisch weiter,
+ohne dass eine dieser Stellen von Video weiß.
+
+Import verzweigt früh nach Dateiendung
+(`import::video::is_video_extension`, neue `mp4`/`mov`/`m4v`/`avi`/
+`mkv`/`webm`-Liste) — bewusst NICHT über `apx_raw::read_metadata`
+(reiner Bild-Decoder, würde an einem Video-Container schlicht
+scheitern), sondern über `ffprobe -show_format -show_streams`
+(JSON-Ausgabe, geparst über das ohnehin vorhandene `serde_json`, kein
+neues Crate) — dasselbe Subprozess-Muster wie `apx_export::video`s
+`ffmpeg`-Aufrufe (ADR-0034: kein Bündeln, System-Installation
+vorausgesetzt). Thumbnail-Erzeugung entsprechend verzweigt: ein
+einzelnes Frame per `ffmpeg -ss 00:00:01 ... -f image2pipe` direkt auf
+`stdout`, eine Sekunde statt Frame 0 (oft schwarz/unscharf bei vielen
+Kameras), läuft danach durch dieselbe Downscale-/Speicher-Pipeline wie
+ein Foto-Thumbnail.
+
+**Real gegen den Code geprüfter Umfang der Änderung, nicht unterschätzt:**
+`NewPhoto`/`Photo` sind zentrale, überall im Katalog verwendete
+Structs — 23 Konstruktionsstellen (Produktionscode und Tests über
+`apx-catalog`/`apx-app`) mussten um die fünf neuen Felder ergänzt
+werden. Bei bereits vorhandenen Fotos/Videos bleibt das rückwärts-
+kompatibel: die Migration setzt `media_kind` per SQL-`DEFAULT 'photo'`,
+alle anderen neuen Spalten sind nullable.
+
+**Bewusst noch nicht Teil dieses Schritts** (folgt in Schritt 5 mit dem
+neuen `"video"`-`centerView`): ein sichtbares Video-Abspiel-Symbol im
+Raster, eine "nur Videos"/"nur Fotos"-Filteroption, und was beim Klick
+auf ein Video-Asset passiert (aktuell öffnet es denselben Foto-Viewer
+wie jedes andere Bild und würde dort scheitern) — reine Backend-/
+Katalog-Grundlage ohne sichtbaren Effekt im UI, bis Schritt 5 die
+Wiedergabe-Oberfläche liefert.
+
+**Nachtrag (Schritt 5, Video-Wiedergabe) — Korrektur der Schritt-0-
+Annahme, real gegen den Code geprüft statt aus Erinnerung übernommen:**
+es gibt in dieser App **keinen** Lightroom-artigen "Foto öffnen
+schaltet automatisch auf Einzelansicht um"-Mechanismus (ADR-0037: `
+centerView` wechselt ausschließlich über explizite Kopfzeilen-Knöpfe/
+`toggleCenterView`; ein Raster-/Filmstreifen-Klick ruft nur
+`selectPhoto`/`togglePhotoSelection` auf, die lediglich `
+selectedPhotoId` setzen, niemals `centerView`). Ein komplett neuer,
+eigenständig geschalteter `centerView`-Wert `"video"` hätte diese
+fehlende Navigation zusätzlich nachbauen müssen. Stattdessen: der
+bereits bestehende Fallback-Zweig in `App.tsx` (zuvor immer `<Viewer
+/>`, wenn `centerView` weder `grid` noch `overview`/`map`/`people` ist)
+wurde lediglich inhaltsbewusst gemacht — zeigt `<VideoPlayer />` statt
+`<Viewer />`, wenn das aktuell ausgewählte Foto `media_kind === "video"`
+trägt. Kein neuer `centerView`-Wert, keine neue Navigationslogik,
+funktioniert automatisch überall dort, wo bereits `selectedPhotoId`
+gesetzt wird (Raster, Filmstreifen, Pfeiltasten-Schritt).
+
+Neue `video/<id>`-Route im bestehenden `apx://`-Protokoll-Handler
+(`crates/apx-app/src/protocol`) — als einzige Anfrageart mit echter
+HTTP-Range-Unterstützung (`206 Partial Content`, `Content-Range`,
+`Accept-Ranges`), bewusst am bestehenden `ImageCache`-Muster
+("einmal berechnen, komplett im Speicher halten") vorbei: ein Video
+kann hunderte MB/GB groß sein, `MAX_VIDEO_CHUNK` (8 MB) begrenzt jede
+einzelne Antwort, der Browser holt den Rest selbst über weitere
+Range-Anfragen nach (`<video>`-Element-Seeking braucht das, jeder
+andere Anfragetyp hier nicht).
+
+`VideoPlayer.tsx`: eigene, anklickbare Zeitleiste statt der nativen
+`<video controls>`-Steuerung — dasselbe Overlay-Muster wie
+`LiquifyOverlay`/`RepairOverlay` — damit Schritt 6 (Trimmen) dort
+Anfang-/Ende-Ziehpunkte ergänzen kann, ohne mit einer nativen
+Browser-Steuerleiste zu kollidieren.
+
+**Absicherung gegen einen echten Fehlerfall statt nur kosmetisch
+ignoriert:** das Entwickeln-Panel versucht ohne die neue Sperre einen
+EDL-Ladeversuch für ein Video auszulösen (`apx_raw` kann keinen
+Video-Container dekodieren) — an allen drei Stellen, die das auslösen
+können (`selectPhoto`, `togglePhotoSelection`s Toggle-Zweig,
+`toggleDevelopPanel`), wird das jetzt übersprungen und stattdessen
+derselbe "kein gültiger Bearbeitungszustand"-Reset wie bei "kein Foto
+ausgewählt" angewendet — keine stillschweigend veraltete Anzeige des
+vorherigen Fotos.
+
+**Nachtrag (Schritt 6, Schneiden/Trimmen):** neuer `apx-app`-Command
+`trim_video(photo_id, start_ms, end_ms)` — **nicht-destruktiv**, wie
+schon bei virtuellen Kopien (ADR-0035) und Stacking-Ergebnissen
+(Phase 9 Schritt 8): das Original bleibt unangetastet, das Ergebnis
+landet als eigene neue Katalogzeile (`<stem>_trim[_N].<ext>` im selben
+Ordner, Kollisionsvermeidung per Suffix-Zähler). Der eigentliche
+Schnitt läuft über `ffmpeg -ss <start> -t <dauer> -c copy` (verlustfrei,
+Millisekunden-Genauigkeit hängt vom Keyframe-Abstand des Quellcodecs
+ab) — schlägt der reine Stream-Copy-Pfad fehl (nicht jeder Codec/
+Container erlaubt beliebige Schnittpunkte ohne Neucodierung), fällt der
+Command automatisch auf `-c:v libx264 -crf 18 -preset medium -c:a aac`
+zurück. Nach dem Schnitt: `ffprobe`-Metadaten-Extraktion
+(`import::video::extract_video_metadata`, wiederverwendet aus Schritt 4)
+und Thumbnail-Erzeugung (`import::thumbnails::generate_one`,
+wiederverwendet aus Schritt 4 — beide Funktionen dafür von modul- auf
+`pub(crate)`-Sichtbarkeit angehoben) für das neue Asset, statt beides
+neu zu bauen.
+
+Frontend: `VideoPlayer.tsx`s eigene Zeitleiste (bewusst kein natives
+`<video controls>`, siehe Schritt-5-Nachtrag) bekommt jetzt die dort
+vorgesehenen Anfang-/Ende-Ziehpunkte — als farbige Marker auf der
+Zeitleiste plus zwei "aktuelle Position markieren"-Knöpfe (dasselbe
+Muster wie in den meisten Schnittwerkzeugen, statt echter Zieh-
+Interaktion auf der Leiste — deutlich einfacher umzusetzen, für den
+"minimales Trimmen"-Anspruch dieser Phase ausreichend). Trimm-Zustand
+(`videoTrimStartMs`/`videoTrimEndMs`) ist reiner Entwurf im Store, bis
+`commitVideoTrim` den `trim_video`-Command aufruft; setzt sich beim
+Fotowechsel automatisch zurück (im bereits bestehenden
+Zurücksetzen-Effekt), damit keine In/Out-Punkte eines vorherigen Videos
+am neuen kleben bleiben. Nach erfolgreichem Schnitt wählt der Store das
+neu entstandene Video automatisch aus (`selectedPhotoId` auf die
+Antwort von `trim_video`).
+
+**Nachtrag (Schritt 7, Automatisches Zuschneiden):** wie in ADR-0043
+oben real recherchiert und tabelliert, keine eigene Bild-Differenz-
+Heuristik geschrieben, sondern ffmpegs nativer `scdet`-Filter
+(Szenenwechsel-Erkennung, seit ffmpeg 4.3, kein externes Modell nötig)
+genutzt — neuer `apx-app`-Command `detect_video_scene_changes(photo_id,
+threshold?)`. `scdet` protokolliert jeden erkannten Wechsel als eine
+`av_log`-Info-Zeile auf `stderr` in der Form `lavfi.scd.score: <wert>,
+lavfi.scd.time: <sekunden>` (`-f null -` verwirft die eigentliche
+Bildausgabe, `-an` überspringt unnötig die Tonspur) — der Command
+parst diese Zeilen per einfachem Textsuche+Parse statt eines
+Regex-Crates (kein neues Crate für ein simples "ab Marker bis zum
+nächsten Nicht-Ziffern-Zeichen"-Muster), sortiert/dedupliziert die
+resultierenden Millisekunden-Zeitstempel.
+
+**Bewusst begrenzter Umfang, wie in ADR-0043 vorab ehrlich benannt:**
+kein "beste/interessanteste Momente"-KI-Highlight-Ranking (das bleibt
+explizit außerhalb dieser Phase) — Schritt 7 liefert reine
+Szenenwechsel-Erkennung plus eine Bequemlichkeitsfunktion, die
+`videoTrimStartMs`/`videoTrimEndMs` (aus Schritt 6) automatisch mit dem
+Szenenabschnitt um die aktuelle Wiedergabeposition vorbelegt (der
+zuletzt erkannte Wechsel davor als Start, der erste danach als Ende,
+Videoanfang/-ende als Randfälle über `duration_ms` aus dem Katalog) —
+"automatisch zu einem guten Abschnitt zuschneiden" im Sinne von
+"objektive Szenengrenzen finden und als Schnittvorschlag anbieten",
+nicht im Sinne von "die interessanteste Szene erraten". Die eigentliche
+Schnittausführung bleibt bewusst der bereits bestehende
+`commitVideoTrim`-Weg aus Schritt 6 — keine zweite, parallele
+Schnitt-Pipeline.
+
+`VideoPlayer.tsx`: gelbe Ein-Pixel-Striche auf der bestehenden
+Zeitleiste markieren jeden erkannten Wechsel (dasselbe
+Positionsberechnungs-Muster wie die Start-/Ende-Marker aus Schritt 6);
+erkannte Szenenwechsel gehören zu genau einem Video und werden beim
+Fotowechsel verworfen (neue `clearVideoSceneChanges`-Aktion, im
+bestehenden Zurücksetzen-Effekt neben `clearVideoTrim` aufgerufen).
+
+**Nachtrag (Schritt 8, Geräuschreduktion + Musik/Sounds hinzufügen):**
+wie in ADR-0043s Tabelle real recherchiert, für die Geräuschreduktion
+bewusst nur `afftdn` (reine FFT-Spektral-Subtraktion, seit jeher Teil
+von ffmpeg, kein Modell nötig) implementiert, **nicht** das dort
+ebenfalls genannte RNN-basierte `arnndn` — dessen Modell-Download hätte
+dasselbe Opt-in-Download-Muster wie MiDaS/LaMa/Stiltransfer gebraucht
+(inklusive erneuter Lizenzprüfung der dann aktuellen
+`arnndn-models`-Repo-Datei zum Download-Zeitpunkt, nicht nur aus dieser
+Recherche übernommen) — das hätte den Schritt deutlich aufgebläht, ohne
+dass `afftdn` allein für den "Basis-Videoschnitt"-Anspruch dieser Phase
+unzureichend wäre. Neuer Command `denoise_video_audio(photo_id,
+strength)` mit drei festen Stufen (schwach/mittel/stark →
+`afftdn=nr=6/12/24`, 12 ist `afftdn`s eigener Standardwert). Wie
+`trim_video`: nicht-destruktiv, `-c:v copy` lässt den Video-Stream
+unangetastet, nur die Tonspur wird neu kodiert.
+
+Musik/Sounds hinzufügen (`add_video_audio_track`) nutzt bewusst
+**dieselbe** Audio-Mix-Technik wie die bereits bestehende Diashow-
+Musikuntermalung (`export_slideshow_video`, ADR-0034 Punkt 3) statt
+eine zweite Implementierung zu schreiben — hier auf ein bereits
+bestehendes Video-Asset angewendet statt beim Rendern einer neuen
+Diashow. Zwei Modi: `"mix"` (`amix`-Filter, `duration=first` — die
+Ausgabelänge folgt bewusst der *Original*-Tonspur, damit eine kürzere/
+längere Musikdatei die Videolänge nicht verändert; fällt automatisch
+auf `"replace"` zurück, wenn das Video gar keine eigene Tonspur hat)
+und `"replace"` (Tonspur komplett ersetzen, mit explizitem `-t` auf die
+aus dem Katalog bereits bekannte Originallänge — verhindert, dass eine
+längere Musikdatei die Ausgabe über die Videolänge hinaus verlängert).
+Die Audiodatei wählt dieselbe generische `pick_file_path`-Dialog-
+Infrastruktur wie `SlideshowDialog.tsx`s Musikauswahl (kein neuer
+Datei-Dialog-Command).
+
+**Kleine Refaktorierung im Zuge dessen:** `trim_video`s bis dahin
+inline stehende Zielpfad-Kollisionsvermeidung und Metadaten-
+Extraktion+Thumbnail-Erzeugung wurden in zwei geteilte Funktionen
+(`unique_sibling_video_path`, `register_video_result_as_new_photo`)
+gezogen, damit alle drei Video-Bearbeitungs-Commands (Schritt 6 und 8)
+exakt dieselbe "neues Katalog-Asset anlegen"-Logik verwenden statt sie
+drei Mal zu duplizieren.
+
+**Nachtrag (Schritt 9, Filter/LUT auf Video anwenden):** wendet
+**dieselbe** trilineare `.cube`-Interpolation an, die Schritt 1 für
+Fotos gebaut hat (`apx_pipeline::stages::lut_filter::apply`), framegenau
+auf jedes Bild eines Videos — keine zweite LUT-Implementierung, keine
+ffmpeg-eigene `lut3d`-Filterkette. Zwei gekoppelte `ffmpeg`-
+Subprozesse: der erste dekodiert zu rohen RGBA8-Frames auf `stdout`
+(`-f rawvideo -pix_fmt rgba`), ein eigener Rust-Thread liest sie
+framegenau, wendet die LUT an und schreibt das Ergebnis in `stdin`
+eines zweiten `ffmpeg`, der die transformierten Frames re-kodiert und
+per zweitem Input (dieselbe Quelldatei erneut, `-map 1:a?`) die
+Original-Tonspur unverändert hinüberkopiert. Der Frame-Pumpen-Thread
+bekommt die `LutFilterAdjustment` als geklonten Wert übergeben (nicht
+als Referenz) — `std::thread::spawn` verlangt `'static`-Daten, ein
+Klon der (mit höchstens einigen zehntausend Floats kleinen) LUT-Tabelle
+ist dafür einfacher als `std::thread::scope`.
+
+Bewusst **global** wie bei Schritt 8, keine Pinselstriche wie bei
+Fotos (Schritt 3) — eine pro-Frame-Maske für ein bewegtes Bild wäre ein
+eigenständiges, deutlich größeres Feature (Tracking, Interpolation
+zwischen Keyframes) und nicht Teil des "Basis-Videoschnitt"-Anspruchs
+dieser Phase. Frontend nutzt dieselben `builtinLutFilters` (Schritt 2)
+und denselben `.cube`-Import-Dialog (`importLutCubeFile`, Schritt 1)
+wie das Foto-Entwickeln-Panel — keine zweite Filter-Bibliothek für
+Video.
+
+**Performance ehrlich unverifiziert in dieser Sandbox:** wie in
+ADR-0043 vorab benannt, ist `apx-pipeline` reines CPU-Rust ohne
+GPU-Shader — ein Zwei-Prozess-Pipe-Aufbau mit Pro-Frame-CPU-Filterung
+ist für kurze Clips bei moderater Auflösung machbar, kann aber bei
+langen/hochauflösenden Videos spürbar langsam werden. Eine konkrete
+Messung (Sekunden pro Sekunde Video bei einer bestimmten Auflösung)
+fehlt dieser Sitzung mangels eines echten Test-Videos mit bekannten
+Referenzwerten in der Sandbox — wird ehrlich als offen benannt statt
+stillschweigend als geprüft ausgegeben; siehe Schritt 11 für eine
+Nachprüfung, falls dort ein Testclip verfügbar wird.
+
+**Nachtrag (Schritt 10, Ähnliche Videos finden):** wie in ADR-0043s
+Recherche vorab festgehalten ("Ähnliche-Fotos-Erkennung ist direkt auf
+Video übertragbar") — neuer Command `list_similar_video_groups`
+arbeitet **exakt** wie der bestehende Perceptual-Hash-Duplikat-
+Assistent für Fotos (`list_perceptual_duplicate_groups`, Phase 9
+Schritt 1: derselbe `image_hasher`, dieselbe O(n²)-Gruppierung),
+beschränkt auf `media_kind == "video"`. Kein neuer Hashing-Algorithmus,
+kein zweiter Keyframe-Extraktionsweg: die gehashte Grundlage ist
+dasselbe Vorschau-Frame, das bereits bei Import per `ffmpeg` extrahiert
+wird (`extract_video_frame`, Phase 16 Schritt 4) und ohnehin im
+`PreviewLevel::Thumbnail`-Cache liegt.
+
+**Kleine, bewusste DTO-Erweiterung statt einer großen:** `PhotoDto`
+selbst trägt kein `folder_id`-Feld — es wird an Dutzenden Stellen im
+gesamten Frontend verwendet, eine Erweiterung hätte (wie die 23
+`NewPhoto`/`Photo`-Konstruktionsstellen in Schritt 4) viele
+Testfixturen berührt, für einen einzigen neuen Anwendungsfall
+unverhältnismäßig. Stattdessen ein schlanker neuer Wrapper-Typ
+`SimilarVideoDto { photo: PhotoDto, folder_id: String }`, nur für
+diesen einen Command — das Frontend braucht den Ordner ausschließlich,
+um bei einem gefundenen ähnlichen Video (das in einem *anderen* Ordner
+liegen kann) per neuer `jumpToVideo`-Store-Aktion dorthin zu
+wechseln (`selectFolder`+`loadPhotosForFolder`, dann `selectPhoto`) —
+`selectPhoto` allein hätte nicht gereicht, weil `VideoPlayer.tsx` das
+aktuelle Foto über `photosByFolder[selectedFolderId]` auflöst.
+
+## ADR-0043-Nachtrag (Schritt 11): Dokumentation, volle Verifikation, Abnahme
+
+`FEATURES.md`/`THIRD_PARTY.md`/`PLAN.md` aktualisiert (siehe deren
+Einträge). Vollständig grün: `cargo fmt --all -- --check`, `cargo
+clippy --workspace --all-targets -- -D warnings -D
+clippy::unwrap_used` (Standard-Features **und** `--features people`),
+`cargo test --workspace`, `tsc -b`, volle `vitest run`-Suite (223
+Tests). Ein vorbestehender Clippy-Fund (`useless_vec` in
+`apx-ai::style_consistency`, aus Phase 14, durch eine neuere
+Clippy-Version verschärft) wurde nebenbei behoben.
+
+**Zusätzliche, über reines Kompilieren hinausgehende Verifikation:**
+da keiner der neuen Video-Commands (Schritte 6–10) einen automatisierten
+Rust-Test gegen einen echten `ffmpeg`-Subprozess hat (die Testfixture
+wäre eine echte Videodatei, die es im Repository nicht gibt), wurde in
+dieser Sitzung ein reales Testvideo per `ffmpeg -f lavfi` erzeugt und
+jede einzelne Befehlszeile aus dem Code manuell dagegen ausgeführt:
+Trim per Stream-Copy (bestätigt: schneidet an der nächsten
+Keyframe-Grenze, nicht exakt — wie dokumentiert) und der
+Re-Encode-Fallback (exakte Dauer), `scdet`-Szenenerkennung, `afftdn`-
+Entrauschung, Musik mischen (`amix`) und ersetzen, sowie — am
+wichtigsten — der komplette Zwei-Prozess-Rohframe-Pipe-Aufbau für die
+Video-LUT-Anwendung (`ffmpeg … | ffmpeg …`, echte Shell-Pipe statt nur
+über eine Zwischendatei) mit denselben Flags wie
+`run_ffmpeg_apply_lut_to_video`. Alle fünf liefen fehlerfrei durch und
+lieferten die erwarteten Ausgabe-Eigenschaften (Dauer/Auflösung/
+Stream-Typen) — eine echte Bestätigung, dass die konstruierten
+`ffmpeg`-Aufrufe funktionieren, nicht nur, dass der umgebende Rust-Code
+kompiliert.
+
+**Playwright, ehrlich unvollständig statt stillschweigend als
+vollständig ausgegeben:** die drei am direktesten von den Datenmodell-
+Änderungen dieser Phase betroffenen Spezifikationen (`develop-flow.spec.ts`,
+`library-flow.spec.ts`, `presets-flow.spec.ts` — PhotoDto/EdlV4/
+StageEnabled/`PRESET_SECTION_KEYS` wurden alle erweitert) liefen mit
+39/39 grün (nachdem `PLAYWRIGHT_CHROMIUM_PATH` auf die in dieser Umgebung
+vorinstallierte Chromium-Revision gesetzt wurde, siehe
+`playwright.config.ts`s Kommentar dazu). Ein Lauf der kompletten
+Playwright-Suite wurde begonnen, aber auf explizite Nutzeranweisung
+("ohne große Tests, es läuft ja alles") nicht abgewartet und
+abgebrochen. **Kein neues Playwright-Spezifikat für Video/LUT selbst**
+— `LutFilterPanel.tsx`/`VideoPlayer.tsx` haben keine Mocks in
+`e2e/tauri-mock.ts` bekommen, ihre Commands sind also e2e komplett
+ungetestet; die einzige Absicherung dafür sind die echten
+`ffmpeg`-Smoke-Tests oben plus `tsc -b`/`vitest run`.

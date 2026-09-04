@@ -61,6 +61,13 @@ export interface PhotoDto {
    * ADR-0039) — frei benannte Zusatzfelder; bekannte Schlüssel siehe
    * `listWellKnownIptcFields`. */
   custom_metadata: Record<string, string>;
+  /** Video als Katalog-Asset (Phase 16 Schritt 4, siehe `DECISIONS.md`
+   * ADR-0043). */
+  media_kind: "photo" | "video";
+  duration_ms: number | null;
+  video_codec: string | null;
+  has_audio: boolean | null;
+  frame_rate: number | null;
 }
 
 export interface KeywordDto {
@@ -388,6 +395,110 @@ export interface DcpProfileDataDto {
  * `apx_pipeline::dcp_profile`s Moduldoku). */
 export function importDcpProfile(): Promise<DcpProfileDataDto | null> {
   return invoke<DcpProfileDataDto | null>("import_dcp_profile");
+}
+
+// ---- Filter-/LUT-Bibliothek (Phase 16 Schritt 1) ---------------------------
+
+export interface LutFilterDataDto {
+  name: string;
+  size: number;
+  /** Anders als `SkyReplacePatchDto.pixels_base64`/`StyleTransferPatch::
+   * pixels` bewusst als schlichtes JSON-Zahlenfeld übertragen, nicht
+   * Base64-codiert — ein `.cube`-Raster ist mit maximal `256^3 * 3`
+   * Floats um Größenordnungen kleiner als ein volles Bild, die
+   * Base64-Optimierung lohnt sich hier nicht. */
+  table: number[];
+  domain_min: [number, number, number];
+  domain_max: [number, number, number];
+}
+
+/** Öffnet einen Datei-Dialog für eine `.cube`-3D-LUT-Datei und parst sie
+ * — `null`, wenn der Dialog abgebrochen wurde. Wirft bei einer
+ * strukturell ungültigen Datei oder einer reinen 1D-LUT (siehe
+ * `apx_pipeline::lut_cube`s Moduldoku). */
+export function importLutCubeFile(): Promise<LutFilterDataDto | null> {
+  return invoke<LutFilterDataDto | null>("import_lut_cube_file");
+}
+
+/** Die fünf eingebauten, selbst erstellten Filter-Looks (Phase 16
+ * Schritt 2, siehe `apx_pipeline::builtin_luts`s Moduldoku — original
+ * erstellt, kein externer Download). Reine Berechnung serverseitig,
+ * sinnvoll einmalig pro Sitzung zu laden statt bei jedem Panel-Öffnen
+ * neu anzufragen (siehe `store`s `loadBuiltinLutFilters`). */
+export function listBuiltinLutFilters(): Promise<LutFilterDataDto[]> {
+  return invoke<LutFilterDataDto[]>("list_builtin_lut_filters");
+}
+
+// ---- Video-Bearbeitung (Phase 16 Schritt 6) --------------------------------
+
+/** Schneidet `[startMs, endMs)` aus einem Video-Asset — nicht
+ * destruktiv, das Ergebnis landet als neues Katalog-Asset im selben
+ * Ordner (siehe `apx_app::commands::trim_video`s Moduldoku). Wirft bei
+ * einem ungültigen Zeitbereich oder wenn `ffmpeg` fehlschlägt. */
+export function trimVideo(photoId: string, startMs: number, endMs: number): Promise<PhotoDto> {
+  return invoke<PhotoDto>("trim_video", { photoId, startMs, endMs });
+}
+
+/** Automatisches Zuschneiden (Phase 16 Schritt 7, siehe `DECISIONS.md`
+ * ADR-0043) — erkennt Szenenwechsel per ffmpegs `scdet`-Filter und gibt
+ * ihre Zeitstempel in Millisekunden zurück (aufsteigend sortiert, ohne
+ * Duplikate). `threshold` folgt `scdet`s eigener 0–100-Skala (Standard
+ * des Filters selbst: 10.0, niedriger = empfindlicher). */
+export function detectVideoSceneChanges(photoId: string, threshold?: number): Promise<number[]> {
+  return invoke<number[]>("detect_video_scene_changes", { photoId, threshold: threshold ?? null });
+}
+
+/** Geräuschreduktion (Phase 16 Schritt 8, siehe `DECISIONS.md` ADR-0043)
+ * — nicht-destruktiv, das Ergebnis landet als neues Katalog-Asset (siehe
+ * `apx_app::commands::denoise_video_audio`s Moduldoku). `strength`:
+ * `"low"`/`"medium"`/`"high"`. */
+export function denoiseVideoAudio(photoId: string, strength: "low" | "medium" | "high"): Promise<PhotoDto> {
+  return invoke<PhotoDto>("denoise_video_audio", { photoId, strength });
+}
+
+/** Musik/Sounds zu einem Video hinzufügen (Phase 16 Schritt 8) —
+ * nicht-destruktiv, siehe `apx_app::commands::add_video_audio_track`s
+ * Moduldoku. `mode`: `"mix"` (mit vorhandener Tonspur mischen, fällt
+ * automatisch auf `"replace"` zurück, falls das Video keine Tonspur
+ * hat) oder `"replace"` (Tonspur ersetzen). `musicVolume` skaliert nur
+ * die neu hinzugefügte Spur (1.0 = unverändert). */
+export function addVideoAudioTrack(
+  photoId: string,
+  audioPath: string,
+  mode: "mix" | "replace",
+  musicVolume?: number,
+): Promise<PhotoDto> {
+  return invoke<PhotoDto>("add_video_audio_track", { photoId, audioPath, mode, musicVolume: musicVolume ?? null });
+}
+
+/** Filter/LUT auf Video anwenden (Phase 16 Schritt 9, siehe
+ * `DECISIONS.md` ADR-0043) — wendet `lut` framegenau auf jedes Bild an
+ * (dieselbe trilineare Interpolation wie bei Fotos), nicht-destruktiv
+ * (siehe `apx_app::commands::apply_lut_filter_to_video`s Moduldoku).
+ * Bewusst global (keine Pinselstriche wie bei Fotos). Kann bei langen/
+ * hochauflösenden Videos spürbar dauern (reine CPU-Pipeline, siehe
+ * ADR-0043) — die Promise löst erst nach vollständiger Verarbeitung
+ * auf. */
+export function applyLutFilterToVideo(photoId: string, lut: LutFilterDataDto, strength: number): Promise<PhotoDto> {
+  return invoke<PhotoDto>("apply_lut_filter_to_video", { photoId, lut, strength });
+}
+
+/** Ein Video innerhalb einer `listSimilarVideoGroups`-Gruppe —
+ * `folder_id` steht hier separat (nicht auf `PhotoDto` selbst, siehe
+ * dessen Rust-Gegenstück `SimilarVideoDto`s Moduldoku), weil nur diese
+ * eine Funktion wissen muss, in welchem Ordner ein ähnliches Video
+ * liegt (zum Dorthin-Springen, siehe `store`s `jumpToVideo`). */
+export interface SimilarVideoDto {
+  photo: PhotoDto;
+  folder_id: string;
+}
+
+/** Ähnliche Videos finden (Phase 16 Schritt 10, siehe `DECISIONS.md`
+ * ADR-0043) — arbeitet wie `listPerceptualDuplicateGroups`, aber auf
+ * Videos beschränkt (siehe `apx_app::commands::list_similar_video_groups`s
+ * Moduldoku). */
+export function listSimilarVideoGroups(maxDistance: number): Promise<SimilarVideoDto[][]> {
+  return invoke<SimilarVideoDto[][]>("list_similar_video_groups", { maxDistance });
 }
 
 // ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------------
@@ -1006,6 +1117,21 @@ export function replaceSky(photoId: string, skyImagePath: string): Promise<SkyRe
   return invoke<SkyReplacePatchDto>("replace_sky", { photoId, skyImagePath });
 }
 
+// ---- Automatisches Hautglätten (Phase 15 Schritt 5) -----------------------
+
+export interface SkinSmoothingPatchDto {
+  bitmap_width: number;
+  bitmap_height: number;
+  pixels_base64: string;
+}
+
+/** Erkennt Gesichter und glättet nur die Hautbereiche darin
+ * (gesichtsbewusste Frequenztrennung) — kein Modell-Download nötig. Wirft
+ * einen Fehler, wenn keine Gesichter erkannt wurden. */
+export function smoothSkin(photoId: string): Promise<SkinSmoothingPatchDto> {
+  return invoke<SkinSmoothingPatchDto>("smooth_skin", { photoId });
+}
+
 // ---- KI: Echte Personen-Wiedererkennung (Phase 13 Schritt 8) ---------------
 
 export interface FaceDetectionDto {
@@ -1101,6 +1227,28 @@ export function runAiInpaint(
   return invoke<AiFillPatchDto>("run_ai_inpaint", { photoId, x, y, width, height });
 }
 
+// ---- Photoshop-Funktion: Content-Aware Move (Phase 15 Schritt 1) ----------
+
+export interface ContentAwareMoveDto {
+  fill: AiFillPatchDto;
+  moved: CompositeLayerSourceDto;
+  dest_scale: number;
+}
+
+/** Schneidet das normierte Rechteck (`x`/`y`/`width`/`height`,
+ * `0.0..=1.0`) aus, füllt die Ausgangsstelle per LaMa-Inferenz und
+ * liefert beides zurück — braucht dasselbe zuvor heruntergeladene
+ * Modell wie [`runAiInpaint`]. */
+export function contentAwareMove(
+  photoId: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): Promise<ContentAwareMoveDto> {
+  return invoke<ContentAwareMoveDto>("content_aware_move", { photoId, x, y, width, height });
+}
+
 // ---- KI: Leinwand-Erweiterung / Outpainting (Phase 14 Schritt 1) ----------
 
 export interface CanvasExtensionPatchDto {
@@ -1133,6 +1281,29 @@ export function runAiOutpaint(
     marginTop,
     marginRight,
     marginBottom,
+  });
+}
+
+// ---- Inhaltssensitives Skalieren / Seam Carving (Phase 15 Schritt 4) -----
+
+export interface ContentAwareScalePatchDto {
+  width_fraction: number;
+  height_fraction: number;
+  bitmap_width: number;
+  bitmap_height: number;
+  /** Base64-kodiertes interleaved-RGB-`u8`-Ergebnis. */
+  pixels_base64: string;
+}
+
+/** Berechnet das seam-carvte Ergebnis für `widthFraction`/
+ * `heightFraction` (Bruchteile der aktuellen Bildbreite/-höhe) — kein
+ * heruntergeladenes Modell nötig, klassischer Algorithmus
+ * (`apx_ai::seam_carving`). */
+export function contentAwareScale(photoId: string, widthFraction: number, heightFraction: number): Promise<ContentAwareScalePatchDto> {
+  return invoke<ContentAwareScalePatchDto>("content_aware_scale", {
+    photoId,
+    widthFraction,
+    heightFraction,
   });
 }
 

@@ -41,7 +41,7 @@
 
 use rayon::prelude::*;
 
-use crate::edl::v2::{CanvasExtension, CropRect, GeometryAdjustment};
+use crate::edl::v2::{CanvasExtension, ContentAwareScale, CropRect, GeometryAdjustment};
 
 fn sample_rgba_at(rgba: &[u8], width: usize, height: usize, x: i32, y: i32) -> [u8; 4] {
     let cx = x.clamp(0, width as i32 - 1) as usize;
@@ -233,11 +233,70 @@ fn extend_canvas(
     (new_width, new_height, out)
 }
 
-/// Wendet Drehung + Zuschnitt + optionale Leinwand-Erweiterung an — die
-/// einzige Funktion, die `develop::render_rgba8` aus diesem Modul
-/// aufruft. Gibt die tatsächliche (u. U. gegenüber `width`/`height`
-/// verkleinerte oder — seit Phase 14 Schritt 1 — vergrößerte)
-/// Ausgabegröße zurück.
+/// Setzt ein einmalig per `apx_ai::seam_carving::resize_rgb8` berechnetes
+/// Ergebnis ein (Phase 15 Schritt 4) — dieselbe Bilinear-Hochskalier-
+/// Technik wie `extend_canvas`, hier aber ohne Bildmitte/Rand-
+/// Unterscheidung: der Patch ersetzt die gesamte Bitmap, nicht nur einen
+/// Ausschnitt (seam carving verformt potenziell jeden Pixel).
+fn apply_content_aware_scale(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    scale: &ContentAwareScale,
+) -> (u32, u32, Vec<u8>) {
+    let Some(patch) = &scale.patch else {
+        return (width, height, rgba.to_vec());
+    };
+    if patch.bitmap_width == 0 || patch.bitmap_height == 0 {
+        return (width, height, rgba.to_vec());
+    }
+    let new_width = ((width as f32) * scale.width_fraction.max(0.01))
+        .round()
+        .max(1.0) as u32;
+    let new_height = ((height as f32) * scale.height_fraction.max(0.01))
+        .round()
+        .max(1.0) as u32;
+
+    let (patch_r, patch_g, patch_b) =
+        split_patch_rgb(&patch.pixels, patch.bitmap_width, patch.bitmap_height);
+    let patch_r = apx_core::raster::bilinear_resize_u8(
+        &patch_r,
+        patch.bitmap_width,
+        patch.bitmap_height,
+        new_width,
+        new_height,
+    );
+    let patch_g = apx_core::raster::bilinear_resize_u8(
+        &patch_g,
+        patch.bitmap_width,
+        patch.bitmap_height,
+        new_width,
+        new_height,
+    );
+    let patch_b = apx_core::raster::bilinear_resize_u8(
+        &patch_b,
+        patch.bitmap_width,
+        patch.bitmap_height,
+        new_width,
+        new_height,
+    );
+
+    let n = (new_width as usize) * (new_height as usize);
+    let mut out = vec![0u8; n * 4];
+    for i in 0..n {
+        out[i * 4] = patch_r[i];
+        out[i * 4 + 1] = patch_g[i];
+        out[i * 4 + 2] = patch_b[i];
+        out[i * 4 + 3] = 255;
+    }
+    (new_width, new_height, out)
+}
+
+/// Wendet Drehung + Zuschnitt + optionale Leinwand-Erweiterung +
+/// optionales inhaltssensitives Skalieren an — die einzige Funktion, die
+/// `develop::render_rgba8` aus diesem Modul aufruft. Gibt die
+/// tatsächliche (u. U. gegenüber `width`/`height` verkleinerte oder
+/// vergrößerte) Ausgabegröße zurück.
 pub fn apply(
     rgba: &[u8],
     width: u32,
@@ -250,16 +309,20 @@ pub fn apply(
     } else {
         crop_rgba(&rotated, width, height, &adjustment.crop)
     };
-    match &adjustment.canvas_extension {
+    let (w, h, extended) = match &adjustment.canvas_extension {
         Some(extension) => extend_canvas(&cropped, w, h, extension),
         None => (w, h, cropped),
+    };
+    match &adjustment.content_aware_scale {
+        Some(scale) => apply_content_aware_scale(&extended, w, h, scale),
+        None => (w, h, extended),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::edl::v2::CanvasExtensionPatch;
+    use crate::edl::v2::{CanvasExtensionPatch, ContentAwareScale, ContentAwareScalePatch};
 
     /// Baut ein `size`×`size`-RGBA8-Testbild mit einer eindeutigen
     /// Markierung an einer bestimmten Pixelposition.
@@ -427,5 +490,50 @@ mod tests {
         // grünen Patch, nicht vom grauen Original.
         let border_idx = 0; // (0, 0) liegt außerhalb des Original-Bereichs
         assert_eq!(&result[border_idx..border_idx + 4], &[0, 200, 0, 255]);
+    }
+
+    /// Ohne berechneten Patch bleibt eine gewählte Content-Aware-Scale-
+    /// Zielgröße ein No-Op — dieselbe Konvention wie
+    /// `canvas_extension_without_a_computed_patch_is_a_no_op`.
+    #[test]
+    fn content_aware_scale_without_a_computed_patch_is_a_no_op() {
+        let pixels = marked_image(10, 4, 4);
+        let adjustment = GeometryAdjustment {
+            content_aware_scale: Some(ContentAwareScale {
+                width_fraction: 0.5,
+                height_fraction: 0.5,
+                patch: None,
+            }),
+            ..GeometryAdjustment::NEUTRAL
+        };
+        let (w, h, result) = apply(&pixels, 10, 10, &adjustment);
+        assert_eq!((w, h), (10, 10));
+        assert_eq!(result, pixels);
+    }
+
+    /// Mit berechnetem Patch ändert sich die Ausgabegröße auf genau
+    /// `width_fraction`/`height_fraction` der aktuellen Bildgröße, und
+    /// das Ergebnis kommt erkennbar aus dem Patch (hier eine
+    /// gleichmäßig grüne Bitmap) statt aus dem Original.
+    #[test]
+    fn content_aware_scale_with_a_patch_resizes_to_the_chosen_fraction() {
+        let pixels = marked_image(10, 4, 4);
+        let patch_pixels = vec![0u8, 200, 0]; // 1x1 grüne Patch-Bitmap
+        let adjustment = GeometryAdjustment {
+            content_aware_scale: Some(ContentAwareScale {
+                width_fraction: 0.5,
+                height_fraction: 0.8,
+                patch: Some(ContentAwareScalePatch {
+                    bitmap_width: 1,
+                    bitmap_height: 1,
+                    pixels: patch_pixels,
+                }),
+            }),
+            ..GeometryAdjustment::NEUTRAL
+        };
+        let (w, h, result) = apply(&pixels, 10, 10, &adjustment);
+        assert_eq!((w, h), (5, 8));
+        assert_eq!(result.len(), (w * h * 4) as usize);
+        assert_eq!(&result[0..4], &[0, 200, 0, 255]);
     }
 }

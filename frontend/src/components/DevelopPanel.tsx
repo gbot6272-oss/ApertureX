@@ -40,6 +40,7 @@ import {
   type GuidedLine,
   type HslAdjustment,
   type LensCorrectionAdjustment,
+  type LiquifyMode,
   type ManualTransform,
   type RepairLayer,
   type RepairMode,
@@ -57,9 +58,12 @@ import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
 import { LensCalibrationDialog } from "./LensCalibrationDialog";
 import { CanvasExtendDialog } from "./CanvasExtendDialog";
+import { ContentAwareScaleDialog } from "./ContentAwareScaleDialog";
 import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import { PaletteFrame } from "./PaletteFrame";
 import { SavePresetDialog } from "./SavePresetDialog";
+import { LutFilterPanel } from "./LutFilterPanel";
+import { SkinSmoothingPanel } from "./SkinSmoothingPanel";
 import { SkyReplacePanel } from "./SkyReplacePanel";
 import { StyleTransferPanel } from "./StyleTransferPanel";
 import { VirtualAperturePanel } from "./VirtualAperturePanel";
@@ -76,6 +80,11 @@ const REPAIR_RADIUS_SPEC: SliderSpec = { key: "radius", label: "Radius (% der Bi
 const REPAIR_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Weiche Kante (% der Bildbreite)", min: 0, max: 25, fineStep: 0.5, coarseStep: 2, neutral: 2 };
 const REPAIR_OPACITY_SPEC: SliderSpec = { key: "opacity", label: "Deckkraft (%)", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 100 };
 
+// ---- Verflüssigen (Liquify, Phase 15 Schritt 3, siehe DECISIONS.md
+// ADR-0042 — Photoshop-exklusiv, Lightroom hat kein Verformungswerkzeug) --
+const LIQUIFY_RADIUS_SPEC: SliderSpec = { key: "radius", label: "Verflüssigen: Wirkbereich (% der Bildbreite)", min: 2, max: 50, fineStep: 0.5, coarseStep: 5, neutral: 15 };
+const LIQUIFY_STRENGTH_SPEC: SliderSpec = { key: "strength", label: "Verflüssigen: Intensität (%)", min: 1, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 };
+
 // ---- Mehrfachbelichtung/Layer-Compositing — Phase 14 Schritt 3, siehe
 // DECISIONS.md ADR-0041 (Lightroom Classic hat "keine klassischen
 // Ebenen-Kompositionsfähigkeiten wie Photoshop") --------------------------
@@ -83,6 +92,8 @@ const COMPOSITE_OPACITY_SPEC: SliderSpec = { key: "opacity", label: "Deckkraft (
 const COMPOSITE_SCALE_SPEC: SliderSpec = { key: "scale", label: "Skalierung (%)", min: 10, max: 300, fineStep: 1, coarseStep: 10, neutral: 100 };
 const COMPOSITE_OFFSET_X_SPEC: SliderSpec = { key: "offset_x", label: "Position X (%)", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 };
 const COMPOSITE_OFFSET_Y_SPEC: SliderSpec = { key: "offset_y", label: "Position Y (%)", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 };
+const COMPOSITE_BLEND_IF_SHADOW_SPEC: SliderSpec = { key: "blend_if_shadow_cutoff", label: "Blend-If Schatten (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 0 };
+const COMPOSITE_BLEND_IF_HIGHLIGHT_SPEC: SliderSpec = { key: "blend_if_highlight_cutoff", label: "Blend-If Lichter (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 100 };
 
 // ---- Node-Editor (Phase 9 Schritt 7, siehe DECISIONS.md ADR-0035) ---------
 //
@@ -112,13 +123,23 @@ const STAGE_ANCHOR_IDS: Record<keyof StageEnabled, string> = {
   composite: "stage-composite",
   virtual_aperture: "stage-virtual_aperture",
   style_transfer: "stage-style_transfer",
+  skin_smoothing: "stage-skin_smoothing",
   sky_replace: "stage-sky_replace",
+  lut_filter: "stage-lut_filter",
+  liquify: "stage-liquify",
   geometry: "stage-geometry",
 };
 
 function openStageAnchor(key: keyof StageEnabled): void {
   document.getElementById(STAGE_ANCHOR_IDS[key])?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
+
+const LIQUIFY_MODE_OPTIONS: ReadonlyArray<{ value: LiquifyMode; label: string }> = [
+  { value: "Push", label: "Schieben" },
+  { value: "Twirl", label: "Verwirbeln" },
+  { value: "Pucker", label: "Stauchen" },
+  { value: "Bloat", label: "Aufblähen" },
+];
 
 const REPAIR_MODE_OPTIONS: ReadonlyArray<{ value: RepairMode; label: string }> = [
   { value: "Clone", label: "Klonen" },
@@ -297,6 +318,7 @@ export function DevelopPanel() {
   const setLensCorrectionCustomDistortionK1 = useAppStore((s) => s.setLensCorrectionCustomDistortionK1);
   const setLensCalibrationDialogOpen = useAppStore((s) => s.setLensCalibrationDialogOpen);
   const setCanvasExtendDialogOpen = useAppStore((s) => s.setCanvasExtendDialogOpen);
+  const setContentAwareScaleDialogOpen = useAppStore((s) => s.setContentAwareScaleDialogOpen);
   const setLensCorrectionAutoCa = useAppStore((s) => s.setLensCorrectionAutoCa);
   const setLensCorrectionUprightMode = useAppStore((s) => s.setLensCorrectionUprightMode);
   const runUprightAutoDetect = useAppStore((s) => s.runUprightAutoDetect);
@@ -314,6 +336,19 @@ export function DevelopPanel() {
   const repairStrokes = useAppStore((s) => s.developEdl.repair);
   const repairActive = useAppStore((s) => s.repairActive);
   const toggleRepairActive = useAppStore((s) => s.toggleRepairActive);
+  const contentAwareMoveActive = useAppStore((s) => s.contentAwareMoveActive);
+  const toggleContentAwareMoveTool = useAppStore((s) => s.toggleContentAwareMoveTool);
+  const contentAwareMoveRect = useAppStore((s) => s.contentAwareMoveRect);
+  const contentAwareMoveLoading = useAppStore((s) => s.contentAwareMoveLoading);
+  const liquifyActive = useAppStore((s) => s.liquifyActive);
+  const toggleLiquifyActive = useAppStore((s) => s.toggleLiquifyActive);
+  const liquifyDraftMode = useAppStore((s) => s.liquifyDraftMode);
+  const setLiquifyDraftMode = useAppStore((s) => s.setLiquifyDraftMode);
+  const liquifyDraftRadius = useAppStore((s) => s.liquifyDraftRadius);
+  const liquifyDraftStrength = useAppStore((s) => s.liquifyDraftStrength);
+  const setLiquifyDraftField = useAppStore((s) => s.setLiquifyDraftField);
+  const liquifyStrokes = useAppStore((s) => s.developEdl.liquify_strokes);
+  const removeLiquifyStroke = useAppStore((s) => s.removeLiquifyStroke);
   const repairDraftMode = useAppStore((s) => s.repairDraftMode);
   const setRepairDraftMode = useAppStore((s) => s.setRepairDraftMode);
   const repairDraftLayer = useAppStore((s) => s.repairDraftLayer);
@@ -1423,6 +1458,18 @@ export function DevelopPanel() {
                     onChange={(value) => setCompositeLayerField(index, "offset_y", value / 100)}
                     onCommit={() => void commitDevelopEdit()}
                   />
+                  <DevelopSlider
+                    spec={COMPOSITE_BLEND_IF_SHADOW_SPEC}
+                    value={layer.blend_if_shadow_cutoff * 100}
+                    onChange={(value) => setCompositeLayerField(index, "blend_if_shadow_cutoff", value / 100)}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
+                  <DevelopSlider
+                    spec={COMPOSITE_BLEND_IF_HIGHLIGHT_SPEC}
+                    value={layer.blend_if_highlight_cutoff * 100}
+                    onChange={(value) => setCompositeLayerField(index, "blend_if_highlight_cutoff", value / 100)}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
                 </li>
               ))}
             </ul>
@@ -1447,9 +1494,25 @@ export function DevelopPanel() {
             <StyleTransferPanel />
           </fieldset>
 
+          {/* Photoshop-Funktion: Automatisches Hautglätten (Phase 15
+              Schritt 5, ADR-0042) — läuft nach `style_transfer`, vor
+              `sky_replace` (siehe `stages::skin_smoothing`s Moduldoku). */}
+          <fieldset id="stage-skin_smoothing" className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Hautglätten</legend>
+            <SkinSmoothingPanel />
+          </fieldset>
+
           <fieldset id="stage-sky_replace" className="flex flex-col gap-2">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Himmelsaustausch</legend>
             <SkyReplacePanel />
+          </fieldset>
+
+          {/* Filter-/LUT-Bibliothek (Phase 16 Schritt 1, ADR-0043) — läuft
+              nach `sky_replace`, vor `liquify` (siehe `stages::
+              lut_filter`s Moduldoku). */}
+          <fieldset id="stage-lut_filter" className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Filter</legend>
+            <LutFilterPanel />
           </fieldset>
 
           <fieldset id="stage-geometry" className="flex flex-col gap-3">
@@ -1519,6 +1582,18 @@ export function DevelopPanel() {
             >
               Leinwand erweitern (KI)…
             </button>
+
+            {/* Photoshop-Funktion: Content-Aware Scale / Seam Carving
+                (Phase 15 Schritt 4, ADR-0042) — klassischer Algorithmus,
+                kein Modell-Download nötig. */}
+            <button
+              type="button"
+              onClick={() => setContentAwareScaleDialogOpen(true)}
+              title="Breite/Höhe unabhängig ändern, ohne wichtige Bildinhalte zu verzerren (Phase 15 Schritt 4, siehe DECISIONS.md ADR-0042)"
+              className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:border-accent"
+            >
+              Inhaltssensitiv skalieren…
+            </button>
           </fieldset>
 
           <fieldset id="stage-repair" className="flex flex-col gap-3">
@@ -1550,6 +1625,29 @@ export function DevelopPanel() {
             >
               Reparatur-Pinsel {repairActive ? "(aktiv)" : ""}
             </button>
+
+            {/* Photoshop-Funktion: Content-Aware Move (Phase 15 Schritt 1,
+                ADR-0042) — nutzt dieselbe LaMa-Session wie das
+                KI-Ausfüllen oben, aber als eigenständiges Werkzeug (kein
+                `RepairMode`, siehe `content_aware_move`s Moduldoku). */}
+            <button
+              type="button"
+              aria-pressed={contentAwareMoveActive}
+              onClick={toggleContentAwareMoveTool}
+              disabled={!aiSettings?.inpainting_model_path}
+              title={!aiSettings?.inpainting_model_path ? "Braucht das KI-Ausfüllen-Modell (siehe oben)" : undefined}
+              className={`rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${contentAwareMoveActive ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
+            >
+              Objekt verschieben (Content-Aware Move) {contentAwareMoveActive ? "(aktiv)" : ""}
+            </button>
+            {contentAwareMoveActive && (
+              <p className="text-xs text-text-muted">
+                {contentAwareMoveRect
+                  ? "Auswahl an die Zielposition ziehen und loslassen."
+                  : "Rechteck um das zu verschiebende Objekt aufziehen."}
+                {contentAwareMoveLoading && " Berechnet…"}
+              </p>
+            )}
 
             {repairActive && (
               <p className="text-xs text-text-muted">
@@ -1734,6 +1832,66 @@ export function DevelopPanel() {
             )}
           </fieldset>
 
+          {/* Photoshop-Funktion: Verflüssigen (Liquify, Phase 15 Schritt 3,
+              ADR-0042) — Lightroom hat kein Verformungswerkzeug. Rein
+              deterministische CPU-Verzerrung, kein separates „Anwenden"
+              nötig (siehe `stages::liquify`s Moduldoku, `LiquifyOverlay`). */}
+          <fieldset id="stage-liquify" className="flex flex-col gap-3">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Verflüssigen</legend>
+
+            <button
+              type="button"
+              aria-pressed={liquifyActive}
+              onClick={toggleLiquifyActive}
+              className={`rounded border px-2 py-1 text-xs ${liquifyActive ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
+            >
+              Verflüssigen-Pinsel {liquifyActive ? "(aktiv)" : ""}
+            </button>
+            {liquifyActive && <p className="text-xs text-text-muted">Strich im Bild ziehen, um den gewählten Verformungsmodus anzuwenden.</p>}
+
+            <div className="flex gap-1">
+              {LIQUIFY_MODE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={liquifyDraftMode === option.value}
+                  onClick={() => setLiquifyDraftMode(option.value)}
+                  className={`flex-1 rounded border px-2 py-1 text-xs ${liquifyDraftMode === option.value ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            <DevelopSlider
+              spec={LIQUIFY_RADIUS_SPEC}
+              value={liquifyDraftRadius * 100}
+              onChange={(value) => setLiquifyDraftField("radius", value / 100)}
+              onCommit={() => {}}
+            />
+            <DevelopSlider
+              spec={LIQUIFY_STRENGTH_SPEC}
+              value={liquifyDraftStrength * 100}
+              onChange={(value) => setLiquifyDraftField("strength", value / 100)}
+              onCommit={() => {}}
+            />
+
+            {liquifyStrokes.length > 0 && (
+              <ul className="flex flex-col gap-1 text-xs text-text-secondary">
+                {liquifyStrokes.map((stroke, index) => (
+                  <li key={index} className="flex items-center justify-between rounded border border-border px-2 py-1">
+                    <span>
+                      {index + 1}. {LIQUIFY_MODE_OPTIONS.find((option) => option.value === stroke.mode)?.label ?? stroke.mode}
+                    </span>
+                    <button type="button" onClick={() => removeLiquifyStroke(index)} className="text-danger underline">
+                      Entfernen
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </fieldset>
+
           <fieldset className="flex flex-col gap-2">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Entrauschung &amp; Hochskalierung</legend>
             <p className="text-xs text-text-muted">Klassische Algorithmen (Bilateral-Filter, kantengerichtete Interpolation), keine Modellinferenz — schreiben eine neue Datei neben dem Original, ändern die Bearbeitung nicht.</p>
@@ -1780,6 +1938,7 @@ export function DevelopPanel() {
     <SavePresetDialog open={savePresetOpen} onClose={() => setSavePresetOpen(false)} />
     <LensCalibrationDialog />
     <CanvasExtendDialog />
+    <ContentAwareScaleDialog />
     </>
   );
 }

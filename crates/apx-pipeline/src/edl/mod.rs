@@ -22,7 +22,9 @@ pub use v3::{
     AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, BrushStroke, Mask, MaskAdjustments,
     MaskCombine, MaskComponent, MaskGeometry, MaskGroup, MaskPoint, OverlayColor, Treatment,
 };
-pub use v4::{CompositeLayer, CompositeLayerSource, EdlV4, StageEnabled};
+pub use v4::{
+    CompositeLayer, CompositeLayerSource, EdlV4, LutFilterAdjustment, LutFilterData, StageEnabled,
+};
 
 /// Die aktuelle EDL-Schema-Version — `EdlV4` (siehe `v4.rs`). Version 1
 /// (`EdlV1`), Version 2 (`EdlV2`) und Version 3 (`EdlV3`) bleiben für

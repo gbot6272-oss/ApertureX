@@ -118,6 +118,27 @@ diese Tabelle korrekt.
 | MiDaS v2.1 small (`isl-org/MiDaS`) | MIT | KI-Tiefenschärfe-Simulator (Schritt 8) | ONNX-Release-Asset, Opt-in-Download, SHA-256-geprüft |
 | `fast_neural_style` (`onnx/models`, 5 Stile) | MIT | KI-Stiltransfer (Schritt 9) | Opt-in-Download je Stil, SHA-256-geprüft |
 
+## Rust — Phase 15 (siehe `DECISIONS.md` ADR-0042)
+
+Keine neue Abhängigkeit — alle fünf Funktionen bauen auf bereits vorhandenen
+Crates/Modellen (siehe obige Tabellen) auf. Seam Carving (Schritt 4) wurde
+bewusst selbst implementiert statt das einzige Treffer-Crate `seamcarving`
+(crates.io) einzubinden: LGPL-3.0-or-later, ein Bruch mit der durchgehend
+permissiven Linie jeder bisherigen Abhängigkeit (siehe ADR-0042).
+
+## Rust — Phase 16 (siehe `DECISIONS.md` ADR-0043)
+
+Keine neue Abhängigkeit — die LUT-/Filter-Engine (Schritte 1–3) ist ein
+selbst implementierter `.cube`-Parser + trilineare Interpolation
+(kein Drittanbieter-Crate, siehe ADR-0043-Recherche zur uneinheitlichen
+Lizenzlage freier LUT-Pakete), die fünf Starter-Filter (Schritt 2) sind
+selbst erstellte parametrische Looks. Die Video-Bearbeitung (Schritte
+4–10) folgt durchgehend ADR-0034s bestehender Linie (System-`ffmpeg`/
+`ffprobe` per Subprozess, kein Bündeln, keine neue Rust-Video-
+Abhängigkeit) und nutzt für die Ähnliche-Videos-Suche (Schritt 10)
+denselben bereits vorhandenen `image_hasher` wie die Foto-
+Duplikaterkennung (Phase 9).
+
 ## Frontend — geplant für Phase 1
 
 | Paket | Lizenz | Zweck | Hinweis |

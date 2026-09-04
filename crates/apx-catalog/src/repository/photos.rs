@@ -17,7 +17,8 @@ pub(crate) const SELECT_COLUMNS: &str =
      photos.focal_length, photos.captured_at, photos.gps_lat, photos.gps_lon, \
      photos.imported_at, photos.missing, photos.rating, photos.flag, photos.color_label, \
      photos.source_photo_id, photos.title, photos.caption, photos.copyright, photos.creator, \
-     photos.custom_metadata_json";
+     photos.custom_metadata_json, photos.media_kind, photos.duration_ms, photos.video_codec, \
+     photos.has_audio, photos.frame_rate";
 
 #[allow(clippy::type_complexity)]
 pub(crate) struct PhotoRow {
@@ -51,6 +52,11 @@ pub(crate) struct PhotoRow {
     copyright: Option<String>,
     creator: Option<String>,
     custom_metadata_json: String,
+    media_kind: String,
+    duration_ms: Option<i64>,
+    video_codec: Option<String>,
+    has_audio: Option<i64>,
+    frame_rate: Option<f64>,
 }
 
 pub(crate) fn row_to_raw(row: &rusqlite::Row) -> rusqlite::Result<PhotoRow> {
@@ -85,11 +91,21 @@ pub(crate) fn row_to_raw(row: &rusqlite::Row) -> rusqlite::Result<PhotoRow> {
         copyright: row.get(27)?,
         creator: row.get(28)?,
         custom_metadata_json: row.get(29)?,
+        media_kind: row.get(30)?,
+        duration_ms: row.get(31)?,
+        video_codec: row.get(32)?,
+        has_audio: row.get(33)?,
+        frame_rate: row.get(34)?,
     })
 }
 
 pub(crate) fn raw_to_photo(raw: PhotoRow) -> Result<Photo> {
     Ok(Photo {
+        media_kind: raw.media_kind,
+        duration_ms: raw.duration_ms,
+        video_codec: raw.video_codec,
+        has_audio: raw.has_audio.map(|v| v != 0),
+        frame_rate: raw.frame_rate.map(|v| v as f32),
         id: raw.id.parse()?,
         folder_id: raw.folder_id.parse()?,
         filename: raw.filename,
@@ -346,8 +362,9 @@ pub(crate) fn create_virtual_copy(
             id, folder_id, filename, file_size, file_mtime, content_hash, width, height,
             orientation, camera_make, camera_model, lens, iso, shutter, aperture, focal_length,
             captured_at, gps_lat, gps_lon, imported_at, missing, rating, flag, color_label,
-            source_photo_id
-        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,0,?21,?22,?23,?24)",
+            source_photo_id, media_kind, duration_ms, video_codec, has_audio, frame_rate
+        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,0,?21,?22,?23,?24,
+                  ?25,?26,?27,?28,?29)",
         params![
             id.to_string(),
             source.folder_id.to_string(),
@@ -373,6 +390,11 @@ pub(crate) fn create_virtual_copy(
             source.flag as i64,
             source.color_label,
             source_id.to_string(),
+            source.media_kind,
+            source.duration_ms,
+            source.video_codec,
+            source.has_audio.map(|v| v as i64),
+            source.frame_rate.map(|v| v as f64),
         ],
     )
     .map_err(map_sqlite_err)?;
@@ -522,8 +544,10 @@ fn insert_row(
         "INSERT INTO photos (
             id, folder_id, filename, file_size, file_mtime, content_hash, width, height,
             orientation, camera_make, camera_model, lens, iso, shutter, aperture, focal_length,
-            captured_at, gps_lat, gps_lon, imported_at, missing
-        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,0)",
+            captured_at, gps_lat, gps_lon, imported_at, missing,
+            media_kind, duration_ms, video_codec, has_audio, frame_rate
+        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,0,
+                  ?21,?22,?23,?24,?25)",
         params![
             id.to_string(),
             p.folder_id.to_string(),
@@ -545,6 +569,11 @@ fn insert_row(
             p.gps_lat,
             p.gps_lon,
             to_unix(imported_at),
+            p.media_kind,
+            p.duration_ms,
+            p.video_codec,
+            p.has_audio.map(|v| v as i64),
+            p.frame_rate.map(|v| v as f64),
         ],
     )
     .map_err(map_sqlite_err)?;
@@ -557,7 +586,9 @@ fn update_row(conn: &Connection, id: PhotoId, p: &NewPhoto) -> Result<()> {
             file_size = ?2, file_mtime = ?3, content_hash = ?4, width = ?5, height = ?6,
             orientation = ?7, camera_make = ?8, camera_model = ?9, lens = ?10, iso = ?11,
             shutter = ?12, aperture = ?13, focal_length = ?14, captured_at = ?15,
-            gps_lat = ?16, gps_lon = ?17, missing = 0
+            gps_lat = ?16, gps_lon = ?17, missing = 0,
+            media_kind = ?18, duration_ms = ?19, video_codec = ?20, has_audio = ?21,
+            frame_rate = ?22
          WHERE id = ?1",
         params![
             id.to_string(),
@@ -577,6 +608,11 @@ fn update_row(conn: &Connection, id: PhotoId, p: &NewPhoto) -> Result<()> {
             to_unix_opt(p.captured_at),
             p.gps_lat,
             p.gps_lon,
+            p.media_kind,
+            p.duration_ms,
+            p.video_codec,
+            p.has_audio.map(|v| v as i64),
+            p.frame_rate.map(|v| v as f64),
         ],
     )
     .map_err(map_sqlite_err)?;
@@ -601,6 +637,11 @@ mod tests {
 
     fn sample_photo(folder_id: FolderId, size: u64, mtime: OffsetDateTime) -> NewPhoto {
         NewPhoto {
+            media_kind: "photo".to_string(),
+            duration_ms: None,
+            video_codec: None,
+            has_audio: None,
+            frame_rate: None,
             folder_id,
             filename: "IMG_0001.CR2".to_string(),
             file_size: size,

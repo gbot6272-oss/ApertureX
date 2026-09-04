@@ -594,6 +594,52 @@ export const STYLE_TRANSFER_SLIDER_SPECS: readonly SliderSpec[] = [
   { key: "amount", label: "Stiltransfer: Betrag", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
 ];
 
+/** Automatisches Hautglätten (Phase 15 Schritt 5) — dieselbe `0..=100`-
+ * UI-Skala für einen intern `0.0..=1.0`-Bruchteil wie
+ * `STYLE_TRANSFER_SLIDER_SPECS` (siehe `SkinSmoothingAdjustment.amount`). */
+export const SKIN_SMOOTHING_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "amount", label: "Hautglätten: Deckkraft", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+];
+
+/** Filter-/LUT-Bibliothek (Phase 16 Schritt 1) — dieselbe `0..=100`-
+ * UI-Skala für einen intern `0.0..=1.0`-Bruchteil wie
+ * `SKIN_SMOOTHING_SLIDER_SPECS` (siehe `LutFilterAdjustment.strength`).
+ * `neutral: 100` (nicht `0`): ein gerade importierter Filter soll ohne
+ * weiteren Regler-Kontakt sofort voll sichtbar sein — dieselbe
+ * Erwartung wie bei Preset-Anwendung (`PRESET_STRENGTH_SPEC.neutral`). */
+export const LUT_FILTER_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "strength", label: "Filter: Deckkraft", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 100 },
+];
+
+/** Filter-Pinsel (Phase 16 Schritt 3) — Einstellungen für den *nächsten*
+ * Strich, dieselbe `0..=100`-UI-Skala für einen intern `0.0..=1.0`-
+ * Bruchteil wie `LUT_FILTER_SLIDER_SPECS`. Eigene, von `LIQUIFY_*_SPEC`
+ * verschiedene Wortwahl ("Umkreis"/"Ausmaß" statt "Wirkbereich"/
+ * "Intensität") — beide Regler landen sonst in derselben `DevelopSlider`-
+ * Zahlenfeld-Namensfläche und ein Playwright-Locator, der nach dem
+ * bloßen Suffix sucht, träfe beide (Substring-Match, kein exakter
+ * Vergleich) — derselbe Grund, aus dem `LIQUIFY_RADIUS_SPEC`/
+ * `LIQUIFY_STRENGTH_SPEC` schon eigene Wortwahl statt "Radius (%
+ * der Bildbreite)"/"Stärke (%)" tragen. */
+export const LUT_FILTER_BRUSH_RADIUS_SPEC: SliderSpec = {
+  key: "radius",
+  label: "Filter-Pinsel: Umkreis (% der Bildbreite)",
+  min: 2,
+  max: 50,
+  fineStep: 0.5,
+  coarseStep: 5,
+  neutral: 15,
+};
+export const LUT_FILTER_BRUSH_STRENGTH_SPEC: SliderSpec = {
+  key: "strength",
+  label: "Filter-Pinsel: Ausmaß (%)",
+  min: 1,
+  max: 100,
+  fineStep: 1,
+  coarseStep: 10,
+  neutral: 100,
+};
+
 // ---- Kalibrierung -----------------------------------------------------------
 
 export type ProcessVersion = "V1";
@@ -714,6 +760,28 @@ export interface CanvasExtension {
   patch: CanvasExtensionPatch | null;
 }
 
+/** Vorab von `content_aware_scale` berechnetes, seam-carvtes Ergebnis —
+ * wird bei jedem Rendern nur noch auf die tatsächliche Zielgröße
+ * hoch-/herunterskaliert (dasselbe Muster wie `CanvasExtensionPatch`). */
+export interface ContentAwareScalePatch {
+  bitmap_width: number;
+  bitmap_height: number;
+  pixels: number[];
+}
+
+/** Inhaltssensitives Skalieren (Content-Aware Scale / Seam Carving,
+ * Phase 15 Schritt 4, siehe `DECISIONS.md` ADR-0042 — Photoshop-
+ * exklusiv seit CS4, Lightroom kann nur gleichmäßig skalieren/
+ * zuschneiden). `width_fraction`/`height_fraction` sind Bruchteile der
+ * *aktuellen* Bildbreite/-höhe (`0.0..`, dieselbe Konvention wie
+ * `CanvasExtension`s Ränder). Ohne `patch` (Zielgröße gewählt, aber
+ * „Berechnen" noch nicht ausgelöst) bleibt die Stufe ein No-Op. */
+export interface ContentAwareScale {
+  width_fraction: number;
+  height_fraction: number;
+  patch: ContentAwareScalePatch | null;
+}
+
 export interface GeometryAdjustment {
   crop: CropRect;
   /** `null` = freie Seitenverhältniswahl, sonst Breite/Höhe-Verhältnis. */
@@ -725,6 +793,9 @@ export interface GeometryAdjustment {
   /** `null`, solange keine Leinwand-Erweiterung gewählt wurde (Phase 14
    * Schritt 1) — additiv, siehe `CanvasExtension`s Doku. */
   canvas_extension: CanvasExtension | null;
+  /** `null`, solange kein inhaltssensitives Skalieren gewählt wurde
+   * (Phase 15 Schritt 4) — additiv, siehe `ContentAwareScale`s Doku. */
+  content_aware_scale: ContentAwareScale | null;
 }
 
 export const NEUTRAL_GEOMETRY: GeometryAdjustment = {
@@ -734,6 +805,7 @@ export const NEUTRAL_GEOMETRY: GeometryAdjustment = {
   overlay: "None",
   auto_horizon: false,
   canvas_extension: null,
+  content_aware_scale: null,
 };
 
 export const ASPECT_RATIO_PRESETS: ReadonlyArray<{ value: number | null; label: string }> = [
@@ -812,6 +884,28 @@ export interface RepairStroke {
   ai_fill?: AiFillPatch;
   /** Frequenztrennung (Phase 14 Schritt 2) — siehe `RepairLayer`s Doku. */
   layer: RepairLayer;
+}
+
+// ---- Verflüssigen (Liquify, Phase 15 Schritt 3) ----------------------------
+
+/** Verformungsmodus (Photoshop-Namensgebung) — siehe `stages::liquify`s
+ * Moduldoku für die genaue Wirkung jedes Modus. */
+export type LiquifyMode = "Push" | "Twirl" | "Pucker" | "Bloat";
+
+export interface LiquifyPoint {
+  x: number;
+  y: number;
+}
+
+/** Ein einzelner Verflüssigen-Pinselzug (Phase 15 Schritt 3, siehe
+ * `DECISIONS.md` ADR-0042 — Photoshop-exklusiv, Lightroom hat kein
+ * Verformungswerkzeug). `radius`/`strength` sind normiert wie
+ * `RepairStroke.radius` (Bruchteil der Bildbreite bzw. 0..1). */
+export interface LiquifyStroke {
+  center_path: LiquifyPoint[];
+  radius: number;
+  strength: number;
+  mode: LiquifyMode;
 }
 
 // ---- Masken (Phase 6, siehe DECISIONS.md ADR-0032) --------------------------
@@ -1181,7 +1275,20 @@ export interface StageEnabled {
    * `composite`, vor `geometry`, im fertig entwickelten sRGB-RGBA8-Bild
    * (siehe `stages::style_transfer`s Moduldoku). */
   style_transfer: boolean;
+  /** Automatisches Hautglätten (Phase 15 Schritt 5) — läuft nach
+   * `style_transfer`, vor `sky_replace` (siehe `stages::
+   * skin_smoothing`s Moduldoku). */
+  skin_smoothing: boolean;
   sky_replace: boolean;
+  /** Filter-/LUT-Bibliothek (Phase 16 Schritt 1) — läuft nach
+   * `sky_replace`, vor `liquify`: als letzte Farb-Stufe vor den rein
+   * geometrischen/verformenden Stufen (siehe `stages::lut_filter`s
+   * Moduldoku). */
+  lut_filter: boolean;
+  /** Verflüssigen (Phase 15 Schritt 3) — läuft nach `sky_replace`, vor
+   * `geometry`, im fertig entwickelten sRGB-RGBA8-Bild (siehe
+   * `stages::liquify`s Moduldoku). */
+  liquify: boolean;
   geometry: boolean;
 }
 
@@ -1201,7 +1308,10 @@ export const NEUTRAL_STAGE_ENABLED: StageEnabled = {
   composite: true,
   virtual_aperture: true,
   style_transfer: true,
+  skin_smoothing: true,
   sky_replace: true,
+  lut_filter: true,
+  liquify: true,
   geometry: true,
 };
 
@@ -1232,6 +1342,11 @@ export interface CompositeLayer {
   offset_x: number;
   offset_y: number;
   source: CompositeLayerSource;
+  /** Blend-If (Phase 15 Schritt 2, Photoshop-exklusiv) — Luminanz-
+   * Schwellenwerte des Basis-Pixels, unterhalb/oberhalb derer die Ebene
+   * weich ausgeblendet wird. Neutralwerte `0.0`/`1.0` sind ein No-Op. */
+  blend_if_shadow_cutoff: number;
+  blend_if_highlight_cutoff: number;
 }
 
 /** Eine einmalig berechnete Tiefenkarte (Phase 14 Schritt 8, MiDaS v2.1
@@ -1282,9 +1397,10 @@ export const NEUTRAL_VIRTUAL_APERTURE: VirtualApertureAdjustment = {
 export interface StyleTransferPatch {
   bitmap_width: number;
   bitmap_height: number;
-  /** Auf der Rust-Seite `Vec<u8>` (`pixels`), hier als base64-String
-   * transportiert — siehe `StyleTransferPatchDto` in `lib/tauri.ts`. */
-  pixels: string;
+  /** Spiegelt Rusts `Vec<u8>` (siehe `CompositeLayerSource`s Doku für
+   * dieselbe Konvention) — `StyleTransferPatchDto.pixels_base64` (`lib/
+   * tauri.ts`) wird beim Übernehmen per `base64ToByteArray` decodiert. */
+  pixels: number[];
 }
 
 /** KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — spiegelt
@@ -1349,7 +1465,10 @@ export const STAGE_NODE_SPECS: readonly StageNodeSpec[] = [
   { key: "composite", label: "Compositing" },
   { key: "virtual_aperture", label: "Virtuelle Blende" },
   { key: "style_transfer", label: "Stiltransfer" },
+  { key: "skin_smoothing", label: "Hautglätten" },
   { key: "sky_replace", label: "Himmelsaustausch" },
+  { key: "lut_filter", label: "Filter" },
+  { key: "liquify", label: "Verflüssigen" },
   { key: "geometry", label: "Geometrie" },
 ] as const;
 
@@ -1375,7 +1494,10 @@ export interface EdlPayload {
   composite_layers: CompositeLayer[];
   virtual_aperture: VirtualApertureAdjustment;
   style_transfer: StyleTransferAdjustment;
+  skin_smoothing: SkinSmoothingAdjustment;
   sky_replace: SkyReplacePatch | null;
+  lut_filter: LutFilterAdjustment;
+  liquify_strokes: LiquifyStroke[];
 }
 
 export function neutralEdlPayload(): EdlPayload {
@@ -1399,7 +1521,10 @@ export function neutralEdlPayload(): EdlPayload {
     composite_layers: [],
     virtual_aperture: NEUTRAL_VIRTUAL_APERTURE,
     style_transfer: NEUTRAL_STYLE_TRANSFER,
+    skin_smoothing: NEUTRAL_SKIN_SMOOTHING,
     sky_replace: null,
+    lut_filter: NEUTRAL_LUT_FILTER,
+    liquify_strokes: [],
   };
 }
 
@@ -1555,5 +1680,92 @@ export function writeBasicField(basic: BasicAdjustments, key: string, value: num
 export interface SkyReplacePatch {
   bitmap_width: number;
   bitmap_height: number;
-  pixels: string;
+  /** Spiegelt Rusts `Vec<u8>` — `SkyReplacePatchDto.pixels_base64`
+   * (`lib/tauri.ts`) wird beim Übernehmen per `base64ToByteArray`
+   * decodiert (dieselbe Konvention wie `StyleTransferPatch::pixels`). */
+  pixels: number[];
 }
+
+/** Einmalig berechnetes Hautglätten-Ergebnis (Phase 15 Schritt 5, siehe
+ * `DECISIONS.md` ADR-0042) — dasselbe „einmal per Command auflösen, bei
+ * jedem Rendern nur noch skalieren"-Muster wie `StyleTransferPatch`.
+ * `pixels` ist interleaved RGB (`0..=255`), spiegelt Rusts `Vec<u8>`
+ * (siehe `CompositeLayerSource`s Doku für dieselbe Konvention). */
+export interface SkinSmoothingPatch {
+  bitmap_width: number;
+  bitmap_height: number;
+  pixels: number[];
+}
+
+/** Automatisches Hautglätten (Phase 15 Schritt 5) — spiegelt
+ * `apx_pipeline::edl::v4::SkinSmoothingAdjustment`. `amount`:
+ * `0.0..=1.0`, blendet linear zwischen unverändertem Bild (`0.0`) und
+ * vollem Glättungsergebnis (`1.0`). Ohne berechnetes Ergebnis
+ * (`patch === null`) bleibt die Stufe wirkungslos, selbst bei
+ * `amount > 0` (siehe `skin_smoothing.rs`s Moduldoku). */
+export interface SkinSmoothingAdjustment {
+  amount: number;
+  patch: SkinSmoothingPatch | null;
+}
+
+export const NEUTRAL_SKIN_SMOOTHING: SkinSmoothingAdjustment = {
+  amount: 0,
+  patch: null,
+};
+
+/** Ein einmalig geparstes 3D-`.cube`-LUT-Raster (Phase 16 Schritt 1,
+ * siehe `DECISIONS.md` ADR-0043) — spiegelt Rusts
+ * `apx_pipeline::edl::v4::LutFilterData`. Anders als `SkinSmoothingPatch`/
+ * `SkyReplacePatch` (je Foto berechnete Bilddaten) sind die vollen
+ * Rasterdaten hier fotounabhängig — derselbe `.cube`-Inhalt lässt sich
+ * unverändert auf jedes andere Foto anwenden (siehe `presets.ts`, wo
+ * `lut_filter` deshalb bewusst NICHT von `PresetSectionKey` ausgeschlossen
+ * ist). */
+export interface LutFilterData {
+  name: string;
+  size: number;
+  /** `size^3 * 3` Zahlen, r am schnellsten variierend — siehe
+   * `apx_pipeline::lut_cube::ParsedLut::table`s Moduldoku für die genaue
+   * Indizierung. */
+  table: number[];
+  domain_min: [number, number, number];
+  domain_max: [number, number, number];
+}
+
+/** Ein Punkt im gemalten Pfad eines Filter-Pinselstrichs (Phase 16
+ * Schritt 3) — normierte Bildkoordinaten (0..1), dieselbe Konvention wie
+ * `LiquifyPoint`. */
+export interface LutFilterPoint {
+  x: number;
+  y: number;
+}
+
+/** Ein einzelner Filter-Pinselstrich (Phase 16 Schritt 3, siehe
+ * `DECISIONS.md` ADR-0043) — spiegelt Rusts `LutFilterStroke`. Gleiche
+ * Form wie `LiquifyStroke` (`center_path`/`radius`/`strength`, normiert
+ * wie dort). */
+export interface LutFilterStroke {
+  center_path: LutFilterPoint[];
+  radius: number;
+  strength: number;
+}
+
+/** Filter-/LUT-Anwendung (Phase 16 Schritt 1) — spiegelt
+ * `apx_pipeline::edl::v4::LutFilterAdjustment`. `strength`: `0.0..=1.0`,
+ * blendet linear zwischen unverändertem Bild (`0.0`) und vollem
+ * LUT-Ergebnis (`1.0`). Ohne gewählten Filter (`lut === null`) bleibt die
+ * Stufe wirkungslos, selbst bei `strength > 0` (siehe `stages::
+ * lut_filter`s Moduldoku). `strokes` (Schritt 3): leer heißt "im ganzen
+ * Bild bei `strength`", nicht-leer beschränkt die Anwendung auf die
+ * gemalten Bereiche. */
+export interface LutFilterAdjustment {
+  strength: number;
+  lut: LutFilterData | null;
+  strokes: LutFilterStroke[];
+}
+
+export const NEUTRAL_LUT_FILTER: LutFilterAdjustment = {
+  strength: 1,
+  lut: null,
+  strokes: [],
+};

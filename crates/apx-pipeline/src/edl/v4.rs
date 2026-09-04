@@ -69,10 +69,30 @@ pub struct StageEnabled {
     /// `default_true`-Begründung wie `composite`/`virtual_aperture` oben.
     #[serde(default = "default_true")]
     pub style_transfer: bool,
+    /// Automatisches Hautglätten (Phase 15 Schritt 5) — läuft nach
+    /// `style_transfer`, vor `sky_replace` (siehe `stages::
+    /// skin_smoothing`s Moduldoku). Dieselbe `default_true`-Begründung
+    /// wie `style_transfer` oben.
+    #[serde(default = "default_true")]
+    pub skin_smoothing: bool,
     /// Himmelsaustausch (Phase 14 Schritt 10) — läuft nach `style_transfer`,
     /// vor `geometry`.
     #[serde(default = "default_true")]
     pub sky_replace: bool,
+    /// Filter-/LUT-Bibliothek (Phase 16 Schritt 1, siehe `DECISIONS.md`
+    /// ADR-0043) — läuft nach `sky_replace`, vor `liquify`: als letzte
+    /// Farb-Stufe vor den rein geometrischen/verformenden Stufen, wie ein
+    /// abschließender "Look"-Pass in professionellen Grading-Werkzeugen
+    /// (siehe `stages::lut_filter`s Moduldoku). Dieselbe
+    /// `default_true`-Begründung wie `sky_replace` oben.
+    #[serde(default = "default_true")]
+    pub lut_filter: bool,
+    /// Verflüssigen (Phase 15 Schritt 3) — läuft nach `sky_replace`, vor
+    /// `geometry`, im fertig entwickelten sRGB-RGBA8-Bild (siehe
+    /// `stages::liquify`s Moduldoku). Dieselbe `default_true`-Begründung
+    /// wie `sky_replace` oben.
+    #[serde(default = "default_true")]
+    pub liquify: bool,
     pub geometry: bool,
 }
 
@@ -99,7 +119,10 @@ impl StageEnabled {
         composite: true,
         virtual_aperture: true,
         style_transfer: true,
+        skin_smoothing: true,
         sky_replace: true,
+        lut_filter: true,
+        liquify: true,
         geometry: true,
     };
 }
@@ -150,6 +173,25 @@ pub struct CompositeLayer {
     pub offset_x: f32,
     pub offset_y: f32,
     pub source: CompositeLayerSource,
+    /// Photoshop-Funktion "Blend-If" (Phase 15 Schritt 2, siehe
+    /// `DECISIONS.md` ADR-0042) — Lightroom hat keine Tonwertbereich-
+    /// Blending-Regler. Additiv, `#[serde(default)]` liest eine
+    /// gespeicherte Ebene ohne dieses Feld als `0.0` (unverändertes
+    /// bisheriges Verhalten: keine Abblendung nach Tonwert). Luminanz der
+    /// **darunterliegenden** Ebene unterhalb dieses Werts wird weich
+    /// ausgeblendet statt hart abgeschnitten (siehe `stages::composite`s
+    /// Moduldoku für die feste Rampenbreite).
+    #[serde(default)]
+    pub blend_if_shadow_cutoff: f32,
+    /// Gegenstück für Lichter — `#[serde(default = "default_blend_if_highlight_cutoff")]`
+    /// liest eine gespeicherte Ebene ohne dieses Feld als `1.0`
+    /// (unverändertes bisheriges Verhalten).
+    #[serde(default = "default_blend_if_highlight_cutoff")]
+    pub blend_if_highlight_cutoff: f32,
+}
+
+fn default_blend_if_highlight_cutoff() -> f32 {
+    1.0
 }
 
 // ---- KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8) ----
@@ -262,6 +304,161 @@ pub struct SkyReplacePatch {
     pub pixels: Vec<u8>,
 }
 
+// ---- Automatisches Hautglätten (Phase 15 Schritt 5) ------------------------
+
+/// Einmalig vorab per `apx-app`s `smooth_skin`-Command berechnetes,
+/// bereits geglättetes Vollbild (gesichtsbewusste Frequenztrennung, siehe
+/// `DECISIONS.md` ADR-0042) — dasselbe „einmal berechnen, bei jedem
+/// Rendern nur noch skalieren"-Muster wie `StyleTransferPatch`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkinSmoothingPatch {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub pixels: Vec<u8>,
+}
+
+/// Automatisches Hautglätten (Phase 15 Schritt 5, siehe `DECISIONS.md`
+/// ADR-0042 — Lightroom hat kein automatisches, gesichtserkennungs-
+/// gestütztes Hautglätten, nur den manuellen Anpassungspinsel). Kombiniert
+/// `apx_ai::faces::detect_face_regions`/`segmentation::person_alpha` und
+/// `stages::frequency_separation::split/combine` (mit kleinerem
+/// `radius_px` als der Reparatur-Standardwert) zu einem einzigen
+/// Automatik-Befehl. `amount` (`0.0..=1.0`) blendet linear zwischen dem
+/// unveränderten Bild und dem vollen Glättungsergebnis — dieselbe
+/// Deckkraft-Konvention wie `StyleTransferAdjustment::amount`. Ohne
+/// `patch` (noch nicht berechnet) bleibt die Stufe ein No-Op.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkinSmoothingAdjustment {
+    pub amount: f32,
+    #[serde(default)]
+    pub patch: Option<SkinSmoothingPatch>,
+}
+
+impl SkinSmoothingAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        patch: None,
+    };
+}
+
+impl Default for SkinSmoothingAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+// ---- Filter-/LUT-Bibliothek (Phase 16 Schritt 1) ---------------------------
+
+/// Ein einmalig geparstes 3D-`.cube`-LUT-Raster (siehe
+/// `lut_cube::parse_cube_bytes`) — dasselbe "einmal auflösen, als Zahlen
+/// im EDL ablegen"-Muster wie `StyleTransferPatch`/`SkinSmoothingPatch`:
+/// die vollständigen Rasterdaten werden direkt hier eingebettet statt nur
+/// ein Dateipfad referenziert, damit ein Katalog portabel bleibt (kein
+/// stiller Bruch, wenn die ursprüngliche `.cube`-Datei später verschoben
+/// oder gelöscht wird). Größenordnung ist unkritisch: ein 33er-Raster
+/// sind ~432 KB, deutlich kleiner als ein `StyleTransferPatch`/
+/// `SkyReplacePatch`, die bereits ein volles Bild einbetten.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LutFilterData {
+    pub name: String,
+    pub size: u32,
+    /// `size^3 * 3` Floats, r am schnellsten variierend — siehe
+    /// `lut_cube::ParsedLut::table`s Moduldoku für die genaue Indizierung.
+    pub table: Vec<f32>,
+    pub domain_min: [f32; 3],
+    pub domain_max: [f32; 3],
+}
+
+/// Ein Punkt im gemalten Pfad eines Filter-Pinselstrichs — normierte
+/// Bildkoordinaten (0..1), dieselbe Konvention wie `LiquifyPoint`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct LutFilterPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// Ein einzelner Filter-Pinselstrich (Phase 16 Schritt 3, siehe
+/// `DECISIONS.md` ADR-0043) — punktuelle statt globaler Filter-Anwendung.
+/// Gleiche Form wie `LiquifyStroke` (`center_path`/`radius`/`strength`,
+/// normiert wie dort), bewusst **nicht** über die bestehende
+/// `Mask`/`MaskAdjustments`-Infrastruktur gelöst: Masken laufen noch im
+/// linearen Arbeitsraum (`stages::masks`s Moduldoku), ein `.cube`-LUT ist
+/// aber für gamma-kodierte, bildschirmreferenzierte Werte gedacht —
+/// dieselbe Pipeline-Position wie der globale `lut_filter`-Durchlauf ist
+/// hier wichtiger als Wiederverwendung der Masken-Struktur (siehe
+/// `stages::lut_filter`s Moduldoku für die genaue Gewichtsberechnung).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LutFilterStroke {
+    pub center_path: Vec<LutFilterPoint>,
+    pub radius: f32,
+    pub strength: f32,
+}
+
+/// Filter-/LUT-Anwendung (Phase 16 Schritt 1, siehe `DECISIONS.md`
+/// ADR-0043). `strength` (`0.0..=1.0`) blendet linear zwischen dem
+/// unveränderten Bild und dem vollen LUT-Ergebnis — dieselbe Deckkraft-
+/// Konvention wie `StyleTransferAdjustment::amount`/
+/// `SkinSmoothingAdjustment::amount`. Ohne `lut` (kein Filter gewählt)
+/// bleibt die Stufe ein No-Op. `strokes` (Schritt 3): leer heißt "im
+/// ganzen Bild bei `strength`", nicht-leer beschränkt die Anwendung auf
+/// die gemalten Bereiche (`strength` wirkt dann als globaler
+/// Gesamt-Multiplikator über den Pinsel-Ergebnissen, siehe
+/// `stages::lut_filter`s Moduldoku).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LutFilterAdjustment {
+    pub strength: f32,
+    #[serde(default)]
+    pub lut: Option<LutFilterData>,
+    #[serde(default)]
+    pub strokes: Vec<LutFilterStroke>,
+}
+
+impl LutFilterAdjustment {
+    pub const NEUTRAL: Self = Self {
+        strength: 1.0,
+        lut: None,
+        strokes: Vec::new(),
+    };
+}
+
+impl Default for LutFilterAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+// ---- Verflüssigen (Liquify, Phase 15 Schritt 3) ----------------------------
+
+/// Ein Punkt im gemalten Pfad eines Verflüssigen-Strichs — normierte
+/// Bildkoordinaten (0..1), dieselbe Konvention wie `v2::RepairPoint`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct LiquifyPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// Verformungsmodus (Photoshop-Namensgebung) — siehe `stages::liquify`s
+/// Moduldoku für die genaue Wirkung jedes Modus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LiquifyMode {
+    Push,
+    Twirl,
+    Pucker,
+    Bloat,
+}
+
+/// Ein einzelner Verflüssigen-Pinselzug (Phase 15 Schritt 3, siehe
+/// `DECISIONS.md` ADR-0042 — Photoshop-exklusiv, Lightroom hat kein
+/// Verformungswerkzeug). `radius`/`strength` sind normiert wie
+/// `v2::RepairStroke`s `radius` (Bruchteil der Bildbreite bzw. 0..1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiquifyStroke {
+    pub center_path: Vec<LiquifyPoint>,
+    pub radius: f32,
+    pub strength: f32,
+    pub mode: LiquifyMode,
+}
+
 // ---- Der vollständige EDL v4 -----------------------------------------------
 
 /// Die konkrete EDL-Struktur für Schema-Version 4 — siehe
@@ -305,9 +502,26 @@ pub struct EdlV4 {
     /// bisheriges Verhalten, kein Stiltransfer berechnet).
     #[serde(default)]
     pub style_transfer: StyleTransferAdjustment,
+    /// Automatisches Hautglätten (Phase 15 Schritt 5) — additiv,
+    /// `#[serde(default)]` liest ein gespeichertes `EdlV4` ohne dieses
+    /// Feld als `SkinSmoothingAdjustment::NEUTRAL` (unverändertes
+    /// bisheriges Verhalten, keine Glättung berechnet).
+    #[serde(default)]
+    pub skin_smoothing: SkinSmoothingAdjustment,
     /// Himmelsaustausch (Phase 14 Schritt 10) — additiv, `#[serde(default)]`.
     #[serde(default)]
     pub sky_replace: Option<SkyReplacePatch>,
+    /// Filter-/LUT-Bibliothek (Phase 16 Schritt 1) — additiv,
+    /// `#[serde(default)]` liest ein gespeichertes `EdlV4` ohne dieses
+    /// Feld als `LutFilterAdjustment::NEUTRAL` (unverändertes bisheriges
+    /// Verhalten, kein Filter gewählt).
+    #[serde(default)]
+    pub lut_filter: LutFilterAdjustment,
+    /// Verflüssigen (Phase 15 Schritt 3) — additiv, `#[serde(default)]`
+    /// liest ein gespeichertes `EdlV4` ohne dieses Feld als leere
+    /// Strichliste (unverändertes bisheriges Verhalten).
+    #[serde(default)]
+    pub liquify_strokes: Vec<LiquifyStroke>,
 }
 
 impl EdlV4 {
@@ -334,7 +548,10 @@ impl EdlV4 {
             composite_layers: Vec::new(),
             virtual_aperture: VirtualApertureAdjustment::NEUTRAL,
             style_transfer: StyleTransferAdjustment::NEUTRAL,
+            skin_smoothing: SkinSmoothingAdjustment::NEUTRAL,
             sky_replace: None,
+            lut_filter: LutFilterAdjustment::NEUTRAL,
+            liquify_strokes: Vec::new(),
         }
     }
 
@@ -364,7 +581,10 @@ impl EdlV4 {
             composite_layers: Vec::new(),
             virtual_aperture: VirtualApertureAdjustment::NEUTRAL,
             style_transfer: StyleTransferAdjustment::NEUTRAL,
+            skin_smoothing: SkinSmoothingAdjustment::NEUTRAL,
             sky_replace: None,
+            lut_filter: LutFilterAdjustment::NEUTRAL,
+            liquify_strokes: Vec::new(),
         }
     }
 }

@@ -54,3 +54,14 @@ export function developUrl(photoId: string, edlJson: string, maxEdge?: number, s
 export function musicUrl(absolutePath: string): string {
   return convertFileSrc(`music/${absolutePath}`, "apx");
 }
+
+/**
+ * Baut die URL für die Original-Videodatei eines Katalog-Assets (Phase 16
+ * Schritt 5, siehe `DECISIONS.md` ADR-0043) — anders als jede andere
+ * Route hier mit echter HTTP-Range-Unterstützung serverseitig
+ * (`protocol::mod::handle_video_request`), damit das `<video>`-Element
+ * seeken kann.
+ */
+export function videoUrl(photoId: string): string {
+  return convertFileSrc(`video/${photoId}`, "apx");
+}

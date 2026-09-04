@@ -248,6 +248,11 @@ mod tests {
                 .expect("Ordner");
         let make_photo = |filename: &str| {
             let photo = NewPhoto {
+                media_kind: "photo".to_string(),
+                duration_ms: None,
+                video_codec: None,
+                has_audio: None,
+                frame_rate: None,
                 folder_id,
                 filename: filename.to_string(),
                 file_size: 100,

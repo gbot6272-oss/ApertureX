@@ -23,7 +23,7 @@ import {
   writeBasicField,
   writeBwMixerField,
 } from "../lib/edl";
-import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairLayer, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
+import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, LiquifyMode, LiquifyPoint, LutFilterData, LutFilterPoint, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairLayer, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import { computeHarmonizeShifts } from "../lib/colorHarmony";
@@ -65,6 +65,7 @@ import type {
   PersonDto,
   PhotoDto,
   PresetDto,
+  SimilarVideoDto,
   PresetFolderDto,
   PrintLayoutOptions,
   SlideshowVideoOptions,
@@ -201,6 +202,15 @@ export function selectActivePhotos(state: AppStore): PhotoDto[] {
   // `store/index.test.ts`s `makeState`) ohne die Sortierfelder — Default
   // entspricht dem bisherigen impliziten Verhalten (siehe `lib/sortPhotos.ts`).
   return sortPhotos(rawActivePhotos(state), state.librarySortField ?? "filename", state.librarySortDirection ?? "asc");
+}
+
+/** Video als Katalog-Asset (Phase 16 Schritt 5, siehe `DECISIONS.md`
+ * ADR-0043) — `true`, wenn `photoId` in der aktuell aktiven Fotoliste als
+ * Video geführt wird. Genutzt, um das Laden des EDL-gestützten
+ * Entwickeln-Zustands beim Fotowechsel zu überspringen: `apx_raw` kann
+ * keinen Video-Container dekodieren, ein Ladeversuch würde nur scheitern. */
+function isVideoPhoto(state: AppStore, photoId: string): boolean {
+  return selectActivePhotos(state).find((p) => p.id === photoId)?.media_kind === "video";
 }
 
 /**
@@ -555,6 +565,19 @@ interface DevelopSlice {
   /** Öffnet/schließt den Leinwand-Erweiterungs-Dialog (Phase 14 Schritt 1). */
   canvasExtendDialogOpen: boolean;
   setCanvasExtendDialogOpen: (open: boolean) => void;
+  /** Öffnet/schließt den Inhaltssensitives-Skalieren-Dialog (Phase 15
+   * Schritt 4, siehe `DECISIONS.md` ADR-0042). */
+  contentAwareScaleDialogOpen: boolean;
+  setContentAwareScaleDialogOpen: (open: boolean) => void;
+  /** Berechnet das seam-carvte Ergebnis für `widthFraction`/
+   * `heightFraction` (Bruchteile der aktuellen Bildbreite/-höhe) per
+   * `apx_ai::seam_carving` und legt es als `developEdl.geometry.
+   * content_aware_scale` ab. */
+  runContentAwareScale: (widthFraction: number, heightFraction: number) => Promise<void>;
+  contentAwareScaleLoading: boolean;
+  /** Entfernt eine gewählte/berechnete Content-Aware-Scale-Anpassung
+   * wieder (zurück auf die Original-Bildgröße) und committet sofort. */
+  clearContentAwareScale: () => void;
   /** Schaltet die automatische CA-Korrektur um und committet sofort. */
   setLensCorrectionAutoCa: (value: boolean) => void;
   /** Setzt den Perspektive/Upright-Modus absolut und committet sofort. */
@@ -639,6 +662,42 @@ interface DevelopSlice {
   /** Läuft während [`runAiInpaintForStroke`] — der Index des gerade
    * berechneten Strichs, sonst `null`. */
   aiInpaintLoadingIndex: number | null;
+
+  /** Photoshop-Funktion: Content-Aware Move (Phase 15 Schritt 1, siehe
+   * `DECISIONS.md` ADR-0042) — Objekt inhaltssensitiv verschieben, ohne
+   * die Ausgangsstelle manuell auszubessern. */
+  contentAwareMoveActive: boolean;
+  toggleContentAwareMoveTool: () => void;
+  /** Der aufgezogene Quellbereich (normiert, `0.0..=1.0`) — `null`,
+   * solange noch kein Rechteck aufgezogen wurde. */
+  contentAwareMoveRect: { x: number; y: number; width: number; height: number } | null;
+  setContentAwareMoveRect: (rect: { x: number; y: number; width: number; height: number } | null) => void;
+  contentAwareMoveLoading: boolean;
+  /** Ruft `content_aware_move` mit dem aktuellen `contentAwareMoveRect`
+   * und der vom Nutzer gewählten Zielposition (`destCenterX`/
+   * `destCenterY`, normiert) auf — legt bei Erfolg einen neuen
+   * `RepairStroke` (füllt die Ausgangsstelle) und eine neue
+   * `CompositeLayer` (setzt das Objekt an die Zielposition) an, committet
+   * einmal für beide zusammen, setzt Rechteck und Werkzeug zurück. */
+  commitContentAwareMove: (destCenterX: number, destCenterY: number) => Promise<void>;
+
+  /** Photoshop-Funktion: Verflüssigen (Liquify, Phase 15 Schritt 3, siehe
+   * `DECISIONS.md` ADR-0042) — Lightroom hat kein Verformungswerkzeug. Ein
+   * Ziehvorgang malt einen Strich, sofort committet (kein separates
+   * „Anwenden" nötig — reine CPU-Verzerrung, siehe `stages::liquify`s
+   * Moduldoku, dasselbe Muster wie `addRepairStroke`). */
+  liquifyActive: boolean;
+  toggleLiquifyActive: () => void;
+  /** Einstellungen für den *nächsten* Strich — dieselbe „nur für neue
+   * Striche"-Konvention wie `repairDraftMode`/-`Radius`/-`Feather`. */
+  liquifyDraftMode: LiquifyMode;
+  liquifyDraftRadius: number;
+  liquifyDraftStrength: number;
+  setLiquifyDraftMode: (mode: LiquifyMode) => void;
+  setLiquifyDraftField: (key: "radius" | "strength", value: number) => void;
+  addLiquifyStroke: (centerPath: LiquifyPoint[]) => void;
+  removeLiquifyStroke: (index: number) => void;
+
   /** Erweitert die Leinwand um die übergebenen Ränder (normierte
    * Bruchteile, `0.0..=1.0`) und lässt LaMa den neuen Rand füllen (Phase
    * 14 Schritt 1) — dasselbe „Anwenden"-Muster wie
@@ -664,7 +723,15 @@ interface DevelopSlice {
   removeCompositeLayer: (index: number) => void;
   setCompositeLayerField: (
     index: number,
-    field: "visible" | "blend_mode" | "opacity" | "scale" | "offset_x" | "offset_y",
+    field:
+      | "visible"
+      | "blend_mode"
+      | "opacity"
+      | "scale"
+      | "offset_x"
+      | "offset_y"
+      | "blend_if_shadow_cutoff"
+      | "blend_if_highlight_cutoff",
     value: boolean | BlendMode | number,
   ) => void;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
@@ -1456,6 +1523,56 @@ interface LibraryBacklogSlice {
   replaceSkyForCurrentPhoto: (skyImagePath: string) => Promise<void>;
   clearSkyReplace: () => void;
 
+  /** Automatisches Hautglätten (Phase 15 Schritt 5, siehe
+   * `DECISIONS.md` ADR-0042) — erkennt Gesichter selbst, kein manuelles
+   * Maskieren nötig. Legt das Ergebnis in `developEdl.skin_smoothing.
+   * patch` ab, wirft bei fehlender Gesichtserkennung eine klare
+   * Fehlermeldung (`catalogError`). */
+  skinSmoothing: boolean;
+  smoothSkinForCurrentPhoto: () => Promise<void>;
+  clearSkinSmoothing: () => void;
+  /** Setzt `developEdl.skin_smoothing.amount` (Deckkraft-Regler,
+   * Zwischenwert beim Ziehen — committet erst `DevelopSlider`s
+   * `onCommit`, wie `setBasicField`). */
+  setSkinSmoothingAmount: (value: number) => void;
+
+  /** Filter-/LUT-Bibliothek (Phase 16 Schritt 1, siehe `DECISIONS.md`
+   * ADR-0043) — öffnet einen Datei-Dialog für eine `.cube`-Datei, legt
+   * das geparste Raster in `developEdl.lut_filter.lut` ab. Anders als
+   * `smoothSkinForCurrentPhoto` fotounabhängig: dieselbe importierte
+   * `.cube`-Datei lässt sich unverändert auf jedes andere Foto anwenden. */
+  lutFilterImporting: boolean;
+  importLutFilterForCurrentPhoto: () => Promise<void>;
+  clearLutFilter: () => void;
+  /** Setzt `developEdl.lut_filter.strength` (Deckkraft-Regler,
+   * Zwischenwert beim Ziehen — committet erst `DevelopSlider`s
+   * `onCommit`, wie `setBasicField`). */
+  setLutFilterStrength: (value: number) => void;
+
+  /** Die fünf eingebauten Filter-Looks (Phase 16 Schritt 2) — einmal pro
+   * Sitzung geladen (`null` = noch nicht geladen, nicht "keine
+   * vorhanden"), dann aus dem Zustand wiederverwendet statt bei jedem
+   * Panel-Öffnen erneut abgefragt. */
+  builtinLutFilters: LutFilterData[] | null;
+  loadBuiltinLutFilters: () => Promise<void>;
+  /** Übernimmt einen der geladenen `builtinLutFilters` per Index direkt
+   * in `developEdl.lut_filter.lut` und committet — dasselbe Muster wie
+   * `importLutFilterForCurrentPhoto`, nur ohne Datei-Dialog. */
+  applyBuiltinLutFilter: (index: number) => void;
+
+  /** Pinsel-Modus für punktuelle Filter-Anwendung (Phase 16 Schritt 3,
+   * siehe `DECISIONS.md` ADR-0043) — dasselbe „ein Ziehvorgang malt
+   * einen Strich, sofort committet"-Muster wie `liquifyActive`. */
+  lutFilterBrushActive: boolean;
+  toggleLutFilterBrushActive: () => void;
+  /** Einstellungen für den *nächsten* Strich — dieselbe „nur für neue
+   * Striche"-Konvention wie `liquifyDraftRadius`/-`Strength`. */
+  lutFilterDraftRadius: number;
+  lutFilterDraftStrength: number;
+  setLutFilterDraftField: (key: "radius" | "strength", value: number) => void;
+  addLutFilterStroke: (centerPath: LutFilterPoint[]) => void;
+  removeLutFilterStroke: (index: number) => void;
+
   /** Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
    * `DECISIONS.md` ADR-0038): eine Regel = `libraryFilter` (wiederverwendet,
    * wie beim normalen Filter-Panel) + eine `BatchAction`. */
@@ -1648,6 +1765,82 @@ interface LibraryViewsSlice {
   loadRemovableVolumes: () => Promise<void>;
 }
 
+/** Video-Bearbeitung (Phase 16 Schritt 6, siehe `DECISIONS.md` ADR-0043) —
+ * Schneiden/Trimmen des aktuell in `VideoPlayer.tsx` angezeigten Videos.
+ * `videoTrimStartMs`/`videoTrimEndMs` sind reiner Entwurfszustand (noch
+ * nicht angewendet) — erst `commitVideoTrim` ruft `api.trimVideo` auf und
+ * legt damit, nicht-destruktiv, ein neues Katalog-Asset an (siehe
+ * `apx_app::commands::trim_video`s Moduldoku). Beide setzen sich beim
+ * Fotowechsel zurück (siehe `VideoPlayer.tsx`s bestehendem
+ * Zurücksetzen-Effekt), damit keine In/Out-Punkte eines vorherigen Videos
+ * am neuen Video kleben bleiben. */
+interface VideoSlice {
+  videoTrimStartMs: number | null;
+  videoTrimEndMs: number | null;
+  setVideoTrimStart: (ms: number) => void;
+  setVideoTrimEnd: (ms: number) => void;
+  clearVideoTrim: () => void;
+  videoTrimSaving: boolean;
+  videoTrimError: string | null;
+  /** Schneidet `[videoTrimStartMs, videoTrimEndMs)` aus dem aktuell
+   * gewählten Video, lädt danach die Fotoliste des Ordners neu und wählt
+   * das neu entstandene, getrimmte Video aus. */
+  commitVideoTrim: () => Promise<void>;
+
+  /** Automatisches Zuschneiden (Phase 16 Schritt 7, siehe `DECISIONS.md`
+   * ADR-0043) — erkannte Szenenwechsel-Zeitpunkte (Millisekunden,
+   * aufsteigend) des aktuell gewählten Videos. `null` = noch nicht
+   * erkannt (nicht dasselbe wie eine leere Liste = erkannt, aber keine
+   * Wechsel gefunden). */
+  videoSceneChanges: number[] | null;
+  videoSceneChangesLoading: boolean;
+  videoSceneChangesError: string | null;
+  detectVideoSceneChanges: () => Promise<void>;
+  /** Wirft erkannte Szenenwechsel weg (Fotowechsel — die vorherigen
+   * gehören zu einem anderen Video, siehe `VideoPlayer.tsx`s bestehendem
+   * Zurücksetzen-Effekt). */
+  clearVideoSceneChanges: () => void;
+  /** Übernimmt den Szenenabschnitt um `atMs` (den zuletzt vor `atMs`
+   * erkannten Wechsel als Start, den ersten danach als Ende — Videoanfang/
+   * -ende als Randfälle) direkt als Trimm-Entwurf, ohne dass die
+   * Nutzerin die beiden Punkte manuell markieren muss. */
+  useSceneAsVideoTrim: (atMs: number) => void;
+
+  /** Geräuschreduktion + Musik/Sounds hinzufügen (Phase 16 Schritt 8,
+   * siehe `DECISIONS.md` ADR-0043) — beide nicht-destruktiv, siehe
+   * `apx_app::commands::denoise_video_audio`/`add_video_audio_track`s
+   * Moduldoku. Beide legen bei Erfolg ein neues Katalog-Asset an und
+   * wählen es aus (dasselbe Muster wie `commitVideoTrim`). */
+  videoAudioBusy: boolean;
+  videoAudioError: string | null;
+  denoiseCurrentVideoAudio: (strength: "low" | "medium" | "high") => Promise<void>;
+  addAudioToCurrentVideo: (audioPath: string, mode: "mix" | "replace", musicVolume: number) => Promise<void>;
+
+  /** Filter/LUT auf Video anwenden (Phase 16 Schritt 9, siehe
+   * `DECISIONS.md` ADR-0043) — nutzt dieselben `builtinLutFilters`
+   * (siehe oben) bzw. einen frisch importierten `.cube`, wie das
+   * Entwickeln-Panel für Fotos. Kann bei langen Videos spürbar dauern
+   * (reine CPU-Pipeline), deshalb eigener Lade-/Fehlerzustand statt
+   * `videoAudioBusy` mitzunutzen. */
+  videoLutBusy: boolean;
+  videoLutError: string | null;
+  applyLutFilterToCurrentVideo: (lut: LutFilterData, strength: number) => Promise<void>;
+
+  /** Ähnliche Videos finden (Phase 16 Schritt 10, siehe `DECISIONS.md`
+   * ADR-0043) — arbeitet wie der bestehende Perceptual-Hash-Duplikat-
+   * Assistent (Phase 9 Schritt 1), auf Videos beschränkt. Läuft über
+   * den *ganzen* Katalog, nicht nur den aktuell geöffneten Ordner. */
+  similarVideoGroups: SimilarVideoDto[][] | null;
+  similarVideosLoading: boolean;
+  similarVideosError: string | null;
+  findSimilarVideos: (maxDistance: number) => Promise<void>;
+  /** Wechselt zu `entry.photo` — anders als `selectPhoto` (setzt nur
+   * `selectedPhotoId` im *aktuell* gewählten Ordner) wechselt dies bei
+   * Bedarf zuerst den Ordner, weil ein ähnliches Video aus
+   * `similarVideoGroups` in einem völlig anderen Ordner liegen kann. */
+  jumpToVideo: (entry: SimilarVideoDto) => Promise<void>;
+}
+
 export type AppStore = CatalogSlice &
   SelectionSlice &
   ViewerSlice &
@@ -1666,7 +1859,8 @@ export type AppStore = CatalogSlice &
   TemplatesSlice &
   LibraryBacklogSlice &
   MetadataSlice &
-  LibraryViewsSlice;
+  LibraryViewsSlice &
+  VideoSlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -1771,11 +1965,18 @@ export const useAppStore = create<AppStore>()(
       get().resetView();
       // Läuft das Entwickeln-Panel bereits, muss es beim Fotowechsel den
       // Bearbeitungszustand des *neuen* Fotos laden statt den alten kurz
-      // weiter anzuzeigen.
+      // weiter anzuzeigen. Videos (Phase 16 Schritt 5) haben noch keine
+      // EDL-gestützte Bearbeitung — `apx_raw` kann keinen Video-Container
+      // dekodieren, ein Ladeversuch würde nur mit einem Fehler enden statt
+      // sinnvoll etwas anzuzeigen.
       if (get().developPanelOpen) {
-        if (photoId) {
+        if (photoId && !isVideoPhoto(get(), photoId)) {
           void get().loadDevelopStateForPhoto(photoId);
         } else {
+          // Kein Foto ausgewählt ODER ein Video (siehe oben) — in beiden
+          // Fällen bleibt das Panel ohne einen für dieses Auswahlobjekt
+          // gültigen Bearbeitungszustand, statt den des vorherigen Fotos
+          // kurz weiter anzuzeigen.
           set((state) => {
             state.developEdl = neutralEdlPayload();
             state.developPhotoId = null;
@@ -1965,7 +2166,9 @@ export const useAppStore = create<AppStore>()(
         state.developPanelOpen = willOpen;
       });
       const { selectedPhotoId } = get();
-      if (willOpen && selectedPhotoId) {
+      // Videos (Phase 16 Schritt 5) haben noch keine EDL-gestützte
+      // Bearbeitung, siehe `selectPhoto`s Moduldoku.
+      if (willOpen && selectedPhotoId && !isVideoPhoto(get(), selectedPhotoId)) {
         void get().loadDevelopStateForPhoto(selectedPhotoId);
       }
     },
@@ -2755,6 +2958,140 @@ export const useAppStore = create<AppStore>()(
       }
     },
 
+    contentAwareMoveActive: false,
+    contentAwareMoveRect: null,
+    contentAwareMoveLoading: false,
+
+    toggleContentAwareMoveTool: () => {
+      set((state) => {
+        state.contentAwareMoveActive = !state.contentAwareMoveActive;
+        state.contentAwareMoveRect = null;
+      });
+    },
+
+    setContentAwareMoveRect: (rect) => {
+      set((state) => {
+        state.contentAwareMoveRect = rect;
+      });
+    },
+
+    commitContentAwareMove: async (destCenterX, destCenterY) => {
+      const { selectedPhotoId, contentAwareMoveRect } = get();
+      if (!selectedPhotoId || !contentAwareMoveRect) return;
+      set((state) => {
+        state.contentAwareMoveLoading = true;
+      });
+      try {
+        const dto = await api.contentAwareMove(
+          selectedPhotoId,
+          contentAwareMoveRect.x,
+          contentAwareMoveRect.y,
+          contentAwareMoveRect.width,
+          contentAwareMoveRect.height,
+        );
+        set((state) => {
+          // Füllt die Ausgangsstelle — derselbe `RepairStroke`-Mechanismus
+          // wie ein manuell "Anwenden"-geklickter `AiInpaint`-Strich,
+          // hier aber bereits mit fertigem `ai_fill` angelegt (kein
+          // separates "Anwenden" nötig, siehe `content_aware_move`s
+          // Rust-Moduldoku).
+          state.developEdl.repair.push({
+            mode: "AiInpaint",
+            source: { x: 0, y: 0 },
+            target_path: [{ x: 0.5, y: 0.5 }],
+            radius: 0,
+            feather: 0,
+            opacity: 1,
+            layer: "Normal",
+            ai_fill: {
+              x: dto.fill.x,
+              y: dto.fill.y,
+              width: dto.fill.width,
+              height: dto.fill.height,
+              bitmap_width: dto.fill.bitmap_width,
+              bitmap_height: dto.fill.bitmap_height,
+              pixels: base64ToByteArray(dto.fill.pixels_base64),
+            },
+          });
+          // Setzt das verschobene Objekt an die Zielposition — eine
+          // ganz normale Compositing-Ebene (Phase 14 Schritt 3), über
+          // die bestehenden Regler danach frei nachjustierbar.
+          state.developEdl.composite_layers.push({
+            visible: true,
+            blend_mode: "Normal",
+            opacity: 1,
+            scale: dto.dest_scale,
+            offset_x: destCenterX,
+            offset_y: destCenterY,
+            source: {
+              bitmap_width: dto.moved.bitmap_width,
+              bitmap_height: dto.moved.bitmap_height,
+              pixels: base64ToByteArray(dto.moved.pixels_base64),
+            },
+            blend_if_shadow_cutoff: 0,
+            blend_if_highlight_cutoff: 1,
+          });
+          state.contentAwareMoveActive = false;
+          state.contentAwareMoveRect = null;
+        });
+        void get().commitDevelopEdit("Objekt inhaltssensitiv verschoben");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.contentAwareMoveLoading = false;
+        });
+      }
+    },
+
+    liquifyActive: false,
+
+    toggleLiquifyActive: () => {
+      set((state) => {
+        state.liquifyActive = !state.liquifyActive;
+      });
+    },
+
+    liquifyDraftMode: "Push",
+    liquifyDraftRadius: 0.15,
+    liquifyDraftStrength: 0.5,
+
+    setLiquifyDraftMode: (mode) => {
+      set((state) => {
+        state.liquifyDraftMode = mode;
+      });
+    },
+
+    setLiquifyDraftField: (key, value) => {
+      set((state) => {
+        if (key === "radius") state.liquifyDraftRadius = value;
+        else state.liquifyDraftStrength = value;
+      });
+    },
+
+    addLiquifyStroke: (centerPath) => {
+      const { liquifyDraftMode, liquifyDraftRadius, liquifyDraftStrength } = get();
+      if (centerPath.length === 0) return;
+      set((state) => {
+        state.developEdl.liquify_strokes.push({
+          center_path: centerPath,
+          radius: liquifyDraftRadius,
+          strength: liquifyDraftStrength,
+          mode: liquifyDraftMode,
+        });
+      });
+      void get().commitDevelopEdit();
+    },
+
+    removeLiquifyStroke: (index) => {
+      set((state) => {
+        state.developEdl.liquify_strokes.splice(index, 1);
+      });
+      void get().commitDevelopEdit();
+    },
+
     aiOutpaintLoading: false,
 
     runAiOutpaint: async (marginLeft, marginTop, marginRight, marginBottom) => {
@@ -2799,6 +3136,54 @@ export const useAppStore = create<AppStore>()(
       void get().commitDevelopEdit("Leinwand-Erweiterung entfernt");
     },
 
+    contentAwareScaleDialogOpen: false,
+
+    setContentAwareScaleDialogOpen: (open) => {
+      set((state) => {
+        state.contentAwareScaleDialogOpen = open;
+      });
+    },
+
+    contentAwareScaleLoading: false,
+
+    runContentAwareScale: async (widthFraction, heightFraction) => {
+      const { selectedPhotoId } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.contentAwareScaleLoading = true;
+      });
+      try {
+        const dto = await api.contentAwareScale(selectedPhotoId, widthFraction, heightFraction);
+        set((state) => {
+          state.developEdl.geometry.content_aware_scale = {
+            width_fraction: dto.width_fraction,
+            height_fraction: dto.height_fraction,
+            patch: {
+              bitmap_width: dto.bitmap_width,
+              bitmap_height: dto.bitmap_height,
+              pixels: base64ToByteArray(dto.pixels_base64),
+            },
+          };
+        });
+        void get().commitDevelopEdit("Inhaltssensitiv skaliert");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.contentAwareScaleLoading = false;
+        });
+      }
+    },
+
+    clearContentAwareScale: () => {
+      set((state) => {
+        state.developEdl.geometry.content_aware_scale = null;
+      });
+      void get().commitDevelopEdit("Inhaltssensitives Skalieren entfernt");
+    },
+
     compositeLayerLoading: false,
 
     addCompositeLayerFromPhoto: async (photoId) => {
@@ -2820,6 +3205,8 @@ export const useAppStore = create<AppStore>()(
               bitmap_height: dto.bitmap_height,
               pixels: base64ToByteArray(dto.pixels_base64),
             },
+            blend_if_shadow_cutoff: 0,
+            blend_if_highlight_cutoff: 1,
           });
         });
         void get().commitDevelopEdit("Compositing-Ebene hinzugefügt");
@@ -2853,6 +3240,8 @@ export const useAppStore = create<AppStore>()(
               bitmap_height: dto.bitmap_height,
               pixels: base64ToByteArray(dto.pixels_base64),
             },
+            blend_if_shadow_cutoff: 0,
+            blend_if_highlight_cutoff: 1,
           });
         });
         void get().commitDevelopEdit("Compositing-Ebene hinzugefügt");
@@ -2896,6 +3285,12 @@ export const useAppStore = create<AppStore>()(
             break;
           case "offset_y":
             layer.offset_y = value as number;
+            break;
+          case "blend_if_shadow_cutoff":
+            layer.blend_if_shadow_cutoff = value as number;
+            break;
+          case "blend_if_highlight_cutoff":
+            layer.blend_if_highlight_cutoff = value as number;
             break;
         }
       });
@@ -3096,7 +3491,18 @@ export const useAppStore = create<AppStore>()(
           state.selectedPhotoId = photoId;
         });
         get().resetView();
-        if (get().developPanelOpen) void get().loadDevelopStateForPhoto(photoId);
+        // Videos (Phase 16 Schritt 5) haben noch keine EDL-gestützte
+        // Bearbeitung, siehe `selectPhoto`s Moduldoku.
+        if (get().developPanelOpen) {
+          if (!isVideoPhoto(get(), photoId)) {
+            void get().loadDevelopStateForPhoto(photoId);
+          } else {
+            set((state) => {
+              state.developEdl = neutralEdlPayload();
+              state.developPhotoId = null;
+            });
+          }
+        }
         if (get().metadataPanelOpen) void get().loadKeywordsForPhoto(photoId);
         return;
       }
@@ -5355,7 +5761,7 @@ export const useAppStore = create<AppStore>()(
           state.developEdl.style_transfer.patch = {
             bitmap_width: dto.bitmap_width,
             bitmap_height: dto.bitmap_height,
-            pixels: dto.pixels_base64,
+            pixels: base64ToByteArray(dto.pixels_base64),
           };
         });
         void get().commitDevelopEdit("Stiltransfer angewendet");
@@ -5384,7 +5790,7 @@ export const useAppStore = create<AppStore>()(
           state.developEdl.sky_replace = {
             bitmap_width: dto.bitmap_width,
             bitmap_height: dto.bitmap_height,
-            pixels: dto.pixels_base64,
+            pixels: base64ToByteArray(dto.pixels_base64),
           };
         });
         void get().commitDevelopEdit("Himmel ersetzt");
@@ -5404,6 +5810,167 @@ export const useAppStore = create<AppStore>()(
         state.developEdl.sky_replace = null;
       });
       void get().commitDevelopEdit("Himmelsaustausch entfernt");
+    },
+
+    skinSmoothing: false,
+
+    smoothSkinForCurrentPhoto: async () => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.skinSmoothing = true;
+      });
+      try {
+        const dto = await api.smoothSkin(developPhotoId);
+        set((state) => {
+          state.developEdl.skin_smoothing.patch = {
+            bitmap_width: dto.bitmap_width,
+            bitmap_height: dto.bitmap_height,
+            pixels: base64ToByteArray(dto.pixels_base64),
+          };
+          if (state.developEdl.skin_smoothing.amount <= 0) {
+            state.developEdl.skin_smoothing.amount = 1;
+          }
+        });
+        void get().commitDevelopEdit("Haut automatisch geglättet");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.skinSmoothing = false;
+        });
+      }
+    },
+
+    clearSkinSmoothing: () => {
+      set((state) => {
+        state.developEdl.skin_smoothing = { amount: 0, patch: null };
+      });
+      void get().commitDevelopEdit("Hautglätten entfernt");
+    },
+
+    setSkinSmoothingAmount: (value) => {
+      set((state) => {
+        state.developEdl.skin_smoothing.amount = value;
+      });
+    },
+
+    lutFilterImporting: false,
+
+    importLutFilterForCurrentPhoto: async () => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.lutFilterImporting = true;
+      });
+      try {
+        const dto = await api.importLutCubeFile();
+        if (!dto) return; // Dialog abgebrochen
+        set((state) => {
+          state.developEdl.lut_filter.lut = {
+            name: dto.name,
+            size: dto.size,
+            table: dto.table,
+            domain_min: dto.domain_min,
+            domain_max: dto.domain_max,
+          };
+          if (state.developEdl.lut_filter.strength <= 0) {
+            state.developEdl.lut_filter.strength = 1;
+          }
+        });
+        void get().commitDevelopEdit(`Filter „${dto.name}“ angewendet`);
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.lutFilterImporting = false;
+        });
+      }
+    },
+
+    clearLutFilter: () => {
+      set((state) => {
+        state.developEdl.lut_filter = { strength: 1, lut: null, strokes: [] };
+      });
+      void get().commitDevelopEdit("Filter entfernt");
+    },
+
+    setLutFilterStrength: (value) => {
+      set((state) => {
+        state.developEdl.lut_filter.strength = value;
+      });
+    },
+
+    builtinLutFilters: null,
+
+    loadBuiltinLutFilters: async () => {
+      if (get().builtinLutFilters) return; // schon geladen, dieselben fünf für die ganze Sitzung
+      try {
+        const list = await api.listBuiltinLutFilters();
+        set((state) => {
+          state.builtinLutFilters = list;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    applyBuiltinLutFilter: (index) => {
+      const { developPhotoId, builtinLutFilters } = get();
+      if (!developPhotoId || !builtinLutFilters) return;
+      const lut = builtinLutFilters[index];
+      if (!lut) return;
+      set((state) => {
+        state.developEdl.lut_filter.lut = lut;
+        if (state.developEdl.lut_filter.strength <= 0) {
+          state.developEdl.lut_filter.strength = 1;
+        }
+      });
+      void get().commitDevelopEdit(`Filter „${lut.name}“ angewendet`);
+    },
+
+    lutFilterBrushActive: false,
+
+    toggleLutFilterBrushActive: () => {
+      set((state) => {
+        state.lutFilterBrushActive = !state.lutFilterBrushActive;
+      });
+    },
+
+    lutFilterDraftRadius: 0.15,
+    lutFilterDraftStrength: 1,
+
+    setLutFilterDraftField: (key, value) => {
+      set((state) => {
+        if (key === "radius") state.lutFilterDraftRadius = value;
+        else state.lutFilterDraftStrength = value;
+      });
+    },
+
+    addLutFilterStroke: (centerPath) => {
+      const { lutFilterDraftRadius, lutFilterDraftStrength } = get();
+      if (centerPath.length === 0) return;
+      set((state) => {
+        state.developEdl.lut_filter.strokes.push({
+          center_path: centerPath,
+          radius: lutFilterDraftRadius,
+          strength: lutFilterDraftStrength,
+        });
+      });
+      void get().commitDevelopEdit();
+    },
+
+    removeLutFilterStroke: (index) => {
+      set((state) => {
+        state.developEdl.lut_filter.strokes.splice(index, 1);
+      });
+      void get().commitDevelopEdit();
     },
 
     batchPreview: [],
@@ -6220,6 +6787,233 @@ export const useAppStore = create<AppStore>()(
           state.removableVolumes = [];
         });
       }
+    },
+
+    videoTrimStartMs: null,
+    videoTrimEndMs: null,
+
+    setVideoTrimStart: (ms) => {
+      set((state) => {
+        state.videoTrimStartMs = ms;
+        state.videoTrimError = null;
+      });
+    },
+
+    setVideoTrimEnd: (ms) => {
+      set((state) => {
+        state.videoTrimEndMs = ms;
+        state.videoTrimError = null;
+      });
+    },
+
+    clearVideoTrim: () => {
+      set((state) => {
+        state.videoTrimStartMs = null;
+        state.videoTrimEndMs = null;
+        state.videoTrimError = null;
+      });
+    },
+
+    videoTrimSaving: false,
+    videoTrimError: null,
+
+    commitVideoTrim: async () => {
+      const { selectedPhotoId, selectedFolderId, videoTrimStartMs, videoTrimEndMs } = get();
+      if (!selectedPhotoId || videoTrimStartMs === null || videoTrimEndMs === null) return;
+      if (videoTrimEndMs <= videoTrimStartMs) {
+        set((state) => {
+          state.videoTrimError = "Ende muss nach dem Anfang liegen";
+        });
+        return;
+      }
+
+      set((state) => {
+        state.videoTrimSaving = true;
+        state.videoTrimError = null;
+      });
+      try {
+        const trimmed = await api.trimVideo(selectedPhotoId, videoTrimStartMs, videoTrimEndMs);
+        if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
+        set((state) => {
+          state.selectedPhotoId = trimmed.id;
+          state.videoTrimStartMs = null;
+          state.videoTrimEndMs = null;
+        });
+      } catch (err) {
+        set((state) => {
+          state.videoTrimError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoTrimSaving = false;
+        });
+      }
+    },
+
+    videoSceneChanges: null,
+    videoSceneChangesLoading: false,
+    videoSceneChangesError: null,
+
+    clearVideoSceneChanges: () => {
+      set((state) => {
+        state.videoSceneChanges = null;
+        state.videoSceneChangesError = null;
+      });
+    },
+
+    detectVideoSceneChanges: async () => {
+      const { selectedPhotoId } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.videoSceneChangesLoading = true;
+        state.videoSceneChangesError = null;
+      });
+      try {
+        const timestamps = await api.detectVideoSceneChanges(selectedPhotoId);
+        set((state) => {
+          state.videoSceneChanges = timestamps;
+        });
+      } catch (err) {
+        set((state) => {
+          state.videoSceneChangesError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoSceneChangesLoading = false;
+        });
+      }
+    },
+
+    useSceneAsVideoTrim: (atMs) => {
+      const { videoSceneChanges, selectedFolderId, selectedPhotoId } = get();
+      if (!videoSceneChanges) return;
+      const photos = selectedFolderId ? get().photosByFolder[selectedFolderId] : undefined;
+      const photo = photos?.find((p) => p.id === selectedPhotoId);
+      const durationMs = photo?.duration_ms ?? null;
+
+      const before = videoSceneChanges.filter((t) => t <= atMs);
+      const after = videoSceneChanges.filter((t) => t > atMs);
+      const start = before[before.length - 1] ?? 0;
+      const end = after[0] ?? durationMs ?? atMs;
+
+      set((state) => {
+        state.videoTrimStartMs = start;
+        state.videoTrimEndMs = end;
+        state.videoTrimError = null;
+      });
+    },
+
+    videoAudioBusy: false,
+    videoAudioError: null,
+
+    denoiseCurrentVideoAudio: async (strength) => {
+      const { selectedPhotoId, selectedFolderId } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.videoAudioBusy = true;
+        state.videoAudioError = null;
+      });
+      try {
+        const result = await api.denoiseVideoAudio(selectedPhotoId, strength);
+        if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
+        set((state) => {
+          state.selectedPhotoId = result.id;
+        });
+      } catch (err) {
+        set((state) => {
+          state.videoAudioError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoAudioBusy = false;
+        });
+      }
+    },
+
+    addAudioToCurrentVideo: async (audioPath, mode, musicVolume) => {
+      const { selectedPhotoId, selectedFolderId } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.videoAudioBusy = true;
+        state.videoAudioError = null;
+      });
+      try {
+        const result = await api.addVideoAudioTrack(selectedPhotoId, audioPath, mode, musicVolume);
+        if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
+        set((state) => {
+          state.selectedPhotoId = result.id;
+        });
+      } catch (err) {
+        set((state) => {
+          state.videoAudioError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoAudioBusy = false;
+        });
+      }
+    },
+
+    videoLutBusy: false,
+    videoLutError: null,
+
+    applyLutFilterToCurrentVideo: async (lut, strength) => {
+      const { selectedPhotoId, selectedFolderId } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.videoLutBusy = true;
+        state.videoLutError = null;
+      });
+      try {
+        const result = await api.applyLutFilterToVideo(selectedPhotoId, lut, strength);
+        if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
+        set((state) => {
+          state.selectedPhotoId = result.id;
+        });
+      } catch (err) {
+        set((state) => {
+          state.videoLutError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoLutBusy = false;
+        });
+      }
+    },
+
+    similarVideoGroups: null,
+    similarVideosLoading: false,
+    similarVideosError: null,
+
+    findSimilarVideos: async (maxDistance) => {
+      set((state) => {
+        state.similarVideosLoading = true;
+        state.similarVideosError = null;
+      });
+      try {
+        const groups = await api.listSimilarVideoGroups(maxDistance);
+        set((state) => {
+          state.similarVideoGroups = groups;
+        });
+      } catch (err) {
+        set((state) => {
+          state.similarVideosError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.similarVideosLoading = false;
+        });
+      }
+    },
+
+    jumpToVideo: async (entry) => {
+      if (entry.folder_id !== get().selectedFolderId) {
+        await get().loadPhotosForFolder(entry.folder_id);
+        set((state) => {
+          state.selectedFolderId = entry.folder_id;
+        });
+      }
+      get().selectPhoto(entry.photo.id);
     },
     };
   }),

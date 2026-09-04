@@ -345,6 +345,31 @@ Zehn eigenständige Fähigkeiten ohne Lightroom-Entsprechung (siehe `DECISIONS.m
 - [x] KI-Stiltransfer zwischen Fotos — Phase 14 Schritt 9 — Status: Fertig (eingeschränkt) — fünf real lizenzierte feste `fast_neural_style`-Stile statt eines beliebigen Referenzfotos (kein lizenzklares Modell dafür gefunden, siehe ADR-0041 Nachtrag IX)
 - [x] Himmelsaustausch mit automatischer Neubelichtung — Phase 14 Schritt 10 — Status: Fertig (minimaler Umfang) — klassische Segmentierungs-Heuristik + Nutzerfoto als neuer Himmel, grobe Farbangleichung des Vordergrunds; ohne Deckkraft-Regler und mit reduzierter Testabdeckung
 
+## Photoshop-Funktionen ohne Lightroom-Entsprechung (Phase 15)
+
+Fünf echte Photoshop-exklusive Fähigkeiten, gezielt nachgezogen (siehe `DECISIONS.md` ADR-0042 für die Recherche-Belege je Punkt) — vier davon ohne jede neue Abhängigkeit, durch Wiederverwendung bereits bestehender Bausteine (Inpainting, Compositing, Frequenztrennung, Personen-/Gesichtserkennung).
+
+- [x] Content-Aware Move (Objekt inhaltssensitiv verschieben) — Phase 15 Schritt 1 — Status: Fertig — Rechteck aufziehen und an die Zielposition ziehen; die Ausgangsstelle wird per LaMa-Inpainting neu gefüllt, das verschobene Objekt landet als neue Compositing-Ebene an der Zielposition
+- [x] Blend-If (Tonwertbereich-Blending) — Phase 15 Schritt 2 — Status: Fertig (eingeschränkt) — je Compositing-Ebene ein Schatten-/Lichter-Schwellenwert, unterhalb/oberhalb dessen die Ebene weich ausgeblendet wird; die einfachere Ein-Schieberegler-Variante statt Photoshops komplexer Alt-Split-Regler
+- [x] Verflüssigen (Liquify) — Phase 15 Schritt 3 — Status: Fertig — vier Verformungsmodi (Schieben/Verwirbeln/Stauchen/Aufblähen), direkt im Bild gemalt, sofort wirksam
+- [x] Inhaltssensitives Skalieren (Content-Aware Scale / Seam Carving) — Phase 15 Schritt 4 — Status: Fertig — selbst implementierter Seam-Carving-Algorithmus (kein lizenzklares Crate gefunden), Breite/Höhe unabhängig änderbar, erkannte Personen/Gesichter automatisch vor Verzerrung geschützt
+- [x] Automatisches Hautglätten — Phase 15 Schritt 5 — Status: Fertig — Gesichtserkennung + gesichtsbewusste Frequenztrennung in einem Klick, kein manuelles Maskieren nötig
+
+## Filter-/LUT-Bibliothek + Video-Grundfunktionen (Phase 16)
+
+Direkt anwendbare Foto-Filter/-Effekte (punktuell mit Pinseln, auf viele Fotos auf einmal mit regelbarer Stärke) plus Video als vollwertiges Katalog-Asset mit Basis-Videoschnitt — siehe `DECISIONS.md` ADR-0043 für die vollständige Architektur-/Lizenzrecherche.
+
+- [x] LUT-/Filter-Engine + globale Anwendung — Phase 16 Schritt 1 — Status: Fertig — selbst implementierter `.cube`-3D-LUT-Parser (trilineare Interpolation), freier Import beliebiger eigener `.cube`-Dateien, Deckkraft-Regler
+- [x] Starter-LUT-Set + Filter-Bibliothek — Phase 16 Schritt 2 — Status: Fertig (eingeschränkt) — fünf selbst erstellte parametrische Looks (Warm/Kühl/Kontrastreich S/W/Verblasst/Kino Teal-Orange) statt einer großen externen Bibliothek (keine sauber lizenzierte "Hunderte/Tausende Filter"-Quelle gefunden, siehe ADR-0043); "Hunderte/Tausende Effekte" bleiben über den freien `.cube`-Import aus Schritt 1 erreichbar
+- [x] Filter-Pinsel + Batch-Anwendung — Phase 16 Schritt 3 — Status: Fertig — punktuelle Pinselanwendung mit Umkreis-/Ausmaß-Reglern, Batch-Übertragung auf eine Mehrfachauswahl über das bestehende Preset-System
+- [x] Video-Import als Katalog-Asset — Phase 16 Schritt 4 — Status: Fertig — mp4/mov/m4v/avi/mkv/webm, Metadaten per `ffprobe`, Thumbnail per `ffmpeg`-Frame-Extraktion; ein Video ist eine ganz normale Katalogzeile (Sammlungen/Schlagworte/Sterne/Filter funktionieren automatisch mit)
+- [x] Video-Wiedergabe — Phase 16 Schritt 5 — Status: Fertig — eigene Zeitleiste, echtes HTTP-Range-Streaming/Seeking im `apx://`-Protokoll-Handler
+- [x] Schneiden/Trimmen — Phase 16 Schritt 6 — Status: Fertig — nicht-destruktiv (Ergebnis als neues Katalog-Asset), verlustfreier Stream-Copy-Schnitt mit automatischem Rückfall auf Neucodierung
+- [x] Automatisches Zuschneiden (Szenenwechsel-Erkennung) — Phase 16 Schritt 7 — Status: Fertig (eingeschränkt) — nativer ffmpeg-Szenenwechsel-Filter als Schnittvorschlag; **keine** KI-Highlight-Erkennung ("beste Momente finden" ist ein deutlich härteres, hier nicht gelöstes Problem, siehe ADR-0043)
+- [x] Geräuschreduktion + Musik/Sounds hinzufügen — Phase 16 Schritt 8 — Status: Fertig (eingeschränkt) — native FFT-Entrauschung (`afftdn`, drei Stufen); kein RNN-basiertes `arnndn` (hätte einen eigenen Opt-in-Modell-Download gebraucht). Musik mischen/ersetzen über dieselbe Technik wie die Diashow-Musikuntermalung
+- [x] Filter/LUT auf Video anwenden — Phase 16 Schritt 9 — Status: Fertig — dieselbe LUT-Engine framegenau auf Video, global (keine Pinselstriche wie bei Fotos); Performance auf langen/hochauflösenden Videos ungemessen (reine CPU-Pipeline, kein Testclip in dieser Sandbox verfügbar)
+- [x] Ähnliche Videos finden — Phase 16 Schritt 10 — Status: Fertig — derselbe Perceptual-Hash-Duplikat-Assistent wie bei Fotos, auf Videos beschränkt
+
 ## Technische Grundlage (Phase 1, keine Endnutzer-Features)
 
 - [x] Rust-Workspace mit Crate-Grenzen (`apx-core`, `apx-raw`, `apx-catalog`, `apx-app`) — Phase 1 — Status: Fertig

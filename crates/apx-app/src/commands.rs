@@ -78,11 +78,24 @@ pub struct PhotoDto {
     /// ADR-0039) — frei benannte Zusatzfelder, siehe
     /// `apx_catalog::Photo::custom_metadata`.
     pub custom_metadata: std::collections::BTreeMap<String, String>,
+    /// Video als Katalog-Asset (Phase 16 Schritt 4, siehe `DECISIONS.md`
+    /// ADR-0043) — `"photo"` oder `"video"`, siehe
+    /// `apx_catalog::NewPhoto::media_kind`s Moduldoku.
+    pub media_kind: String,
+    pub duration_ms: Option<i64>,
+    pub video_codec: Option<String>,
+    pub has_audio: Option<bool>,
+    pub frame_rate: Option<f32>,
 }
 
 impl From<apx_catalog::Photo> for PhotoDto {
     fn from(photo: apx_catalog::Photo) -> Self {
         Self {
+            media_kind: photo.media_kind,
+            duration_ms: photo.duration_ms,
+            video_codec: photo.video_codec,
+            has_audio: photo.has_audio,
+            frame_rate: photo.frame_rate,
             id: photo.id.to_string(),
             filename: photo.filename,
             file_size: photo.file_size,
@@ -973,6 +986,711 @@ pub async fn import_dcp_profile(app: AppHandle) -> Result<Option<DcpProfileDataD
         ));
     };
     Ok(Some(hue_sat_map.into()))
+}
+
+// ---- Filter-/LUT-Bibliothek (Phase 16 Schritt 1) ---------------------------
+
+// `Deserialize` zusätzlich zum bisherigen `Serialize` (Phase 16
+// Schritt 9): `apply_lut_filter_to_video` nimmt einen bereits im
+// Frontend gewählten Filter (Bibliotheks-Eintrag oder eigener
+// `.cube`-Import) als Parameter entgegen statt ihn erneut zu berechnen.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LutFilterDataDto {
+    pub name: String,
+    pub size: u32,
+    pub table: Vec<f32>,
+    pub domain_min: [f32; 3],
+    pub domain_max: [f32; 3],
+}
+
+impl From<LutFilterDataDto> for apx_pipeline::edl::LutFilterData {
+    fn from(dto: LutFilterDataDto) -> Self {
+        Self {
+            name: dto.name,
+            size: dto.size,
+            table: dto.table,
+            domain_min: dto.domain_min,
+            domain_max: dto.domain_max,
+        }
+    }
+}
+
+impl From<apx_pipeline::lut_cube::ParsedLut> for LutFilterDataDto {
+    fn from(parsed: apx_pipeline::lut_cube::ParsedLut) -> Self {
+        Self {
+            name: parsed
+                .title
+                .unwrap_or_else(|| "Unbenannter Filter".to_string()),
+            size: parsed.size,
+            table: parsed.table,
+            domain_min: parsed.domain_min,
+            domain_max: parsed.domain_max,
+        }
+    }
+}
+
+/// Öffnet einen Datei-Dialog für eine `.cube`-3D-LUT-Datei, parst sie
+/// (`apx_pipeline::lut_cube::parse_cube_bytes`, siehe dessen Moduldoku)
+/// und liefert das Ergebnis zurück — `None`, wenn der Dialog abgebrochen
+/// wurde. Dasselbe „Dialog öffnen, Datei parsen, fertige Daten
+/// zurückgeben — nur das Frontend legt sie im EDL ab"-Muster wie
+/// `import_dcp_profile`.
+///
+/// Wenn kein eigener Dateiname im Dokument steht (keine `TITLE`-Zeile),
+/// wird der Dateiname ohne Endung als Anzeigename verwendet — dieselbe
+/// Bequemlichkeit, die die meisten frei verfügbaren `.cube`-Dateien
+/// ohnehin ohne `TITLE`-Zeile ausliefern.
+#[tauri::command]
+pub async fn import_lut_cube_file(app: AppHandle) -> Result<Option<LutFilterDataDto>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("3D-LUT (.cube)", &["cube"])
+        .pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|err| format!("Öffnen-Dialog fehlgeschlagen: {err}"))?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|err| format!("Ungültiger Pfad: {err}"))?;
+    let bytes = std::fs::read(&path)
+        .map_err(|err| format!("Datei '{}' nicht lesbar: {err}", path.display()))?;
+    let mut parsed =
+        apx_pipeline::lut_cube::parse_cube_bytes(&bytes).map_err(|err| err.to_string())?;
+    if parsed.title.is_none() {
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Unbenannter Filter");
+        parsed.title = Some(stem.to_string());
+    }
+    Ok(Some(parsed.into()))
+}
+
+impl From<apx_pipeline::edl::LutFilterData> for LutFilterDataDto {
+    fn from(data: apx_pipeline::edl::LutFilterData) -> Self {
+        Self {
+            name: data.name,
+            size: data.size,
+            table: data.table,
+            domain_min: data.domain_min,
+            domain_max: data.domain_max,
+        }
+    }
+}
+
+/// Liefert die fünf eingebauten, selbst erstellten Filter-Looks
+/// (`apx_pipeline::builtin_luts`, siehe dessen Moduldoku — original
+/// erstellt statt von einer externen Quelle heruntergeladen, dieselbe
+/// Rolle wie Lightrooms eigene mitgelieferte "Creative"-Profile). Reine
+/// Berechnung, kein Datei-/Netzwerkzugriff — anders als
+/// `import_lut_cube_file` kein `async`.
+#[tauri::command]
+pub fn list_builtin_lut_filters() -> Vec<LutFilterDataDto> {
+    apx_pipeline::builtin_luts::BuiltinLut::ALL
+        .into_iter()
+        .map(|kind| apx_pipeline::builtin_luts::generate(kind, 17).into())
+        .collect()
+}
+
+// ---- Video-Bearbeitung (Phase 16 Schritt 6) --------------------------------
+
+/// Schneidet `[start_ms, end_ms)` aus einem Video-Asset — nicht
+/// destruktiv (siehe `DECISIONS.md` ADR-0043): das Original bleibt
+/// unverändert, das Ergebnis wird als **neues** Katalog-Asset im selben
+/// Ordner abgelegt (`<stem>_trim[_N].<ext>`), dieselbe Konvention wie
+/// gespeicherte Stapel-/Panorama-Ergebnisse an anderer Stelle in dieser
+/// Datei. Erst ein schneller `-c copy`-Stream-Kopier-Versuch (verlustfrei,
+/// aber an den nächsten Keyframes statt frame-genau — dieselbe
+/// Einschränkung wie bei jedem Videoschnittprogramm im "schnellen"
+/// Modus), bei Fehlschlag ein vollständiger Re-Encode
+/// (`libx264`/`aac`) — siehe PLAN.md Schritt 6: "verlustfreier
+/// ffmpeg-Stream-Copy wo möglich, sonst Re-Encode".
+#[tauri::command]
+pub fn trim_video(
+    state: State<'_, AppState>,
+    photo_id: String,
+    start_ms: i64,
+    end_ms: i64,
+) -> Result<PhotoDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    if start_ms < 0 || end_ms <= start_ms {
+        return Err("Ungültiger Zeitbereich: Ende muss nach Anfang liegen".to_string());
+    }
+
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    if photo.media_kind != "video" {
+        return Err("Nur Videos können geschnitten werden".to_string());
+    }
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    let dest_path = unique_sibling_video_path(&folder.path, &source_path, "trim");
+
+    run_ffmpeg_trim(&source_path, &dest_path, start_ms, end_ms, true)
+        .or_else(|_| run_ffmpeg_trim(&source_path, &dest_path, start_ms, end_ms, false))?;
+
+    register_video_result_as_new_photo(&state, photo.folder_id, &dest_path)
+}
+
+/// `<stem>_<suffix>.<ext>`, mit `_<n>`-Zähler bei Namenskollision — die
+/// gemeinsame nicht-destruktive Zielpfad-Konvention aller Phase-16-
+/// Video-Bearbeitungs-Commands (`trim_video`, `denoise_video_audio`,
+/// `add_video_audio_track`): das Ergebnis landet immer als neue Datei
+/// im selben Ordner wie die Quelle, niemals als Überschreiben.
+fn unique_sibling_video_path(folder_path: &Path, source_path: &Path, suffix: &str) -> PathBuf {
+    let stem = source_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("video");
+    let ext = source_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("mp4");
+    let mut dest_path = folder_path.join(format!("{stem}_{suffix}.{ext}"));
+    let mut counter = 1u32;
+    while dest_path.exists() {
+        dest_path = folder_path.join(format!("{stem}_{suffix}_{counter}.{ext}"));
+        counter += 1;
+    }
+    dest_path
+}
+
+/// Legt eine bereits fertig auf der Platte liegende Video-Datei
+/// (Ergebnis von `trim_video`/`denoise_video_audio`/
+/// `add_video_audio_track`) als **neues** Katalog-Asset an — dieselbe
+/// Metadaten-Extraktion+Thumbnail-Erzeugung, die vorher in `trim_video`
+/// inline stand, jetzt geteilt zwischen allen drei Video-Bearbeitungs-
+/// Commands.
+fn register_video_result_as_new_photo(
+    state: &State<'_, AppState>,
+    folder_id: apx_core::FolderId,
+    dest_path: &Path,
+) -> Result<PhotoDto, String> {
+    let file_size = std::fs::metadata(dest_path)
+        .map_err(|err| format!("Ergebnisdatei nicht lesbar: {err}"))?
+        .len();
+    let content_hash = crate::import::compute_content_hash(dest_path)?;
+    let video_meta = crate::import::video::extract_video_metadata(dest_path)?;
+    let filename = dest_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "Ungültiger Dateiname".to_string())?
+        .to_string();
+
+    let new_photo = apx_catalog::NewPhoto {
+        folder_id,
+        filename,
+        file_size,
+        file_mtime: time::OffsetDateTime::now_utc(),
+        content_hash: Some(content_hash),
+        width: video_meta.width,
+        height: video_meta.height,
+        orientation: 1,
+        camera_make: None,
+        camera_model: None,
+        lens: None,
+        iso: None,
+        shutter: None,
+        aperture: None,
+        focal_length: None,
+        captured_at: Some(time::OffsetDateTime::now_utc()),
+        gps_lat: None,
+        gps_lon: None,
+        media_kind: "video".to_string(),
+        duration_ms: video_meta.duration_ms,
+        video_codec: video_meta.codec,
+        has_audio: video_meta.has_audio,
+        frame_rate: video_meta.frame_rate,
+    };
+    let (new_photo_id, _) = state
+        .catalog
+        .upsert_photo(&new_photo)
+        .map_err(|err| err.to_string())?;
+
+    if let Err(err) = crate::import::thumbnails::generate_one(
+        &state.catalog,
+        &state.paths.preview_cache_dir(),
+        new_photo_id,
+        dest_path,
+    ) {
+        tracing::warn!(%err, "Thumbnail für neues Video-Asset nicht erzeugbar");
+    }
+
+    let saved = state
+        .catalog
+        .get_photo(new_photo_id)
+        .map_err(|err| err.to_string())?;
+    Ok(saved.into())
+}
+
+/// `stream_copy = true`: `-c copy` (schnell, verlustfrei, an den
+/// nächsten Keyframes) — `false`: vollständiger Re-Encode (langsamer,
+/// aber frame-genau, funktioniert auch, wenn Stream-Copy am
+/// Container/Codec scheitert). `-ss` **vor** `-i` (schnelles Grobsuchen)
+/// ist bei `-c copy` sogar erforderlich — ffmpeg kann einen
+/// kopierten Stream nur an Paketgrenzen (Keyframes) schneiden, ein
+/// Suchen nach dem Dekodieren würde daran nichts ändern.
+fn run_ffmpeg_trim(
+    source: &std::path::Path,
+    dest: &std::path::Path,
+    start_ms: i64,
+    end_ms: i64,
+    stream_copy: bool,
+) -> Result<(), String> {
+    let start_secs = start_ms as f64 / 1000.0;
+    let duration_secs = (end_ms - start_ms) as f64 / 1000.0;
+
+    let mut cmd = std::process::Command::new("ffmpeg");
+    cmd.args(["-y", "-ss", &format!("{start_secs}"), "-i"])
+        .arg(source);
+    cmd.args(["-t", &format!("{duration_secs}")]);
+    if stream_copy {
+        cmd.args(["-c", "copy"]);
+    } else {
+        cmd.args([
+            "-c:v", "libx264", "-crf", "18", "-preset", "medium", "-c:a", "aac",
+        ]);
+    }
+    cmd.arg(dest);
+
+    let output = cmd
+        .output()
+        .map_err(|err| format!("ffmpeg nicht startbar (ist ffmpeg installiert?): {err}"))?;
+    if !output.status.success() {
+        let _ = std::fs::remove_file(dest); // unvollständige Datei nicht liegen lassen
+        return Err(format!(
+            "ffmpeg-Schnitt fehlgeschlagen: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Automatisches Zuschneiden (Phase 16 Schritt 7, siehe `DECISIONS.md`
+/// ADR-0043): erkennt Szenenwechsel über ffmpegs nativen `scdet`-Filter
+/// (seit ffmpeg 4.3, keine externe Modell-Abhängigkeit — echte, gegen
+/// die ffmpeg-Dokumentation verifizierte Bordfunktion statt eines
+/// eigenen Bild-Differenz-Algorithmus). Gibt sortierte, deduplizierte
+/// Zeitstempel (Millisekunden) jedes erkannten Wechsels zurück; das
+/// Frontend nutzt diese als Sprungmarken auf der Zeitleiste und um den
+/// "aktuellen Szenenabschnitt" automatisch als Trimm-Vorschlag
+/// vorzubelegen (siehe `VideoPlayer.tsx`). `threshold` folgt `scdet`s
+/// eigener Skala (0–100, Standardwert des Filters ist 10.0 — niedriger
+/// = empfindlicher/mehr erkannte Wechsel).
+#[tauri::command]
+pub fn detect_video_scene_changes(
+    state: State<'_, AppState>,
+    photo_id: String,
+    threshold: Option<f32>,
+) -> Result<Vec<i64>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    if photo.media_kind != "video" {
+        return Err("Szenenerkennung funktioniert nur bei Videos".to_string());
+    }
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    run_ffmpeg_scene_detect(&source_path, threshold.unwrap_or(10.0))
+}
+
+/// `scdet` protokolliert jeden erkannten Wechsel als eine
+/// `av_log`-Info-Zeile auf `stderr` in der Form
+/// `lavfi.scd.score: <wert>, lavfi.scd.time: <sekunden>` — `-f null -`
+/// verwirft die eigentliche Bildausgabe (nur die Metadaten interessieren
+/// hier), `-an` überspringt die Tonspur (unnötig für Bild-Szenenerkennung,
+/// spart Laufzeit).
+fn run_ffmpeg_scene_detect(source: &std::path::Path, threshold: f32) -> Result<Vec<i64>, String> {
+    let output = std::process::Command::new("ffmpeg")
+        .args(["-hide_banner", "-nostats", "-v", "info", "-i"])
+        .arg(source)
+        .args([
+            "-an",
+            "-filter:v",
+            &format!("scdet=threshold={threshold}"),
+            "-f",
+            "null",
+            "-",
+        ])
+        .output()
+        .map_err(|err| format!("ffmpeg nicht startbar (ist ffmpeg installiert?): {err}"))?;
+
+    // scdet meldet Erfolg über den regulären Nulldevice-Encode-Pfad —
+    // ein Fehlschlag hier bedeutet i. d. R. eine nicht dekodierbare
+    // Datei, nicht "keine Szenenwechsel gefunden" (das liefert einfach
+    // eine leere Liste).
+    if !output.status.success() {
+        return Err(format!(
+            "Szenenerkennung fehlgeschlagen: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut timestamps: Vec<i64> = stderr
+        .lines()
+        .filter_map(|line| {
+            let marker = "lavfi.scd.time:";
+            let idx = line.find(marker)?;
+            let rest = line[idx + marker.len()..].trim();
+            let value = rest
+                .split(|c: char| !(c.is_ascii_digit() || c == '.'))
+                .next()?;
+            value.parse::<f64>().ok()
+        })
+        .map(|secs| (secs * 1000.0).round() as i64)
+        .collect();
+    timestamps.sort_unstable();
+    timestamps.dedup();
+    Ok(timestamps)
+}
+
+/// Geräuschreduktion (Phase 16 Schritt 8, siehe `DECISIONS.md`
+/// ADR-0043) — nativer ffmpeg-Filter `afftdn` (reine FFT-Spektral-
+/// Subtraktion, kein externes Modell nötig, anders als das
+/// RNN-basierte `arnndn`, das laut ADR-0043-Recherche einen separaten
+/// Modell-Download voraussetzen würde). Nicht destruktiv wie
+/// `trim_video`: Ergebnis landet als neues Katalog-Asset
+/// (`<stem>_denoise[_N].<ext>`), der Video-Stream bleibt per `-c:v copy`
+/// unverändert — nur die Tonspur wird neu kodiert. `strength` steuert
+/// `afftdn`s `nr`-Parameter (0.01–97; `afftdn`s eigener Standardwert ist
+/// 12, hier als `"medium"` übernommen).
+#[tauri::command]
+pub fn denoise_video_audio(
+    state: State<'_, AppState>,
+    photo_id: String,
+    strength: String,
+) -> Result<PhotoDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    if photo.media_kind != "video" {
+        return Err("Geräuschreduktion funktioniert nur bei Videos".to_string());
+    }
+    if photo.has_audio != Some(true) {
+        return Err("Dieses Video hat keine Tonspur".to_string());
+    }
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    let nr: f32 = match strength.as_str() {
+        "low" => 6.0,
+        "high" => 24.0,
+        _ => 12.0, // "medium" — zugleich afftdns eigener Standardwert
+    };
+
+    let dest_path = unique_sibling_video_path(&folder.path, &source_path, "denoise");
+    let output = std::process::Command::new("ffmpeg")
+        .args(["-y", "-i"])
+        .arg(&source_path)
+        .args([
+            "-c:v",
+            "copy",
+            "-af",
+            &format!("afftdn=nr={nr}"),
+            "-c:a",
+            "aac",
+        ])
+        .arg(&dest_path)
+        .output()
+        .map_err(|err| format!("ffmpeg nicht startbar (ist ffmpeg installiert?): {err}"))?;
+    if !output.status.success() {
+        let _ = std::fs::remove_file(&dest_path);
+        return Err(format!(
+            "Geräuschreduktion fehlgeschlagen: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    register_video_result_as_new_photo(&state, photo.folder_id, &dest_path)
+}
+
+/// Musik/Sounds zu einem Video hinzufügen (Phase 16 Schritt 8) —
+/// dieselbe Audio-Mix-Technik wie die Diashow-Musikuntermalung
+/// (`export_slideshow_video`, ADR-0034 Punkt 3), hier auf ein bereits
+/// bestehendes Video-Asset angewendet statt beim Rendern einer neuen
+/// Diashow. Nicht destruktiv: neues Katalog-Asset
+/// (`<stem>_audio[_N].<ext>`), Video-Stream per `-c:v copy` unverändert.
+///
+/// `mode == "mix"` mischt die neue Spur zur vorhandenen Tonspur dazu
+/// (`amix`, `duration=first` — die Ausgabelänge folgt der *Original*-
+/// Tonspur, damit eine kürzere/längere Musikdatei die Videolänge nicht
+/// verändert) und fällt automatisch auf `"replace"` zurück, wenn das
+/// Video gar keine Tonspur hat (nichts zum Mischen da). `mode ==
+/// "replace"` ersetzt die Tonspur vollständig; ein explizites `-t` auf
+/// die aus dem Katalog bekannte Originallänge verhindert hier, dass
+/// eine längere Musikdatei die Ausgabe über das Video hinaus verlängert
+/// (kürzere Musik lässt den Rest einfach stumm, dasselbe Verhalten wie
+/// bei den meisten Schnittprogrammen). `music_volume` skaliert nur die
+/// neu hinzugefügte Spur (1.0 = unverändert).
+#[tauri::command]
+pub fn add_video_audio_track(
+    state: State<'_, AppState>,
+    photo_id: String,
+    audio_path: String,
+    mode: String,
+    music_volume: Option<f32>,
+) -> Result<PhotoDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    if photo.media_kind != "video" {
+        return Err("Tonspur hinzufügen funktioniert nur bei Videos".to_string());
+    }
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    let audio_source = Path::new(&audio_path);
+    if !audio_source.is_file() {
+        return Err(format!("Audiodatei '{audio_path}' nicht gefunden"));
+    }
+
+    let volume = music_volume.unwrap_or(1.0).max(0.0);
+    let should_mix = mode == "mix" && photo.has_audio == Some(true);
+
+    let dest_path = unique_sibling_video_path(&folder.path, &source_path, "audio");
+    let mut cmd = std::process::Command::new("ffmpeg");
+    cmd.args(["-y", "-i"])
+        .arg(&source_path)
+        .arg("-i")
+        .arg(audio_source);
+    if should_mix {
+        cmd.args([
+            "-filter_complex",
+            &format!(
+                "[1:a]volume={volume}[music];[0:a][music]amix=inputs=2:duration=first:dropout_transition=0[aout]"
+            ),
+            "-map",
+            "0:v",
+            "-map",
+            "[aout]",
+        ]);
+    } else {
+        cmd.args([
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
+            "-af",
+            &format!("volume={volume}"),
+        ]);
+    }
+    cmd.args(["-c:v", "copy", "-c:a", "aac"]);
+    if let Some(duration_ms) = photo.duration_ms {
+        cmd.args(["-t", &format!("{}", duration_ms as f64 / 1000.0)]);
+    }
+    cmd.arg(&dest_path);
+
+    let output = cmd
+        .output()
+        .map_err(|err| format!("ffmpeg nicht startbar (ist ffmpeg installiert?): {err}"))?;
+    if !output.status.success() {
+        let _ = std::fs::remove_file(&dest_path);
+        return Err(format!(
+            "Tonspur hinzufügen fehlgeschlagen: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    register_video_result_as_new_photo(&state, photo.folder_id, &dest_path)
+}
+
+/// Filter/LUT auf Video anwenden (Phase 16 Schritt 9, siehe
+/// `DECISIONS.md` ADR-0043) — wendet dieselbe trilineare `.cube`-LUT-
+/// Interpolation an, die Schritt 1 für Fotos gebaut hat
+/// (`apx_pipeline::stages::lut_filter::apply`), framegenau auf jedes
+/// Bild eines Videos. Bewusst **global** (keine Pinselstriche wie bei
+/// Fotos — eine pro-Frame-Maske wäre für ein bewegtes Bild ein
+/// eigenständiges, deutlich größeres Feature und nicht Teil des
+/// "Basis-Videoschnitt"-Anspruchs dieser Phase). Nicht destruktiv:
+/// neues Katalog-Asset (`<stem>_lut[_N].<ext>`), Original unverändert;
+/// die Original-Tonspur wird unangetastet in die Ausgabe übernommen
+/// (`-c:a copy`), nur das Bild durchläuft die LUT.
+///
+/// **Bewusst kein GPU-Pfad** (siehe ADR-0043: `apx-pipeline` ist reines
+/// CPU-Rust) — bei langen/hochauflösenden Videos entsprechend langsam,
+/// siehe die Performance-Messung in Schritt 11.
+#[tauri::command]
+pub fn apply_lut_filter_to_video(
+    state: State<'_, AppState>,
+    photo_id: String,
+    lut: LutFilterDataDto,
+    strength: f32,
+) -> Result<PhotoDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    if photo.media_kind != "video" {
+        return Err("Filter/LUT auf Video funktioniert nur bei Videos".to_string());
+    }
+    let (Some(width), Some(height)) = (photo.width, photo.height) else {
+        return Err("Video-Auflösung unbekannt (fehlende Metadaten)".to_string());
+    };
+    let fps = photo.frame_rate.unwrap_or(30.0).max(1.0);
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    let adjustment = apx_pipeline::edl::LutFilterAdjustment {
+        strength: strength.clamp(0.0, 1.0),
+        lut: Some(lut.into()),
+        strokes: Vec::new(),
+    };
+
+    let dest_path = unique_sibling_video_path(&folder.path, &source_path, "lut");
+    run_ffmpeg_apply_lut_to_video(&source_path, &dest_path, width, height, fps, adjustment)?;
+
+    register_video_result_as_new_photo(&state, photo.folder_id, &dest_path)
+}
+
+/// Zwei gekoppelte `ffmpeg`-Subprozesse: der erste dekodiert `source`
+/// zu rohen RGBA8-Frames auf `stdout` (`-f rawvideo -pix_fmt rgba`),
+/// ein eigener Thread liest sie framegenau, wendet
+/// `stages::lut_filter::apply` darauf an und schreibt das Ergebnis in
+/// `stdin` des zweiten `ffmpeg`, der die transformierten Frames zu
+/// `dest` re-kodiert und dabei per zweitem Input (`source` erneut,
+/// `-map 1:a?`) die Original-Tonspur unverändert hinüberkopiert —
+/// dasselbe zwei-Prozesse-Pipe-Muster wie ein klassischer
+/// Video-Filterpipeline-Aufbau, hier in Rust statt einer einzigen
+/// `-vf`-ffmpeg-Filterkette, weil die LUT-Logik in
+/// `apx_pipeline::stages::lut_filter` liegt (dieselbe Implementierung
+/// wie bei Fotos, keine zweite LUT-Anwendung in einer ffmpeg-eigenen
+/// Filtersprache).
+fn run_ffmpeg_apply_lut_to_video(
+    source: &Path,
+    dest: &Path,
+    width: u32,
+    height: u32,
+    fps: f32,
+    // Wert statt Referenz: der Frame-Pumpen-Thread braucht `'static`
+    // (`std::thread::spawn`), ein geklonter Wert ist einfacher als
+    // `std::thread::scope` für diesen einen Aufrufort — die LUT-Tabelle
+    // ist mit höchstens einigen zehntausend Floats klein genug, dass das
+    // Klonen nicht ins Gewicht fällt.
+    adjustment: apx_pipeline::edl::LutFilterAdjustment,
+) -> Result<(), String> {
+    use std::io::{Read, Write};
+
+    let mut decode = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(source)
+        .args(["-f", "rawvideo", "-pix_fmt", "rgba", "-"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("ffmpeg (Dekodieren) nicht startbar: {err}"))?;
+    let mut decode_stdout = decode
+        .stdout
+        .take()
+        .ok_or_else(|| "ffmpeg-Dekodier-Ausgabe nicht verfügbar".to_string())?;
+
+    let mut encode = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba"])
+        .args([
+            "-s",
+            &format!("{width}x{height}"),
+            "-r",
+            &format!("{fps}"),
+            "-i",
+            "-",
+        ])
+        .arg("-i")
+        .arg(source)
+        .args([
+            "-map", "0:v", "-map", "1:a?", "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+            "-c:a", "copy",
+        ])
+        .arg(dest)
+        .stdin(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("ffmpeg (Kodieren) nicht startbar: {err}"))?;
+    let mut encode_stdin = encode
+        .stdin
+        .take()
+        .ok_or_else(|| "ffmpeg-Kodier-Eingabe nicht verfügbar".to_string())?;
+
+    let frame_bytes = (width as usize) * (height as usize) * 4;
+    let pump = std::thread::spawn(move || -> Result<(), String> {
+        let mut frame = vec![0u8; frame_bytes];
+        loop {
+            match decode_stdout.read_exact(&mut frame) {
+                Ok(()) => {
+                    let filtered =
+                        apx_pipeline::stages::lut_filter::apply(&frame, width, height, &adjustment);
+                    encode_stdin
+                        .write_all(&filtered)
+                        .map_err(|err| format!("Schreiben an ffmpeg fehlgeschlagen: {err}"))?;
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(err) => return Err(format!("Lesen von ffmpeg fehlgeschlagen: {err}")),
+            }
+        }
+        Ok(()) // `encode_stdin` fällt hier aus dem Gültigkeitsbereich → EOF für ffmpeg
+    });
+
+    let pump_result = pump
+        .join()
+        .map_err(|_| "Frame-Pipeline-Thread abgestürzt".to_string())?;
+
+    let decode_status = decode
+        .wait()
+        .map_err(|err| format!("Warten auf ffmpeg (Dekodieren) fehlgeschlagen: {err}"))?;
+    let encode_output = {
+        let status = encode
+            .wait()
+            .map_err(|err| format!("Warten auf ffmpeg (Kodieren) fehlgeschlagen: {err}"))?;
+        let mut stderr = String::new();
+        if let Some(mut pipe) = encode.stderr.take() {
+            let _ = pipe.read_to_string(&mut stderr);
+        }
+        (status, stderr)
+    };
+
+    pump_result?;
+    if !decode_status.success() {
+        let _ = std::fs::remove_file(dest);
+        return Err("ffmpeg (Dekodieren) fehlgeschlagen".to_string());
+    }
+    if !encode_output.0.success() {
+        let _ = std::fs::remove_file(dest);
+        return Err(format!(
+            "ffmpeg (Kodieren) fehlgeschlagen: {}",
+            encode_output.1
+        ));
+    }
+    Ok(())
 }
 
 /// Geht einen Bearbeitungsschritt zurück. `None`, wenn schon am
@@ -2440,6 +3158,92 @@ pub fn list_perceptual_duplicate_groups(
         .collect())
 }
 
+/// Ähnliche Videos finden (Phase 16 Schritt 10, siehe `DECISIONS.md`
+/// ADR-0043) — arbeitet **exakt** wie
+/// [`list_perceptual_duplicate_groups`] (derselbe Hasher, dieselbe
+/// O(n²)-Gruppierung gegen den jeweils ersten Gruppen-Vertreter),
+/// beschränkt auf `media_kind == "video"` und deren bereits bei Import
+/// per `ffmpeg` extrahiertes Vorschau-Frame (`extract_video_frame`,
+/// Phase 16 Schritt 4) als Hash-Grundlage — kein neuer Hashing-
+/// Algorithmus, kein zweiter Keyframe-Extraktionsweg. Nur ein einzelnes
+/// Frame pro Video (dieselbe Vereinfachung wie bei Fotos: "genügt für
+/// einen auf Abruf gestarteten Assistenten", keine Szenen-übergreifende
+/// Analyse).
+#[tauri::command]
+pub fn list_similar_video_groups(
+    state: State<'_, AppState>,
+    max_distance: u32,
+) -> Result<Vec<Vec<SimilarVideoDto>>, String> {
+    let photos = state
+        .catalog
+        .search_and_filter_photos(None, &apx_catalog::FilterCriteria::default())
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .filter(|photo| photo.media_kind == "video");
+
+    let hasher = image_hasher::HasherConfig::new().to_hasher();
+    let mut hashed: Vec<(apx_catalog::Photo, image_hasher::ImageHash)> = Vec::new();
+    for photo in photos {
+        let Ok(Some(preview)) = state
+            .catalog
+            .get_preview(photo.id, apx_catalog::PreviewLevel::Thumbnail)
+        else {
+            continue;
+        };
+        let Ok(img) = image::open(&preview.path) else {
+            continue;
+        };
+        let hash = hasher.hash_image(&img);
+        hashed.push((photo, hash));
+    }
+
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for (index, (_, hash)) in hashed.iter().enumerate() {
+        let mut placed = false;
+        for group in groups.iter_mut() {
+            if hashed[group[0]].1.dist(hash) <= max_distance {
+                group.push(index);
+                placed = true;
+                break;
+            }
+        }
+        if !placed {
+            groups.push(vec![index]);
+        }
+    }
+
+    Ok(groups
+        .into_iter()
+        .filter(|group| group.len() >= 2)
+        .map(|group| {
+            group
+                .into_iter()
+                .map(|i| {
+                    let photo = hashed[i].0.clone();
+                    SimilarVideoDto {
+                        folder_id: photo.folder_id.to_string(),
+                        photo: photo.into(),
+                    }
+                })
+                .collect()
+        })
+        .collect())
+}
+
+/// Ein Video innerhalb einer [`list_similar_video_groups`]-Gruppe —
+/// `PhotoDto` selbst trägt bewusst kein `folder_id` (in dieser breit
+/// genutzten zentralen Struktur wäre das eine deutlich größere
+/// Änderung mit vielen Testfixture-Anpassungen, siehe Phase 16
+/// Schritt 4s Erfahrung mit den 23 `NewPhoto`/`Photo`-Konstruktions-
+/// stellen) — hier reicht ein schlanker Wrapper, weil das Frontend nur
+/// für *diese eine* Funktion (zu einem ähnlichen Video in einem anderen
+/// Ordner springen) wissen muss, in welchem Ordner es liegt.
+#[derive(Debug, Clone, Serialize)]
+pub struct SimilarVideoDto {
+    pub photo: PhotoDto,
+    pub folder_id: String,
+}
+
 /// Personenansicht (Phase 11 Schritt 5, siehe `DECISIONS.md` ADR-0038):
 /// grobe Vorsortierung von Fotos mit erkannten Gesichtsregionen nach
 /// Ähnlichkeit (Blob-Anzahl/-Fläche als grobe „Signatur") — **keine
@@ -3087,6 +3891,153 @@ pub fn run_ai_inpaint(
     })
 }
 
+// ---- Photoshop-Funktion: Content-Aware Move (Phase 15 Schritt 1, siehe
+// DECISIONS.md ADR-0042) -----------------------------------------------------
+//
+// Baut auf zwei bereits bestehenden Primitiven auf, kein neuer EDL-Typ:
+// die Ausgangsstelle wird — wie `run_ai_inpaint` oben — über einen
+// `AiFillPatch` gefüllt, hier aber fürs GESAMTE Bild statt eines
+// Rechtecks (damit LaMa echten Bildkontext ringsum sieht, nicht nur den
+// unmittelbaren Rand des ausgeschnittenen Rechtecks). Da `fill_rgb8`
+// unmaskierte Pixel laut seiner eigenen Moduldoku unverändert
+// zurückgibt, lässt sich das Ergebnis gefahrlos als Vollbild-Patch
+// (`x = y = 0`, `width = height = 1`) zurückgeben. Das verschobene
+// Objekt selbst wird als neue `CompositeLayer` (Phase 14 Schritt 3) an
+// der vom Nutzer gewählten Zielposition platziert — die eigentliche
+// Platzierung (Ziel-`offset_x`/`offset_y`) entscheidet ausschließlich
+// das Frontend beim Aufbau der beiden neuen EDL-Einträge, dieser
+// Command liefert nur die beiden fertigen Bitmaps.
+#[derive(Debug, Clone, Serialize)]
+pub struct ContentAwareMoveDto {
+    /// Vollbild-Fill-Patch für die Ausgangsstelle — direkt als
+    /// `RepairStroke::ai_fill` verwendbar.
+    pub fill: AiFillPatchDto,
+    /// Der ausgeschnittene, verschobene Bildausschnitt — direkt als
+    /// `CompositeLayer::source` verwendbar.
+    pub moved: CompositeLayerSourceDto,
+    /// Bester Startwert für `CompositeLayer::scale`, damit die
+    /// verschobene Bitmap ungefähr in ihrer ursprünglichen Pixelgröße
+    /// erscheint (`Auswahlbreite / Bildbreite`). `CompositeLayer::scale`
+    /// skaliert Breite und Höhe der Ebene immer gleich relativ zur
+    /// Leinwand (siehe `stages::composite`s Moduldoku) — bei einem von
+    /// der Leinwand abweichenden Seitenverhältnis der Auswahl kommt es
+    /// deshalb zu einer leichten Verzerrung, über den bereits
+    /// bestehenden Skalierungs-Regler der Ebene danach manuell
+    /// korrigierbar.
+    pub dest_scale: f32,
+}
+
+#[tauri::command]
+pub fn content_aware_move(
+    state: State<'_, AppState>,
+    photo_id: String,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> Result<ContentAwareMoveDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let model_path = settings
+        .ai
+        .inpainting_model_path
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| {
+            "Kein KI-Ausfüllen-Modell heruntergeladen — siehe Einstellungen → KI.".to_string()
+        })?;
+
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let px = (x * linear.width as f32)
+        .round()
+        .clamp(0.0, linear.width as f32 - 1.0) as u32;
+    let py = (y * linear.height as f32)
+        .round()
+        .clamp(0.0, linear.height as f32 - 1.0) as u32;
+    let pw = (width * linear.width as f32)
+        .round()
+        .max(1.0)
+        .min((linear.width - px) as f32) as u32;
+    let ph = (height * linear.height as f32)
+        .round()
+        .max(1.0)
+        .min((linear.height - py) as f32) as u32;
+
+    // Vollbild als linearer u8-RGB-Puffer (für den Fill-Patch — derselbe
+    // Farbraum wie `run_ai_inpaint`, das Reparatur-Stufe läuft noch vor
+    // der sRGB-Konvertierung im Renderpfad).
+    let pixel_count = (linear.width as usize) * (linear.height as usize);
+    let full_linear_u8: Vec<u8> = linear.pixels[..pixel_count * 3]
+        .iter()
+        .map(|&v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+        .collect();
+
+    let mut mask = vec![0u8; pixel_count];
+    for row in py..(py + ph) {
+        for col in px..(px + pw) {
+            mask[row as usize * linear.width as usize + col as usize] = 255;
+        }
+    }
+
+    // Session wird pro Aufruf frisch geladen (dieselbe Begründung wie
+    // `run_ai_inpaint`).
+    let mut session = apx_ai::inpaint::InpaintSession::load(Path::new(&model_path))
+        .map_err(|err| err.to_string())?;
+    let filled = session
+        .fill_rgb8(&full_linear_u8, linear.width, linear.height, &mask)
+        .map_err(|err| err.to_string())?;
+
+    // Der verschobene Ausschnitt selbst wird als `CompositeLayer`
+    // gerendert — die läuft im bereits entwickelten sRGB-Bild, deshalb
+    // hier bewusst *nicht* derselbe lineare Puffer wie oben, sondern
+    // dieselbe sRGB-Konvertierung wie `prepare_composite_layer_source`s
+    // Foto-Zweig.
+    let rgba_srgb =
+        apx_pipeline::color::linear_camera_rgb_to_srgb_rgba8(&linear.pixels, linear.cam_to_srgb);
+    let mut moved_rgb = vec![0u8; (pw as usize) * (ph as usize) * 3];
+    for row in 0..ph {
+        for col in 0..pw {
+            let src_idx = ((py + row) as usize * linear.width as usize + (px + col) as usize) * 4;
+            let dst_idx = (row as usize * pw as usize + col as usize) * 3;
+            moved_rgb[dst_idx] = rgba_srgb[src_idx];
+            moved_rgb[dst_idx + 1] = rgba_srgb[src_idx + 1];
+            moved_rgb[dst_idx + 2] = rgba_srgb[src_idx + 2];
+        }
+    }
+
+    Ok(ContentAwareMoveDto {
+        fill: AiFillPatchDto {
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            bitmap_width: linear.width,
+            bitmap_height: linear.height,
+            pixels_base64: base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                &filled,
+            ),
+        },
+        moved: CompositeLayerSourceDto {
+            bitmap_width: pw,
+            bitmap_height: ph,
+            pixels_base64: base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                &moved_rgb,
+            ),
+        },
+        dest_scale: pw as f32 / linear.width as f32,
+    })
+}
+
 // ---- KI: Leinwand-Erweiterung (Outpainting, Phase 14 Schritt 1, siehe
 // DECISIONS.md ADR-0041) -----------------------------------------------------
 //
@@ -3210,6 +4161,211 @@ pub fn run_ai_outpaint(
         bitmap_width: new_width,
         bitmap_height: new_height,
         pixels_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &filled),
+    })
+}
+
+// ---- Inhaltssensitives Skalieren (Content-Aware Scale / Seam Carving,
+// Phase 15 Schritt 4, siehe DECISIONS.md ADR-0042) — klassischer
+// Algorithmus (`apx_ai::seam_carving`), kein ONNX-Modell. --------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ContentAwareScalePatchDto {
+    pub width_fraction: f32,
+    pub height_fraction: f32,
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    /// Base64-kodiertes interleaved-RGB-`u8`-Ergebnis — dasselbe
+    /// Übertragungsmuster wie `CanvasExtensionPatchDto::pixels_base64`.
+    pub pixels_base64: String,
+}
+
+/// Berechnet das seam-carvte Ergebnis für `width_fraction`/
+/// `height_fraction` (Bruchteile der aktuellen, auf
+/// `apx_ai::segmentation::ANALYSIS_MAX_EDGE` gedeckelten Dekodier-
+/// Auflösung — dieselbe ehrliche Vereinfachung wie `run_ai_outpaint`:
+/// arbeitet auf dem rohen Dekodierergebnis, nicht der entwickelten
+/// Vorschau). Schützt erkannte Personen/Gesichter automatisch vor
+/// Verzerrung (`apx_ai::segmentation::person_alpha` als Schutzmaske,
+/// siehe `apx_ai::seam_carving`s Moduldoku) — ein `person_alpha`-Fehler
+/// (z. B. leeres Bild) lässt die Schutzmaske einfach entfallen statt den
+/// ganzen Befehl fehlschlagen zu lassen, da sie nur eine Qualitäts-
+/// verbesserung, keine Voraussetzung ist.
+#[tauri::command]
+pub fn content_aware_scale(
+    state: State<'_, AppState>,
+    photo_id: String,
+    width_fraction: f32,
+    height_fraction: f32,
+) -> Result<ContentAwareScalePatchDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let target_width = ((linear.width as f32) * width_fraction.max(0.01))
+        .round()
+        .max(1.0) as u32;
+    let target_height = ((linear.height as f32) * height_fraction.max(0.01))
+        .round()
+        .max(1.0) as u32;
+    if target_width == linear.width && target_height == linear.height {
+        return Err("Zielgröße entspricht bereits der aktuellen Bildgröße.".to_string());
+    }
+
+    let rgba =
+        apx_pipeline::color::linear_camera_rgb_to_srgb_rgba8(&linear.pixels, linear.cam_to_srgb);
+    let pixel_count = (linear.width as usize) * (linear.height as usize);
+    let mut rgb = vec![0u8; pixel_count * 3];
+    for i in 0..pixel_count {
+        rgb[i * 3] = rgba[i * 4];
+        rgb[i * 3 + 1] = rgba[i * 4 + 1];
+        rgb[i * 3 + 2] = rgba[i * 4 + 2];
+    }
+
+    let protect =
+        apx_ai::segmentation::person_alpha(&linear.pixels, linear.width, linear.height).ok();
+
+    let (bitmap_width, bitmap_height, pixels) = apx_ai::seam_carving::resize_rgb8(
+        &rgb,
+        linear.width,
+        linear.height,
+        target_width,
+        target_height,
+        protect.as_deref(),
+    );
+
+    Ok(ContentAwareScalePatchDto {
+        width_fraction,
+        height_fraction,
+        bitmap_width,
+        bitmap_height,
+        pixels_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &pixels),
+    })
+}
+
+// ---- Automatisches Hautglätten (Phase 15 Schritt 5, siehe DECISIONS.md
+// ADR-0042) — kombiniert Gesichtserkennung + Frequenztrennung, kein
+// zusätzliches ONNX-Modell. --------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkinSmoothingPatchDto {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    /// Base64-kodiertes interleaved-RGB-`u8`-Ergebnis.
+    pub pixels_base64: String,
+}
+
+/// Erkennt Gesichtsregionen (`apx_ai::faces::detect_face_regions`),
+/// schneidet die Hautton-Alpha-Maske (`apx_ai::segmentation::
+/// person_alpha`) auf diese Regionen zu (verhindert Glätten hautfarbener
+/// Bildbereiche außerhalb von Gesichtern), zerlegt das Bild per
+/// Frequenztrennung mit einem kleineren Radius als `stages::repair`s
+/// Standardwert (feinere Poren-/Textur-Frequenz) und weichzeichnet nur
+/// die Hochfrequenz-Ebene innerhalb der Gesichtsmaske — dieselbe
+/// Retusche-Technik wie Photoshops "Frequenztrennung", hier automatisiert
+/// ohne manuelles Maskieren (siehe `PLAN.md` Phase 15 Schritt 5). Läuft
+/// — wie jede andere KI-Analyse dieses Projekts — auf dem rohen, auf
+/// `apx_ai::segmentation::ANALYSIS_MAX_EDGE` gedeckelten
+/// Dekodierergebnis.
+#[tauri::command]
+pub fn smooth_skin(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<SkinSmoothingPatchDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let faces = apx_ai::faces::detect_face_regions(&linear.pixels, linear.width, linear.height)
+        .map_err(|err| err.to_string())?;
+    if faces.is_empty() {
+        return Err("Keine Gesichter erkannt.".to_string());
+    }
+    let skin_alpha =
+        apx_ai::segmentation::person_alpha(&linear.pixels, linear.width, linear.height)
+            .map_err(|err| err.to_string())?;
+
+    let width = linear.width;
+    let height = linear.height;
+    let pixel_count = (width as usize) * (height as usize);
+
+    let mut face_mask = vec![0u8; pixel_count];
+    for y in 0..height {
+        for x in 0..width {
+            let nx = x as f32 / width as f32;
+            let ny = y as f32 / height as f32;
+            let inside = faces
+                .iter()
+                .any(|f| nx >= f.x && nx < f.x + f.width && ny >= f.y && ny < f.y + f.height);
+            if inside {
+                let idx = (y as usize) * (width as usize) + x as usize;
+                face_mask[idx] = skin_alpha[idx];
+            }
+        }
+    }
+
+    let rgba =
+        apx_pipeline::color::linear_camera_rgb_to_srgb_rgba8(&linear.pixels, linear.cam_to_srgb);
+    let mut rgb_f32 = vec![0f32; pixel_count * 3];
+    for i in 0..pixel_count {
+        rgb_f32[i * 3] = rgba[i * 4] as f32 / 255.0;
+        rgb_f32[i * 3 + 1] = rgba[i * 4 + 1] as f32 / 255.0;
+        rgb_f32[i * 3 + 2] = rgba[i * 4 + 2] as f32 / 255.0;
+    }
+
+    use apx_pipeline::stages::frequency_separation::{
+        combine, default_split_radius_px, low_pass, HIGH_FREQUENCY_OFFSET,
+    };
+    // Kleinerer Trennradius als der für allgemeine Retusche gewählte
+    // Standardwert — feinere Poren-/Textur-Frequenz (siehe Moduldoku).
+    let split_radius = (default_split_radius_px(width) / 2).max(1);
+    let low = low_pass(&rgb_f32, width, height, split_radius);
+    let high: Vec<f32> = rgb_f32
+        .iter()
+        .zip(low.iter())
+        .map(|(&original, &blurred)| (original - blurred + HIGH_FREQUENCY_OFFSET).clamp(0.0, 1.0))
+        .collect();
+
+    // Größerer Radius als die Trennung selbst — verwischt genau die
+    // feine Poren-/Textur-Information, die die Hochfrequenz-Ebene trägt.
+    let smoothing_radius = (split_radius * 4).max(2);
+    let smoothed_high = low_pass(&high, width, height, smoothing_radius);
+
+    // Nur innerhalb der Gesichtsmaske durch die geglättete Hochfrequenz
+    // ersetzen, weich gewichtet nach `person_alpha`s Alpha-Wert.
+    let mut final_high = high.clone();
+    for (i, &mask_value) in face_mask.iter().enumerate() {
+        let weight = mask_value as f32 / 255.0;
+        if weight <= 0.0 {
+            continue;
+        }
+        for c in 0..3 {
+            let idx = i * 3 + c;
+            final_high[idx] = high[idx] + (smoothed_high[idx] - high[idx]) * weight;
+        }
+    }
+
+    let smoothed = combine(&low, &final_high);
+    let mut pixels = vec![0u8; pixel_count * 3];
+    for (i, value) in smoothed.iter().enumerate() {
+        pixels[i] = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+    }
+
+    Ok(SkinSmoothingPatchDto {
+        bitmap_width: width,
+        bitmap_height: height,
+        pixels_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &pixels),
     })
 }
 
@@ -6281,6 +7437,11 @@ fn import_stack_result_photo(
         captured_at: Some(time::OffsetDateTime::now_utc()),
         gps_lat: None,
         gps_lon: None,
+        media_kind: "photo".to_string(),
+        duration_ms: None,
+        video_codec: None,
+        has_audio: None,
+        frame_rate: None,
     };
     let (result_photo_id, _) = state
         .catalog

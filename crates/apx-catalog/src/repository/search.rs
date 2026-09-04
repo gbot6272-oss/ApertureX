@@ -156,6 +156,11 @@ mod tests {
             folders::find_or_create(conn, Path::new("/fotos"), None, OffsetDateTime::now_utc())
                 .expect("Ordner");
         let photo = NewPhoto {
+            media_kind: "photo".to_string(),
+            duration_ms: None,
+            video_codec: None,
+            has_audio: None,
+            frame_rate: None,
             folder_id,
             filename: filename.to_string(),
             file_size: 100,

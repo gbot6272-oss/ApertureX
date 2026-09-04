@@ -20,8 +20,8 @@ use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
     basic_fused, bw_mixer, calibration, color_grading, composite, curves, details, effects,
-    geometry, hsl_color_mixer, lens_corrections, local_contrast, masks, repair, sky_replace,
-    style_transfer, virtual_aperture, white_balance,
+    geometry, hsl_color_mixer, lens_corrections, liquify, local_contrast, lut_filter, masks,
+    repair, skin_smoothing, sky_replace, style_transfer, virtual_aperture, white_balance,
 };
 
 /// Das Ergebnis von [`render_rgba8`] — `width`/`height` beschreiben
@@ -399,10 +399,38 @@ pub fn render_rgba8(
         )
     };
 
-    let skied = if !stages.sky_replace || edl.sky_replace.is_none() {
+    // Automatisches Hautglätten (Phase 15 Schritt 5) — läuft nach
+    // `style_transfer`, vor `sky_replace`, im selben fertig entwickelten
+    // sRGB-RGBA8-Bild (siehe `stages::skin_smoothing`s Moduldoku).
+    let smoothed = if !stages.skin_smoothing || edl.skin_smoothing.amount <= 0.0 {
         styled
     } else {
-        sky_replace::apply(&styled, linear.width, linear.height, &edl.sky_replace)
+        skin_smoothing::apply(&styled, linear.width, linear.height, &edl.skin_smoothing)
+    };
+
+    let skied = if !stages.sky_replace || edl.sky_replace.is_none() {
+        smoothed
+    } else {
+        sky_replace::apply(&smoothed, linear.width, linear.height, &edl.sky_replace)
+    };
+
+    // Filter-/LUT-Bibliothek (Phase 16 Schritt 1) — läuft nach
+    // `sky_replace`, vor `liquify`, im selben fertig entwickelten
+    // sRGB-RGBA8-Bild (siehe `stages::lut_filter`s Moduldoku für die
+    // Begründung dieser Position).
+    let filtered = if !stages.lut_filter || edl.lut_filter.lut.is_none() {
+        skied
+    } else {
+        lut_filter::apply(&skied, linear.width, linear.height, &edl.lut_filter)
+    };
+
+    // Verflüssigen (Phase 15 Schritt 3) — läuft nach `sky_replace`, vor
+    // `geometry`, im selben fertig entwickelten sRGB-RGBA8-Bild (siehe
+    // `stages::liquify`s Moduldoku).
+    let liquified = if !stages.liquify || edl.liquify_strokes.is_empty() {
+        filtered
+    } else {
+        liquify::apply(&filtered, linear.width, linear.height, &edl.liquify_strokes)
     };
 
     let (width, height, pixels) = if !stages.geometry || edl.geometry == GeometryAdjustment::NEUTRAL
@@ -410,9 +438,9 @@ pub fn render_rgba8(
         // Kein zusätzlicher Durchlauf, wenn die Stufe deaktiviert ist
         // oder weder Drehung noch Zuschnitt etwas zu tun haben
         // (Regelfall).
-        (linear.width, linear.height, skied)
+        (linear.width, linear.height, liquified)
     } else {
-        geometry::apply(&skied, linear.width, linear.height, &edl.geometry)
+        geometry::apply(&liquified, linear.width, linear.height, &edl.geometry)
     };
 
     Ok(RenderedImage {
@@ -497,6 +525,8 @@ mod tests {
                 bitmap_height: 1,
                 pixels: vec![250, 250, 250],
             },
+            blend_if_shadow_cutoff: 0.0,
+            blend_if_highlight_cutoff: 1.0,
         };
         let edl = EdlV4 {
             composite_layers: vec![layer],
@@ -814,6 +844,9 @@ mod tests {
             virtual_aperture: crate::edl::v4::VirtualApertureAdjustment::NEUTRAL,
             style_transfer: crate::edl::v4::StyleTransferAdjustment::NEUTRAL,
             sky_replace: None,
+            skin_smoothing: crate::edl::v4::SkinSmoothingAdjustment::NEUTRAL,
+            lut_filter: crate::edl::v4::LutFilterAdjustment::NEUTRAL,
+            liquify_strokes: Vec::new(),
         };
 
         if let Some(ctx) = &ctx {

@@ -1120,6 +1120,20 @@ pub fn trim_video(
         .map_err(|err| err.to_string())?;
     let source_path = folder.path.join(&photo.filename);
 
+    let dest_path = unique_sibling_video_path(&folder.path, &source_path, "trim");
+
+    run_ffmpeg_trim(&source_path, &dest_path, start_ms, end_ms, true)
+        .or_else(|_| run_ffmpeg_trim(&source_path, &dest_path, start_ms, end_ms, false))?;
+
+    register_video_result_as_new_photo(&state, photo.folder_id, &dest_path)
+}
+
+/// `<stem>_<suffix>.<ext>`, mit `_<n>`-Zähler bei Namenskollision — die
+/// gemeinsame nicht-destruktive Zielpfad-Konvention aller Phase-16-
+/// Video-Bearbeitungs-Commands (`trim_video`, `denoise_video_audio`,
+/// `add_video_audio_track`): das Ergebnis landet immer als neue Datei
+/// im selben Ordner wie die Quelle, niemals als Überschreiben.
+fn unique_sibling_video_path(folder_path: &Path, source_path: &Path, suffix: &str) -> PathBuf {
     let stem = source_path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -1128,21 +1142,31 @@ pub fn trim_video(
         .extension()
         .and_then(|s| s.to_str())
         .unwrap_or("mp4");
-    let mut dest_path = folder.path.join(format!("{stem}_trim.{ext}"));
+    let mut dest_path = folder_path.join(format!("{stem}_{suffix}.{ext}"));
     let mut counter = 1u32;
     while dest_path.exists() {
-        dest_path = folder.path.join(format!("{stem}_trim_{counter}.{ext}"));
+        dest_path = folder_path.join(format!("{stem}_{suffix}_{counter}.{ext}"));
         counter += 1;
     }
+    dest_path
+}
 
-    run_ffmpeg_trim(&source_path, &dest_path, start_ms, end_ms, true)
-        .or_else(|_| run_ffmpeg_trim(&source_path, &dest_path, start_ms, end_ms, false))?;
-
-    let file_size = std::fs::metadata(&dest_path)
-        .map_err(|err| format!("Geschnittene Datei nicht lesbar: {err}"))?
+/// Legt eine bereits fertig auf der Platte liegende Video-Datei
+/// (Ergebnis von `trim_video`/`denoise_video_audio`/
+/// `add_video_audio_track`) als **neues** Katalog-Asset an — dieselbe
+/// Metadaten-Extraktion+Thumbnail-Erzeugung, die vorher in `trim_video`
+/// inline stand, jetzt geteilt zwischen allen drei Video-Bearbeitungs-
+/// Commands.
+fn register_video_result_as_new_photo(
+    state: &State<'_, AppState>,
+    folder_id: apx_core::FolderId,
+    dest_path: &Path,
+) -> Result<PhotoDto, String> {
+    let file_size = std::fs::metadata(dest_path)
+        .map_err(|err| format!("Ergebnisdatei nicht lesbar: {err}"))?
         .len();
-    let content_hash = crate::import::compute_content_hash(&dest_path)?;
-    let video_meta = crate::import::video::extract_video_metadata(&dest_path)?;
+    let content_hash = crate::import::compute_content_hash(dest_path)?;
+    let video_meta = crate::import::video::extract_video_metadata(dest_path)?;
     let filename = dest_path
         .file_name()
         .and_then(|n| n.to_str())
@@ -1150,7 +1174,7 @@ pub fn trim_video(
         .to_string();
 
     let new_photo = apx_catalog::NewPhoto {
-        folder_id: photo.folder_id,
+        folder_id,
         filename,
         file_size,
         file_mtime: time::OffsetDateTime::now_utc(),
@@ -1183,9 +1207,9 @@ pub fn trim_video(
         &state.catalog,
         &state.paths.preview_cache_dir(),
         new_photo_id,
-        &dest_path,
+        dest_path,
     ) {
-        tracing::warn!(%err, "Thumbnail für geschnittenes Video nicht erzeugbar");
+        tracing::warn!(%err, "Thumbnail für neues Video-Asset nicht erzeugbar");
     }
 
     let saved = state
@@ -1321,6 +1345,166 @@ fn run_ffmpeg_scene_detect(source: &std::path::Path, threshold: f32) -> Result<V
     timestamps.sort_unstable();
     timestamps.dedup();
     Ok(timestamps)
+}
+
+/// Geräuschreduktion (Phase 16 Schritt 8, siehe `DECISIONS.md`
+/// ADR-0043) — nativer ffmpeg-Filter `afftdn` (reine FFT-Spektral-
+/// Subtraktion, kein externes Modell nötig, anders als das
+/// RNN-basierte `arnndn`, das laut ADR-0043-Recherche einen separaten
+/// Modell-Download voraussetzen würde). Nicht destruktiv wie
+/// `trim_video`: Ergebnis landet als neues Katalog-Asset
+/// (`<stem>_denoise[_N].<ext>`), der Video-Stream bleibt per `-c:v copy`
+/// unverändert — nur die Tonspur wird neu kodiert. `strength` steuert
+/// `afftdn`s `nr`-Parameter (0.01–97; `afftdn`s eigener Standardwert ist
+/// 12, hier als `"medium"` übernommen).
+#[tauri::command]
+pub fn denoise_video_audio(
+    state: State<'_, AppState>,
+    photo_id: String,
+    strength: String,
+) -> Result<PhotoDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    if photo.media_kind != "video" {
+        return Err("Geräuschreduktion funktioniert nur bei Videos".to_string());
+    }
+    if photo.has_audio != Some(true) {
+        return Err("Dieses Video hat keine Tonspur".to_string());
+    }
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    let nr: f32 = match strength.as_str() {
+        "low" => 6.0,
+        "high" => 24.0,
+        _ => 12.0, // "medium" — zugleich afftdns eigener Standardwert
+    };
+
+    let dest_path = unique_sibling_video_path(&folder.path, &source_path, "denoise");
+    let output = std::process::Command::new("ffmpeg")
+        .args(["-y", "-i"])
+        .arg(&source_path)
+        .args([
+            "-c:v",
+            "copy",
+            "-af",
+            &format!("afftdn=nr={nr}"),
+            "-c:a",
+            "aac",
+        ])
+        .arg(&dest_path)
+        .output()
+        .map_err(|err| format!("ffmpeg nicht startbar (ist ffmpeg installiert?): {err}"))?;
+    if !output.status.success() {
+        let _ = std::fs::remove_file(&dest_path);
+        return Err(format!(
+            "Geräuschreduktion fehlgeschlagen: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    register_video_result_as_new_photo(&state, photo.folder_id, &dest_path)
+}
+
+/// Musik/Sounds zu einem Video hinzufügen (Phase 16 Schritt 8) —
+/// dieselbe Audio-Mix-Technik wie die Diashow-Musikuntermalung
+/// (`export_slideshow_video`, ADR-0034 Punkt 3), hier auf ein bereits
+/// bestehendes Video-Asset angewendet statt beim Rendern einer neuen
+/// Diashow. Nicht destruktiv: neues Katalog-Asset
+/// (`<stem>_audio[_N].<ext>`), Video-Stream per `-c:v copy` unverändert.
+///
+/// `mode == "mix"` mischt die neue Spur zur vorhandenen Tonspur dazu
+/// (`amix`, `duration=first` — die Ausgabelänge folgt der *Original*-
+/// Tonspur, damit eine kürzere/längere Musikdatei die Videolänge nicht
+/// verändert) und fällt automatisch auf `"replace"` zurück, wenn das
+/// Video gar keine Tonspur hat (nichts zum Mischen da). `mode ==
+/// "replace"` ersetzt die Tonspur vollständig; ein explizites `-t` auf
+/// die aus dem Katalog bekannte Originallänge verhindert hier, dass
+/// eine längere Musikdatei die Ausgabe über das Video hinaus verlängert
+/// (kürzere Musik lässt den Rest einfach stumm, dasselbe Verhalten wie
+/// bei den meisten Schnittprogrammen). `music_volume` skaliert nur die
+/// neu hinzugefügte Spur (1.0 = unverändert).
+#[tauri::command]
+pub fn add_video_audio_track(
+    state: State<'_, AppState>,
+    photo_id: String,
+    audio_path: String,
+    mode: String,
+    music_volume: Option<f32>,
+) -> Result<PhotoDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    if photo.media_kind != "video" {
+        return Err("Tonspur hinzufügen funktioniert nur bei Videos".to_string());
+    }
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    let audio_source = Path::new(&audio_path);
+    if !audio_source.is_file() {
+        return Err(format!("Audiodatei '{audio_path}' nicht gefunden"));
+    }
+
+    let volume = music_volume.unwrap_or(1.0).max(0.0);
+    let should_mix = mode == "mix" && photo.has_audio == Some(true);
+
+    let dest_path = unique_sibling_video_path(&folder.path, &source_path, "audio");
+    let mut cmd = std::process::Command::new("ffmpeg");
+    cmd.args(["-y", "-i"])
+        .arg(&source_path)
+        .arg("-i")
+        .arg(audio_source);
+    if should_mix {
+        cmd.args([
+            "-filter_complex",
+            &format!(
+                "[1:a]volume={volume}[music];[0:a][music]amix=inputs=2:duration=first:dropout_transition=0[aout]"
+            ),
+            "-map",
+            "0:v",
+            "-map",
+            "[aout]",
+        ]);
+    } else {
+        cmd.args([
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
+            "-af",
+            &format!("volume={volume}"),
+        ]);
+    }
+    cmd.args(["-c:v", "copy", "-c:a", "aac"]);
+    if let Some(duration_ms) = photo.duration_ms {
+        cmd.args(["-t", &format!("{}", duration_ms as f64 / 1000.0)]);
+    }
+    cmd.arg(&dest_path);
+
+    let output = cmd
+        .output()
+        .map_err(|err| format!("ffmpeg nicht startbar (ist ffmpeg installiert?): {err}"))?;
+    if !output.status.success() {
+        let _ = std::fs::remove_file(&dest_path);
+        return Err(format!(
+            "Tonspur hinzufügen fehlgeschlagen: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    register_video_result_as_new_photo(&state, photo.folder_id, &dest_path)
 }
 
 /// Geht einen Bearbeitungsschritt zurück. `None`, wenn schon am

@@ -448,6 +448,29 @@ export function detectVideoSceneChanges(photoId: string, threshold?: number): Pr
   return invoke<number[]>("detect_video_scene_changes", { photoId, threshold: threshold ?? null });
 }
 
+/** Geräuschreduktion (Phase 16 Schritt 8, siehe `DECISIONS.md` ADR-0043)
+ * — nicht-destruktiv, das Ergebnis landet als neues Katalog-Asset (siehe
+ * `apx_app::commands::denoise_video_audio`s Moduldoku). `strength`:
+ * `"low"`/`"medium"`/`"high"`. */
+export function denoiseVideoAudio(photoId: string, strength: "low" | "medium" | "high"): Promise<PhotoDto> {
+  return invoke<PhotoDto>("denoise_video_audio", { photoId, strength });
+}
+
+/** Musik/Sounds zu einem Video hinzufügen (Phase 16 Schritt 8) —
+ * nicht-destruktiv, siehe `apx_app::commands::add_video_audio_track`s
+ * Moduldoku. `mode`: `"mix"` (mit vorhandener Tonspur mischen, fällt
+ * automatisch auf `"replace"` zurück, falls das Video keine Tonspur
+ * hat) oder `"replace"` (Tonspur ersetzen). `musicVolume` skaliert nur
+ * die neu hinzugefügte Spur (1.0 = unverändert). */
+export function addVideoAudioTrack(
+  photoId: string,
+  audioPath: string,
+  mode: "mix" | "replace",
+  musicVolume?: number,
+): Promise<PhotoDto> {
+  return invoke<PhotoDto>("add_video_audio_track", { photoId, audioPath, mode, musicVolume: musicVolume ?? null });
+}
+
 // ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------------
 // Anders als der lineare Verlauf oben: siehe `crates/apx-app/src/commands.rs`s
 // Moduldoku für die Abgrenzung. Kein eigener "restore"-Aufruf — die

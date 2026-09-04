@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { videoUrl } from "../lib/media";
+import { pickFilePath } from "../lib/tauri";
 import { useAppStore } from "../store";
 
 function formatTime(seconds: number): string {
@@ -43,11 +44,20 @@ export function VideoPlayer() {
   const clearVideoSceneChanges = useAppStore((s) => s.clearVideoSceneChanges);
   const useSceneAsVideoTrim = useAppStore((s) => s.useSceneAsVideoTrim);
 
+  const videoAudioBusy = useAppStore((s) => s.videoAudioBusy);
+  const videoAudioError = useAppStore((s) => s.videoAudioError);
+  const denoiseCurrentVideoAudio = useAppStore((s) => s.denoiseCurrentVideoAudio);
+  const addAudioToCurrentVideo = useAppStore((s) => s.addAudioToCurrentVideo);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [denoiseStrength, setDenoiseStrength] = useState<"low" | "medium" | "high">("medium");
+  const [musicPath, setMusicPath] = useState<string | null>(null);
+  const [musicMode, setMusicMode] = useState<"mix" | "replace">("mix");
+  const [musicVolume, setMusicVolume] = useState(1);
 
   // Beim Fotowechsel Wiedergabezustand zurücksetzen — sonst zeigt die
   // Zeitleiste kurz den Stand des vorherigen Videos an, bevor die neuen
@@ -58,6 +68,7 @@ export function VideoPlayer() {
     setDuration(0);
     clearVideoTrim();
     clearVideoSceneChanges();
+    setMusicPath(null);
   }, [selectedPhotoId, clearVideoTrim, clearVideoSceneChanges]);
 
   const togglePlay = useCallback(() => {
@@ -91,6 +102,11 @@ export function VideoPlayer() {
   const useCurrentSceneAsTrim = useCallback(() => {
     useSceneAsVideoTrim(Math.round(currentTime * 1000));
   }, [currentTime, useSceneAsVideoTrim]);
+
+  const handlePickMusic = useCallback(async () => {
+    const path = await pickFilePath("Audio", ["mp3", "wav", "ogg", "flac", "m4a", "aac"]);
+    if (path) setMusicPath(path);
+  }, []);
 
   if (!photo) return null;
 
@@ -261,6 +277,81 @@ export function VideoPlayer() {
           ) : null}
         </div>
         {videoSceneChangesError ? <p className="text-xs text-red-500">{videoSceneChangesError}</p> : null}
+
+        {/* Geräuschreduktion + Musik/Sounds hinzufügen (Phase 16 Schritt 8):
+            beide nicht-destruktiv — legen bei Erfolg ein neues Katalog-
+            Asset an, das automatisch ausgewählt wird (siehe
+            `denoise_video_audio`/`add_video_audio_track`s Moduldoku in
+            `apx_app::commands`). */}
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-xs">
+          <span className="text-text-secondary">Entrauschen:</span>
+          <select
+            value={denoiseStrength}
+            onChange={(e) => setDenoiseStrength(e.target.value as "low" | "medium" | "high")}
+            className="rounded border border-border bg-bg-panel px-1 py-0.5"
+          >
+            <option value="low">schwach</option>
+            <option value="medium">mittel</option>
+            <option value="high">stark</option>
+          </select>
+          <button
+            type="button"
+            onClick={() => void denoiseCurrentVideoAudio(denoiseStrength)}
+            disabled={videoAudioBusy || photo.has_audio !== true}
+            title={photo.has_audio !== true ? "Video hat keine Tonspur" : undefined}
+            className="rounded border border-border px-2 py-0.5 text-text-primary hover:border-accent disabled:opacity-40"
+          >
+            {videoAudioBusy ? "Verarbeite…" : "Entrauschen"}
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-xs">
+          <span className="text-text-secondary">Musik:</span>
+          <button
+            type="button"
+            onClick={() => void handlePickMusic()}
+            className="rounded border border-border px-2 py-0.5 text-text-primary hover:border-accent"
+          >
+            {musicPath ? "Andere Datei wählen" : "Datei wählen"}
+          </button>
+          {musicPath ? (
+            <>
+              <span className="max-w-[12rem] truncate text-text-muted" title={musicPath}>
+                {musicPath.split(/[/\\]/).pop()}
+              </span>
+              <select
+                value={musicMode}
+                onChange={(e) => setMusicMode(e.target.value as "mix" | "replace")}
+                className="rounded border border-border bg-bg-panel px-1 py-0.5"
+              >
+                <option value="mix">mit Ton mischen</option>
+                <option value="replace">Ton ersetzen</option>
+              </select>
+              <label className="flex items-center gap-1 text-text-secondary">
+                Lautstärke
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={0.05}
+                  value={musicVolume}
+                  onChange={(e) => setMusicVolume(Number(e.target.value))}
+                  className="w-20"
+                />
+                <span className="w-8 text-right text-text-muted">{Math.round(musicVolume * 100)}%</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => void addAudioToCurrentVideo(musicPath, musicMode, musicVolume)}
+                disabled={videoAudioBusy}
+                className="ml-auto rounded border border-accent bg-accent/10 px-3 py-0.5 font-medium text-accent hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {videoAudioBusy ? "Verarbeite…" : "Hinzufügen"}
+              </button>
+            </>
+          ) : null}
+        </div>
+        {videoAudioError ? <p className="text-xs text-red-500">{videoAudioError}</p> : null}
       </div>
     </div>
   );

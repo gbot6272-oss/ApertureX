@@ -3880,3 +3880,43 @@ Positionsberechnungs-Muster wie die Start-/Ende-Marker aus Schritt 6);
 erkannte Szenenwechsel gehören zu genau einem Video und werden beim
 Fotowechsel verworfen (neue `clearVideoSceneChanges`-Aktion, im
 bestehenden Zurücksetzen-Effekt neben `clearVideoTrim` aufgerufen).
+
+**Nachtrag (Schritt 8, Geräuschreduktion + Musik/Sounds hinzufügen):**
+wie in ADR-0043s Tabelle real recherchiert, für die Geräuschreduktion
+bewusst nur `afftdn` (reine FFT-Spektral-Subtraktion, seit jeher Teil
+von ffmpeg, kein Modell nötig) implementiert, **nicht** das dort
+ebenfalls genannte RNN-basierte `arnndn` — dessen Modell-Download hätte
+dasselbe Opt-in-Download-Muster wie MiDaS/LaMa/Stiltransfer gebraucht
+(inklusive erneuter Lizenzprüfung der dann aktuellen
+`arnndn-models`-Repo-Datei zum Download-Zeitpunkt, nicht nur aus dieser
+Recherche übernommen) — das hätte den Schritt deutlich aufgebläht, ohne
+dass `afftdn` allein für den "Basis-Videoschnitt"-Anspruch dieser Phase
+unzureichend wäre. Neuer Command `denoise_video_audio(photo_id,
+strength)` mit drei festen Stufen (schwach/mittel/stark →
+`afftdn=nr=6/12/24`, 12 ist `afftdn`s eigener Standardwert). Wie
+`trim_video`: nicht-destruktiv, `-c:v copy` lässt den Video-Stream
+unangetastet, nur die Tonspur wird neu kodiert.
+
+Musik/Sounds hinzufügen (`add_video_audio_track`) nutzt bewusst
+**dieselbe** Audio-Mix-Technik wie die bereits bestehende Diashow-
+Musikuntermalung (`export_slideshow_video`, ADR-0034 Punkt 3) statt
+eine zweite Implementierung zu schreiben — hier auf ein bereits
+bestehendes Video-Asset angewendet statt beim Rendern einer neuen
+Diashow. Zwei Modi: `"mix"` (`amix`-Filter, `duration=first` — die
+Ausgabelänge folgt bewusst der *Original*-Tonspur, damit eine kürzere/
+längere Musikdatei die Videolänge nicht verändert; fällt automatisch
+auf `"replace"` zurück, wenn das Video gar keine eigene Tonspur hat)
+und `"replace"` (Tonspur komplett ersetzen, mit explizitem `-t` auf die
+aus dem Katalog bereits bekannte Originallänge — verhindert, dass eine
+längere Musikdatei die Ausgabe über die Videolänge hinaus verlängert).
+Die Audiodatei wählt dieselbe generische `pick_file_path`-Dialog-
+Infrastruktur wie `SlideshowDialog.tsx`s Musikauswahl (kein neuer
+Datei-Dialog-Command).
+
+**Kleine Refaktorierung im Zuge dessen:** `trim_video`s bis dahin
+inline stehende Zielpfad-Kollisionsvermeidung und Metadaten-
+Extraktion+Thumbnail-Erzeugung wurden in zwei geteilte Funktionen
+(`unique_sibling_video_path`, `register_video_result_as_new_photo`)
+gezogen, damit alle drei Video-Bearbeitungs-Commands (Schritt 6 und 8)
+exakt dieselbe "neues Katalog-Asset anlegen"-Logik verwenden statt sie
+drei Mal zu duplizieren.

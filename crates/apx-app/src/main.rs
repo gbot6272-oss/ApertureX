@@ -321,6 +321,8 @@ fn main() {
             commands::list_builtin_lut_filters,
             commands::trim_video,
             commands::detect_video_scene_changes,
+            commands::denoise_video_audio,
+            commands::add_video_audio_track,
             commands::undo_develop_edit,
             commands::redo_develop_edit,
             commands::list_develop_history,

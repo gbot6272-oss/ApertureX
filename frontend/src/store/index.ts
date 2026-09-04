@@ -1804,6 +1804,16 @@ interface VideoSlice {
    * -ende als Randfälle) direkt als Trimm-Entwurf, ohne dass die
    * Nutzerin die beiden Punkte manuell markieren muss. */
   useSceneAsVideoTrim: (atMs: number) => void;
+
+  /** Geräuschreduktion + Musik/Sounds hinzufügen (Phase 16 Schritt 8,
+   * siehe `DECISIONS.md` ADR-0043) — beide nicht-destruktiv, siehe
+   * `apx_app::commands::denoise_video_audio`/`add_video_audio_track`s
+   * Moduldoku. Beide legen bei Erfolg ein neues Katalog-Asset an und
+   * wählen es aus (dasselbe Muster wie `commitVideoTrim`). */
+  videoAudioBusy: boolean;
+  videoAudioError: string | null;
+  denoiseCurrentVideoAudio: (strength: "low" | "medium" | "high") => Promise<void>;
+  addAudioToCurrentVideo: (audioPath: string, mode: "mix" | "replace", musicVolume: number) => Promise<void>;
 }
 
 export type AppStore = CatalogSlice &
@@ -6866,6 +6876,57 @@ export const useAppStore = create<AppStore>()(
         state.videoTrimEndMs = end;
         state.videoTrimError = null;
       });
+    },
+
+    videoAudioBusy: false,
+    videoAudioError: null,
+
+    denoiseCurrentVideoAudio: async (strength) => {
+      const { selectedPhotoId, selectedFolderId } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.videoAudioBusy = true;
+        state.videoAudioError = null;
+      });
+      try {
+        const result = await api.denoiseVideoAudio(selectedPhotoId, strength);
+        if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
+        set((state) => {
+          state.selectedPhotoId = result.id;
+        });
+      } catch (err) {
+        set((state) => {
+          state.videoAudioError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoAudioBusy = false;
+        });
+      }
+    },
+
+    addAudioToCurrentVideo: async (audioPath, mode, musicVolume) => {
+      const { selectedPhotoId, selectedFolderId } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.videoAudioBusy = true;
+        state.videoAudioError = null;
+      });
+      try {
+        const result = await api.addVideoAudioTrack(selectedPhotoId, audioPath, mode, musicVolume);
+        if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
+        set((state) => {
+          state.selectedPhotoId = result.id;
+        });
+      } catch (err) {
+        set((state) => {
+          state.videoAudioError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoAudioBusy = false;
+        });
+      }
     },
     };
   }),

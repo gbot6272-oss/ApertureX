@@ -3844,3 +3844,39 @@ Zurücksetzen-Effekt), damit keine In/Out-Punkte eines vorherigen Videos
 am neuen kleben bleiben. Nach erfolgreichem Schnitt wählt der Store das
 neu entstandene Video automatisch aus (`selectedPhotoId` auf die
 Antwort von `trim_video`).
+
+**Nachtrag (Schritt 7, Automatisches Zuschneiden):** wie in ADR-0043
+oben real recherchiert und tabelliert, keine eigene Bild-Differenz-
+Heuristik geschrieben, sondern ffmpegs nativer `scdet`-Filter
+(Szenenwechsel-Erkennung, seit ffmpeg 4.3, kein externes Modell nötig)
+genutzt — neuer `apx-app`-Command `detect_video_scene_changes(photo_id,
+threshold?)`. `scdet` protokolliert jeden erkannten Wechsel als eine
+`av_log`-Info-Zeile auf `stderr` in der Form `lavfi.scd.score: <wert>,
+lavfi.scd.time: <sekunden>` (`-f null -` verwirft die eigentliche
+Bildausgabe, `-an` überspringt unnötig die Tonspur) — der Command
+parst diese Zeilen per einfachem Textsuche+Parse statt eines
+Regex-Crates (kein neues Crate für ein simples "ab Marker bis zum
+nächsten Nicht-Ziffern-Zeichen"-Muster), sortiert/dedupliziert die
+resultierenden Millisekunden-Zeitstempel.
+
+**Bewusst begrenzter Umfang, wie in ADR-0043 vorab ehrlich benannt:**
+kein "beste/interessanteste Momente"-KI-Highlight-Ranking (das bleibt
+explizit außerhalb dieser Phase) — Schritt 7 liefert reine
+Szenenwechsel-Erkennung plus eine Bequemlichkeitsfunktion, die
+`videoTrimStartMs`/`videoTrimEndMs` (aus Schritt 6) automatisch mit dem
+Szenenabschnitt um die aktuelle Wiedergabeposition vorbelegt (der
+zuletzt erkannte Wechsel davor als Start, der erste danach als Ende,
+Videoanfang/-ende als Randfälle über `duration_ms` aus dem Katalog) —
+"automatisch zu einem guten Abschnitt zuschneiden" im Sinne von
+"objektive Szenengrenzen finden und als Schnittvorschlag anbieten",
+nicht im Sinne von "die interessanteste Szene erraten". Die eigentliche
+Schnittausführung bleibt bewusst der bereits bestehende
+`commitVideoTrim`-Weg aus Schritt 6 — keine zweite, parallele
+Schnitt-Pipeline.
+
+`VideoPlayer.tsx`: gelbe Ein-Pixel-Striche auf der bestehenden
+Zeitleiste markieren jeden erkannten Wechsel (dasselbe
+Positionsberechnungs-Muster wie die Start-/Ende-Marker aus Schritt 6);
+erkannte Szenenwechsel gehören zu genau einem Video und werden beim
+Fotowechsel verworfen (neue `clearVideoSceneChanges`-Aktion, im
+bestehenden Zurücksetzen-Effekt neben `clearVideoTrim` aufgerufen).

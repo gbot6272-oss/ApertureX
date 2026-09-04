@@ -439,6 +439,15 @@ export function trimVideo(photoId: string, startMs: number, endMs: number): Prom
   return invoke<PhotoDto>("trim_video", { photoId, startMs, endMs });
 }
 
+/** Automatisches Zuschneiden (Phase 16 Schritt 7, siehe `DECISIONS.md`
+ * ADR-0043) — erkennt Szenenwechsel per ffmpegs `scdet`-Filter und gibt
+ * ihre Zeitstempel in Millisekunden zurück (aufsteigend sortiert, ohne
+ * Duplikate). `threshold` folgt `scdet`s eigener 0–100-Skala (Standard
+ * des Filters selbst: 10.0, niedriger = empfindlicher). */
+export function detectVideoSceneChanges(photoId: string, threshold?: number): Promise<number[]> {
+  return invoke<number[]>("detect_video_scene_changes", { photoId, threshold: threshold ?? null });
+}
+
 // ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------------
 // Anders als der lineare Verlauf oben: siehe `crates/apx-app/src/commands.rs`s
 // Moduldoku für die Abgrenzung. Kein eigener "restore"-Aufruf — die

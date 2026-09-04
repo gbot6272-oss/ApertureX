@@ -1238,6 +1238,91 @@ fn run_ffmpeg_trim(
     Ok(())
 }
 
+/// Automatisches Zuschneiden (Phase 16 Schritt 7, siehe `DECISIONS.md`
+/// ADR-0043): erkennt Szenenwechsel über ffmpegs nativen `scdet`-Filter
+/// (seit ffmpeg 4.3, keine externe Modell-Abhängigkeit — echte, gegen
+/// die ffmpeg-Dokumentation verifizierte Bordfunktion statt eines
+/// eigenen Bild-Differenz-Algorithmus). Gibt sortierte, deduplizierte
+/// Zeitstempel (Millisekunden) jedes erkannten Wechsels zurück; das
+/// Frontend nutzt diese als Sprungmarken auf der Zeitleiste und um den
+/// "aktuellen Szenenabschnitt" automatisch als Trimm-Vorschlag
+/// vorzubelegen (siehe `VideoPlayer.tsx`). `threshold` folgt `scdet`s
+/// eigener Skala (0–100, Standardwert des Filters ist 10.0 — niedriger
+/// = empfindlicher/mehr erkannte Wechsel).
+#[tauri::command]
+pub fn detect_video_scene_changes(
+    state: State<'_, AppState>,
+    photo_id: String,
+    threshold: Option<f32>,
+) -> Result<Vec<i64>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    if photo.media_kind != "video" {
+        return Err("Szenenerkennung funktioniert nur bei Videos".to_string());
+    }
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    run_ffmpeg_scene_detect(&source_path, threshold.unwrap_or(10.0))
+}
+
+/// `scdet` protokolliert jeden erkannten Wechsel als eine
+/// `av_log`-Info-Zeile auf `stderr` in der Form
+/// `lavfi.scd.score: <wert>, lavfi.scd.time: <sekunden>` — `-f null -`
+/// verwirft die eigentliche Bildausgabe (nur die Metadaten interessieren
+/// hier), `-an` überspringt die Tonspur (unnötig für Bild-Szenenerkennung,
+/// spart Laufzeit).
+fn run_ffmpeg_scene_detect(source: &std::path::Path, threshold: f32) -> Result<Vec<i64>, String> {
+    let output = std::process::Command::new("ffmpeg")
+        .args(["-hide_banner", "-nostats", "-v", "info", "-i"])
+        .arg(source)
+        .args([
+            "-an",
+            "-filter:v",
+            &format!("scdet=threshold={threshold}"),
+            "-f",
+            "null",
+            "-",
+        ])
+        .output()
+        .map_err(|err| format!("ffmpeg nicht startbar (ist ffmpeg installiert?): {err}"))?;
+
+    // scdet meldet Erfolg über den regulären Nulldevice-Encode-Pfad —
+    // ein Fehlschlag hier bedeutet i. d. R. eine nicht dekodierbare
+    // Datei, nicht "keine Szenenwechsel gefunden" (das liefert einfach
+    // eine leere Liste).
+    if !output.status.success() {
+        return Err(format!(
+            "Szenenerkennung fehlgeschlagen: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut timestamps: Vec<i64> = stderr
+        .lines()
+        .filter_map(|line| {
+            let marker = "lavfi.scd.time:";
+            let idx = line.find(marker)?;
+            let rest = line[idx + marker.len()..].trim();
+            let value = rest
+                .split(|c: char| !(c.is_ascii_digit() || c == '.'))
+                .next()?;
+            value.parse::<f64>().ok()
+        })
+        .map(|secs| (secs * 1000.0).round() as i64)
+        .collect();
+    timestamps.sort_unstable();
+    timestamps.dedup();
+    Ok(timestamps)
+}
+
 /// Geht einen Bearbeitungsschritt zurück. `None`, wenn schon am
 /// Ausgangszustand (kein Rückgängig möglich) — kein Fehler, siehe
 /// `apx_catalog::Catalog::undo_edit`.

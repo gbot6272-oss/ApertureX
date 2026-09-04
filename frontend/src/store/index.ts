@@ -1785,6 +1785,25 @@ interface VideoSlice {
    * gewählten Video, lädt danach die Fotoliste des Ordners neu und wählt
    * das neu entstandene, getrimmte Video aus. */
   commitVideoTrim: () => Promise<void>;
+
+  /** Automatisches Zuschneiden (Phase 16 Schritt 7, siehe `DECISIONS.md`
+   * ADR-0043) — erkannte Szenenwechsel-Zeitpunkte (Millisekunden,
+   * aufsteigend) des aktuell gewählten Videos. `null` = noch nicht
+   * erkannt (nicht dasselbe wie eine leere Liste = erkannt, aber keine
+   * Wechsel gefunden). */
+  videoSceneChanges: number[] | null;
+  videoSceneChangesLoading: boolean;
+  videoSceneChangesError: string | null;
+  detectVideoSceneChanges: () => Promise<void>;
+  /** Wirft erkannte Szenenwechsel weg (Fotowechsel — die vorherigen
+   * gehören zu einem anderen Video, siehe `VideoPlayer.tsx`s bestehendem
+   * Zurücksetzen-Effekt). */
+  clearVideoSceneChanges: () => void;
+  /** Übernimmt den Szenenabschnitt um `atMs` (den zuletzt vor `atMs`
+   * erkannten Wechsel als Start, den ersten danach als Ende — Videoanfang/
+   * -ende als Randfälle) direkt als Trimm-Entwurf, ohne dass die
+   * Nutzerin die beiden Punkte manuell markieren muss. */
+  useSceneAsVideoTrim: (atMs: number) => void;
 }
 
 export type AppStore = CatalogSlice &
@@ -6794,6 +6813,59 @@ export const useAppStore = create<AppStore>()(
           state.videoTrimSaving = false;
         });
       }
+    },
+
+    videoSceneChanges: null,
+    videoSceneChangesLoading: false,
+    videoSceneChangesError: null,
+
+    clearVideoSceneChanges: () => {
+      set((state) => {
+        state.videoSceneChanges = null;
+        state.videoSceneChangesError = null;
+      });
+    },
+
+    detectVideoSceneChanges: async () => {
+      const { selectedPhotoId } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.videoSceneChangesLoading = true;
+        state.videoSceneChangesError = null;
+      });
+      try {
+        const timestamps = await api.detectVideoSceneChanges(selectedPhotoId);
+        set((state) => {
+          state.videoSceneChanges = timestamps;
+        });
+      } catch (err) {
+        set((state) => {
+          state.videoSceneChangesError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoSceneChangesLoading = false;
+        });
+      }
+    },
+
+    useSceneAsVideoTrim: (atMs) => {
+      const { videoSceneChanges, selectedFolderId, selectedPhotoId } = get();
+      if (!videoSceneChanges) return;
+      const photos = selectedFolderId ? get().photosByFolder[selectedFolderId] : undefined;
+      const photo = photos?.find((p) => p.id === selectedPhotoId);
+      const durationMs = photo?.duration_ms ?? null;
+
+      const before = videoSceneChanges.filter((t) => t <= atMs);
+      const after = videoSceneChanges.filter((t) => t > atMs);
+      const start = before[before.length - 1] ?? 0;
+      const end = after[0] ?? durationMs ?? atMs;
+
+      set((state) => {
+        state.videoTrimStartMs = start;
+        state.videoTrimEndMs = end;
+        state.videoTrimError = null;
+      });
     },
     };
   }),

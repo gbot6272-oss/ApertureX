@@ -320,6 +320,7 @@ fn main() {
             commands::import_lut_cube_file,
             commands::list_builtin_lut_filters,
             commands::trim_video,
+            commands::detect_video_scene_changes,
             commands::undo_develop_edit,
             commands::redo_develop_edit,
             commands::list_develop_history,

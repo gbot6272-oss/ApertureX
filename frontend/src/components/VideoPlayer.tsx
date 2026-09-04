@@ -36,6 +36,13 @@ export function VideoPlayer() {
   const videoTrimError = useAppStore((s) => s.videoTrimError);
   const commitVideoTrim = useAppStore((s) => s.commitVideoTrim);
 
+  const videoSceneChanges = useAppStore((s) => s.videoSceneChanges);
+  const videoSceneChangesLoading = useAppStore((s) => s.videoSceneChangesLoading);
+  const videoSceneChangesError = useAppStore((s) => s.videoSceneChangesError);
+  const detectVideoSceneChanges = useAppStore((s) => s.detectVideoSceneChanges);
+  const clearVideoSceneChanges = useAppStore((s) => s.clearVideoSceneChanges);
+  const useSceneAsVideoTrim = useAppStore((s) => s.useSceneAsVideoTrim);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -50,7 +57,8 @@ export function VideoPlayer() {
     setCurrentTime(0);
     setDuration(0);
     clearVideoTrim();
-  }, [selectedPhotoId, clearVideoTrim]);
+    clearVideoSceneChanges();
+  }, [selectedPhotoId, clearVideoTrim, clearVideoSceneChanges]);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
@@ -79,6 +87,10 @@ export function VideoPlayer() {
   const markEnd = useCallback(() => {
     setVideoTrimEnd(Math.round(currentTime * 1000));
   }, [currentTime, setVideoTrimEnd]);
+
+  const useCurrentSceneAsTrim = useCallback(() => {
+    useSceneAsVideoTrim(Math.round(currentTime * 1000));
+  }, [currentTime, useSceneAsVideoTrim]);
 
   if (!photo) return null;
 
@@ -135,6 +147,16 @@ export function VideoPlayer() {
               style={{ left: `${trimEndProgress * 100}%` }}
             />
           ) : null}
+          {videoSceneChanges?.map((ms) =>
+            duration > 0 ? (
+              <div
+                key={ms}
+                aria-hidden="true"
+                className="absolute inset-y-0 w-px bg-yellow-500/70"
+                style={{ left: `${Math.min(1, Math.max(0, ms / 1000 / duration)) * 100}%` }}
+              />
+            ) : null,
+          )}
           <div
             className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent shadow"
             style={{ left: `${progress * 100}%` }}
@@ -205,6 +227,40 @@ export function VideoPlayer() {
           </button>
         </div>
         {videoTrimError ? <p className="text-xs text-red-500">{videoTrimError}</p> : null}
+
+        {/* Automatisches Zuschneiden (Phase 16 Schritt 7): Szenenwechsel-
+            Erkennung per ffmpegs `scdet`-Filter (gelbe Striche auf der
+            Zeitleiste oben) — "Diesen Abschnitt übernehmen" belegt Start/
+            Ende automatisch mit den beiden Wechseln links/rechts der
+            aktuellen Wiedergabeposition vor, statt beide Punkte manuell
+            markieren zu müssen. */}
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-xs">
+          <button
+            type="button"
+            onClick={() => void detectVideoSceneChanges()}
+            disabled={videoSceneChangesLoading}
+            className="rounded border border-border px-2 py-0.5 text-text-primary hover:border-accent disabled:opacity-40"
+          >
+            {videoSceneChangesLoading ? "Erkenne Szenen…" : "Szenenwechsel erkennen"}
+          </button>
+          {videoSceneChanges ? (
+            <>
+              <span className="text-text-muted">
+                {videoSceneChanges.length === 0
+                  ? "keine Wechsel gefunden"
+                  : `${videoSceneChanges.length} Wechsel gefunden`}
+              </span>
+              <button
+                type="button"
+                onClick={useCurrentSceneAsTrim}
+                className="rounded border border-border px-2 py-0.5 text-text-primary hover:border-accent"
+              >
+                Diesen Abschnitt übernehmen
+              </button>
+            </>
+          ) : null}
+        </div>
+        {videoSceneChangesError ? <p className="text-xs text-red-500">{videoSceneChangesError}</p> : null}
       </div>
     </div>
   );

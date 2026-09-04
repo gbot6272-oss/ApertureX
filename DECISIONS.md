@@ -4028,3 +4028,116 @@ abgebrochen. **Kein neues Playwright-Spezifikat für Video/LUT selbst**
 `e2e/tauri-mock.ts` bekommen, ihre Commands sind also e2e komplett
 ungetestet; die einzige Absicherung dafür sind die echten
 `ffmpeg`-Smoke-Tests oben plus `tsc -b`/`vitest run`.
+
+## ADR-0044: Foto-Globus + Dichte-Heatmap (Erweiterung der Kartenansicht)
+
+**Kontext:** Nutzerwunsch, direkt nach Phase 16, außerhalb der
+sequenziellen Phasennummerierung: die bestehende Kartenansicht
+(Phase 8 Schritt 7 — flache Leaflet-Karte mit einzelnen Foto-Pins)
+"etwas ausweiten" — ein Foto-Globus als kleinste Zoomstufe (dreht sich,
+sieht "wie ein echter Globus" aus), eine Foto-Dichte-Heatmap
+(Google-Fotos-Stil, farbige Zonen statt einzelner Pins) basierend auf
+*allen* geotaggten Fotos, Pins erst wieder bei sehr großem Zoom, alles
+im bestehenden dunklen/technischen Design. Direkt umgesetzt ohne
+Zwischen-Rückfrage (explizite Nutzervorgabe).
+
+**Architektur-Entscheidung — drei Ebenen statt einer:**
+
+1. **Globus** (`GlobeView.tsx`, Standard-Einstieg) — eine selbst
+   gerenderte, drehbare 3D-Kugel (orthographische Projektion, reines
+   Canvas 2D) mit derselben Dichte-Heatmap auf der Oberfläche, keine
+   einzelnen Pins.
+2. **Flache Karte, Heatmap-Zoom** — die bestehende Leaflet-Karte, jetzt
+   mit denselben Dichte-Zonen statt Pins, dunklen CARTO-Kacheln statt
+   der ursprünglichen hellen OSM-Kacheln.
+3. **Flache Karte, Pin-Zoom** (`PIN_ZOOM_THRESHOLD = 10`) — dieselben
+   Pins/Popups/Reiserouten wie zuvor, jetzt nur noch ab sehr großem
+   Zoom sichtbar statt immer.
+
+Kein neuer Backend-Command: `list_geotagged_photos` (Phase 8 Schritt 7)
+liefert bereits alle geotaggten Fotos katalogweit — genau "alle sollen
+angelegt werden" aus dem Nutzerwunsch, ohne Änderung.
+
+**Globus — bewusst selbst implementiert statt einer 3D-Engine:** eine
+orthographische Kugelprojektion (`lib/geoProjection.ts`, reine, unit-
+getestete Funktionen: Länge/Breite → Einheitskugel-Punkt, Rotation um
+zwei Achsen, Parallelprojektion auf die Bildebene) ist reine, gut
+dokumentierte Vektor-Mathematik — derselbe Grund, aus dem diese Sitzung
+bereits Seam Carving (Phase 15) und die `.cube`-LUT-Engine (Phase 16)
+selbst implementiert statt eine Bibliothek einzubinden. Eine echte
+3D-Engine (Three.js/`globe.gl`/WebGL) wäre für eine UI-Panel-Größe
+unverhältnismäßig schwer; Canvas 2D mit vorab projizierten Punkten
+reicht für die Ziel-Größenordnung (ein Panel, keine Vollbild-3D-Szene)
+performant aus. Landmasse-Ringe, die den Horizont überschneiden, werden
+bewusst **vereinfacht** geclippt (zusammenhängende sichtbare Punktläufe
+als gefüllte Pfade mit einer geraden Sehne am Rand statt einer exakten
+Kreisbogen-Clip-Berechnung) — ein am Bildschirm kaum wahrnehmbarer
+Kompromiss (der Rand ist ohnehin durch die Rand-Abdunkelung visuell
+weich), der den Rendercode deutlich einfacher hält.
+
+**Landmasse-Daten — real recherchiert, einmalig konvertiert statt einer
+Laufzeit-Abhängigkeit:** `world-atlas`s `land-110m.json` (Natural-
+Earth-110m-Auflösung, ISC-Lizenz, öffentlich-rechtsfreie Datengrundlage
+laut Natural Earth selbst) wurde einmalig in dieser Sitzung per
+`topojson-client` (ebenfalls ISC) zu einem flachen, auf zwei
+Nachkommastellen gerundeten Ringe-Array konvertiert und als statische
+`frontend/src/assets/world-land-110m.json` (~74 KB, ~27 KB gzip)
+gebündelt — danach wurden beide npm-Pakete wieder entfernt
+(`pnpm remove`), sie sind **keine** Laufzeit-Abhängigkeit. Siehe
+`THIRD_PARTY.md` für die vollständige Lizenzangabe der gebündelten
+Daten.
+
+**Heatmap-Farbskala — aus den Theme-Tokens abgeleitet statt einer
+generischen Regenbogen-Skala:** `lib/photoHeatmap.ts` (reine,
+unit-getestete Logik, geteilt zwischen Globus und flacher Karte)
+interpoliert von der Akzentfarbe (`--color-accent`, kühl/wenig Fotos)
+zur Warnfarbe (`--color-danger`, viele Fotos an einem Ort) — folgt
+automatisch Dark-/Hell-/Kontrastmodus und der benutzerdefinierten
+Akzentfarbe (Phase 10 Schritt 7), bleibt "technisch/dunkel" statt
+bunt-verspielt, wie vom Nutzer gefordert ("sich visuell dem gesamten
+Design anpassen"). Dichte-Bündelung per festem Breiten-/Längengrad-
+Raster (dieselbe einfache Idee wie die Personenansicht-Vorsortierung,
+Phase 11 Schritt 5) statt einer echten Kernel-Density-Schätzung —
+für eine Übersicht, nicht für wissenschaftliche Genauigkeit.
+
+**Flache-Karten-Heatmap — selbst implementierter Leaflet-Layer statt
+`leaflet.heat`:** `lib/leafletHeatmap.ts` baut einen eigenen
+`L.Layer` (Canvas im `overlayPane`, neu gezeichnet bei
+`moveend`/`zoomend`/`resize`) statt der neuen Laufzeit-Abhängigkeit
+`leaflet.heat` — dieselbe Rasterung/Farbskala wie der Globus
+(`photoHeatmap.ts`), keine zweite unabhängige Heatmap-Implementierung.
+`leaflet.heat` wäre zwar klein und MIT-lizenziert gewesen, aber eine
+neue Abhängigkeit für eine bereits vorhandene, geteilte Logik war nicht
+nötig.
+
+**Dunkle Kartenkacheln:** CARTOs "Dark Matter"-Kacheln
+(`basemaps.cartocdn.com/dark_all`, kostenlos, kein API-Schlüssel,
+CC-BY-3.0-Kacheln über OpenStreetMap-Daten) ersetzen die ursprünglichen
+hellen Standard-OSM-Kacheln — passend zum "technisch/professionell/
+dunkel"-Anspruch und zum Globus, der dieselbe dunkle Grundstimmung hat.
+
+**Bewegungs-Rücksicht:** der Globus rotiert automatisch (langsam,
+ziehbar für manuelle Drehung) — respektiert sowohl
+`prefers-reduced-motion` als auch die App-eigene
+`uiSettings.reduced_motion`-Einstellung (Phase 10 Schritt 6), dann
+bleibt die automatische Rotation aus, Ziehen bleibt weiter möglich.
+
+**Bestehende Playwright-Spezifikation angepasst, nicht neu
+geschrieben:** `map-flow.spec.ts` ging bisher davon aus, dass der
+"Karte"-Knopf direkt die flache Karte zeigt — jetzt zeigt er den
+Globus (neuer Standard-Einstieg). Die GPX-Import-Tests wurden um einen
+expliziten "Zur Karte →"-Klick ergänzt, ein neuer Test deckt den
+Globus→Karte-Wechsel selbst ab.
+
+**Reale visuelle Verifikation statt nur Kompilieren:** ein Playwright-
+Screenshot-Testlauf (nicht Teil der eingecheckten Suite, nur für diese
+Sitzung) bestätigte den Globus mit echten, erkennbaren Kontinenten
+(Südamerika/Afrika/Antarktis in der Standard-Rotation) und die
+Heatmap-Blobs in der Akzent→Warnfarbe-Skala auf der flachen Karte;
+dabei zwei echte Bugs gefunden und behoben: (1) die Heatmap-Punkte
+wurden nie an die neu erzeugte Leaflet-Heatmap-Ebene übergeben, wenn
+`geotaggedPhotos` bereits vor dem ersten Wechsel in den Kartenmodus
+geladen war (Effekt-Abhängigkeitsliste fehlte `mapMode`); (2) die
+angezeigte Zoomstufe war eingefroren (aus einer Ref statt reaktivem
+State gelesen, aktualisierte sich nie nach dem ersten Render). Beide
+behoben, vor dem Commit erneut visuell bestätigt.

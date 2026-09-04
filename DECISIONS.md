@@ -3728,3 +3728,42 @@ bildpositions-spezifisch (dieselbe Begründung, aus der
 ausgeschlossen sind) — `buildPresetEdlSubset` schneidet sie deshalb beim
 Sektions-Kopieren explizit heraus (Preset trägt nur die globale
 Filter-Anwendung, nie gemalte Bereiche eines fremden Fotos).
+
+**Nachtrag (Schritt 4, Video als Katalog-Asset):** wie in Schritt 0
+festgelegt, erweitert eine neue Migration (`0012_video.sql`) die
+bestehende `photos`-Tabelle um fünf nullable Spalten
+(`media_kind`/`duration_ms`/`video_codec`/`has_audio`/`frame_rate`)
+statt eine eigene `videos`-Tabelle einzuführen — ein Video bleibt eine
+ganz normale Katalogzeile, Sammlungen/Schlagworte/Sterne/Filter/
+Duplikat-Erkennung/Batch-Verarbeitung funktionieren automatisch weiter,
+ohne dass eine dieser Stellen von Video weiß.
+
+Import verzweigt früh nach Dateiendung
+(`import::video::is_video_extension`, neue `mp4`/`mov`/`m4v`/`avi`/
+`mkv`/`webm`-Liste) — bewusst NICHT über `apx_raw::read_metadata`
+(reiner Bild-Decoder, würde an einem Video-Container schlicht
+scheitern), sondern über `ffprobe -show_format -show_streams`
+(JSON-Ausgabe, geparst über das ohnehin vorhandene `serde_json`, kein
+neues Crate) — dasselbe Subprozess-Muster wie `apx_export::video`s
+`ffmpeg`-Aufrufe (ADR-0034: kein Bündeln, System-Installation
+vorausgesetzt). Thumbnail-Erzeugung entsprechend verzweigt: ein
+einzelnes Frame per `ffmpeg -ss 00:00:01 ... -f image2pipe` direkt auf
+`stdout`, eine Sekunde statt Frame 0 (oft schwarz/unscharf bei vielen
+Kameras), läuft danach durch dieselbe Downscale-/Speicher-Pipeline wie
+ein Foto-Thumbnail.
+
+**Real gegen den Code geprüfter Umfang der Änderung, nicht unterschätzt:**
+`NewPhoto`/`Photo` sind zentrale, überall im Katalog verwendete
+Structs — 23 Konstruktionsstellen (Produktionscode und Tests über
+`apx-catalog`/`apx-app`) mussten um die fünf neuen Felder ergänzt
+werden. Bei bereits vorhandenen Fotos/Videos bleibt das rückwärts-
+kompatibel: die Migration setzt `media_kind` per SQL-`DEFAULT 'photo'`,
+alle anderen neuen Spalten sind nullable.
+
+**Bewusst noch nicht Teil dieses Schritts** (folgt in Schritt 5 mit dem
+neuen `"video"`-`centerView`): ein sichtbares Video-Abspiel-Symbol im
+Raster, eine "nur Videos"/"nur Fotos"-Filteroption, und was beim Klick
+auf ein Video-Asset passiert (aktuell öffnet es denselben Foto-Viewer
+wie jedes andere Bild und würde dort scheitern) — reine Backend-/
+Katalog-Grundlage ohne sichtbaren Effekt im UI, bis Schritt 5 die
+Wiedergabe-Oberfläche liefert.

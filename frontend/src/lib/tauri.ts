@@ -61,6 +61,13 @@ export interface PhotoDto {
    * ADR-0039) — frei benannte Zusatzfelder; bekannte Schlüssel siehe
    * `listWellKnownIptcFields`. */
   custom_metadata: Record<string, string>;
+  /** Video als Katalog-Asset (Phase 16 Schritt 4, siehe `DECISIONS.md`
+   * ADR-0043). */
+  media_kind: "photo" | "video";
+  duration_ms: number | null;
+  video_codec: string | null;
+  has_audio: boolean | null;
+  frame_rate: number | null;
 }
 
 export interface KeywordDto {

@@ -316,6 +316,11 @@ mod tests {
             folders::insert(&conn, Path::new("/fotos"), None, OffsetDateTime::now_utc())
                 .expect("Ordner");
         let photo = NewPhoto {
+            media_kind: "photo".to_string(),
+            duration_ms: None,
+            video_codec: None,
+            has_audio: None,
+            frame_rate: None,
             folder_id,
             filename: "a.cr2".to_string(),
             file_size: 100,
@@ -372,6 +377,11 @@ mod tests {
         let (conn2, photo_b) = (&conn, {
             let folder_id = photos::get(&conn, photo_a).expect("ok").folder_id;
             let photo = NewPhoto {
+                media_kind: "photo".to_string(),
+                duration_ms: None,
+                video_codec: None,
+                has_audio: None,
+                frame_rate: None,
                 folder_id,
                 filename: "b.cr2".to_string(),
                 file_size: 100,

@@ -360,6 +360,11 @@ mod tests {
             folders::insert(&conn, Path::new("/fotos"), None, OffsetDateTime::now_utc())
                 .expect("Ordner");
         let photo = NewPhoto {
+            media_kind: "photo".to_string(),
+            duration_ms: None,
+            video_codec: None,
+            has_audio: None,
+            frame_rate: None,
             folder_id,
             filename: "a.cr2".to_string(),
             file_size: 100,
@@ -388,6 +393,11 @@ mod tests {
 
     fn second_photo(conn: &Connection, folder_id: apx_core::FolderId) -> PhotoId {
         let photo = NewPhoto {
+            media_kind: "photo".to_string(),
+            duration_ms: None,
+            video_codec: None,
+            has_audio: None,
+            frame_rate: None,
             folder_id,
             filename: "b.cr2".to_string(),
             file_size: 200,
@@ -601,6 +611,11 @@ mod tests {
         let photo_b = photos::upsert(
             &conn,
             &NewPhoto {
+                media_kind: "photo".to_string(),
+                duration_ms: None,
+                video_codec: None,
+                has_audio: None,
+                frame_rate: None,
                 folder_id,
                 filename: "c.cr2".to_string(),
                 file_size: 300,

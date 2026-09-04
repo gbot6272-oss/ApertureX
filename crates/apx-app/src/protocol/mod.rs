@@ -485,6 +485,11 @@ mod tests {
                 captured_at: None,
                 gps_lat: None,
                 gps_lon: None,
+                media_kind: "photo".to_string(),
+                duration_ms: None,
+                video_codec: None,
+                has_audio: None,
+                frame_rate: None,
             })
             .expect("Foto anlegbar");
         photo_id

@@ -102,6 +102,11 @@ mod tests {
         )
         .expect("Ordner");
         let photo = NewPhoto {
+            media_kind: "photo".to_string(),
+            duration_ms: None,
+            video_codec: None,
+            has_audio: None,
+            frame_rate: None,
             folder_id,
             filename: "a.cr2".to_string(),
             file_size: 100,

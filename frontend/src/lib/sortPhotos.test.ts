@@ -29,6 +29,11 @@ function photo(overrides: Partial<PhotoDto> & { id: string }): PhotoDto {
     copyright: null,
     creator: null,
     custom_metadata: {},
+    media_kind: "photo",
+    duration_ms: null,
+    video_codec: null,
+    has_audio: null,
+    frame_rate: null,
     ...overrides,
   };
 }

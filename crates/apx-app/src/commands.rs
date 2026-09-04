@@ -78,11 +78,24 @@ pub struct PhotoDto {
     /// ADR-0039) — frei benannte Zusatzfelder, siehe
     /// `apx_catalog::Photo::custom_metadata`.
     pub custom_metadata: std::collections::BTreeMap<String, String>,
+    /// Video als Katalog-Asset (Phase 16 Schritt 4, siehe `DECISIONS.md`
+    /// ADR-0043) — `"photo"` oder `"video"`, siehe
+    /// `apx_catalog::NewPhoto::media_kind`s Moduldoku.
+    pub media_kind: String,
+    pub duration_ms: Option<i64>,
+    pub video_codec: Option<String>,
+    pub has_audio: Option<bool>,
+    pub frame_rate: Option<f32>,
 }
 
 impl From<apx_catalog::Photo> for PhotoDto {
     fn from(photo: apx_catalog::Photo) -> Self {
         Self {
+            media_kind: photo.media_kind,
+            duration_ms: photo.duration_ms,
+            video_codec: photo.video_codec,
+            has_audio: photo.has_audio,
+            frame_rate: photo.frame_rate,
             id: photo.id.to_string(),
             filename: photo.filename,
             file_size: photo.file_size,
@@ -6727,6 +6740,11 @@ fn import_stack_result_photo(
         captured_at: Some(time::OffsetDateTime::now_utc()),
         gps_lat: None,
         gps_lon: None,
+        media_kind: "photo".to_string(),
+        duration_ms: None,
+        video_codec: None,
+        has_audio: None,
+        frame_rate: None,
     };
     let (result_photo_id, _) = state
         .catalog

@@ -17,6 +17,7 @@ pub(crate) mod mode;
 pub(crate) mod presets;
 mod rename;
 mod thumbnails;
+mod video;
 
 use std::collections::HashMap;
 use std::io::BufReader;
@@ -256,7 +257,7 @@ fn scan_supported_files(folder: &Path) -> Vec<PathBuf> {
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().is_file())
         .map(|entry| entry.into_path())
-        .filter(|path| apx_raw::is_supported_extension(path))
+        .filter(|path| apx_raw::is_supported_extension(path) || video::is_video_extension(path))
         .collect()
 }
 
@@ -315,6 +316,34 @@ pub(crate) fn compute_content_hash(path: &Path) -> Result<String, String> {
 ///
 /// Die volle Ordner-Hierarchie zwischen `hierarchy_root` und der Datei wird
 /// als mehrstufige `parent_id`-Kette angelegt (siehe [`ensure_folder`]).
+/// Metadaten, wie sie für [`NewPhoto`] gebraucht werden — entweder aus
+/// `apx_raw::read_metadata` (Foto) oder aus [`video::extract_video_metadata`]
+/// (Video, Phase 16 Schritt 4) gewonnen. Hält [`import_single_file`]s
+/// Staging-/Hashing-/Upsert-Teil identisch für beide Fälle, nur die
+/// Metadaten-Extraktion selbst unterscheidet sich (siehe deren Moduldoku
+/// für die Begründung, warum Video NICHT über `apx_raw::read_metadata`
+/// läuft — das ist ein reiner Bild-Decoder).
+struct FileMeta {
+    media_kind: &'static str,
+    width: Option<u32>,
+    height: Option<u32>,
+    orientation: u16,
+    camera_make: Option<String>,
+    camera_model: Option<String>,
+    lens: Option<String>,
+    iso: Option<u32>,
+    shutter: Option<f32>,
+    aperture: Option<f32>,
+    focal_length: Option<f32>,
+    captured_at: Option<OffsetDateTime>,
+    gps_lat: Option<f64>,
+    gps_lon: Option<f64>,
+    duration_ms: Option<i64>,
+    video_codec: Option<String>,
+    has_audio: Option<bool>,
+    frame_rate: Option<f32>,
+}
+
 fn import_single_file(
     catalog: &Catalog,
     folder_cache: &mut HashMap<PathBuf, FolderId>,
@@ -329,15 +358,59 @@ fn import_single_file(
     // nicht mehr, ein zweiter Lesezugriff wäre also ohnehin unmöglich —
     // und für Copy/AddInPlace liefert das identische Bytes wie ein
     // Lesen von der Kopie.
-    let raw_meta = apx_raw::read_metadata(path).map_err(|err| err.to_string())?;
+    let meta = if video::is_video_extension(path) {
+        let video_meta = video::extract_video_metadata(path)?;
+        FileMeta {
+            media_kind: "video",
+            width: video_meta.width,
+            height: video_meta.height,
+            orientation: 1,
+            camera_make: None,
+            camera_model: None,
+            lens: None,
+            iso: None,
+            shutter: None,
+            aperture: None,
+            focal_length: None,
+            captured_at: None,
+            gps_lat: None,
+            gps_lon: None,
+            duration_ms: video_meta.duration_ms,
+            video_codec: video_meta.codec,
+            has_audio: video_meta.has_audio,
+            frame_rate: video_meta.frame_rate,
+        }
+    } else {
+        let raw_meta = apx_raw::read_metadata(path).map_err(|err| err.to_string())?;
+        FileMeta {
+            media_kind: "photo",
+            width: Some(raw_meta.width),
+            height: Some(raw_meta.height),
+            orientation: orientation_to_exif_code(raw_meta.orientation),
+            camera_make: non_empty(raw_meta.camera_make),
+            camera_model: non_empty(raw_meta.camera_model),
+            lens: raw_meta.lens,
+            iso: raw_meta.iso,
+            shutter: raw_meta.shutter,
+            aperture: raw_meta.aperture,
+            focal_length: raw_meta.focal_length,
+            captured_at: raw_meta.captured_at,
+            gps_lat: raw_meta.gps.map(|(lat, _)| lat),
+            gps_lon: raw_meta.gps.map(|(_, lon)| lon),
+            duration_ms: None,
+            video_codec: None,
+            has_audio: None,
+            frame_rate: None,
+        }
+    };
 
     let staged_path = mode::stage_file_for_mode(
         mode,
         path,
         rename_pattern,
         seq,
-        non_empty_ref(&raw_meta.camera_model),
-        raw_meta.captured_at,
+        meta.camera_model.as_deref(),
+        meta.captured_at,
         OffsetDateTime::now_utc(),
     )?;
 
@@ -367,19 +440,24 @@ fn import_single_file(
         file_size,
         file_mtime,
         content_hash: Some(content_hash),
-        width: Some(raw_meta.width),
-        height: Some(raw_meta.height),
-        orientation: orientation_to_exif_code(raw_meta.orientation),
-        camera_make: non_empty(raw_meta.camera_make),
-        camera_model: non_empty(raw_meta.camera_model),
-        lens: raw_meta.lens,
-        iso: raw_meta.iso,
-        shutter: raw_meta.shutter,
-        aperture: raw_meta.aperture,
-        focal_length: raw_meta.focal_length,
-        captured_at: raw_meta.captured_at,
-        gps_lat: raw_meta.gps.map(|(lat, _)| lat),
-        gps_lon: raw_meta.gps.map(|(_, lon)| lon),
+        width: meta.width,
+        height: meta.height,
+        orientation: meta.orientation,
+        camera_make: meta.camera_make,
+        camera_model: meta.camera_model,
+        lens: meta.lens,
+        iso: meta.iso,
+        shutter: meta.shutter,
+        aperture: meta.aperture,
+        focal_length: meta.focal_length,
+        captured_at: meta.captured_at,
+        gps_lat: meta.gps_lat,
+        gps_lon: meta.gps_lon,
+        media_kind: meta.media_kind.to_string(),
+        duration_ms: meta.duration_ms,
+        video_codec: meta.video_codec,
+        has_audio: meta.has_audio,
+        frame_rate: meta.frame_rate,
     };
 
     let (photo_id, changed) = catalog
@@ -393,17 +471,6 @@ fn import_single_file(
 }
 
 fn non_empty(value: String) -> Option<String> {
-    if value.trim().is_empty() {
-        None
-    } else {
-        Some(value)
-    }
-}
-
-/// Wie [`non_empty`], aber ohne den `String` zu konsumieren — für
-/// [`mode::stage_file_for_mode`]s `camera`-Token-Parameter, das nur einen
-/// `&str` braucht.
-fn non_empty_ref(value: &str) -> Option<&str> {
     if value.trim().is_empty() {
         None
     } else {

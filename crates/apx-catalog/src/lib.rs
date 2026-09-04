@@ -985,6 +985,11 @@ mod tests {
 
     fn sample_photo(folder_id: FolderId) -> NewPhoto {
         NewPhoto {
+            media_kind: "photo".to_string(),
+            duration_ms: None,
+            video_codec: None,
+            has_audio: None,
+            frame_rate: None,
             folder_id,
             filename: "IMG_0001.CR2".to_string(),
             file_size: 12_345_678,

@@ -62,6 +62,11 @@ export type PresetSectionKey = Exclude<
   | "skin_smoothing"
 >;
 
+// `lut_filter` fehlt hier bewusst noch (siehe `PRESET_SECTION_LABELS`s
+// Kommentar) — Phase 16 Schritt 3 macht "Filter" hier wählbar, sobald
+// die Batch-Anwendung selbst gebaut ist. Bis dahin ist die Sektion
+// type-seitig bereits preset-fähig (`PresetSectionKey` schließt sie
+// nicht aus), aber im Speichern-Dialog noch nicht auswählbar.
 export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [
   "basic",
   "curves",
@@ -88,6 +93,14 @@ export const PRESET_SECTION_LABELS: Record<PresetSectionKey, string> = {
   calibration: "Kalibrierung",
   geometry: "Geometrie",
   composite_layers: "Compositing-Ebenen",
+  // `lut_filter` (Phase 16 Schritt 1) ist bewusst NICHT von
+  // `PresetSectionKey` ausgeschlossen (anders als `skin_smoothing`/
+  // `style_transfer`/`sky_replace` oben): die vollen `.cube`-Rasterdaten
+  // sind fotounabhängig, dieselbe Datei lässt sich unverändert auf jedes
+  // andere Foto anwenden — genau das ist der Mechanismus für
+  // Batch-Anwendung auf viele Fotos (Phase 16 Schritt 3, siehe
+  // `DECISIONS.md` ADR-0043).
+  lut_filter: "Filter",
 };
 
 /** Die eigentliche gespeicherte EDL-Teilmenge — für `apx-catalog`/

@@ -79,6 +79,14 @@ pub struct StageEnabled {
     /// vor `geometry`.
     #[serde(default = "default_true")]
     pub sky_replace: bool,
+    /// Filter-/LUT-Bibliothek (Phase 16 Schritt 1, siehe `DECISIONS.md`
+    /// ADR-0043) — läuft nach `sky_replace`, vor `liquify`: als letzte
+    /// Farb-Stufe vor den rein geometrischen/verformenden Stufen, wie ein
+    /// abschließender "Look"-Pass in professionellen Grading-Werkzeugen
+    /// (siehe `stages::lut_filter`s Moduldoku). Dieselbe
+    /// `default_true`-Begründung wie `sky_replace` oben.
+    #[serde(default = "default_true")]
+    pub lut_filter: bool,
     /// Verflüssigen (Phase 15 Schritt 3) — läuft nach `sky_replace`, vor
     /// `geometry`, im fertig entwickelten sRGB-RGBA8-Bild (siehe
     /// `stages::liquify`s Moduldoku). Dieselbe `default_true`-Begründung
@@ -113,6 +121,7 @@ impl StageEnabled {
         style_transfer: true,
         skin_smoothing: true,
         sky_replace: true,
+        lut_filter: true,
         liquify: true,
         geometry: true,
     };
@@ -338,6 +347,54 @@ impl Default for SkinSmoothingAdjustment {
     }
 }
 
+// ---- Filter-/LUT-Bibliothek (Phase 16 Schritt 1) ---------------------------
+
+/// Ein einmalig geparstes 3D-`.cube`-LUT-Raster (siehe
+/// `lut_cube::parse_cube_bytes`) — dasselbe "einmal auflösen, als Zahlen
+/// im EDL ablegen"-Muster wie `StyleTransferPatch`/`SkinSmoothingPatch`:
+/// die vollständigen Rasterdaten werden direkt hier eingebettet statt nur
+/// ein Dateipfad referenziert, damit ein Katalog portabel bleibt (kein
+/// stiller Bruch, wenn die ursprüngliche `.cube`-Datei später verschoben
+/// oder gelöscht wird). Größenordnung ist unkritisch: ein 33er-Raster
+/// sind ~432 KB, deutlich kleiner als ein `StyleTransferPatch`/
+/// `SkyReplacePatch`, die bereits ein volles Bild einbetten.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LutFilterData {
+    pub name: String,
+    pub size: u32,
+    /// `size^3 * 3` Floats, r am schnellsten variierend — siehe
+    /// `lut_cube::ParsedLut::table`s Moduldoku für die genaue Indizierung.
+    pub table: Vec<f32>,
+    pub domain_min: [f32; 3],
+    pub domain_max: [f32; 3],
+}
+
+/// Filter-/LUT-Anwendung (Phase 16 Schritt 1, siehe `DECISIONS.md`
+/// ADR-0043). `strength` (`0.0..=1.0`) blendet linear zwischen dem
+/// unveränderten Bild und dem vollen LUT-Ergebnis — dieselbe Deckkraft-
+/// Konvention wie `StyleTransferAdjustment::amount`/
+/// `SkinSmoothingAdjustment::amount`. Ohne `lut` (kein Filter gewählt)
+/// bleibt die Stufe ein No-Op.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LutFilterAdjustment {
+    pub strength: f32,
+    #[serde(default)]
+    pub lut: Option<LutFilterData>,
+}
+
+impl LutFilterAdjustment {
+    pub const NEUTRAL: Self = Self {
+        strength: 1.0,
+        lut: None,
+    };
+}
+
+impl Default for LutFilterAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
 // ---- Verflüssigen (Liquify, Phase 15 Schritt 3) ----------------------------
 
 /// Ein Punkt im gemalten Pfad eines Verflüssigen-Strichs — normierte
@@ -422,6 +479,12 @@ pub struct EdlV4 {
     /// Himmelsaustausch (Phase 14 Schritt 10) — additiv, `#[serde(default)]`.
     #[serde(default)]
     pub sky_replace: Option<SkyReplacePatch>,
+    /// Filter-/LUT-Bibliothek (Phase 16 Schritt 1) — additiv,
+    /// `#[serde(default)]` liest ein gespeichertes `EdlV4` ohne dieses
+    /// Feld als `LutFilterAdjustment::NEUTRAL` (unverändertes bisheriges
+    /// Verhalten, kein Filter gewählt).
+    #[serde(default)]
+    pub lut_filter: LutFilterAdjustment,
     /// Verflüssigen (Phase 15 Schritt 3) — additiv, `#[serde(default)]`
     /// liest ein gespeichertes `EdlV4` ohne dieses Feld als leere
     /// Strichliste (unverändertes bisheriges Verhalten).
@@ -455,6 +518,7 @@ impl EdlV4 {
             style_transfer: StyleTransferAdjustment::NEUTRAL,
             skin_smoothing: SkinSmoothingAdjustment::NEUTRAL,
             sky_replace: None,
+            lut_filter: LutFilterAdjustment::NEUTRAL,
             liquify_strokes: Vec::new(),
         }
     }
@@ -487,6 +551,7 @@ impl EdlV4 {
             style_transfer: StyleTransferAdjustment::NEUTRAL,
             skin_smoothing: SkinSmoothingAdjustment::NEUTRAL,
             sky_replace: None,
+            lut_filter: LutFilterAdjustment::NEUTRAL,
             liquify_strokes: Vec::new(),
         }
     }

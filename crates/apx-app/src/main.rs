@@ -317,6 +317,7 @@ fn main() {
             commands::calibrate_lens_distortion,
             commands::detect_upright_correction,
             commands::import_dcp_profile,
+            commands::import_lut_cube_file,
             commands::undo_develop_edit,
             commands::redo_develop_edit,
             commands::list_develop_history,

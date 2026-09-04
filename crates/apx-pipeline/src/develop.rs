@@ -20,8 +20,8 @@ use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
     basic_fused, bw_mixer, calibration, color_grading, composite, curves, details, effects,
-    geometry, hsl_color_mixer, lens_corrections, liquify, local_contrast, masks, repair,
-    skin_smoothing, sky_replace, style_transfer, virtual_aperture, white_balance,
+    geometry, hsl_color_mixer, lens_corrections, liquify, local_contrast, lut_filter, masks,
+    repair, skin_smoothing, sky_replace, style_transfer, virtual_aperture, white_balance,
 };
 
 /// Das Ergebnis von [`render_rgba8`] — `width`/`height` beschreiben
@@ -414,13 +414,23 @@ pub fn render_rgba8(
         sky_replace::apply(&smoothed, linear.width, linear.height, &edl.sky_replace)
     };
 
+    // Filter-/LUT-Bibliothek (Phase 16 Schritt 1) — läuft nach
+    // `sky_replace`, vor `liquify`, im selben fertig entwickelten
+    // sRGB-RGBA8-Bild (siehe `stages::lut_filter`s Moduldoku für die
+    // Begründung dieser Position).
+    let filtered = if !stages.lut_filter || edl.lut_filter.lut.is_none() {
+        skied
+    } else {
+        lut_filter::apply(&skied, linear.width, linear.height, &edl.lut_filter)
+    };
+
     // Verflüssigen (Phase 15 Schritt 3) — läuft nach `sky_replace`, vor
     // `geometry`, im selben fertig entwickelten sRGB-RGBA8-Bild (siehe
     // `stages::liquify`s Moduldoku).
     let liquified = if !stages.liquify || edl.liquify_strokes.is_empty() {
-        skied
+        filtered
     } else {
-        liquify::apply(&skied, linear.width, linear.height, &edl.liquify_strokes)
+        liquify::apply(&filtered, linear.width, linear.height, &edl.liquify_strokes)
     };
 
     let (width, height, pixels) = if !stages.geometry || edl.geometry == GeometryAdjustment::NEUTRAL
@@ -835,6 +845,7 @@ mod tests {
             style_transfer: crate::edl::v4::StyleTransferAdjustment::NEUTRAL,
             sky_replace: None,
             skin_smoothing: crate::edl::v4::SkinSmoothingAdjustment::NEUTRAL,
+            lut_filter: crate::edl::v4::LutFilterAdjustment::NEUTRAL,
             liquify_strokes: Vec::new(),
         };
 

@@ -1526,6 +1526,19 @@ interface LibraryBacklogSlice {
    * `onCommit`, wie `setBasicField`). */
   setSkinSmoothingAmount: (value: number) => void;
 
+  /** Filter-/LUT-Bibliothek (Phase 16 Schritt 1, siehe `DECISIONS.md`
+   * ADR-0043) — öffnet einen Datei-Dialog für eine `.cube`-Datei, legt
+   * das geparste Raster in `developEdl.lut_filter.lut` ab. Anders als
+   * `smoothSkinForCurrentPhoto` fotounabhängig: dieselbe importierte
+   * `.cube`-Datei lässt sich unverändert auf jedes andere Foto anwenden. */
+  lutFilterImporting: boolean;
+  importLutFilterForCurrentPhoto: () => Promise<void>;
+  clearLutFilter: () => void;
+  /** Setzt `developEdl.lut_filter.strength` (Deckkraft-Regler,
+   * Zwischenwert beim Ziehen — committet erst `DevelopSlider`s
+   * `onCommit`, wie `setBasicField`). */
+  setLutFilterStrength: (value: number) => void;
+
   /** Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
    * `DECISIONS.md` ADR-0038): eine Regel = `libraryFilter` (wiederverwendet,
    * wie beim normalen Filter-Panel) + eine `BatchAction`. */
@@ -5710,6 +5723,54 @@ export const useAppStore = create<AppStore>()(
     setSkinSmoothingAmount: (value) => {
       set((state) => {
         state.developEdl.skin_smoothing.amount = value;
+      });
+    },
+
+    lutFilterImporting: false,
+
+    importLutFilterForCurrentPhoto: async () => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.lutFilterImporting = true;
+      });
+      try {
+        const dto = await api.importLutCubeFile();
+        if (!dto) return; // Dialog abgebrochen
+        set((state) => {
+          state.developEdl.lut_filter.lut = {
+            name: dto.name,
+            size: dto.size,
+            table: dto.table,
+            domain_min: dto.domain_min,
+            domain_max: dto.domain_max,
+          };
+          if (state.developEdl.lut_filter.strength <= 0) {
+            state.developEdl.lut_filter.strength = 1;
+          }
+        });
+        void get().commitDevelopEdit(`Filter „${dto.name}“ angewendet`);
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.lutFilterImporting = false;
+        });
+      }
+    },
+
+    clearLutFilter: () => {
+      set((state) => {
+        state.developEdl.lut_filter = { strength: 1, lut: null };
+      });
+      void get().commitDevelopEdit("Filter entfernt");
+    },
+
+    setLutFilterStrength: (value) => {
+      set((state) => {
+        state.developEdl.lut_filter.strength = value;
       });
     },
 

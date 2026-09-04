@@ -390,6 +390,29 @@ export function importDcpProfile(): Promise<DcpProfileDataDto | null> {
   return invoke<DcpProfileDataDto | null>("import_dcp_profile");
 }
 
+// ---- Filter-/LUT-Bibliothek (Phase 16 Schritt 1) ---------------------------
+
+export interface LutFilterDataDto {
+  name: string;
+  size: number;
+  /** Anders als `SkyReplacePatchDto.pixels_base64`/`StyleTransferPatch::
+   * pixels` bewusst als schlichtes JSON-Zahlenfeld übertragen, nicht
+   * Base64-codiert — ein `.cube`-Raster ist mit maximal `256^3 * 3`
+   * Floats um Größenordnungen kleiner als ein volles Bild, die
+   * Base64-Optimierung lohnt sich hier nicht. */
+  table: number[];
+  domain_min: [number, number, number];
+  domain_max: [number, number, number];
+}
+
+/** Öffnet einen Datei-Dialog für eine `.cube`-3D-LUT-Datei und parst sie
+ * — `null`, wenn der Dialog abgebrochen wurde. Wirft bei einer
+ * strukturell ungültigen Datei oder einer reinen 1D-LUT (siehe
+ * `apx_pipeline::lut_cube`s Moduldoku). */
+export function importLutCubeFile(): Promise<LutFilterDataDto | null> {
+  return invoke<LutFilterDataDto | null>("import_lut_cube_file");
+}
+
 // ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------------
 // Anders als der lineare Verlauf oben: siehe `crates/apx-app/src/commands.rs`s
 // Moduldoku für die Abgrenzung. Kein eigener "restore"-Aufruf — die

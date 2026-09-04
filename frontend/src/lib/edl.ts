@@ -601,6 +601,16 @@ export const SKIN_SMOOTHING_SLIDER_SPECS: readonly SliderSpec[] = [
   { key: "amount", label: "Hautglätten: Deckkraft", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
 ];
 
+/** Filter-/LUT-Bibliothek (Phase 16 Schritt 1) — dieselbe `0..=100`-
+ * UI-Skala für einen intern `0.0..=1.0`-Bruchteil wie
+ * `SKIN_SMOOTHING_SLIDER_SPECS` (siehe `LutFilterAdjustment.strength`).
+ * `neutral: 100` (nicht `0`): ein gerade importierter Filter soll ohne
+ * weiteren Regler-Kontakt sofort voll sichtbar sein — dieselbe
+ * Erwartung wie bei Preset-Anwendung (`PRESET_STRENGTH_SPEC.neutral`). */
+export const LUT_FILTER_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "strength", label: "Filter: Deckkraft", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 100 },
+];
+
 // ---- Kalibrierung -----------------------------------------------------------
 
 export type ProcessVersion = "V1";
@@ -1241,6 +1251,11 @@ export interface StageEnabled {
    * skin_smoothing`s Moduldoku). */
   skin_smoothing: boolean;
   sky_replace: boolean;
+  /** Filter-/LUT-Bibliothek (Phase 16 Schritt 1) — läuft nach
+   * `sky_replace`, vor `liquify`: als letzte Farb-Stufe vor den rein
+   * geometrischen/verformenden Stufen (siehe `stages::lut_filter`s
+   * Moduldoku). */
+  lut_filter: boolean;
   /** Verflüssigen (Phase 15 Schritt 3) — läuft nach `sky_replace`, vor
    * `geometry`, im fertig entwickelten sRGB-RGBA8-Bild (siehe
    * `stages::liquify`s Moduldoku). */
@@ -1266,6 +1281,7 @@ export const NEUTRAL_STAGE_ENABLED: StageEnabled = {
   style_transfer: true,
   skin_smoothing: true,
   sky_replace: true,
+  lut_filter: true,
   liquify: true,
   geometry: true,
 };
@@ -1422,6 +1438,7 @@ export const STAGE_NODE_SPECS: readonly StageNodeSpec[] = [
   { key: "style_transfer", label: "Stiltransfer" },
   { key: "skin_smoothing", label: "Hautglätten" },
   { key: "sky_replace", label: "Himmelsaustausch" },
+  { key: "lut_filter", label: "Filter" },
   { key: "liquify", label: "Verflüssigen" },
   { key: "geometry", label: "Geometrie" },
 ] as const;
@@ -1450,6 +1467,7 @@ export interface EdlPayload {
   style_transfer: StyleTransferAdjustment;
   skin_smoothing: SkinSmoothingAdjustment;
   sky_replace: SkyReplacePatch | null;
+  lut_filter: LutFilterAdjustment;
   liquify_strokes: LiquifyStroke[];
 }
 
@@ -1476,6 +1494,7 @@ export function neutralEdlPayload(): EdlPayload {
     style_transfer: NEUTRAL_STYLE_TRANSFER,
     skin_smoothing: NEUTRAL_SKIN_SMOOTHING,
     sky_replace: null,
+    lut_filter: NEUTRAL_LUT_FILTER,
     liquify_strokes: [],
   };
 }
@@ -1663,4 +1682,39 @@ export interface SkinSmoothingAdjustment {
 export const NEUTRAL_SKIN_SMOOTHING: SkinSmoothingAdjustment = {
   amount: 0,
   patch: null,
+};
+
+/** Ein einmalig geparstes 3D-`.cube`-LUT-Raster (Phase 16 Schritt 1,
+ * siehe `DECISIONS.md` ADR-0043) — spiegelt Rusts
+ * `apx_pipeline::edl::v4::LutFilterData`. Anders als `SkinSmoothingPatch`/
+ * `SkyReplacePatch` (je Foto berechnete Bilddaten) sind die vollen
+ * Rasterdaten hier fotounabhängig — derselbe `.cube`-Inhalt lässt sich
+ * unverändert auf jedes andere Foto anwenden (siehe `presets.ts`, wo
+ * `lut_filter` deshalb bewusst NICHT von `PresetSectionKey` ausgeschlossen
+ * ist). */
+export interface LutFilterData {
+  name: string;
+  size: number;
+  /** `size^3 * 3` Zahlen, r am schnellsten variierend — siehe
+   * `apx_pipeline::lut_cube::ParsedLut::table`s Moduldoku für die genaue
+   * Indizierung. */
+  table: number[];
+  domain_min: [number, number, number];
+  domain_max: [number, number, number];
+}
+
+/** Filter-/LUT-Anwendung (Phase 16 Schritt 1) — spiegelt
+ * `apx_pipeline::edl::v4::LutFilterAdjustment`. `strength`: `0.0..=1.0`,
+ * blendet linear zwischen unverändertem Bild (`0.0`) und vollem
+ * LUT-Ergebnis (`1.0`). Ohne gewählten Filter (`lut === null`) bleibt die
+ * Stufe wirkungslos, selbst bei `strength > 0` (siehe `stages::
+ * lut_filter`s Moduldoku). */
+export interface LutFilterAdjustment {
+  strength: number;
+  lut: LutFilterData | null;
+}
+
+export const NEUTRAL_LUT_FILTER: LutFilterAdjustment = {
+  strength: 1,
+  lut: null,
 };

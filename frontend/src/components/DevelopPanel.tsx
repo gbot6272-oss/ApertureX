@@ -62,6 +62,7 @@ import { ContentAwareScaleDialog } from "./ContentAwareScaleDialog";
 import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import { PaletteFrame } from "./PaletteFrame";
 import { SavePresetDialog } from "./SavePresetDialog";
+import { LutFilterPanel } from "./LutFilterPanel";
 import { SkinSmoothingPanel } from "./SkinSmoothingPanel";
 import { SkyReplacePanel } from "./SkyReplacePanel";
 import { StyleTransferPanel } from "./StyleTransferPanel";
@@ -124,6 +125,7 @@ const STAGE_ANCHOR_IDS: Record<keyof StageEnabled, string> = {
   style_transfer: "stage-style_transfer",
   skin_smoothing: "stage-skin_smoothing",
   sky_replace: "stage-sky_replace",
+  lut_filter: "stage-lut_filter",
   liquify: "stage-liquify",
   geometry: "stage-geometry",
 };
@@ -1503,6 +1505,14 @@ export function DevelopPanel() {
           <fieldset id="stage-sky_replace" className="flex flex-col gap-2">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Himmelsaustausch</legend>
             <SkyReplacePanel />
+          </fieldset>
+
+          {/* Filter-/LUT-Bibliothek (Phase 16 Schritt 1, ADR-0043) — läuft
+              nach `sky_replace`, vor `liquify` (siehe `stages::
+              lut_filter`s Moduldoku). */}
+          <fieldset id="stage-lut_filter" className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Filter</legend>
+            <LutFilterPanel />
           </fieldset>
 
           <fieldset id="stage-geometry" className="flex flex-col gap-3">

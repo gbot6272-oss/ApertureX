@@ -27,6 +27,7 @@ pub mod hsl_color_mixer;
 pub mod lens_corrections;
 pub mod liquify;
 pub mod local_contrast;
+pub mod lut_filter;
 pub mod masks;
 pub mod repair;
 pub mod skin_smoothing;

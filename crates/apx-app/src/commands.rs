@@ -975,6 +975,74 @@ pub async fn import_dcp_profile(app: AppHandle) -> Result<Option<DcpProfileDataD
     Ok(Some(hue_sat_map.into()))
 }
 
+// ---- Filter-/LUT-Bibliothek (Phase 16 Schritt 1) ---------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LutFilterDataDto {
+    pub name: String,
+    pub size: u32,
+    pub table: Vec<f32>,
+    pub domain_min: [f32; 3],
+    pub domain_max: [f32; 3],
+}
+
+impl From<apx_pipeline::lut_cube::ParsedLut> for LutFilterDataDto {
+    fn from(parsed: apx_pipeline::lut_cube::ParsedLut) -> Self {
+        Self {
+            name: parsed
+                .title
+                .unwrap_or_else(|| "Unbenannter Filter".to_string()),
+            size: parsed.size,
+            table: parsed.table,
+            domain_min: parsed.domain_min,
+            domain_max: parsed.domain_max,
+        }
+    }
+}
+
+/// Öffnet einen Datei-Dialog für eine `.cube`-3D-LUT-Datei, parst sie
+/// (`apx_pipeline::lut_cube::parse_cube_bytes`, siehe dessen Moduldoku)
+/// und liefert das Ergebnis zurück — `None`, wenn der Dialog abgebrochen
+/// wurde. Dasselbe „Dialog öffnen, Datei parsen, fertige Daten
+/// zurückgeben — nur das Frontend legt sie im EDL ab"-Muster wie
+/// `import_dcp_profile`.
+///
+/// Wenn kein eigener Dateiname im Dokument steht (keine `TITLE`-Zeile),
+/// wird der Dateiname ohne Endung als Anzeigename verwendet — dieselbe
+/// Bequemlichkeit, die die meisten frei verfügbaren `.cube`-Dateien
+/// ohnehin ohne `TITLE`-Zeile ausliefern.
+#[tauri::command]
+pub async fn import_lut_cube_file(app: AppHandle) -> Result<Option<LutFilterDataDto>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("3D-LUT (.cube)", &["cube"])
+        .pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|err| format!("Öffnen-Dialog fehlgeschlagen: {err}"))?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|err| format!("Ungültiger Pfad: {err}"))?;
+    let bytes = std::fs::read(&path)
+        .map_err(|err| format!("Datei '{}' nicht lesbar: {err}", path.display()))?;
+    let mut parsed =
+        apx_pipeline::lut_cube::parse_cube_bytes(&bytes).map_err(|err| err.to_string())?;
+    if parsed.title.is_none() {
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Unbenannter Filter");
+        parsed.title = Some(stem.to_string());
+    }
+    Ok(Some(parsed.into()))
+}
+
 /// Geht einen Bearbeitungsschritt zurück. `None`, wenn schon am
 /// Ausgangszustand (kein Rückgängig möglich) — kein Fehler, siehe
 /// `apx_catalog::Catalog::undo_edit`.

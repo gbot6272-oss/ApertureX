@@ -3680,3 +3680,19 @@ Schritt 1), aber erst in Schritt 11 gesammelt ausgeführt.
 Übergänge, Titel-Grafiken jenseits der bestehenden Diashow-Intro-
 Funktion), echte KI-Highlight-Erkennung, Video-Farbverwaltung/HDR,
 GPU-beschleunigte Video-Pipeline.
+
+**Nachtrag (Schritt 2, Starter-LUT-Set):** wie oben real recherchiert
+keine einzelne, sauber lizenzierte "Hunderte/Tausende Filter"-Quelle
+gefunden — die freien LUT-Pakete, die sich fanden (Q-DDL, RocketStock
+u. a.), haben uneinheitliche/unklare Lizenzbedingungen, und ein
+konkreter Download-Versuch scheiterte zusätzlich an der
+Netzwerk-Sandbox dieser Sitzung (mehrere Kandidaten-Domains vom
+Egress-Proxy blockiert, nicht real verifizierbar). Statt eines
+unverifizierten externen Downloads: fünf **selbst erstellte** parametrische
+Farbverläufe (`apx_pipeline::builtin_luts` — Warm/Kühl/Kontrastreich
+S/W/Verblasst/Kino Teal-Orange, reine Mathematik, kein fremdes Werk
+enthalten) — dieselbe Rolle wie Lightrooms eigene mitgelieferte
+"Creative"-Profile, kein Redistributions-/Lizenzrisiko. Der freie
+`.cube`-Import aus Schritt 1 bleibt der Weg zu "Hunderte/Tausende
+Effekte" — dafür bringt der Nutzer eigene Dateien mit, ApertureX selbst
+redistribuiert kein fremdes Preset-Paket.

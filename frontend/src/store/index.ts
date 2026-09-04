@@ -23,7 +23,7 @@ import {
   writeBasicField,
   writeBwMixerField,
 } from "../lib/edl";
-import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, LiquifyMode, LiquifyPoint, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairLayer, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
+import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, LiquifyMode, LiquifyPoint, LutFilterData, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairLayer, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import { computeHarmonizeShifts } from "../lib/colorHarmony";
@@ -1538,6 +1538,17 @@ interface LibraryBacklogSlice {
    * Zwischenwert beim Ziehen — committet erst `DevelopSlider`s
    * `onCommit`, wie `setBasicField`). */
   setLutFilterStrength: (value: number) => void;
+
+  /** Die fünf eingebauten Filter-Looks (Phase 16 Schritt 2) — einmal pro
+   * Sitzung geladen (`null` = noch nicht geladen, nicht "keine
+   * vorhanden"), dann aus dem Zustand wiederverwendet statt bei jedem
+   * Panel-Öffnen erneut abgefragt. */
+  builtinLutFilters: LutFilterData[] | null;
+  loadBuiltinLutFilters: () => Promise<void>;
+  /** Übernimmt einen der geladenen `builtinLutFilters` per Index direkt
+   * in `developEdl.lut_filter.lut` und committet — dasselbe Muster wie
+   * `importLutFilterForCurrentPhoto`, nur ohne Datei-Dialog. */
+  applyBuiltinLutFilter: (index: number) => void;
 
   /** Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
    * `DECISIONS.md` ADR-0038): eine Regel = `libraryFilter` (wiederverwendet,
@@ -5772,6 +5783,36 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.developEdl.lut_filter.strength = value;
       });
+    },
+
+    builtinLutFilters: null,
+
+    loadBuiltinLutFilters: async () => {
+      if (get().builtinLutFilters) return; // schon geladen, dieselben fünf für die ganze Sitzung
+      try {
+        const list = await api.listBuiltinLutFilters();
+        set((state) => {
+          state.builtinLutFilters = list;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    applyBuiltinLutFilter: (index) => {
+      const { developPhotoId, builtinLutFilters } = get();
+      if (!developPhotoId || !builtinLutFilters) return;
+      const lut = builtinLutFilters[index];
+      if (!lut) return;
+      set((state) => {
+        state.developEdl.lut_filter.lut = lut;
+        if (state.developEdl.lut_filter.strength <= 0) {
+          state.developEdl.lut_filter.strength = 1;
+        }
+      });
+      void get().commitDevelopEdit(`Filter „${lut.name}“ angewendet`);
     },
 
     batchPreview: [],

@@ -1043,6 +1043,32 @@ pub async fn import_lut_cube_file(app: AppHandle) -> Result<Option<LutFilterData
     Ok(Some(parsed.into()))
 }
 
+impl From<apx_pipeline::edl::LutFilterData> for LutFilterDataDto {
+    fn from(data: apx_pipeline::edl::LutFilterData) -> Self {
+        Self {
+            name: data.name,
+            size: data.size,
+            table: data.table,
+            domain_min: data.domain_min,
+            domain_max: data.domain_max,
+        }
+    }
+}
+
+/// Liefert die fünf eingebauten, selbst erstellten Filter-Looks
+/// (`apx_pipeline::builtin_luts`, siehe dessen Moduldoku — original
+/// erstellt statt von einer externen Quelle heruntergeladen, dieselbe
+/// Rolle wie Lightrooms eigene mitgelieferte "Creative"-Profile). Reine
+/// Berechnung, kein Datei-/Netzwerkzugriff — anders als
+/// `import_lut_cube_file` kein `async`.
+#[tauri::command]
+pub fn list_builtin_lut_filters() -> Vec<LutFilterDataDto> {
+    apx_pipeline::builtin_luts::BuiltinLut::ALL
+        .into_iter()
+        .map(|kind| apx_pipeline::builtin_luts::generate(kind, 17).into())
+        .collect()
+}
+
 /// Geht einen Bearbeitungsschritt zurück. `None`, wenn schon am
 /// Ausgangszustand (kein Rückgängig möglich) — kein Fehler, siehe
 /// `apx_catalog::Catalog::undo_edit`.

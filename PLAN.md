@@ -1119,7 +1119,7 @@ Modul geschrieben, aber erst in Schritt 11 gesammelt ausgeführt.
 
 - [x] 0. Scope festzurren, ADR-0043 — Architektur real gegen den Code geprüft (kein Modul-Vollbild-Umschalter, kein Video-Import, kein LUT-Konzept — dafür Masken-/Batch-/Duplikat-Infrastruktur direkt wiederverwendbar), Filter-/LUT-Lizenzlage und ffmpeg-Video-Filter (scdet, afftdn/arnndn) real recherchiert; Entscheidung: neuer `centerView`-Wert `"video"`, selbst implementierte `.cube`-Engine statt Drittanbieter-Crate, keine neue Rust-Video-Abhängigkeit
 - [x] 1. LUT-/Filter-Engine (Rust) + globale Anwendung — selbst implementierter `.cube`-Parser (`apx_pipeline::lut_cube`) + neue Pipeline-Stage (`stages::lut_filter`, trilineare Interpolation), neues `EdlV4.lut_filter`-Feld (bewusst NICHT von `PresetSectionKey` ausgeschlossen — fotounabhängig, Grundlage für Batch-Anwendung in Schritt 3), `import_lut_cube_file`-Command, `LutFilterPanel.tsx`
-- [ ] 2. Starter-LUT-Set + Filter-Bibliothek-Panel
+- [x] 2. Starter-LUT-Set + Filter-Bibliothek-Panel — keine einzelne sauber lizenzierte externe "Hunderte/Tausende Filter"-Quelle gefunden (siehe ADR-0043-Nachtrag); stattdessen fünf selbst erstellte parametrische Looks (`apx_pipeline::builtin_luts`, dieselbe Rolle wie Lightrooms eigene "Creative"-Profile), `list_builtin_lut_filters`-Command, `LutFilterPanel.tsx` um Bibliotheks-Liste mit Farbverlauf-Vorschau erweitert
 - [ ] 3. Masken-/Pinsel-Integration + Batch-Anwendung auf Mehrfachauswahl
 - [ ] 4. Video als Katalog-Asset (Import, DB-Schema, Thumbnails/Keyframes)
 - [ ] 5. Neuer "Video"-centerView (Wiedergabe, Zeitleisten-Grundgerüst)

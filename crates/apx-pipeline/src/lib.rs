@@ -19,6 +19,7 @@
 
 #![deny(clippy::unwrap_used)]
 
+pub mod builtin_luts;
 pub mod color;
 pub mod dcp_profile;
 pub mod develop;

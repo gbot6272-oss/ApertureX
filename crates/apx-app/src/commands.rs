@@ -3087,6 +3087,153 @@ pub fn run_ai_inpaint(
     })
 }
 
+// ---- Photoshop-Funktion: Content-Aware Move (Phase 15 Schritt 1, siehe
+// DECISIONS.md ADR-0042) -----------------------------------------------------
+//
+// Baut auf zwei bereits bestehenden Primitiven auf, kein neuer EDL-Typ:
+// die Ausgangsstelle wird — wie `run_ai_inpaint` oben — über einen
+// `AiFillPatch` gefüllt, hier aber fürs GESAMTE Bild statt eines
+// Rechtecks (damit LaMa echten Bildkontext ringsum sieht, nicht nur den
+// unmittelbaren Rand des ausgeschnittenen Rechtecks). Da `fill_rgb8`
+// unmaskierte Pixel laut seiner eigenen Moduldoku unverändert
+// zurückgibt, lässt sich das Ergebnis gefahrlos als Vollbild-Patch
+// (`x = y = 0`, `width = height = 1`) zurückgeben. Das verschobene
+// Objekt selbst wird als neue `CompositeLayer` (Phase 14 Schritt 3) an
+// der vom Nutzer gewählten Zielposition platziert — die eigentliche
+// Platzierung (Ziel-`offset_x`/`offset_y`) entscheidet ausschließlich
+// das Frontend beim Aufbau der beiden neuen EDL-Einträge, dieser
+// Command liefert nur die beiden fertigen Bitmaps.
+#[derive(Debug, Clone, Serialize)]
+pub struct ContentAwareMoveDto {
+    /// Vollbild-Fill-Patch für die Ausgangsstelle — direkt als
+    /// `RepairStroke::ai_fill` verwendbar.
+    pub fill: AiFillPatchDto,
+    /// Der ausgeschnittene, verschobene Bildausschnitt — direkt als
+    /// `CompositeLayer::source` verwendbar.
+    pub moved: CompositeLayerSourceDto,
+    /// Bester Startwert für `CompositeLayer::scale`, damit die
+    /// verschobene Bitmap ungefähr in ihrer ursprünglichen Pixelgröße
+    /// erscheint (`Auswahlbreite / Bildbreite`). `CompositeLayer::scale`
+    /// skaliert Breite und Höhe der Ebene immer gleich relativ zur
+    /// Leinwand (siehe `stages::composite`s Moduldoku) — bei einem von
+    /// der Leinwand abweichenden Seitenverhältnis der Auswahl kommt es
+    /// deshalb zu einer leichten Verzerrung, über den bereits
+    /// bestehenden Skalierungs-Regler der Ebene danach manuell
+    /// korrigierbar.
+    pub dest_scale: f32,
+}
+
+#[tauri::command]
+pub fn content_aware_move(
+    state: State<'_, AppState>,
+    photo_id: String,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> Result<ContentAwareMoveDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let model_path = settings
+        .ai
+        .inpainting_model_path
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| {
+            "Kein KI-Ausfüllen-Modell heruntergeladen — siehe Einstellungen → KI.".to_string()
+        })?;
+
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let px = (x * linear.width as f32)
+        .round()
+        .clamp(0.0, linear.width as f32 - 1.0) as u32;
+    let py = (y * linear.height as f32)
+        .round()
+        .clamp(0.0, linear.height as f32 - 1.0) as u32;
+    let pw = (width * linear.width as f32)
+        .round()
+        .max(1.0)
+        .min((linear.width - px) as f32) as u32;
+    let ph = (height * linear.height as f32)
+        .round()
+        .max(1.0)
+        .min((linear.height - py) as f32) as u32;
+
+    // Vollbild als linearer u8-RGB-Puffer (für den Fill-Patch — derselbe
+    // Farbraum wie `run_ai_inpaint`, das Reparatur-Stufe läuft noch vor
+    // der sRGB-Konvertierung im Renderpfad).
+    let pixel_count = (linear.width as usize) * (linear.height as usize);
+    let full_linear_u8: Vec<u8> = linear.pixels[..pixel_count * 3]
+        .iter()
+        .map(|&v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+        .collect();
+
+    let mut mask = vec![0u8; pixel_count];
+    for row in py..(py + ph) {
+        for col in px..(px + pw) {
+            mask[row as usize * linear.width as usize + col as usize] = 255;
+        }
+    }
+
+    // Session wird pro Aufruf frisch geladen (dieselbe Begründung wie
+    // `run_ai_inpaint`).
+    let mut session = apx_ai::inpaint::InpaintSession::load(Path::new(&model_path))
+        .map_err(|err| err.to_string())?;
+    let filled = session
+        .fill_rgb8(&full_linear_u8, linear.width, linear.height, &mask)
+        .map_err(|err| err.to_string())?;
+
+    // Der verschobene Ausschnitt selbst wird als `CompositeLayer`
+    // gerendert — die läuft im bereits entwickelten sRGB-Bild, deshalb
+    // hier bewusst *nicht* derselbe lineare Puffer wie oben, sondern
+    // dieselbe sRGB-Konvertierung wie `prepare_composite_layer_source`s
+    // Foto-Zweig.
+    let rgba_srgb =
+        apx_pipeline::color::linear_camera_rgb_to_srgb_rgba8(&linear.pixels, linear.cam_to_srgb);
+    let mut moved_rgb = vec![0u8; (pw as usize) * (ph as usize) * 3];
+    for row in 0..ph {
+        for col in 0..pw {
+            let src_idx = ((py + row) as usize * linear.width as usize + (px + col) as usize) * 4;
+            let dst_idx = (row as usize * pw as usize + col as usize) * 3;
+            moved_rgb[dst_idx] = rgba_srgb[src_idx];
+            moved_rgb[dst_idx + 1] = rgba_srgb[src_idx + 1];
+            moved_rgb[dst_idx + 2] = rgba_srgb[src_idx + 2];
+        }
+    }
+
+    Ok(ContentAwareMoveDto {
+        fill: AiFillPatchDto {
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            bitmap_width: linear.width,
+            bitmap_height: linear.height,
+            pixels_base64: base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                &filled,
+            ),
+        },
+        moved: CompositeLayerSourceDto {
+            bitmap_width: pw,
+            bitmap_height: ph,
+            pixels_base64: base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                &moved_rgb,
+            ),
+        },
+        dest_scale: pw as f32 / linear.width as f32,
+    })
+}
+
 // ---- KI: Leinwand-Erweiterung (Outpainting, Phase 14 Schritt 1, siehe
 // DECISIONS.md ADR-0041) -----------------------------------------------------
 //

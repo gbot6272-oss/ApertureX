@@ -18,6 +18,7 @@ import { clampZoom, computeBaseScale, imageOrigin, nextZoomStep, panForZoomAtCur
 import { QuadRenderer } from "../lib/webgl";
 import { useAppStore } from "../store";
 import { BeforeAfterView } from "./BeforeAfterView";
+import { ContentAwareMoveOverlay } from "./ContentAwareMoveOverlay";
 import { CropOverlay } from "./CropOverlay";
 import { DevelopAnalysisPanel } from "./DevelopAnalysisPanel";
 import { MaskColorOverlay } from "./MaskColorOverlay";
@@ -90,6 +91,11 @@ export function Viewer() {
     virtualApertureFocusPickerActive;
   const geometryCropActive = useAppStore((s) => s.geometryCropActive);
   const setGeometryCrop = useAppStore((s) => s.setGeometryCrop);
+  const contentAwareMoveActive = useAppStore((s) => s.contentAwareMoveActive);
+  const contentAwareMoveRect = useAppStore((s) => s.contentAwareMoveRect);
+  const contentAwareMoveLoading = useAppStore((s) => s.contentAwareMoveLoading);
+  const setContentAwareMoveRect = useAppStore((s) => s.setContentAwareMoveRect);
+  const commitContentAwareMove = useAppStore((s) => s.commitContentAwareMove);
   const repairActive = useAppStore((s) => s.repairActive);
   const repairStrokes = useAppStore((s) => s.developEdl.repair);
   const repairPendingSource = useAppStore((s) => s.repairPendingSource);
@@ -755,6 +761,19 @@ export function Viewer() {
           aspectRatio={developEdl.geometry.aspect_ratio}
           onChange={setGeometryCrop}
           onCommit={() => void commitDevelopEdit()}
+        />
+      )}
+
+      {photo && contentAwareMoveActive && imgW > 0 && imgH > 0 && (
+        <ContentAwareMoveOverlay
+          imageLeft={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).x}
+          imageTop={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).y}
+          imageWidth={imgW * effectiveScale}
+          imageHeight={imgH * effectiveScale}
+          rect={contentAwareMoveRect}
+          loading={contentAwareMoveLoading}
+          onRectDrawn={setContentAwareMoveRect}
+          onMoveCommitted={(destX, destY) => void commitContentAwareMove(destX, destY)}
         />
       )}
 

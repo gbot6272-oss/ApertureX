@@ -314,6 +314,10 @@ export function DevelopPanel() {
   const repairStrokes = useAppStore((s) => s.developEdl.repair);
   const repairActive = useAppStore((s) => s.repairActive);
   const toggleRepairActive = useAppStore((s) => s.toggleRepairActive);
+  const contentAwareMoveActive = useAppStore((s) => s.contentAwareMoveActive);
+  const toggleContentAwareMoveTool = useAppStore((s) => s.toggleContentAwareMoveTool);
+  const contentAwareMoveRect = useAppStore((s) => s.contentAwareMoveRect);
+  const contentAwareMoveLoading = useAppStore((s) => s.contentAwareMoveLoading);
   const repairDraftMode = useAppStore((s) => s.repairDraftMode);
   const setRepairDraftMode = useAppStore((s) => s.setRepairDraftMode);
   const repairDraftLayer = useAppStore((s) => s.repairDraftLayer);
@@ -1550,6 +1554,29 @@ export function DevelopPanel() {
             >
               Reparatur-Pinsel {repairActive ? "(aktiv)" : ""}
             </button>
+
+            {/* Photoshop-Funktion: Content-Aware Move (Phase 15 Schritt 1,
+                ADR-0042) — nutzt dieselbe LaMa-Session wie das
+                KI-Ausfüllen oben, aber als eigenständiges Werkzeug (kein
+                `RepairMode`, siehe `content_aware_move`s Moduldoku). */}
+            <button
+              type="button"
+              aria-pressed={contentAwareMoveActive}
+              onClick={toggleContentAwareMoveTool}
+              disabled={!aiSettings?.inpainting_model_path}
+              title={!aiSettings?.inpainting_model_path ? "Braucht das KI-Ausfüllen-Modell (siehe oben)" : undefined}
+              className={`rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${contentAwareMoveActive ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
+            >
+              Objekt verschieben (Content-Aware Move) {contentAwareMoveActive ? "(aktiv)" : ""}
+            </button>
+            {contentAwareMoveActive && (
+              <p className="text-xs text-text-muted">
+                {contentAwareMoveRect
+                  ? "Auswahl an die Zielposition ziehen und loslassen."
+                  : "Rechteck um das zu verschiebende Objekt aufziehen."}
+                {contentAwareMoveLoading && " Berechnet…"}
+              </p>
+            )}
 
             {repairActive && (
               <p className="text-xs text-text-muted">

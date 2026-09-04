@@ -1101,6 +1101,28 @@ export function runAiInpaint(
   return invoke<AiFillPatchDto>("run_ai_inpaint", { photoId, x, y, width, height });
 }
 
+// ---- Photoshop-Funktion: Content-Aware Move (Phase 15 Schritt 1) ----------
+
+export interface ContentAwareMoveDto {
+  fill: AiFillPatchDto;
+  moved: CompositeLayerSourceDto;
+  dest_scale: number;
+}
+
+/** Schneidet das normierte Rechteck (`x`/`y`/`width`/`height`,
+ * `0.0..=1.0`) aus, füllt die Ausgangsstelle per LaMa-Inferenz und
+ * liefert beides zurück — braucht dasselbe zuvor heruntergeladene
+ * Modell wie [`runAiInpaint`]. */
+export function contentAwareMove(
+  photoId: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): Promise<ContentAwareMoveDto> {
+  return invoke<ContentAwareMoveDto>("content_aware_move", { photoId, x, y, width, height });
+}
+
 // ---- KI: Leinwand-Erweiterung / Outpainting (Phase 14 Schritt 1) ----------
 
 export interface CanvasExtensionPatchDto {

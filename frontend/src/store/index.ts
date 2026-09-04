@@ -639,6 +639,24 @@ interface DevelopSlice {
   /** Läuft während [`runAiInpaintForStroke`] — der Index des gerade
    * berechneten Strichs, sonst `null`. */
   aiInpaintLoadingIndex: number | null;
+
+  /** Photoshop-Funktion: Content-Aware Move (Phase 15 Schritt 1, siehe
+   * `DECISIONS.md` ADR-0042) — Objekt inhaltssensitiv verschieben, ohne
+   * die Ausgangsstelle manuell auszubessern. */
+  contentAwareMoveActive: boolean;
+  toggleContentAwareMoveTool: () => void;
+  /** Der aufgezogene Quellbereich (normiert, `0.0..=1.0`) — `null`,
+   * solange noch kein Rechteck aufgezogen wurde. */
+  contentAwareMoveRect: { x: number; y: number; width: number; height: number } | null;
+  setContentAwareMoveRect: (rect: { x: number; y: number; width: number; height: number } | null) => void;
+  contentAwareMoveLoading: boolean;
+  /** Ruft `content_aware_move` mit dem aktuellen `contentAwareMoveRect`
+   * und der vom Nutzer gewählten Zielposition (`destCenterX`/
+   * `destCenterY`, normiert) auf — legt bei Erfolg einen neuen
+   * `RepairStroke` (füllt die Ausgangsstelle) und eine neue
+   * `CompositeLayer` (setzt das Objekt an die Zielposition) an, committet
+   * einmal für beide zusammen, setzt Rechteck und Werkzeug zurück. */
+  commitContentAwareMove: (destCenterX: number, destCenterY: number) => Promise<void>;
   /** Erweitert die Leinwand um die übergebenen Ränder (normierte
    * Bruchteile, `0.0..=1.0`) und lässt LaMa den neuen Rand füllen (Phase
    * 14 Schritt 1) — dasselbe „Anwenden"-Muster wie
@@ -2751,6 +2769,92 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.aiInpaintLoadingIndex = null;
+        });
+      }
+    },
+
+    contentAwareMoveActive: false,
+    contentAwareMoveRect: null,
+    contentAwareMoveLoading: false,
+
+    toggleContentAwareMoveTool: () => {
+      set((state) => {
+        state.contentAwareMoveActive = !state.contentAwareMoveActive;
+        state.contentAwareMoveRect = null;
+      });
+    },
+
+    setContentAwareMoveRect: (rect) => {
+      set((state) => {
+        state.contentAwareMoveRect = rect;
+      });
+    },
+
+    commitContentAwareMove: async (destCenterX, destCenterY) => {
+      const { selectedPhotoId, contentAwareMoveRect } = get();
+      if (!selectedPhotoId || !contentAwareMoveRect) return;
+      set((state) => {
+        state.contentAwareMoveLoading = true;
+      });
+      try {
+        const dto = await api.contentAwareMove(
+          selectedPhotoId,
+          contentAwareMoveRect.x,
+          contentAwareMoveRect.y,
+          contentAwareMoveRect.width,
+          contentAwareMoveRect.height,
+        );
+        set((state) => {
+          // Füllt die Ausgangsstelle — derselbe `RepairStroke`-Mechanismus
+          // wie ein manuell "Anwenden"-geklickter `AiInpaint`-Strich,
+          // hier aber bereits mit fertigem `ai_fill` angelegt (kein
+          // separates "Anwenden" nötig, siehe `content_aware_move`s
+          // Rust-Moduldoku).
+          state.developEdl.repair.push({
+            mode: "AiInpaint",
+            source: { x: 0, y: 0 },
+            target_path: [{ x: 0.5, y: 0.5 }],
+            radius: 0,
+            feather: 0,
+            opacity: 1,
+            layer: "Normal",
+            ai_fill: {
+              x: dto.fill.x,
+              y: dto.fill.y,
+              width: dto.fill.width,
+              height: dto.fill.height,
+              bitmap_width: dto.fill.bitmap_width,
+              bitmap_height: dto.fill.bitmap_height,
+              pixels: base64ToByteArray(dto.fill.pixels_base64),
+            },
+          });
+          // Setzt das verschobene Objekt an die Zielposition — eine
+          // ganz normale Compositing-Ebene (Phase 14 Schritt 3), über
+          // die bestehenden Regler danach frei nachjustierbar.
+          state.developEdl.composite_layers.push({
+            visible: true,
+            blend_mode: "Normal",
+            opacity: 1,
+            scale: dto.dest_scale,
+            offset_x: destCenterX,
+            offset_y: destCenterY,
+            source: {
+              bitmap_width: dto.moved.bitmap_width,
+              bitmap_height: dto.moved.bitmap_height,
+              pixels: base64ToByteArray(dto.moved.pixels_base64),
+            },
+          });
+          state.contentAwareMoveActive = false;
+          state.contentAwareMoveRect = null;
+        });
+        void get().commitDevelopEdit("Objekt inhaltssensitiv verschoben");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.contentAwareMoveLoading = false;
         });
       }
     },

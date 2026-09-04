@@ -15,11 +15,49 @@ interface VideoTimelineDialogProps {
   onClose: () => void;
 }
 
-type Resolution = "1280x720" | "1920x1080" | "3840x2160";
-const RESOLUTIONS: Record<Resolution, { width: number; height: number }> = {
-  "1280x720": { width: 1280, height: 720 },
-  "1920x1080": { width: 1920, height: 1080 },
-  "3840x2160": { width: 3840, height: 2160 },
+/** Auflösungs-/Seitenverhältnis-Voreinstellungen inkl. Social-Media-
+ * Formaten (Phase 17 Schritt 6, siehe `DECISIONS.md` ADR-0045) — braucht
+ * KEINE Backend-Änderung: sowohl Video-Segmente
+ * (`render_video_clip_segment`s `scale`+`crop`) als auch Foto-/Titel-
+ * Folien (`video::cover_adjust`) skalieren bereits "cover" (wie CSS
+ * `object-fit: cover`) auf ein beliebiges `width`×`height` — Hoch-/
+ * Quadratformat funktioniert also mit genau denselben Rendering-Pfaden
+ * wie die bisherigen 16:9-Auflösungen. */
+type Resolution =
+  | "1280x720"
+  | "1920x1080"
+  | "3840x2160"
+  | "1080x1920"
+  | "1080x1080";
+const RESOLUTIONS: Record<
+  Resolution,
+  { width: number; height: number; label: string }
+> = {
+  "1280x720": {
+    width: 1280,
+    height: 720,
+    label: "16:9 Querformat — 1280×720 (HD)",
+  },
+  "1920x1080": {
+    width: 1920,
+    height: 1080,
+    label: "16:9 Querformat — 1920×1080 (Full HD)",
+  },
+  "3840x2160": {
+    width: 3840,
+    height: 2160,
+    label: "16:9 Querformat — 3840×2160 (4K)",
+  },
+  "1080x1920": {
+    width: 1080,
+    height: 1920,
+    label: "9:16 Hochformat — 1080×1920 (Reels/TikTok/Stories)",
+  },
+  "1080x1080": {
+    width: 1080,
+    height: 1080,
+    label: "1:1 Quadratisch — 1080×1080 (Instagram-Feed)",
+  },
 };
 
 /** Ein Eintrag in der lokalen Bearbeitungsreihenfolge — `photoId`
@@ -774,9 +812,11 @@ export function VideoTimelineDialog({
               onChange={(e) => setResolution(e.target.value as Resolution)}
               className="rounded border border-border bg-bg-panel px-2 py-1 text-sm"
             >
-              <option value="1280x720">1280×720 (HD)</option>
-              <option value="1920x1080">1920×1080 (Full HD)</option>
-              <option value="3840x2160">3840×2160 (4K)</option>
+              {(Object.keys(RESOLUTIONS) as Resolution[]).map((key) => (
+                <option key={key} value={key}>
+                  {RESOLUTIONS[key].label}
+                </option>
+              ))}
             </select>
           </label>
           <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">

@@ -429,6 +429,16 @@ export function listBuiltinLutFilters(): Promise<LutFilterDataDto[]> {
   return invoke<LutFilterDataDto[]>("list_builtin_lut_filters");
 }
 
+// ---- Video-Bearbeitung (Phase 16 Schritt 6) --------------------------------
+
+/** Schneidet `[startMs, endMs)` aus einem Video-Asset — nicht
+ * destruktiv, das Ergebnis landet als neues Katalog-Asset im selben
+ * Ordner (siehe `apx_app::commands::trim_video`s Moduldoku). Wirft bei
+ * einem ungültigen Zeitbereich oder wenn `ffmpeg` fehlschlägt. */
+export function trimVideo(photoId: string, startMs: number, endMs: number): Promise<PhotoDto> {
+  return invoke<PhotoDto>("trim_video", { photoId, startMs, endMs });
+}
+
 // ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------------
 // Anders als der lineare Verlauf oben: siehe `crates/apx-app/src/commands.rs`s
 // Moduldoku für die Abgrenzung. Kein eigener "restore"-Aufruf — die

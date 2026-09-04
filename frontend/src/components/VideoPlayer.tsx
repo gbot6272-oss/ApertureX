@@ -27,6 +27,15 @@ export function VideoPlayer() {
   const photos = useAppStore((s) => (selectedFolderId ? s.photosByFolder[selectedFolderId] : undefined));
   const photo = photos?.find((p) => p.id === selectedPhotoId);
 
+  const videoTrimStartMs = useAppStore((s) => s.videoTrimStartMs);
+  const videoTrimEndMs = useAppStore((s) => s.videoTrimEndMs);
+  const setVideoTrimStart = useAppStore((s) => s.setVideoTrimStart);
+  const setVideoTrimEnd = useAppStore((s) => s.setVideoTrimEnd);
+  const clearVideoTrim = useAppStore((s) => s.clearVideoTrim);
+  const videoTrimSaving = useAppStore((s) => s.videoTrimSaving);
+  const videoTrimError = useAppStore((s) => s.videoTrimError);
+  const commitVideoTrim = useAppStore((s) => s.commitVideoTrim);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -40,7 +49,8 @@ export function VideoPlayer() {
     setPlaying(false);
     setCurrentTime(0);
     setDuration(0);
-  }, [selectedPhotoId]);
+    clearVideoTrim();
+  }, [selectedPhotoId, clearVideoTrim]);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
@@ -58,9 +68,27 @@ export function VideoPlayer() {
     video.currentTime = fraction * duration;
   }, [duration]);
 
+  // Setzt den jeweiligen Trimm-Punkt auf die aktuelle Wiedergabeposition
+  // (Millisekunden, wie `trim_video`s Signatur es erwartet) — dasselbe
+  // "aktuelle Position markieren"-Muster wie viele Videoschnittwerkzeuge,
+  // statt eigener Zieh-Ziehpunkte auf der Zeitleiste.
+  const markStart = useCallback(() => {
+    setVideoTrimStart(Math.round(currentTime * 1000));
+  }, [currentTime, setVideoTrimStart]);
+
+  const markEnd = useCallback(() => {
+    setVideoTrimEnd(Math.round(currentTime * 1000));
+  }, [currentTime, setVideoTrimEnd]);
+
   if (!photo) return null;
 
   const progress = duration > 0 ? currentTime / duration : 0;
+  const trimStartProgress =
+    videoTrimStartMs !== null && duration > 0 ? Math.min(1, Math.max(0, videoTrimStartMs / 1000 / duration)) : null;
+  const trimEndProgress =
+    videoTrimEndMs !== null && duration > 0 ? Math.min(1, Math.max(0, videoTrimEndMs / 1000 / duration)) : null;
+  const canTrim =
+    videoTrimStartMs !== null && videoTrimEndMs !== null && videoTrimEndMs > videoTrimStartMs && !videoTrimSaving;
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 overflow-hidden bg-bg-base p-4">
@@ -87,6 +115,26 @@ export function VideoPlayer() {
           className="relative h-2 w-full cursor-pointer rounded-full bg-bg-raised"
         >
           <div className="absolute inset-y-0 left-0 rounded-full bg-accent" style={{ width: `${progress * 100}%` }} />
+          {trimStartProgress !== null && trimEndProgress !== null ? (
+            <div
+              className="absolute inset-y-0 rounded-full bg-accent/25"
+              style={{ left: `${trimStartProgress * 100}%`, width: `${Math.max(0, trimEndProgress - trimStartProgress) * 100}%` }}
+            />
+          ) : null}
+          {trimStartProgress !== null ? (
+            <div
+              aria-hidden="true"
+              className="absolute top-1/2 h-3.5 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-green-500"
+              style={{ left: `${trimStartProgress * 100}%` }}
+            />
+          ) : null}
+          {trimEndProgress !== null ? (
+            <div
+              aria-hidden="true"
+              className="absolute top-1/2 h-3.5 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-500"
+              style={{ left: `${trimEndProgress * 100}%` }}
+            />
+          ) : null}
           <div
             className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent shadow"
             style={{ left: `${progress * 100}%` }}
@@ -113,6 +161,50 @@ export function VideoPlayer() {
             {photo.has_audio === false ? " · ohne Ton" : null}
           </span>
         </div>
+
+        {/* Schneiden/Trimmen (Phase 16 Schritt 6): nicht-destruktiv — der
+            Knopf legt über `commitVideoTrim` ein neues Katalog-Asset an,
+            das Original bleibt unangetastet (siehe `trim_video`s Moduldoku
+            in `apx_app::commands`). */}
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-xs">
+          <button
+            type="button"
+            onClick={markStart}
+            className="rounded border border-border px-2 py-0.5 text-text-primary hover:border-green-500"
+          >
+            Anfang markieren
+          </button>
+          <span className="text-text-muted">
+            {videoTrimStartMs !== null ? formatTime(videoTrimStartMs / 1000) : "–"}
+          </span>
+          <button
+            type="button"
+            onClick={markEnd}
+            className="rounded border border-border px-2 py-0.5 text-text-primary hover:border-red-500"
+          >
+            Ende markieren
+          </button>
+          <span className="text-text-muted">
+            {videoTrimEndMs !== null ? formatTime(videoTrimEndMs / 1000) : "–"}
+          </span>
+          <button
+            type="button"
+            onClick={clearVideoTrim}
+            disabled={videoTrimStartMs === null && videoTrimEndMs === null}
+            className="rounded border border-border px-2 py-0.5 text-text-secondary hover:border-accent disabled:opacity-40"
+          >
+            Zurücksetzen
+          </button>
+          <button
+            type="button"
+            onClick={() => void commitVideoTrim()}
+            disabled={!canTrim}
+            className="ml-auto rounded border border-accent bg-accent/10 px-3 py-0.5 font-medium text-accent hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {videoTrimSaving ? "Schneide…" : "Schneiden"}
+          </button>
+        </div>
+        {videoTrimError ? <p className="text-xs text-red-500">{videoTrimError}</p> : null}
       </div>
     </div>
   );

@@ -1764,6 +1764,29 @@ interface LibraryViewsSlice {
   loadRemovableVolumes: () => Promise<void>;
 }
 
+/** Video-Bearbeitung (Phase 16 Schritt 6, siehe `DECISIONS.md` ADR-0043) —
+ * Schneiden/Trimmen des aktuell in `VideoPlayer.tsx` angezeigten Videos.
+ * `videoTrimStartMs`/`videoTrimEndMs` sind reiner Entwurfszustand (noch
+ * nicht angewendet) — erst `commitVideoTrim` ruft `api.trimVideo` auf und
+ * legt damit, nicht-destruktiv, ein neues Katalog-Asset an (siehe
+ * `apx_app::commands::trim_video`s Moduldoku). Beide setzen sich beim
+ * Fotowechsel zurück (siehe `VideoPlayer.tsx`s bestehendem
+ * Zurücksetzen-Effekt), damit keine In/Out-Punkte eines vorherigen Videos
+ * am neuen Video kleben bleiben. */
+interface VideoSlice {
+  videoTrimStartMs: number | null;
+  videoTrimEndMs: number | null;
+  setVideoTrimStart: (ms: number) => void;
+  setVideoTrimEnd: (ms: number) => void;
+  clearVideoTrim: () => void;
+  videoTrimSaving: boolean;
+  videoTrimError: string | null;
+  /** Schneidet `[videoTrimStartMs, videoTrimEndMs)` aus dem aktuell
+   * gewählten Video, lädt danach die Fotoliste des Ordners neu und wählt
+   * das neu entstandene, getrimmte Video aus. */
+  commitVideoTrim: () => Promise<void>;
+}
+
 export type AppStore = CatalogSlice &
   SelectionSlice &
   ViewerSlice &
@@ -1782,7 +1805,8 @@ export type AppStore = CatalogSlice &
   TemplatesSlice &
   LibraryBacklogSlice &
   MetadataSlice &
-  LibraryViewsSlice;
+  LibraryViewsSlice &
+  VideoSlice;
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -6707,6 +6731,67 @@ export const useAppStore = create<AppStore>()(
         // Ordner-Import nicht blockieren, deshalb kein `catalogError`.
         set((state) => {
           state.removableVolumes = [];
+        });
+      }
+    },
+
+    videoTrimStartMs: null,
+    videoTrimEndMs: null,
+
+    setVideoTrimStart: (ms) => {
+      set((state) => {
+        state.videoTrimStartMs = ms;
+        state.videoTrimError = null;
+      });
+    },
+
+    setVideoTrimEnd: (ms) => {
+      set((state) => {
+        state.videoTrimEndMs = ms;
+        state.videoTrimError = null;
+      });
+    },
+
+    clearVideoTrim: () => {
+      set((state) => {
+        state.videoTrimStartMs = null;
+        state.videoTrimEndMs = null;
+        state.videoTrimError = null;
+      });
+    },
+
+    videoTrimSaving: false,
+    videoTrimError: null,
+
+    commitVideoTrim: async () => {
+      const { selectedPhotoId, selectedFolderId, videoTrimStartMs, videoTrimEndMs } = get();
+      if (!selectedPhotoId || videoTrimStartMs === null || videoTrimEndMs === null) return;
+      if (videoTrimEndMs <= videoTrimStartMs) {
+        set((state) => {
+          state.videoTrimError = "Ende muss nach dem Anfang liegen";
+        });
+        return;
+      }
+
+      set((state) => {
+        state.videoTrimSaving = true;
+        state.videoTrimError = null;
+      });
+      try {
+        const trimmed = await api.trimVideo(selectedPhotoId, videoTrimStartMs, videoTrimEndMs);
+        if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
+        set((state) => {
+          state.selectedPhotoId = trimmed.id;
+          state.videoTrimStartMs = null;
+          state.videoTrimEndMs = null;
+        });
+      } catch (err) {
+        set((state) => {
+          state.videoTrimError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoTrimSaving = false;
         });
       }
     },

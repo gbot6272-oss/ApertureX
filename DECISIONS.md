@@ -3811,3 +3811,36 @@ können (`selectPhoto`, `togglePhotoSelection`s Toggle-Zweig,
 derselbe "kein gültiger Bearbeitungszustand"-Reset wie bei "kein Foto
 ausgewählt" angewendet — keine stillschweigend veraltete Anzeige des
 vorherigen Fotos.
+
+**Nachtrag (Schritt 6, Schneiden/Trimmen):** neuer `apx-app`-Command
+`trim_video(photo_id, start_ms, end_ms)` — **nicht-destruktiv**, wie
+schon bei virtuellen Kopien (ADR-0035) und Stacking-Ergebnissen
+(Phase 9 Schritt 8): das Original bleibt unangetastet, das Ergebnis
+landet als eigene neue Katalogzeile (`<stem>_trim[_N].<ext>` im selben
+Ordner, Kollisionsvermeidung per Suffix-Zähler). Der eigentliche
+Schnitt läuft über `ffmpeg -ss <start> -t <dauer> -c copy` (verlustfrei,
+Millisekunden-Genauigkeit hängt vom Keyframe-Abstand des Quellcodecs
+ab) — schlägt der reine Stream-Copy-Pfad fehl (nicht jeder Codec/
+Container erlaubt beliebige Schnittpunkte ohne Neucodierung), fällt der
+Command automatisch auf `-c:v libx264 -crf 18 -preset medium -c:a aac`
+zurück. Nach dem Schnitt: `ffprobe`-Metadaten-Extraktion
+(`import::video::extract_video_metadata`, wiederverwendet aus Schritt 4)
+und Thumbnail-Erzeugung (`import::thumbnails::generate_one`,
+wiederverwendet aus Schritt 4 — beide Funktionen dafür von modul- auf
+`pub(crate)`-Sichtbarkeit angehoben) für das neue Asset, statt beides
+neu zu bauen.
+
+Frontend: `VideoPlayer.tsx`s eigene Zeitleiste (bewusst kein natives
+`<video controls>`, siehe Schritt-5-Nachtrag) bekommt jetzt die dort
+vorgesehenen Anfang-/Ende-Ziehpunkte — als farbige Marker auf der
+Zeitleiste plus zwei "aktuelle Position markieren"-Knöpfe (dasselbe
+Muster wie in den meisten Schnittwerkzeugen, statt echter Zieh-
+Interaktion auf der Leiste — deutlich einfacher umzusetzen, für den
+"minimales Trimmen"-Anspruch dieser Phase ausreichend). Trimm-Zustand
+(`videoTrimStartMs`/`videoTrimEndMs`) ist reiner Entwurf im Store, bis
+`commitVideoTrim` den `trim_video`-Command aufruft; setzt sich beim
+Fotowechsel automatisch zurück (im bereits bestehenden
+Zurücksetzen-Effekt), damit keine In/Out-Punkte eines vorherigen Videos
+am neuen kleben bleiben. Nach erfolgreichem Schnitt wählt der Store das
+neu entstandene Video automatisch aus (`selectedPhotoId` auf die
+Antwort von `trim_video`).

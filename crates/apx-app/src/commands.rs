@@ -1082,6 +1082,162 @@ pub fn list_builtin_lut_filters() -> Vec<LutFilterDataDto> {
         .collect()
 }
 
+// ---- Video-Bearbeitung (Phase 16 Schritt 6) --------------------------------
+
+/// Schneidet `[start_ms, end_ms)` aus einem Video-Asset — nicht
+/// destruktiv (siehe `DECISIONS.md` ADR-0043): das Original bleibt
+/// unverändert, das Ergebnis wird als **neues** Katalog-Asset im selben
+/// Ordner abgelegt (`<stem>_trim[_N].<ext>`), dieselbe Konvention wie
+/// gespeicherte Stapel-/Panorama-Ergebnisse an anderer Stelle in dieser
+/// Datei. Erst ein schneller `-c copy`-Stream-Kopier-Versuch (verlustfrei,
+/// aber an den nächsten Keyframes statt frame-genau — dieselbe
+/// Einschränkung wie bei jedem Videoschnittprogramm im "schnellen"
+/// Modus), bei Fehlschlag ein vollständiger Re-Encode
+/// (`libx264`/`aac`) — siehe PLAN.md Schritt 6: "verlustfreier
+/// ffmpeg-Stream-Copy wo möglich, sonst Re-Encode".
+#[tauri::command]
+pub fn trim_video(
+    state: State<'_, AppState>,
+    photo_id: String,
+    start_ms: i64,
+    end_ms: i64,
+) -> Result<PhotoDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    if start_ms < 0 || end_ms <= start_ms {
+        return Err("Ungültiger Zeitbereich: Ende muss nach Anfang liegen".to_string());
+    }
+
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    if photo.media_kind != "video" {
+        return Err("Nur Videos können geschnitten werden".to_string());
+    }
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    let stem = source_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("video");
+    let ext = source_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("mp4");
+    let mut dest_path = folder.path.join(format!("{stem}_trim.{ext}"));
+    let mut counter = 1u32;
+    while dest_path.exists() {
+        dest_path = folder.path.join(format!("{stem}_trim_{counter}.{ext}"));
+        counter += 1;
+    }
+
+    run_ffmpeg_trim(&source_path, &dest_path, start_ms, end_ms, true)
+        .or_else(|_| run_ffmpeg_trim(&source_path, &dest_path, start_ms, end_ms, false))?;
+
+    let file_size = std::fs::metadata(&dest_path)
+        .map_err(|err| format!("Geschnittene Datei nicht lesbar: {err}"))?
+        .len();
+    let content_hash = crate::import::compute_content_hash(&dest_path)?;
+    let video_meta = crate::import::video::extract_video_metadata(&dest_path)?;
+    let filename = dest_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "Ungültiger Dateiname".to_string())?
+        .to_string();
+
+    let new_photo = apx_catalog::NewPhoto {
+        folder_id: photo.folder_id,
+        filename,
+        file_size,
+        file_mtime: time::OffsetDateTime::now_utc(),
+        content_hash: Some(content_hash),
+        width: video_meta.width,
+        height: video_meta.height,
+        orientation: 1,
+        camera_make: None,
+        camera_model: None,
+        lens: None,
+        iso: None,
+        shutter: None,
+        aperture: None,
+        focal_length: None,
+        captured_at: Some(time::OffsetDateTime::now_utc()),
+        gps_lat: None,
+        gps_lon: None,
+        media_kind: "video".to_string(),
+        duration_ms: video_meta.duration_ms,
+        video_codec: video_meta.codec,
+        has_audio: video_meta.has_audio,
+        frame_rate: video_meta.frame_rate,
+    };
+    let (new_photo_id, _) = state
+        .catalog
+        .upsert_photo(&new_photo)
+        .map_err(|err| err.to_string())?;
+
+    if let Err(err) = crate::import::thumbnails::generate_one(
+        &state.catalog,
+        &state.paths.preview_cache_dir(),
+        new_photo_id,
+        &dest_path,
+    ) {
+        tracing::warn!(%err, "Thumbnail für geschnittenes Video nicht erzeugbar");
+    }
+
+    let saved = state
+        .catalog
+        .get_photo(new_photo_id)
+        .map_err(|err| err.to_string())?;
+    Ok(saved.into())
+}
+
+/// `stream_copy = true`: `-c copy` (schnell, verlustfrei, an den
+/// nächsten Keyframes) — `false`: vollständiger Re-Encode (langsamer,
+/// aber frame-genau, funktioniert auch, wenn Stream-Copy am
+/// Container/Codec scheitert). `-ss` **vor** `-i` (schnelles Grobsuchen)
+/// ist bei `-c copy` sogar erforderlich — ffmpeg kann einen
+/// kopierten Stream nur an Paketgrenzen (Keyframes) schneiden, ein
+/// Suchen nach dem Dekodieren würde daran nichts ändern.
+fn run_ffmpeg_trim(
+    source: &std::path::Path,
+    dest: &std::path::Path,
+    start_ms: i64,
+    end_ms: i64,
+    stream_copy: bool,
+) -> Result<(), String> {
+    let start_secs = start_ms as f64 / 1000.0;
+    let duration_secs = (end_ms - start_ms) as f64 / 1000.0;
+
+    let mut cmd = std::process::Command::new("ffmpeg");
+    cmd.args(["-y", "-ss", &format!("{start_secs}"), "-i"])
+        .arg(source);
+    cmd.args(["-t", &format!("{duration_secs}")]);
+    if stream_copy {
+        cmd.args(["-c", "copy"]);
+    } else {
+        cmd.args([
+            "-c:v", "libx264", "-crf", "18", "-preset", "medium", "-c:a", "aac",
+        ]);
+    }
+    cmd.arg(dest);
+
+    let output = cmd
+        .output()
+        .map_err(|err| format!("ffmpeg nicht startbar (ist ffmpeg installiert?): {err}"))?;
+    if !output.status.success() {
+        let _ = std::fs::remove_file(dest); // unvollständige Datei nicht liegen lassen
+        return Err(format!(
+            "ffmpeg-Schnitt fehlgeschlagen: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
 /// Geht einen Bearbeitungsschritt zurück. `None`, wenn schon am
 /// Ausgangszustand (kein Rückgängig möglich) — kein Fehler, siehe
 /// `apx_catalog::Catalog::undo_edit`.

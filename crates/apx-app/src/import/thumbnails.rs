@@ -74,7 +74,12 @@ pub(super) fn generate(
     error_count.into_inner()
 }
 
-fn generate_one(
+/// `pub(crate)` (statt nur modulintern), weil Phase 16 Schritt 6
+/// (Video-Trimmen, `apx-app::commands::trim_video`) für das neu
+/// entstandene, getrimmte Video-Asset genau dasselbe Ein-Datei-
+/// Thumbnail außerhalb eines vollen Batch-Imports braucht, statt den
+/// ganzen Worker-Pool aus [`generate`] dafür aufzuziehen.
+pub(crate) fn generate_one(
     catalog: &Catalog,
     cache_root: &Path,
     photo_id: PhotoId,

@@ -16,8 +16,8 @@
 pub(crate) mod mode;
 pub(crate) mod presets;
 mod rename;
-mod thumbnails;
-mod video;
+pub(crate) mod thumbnails;
+pub(crate) mod video;
 
 use std::collections::HashMap;
 use std::io::BufReader;

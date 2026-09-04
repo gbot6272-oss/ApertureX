@@ -323,6 +323,7 @@ fn main() {
             commands::detect_video_scene_changes,
             commands::denoise_video_audio,
             commands::add_video_audio_track,
+            commands::apply_lut_filter_to_video,
             commands::undo_develop_edit,
             commands::redo_develop_edit,
             commands::list_develop_history,

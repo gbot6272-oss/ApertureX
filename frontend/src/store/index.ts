@@ -1814,6 +1814,16 @@ interface VideoSlice {
   videoAudioError: string | null;
   denoiseCurrentVideoAudio: (strength: "low" | "medium" | "high") => Promise<void>;
   addAudioToCurrentVideo: (audioPath: string, mode: "mix" | "replace", musicVolume: number) => Promise<void>;
+
+  /** Filter/LUT auf Video anwenden (Phase 16 Schritt 9, siehe
+   * `DECISIONS.md` ADR-0043) — nutzt dieselben `builtinLutFilters`
+   * (siehe oben) bzw. einen frisch importierten `.cube`, wie das
+   * Entwickeln-Panel für Fotos. Kann bei langen Videos spürbar dauern
+   * (reine CPU-Pipeline), deshalb eigener Lade-/Fehlerzustand statt
+   * `videoAudioBusy` mitzunutzen. */
+  videoLutBusy: boolean;
+  videoLutError: string | null;
+  applyLutFilterToCurrentVideo: (lut: LutFilterData, strength: number) => Promise<void>;
 }
 
 export type AppStore = CatalogSlice &
@@ -6925,6 +6935,33 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.videoAudioBusy = false;
+        });
+      }
+    },
+
+    videoLutBusy: false,
+    videoLutError: null,
+
+    applyLutFilterToCurrentVideo: async (lut, strength) => {
+      const { selectedPhotoId, selectedFolderId } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.videoLutBusy = true;
+        state.videoLutError = null;
+      });
+      try {
+        const result = await api.applyLutFilterToVideo(selectedPhotoId, lut, strength);
+        if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
+        set((state) => {
+          state.selectedPhotoId = result.id;
+        });
+      } catch (err) {
+        set((state) => {
+          state.videoLutError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoLutBusy = false;
         });
       }
     },

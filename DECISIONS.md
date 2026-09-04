@@ -3920,3 +3920,39 @@ Extraktion+Thumbnail-Erzeugung wurden in zwei geteilte Funktionen
 gezogen, damit alle drei Video-Bearbeitungs-Commands (Schritt 6 und 8)
 exakt dieselbe "neues Katalog-Asset anlegen"-Logik verwenden statt sie
 drei Mal zu duplizieren.
+
+**Nachtrag (Schritt 9, Filter/LUT auf Video anwenden):** wendet
+**dieselbe** trilineare `.cube`-Interpolation an, die Schritt 1 für
+Fotos gebaut hat (`apx_pipeline::stages::lut_filter::apply`), framegenau
+auf jedes Bild eines Videos — keine zweite LUT-Implementierung, keine
+ffmpeg-eigene `lut3d`-Filterkette. Zwei gekoppelte `ffmpeg`-
+Subprozesse: der erste dekodiert zu rohen RGBA8-Frames auf `stdout`
+(`-f rawvideo -pix_fmt rgba`), ein eigener Rust-Thread liest sie
+framegenau, wendet die LUT an und schreibt das Ergebnis in `stdin`
+eines zweiten `ffmpeg`, der die transformierten Frames re-kodiert und
+per zweitem Input (dieselbe Quelldatei erneut, `-map 1:a?`) die
+Original-Tonspur unverändert hinüberkopiert. Der Frame-Pumpen-Thread
+bekommt die `LutFilterAdjustment` als geklonten Wert übergeben (nicht
+als Referenz) — `std::thread::spawn` verlangt `'static`-Daten, ein
+Klon der (mit höchstens einigen zehntausend Floats kleinen) LUT-Tabelle
+ist dafür einfacher als `std::thread::scope`.
+
+Bewusst **global** wie bei Schritt 8, keine Pinselstriche wie bei
+Fotos (Schritt 3) — eine pro-Frame-Maske für ein bewegtes Bild wäre ein
+eigenständiges, deutlich größeres Feature (Tracking, Interpolation
+zwischen Keyframes) und nicht Teil des "Basis-Videoschnitt"-Anspruchs
+dieser Phase. Frontend nutzt dieselben `builtinLutFilters` (Schritt 2)
+und denselben `.cube`-Import-Dialog (`importLutCubeFile`, Schritt 1)
+wie das Foto-Entwickeln-Panel — keine zweite Filter-Bibliothek für
+Video.
+
+**Performance ehrlich unverifiziert in dieser Sandbox:** wie in
+ADR-0043 vorab benannt, ist `apx-pipeline` reines CPU-Rust ohne
+GPU-Shader — ein Zwei-Prozess-Pipe-Aufbau mit Pro-Frame-CPU-Filterung
+ist für kurze Clips bei moderater Auflösung machbar, kann aber bei
+langen/hochauflösenden Videos spürbar langsam werden. Eine konkrete
+Messung (Sekunden pro Sekunde Video bei einer bestimmten Auflösung)
+fehlt dieser Sitzung mangels eines echten Test-Videos mit bekannten
+Referenzwerten in der Sandbox — wird ehrlich als offen benannt statt
+stillschweigend als geprüft ausgegeben; siehe Schritt 11 für eine
+Nachprüfung, falls dort ein Testclip verfügbar wird.

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { LutFilterData } from "../lib/edl";
 import { videoUrl } from "../lib/media";
-import { pickFilePath } from "../lib/tauri";
+import { importLutCubeFile, pickFilePath } from "../lib/tauri";
 import { useAppStore } from "../store";
 
 function formatTime(seconds: number): string {
@@ -49,6 +50,12 @@ export function VideoPlayer() {
   const denoiseCurrentVideoAudio = useAppStore((s) => s.denoiseCurrentVideoAudio);
   const addAudioToCurrentVideo = useAppStore((s) => s.addAudioToCurrentVideo);
 
+  const builtinLutFilters = useAppStore((s) => s.builtinLutFilters);
+  const loadBuiltinLutFilters = useAppStore((s) => s.loadBuiltinLutFilters);
+  const videoLutBusy = useAppStore((s) => s.videoLutBusy);
+  const videoLutError = useAppStore((s) => s.videoLutError);
+  const applyLutFilterToCurrentVideo = useAppStore((s) => s.applyLutFilterToCurrentVideo);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -58,6 +65,17 @@ export function VideoPlayer() {
   const [musicPath, setMusicPath] = useState<string | null>(null);
   const [musicMode, setMusicMode] = useState<"mix" | "replace">("mix");
   const [musicVolume, setMusicVolume] = useState(1);
+  const [customLut, setCustomLut] = useState<LutFilterData | null>(null);
+  const [selectedLutKey, setSelectedLutKey] = useState<string>("");
+  const [lutStrength, setLutStrength] = useState(1);
+
+  // Die fünf eingebauten Filter-Looks (dieselben wie im Foto-
+  // Entwickeln-Panel, `LutFilterPanel.tsx`) werden lazy beim ersten
+  // Öffnen einer Video-Ansicht geladen, danach für die ganze Sitzung
+  // wiederverwendet (siehe `loadBuiltinLutFilters`s Moduldoku).
+  useEffect(() => {
+    void loadBuiltinLutFilters();
+  }, [loadBuiltinLutFilters]);
 
   // Beim Fotowechsel Wiedergabezustand zurücksetzen — sonst zeigt die
   // Zeitleiste kurz den Stand des vorherigen Videos an, bevor die neuen
@@ -70,6 +88,21 @@ export function VideoPlayer() {
     clearVideoSceneChanges();
     setMusicPath(null);
   }, [selectedPhotoId, clearVideoTrim, clearVideoSceneChanges]);
+
+  const handleImportCustomLut = useCallback(async () => {
+    const imported = await importLutCubeFile();
+    if (imported) {
+      setCustomLut(imported);
+      setSelectedLutKey("custom");
+    }
+  }, []);
+
+  const selectedLut: LutFilterData | null =
+    selectedLutKey === "custom"
+      ? customLut
+      : selectedLutKey !== "" && builtinLutFilters
+        ? (builtinLutFilters[Number(selectedLutKey)] ?? null)
+        : null;
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
@@ -352,6 +385,61 @@ export function VideoPlayer() {
           ) : null}
         </div>
         {videoAudioError ? <p className="text-xs text-red-500">{videoAudioError}</p> : null}
+
+        {/* Filter/LUT auf Video anwenden (Phase 16 Schritt 9): dieselben
+            fünf eingebauten Filter-Looks wie im Foto-Entwickeln-Panel
+            (`LutFilterPanel.tsx`) plus freier `.cube`-Import — bewusst
+            global (keine Pinselstriche wie bei Fotos, siehe
+            `apply_lut_filter_to_video`s Moduldoku). */}
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-xs">
+          <span className="text-text-secondary">Filter:</span>
+          <select
+            value={selectedLutKey}
+            onChange={(e) => setSelectedLutKey(e.target.value)}
+            className="rounded border border-border bg-bg-panel px-1 py-0.5"
+          >
+            <option value="">– wählen –</option>
+            {builtinLutFilters?.map((lut, index) => (
+              <option key={lut.name} value={index}>
+                {lut.name}
+              </option>
+            ))}
+            {customLut ? <option value="custom">{customLut.name} (importiert)</option> : null}
+          </select>
+          <button
+            type="button"
+            onClick={() => void handleImportCustomLut()}
+            className="rounded border border-border px-2 py-0.5 text-text-primary hover:border-accent"
+          >
+            .cube importieren
+          </button>
+          {selectedLut ? (
+            <>
+              <label className="flex items-center gap-1 text-text-secondary">
+                Stärke
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={lutStrength}
+                  onChange={(e) => setLutStrength(Number(e.target.value))}
+                  className="w-20"
+                />
+                <span className="w-8 text-right text-text-muted">{Math.round(lutStrength * 100)}%</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => void applyLutFilterToCurrentVideo(selectedLut, lutStrength)}
+                disabled={videoLutBusy}
+                className="ml-auto rounded border border-accent bg-accent/10 px-3 py-0.5 font-medium text-accent hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {videoLutBusy ? "Wende an…" : "Anwenden"}
+              </button>
+            </>
+          ) : null}
+        </div>
+        {videoLutError ? <p className="text-xs text-red-500">{videoLutError}</p> : null}
       </div>
     </div>
   );

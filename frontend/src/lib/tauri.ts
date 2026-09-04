@@ -471,6 +471,18 @@ export function addVideoAudioTrack(
   return invoke<PhotoDto>("add_video_audio_track", { photoId, audioPath, mode, musicVolume: musicVolume ?? null });
 }
 
+/** Filter/LUT auf Video anwenden (Phase 16 Schritt 9, siehe
+ * `DECISIONS.md` ADR-0043) — wendet `lut` framegenau auf jedes Bild an
+ * (dieselbe trilineare Interpolation wie bei Fotos), nicht-destruktiv
+ * (siehe `apx_app::commands::apply_lut_filter_to_video`s Moduldoku).
+ * Bewusst global (keine Pinselstriche wie bei Fotos). Kann bei langen/
+ * hochauflösenden Videos spürbar dauern (reine CPU-Pipeline, siehe
+ * ADR-0043) — die Promise löst erst nach vollständiger Verarbeitung
+ * auf. */
+export function applyLutFilterToVideo(photoId: string, lut: LutFilterDataDto, strength: number): Promise<PhotoDto> {
+  return invoke<PhotoDto>("apply_lut_filter_to_video", { photoId, lut, strength });
+}
+
 // ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------------
 // Anders als der lineare Verlauf oben: siehe `crates/apx-app/src/commands.rs`s
 // Moduldoku für die Abgrenzung. Kein eigener "restore"-Aufruf — die

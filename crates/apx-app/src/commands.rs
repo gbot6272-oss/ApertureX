@@ -990,13 +990,29 @@ pub async fn import_dcp_profile(app: AppHandle) -> Result<Option<DcpProfileDataD
 
 // ---- Filter-/LUT-Bibliothek (Phase 16 Schritt 1) ---------------------------
 
-#[derive(Debug, Clone, Serialize)]
+// `Deserialize` zusätzlich zum bisherigen `Serialize` (Phase 16
+// Schritt 9): `apply_lut_filter_to_video` nimmt einen bereits im
+// Frontend gewählten Filter (Bibliotheks-Eintrag oder eigener
+// `.cube`-Import) als Parameter entgegen statt ihn erneut zu berechnen.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LutFilterDataDto {
     pub name: String,
     pub size: u32,
     pub table: Vec<f32>,
     pub domain_min: [f32; 3],
     pub domain_max: [f32; 3],
+}
+
+impl From<LutFilterDataDto> for apx_pipeline::edl::LutFilterData {
+    fn from(dto: LutFilterDataDto) -> Self {
+        Self {
+            name: dto.name,
+            size: dto.size,
+            table: dto.table,
+            domain_min: dto.domain_min,
+            domain_max: dto.domain_max,
+        }
+    }
 }
 
 impl From<apx_pipeline::lut_cube::ParsedLut> for LutFilterDataDto {
@@ -1505,6 +1521,176 @@ pub fn add_video_audio_track(
     }
 
     register_video_result_as_new_photo(&state, photo.folder_id, &dest_path)
+}
+
+/// Filter/LUT auf Video anwenden (Phase 16 Schritt 9, siehe
+/// `DECISIONS.md` ADR-0043) — wendet dieselbe trilineare `.cube`-LUT-
+/// Interpolation an, die Schritt 1 für Fotos gebaut hat
+/// (`apx_pipeline::stages::lut_filter::apply`), framegenau auf jedes
+/// Bild eines Videos. Bewusst **global** (keine Pinselstriche wie bei
+/// Fotos — eine pro-Frame-Maske wäre für ein bewegtes Bild ein
+/// eigenständiges, deutlich größeres Feature und nicht Teil des
+/// "Basis-Videoschnitt"-Anspruchs dieser Phase). Nicht destruktiv:
+/// neues Katalog-Asset (`<stem>_lut[_N].<ext>`), Original unverändert;
+/// die Original-Tonspur wird unangetastet in die Ausgabe übernommen
+/// (`-c:a copy`), nur das Bild durchläuft die LUT.
+///
+/// **Bewusst kein GPU-Pfad** (siehe ADR-0043: `apx-pipeline` ist reines
+/// CPU-Rust) — bei langen/hochauflösenden Videos entsprechend langsam,
+/// siehe die Performance-Messung in Schritt 11.
+#[tauri::command]
+pub fn apply_lut_filter_to_video(
+    state: State<'_, AppState>,
+    photo_id: String,
+    lut: LutFilterDataDto,
+    strength: f32,
+) -> Result<PhotoDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    if photo.media_kind != "video" {
+        return Err("Filter/LUT auf Video funktioniert nur bei Videos".to_string());
+    }
+    let (Some(width), Some(height)) = (photo.width, photo.height) else {
+        return Err("Video-Auflösung unbekannt (fehlende Metadaten)".to_string());
+    };
+    let fps = photo.frame_rate.unwrap_or(30.0).max(1.0);
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    let adjustment = apx_pipeline::edl::LutFilterAdjustment {
+        strength: strength.clamp(0.0, 1.0),
+        lut: Some(lut.into()),
+        strokes: Vec::new(),
+    };
+
+    let dest_path = unique_sibling_video_path(&folder.path, &source_path, "lut");
+    run_ffmpeg_apply_lut_to_video(&source_path, &dest_path, width, height, fps, adjustment)?;
+
+    register_video_result_as_new_photo(&state, photo.folder_id, &dest_path)
+}
+
+/// Zwei gekoppelte `ffmpeg`-Subprozesse: der erste dekodiert `source`
+/// zu rohen RGBA8-Frames auf `stdout` (`-f rawvideo -pix_fmt rgba`),
+/// ein eigener Thread liest sie framegenau, wendet
+/// `stages::lut_filter::apply` darauf an und schreibt das Ergebnis in
+/// `stdin` des zweiten `ffmpeg`, der die transformierten Frames zu
+/// `dest` re-kodiert und dabei per zweitem Input (`source` erneut,
+/// `-map 1:a?`) die Original-Tonspur unverändert hinüberkopiert —
+/// dasselbe zwei-Prozesse-Pipe-Muster wie ein klassischer
+/// Video-Filterpipeline-Aufbau, hier in Rust statt einer einzigen
+/// `-vf`-ffmpeg-Filterkette, weil die LUT-Logik in
+/// `apx_pipeline::stages::lut_filter` liegt (dieselbe Implementierung
+/// wie bei Fotos, keine zweite LUT-Anwendung in einer ffmpeg-eigenen
+/// Filtersprache).
+fn run_ffmpeg_apply_lut_to_video(
+    source: &Path,
+    dest: &Path,
+    width: u32,
+    height: u32,
+    fps: f32,
+    // Wert statt Referenz: der Frame-Pumpen-Thread braucht `'static`
+    // (`std::thread::spawn`), ein geklonter Wert ist einfacher als
+    // `std::thread::scope` für diesen einen Aufrufort — die LUT-Tabelle
+    // ist mit höchstens einigen zehntausend Floats klein genug, dass das
+    // Klonen nicht ins Gewicht fällt.
+    adjustment: apx_pipeline::edl::LutFilterAdjustment,
+) -> Result<(), String> {
+    use std::io::{Read, Write};
+
+    let mut decode = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(source)
+        .args(["-f", "rawvideo", "-pix_fmt", "rgba", "-"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("ffmpeg (Dekodieren) nicht startbar: {err}"))?;
+    let mut decode_stdout = decode
+        .stdout
+        .take()
+        .ok_or_else(|| "ffmpeg-Dekodier-Ausgabe nicht verfügbar".to_string())?;
+
+    let mut encode = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba"])
+        .args([
+            "-s",
+            &format!("{width}x{height}"),
+            "-r",
+            &format!("{fps}"),
+            "-i",
+            "-",
+        ])
+        .arg("-i")
+        .arg(source)
+        .args([
+            "-map", "0:v", "-map", "1:a?", "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+            "-c:a", "copy",
+        ])
+        .arg(dest)
+        .stdin(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("ffmpeg (Kodieren) nicht startbar: {err}"))?;
+    let mut encode_stdin = encode
+        .stdin
+        .take()
+        .ok_or_else(|| "ffmpeg-Kodier-Eingabe nicht verfügbar".to_string())?;
+
+    let frame_bytes = (width as usize) * (height as usize) * 4;
+    let pump = std::thread::spawn(move || -> Result<(), String> {
+        let mut frame = vec![0u8; frame_bytes];
+        loop {
+            match decode_stdout.read_exact(&mut frame) {
+                Ok(()) => {
+                    let filtered =
+                        apx_pipeline::stages::lut_filter::apply(&frame, width, height, &adjustment);
+                    encode_stdin
+                        .write_all(&filtered)
+                        .map_err(|err| format!("Schreiben an ffmpeg fehlgeschlagen: {err}"))?;
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(err) => return Err(format!("Lesen von ffmpeg fehlgeschlagen: {err}")),
+            }
+        }
+        Ok(()) // `encode_stdin` fällt hier aus dem Gültigkeitsbereich → EOF für ffmpeg
+    });
+
+    let pump_result = pump
+        .join()
+        .map_err(|_| "Frame-Pipeline-Thread abgestürzt".to_string())?;
+
+    let decode_status = decode
+        .wait()
+        .map_err(|err| format!("Warten auf ffmpeg (Dekodieren) fehlgeschlagen: {err}"))?;
+    let encode_output = {
+        let status = encode
+            .wait()
+            .map_err(|err| format!("Warten auf ffmpeg (Kodieren) fehlgeschlagen: {err}"))?;
+        let mut stderr = String::new();
+        if let Some(mut pipe) = encode.stderr.take() {
+            let _ = pipe.read_to_string(&mut stderr);
+        }
+        (status, stderr)
+    };
+
+    pump_result?;
+    if !decode_status.success() {
+        let _ = std::fs::remove_file(dest);
+        return Err("ffmpeg (Dekodieren) fehlgeschlagen".to_string());
+    }
+    if !encode_output.0.success() {
+        let _ = std::fs::remove_file(dest);
+        return Err(format!(
+            "ffmpeg (Kodieren) fehlgeschlagen: {}",
+            encode_output.1
+        ));
+    }
+    Ok(())
 }
 
 /// Geht einen Bearbeitungsschritt zurück. `None`, wenn schon am

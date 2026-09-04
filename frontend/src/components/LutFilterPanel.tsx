@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { DevelopSlider } from "./DevelopSlider";
-import { LUT_FILTER_SLIDER_SPECS, type LutFilterData } from "../lib/edl";
+import { LUT_FILTER_BRUSH_RADIUS_SPEC, LUT_FILTER_BRUSH_STRENGTH_SPEC, LUT_FILTER_SLIDER_SPECS, type LutFilterData } from "../lib/edl";
 import { useAppStore } from "../store";
 
 /** Liest den Wert eines Rasterpunkts `(ri, gi, bi)` aus `lut.table`
@@ -48,6 +48,12 @@ export function LutFilterPanel() {
   const loadBuiltinLutFilters = useAppStore((s) => s.loadBuiltinLutFilters);
   const applyBuiltinLutFilter = useAppStore((s) => s.applyBuiltinLutFilter);
   const commitDevelopEdit = useAppStore((s) => s.commitDevelopEdit);
+  const lutFilterBrushActive = useAppStore((s) => s.lutFilterBrushActive);
+  const toggleLutFilterBrushActive = useAppStore((s) => s.toggleLutFilterBrushActive);
+  const lutFilterDraftRadius = useAppStore((s) => s.lutFilterDraftRadius);
+  const lutFilterDraftStrength = useAppStore((s) => s.lutFilterDraftStrength);
+  const setLutFilterDraftField = useAppStore((s) => s.setLutFilterDraftField);
+  const removeLutFilterStroke = useAppStore((s) => s.removeLutFilterStroke);
 
   useEffect(() => {
     void loadBuiltinLutFilters();
@@ -108,6 +114,49 @@ export function LutFilterPanel() {
           onCommit={() => void commitDevelopEdit()}
         />
       ))}
+
+      {/* Punktuelle Anwendung (Phase 16 Schritt 3, ADR-0043) — leere
+          `strokes` heißen "im ganzen Bild", nicht-leere beschränken den
+          gewählten Filter auf die gemalten Bereiche (siehe
+          `stages::lut_filter`s Moduldoku). */}
+      <button
+        type="button"
+        aria-pressed={lutFilterBrushActive}
+        onClick={toggleLutFilterBrushActive}
+        disabled={!lutFilterAdjustment.lut}
+        className={`rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50 ${
+          lutFilterBrushActive ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"
+        }`}
+      >
+        Filter-Pinsel {lutFilterBrushActive ? "(aktiv)" : ""}
+      </button>
+      {lutFilterBrushActive && <p className="text-xs text-text-muted">Strich im Bild ziehen, um den Filter nur dort anzuwenden.</p>}
+
+      <DevelopSlider
+        spec={LUT_FILTER_BRUSH_RADIUS_SPEC}
+        value={lutFilterDraftRadius * 100}
+        onChange={(value) => setLutFilterDraftField("radius", value / 100)}
+        onCommit={() => {}}
+      />
+      <DevelopSlider
+        spec={LUT_FILTER_BRUSH_STRENGTH_SPEC}
+        value={lutFilterDraftStrength * 100}
+        onChange={(value) => setLutFilterDraftField("strength", value / 100)}
+        onCommit={() => {}}
+      />
+
+      {lutFilterAdjustment.strokes.length > 0 && (
+        <ul className="flex flex-col gap-1 text-xs text-text-secondary">
+          {lutFilterAdjustment.strokes.map((_stroke, index) => (
+            <li key={index} className="flex items-center justify-between rounded border border-border px-2 py-1">
+              <span>Strich {index + 1}</span>
+              <button type="button" onClick={() => removeLutFilterStroke(index)} className="text-text-muted hover:text-danger">
+                Entfernen
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

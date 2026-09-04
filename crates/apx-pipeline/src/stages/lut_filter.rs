@@ -18,7 +18,73 @@
 //! technischer Farbraum-Konvertierung) ist der Unterschied zur
 //! aufwendigeren tetraedrischen Interpolation visuell nicht relevant.
 
-use crate::edl::v4::LutFilterAdjustment;
+use crate::edl::v4::{LutFilterAdjustment, LutFilterStroke};
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    if edge1 <= edge0 {
+        return if x < edge0 { 0.0 } else { 1.0 };
+    }
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Kürzeste Distanz eines Bildpunkts zum gemalten Pfad eines Strichs —
+/// dieselbe "nächster Punkt auf der Polylinie"-Idee wie
+/// `stages::liquify::nearest_on_path`, hier ohne den gefundenen Punkt
+/// selbst (nur die Distanz wird für die Gewichtung gebraucht).
+fn distance_to_path(px: f32, py: f32, path: &[(f32, f32)]) -> f32 {
+    let mut best = f32::MAX;
+    for &(x, y) in path {
+        let dx = px - x;
+        let dy = py - y;
+        let dist = (dx * dx + dy * dy).sqrt();
+        if dist < best {
+            best = dist;
+        }
+    }
+    best
+}
+
+/// Berechnet je Bildpixel das Gewicht (`0.0..=1.0`), mit dem `strokes`
+/// die LUT-Anwendung dort zulassen — leere `strokes` heißen "überall
+/// volles Gewicht" (Rückwärtskompatibilität mit dem globalen Modus vor
+/// Schritt 3). Weiche Radius-Rampe wie `stages::liquify::warp_source`s
+/// `smoothstep`-Randabfall, hier radial statt distanzbasiert verzerrend.
+fn stroke_weight_map(width: u32, height: u32, strokes: &[LutFilterStroke]) -> Option<Vec<f32>> {
+    if strokes.is_empty() {
+        return None;
+    }
+    let w = width as usize;
+    let h = height as usize;
+    let mut weights = vec![0.0f32; w * h];
+    for stroke in strokes {
+        if stroke.center_path.is_empty() || stroke.radius <= 0.0 || stroke.strength <= 0.0 {
+            continue;
+        }
+        let path: Vec<(f32, f32)> = stroke
+            .center_path
+            .iter()
+            .map(|p| (p.x * width as f32, p.y * height as f32))
+            .collect();
+        let radius_px = (stroke.radius * width as f32).max(1.0);
+        let strength = stroke.strength.clamp(0.0, 1.0);
+        for y in 0..h {
+            for x in 0..w {
+                let dist = distance_to_path(x as f32 + 0.5, y as f32 + 0.5, &path);
+                if dist > radius_px {
+                    continue;
+                }
+                let falloff = 1.0 - smoothstep(0.0, radius_px, dist);
+                let weight = falloff * strength;
+                let slot = &mut weights[y * w + x];
+                if weight > *slot {
+                    *slot = weight;
+                }
+            }
+        }
+    }
+    Some(weights)
+}
 
 /// Interpoliert einen einzelnen Farbwert `(r, g, b)` (jeweils `0.0..=1.0`,
 /// bereits auf den LUT-Wertebereich normiert) trilinear aus `table`.
@@ -92,9 +158,24 @@ pub fn apply(base: &[u8], width: u32, height: u32, adjustment: &LutFilterAdjustm
         (lut.domain_max[2] - dmin[2]).max(1e-6),
     ];
 
+    // Schritt 3: leer (`None`) heißt "überall volles Gewicht" (der bis
+    // Schritt 2 einzige, globale Modus), nicht-leere `strokes`
+    // beschränken die Anwendung auf die gemalten Bereiche — `strength`
+    // wirkt in beiden Fällen als abschließender Gesamt-Multiplikator.
+    let stroke_weights = stroke_weight_map(width, height, &adjustment.strokes);
+
     let n = (width as usize) * (height as usize);
     let mut out = base.to_vec();
     for i in 0..n.min(base.len() / 4) {
+        let local_weight = match &stroke_weights {
+            Some(weights) => weights[i],
+            None => 1.0,
+        };
+        let weight = local_weight * strength;
+        if weight <= 0.0 {
+            continue;
+        }
+
         let px = i * 4;
         let r = base[px] as f32 / 255.0;
         let g = base[px + 1] as f32 / 255.0;
@@ -106,9 +187,9 @@ pub fn apply(base: &[u8], width: u32, height: u32, adjustment: &LutFilterAdjustm
 
         let looked_up = sample_lut(&lut.table, lut.size, nr, ng, nb);
 
-        out[px] = ((r + (looked_up[0] - r) * strength).clamp(0.0, 1.0) * 255.0).round() as u8;
-        out[px + 1] = ((g + (looked_up[1] - g) * strength).clamp(0.0, 1.0) * 255.0).round() as u8;
-        out[px + 2] = ((b + (looked_up[2] - b) * strength).clamp(0.0, 1.0) * 255.0).round() as u8;
+        out[px] = ((r + (looked_up[0] - r) * weight).clamp(0.0, 1.0) * 255.0).round() as u8;
+        out[px + 1] = ((g + (looked_up[1] - g) * weight).clamp(0.0, 1.0) * 255.0).round() as u8;
+        out[px + 2] = ((b + (looked_up[2] - b) * weight).clamp(0.0, 1.0) * 255.0).round() as u8;
         // Alpha bleibt unverändert (`out[px + 3]`).
     }
     out
@@ -176,6 +257,7 @@ mod tests {
         let adjustment = LutFilterAdjustment {
             strength: 0.0,
             lut: Some(invert_lut_2()),
+            strokes: Vec::new(),
         };
         let out = apply(&base, 1, 1, &adjustment);
         assert_eq!(out, base);
@@ -187,6 +269,7 @@ mod tests {
         let adjustment = LutFilterAdjustment {
             strength: 1.0,
             lut: Some(identity_lut_2()),
+            strokes: Vec::new(),
         };
         let out = apply(&base, 2, 1, &adjustment);
         // Trilineare Interpolation einer echten Identität ist exakt,
@@ -202,6 +285,7 @@ mod tests {
         let adjustment = LutFilterAdjustment {
             strength: 1.0,
             lut: Some(invert_lut_2()),
+            strokes: Vec::new(),
         };
         let out = apply(&base, 1, 1, &adjustment);
         assert_eq!(out[0], 255);
@@ -216,6 +300,7 @@ mod tests {
         let adjustment = LutFilterAdjustment {
             strength: 0.5,
             lut: Some(invert_lut_2()),
+            strokes: Vec::new(),
         };
         let out = apply(&base, 1, 1, &adjustment);
         // 0 -> 255 bei voller Stärke, also ~128 bei halber.
@@ -230,6 +315,7 @@ mod tests {
         let adjustment = LutFilterAdjustment {
             strength: 1.0,
             lut: Some(lut),
+            strokes: Vec::new(),
         };
         let out = apply(&base, 1, 1, &adjustment);
         assert_eq!(out, base);

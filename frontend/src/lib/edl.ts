@@ -611,6 +611,35 @@ export const LUT_FILTER_SLIDER_SPECS: readonly SliderSpec[] = [
   { key: "strength", label: "Filter: Deckkraft", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 100 },
 ];
 
+/** Filter-Pinsel (Phase 16 Schritt 3) — Einstellungen für den *nächsten*
+ * Strich, dieselbe `0..=100`-UI-Skala für einen intern `0.0..=1.0`-
+ * Bruchteil wie `LUT_FILTER_SLIDER_SPECS`. Eigene, von `LIQUIFY_*_SPEC`
+ * verschiedene Wortwahl ("Umkreis"/"Ausmaß" statt "Wirkbereich"/
+ * "Intensität") — beide Regler landen sonst in derselben `DevelopSlider`-
+ * Zahlenfeld-Namensfläche und ein Playwright-Locator, der nach dem
+ * bloßen Suffix sucht, träfe beide (Substring-Match, kein exakter
+ * Vergleich) — derselbe Grund, aus dem `LIQUIFY_RADIUS_SPEC`/
+ * `LIQUIFY_STRENGTH_SPEC` schon eigene Wortwahl statt "Radius (%
+ * der Bildbreite)"/"Stärke (%)" tragen. */
+export const LUT_FILTER_BRUSH_RADIUS_SPEC: SliderSpec = {
+  key: "radius",
+  label: "Filter-Pinsel: Umkreis (% der Bildbreite)",
+  min: 2,
+  max: 50,
+  fineStep: 0.5,
+  coarseStep: 5,
+  neutral: 15,
+};
+export const LUT_FILTER_BRUSH_STRENGTH_SPEC: SliderSpec = {
+  key: "strength",
+  label: "Filter-Pinsel: Ausmaß (%)",
+  min: 1,
+  max: 100,
+  fineStep: 1,
+  coarseStep: 10,
+  neutral: 100,
+};
+
 // ---- Kalibrierung -----------------------------------------------------------
 
 export type ProcessVersion = "V1";
@@ -1703,18 +1732,40 @@ export interface LutFilterData {
   domain_max: [number, number, number];
 }
 
+/** Ein Punkt im gemalten Pfad eines Filter-Pinselstrichs (Phase 16
+ * Schritt 3) — normierte Bildkoordinaten (0..1), dieselbe Konvention wie
+ * `LiquifyPoint`. */
+export interface LutFilterPoint {
+  x: number;
+  y: number;
+}
+
+/** Ein einzelner Filter-Pinselstrich (Phase 16 Schritt 3, siehe
+ * `DECISIONS.md` ADR-0043) — spiegelt Rusts `LutFilterStroke`. Gleiche
+ * Form wie `LiquifyStroke` (`center_path`/`radius`/`strength`, normiert
+ * wie dort). */
+export interface LutFilterStroke {
+  center_path: LutFilterPoint[];
+  radius: number;
+  strength: number;
+}
+
 /** Filter-/LUT-Anwendung (Phase 16 Schritt 1) — spiegelt
  * `apx_pipeline::edl::v4::LutFilterAdjustment`. `strength`: `0.0..=1.0`,
  * blendet linear zwischen unverändertem Bild (`0.0`) und vollem
  * LUT-Ergebnis (`1.0`). Ohne gewählten Filter (`lut === null`) bleibt die
  * Stufe wirkungslos, selbst bei `strength > 0` (siehe `stages::
- * lut_filter`s Moduldoku). */
+ * lut_filter`s Moduldoku). `strokes` (Schritt 3): leer heißt "im ganzen
+ * Bild bei `strength`", nicht-leer beschränkt die Anwendung auf die
+ * gemalten Bereiche. */
 export interface LutFilterAdjustment {
   strength: number;
   lut: LutFilterData | null;
+  strokes: LutFilterStroke[];
 }
 
 export const NEUTRAL_LUT_FILTER: LutFilterAdjustment = {
   strength: 1,
   lut: null,
+  strokes: [],
 };

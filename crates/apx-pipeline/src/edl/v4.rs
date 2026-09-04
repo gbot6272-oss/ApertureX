@@ -369,23 +369,55 @@ pub struct LutFilterData {
     pub domain_max: [f32; 3],
 }
 
+/// Ein Punkt im gemalten Pfad eines Filter-Pinselstrichs — normierte
+/// Bildkoordinaten (0..1), dieselbe Konvention wie `LiquifyPoint`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct LutFilterPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// Ein einzelner Filter-Pinselstrich (Phase 16 Schritt 3, siehe
+/// `DECISIONS.md` ADR-0043) — punktuelle statt globaler Filter-Anwendung.
+/// Gleiche Form wie `LiquifyStroke` (`center_path`/`radius`/`strength`,
+/// normiert wie dort), bewusst **nicht** über die bestehende
+/// `Mask`/`MaskAdjustments`-Infrastruktur gelöst: Masken laufen noch im
+/// linearen Arbeitsraum (`stages::masks`s Moduldoku), ein `.cube`-LUT ist
+/// aber für gamma-kodierte, bildschirmreferenzierte Werte gedacht —
+/// dieselbe Pipeline-Position wie der globale `lut_filter`-Durchlauf ist
+/// hier wichtiger als Wiederverwendung der Masken-Struktur (siehe
+/// `stages::lut_filter`s Moduldoku für die genaue Gewichtsberechnung).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LutFilterStroke {
+    pub center_path: Vec<LutFilterPoint>,
+    pub radius: f32,
+    pub strength: f32,
+}
+
 /// Filter-/LUT-Anwendung (Phase 16 Schritt 1, siehe `DECISIONS.md`
 /// ADR-0043). `strength` (`0.0..=1.0`) blendet linear zwischen dem
 /// unveränderten Bild und dem vollen LUT-Ergebnis — dieselbe Deckkraft-
 /// Konvention wie `StyleTransferAdjustment::amount`/
 /// `SkinSmoothingAdjustment::amount`. Ohne `lut` (kein Filter gewählt)
-/// bleibt die Stufe ein No-Op.
+/// bleibt die Stufe ein No-Op. `strokes` (Schritt 3): leer heißt "im
+/// ganzen Bild bei `strength`", nicht-leer beschränkt die Anwendung auf
+/// die gemalten Bereiche (`strength` wirkt dann als globaler
+/// Gesamt-Multiplikator über den Pinsel-Ergebnissen, siehe
+/// `stages::lut_filter`s Moduldoku).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LutFilterAdjustment {
     pub strength: f32,
     #[serde(default)]
     pub lut: Option<LutFilterData>,
+    #[serde(default)]
+    pub strokes: Vec<LutFilterStroke>,
 }
 
 impl LutFilterAdjustment {
     pub const NEUTRAL: Self = Self {
         strength: 1.0,
         lut: None,
+        strokes: Vec::new(),
     };
 }
 

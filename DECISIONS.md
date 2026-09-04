@@ -3696,3 +3696,35 @@ enthalten) — dieselbe Rolle wie Lightrooms eigene mitgelieferte
 `.cube`-Import aus Schritt 1 bleibt der Weg zu "Hunderte/Tausende
 Effekte" — dafür bringt der Nutzer eigene Dateien mit, ApertureX selbst
 redistribuiert kein fremdes Preset-Paket.
+
+**Nachtrag (Schritt 3, Pinsel-Integration):** bewusst NICHT über die
+bestehende `Mask`/`MaskAdjustments`-Infrastruktur gelöst, obwohl sie
+strukturell naheliegend wäre. `MaskAdjustments` läuft in
+`stages::masks` noch im **linearen** Arbeitsraum (vor der Farbraum-
+Konvertierung), ein `.cube`-LUT ist aber für gamma-kodierte,
+bildschirmreferenzierte Werte gedacht — eine LUT-Anwendung auf
+Szenen-linearen Werten würde ein anderes (falsches) Ergebnis liefern
+als auf denselben Werten nach sRGB-Kodierung. Denselben Bruch löst das
+Projekt an anderer Stelle bereits nicht durch Farbraum-Hin-und-Her-
+Konvertierung, sondern durch eine eigene, für die jeweilige
+Pipeline-Position passende Implementierung (`curves::apply_linear_rgb`
+für Masken vs. der globalen sRGB-`curves`-Stufe). Konsequent
+übertragen: `LutFilterAdjustment` bekommt eigene `strokes`
+(`LutFilterStroke` — `center_path`/`radius`/`strength`, exakt dieselbe
+Form wie `LiquifyStroke`), angewendet an derselben späten
+sRGB-Pipeline-Position wie die globale `strength`-Anwendung, per
+Abstand-zum-Pfad-Gewichtung (dieselbe `nearest_on_path`+`smoothstep`-
+Idee wie `stages::liquify`). Leere `strokes` bleiben das bisherige
+globale Verhalten (Rückwärtskompatibilität), nicht-leere beschränken
+die Anwendung auf die gemalten Bereiche.
+
+Batch-Anwendung auf viele Fotos brauchte dagegen **keine** neue
+Architektur: `lut_filter` in `PRESET_SECTION_KEYS` aufgenommen (treibt
+sowohl den Preset-Speichern-Dialog als auch "Synchronisieren"/"Vorherige
+übernehmen" — dieselbe eine Liste). Ein wichtiger Unterschied zu
+`lut`/`strength` (fotounabhängig, siehe oben): `strokes` SIND
+bildpositions-spezifisch (dieselbe Begründung, aus der
+`liquify_strokes`/`repair`/`masks` ganz von `PresetSectionKey`
+ausgeschlossen sind) — `buildPresetEdlSubset` schneidet sie deshalb beim
+Sektions-Kopieren explizit heraus (Preset trägt nur die globale
+Filter-Anwendung, nie gemalte Bereiche eines fremden Fotos).

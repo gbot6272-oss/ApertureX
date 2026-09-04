@@ -62,11 +62,6 @@ export type PresetSectionKey = Exclude<
   | "skin_smoothing"
 >;
 
-// `lut_filter` fehlt hier bewusst noch (siehe `PRESET_SECTION_LABELS`s
-// Kommentar) — Phase 16 Schritt 3 macht "Filter" hier wählbar, sobald
-// die Batch-Anwendung selbst gebaut ist. Bis dahin ist die Sektion
-// type-seitig bereits preset-fähig (`PresetSectionKey` schließt sie
-// nicht aus), aber im Speichern-Dialog noch nicht auswählbar.
 export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [
   "basic",
   "curves",
@@ -79,6 +74,13 @@ export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [
   "calibration",
   "geometry",
   "composite_layers",
+  // Phase 16 Schritt 3: jetzt wählbar — der Mechanismus für
+  // Batch-Anwendung eines Filters auf viele Fotos ist einfach "als
+  // Preset speichern (nur diese Sektion), auf Mehrfachauswahl anwenden",
+  // dieselbe bestehende Preset-Infrastruktur wie jede andere Sektion
+  // hier (siehe `PRESET_SECTION_LABELS`s Kommentar zur Begründung, warum
+  // `lut_filter` überhaupt preset-fähig ist).
+  "lut_filter",
 ];
 
 export const PRESET_SECTION_LABELS: Record<PresetSectionKey, string> = {
@@ -116,6 +118,16 @@ export type PresetEdlSubset = Partial<Pick<EdlPayload, PresetSectionKey>>;
 export function buildPresetEdlSubset(edl: EdlPayload, sections: readonly PresetSectionKey[]): PresetEdlSubset {
   const subset: Record<string, unknown> = {};
   for (const key of sections) {
+    if (key === "lut_filter") {
+      // `strokes` sind Bildpositionen für GENAU dieses Foto gemalt
+      // (dieselbe „nicht auf ein anderes Foto übertragbar"-Begründung
+      // wie `liquify_strokes`/`repair`, die deshalb ganz von
+      // `PresetSectionKey` ausgeschlossen sind) — anders als `lut`/
+      // `strength` (fotounabhängig) gehören sie nicht in ein Preset.
+      // Ein Preset trägt deshalb nur die globale Filter-Anwendung.
+      subset[key] = { strength: edl.lut_filter.strength, lut: edl.lut_filter.lut, strokes: [] };
+      continue;
+    }
     subset[key] = edl[key];
   }
   return subset as PresetEdlSubset;

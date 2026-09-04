@@ -22,6 +22,7 @@ import { ContentAwareMoveOverlay } from "./ContentAwareMoveOverlay";
 import { CropOverlay } from "./CropOverlay";
 import { DevelopAnalysisPanel } from "./DevelopAnalysisPanel";
 import { LiquifyOverlay } from "./LiquifyOverlay";
+import { LutFilterOverlay } from "./LutFilterOverlay";
 import { MaskColorOverlay } from "./MaskColorOverlay";
 import { MaskOverlay } from "./MaskOverlay";
 import { ReferenceView } from "./ReferenceView";
@@ -102,6 +103,11 @@ export function Viewer() {
   const liquifyDraftRadius = useAppStore((s) => s.liquifyDraftRadius);
   const addLiquifyStroke = useAppStore((s) => s.addLiquifyStroke);
   const removeLiquifyStroke = useAppStore((s) => s.removeLiquifyStroke);
+  const lutFilterBrushActive = useAppStore((s) => s.lutFilterBrushActive);
+  const lutFilterStrokes = useAppStore((s) => s.developEdl.lut_filter.strokes);
+  const lutFilterDraftRadius = useAppStore((s) => s.lutFilterDraftRadius);
+  const addLutFilterStroke = useAppStore((s) => s.addLutFilterStroke);
+  const removeLutFilterStroke = useAppStore((s) => s.removeLutFilterStroke);
   const repairActive = useAppStore((s) => s.repairActive);
   const repairStrokes = useAppStore((s) => s.developEdl.repair);
   const repairPendingSource = useAppStore((s) => s.repairPendingSource);
@@ -310,7 +316,7 @@ export function Viewer() {
   // Pinselmaske ab (Phase 6 Schritt 4).
   const selectedMaskIsBrush = selectedMask?.components[selectedMaskComponentIndex]?.geometry.kind === "Brush";
   const tatActive = tatMode !== "off";
-  const canPan = !repairActive && !liquifyActive && !selectedMaskIsBrush && !tatActive && (spaceHeld || effectiveScale > fitScale + 1e-6);
+  const canPan = !repairActive && !liquifyActive && !lutFilterBrushActive && !selectedMaskIsBrush && !tatActive && (spaceHeld || effectiveScale > fitScale + 1e-6);
 
   // TAT-Schwellwert für "neuen Kurvenpunkt statt vorhandenen verschieben"
   // (Eingabewert-Abstand, 0..1) — siehe Store-Moduldoku.
@@ -793,6 +799,19 @@ export function Viewer() {
           radius={liquifyDraftRadius}
           onPaint={addLiquifyStroke}
           onRemoveStroke={removeLiquifyStroke}
+        />
+      )}
+
+      {photo && lutFilterBrushActive && imgW > 0 && imgH > 0 && (
+        <LutFilterOverlay
+          imageLeft={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).x}
+          imageTop={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).y}
+          imageWidth={imgW * effectiveScale}
+          imageHeight={imgH * effectiveScale}
+          strokes={lutFilterStrokes}
+          radius={lutFilterDraftRadius}
+          onPaint={addLutFilterStroke}
+          onRemoveStroke={removeLutFilterStroke}
         />
       )}
 

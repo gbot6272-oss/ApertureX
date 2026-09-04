@@ -23,7 +23,7 @@ import {
   writeBasicField,
   writeBwMixerField,
 } from "../lib/edl";
-import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, LiquifyMode, LiquifyPoint, LutFilterData, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairLayer, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
+import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, LiquifyMode, LiquifyPoint, LutFilterData, LutFilterPoint, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairLayer, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import { computeHarmonizeShifts } from "../lib/colorHarmony";
@@ -1549,6 +1549,19 @@ interface LibraryBacklogSlice {
    * in `developEdl.lut_filter.lut` und committet — dasselbe Muster wie
    * `importLutFilterForCurrentPhoto`, nur ohne Datei-Dialog. */
   applyBuiltinLutFilter: (index: number) => void;
+
+  /** Pinsel-Modus für punktuelle Filter-Anwendung (Phase 16 Schritt 3,
+   * siehe `DECISIONS.md` ADR-0043) — dasselbe „ein Ziehvorgang malt
+   * einen Strich, sofort committet"-Muster wie `liquifyActive`. */
+  lutFilterBrushActive: boolean;
+  toggleLutFilterBrushActive: () => void;
+  /** Einstellungen für den *nächsten* Strich — dieselbe „nur für neue
+   * Striche"-Konvention wie `liquifyDraftRadius`/-`Strength`. */
+  lutFilterDraftRadius: number;
+  lutFilterDraftStrength: number;
+  setLutFilterDraftField: (key: "radius" | "strength", value: number) => void;
+  addLutFilterStroke: (centerPath: LutFilterPoint[]) => void;
+  removeLutFilterStroke: (index: number) => void;
 
   /** Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
    * `DECISIONS.md` ADR-0038): eine Regel = `libraryFilter` (wiederverwendet,
@@ -5774,7 +5787,7 @@ export const useAppStore = create<AppStore>()(
 
     clearLutFilter: () => {
       set((state) => {
-        state.developEdl.lut_filter = { strength: 1, lut: null };
+        state.developEdl.lut_filter = { strength: 1, lut: null, strokes: [] };
       });
       void get().commitDevelopEdit("Filter entfernt");
     },
@@ -5813,6 +5826,44 @@ export const useAppStore = create<AppStore>()(
         }
       });
       void get().commitDevelopEdit(`Filter „${lut.name}“ angewendet`);
+    },
+
+    lutFilterBrushActive: false,
+
+    toggleLutFilterBrushActive: () => {
+      set((state) => {
+        state.lutFilterBrushActive = !state.lutFilterBrushActive;
+      });
+    },
+
+    lutFilterDraftRadius: 0.15,
+    lutFilterDraftStrength: 1,
+
+    setLutFilterDraftField: (key, value) => {
+      set((state) => {
+        if (key === "radius") state.lutFilterDraftRadius = value;
+        else state.lutFilterDraftStrength = value;
+      });
+    },
+
+    addLutFilterStroke: (centerPath) => {
+      const { lutFilterDraftRadius, lutFilterDraftStrength } = get();
+      if (centerPath.length === 0) return;
+      set((state) => {
+        state.developEdl.lut_filter.strokes.push({
+          center_path: centerPath,
+          radius: lutFilterDraftRadius,
+          strength: lutFilterDraftStrength,
+        });
+      });
+      void get().commitDevelopEdit();
+    },
+
+    removeLutFilterStroke: (index) => {
+      set((state) => {
+        state.developEdl.lut_filter.strokes.splice(index, 1);
+      });
+      void get().commitDevelopEdit();
     },
 
     batchPreview: [],

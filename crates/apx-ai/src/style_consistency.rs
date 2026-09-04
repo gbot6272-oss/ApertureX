@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn compute_style_signature_of_a_uniform_image_matches_the_single_pixel_conversion() {
         let (l, a, b) = srgb_to_lab(0.4, 0.5, 0.6);
-        let pixels = vec![0.4, 0.5, 0.6].repeat(9); // 3x3 uniform image
+        let pixels = [0.4, 0.5, 0.6].repeat(9); // 3x3 uniform image
         let signature = compute_style_signature(&pixels, 3, 3);
         assert!((signature.mean_l - l).abs() < 1e-3);
         assert!((signature.mean_a - a).abs() < 1e-3);

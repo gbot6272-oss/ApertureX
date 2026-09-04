@@ -3669,10 +3669,12 @@ Schritt 4–5 Video-Fundament (Katalog-Asset, Wiedergabe) — noch ohne
 Bearbeitung; (3) Schritt 6–10 Video-Bearbeitungsfunktionen, bauen auf
 Block 2 auf.
 
-**Testdisziplin:** wie Phase 15 nur `cargo check`/`tsc -b` nach den
-einzelnen Schritten 1–10, volle Testausführung gebündelt an zwei
-Kontrollpunkten — Ende Block 1 (Schritt 3, bevor die riskantere
-DB-Schema-Änderung für Video beginnt) und final in Schritt 11.
+**Testdisziplin (Nachtrag: expliziter als Phase 15 gefasst, Nutzervorgabe
+während Schritt 1):** ausschließlich `cargo check`/`tsc -b` nach den
+einzelnen Schritten 1–10 — kein `cargo test`, kein Vitest, keine
+Playwright-Läufe zwischendurch, auch nicht an einem Zwischen-
+Kontrollpunkt. Unit-Tests werden weiterhin je Modul geschrieben (wie in
+Schritt 1), aber erst in Schritt 11 gesammelt ausgeführt.
 
 **Nicht Teil dieser Phase:** vollwertiger Videoschnitt (Multi-Track,
 Übergänge, Titel-Grafiken jenseits der bestehenden Diashow-Intro-

@@ -1111,12 +1111,14 @@ die vollständige Architektur-/Lizenzrecherche. Drei Blöcke: (1)
 Schritt 1–3 LUT-/Filter-Engine, unabhängig von Video; (2) Schritt 4–5
 Video-Fundament (Katalog-Asset, Wiedergabe), noch ohne Bearbeitung; (3)
 Schritt 6–10 Video-Bearbeitungsfunktionen auf Block 2 aufbauend.
-Testdisziplin wie Phase 15: nur `cargo check`/`tsc -b` nach den
-einzelnen Schritten 1–10, volle Suite an zwei Kontrollpunkten (Ende
-Schritt 3, final in Schritt 11).
+Testdisziplin (Nachtrag, Nutzervorgabe während Schritt 1): ausschließlich
+`cargo check`/`tsc -b` nach den einzelnen Schritten 1–10 — kein
+`cargo test`, kein Vitest, keine Playwright-Läufe zwischendurch, auch
+nicht an einem Zwischen-Kontrollpunkt. Unit-Tests werden weiterhin je
+Modul geschrieben, aber erst in Schritt 11 gesammelt ausgeführt.
 
 - [x] 0. Scope festzurren, ADR-0043 — Architektur real gegen den Code geprüft (kein Modul-Vollbild-Umschalter, kein Video-Import, kein LUT-Konzept — dafür Masken-/Batch-/Duplikat-Infrastruktur direkt wiederverwendbar), Filter-/LUT-Lizenzlage und ffmpeg-Video-Filter (scdet, afftdn/arnndn) real recherchiert; Entscheidung: neuer `centerView`-Wert `"video"`, selbst implementierte `.cube`-Engine statt Drittanbieter-Crate, keine neue Rust-Video-Abhängigkeit
-- [ ] 1. LUT-/Filter-Engine (Rust) + globale Anwendung
+- [x] 1. LUT-/Filter-Engine (Rust) + globale Anwendung — selbst implementierter `.cube`-Parser (`apx_pipeline::lut_cube`) + neue Pipeline-Stage (`stages::lut_filter`, trilineare Interpolation), neues `EdlV4.lut_filter`-Feld (bewusst NICHT von `PresetSectionKey` ausgeschlossen — fotounabhängig, Grundlage für Batch-Anwendung in Schritt 3), `import_lut_cube_file`-Command, `LutFilterPanel.tsx`
 - [ ] 2. Starter-LUT-Set + Filter-Bibliothek-Panel
 - [ ] 3. Masken-/Pinsel-Integration + Batch-Anwendung auf Mehrfachauswahl
 - [ ] 4. Video als Katalog-Asset (Import, DB-Schema, Thumbnails/Keyframes)

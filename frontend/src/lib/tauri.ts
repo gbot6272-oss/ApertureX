@@ -1158,6 +1158,29 @@ export function runAiOutpaint(
   });
 }
 
+// ---- Inhaltssensitives Skalieren / Seam Carving (Phase 15 Schritt 4) -----
+
+export interface ContentAwareScalePatchDto {
+  width_fraction: number;
+  height_fraction: number;
+  bitmap_width: number;
+  bitmap_height: number;
+  /** Base64-kodiertes interleaved-RGB-`u8`-Ergebnis. */
+  pixels_base64: string;
+}
+
+/** Berechnet das seam-carvte Ergebnis für `widthFraction`/
+ * `heightFraction` (Bruchteile der aktuellen Bildbreite/-höhe) — kein
+ * heruntergeladenes Modell nötig, klassischer Algorithmus
+ * (`apx_ai::seam_carving`). */
+export function contentAwareScale(photoId: string, widthFraction: number, heightFraction: number): Promise<ContentAwareScalePatchDto> {
+  return invoke<ContentAwareScalePatchDto>("content_aware_scale", {
+    photoId,
+    widthFraction,
+    heightFraction,
+  });
+}
+
 // ---- Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3) ------------
 
 export interface CompositeLayerSourceDto {

@@ -714,6 +714,28 @@ export interface CanvasExtension {
   patch: CanvasExtensionPatch | null;
 }
 
+/** Vorab von `content_aware_scale` berechnetes, seam-carvtes Ergebnis —
+ * wird bei jedem Rendern nur noch auf die tatsächliche Zielgröße
+ * hoch-/herunterskaliert (dasselbe Muster wie `CanvasExtensionPatch`). */
+export interface ContentAwareScalePatch {
+  bitmap_width: number;
+  bitmap_height: number;
+  pixels: number[];
+}
+
+/** Inhaltssensitives Skalieren (Content-Aware Scale / Seam Carving,
+ * Phase 15 Schritt 4, siehe `DECISIONS.md` ADR-0042 — Photoshop-
+ * exklusiv seit CS4, Lightroom kann nur gleichmäßig skalieren/
+ * zuschneiden). `width_fraction`/`height_fraction` sind Bruchteile der
+ * *aktuellen* Bildbreite/-höhe (`0.0..`, dieselbe Konvention wie
+ * `CanvasExtension`s Ränder). Ohne `patch` (Zielgröße gewählt, aber
+ * „Berechnen" noch nicht ausgelöst) bleibt die Stufe ein No-Op. */
+export interface ContentAwareScale {
+  width_fraction: number;
+  height_fraction: number;
+  patch: ContentAwareScalePatch | null;
+}
+
 export interface GeometryAdjustment {
   crop: CropRect;
   /** `null` = freie Seitenverhältniswahl, sonst Breite/Höhe-Verhältnis. */
@@ -725,6 +747,9 @@ export interface GeometryAdjustment {
   /** `null`, solange keine Leinwand-Erweiterung gewählt wurde (Phase 14
    * Schritt 1) — additiv, siehe `CanvasExtension`s Doku. */
   canvas_extension: CanvasExtension | null;
+  /** `null`, solange kein inhaltssensitives Skalieren gewählt wurde
+   * (Phase 15 Schritt 4) — additiv, siehe `ContentAwareScale`s Doku. */
+  content_aware_scale: ContentAwareScale | null;
 }
 
 export const NEUTRAL_GEOMETRY: GeometryAdjustment = {
@@ -734,6 +759,7 @@ export const NEUTRAL_GEOMETRY: GeometryAdjustment = {
   overlay: "None",
   auto_horizon: false,
   canvas_extension: null,
+  content_aware_scale: null,
 };
 
 export const ASPECT_RATIO_PRESETS: ReadonlyArray<{ value: number | null; label: string }> = [

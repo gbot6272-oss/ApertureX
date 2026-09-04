@@ -55,6 +55,7 @@ pub mod palette;
 pub mod people;
 pub mod preset_generator;
 pub mod repair_analysis;
+pub mod seam_carving;
 pub mod segmentation;
 pub mod sky_replace;
 pub mod style_consistency;

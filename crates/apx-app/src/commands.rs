@@ -3360,6 +3360,90 @@ pub fn run_ai_outpaint(
     })
 }
 
+// ---- Inhaltssensitives Skalieren (Content-Aware Scale / Seam Carving,
+// Phase 15 Schritt 4, siehe DECISIONS.md ADR-0042) — klassischer
+// Algorithmus (`apx_ai::seam_carving`), kein ONNX-Modell. --------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ContentAwareScalePatchDto {
+    pub width_fraction: f32,
+    pub height_fraction: f32,
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    /// Base64-kodiertes interleaved-RGB-`u8`-Ergebnis — dasselbe
+    /// Übertragungsmuster wie `CanvasExtensionPatchDto::pixels_base64`.
+    pub pixels_base64: String,
+}
+
+/// Berechnet das seam-carvte Ergebnis für `width_fraction`/
+/// `height_fraction` (Bruchteile der aktuellen, auf
+/// `apx_ai::segmentation::ANALYSIS_MAX_EDGE` gedeckelten Dekodier-
+/// Auflösung — dieselbe ehrliche Vereinfachung wie `run_ai_outpaint`:
+/// arbeitet auf dem rohen Dekodierergebnis, nicht der entwickelten
+/// Vorschau). Schützt erkannte Personen/Gesichter automatisch vor
+/// Verzerrung (`apx_ai::segmentation::person_alpha` als Schutzmaske,
+/// siehe `apx_ai::seam_carving`s Moduldoku) — ein `person_alpha`-Fehler
+/// (z. B. leeres Bild) lässt die Schutzmaske einfach entfallen statt den
+/// ganzen Befehl fehlschlagen zu lassen, da sie nur eine Qualitäts-
+/// verbesserung, keine Voraussetzung ist.
+#[tauri::command]
+pub fn content_aware_scale(
+    state: State<'_, AppState>,
+    photo_id: String,
+    width_fraction: f32,
+    height_fraction: f32,
+) -> Result<ContentAwareScalePatchDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let target_width = ((linear.width as f32) * width_fraction.max(0.01))
+        .round()
+        .max(1.0) as u32;
+    let target_height = ((linear.height as f32) * height_fraction.max(0.01))
+        .round()
+        .max(1.0) as u32;
+    if target_width == linear.width && target_height == linear.height {
+        return Err("Zielgröße entspricht bereits der aktuellen Bildgröße.".to_string());
+    }
+
+    let rgba =
+        apx_pipeline::color::linear_camera_rgb_to_srgb_rgba8(&linear.pixels, linear.cam_to_srgb);
+    let pixel_count = (linear.width as usize) * (linear.height as usize);
+    let mut rgb = vec![0u8; pixel_count * 3];
+    for i in 0..pixel_count {
+        rgb[i * 3] = rgba[i * 4];
+        rgb[i * 3 + 1] = rgba[i * 4 + 1];
+        rgb[i * 3 + 2] = rgba[i * 4 + 2];
+    }
+
+    let protect =
+        apx_ai::segmentation::person_alpha(&linear.pixels, linear.width, linear.height).ok();
+
+    let (bitmap_width, bitmap_height, pixels) = apx_ai::seam_carving::resize_rgb8(
+        &rgb,
+        linear.width,
+        linear.height,
+        target_width,
+        target_height,
+        protect.as_deref(),
+    );
+
+    Ok(ContentAwareScalePatchDto {
+        width_fraction,
+        height_fraction,
+        bitmap_width,
+        bitmap_height,
+        pixels_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &pixels),
+    })
+}
+
 // ---- Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3, siehe
 // DECISIONS.md ADR-0041) ------------------------------------------------------
 //

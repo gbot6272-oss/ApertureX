@@ -642,6 +642,13 @@ pub struct GeometryAdjustment {
     /// als `None` (keine Erweiterung).
     #[serde(default)]
     pub canvas_extension: Option<CanvasExtension>,
+    /// Inhaltssensitives Skalieren (Content-Aware Scale / Seam Carving,
+    /// Phase 15 Schritt 4, siehe `DECISIONS.md` ADR-0042) — additiv,
+    /// dieselbe `#[serde(default)]`-Konvention wie `canvas_extension`:
+    /// ein gespeichertes EDL ohne dieses Feld liest weiterhin als
+    /// `None` (keine Größenänderung).
+    #[serde(default)]
+    pub content_aware_scale: Option<ContentAwareScale>,
 }
 
 impl GeometryAdjustment {
@@ -652,6 +659,7 @@ impl GeometryAdjustment {
         overlay: GridOverlay::None,
         auto_horizon: false,
         canvas_extension: None,
+        content_aware_scale: None,
     };
 }
 
@@ -699,6 +707,42 @@ pub struct CanvasExtension {
 /// Rand-Nahtstellen sichtbar unstetig wären.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CanvasExtensionPatch {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub pixels: Vec<u8>,
+}
+
+/// Inhaltssensitives Skalieren (Content-Aware Scale / Seam Carving,
+/// Phase 15 Schritt 4, siehe `DECISIONS.md` ADR-0042 — Photoshop-
+/// exklusiv seit CS4, Lightroom kann nur gleichmäßig skalieren/
+/// zuschneiden). Läuft am **Ende** der Geometrie-Stufe, nach `crop`/
+/// Drehung/`canvas_extension` — dieselbe „einzige größenverändernde
+/// Kette der ganzen Pipeline"-Stelle. `width_fraction`/`height_fraction`
+/// sind — wie `CanvasExtension`s Ränder — Bruchteile der jeweils
+/// **aktuellen** (bereits gedrehten/zugeschnittenen/erweiterten)
+/// Breite/Höhe, kein absoluter Pixelwert (skaliert bei jeder Export-/
+/// Vorschau-Auflösung gleichermaßen mit).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContentAwareScale {
+    pub width_fraction: f32,
+    pub height_fraction: f32,
+    /// Einmalig vorab per `apx_ai::seam_carving::resize_rgb8` berechnetes
+    /// Ergebnis (analog zu `CanvasExtension::patch`) — `None` heißt
+    /// „Zielgröße gewählt, aber „Berechnen" noch nicht bestätigt",
+    /// dieselbe „noch nicht berechnet"-Konvention wie
+    /// `RepairStroke::ai_fill`. Ohne Patch bleibt die Stufe ein No-Op.
+    #[serde(default)]
+    pub patch: Option<ContentAwareScalePatch>,
+}
+
+/// `pixels` ist das **gesamte** seam-carvte Ergebnis (nicht nur ein
+/// Ausschnitt) als interleaved RGB (`0..=255`), `bitmap_width *
+/// bitmap_height * 3` Bytes — beim Rendern bilinear auf die tatsächliche
+/// Zielgröße hochskaliert (dieselbe Technik wie `CanvasExtensionPatch`,
+/// aus demselben Grund: Vorschau- und Exportauflösung weichen von der
+/// Analyse-Auflösung ab).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContentAwareScalePatch {
     pub bitmap_width: u32,
     pub bitmap_height: u32,
     pub pixels: Vec<u8>,

@@ -432,6 +432,7 @@ fn main() {
             commands::clear_inpainting_model_path,
             commands::run_ai_inpaint,
             commands::content_aware_move,
+            commands::content_aware_scale,
             commands::run_ai_outpaint,
             commands::prepare_composite_layer_source,
             commands::download_depth_model,

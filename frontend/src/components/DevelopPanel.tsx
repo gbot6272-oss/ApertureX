@@ -58,6 +58,7 @@ import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
 import { LensCalibrationDialog } from "./LensCalibrationDialog";
 import { CanvasExtendDialog } from "./CanvasExtendDialog";
+import { ContentAwareScaleDialog } from "./ContentAwareScaleDialog";
 import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import { PaletteFrame } from "./PaletteFrame";
 import { SavePresetDialog } from "./SavePresetDialog";
@@ -313,6 +314,7 @@ export function DevelopPanel() {
   const setLensCorrectionCustomDistortionK1 = useAppStore((s) => s.setLensCorrectionCustomDistortionK1);
   const setLensCalibrationDialogOpen = useAppStore((s) => s.setLensCalibrationDialogOpen);
   const setCanvasExtendDialogOpen = useAppStore((s) => s.setCanvasExtendDialogOpen);
+  const setContentAwareScaleDialogOpen = useAppStore((s) => s.setContentAwareScaleDialogOpen);
   const setLensCorrectionAutoCa = useAppStore((s) => s.setLensCorrectionAutoCa);
   const setLensCorrectionUprightMode = useAppStore((s) => s.setLensCorrectionUprightMode);
   const runUprightAutoDetect = useAppStore((s) => s.runUprightAutoDetect);
@@ -1560,6 +1562,18 @@ export function DevelopPanel() {
             >
               Leinwand erweitern (KI)…
             </button>
+
+            {/* Photoshop-Funktion: Content-Aware Scale / Seam Carving
+                (Phase 15 Schritt 4, ADR-0042) — klassischer Algorithmus,
+                kein Modell-Download nötig. */}
+            <button
+              type="button"
+              onClick={() => setContentAwareScaleDialogOpen(true)}
+              title="Breite/Höhe unabhängig ändern, ohne wichtige Bildinhalte zu verzerren (Phase 15 Schritt 4, siehe DECISIONS.md ADR-0042)"
+              className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:border-accent"
+            >
+              Inhaltssensitiv skalieren…
+            </button>
           </fieldset>
 
           <fieldset id="stage-repair" className="flex flex-col gap-3">
@@ -1904,6 +1918,7 @@ export function DevelopPanel() {
     <SavePresetDialog open={savePresetOpen} onClose={() => setSavePresetOpen(false)} />
     <LensCalibrationDialog />
     <CanvasExtendDialog />
+    <ContentAwareScaleDialog />
     </>
   );
 }

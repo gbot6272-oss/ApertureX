@@ -555,6 +555,19 @@ interface DevelopSlice {
   /** Öffnet/schließt den Leinwand-Erweiterungs-Dialog (Phase 14 Schritt 1). */
   canvasExtendDialogOpen: boolean;
   setCanvasExtendDialogOpen: (open: boolean) => void;
+  /** Öffnet/schließt den Inhaltssensitives-Skalieren-Dialog (Phase 15
+   * Schritt 4, siehe `DECISIONS.md` ADR-0042). */
+  contentAwareScaleDialogOpen: boolean;
+  setContentAwareScaleDialogOpen: (open: boolean) => void;
+  /** Berechnet das seam-carvte Ergebnis für `widthFraction`/
+   * `heightFraction` (Bruchteile der aktuellen Bildbreite/-höhe) per
+   * `apx_ai::seam_carving` und legt es als `developEdl.geometry.
+   * content_aware_scale` ab. */
+  runContentAwareScale: (widthFraction: number, heightFraction: number) => Promise<void>;
+  contentAwareScaleLoading: boolean;
+  /** Entfernt eine gewählte/berechnete Content-Aware-Scale-Anpassung
+   * wieder (zurück auf die Original-Bildgröße) und committet sofort. */
+  clearContentAwareScale: () => void;
   /** Schaltet die automatische CA-Korrektur um und committet sofort. */
   setLensCorrectionAutoCa: (value: boolean) => void;
   /** Setzt den Perspektive/Upright-Modus absolut und committet sofort. */
@@ -2975,6 +2988,54 @@ export const useAppStore = create<AppStore>()(
         state.developEdl.geometry.canvas_extension = null;
       });
       void get().commitDevelopEdit("Leinwand-Erweiterung entfernt");
+    },
+
+    contentAwareScaleDialogOpen: false,
+
+    setContentAwareScaleDialogOpen: (open) => {
+      set((state) => {
+        state.contentAwareScaleDialogOpen = open;
+      });
+    },
+
+    contentAwareScaleLoading: false,
+
+    runContentAwareScale: async (widthFraction, heightFraction) => {
+      const { selectedPhotoId } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.contentAwareScaleLoading = true;
+      });
+      try {
+        const dto = await api.contentAwareScale(selectedPhotoId, widthFraction, heightFraction);
+        set((state) => {
+          state.developEdl.geometry.content_aware_scale = {
+            width_fraction: dto.width_fraction,
+            height_fraction: dto.height_fraction,
+            patch: {
+              bitmap_width: dto.bitmap_width,
+              bitmap_height: dto.bitmap_height,
+              pixels: base64ToByteArray(dto.pixels_base64),
+            },
+          };
+        });
+        void get().commitDevelopEdit("Inhaltssensitiv skaliert");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.contentAwareScaleLoading = false;
+        });
+      }
+    },
+
+    clearContentAwareScale: () => {
+      set((state) => {
+        state.developEdl.geometry.content_aware_scale = null;
+      });
+      void get().commitDevelopEdit("Inhaltssensitives Skalieren entfernt");
     },
 
     compositeLayerLoading: false,

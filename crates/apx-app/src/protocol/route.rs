@@ -69,6 +69,17 @@ pub(super) enum ImageRequest {
     /// Dateipfad enthält so gut wie immer `/`) — alles nach dem ersten
     /// `/`-Segment `music` wird wieder zu einem Pfad zusammengefügt.
     Music { path: PathBuf },
+    /// `video/<id>` (Phase 16 Schritt 5, siehe `DECISIONS.md` ADR-0043) —
+    /// liefert die Original-Videodatei eines Katalog-Assets für das
+    /// `<video>`-Element im neuen Video-`centerView`. Anders als
+    /// `Music` per `photo_id` statt eines rohen Pfads aufgelöst
+    /// (`resolve_source_path`, dieselbe Auflösung wie `Image`/`Develop`)
+    /// — ein Video ist ein echter Katalogeintrag, kein vom Nutzer per
+    /// Dialog gewählter Einzelpfad. Mit HTTP-Range-Unterstützung
+    /// (`handle_video_request`), anders als jede andere Anfrageart hier:
+    /// ein `<video>`-Element braucht Seeking, das erfordert `206 Partial
+    /// Content`-Antworten statt eines einzigen gepufferten Volltransfers.
+    Video { photo_id: PhotoId },
 }
 
 /// Geparste `<soft_proof>`-Nutzlast — siehe Modul-Doku.
@@ -98,9 +109,13 @@ pub(super) fn parse(raw_path: &str) -> Result<ImageRequest, RouteError> {
             parse_develop(id_str, max_edge_str, soft_proof_str, edl_json)
         }
         ["music", rest @ ..] if !rest.is_empty() => parse_music(rest),
+        ["video", id_str] => Ok(ImageRequest::Video {
+            photo_id: parse_photo_id(id_str)?,
+        }),
         _ => Err(RouteError(format!(
             "unbekannte oder falsch aufgebaute Anfrage (erwartet 'art/id/parameter', \
-             'develop/id/max_edge/soft_proof/edl_json' oder 'music/absoluter_pfad'), erhalten: '{decoded}'"
+             'develop/id/max_edge/soft_proof/edl_json', 'music/absoluter_pfad' oder \
+             'video/id'), erhalten: '{decoded}'"
         ))),
     }
 }

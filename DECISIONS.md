@@ -3767,3 +3767,47 @@ auf ein Video-Asset passiert (aktuell öffnet es denselben Foto-Viewer
 wie jedes andere Bild und würde dort scheitern) — reine Backend-/
 Katalog-Grundlage ohne sichtbaren Effekt im UI, bis Schritt 5 die
 Wiedergabe-Oberfläche liefert.
+
+**Nachtrag (Schritt 5, Video-Wiedergabe) — Korrektur der Schritt-0-
+Annahme, real gegen den Code geprüft statt aus Erinnerung übernommen:**
+es gibt in dieser App **keinen** Lightroom-artigen "Foto öffnen
+schaltet automatisch auf Einzelansicht um"-Mechanismus (ADR-0037: `
+centerView` wechselt ausschließlich über explizite Kopfzeilen-Knöpfe/
+`toggleCenterView`; ein Raster-/Filmstreifen-Klick ruft nur
+`selectPhoto`/`togglePhotoSelection` auf, die lediglich `
+selectedPhotoId` setzen, niemals `centerView`). Ein komplett neuer,
+eigenständig geschalteter `centerView`-Wert `"video"` hätte diese
+fehlende Navigation zusätzlich nachbauen müssen. Stattdessen: der
+bereits bestehende Fallback-Zweig in `App.tsx` (zuvor immer `<Viewer
+/>`, wenn `centerView` weder `grid` noch `overview`/`map`/`people` ist)
+wurde lediglich inhaltsbewusst gemacht — zeigt `<VideoPlayer />` statt
+`<Viewer />`, wenn das aktuell ausgewählte Foto `media_kind === "video"`
+trägt. Kein neuer `centerView`-Wert, keine neue Navigationslogik,
+funktioniert automatisch überall dort, wo bereits `selectedPhotoId`
+gesetzt wird (Raster, Filmstreifen, Pfeiltasten-Schritt).
+
+Neue `video/<id>`-Route im bestehenden `apx://`-Protokoll-Handler
+(`crates/apx-app/src/protocol`) — als einzige Anfrageart mit echter
+HTTP-Range-Unterstützung (`206 Partial Content`, `Content-Range`,
+`Accept-Ranges`), bewusst am bestehenden `ImageCache`-Muster
+("einmal berechnen, komplett im Speicher halten") vorbei: ein Video
+kann hunderte MB/GB groß sein, `MAX_VIDEO_CHUNK` (8 MB) begrenzt jede
+einzelne Antwort, der Browser holt den Rest selbst über weitere
+Range-Anfragen nach (`<video>`-Element-Seeking braucht das, jeder
+andere Anfragetyp hier nicht).
+
+`VideoPlayer.tsx`: eigene, anklickbare Zeitleiste statt der nativen
+`<video controls>`-Steuerung — dasselbe Overlay-Muster wie
+`LiquifyOverlay`/`RepairOverlay` — damit Schritt 6 (Trimmen) dort
+Anfang-/Ende-Ziehpunkte ergänzen kann, ohne mit einer nativen
+Browser-Steuerleiste zu kollidieren.
+
+**Absicherung gegen einen echten Fehlerfall statt nur kosmetisch
+ignoriert:** das Entwickeln-Panel versucht ohne die neue Sperre einen
+EDL-Ladeversuch für ein Video auszulösen (`apx_raw` kann keinen
+Video-Container dekodieren) — an allen drei Stellen, die das auslösen
+können (`selectPhoto`, `togglePhotoSelection`s Toggle-Zweig,
+`toggleDevelopPanel`), wird das jetzt übersprungen und stattdessen
+derselbe "kein gültiger Bearbeitungszustand"-Reset wie bei "kein Foto
+ausgewählt" angewendet — keine stillschweigend veraltete Anzeige des
+vorherigen Fotos.

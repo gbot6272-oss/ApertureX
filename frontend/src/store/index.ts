@@ -203,6 +203,15 @@ export function selectActivePhotos(state: AppStore): PhotoDto[] {
   return sortPhotos(rawActivePhotos(state), state.librarySortField ?? "filename", state.librarySortDirection ?? "asc");
 }
 
+/** Video als Katalog-Asset (Phase 16 Schritt 5, siehe `DECISIONS.md`
+ * ADR-0043) — `true`, wenn `photoId` in der aktuell aktiven Fotoliste als
+ * Video geführt wird. Genutzt, um das Laden des EDL-gestützten
+ * Entwickeln-Zustands beim Fotowechsel zu überspringen: `apx_raw` kann
+ * keinen Video-Container dekodieren, ein Ladeversuch würde nur scheitern. */
+function isVideoPhoto(state: AppStore, photoId: string): boolean {
+  return selectActivePhotos(state).find((p) => p.id === photoId)?.media_kind === "video";
+}
+
 /**
  * Zustand-Store mit den in `PHASE1_PROMPT.md` Abschnitt 7 geforderten
  * Slices: `catalog`, `selection`, `viewer`, `jobs`. Alle vier leben in
@@ -1878,11 +1887,18 @@ export const useAppStore = create<AppStore>()(
       get().resetView();
       // Läuft das Entwickeln-Panel bereits, muss es beim Fotowechsel den
       // Bearbeitungszustand des *neuen* Fotos laden statt den alten kurz
-      // weiter anzuzeigen.
+      // weiter anzuzeigen. Videos (Phase 16 Schritt 5) haben noch keine
+      // EDL-gestützte Bearbeitung — `apx_raw` kann keinen Video-Container
+      // dekodieren, ein Ladeversuch würde nur mit einem Fehler enden statt
+      // sinnvoll etwas anzuzeigen.
       if (get().developPanelOpen) {
-        if (photoId) {
+        if (photoId && !isVideoPhoto(get(), photoId)) {
           void get().loadDevelopStateForPhoto(photoId);
         } else {
+          // Kein Foto ausgewählt ODER ein Video (siehe oben) — in beiden
+          // Fällen bleibt das Panel ohne einen für dieses Auswahlobjekt
+          // gültigen Bearbeitungszustand, statt den des vorherigen Fotos
+          // kurz weiter anzuzeigen.
           set((state) => {
             state.developEdl = neutralEdlPayload();
             state.developPhotoId = null;
@@ -2072,7 +2088,9 @@ export const useAppStore = create<AppStore>()(
         state.developPanelOpen = willOpen;
       });
       const { selectedPhotoId } = get();
-      if (willOpen && selectedPhotoId) {
+      // Videos (Phase 16 Schritt 5) haben noch keine EDL-gestützte
+      // Bearbeitung, siehe `selectPhoto`s Moduldoku.
+      if (willOpen && selectedPhotoId && !isVideoPhoto(get(), selectedPhotoId)) {
         void get().loadDevelopStateForPhoto(selectedPhotoId);
       }
     },
@@ -3395,7 +3413,18 @@ export const useAppStore = create<AppStore>()(
           state.selectedPhotoId = photoId;
         });
         get().resetView();
-        if (get().developPanelOpen) void get().loadDevelopStateForPhoto(photoId);
+        // Videos (Phase 16 Schritt 5) haben noch keine EDL-gestützte
+        // Bearbeitung, siehe `selectPhoto`s Moduldoku.
+        if (get().developPanelOpen) {
+          if (!isVideoPhoto(get(), photoId)) {
+            void get().loadDevelopStateForPhoto(photoId);
+          } else {
+            set((state) => {
+              state.developEdl = neutralEdlPayload();
+              state.developPhotoId = null;
+            });
+          }
+        }
         if (get().metadataPanelOpen) void get().loadKeywordsForPhoto(photoId);
         return;
       }

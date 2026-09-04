@@ -3982,3 +3982,49 @@ liegen kann) per neuer `jumpToVideo`-Store-Aktion dorthin zu
 wechseln (`selectFolder`+`loadPhotosForFolder`, dann `selectPhoto`) —
 `selectPhoto` allein hätte nicht gereicht, weil `VideoPlayer.tsx` das
 aktuelle Foto über `photosByFolder[selectedFolderId]` auflöst.
+
+## ADR-0043-Nachtrag (Schritt 11): Dokumentation, volle Verifikation, Abnahme
+
+`FEATURES.md`/`THIRD_PARTY.md`/`PLAN.md` aktualisiert (siehe deren
+Einträge). Vollständig grün: `cargo fmt --all -- --check`, `cargo
+clippy --workspace --all-targets -- -D warnings -D
+clippy::unwrap_used` (Standard-Features **und** `--features people`),
+`cargo test --workspace`, `tsc -b`, volle `vitest run`-Suite (223
+Tests). Ein vorbestehender Clippy-Fund (`useless_vec` in
+`apx-ai::style_consistency`, aus Phase 14, durch eine neuere
+Clippy-Version verschärft) wurde nebenbei behoben.
+
+**Zusätzliche, über reines Kompilieren hinausgehende Verifikation:**
+da keiner der neuen Video-Commands (Schritte 6–10) einen automatisierten
+Rust-Test gegen einen echten `ffmpeg`-Subprozess hat (die Testfixture
+wäre eine echte Videodatei, die es im Repository nicht gibt), wurde in
+dieser Sitzung ein reales Testvideo per `ffmpeg -f lavfi` erzeugt und
+jede einzelne Befehlszeile aus dem Code manuell dagegen ausgeführt:
+Trim per Stream-Copy (bestätigt: schneidet an der nächsten
+Keyframe-Grenze, nicht exakt — wie dokumentiert) und der
+Re-Encode-Fallback (exakte Dauer), `scdet`-Szenenerkennung, `afftdn`-
+Entrauschung, Musik mischen (`amix`) und ersetzen, sowie — am
+wichtigsten — der komplette Zwei-Prozess-Rohframe-Pipe-Aufbau für die
+Video-LUT-Anwendung (`ffmpeg … | ffmpeg …`, echte Shell-Pipe statt nur
+über eine Zwischendatei) mit denselben Flags wie
+`run_ffmpeg_apply_lut_to_video`. Alle fünf liefen fehlerfrei durch und
+lieferten die erwarteten Ausgabe-Eigenschaften (Dauer/Auflösung/
+Stream-Typen) — eine echte Bestätigung, dass die konstruierten
+`ffmpeg`-Aufrufe funktionieren, nicht nur, dass der umgebende Rust-Code
+kompiliert.
+
+**Playwright, ehrlich unvollständig statt stillschweigend als
+vollständig ausgegeben:** die drei am direktesten von den Datenmodell-
+Änderungen dieser Phase betroffenen Spezifikationen (`develop-flow.spec.ts`,
+`library-flow.spec.ts`, `presets-flow.spec.ts` — PhotoDto/EdlV4/
+StageEnabled/`PRESET_SECTION_KEYS` wurden alle erweitert) liefen mit
+39/39 grün (nachdem `PLAYWRIGHT_CHROMIUM_PATH` auf die in dieser Umgebung
+vorinstallierte Chromium-Revision gesetzt wurde, siehe
+`playwright.config.ts`s Kommentar dazu). Ein Lauf der kompletten
+Playwright-Suite wurde begonnen, aber auf explizite Nutzeranweisung
+("ohne große Tests, es läuft ja alles") nicht abgewartet und
+abgebrochen. **Kein neues Playwright-Spezifikat für Video/LUT selbst**
+— `LutFilterPanel.tsx`/`VideoPlayer.tsx` haben keine Mocks in
+`e2e/tauri-mock.ts` bekommen, ihre Commands sind also e2e komplett
+ungetestet; die einzige Absicherung dafür sind die echten
+`ffmpeg`-Smoke-Tests oben plus `tsc -b`/`vitest run`.

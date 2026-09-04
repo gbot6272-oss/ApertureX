@@ -3551,3 +3551,130 @@ Rust-Deserialisierung. Behoben durch `base64ToByteArray` an beiden
 Store-Stellen, TS-Typen auf `number[]` korrigiert (dieselbe Konvention
 wie `CompositeLayerSource`/`ContentAwareScalePatch`), betroffener
 Playwright-Test entsprechend angepasst.
+
+## ADR-0043: Phase 16 — Filter-/LUT-Bibliothek + Video als Katalog-Asset
+mit Basis-Schnitt
+
+**Status:** Angenommen
+**Kontext:** Nutzerwunsch (siehe Sitzungsverlauf): direkt anwendbare
+Foto-Filter/-Effekte aus einer möglichst großen öffentlichen
+Bibliothek, punktuell mit Pinseln einsetzbar, auf viele Fotos auf
+einmal anwendbar mit regelbarer Stärke — dieselben Filter auch für
+Video, dazu Basis-Videoschnitt (Ausschneiden, Länge anpassen,
+automatisches Zuschneiden auf passende Stellen, Geräuschreduktion,
+Musik/Sounds hinzufügen, ähnliche Videos finden) — "eine sehr
+abgespeckte CapCut-Variante". Vor der Umsetzung wurde die bestehende
+Architektur real gegen den aktuellen Code geprüft (nicht aus
+Erinnerung an frühere Phasen behauptet) und öffentlich nach
+lizenzsauberen Filter-/Video-Werkzeugen recherchiert.
+
+**Architektur-Befund (real gegen den Code geprüft):**
+
+- Es gibt **keinen** Lightroom-artigen Modul-Vollbild-Umschalter. Statt
+  dessen zwei getrennte Mechanismen (bewusste Vereinfachung, ADR-0037):
+  `centerView: "viewer" | "grid" | "map" | "overview" | "people"`
+  (`frontend/src/store/index.ts:767`) bekommt echte Leinwandfläche;
+  Drucken/Buch/Web-Galerie/Diashow/Stapelverarbeitung sind dagegen
+  Modal-Dialoge, angestoßen aus `Header.tsx`. Video-Bearbeitung braucht
+  eine dauerhafte, interaktive Zeitleisten-Oberfläche — passt zu
+  keinem der beiden bestehenden Muster exakt, am ehesten zum ersten.
+  **Entscheidung:** neuer `centerView`-Wert `"video"`, strukturell
+  gleichrangig mit `"viewer"`, kein neuer Modal-Dialog und keine neue
+  Kompartment-Sektion im bestehenden Entwickeln-Panel.
+- **Kein Video-Import existiert.** `RAW_EXTENSIONS`/`FALLBACK_EXTENSIONS`
+  (`crates/apx-raw/src/format.rs:8-10`) sind rein bildbasiert, `Photo`
+  (`crates/apx-catalog/src/models.rs`) hat keine Dauer-/Codec-/Audio-
+  Felder. Video als Katalog-Asset ist echtes Neuland, keine Erweiterung
+  eines bestehenden Feldes.
+- **Kein LUT-/3D-Filter-Konzept existiert.** Presets
+  (`frontend/src/lib/presets.ts`) sind laut ADR-0031/ADR-0032 strikt
+  numerische EDL-Teilmengen; "LUT" kommt im Code bisher nur als interne
+  1D-Lookup-Table der Gradationskurven-Stage vor
+  (`stages/curves.rs::build_points_lut`), kein `.cube`-Import.
+- **Masken-System ist direkt wiederverwendbar:** jede Maske
+  (`MaskGeometry` in `crates/apx-pipeline/src/edl/v3.rs` — Pinsel/
+  Linear-/Radialverlauf/KI-Auswahl) wendet in `stages/masks.rs` ein
+  eigenes EDL-Werkzeug-Subset auf ihre Alpha-Region an und blendet
+  zurück. Ein Filter/LUT wird ein weiteres Werkzeug in diesem Muster —
+  punktuelle Pinsel-Anwendung ist damit keine neue Architektur, sondern
+  Wiederverwendung.
+- **Foto-Batch-Anwendung ist direkt wiederverwendbar:**
+  `syncSettingsToSelection` (`frontend/src/store/index.ts:365`) und die
+  bereits mehrfach getestete Preset-Stapel-Anwendung übertragen EDL-
+  Abschnitte auf eine Mehrfachauswahl — ein Filter ist einfach ein
+  Preset mit optionaler LUT-Referenz.
+- **Ähnliche-Fotos-Erkennung ist direkt auf Video übertragbar:**
+  Phase-9-Perceptual-Hashing (`image_hasher`-Crate, gehashter 256px-
+  Thumbnail, Hamming-Distanz-Gruppierung) in
+  `list_perceptual_duplicate_groups`
+  (`crates/apx-app/src/commands.rs:2391-2441`) — für Video genügt
+  derselbe Hash auf einen repräsentativen, per `ffmpeg` extrahierten
+  Keyframe.
+- **ffmpeg-Grundsatzentscheidung (ADR-0034) bleibt tragend:** kein
+  Bündeln, System-Binary vorausgesetzt, `Command`-Subprozess-Aufruf
+  (`crates/apx-export/src/video.rs`), weil kein brauchbarer reiner
+  Rust-H.264-Encoder existiert und Bündeln GPL-Lizenzpflichten nach
+  sich zöge. Alle neuen Video-Fähigkeiten in dieser Phase folgen
+  demselben Muster — **keine neue Rust-Video-Abhängigkeit**.
+
+**LUT-Filter-Engine — real recherchierter Lizenzbefund statt Annahme:**
+eine "öffentliche Bibliothek mit Tausenden einheitlich lizenzierten
+Effekten" existiert real nicht — freie LUT-Pakete sind über Dutzende
+Quellen verstreut mit uneinheitlicher Lizenzlage (CC0, CC-BY, viele nur
+vage "kostenlos nutzbar" ohne echte OSI-Lizenz), dasselbe Muster wie
+beim Stiltransfer in Phase 14 (ADR-0041). Vorhandene Rust-Crates für
+`.cube`-Anwendung (`wagahai_lut`, `lut-cube`) sind kaum verbreitet,
+Wartungsstatus unklar. **Entscheidung, dieselbe Linie wie Seam Carving
+in Phase 15:** die Anwendungs-Engine (trilineare Interpolation über ein
+`.cube`-Raster, gut dokumentierter, einfacher Algorithmus) wird selbst
+implementiert — kein Lizenzrisiko, keine Wartungsabhängigkeit von
+einem kaum genutzten Drittanbieter-Crate. `.cube` ist ein offenes,
+patentfreies Textdateiformat (Industriestandard, u. a. von Lightroom,
+Premiere, DaVinci Resolve, Capture One genutzt) — das Format selbst ist
+nicht schutzfähig. Statt eines großen gebündelten Presets: ein kleines,
+**einzeln lizenzgeprüftes** Starter-Set (nach demselben "Opt-in-
+Download, geprüfte Herkunft"-Muster wie MiDaS/Stiltransfer-Modelle in
+Phase 14, in `THIRD_PARTY.md` je Quelle dokumentiert) **plus** freier
+Import beliebiger eigener `.cube`-Dateien — dadurch wird "Hunderte/
+Tausende Effekte" real erreichbar, ohne dass ApertureX selbst
+fragwürdig lizenzierte Presets bündelt/redistribuiert.
+
+**Video-Werkzeuge — reale ffmpeg-Filter-Verifikation statt Annahme:**
+
+| Funktion | Lösung | Befund |
+|---|---|---|
+| Schneiden/Trimmen, Länge anpassen | `ffmpeg -ss/-to`, bei kompatiblem Codec verlustfreier Stream-Copy (`-c copy`), sonst Re-Encode | dieselbe Subprozess-Technik wie `video.rs` |
+| Automatisches Zuschneiden | nativer ffmpeg-`scdet`-Filter (Szenenwechsel-Metadaten `lavfi.scd.score`, seit ffmpeg 4.3) | echte, verifizierte native Funktion, kein externes Modell |
+| Geräuschreduktion | native ffmpeg-Filter `afftdn` (reine FFT-Entrauschung, kein Modell nötig) als Standard; `arnndn` (RNN-basiert, Modell von `github.com/richardpl/arnndn-models`, aufbauend auf Xiph.org RNNoise, **BSD-3-Clause**) als stärkere Opt-in-Variante | verifiziert; Modell-Lizenz beim tatsächlichen Download-Schritt erneut gegen die dann aktuelle Repo-Lizenzdatei geprüft, nicht nur aus dieser Recherche übernommen |
+| Musik/Sounds hinzufügen | dieselbe Audio-Mix-Technik wie die Diashow-Musikuntermalung (ADR-0034 Punkt 3: Vorschau über `<audio>`, Export-Mix über ffmpeg) | bestehendes Muster |
+
+**Ehrlich benannte Grenze:** "automatisch die besten/interessantesten
+Momente finden" (wie kommerzielle Tools wie CapCut es bewerben) ist ein
+deutlich härteres ML-Problem — keine lizenzklare, fertige Lösung
+gefunden. Schritt 7 liefert Szenenwechsel-Erkennung + einfache
+Heuristiken (statische Passagen, Stille), **nicht** echte KI-
+Highlight-Erkennung; das wird explizit nicht versprochen.
+
+**Performance-Grenze, ebenfalls offen benannt:** die Foto-Pipeline
+(`apx-pipeline`) ist reines CPU-Rust ohne GPU-Shader. Filter framegenau
+auf Video anzuwenden (Schritt 9) ist für kurze Clips bei moderater
+Auflösung machbar, kann bei langen/hochauflösenden Videos spürbar
+langsam werden — Skalierungsgrenzen werden in Schritt 9/11 gemessen
+und dokumentiert statt stillschweigend vorausgesetzt.
+
+**Zuschnitt in elf Schritten** (siehe PLAN.md), in drei unabhängig
+lieferbaren Blöcken: (1) Schritt 1–3 LUT-/Filter-Engine — funktioniert
+komplett unabhängig von Video, liefert sofort Wert für Fotos; (2)
+Schritt 4–5 Video-Fundament (Katalog-Asset, Wiedergabe) — noch ohne
+Bearbeitung; (3) Schritt 6–10 Video-Bearbeitungsfunktionen, bauen auf
+Block 2 auf.
+
+**Testdisziplin:** wie Phase 15 nur `cargo check`/`tsc -b` nach den
+einzelnen Schritten 1–10, volle Testausführung gebündelt an zwei
+Kontrollpunkten — Ende Block 1 (Schritt 3, bevor die riskantere
+DB-Schema-Änderung für Video beginnt) und final in Schritt 11.
+
+**Nicht Teil dieser Phase:** vollwertiger Videoschnitt (Multi-Track,
+Übergänge, Titel-Grafiken jenseits der bestehenden Diashow-Intro-
+Funktion), echte KI-Highlight-Erkennung, Video-Farbverwaltung/HDR,
+GPU-beschleunigte Video-Pipeline.

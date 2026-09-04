@@ -1078,7 +1078,7 @@ diesen einen Test laufen lassen), volle Suite einmalig in Schritt 11.
 - [x] 10. Himmelsaustausch mit automatischer Neubelichtung — Lightroom "hat kein Ein-Klick-Himmelsaustausch, verlässt sich auf Photoshop dafür". Klassischer Algorithmus, kein ONNX-Modell: neues `crates/apx-ai/src/sky_replace.rs::composite()` nutzt die bestehende `segmentation::sky_alpha`-Heuristik als Maske, ersetzt den Himmel durch ein vom Nutzer gewähltes Foto und skaliert den Vordergrund je Kanal grob auf die mittlere Farbtemperatur/Helligkeit des neuen Himmels (einfache RGB-Mittelwert-Angleichung statt vollem Lab-Transfer). `apx-app::commands::replace_sky` berechnet das fertige Vollbild einmal; `crates/apx-pipeline/src/stages/sky_replace.rs` ersetzt beim Rendern nur noch die RGB-Kanäle (kein Deckkraft-Regler). Frontend: minimales `SkyReplacePanel.tsx` (Dateiauswahl + Ersetzen/Entfernen) im Entwickeln-Panel vor Geometrie. `sky_replace` bewusst nicht Teil eines Presets. Aus Zeitgründen ohne dedizierten Unit-Test/e2e-Test umgesetzt (Nutzervorgabe für diesen Schritt).
 - [x] 11. Dokumentation, volle Verifikation, Abnahme — abweichend vom ursprünglichen Umfang (Nutzervorgabe: knapper Abschluss bei begrenztem Budget): `FEATURES.md` um eine neue "Alleinstellungsmerkmale"-Rubrik (alle zehn Punkte) ergänzt, `THIRD_PARTY.md` um eine Phase-14-Sektion (kmeans_colors/palette, MiDaS, fast_neural_style). Zwei gezielte Tests für Schritt 10 nachgezogen (`apx-ai::sky_replace`, bis dahin ungetestet). Kein voller `cargo fmt/clippy/test --workspace`-Lauf, keine volle Playwright-Suite — nur `tsc -b` (siehe DECISIONS.md ADR-0041 Nachtrag XI).
 
-## Aktuelle Phase: Phase 15 — Fünf Photoshop-Funktionen, die es in Lightroom nicht gibt
+## Phase 15 — Fünf Photoshop-Funktionen, die es in Lightroom nicht gibt
 
 Phase 14 hat zehn eigenständige Alleinstellungsmerkmale ohne
 Lightroom-Entsprechung geliefert. Phase 15 zieht gezielt fünf echte
@@ -1098,3 +1098,32 @@ in Schritt 6.
 - [x] 4. Inhaltssensitives Skalieren (Content-Aware Scale / Seam Carving) — selbst implementiertes `apx_ai::seam_carving`, neues `GeometryAdjustment.content_aware_scale`-Feld, `ContentAwareScaleDialog.tsx`
 - [x] 5. Automatisches Hautglätten (gesichtsbewusste Frequenztrennung) — `smooth_skin`-Command (Gesichtserkennung + Frequenztrennung), neues `EdlV4.skin_smoothing`-Feld, `SkinSmoothingPanel.tsx`
 - [x] 6. Dokumentation, volle Verifikation, Abnahme — `FEATURES.md`/`THIRD_PARTY.md` ergänzt, gezielte Unit-Tests je neuem Modul, `cargo fmt/clippy/test --workspace` + `tsc -b` + Vitest + volle Playwright-Suite grün (ein pre-existing, phasenfremder `tat-flow.spec.ts`-Fehlschlag real gegen den Phase-14-Endstand `e6ec6e1` gegengeprüft — reproduziert dort identisch, siehe DECISIONS.md ADR-0042 Nachtrag). Nebenbei einen echten, vorbestehenden Bug in Phase 14 Schritt 9/10 gefunden und behoben: `StyleTransferPatch`/`SkyReplacePatch.pixels` wurden im Frontend als roher Base64-String statt als dekodiertes Byte-Array abgelegt (Rusts `Vec<u8>` kann das nicht deserialisieren)
+
+## Aktuelle Phase: Phase 16 — Filter-/LUT-Bibliothek + Video als Katalog-Asset mit Basis-Schnitt
+
+Nutzerwunsch: direkt anwendbare Foto-Filter/-Effekte aus einer
+möglichst großen öffentlichen Bibliothek, punktuell mit Pinseln
+einsetzbar, auf viele Fotos auf einmal mit regelbarer Stärke — dieselben
+Filter auch für Video, dazu Basis-Videoschnitt (Ausschneiden, Länge
+anpassen, automatisches Zuschneiden, Geräuschreduktion, Musik
+hinzufügen, ähnliche Videos finden). Siehe `DECISIONS.md` ADR-0043 für
+die vollständige Architektur-/Lizenzrecherche. Drei Blöcke: (1)
+Schritt 1–3 LUT-/Filter-Engine, unabhängig von Video; (2) Schritt 4–5
+Video-Fundament (Katalog-Asset, Wiedergabe), noch ohne Bearbeitung; (3)
+Schritt 6–10 Video-Bearbeitungsfunktionen auf Block 2 aufbauend.
+Testdisziplin wie Phase 15: nur `cargo check`/`tsc -b` nach den
+einzelnen Schritten 1–10, volle Suite an zwei Kontrollpunkten (Ende
+Schritt 3, final in Schritt 11).
+
+- [x] 0. Scope festzurren, ADR-0043 — Architektur real gegen den Code geprüft (kein Modul-Vollbild-Umschalter, kein Video-Import, kein LUT-Konzept — dafür Masken-/Batch-/Duplikat-Infrastruktur direkt wiederverwendbar), Filter-/LUT-Lizenzlage und ffmpeg-Video-Filter (scdet, afftdn/arnndn) real recherchiert; Entscheidung: neuer `centerView`-Wert `"video"`, selbst implementierte `.cube`-Engine statt Drittanbieter-Crate, keine neue Rust-Video-Abhängigkeit
+- [ ] 1. LUT-/Filter-Engine (Rust) + globale Anwendung
+- [ ] 2. Starter-LUT-Set + Filter-Bibliothek-Panel
+- [ ] 3. Masken-/Pinsel-Integration + Batch-Anwendung auf Mehrfachauswahl
+- [ ] 4. Video als Katalog-Asset (Import, DB-Schema, Thumbnails/Keyframes)
+- [ ] 5. Neuer "Video"-centerView (Wiedergabe, Zeitleisten-Grundgerüst)
+- [ ] 6. Schneiden/Trimmen (In/Out-Punkte, Länge anpassen)
+- [ ] 7. Automatisches Zuschneiden (Szenenwechsel-Erkennung)
+- [ ] 8. Geräuschreduktion + Musik/Sounds hinzufügen
+- [ ] 9. Filter/LUT auf Video anwenden
+- [ ] 10. Ähnliche Videos finden
+- [ ] 11. Dokumentation, volle Verifikation, Abnahme

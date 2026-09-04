@@ -139,6 +139,35 @@ Abhängigkeit) und nutzt für die Ähnliche-Videos-Suche (Schritt 10)
 denselben bereits vorhandenen `image_hasher` wie die Foto-
 Duplikaterkennung (Phase 9).
 
+## Frontend — Nachtrag: Foto-Globus + Dichte-Heatmap (siehe `DECISIONS.md` ADR-0044)
+
+Keine neue npm-Laufzeit-Abhängigkeit. Bewusst selbst implementiert statt
+neuer Pakete: die Globus-Projektion (`lib/geoProjection.ts`, reine
+orthographische Vektor-Mathematik) und der Leaflet-Heatmap-Layer
+(`lib/leafletHeatmap.ts`, statt der sonst naheliegenden `leaflet.heat`-
+Abhängigkeit) — siehe ADR-0044 für die Begründung.
+
+**Gebündelte Daten:** `frontend/src/assets/world-land-110m.json`
+(Landmasse-Umrisse, ~74 KB) — einmalig in dieser Sitzung aus dem
+npm-Paket `world-atlas` (Version 2.0.2, ISC-Lizenz, Michael Bostock)
+per `topojson-client` (Version 3.1.0, ISC-Lizenz) zu einem flachen
+Ringe-Array konvertiert; beide Pakete waren nur für diese einmalige
+Konvertierung installiert (`pnpm add -D`, danach `pnpm remove`) und
+sind **nicht** Teil von `package.json`. `world-atlas`s Daten stammen
+selbst von [Natural Earth](https://www.naturalearthdata.com/) — Natural
+Earth erklärt seine Daten ausdrücklich als gemeinfrei ("no
+copyright... Version 1.0.0 was released to the Public Domain"), keine
+Namensnennungspflicht, aber hier trotzdem dokumentiert.
+
+**Kartenkacheln (Laufzeit, kein Bundle-Bestandteil):** CARTOs "Dark
+Matter"-Kacheln (`basemaps.cartocdn.com/dark_all`) ersetzen die
+bisherigen hellen OSM-Standard-Kacheln der Kartenansicht (Phase 8
+Schritt 7) — kostenlos, kein API-Schlüssel, CC-BY-3.0-Kacheln über
+OpenStreetMap-Daten (Namensnennung in der Karten-Attribution bereits
+vorhanden). `leaflet` selbst (BSD-2-Clause) ist seit Phase 8 Schritt 7
+im Einsatz, war aber bislang nicht in dieser Tabelle eingetragen — hier
+nachgeholt statt eines weiteren stillschweigenden Nachtrags.
+
 ## Frontend — geplant für Phase 1
 
 | Paket | Lizenz | Zweck | Hinweis |

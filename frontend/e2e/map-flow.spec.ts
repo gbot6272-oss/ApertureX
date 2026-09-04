@@ -22,13 +22,14 @@ const UNTAGGED_PHOTO = {
 };
 
 /**
- * Deckt Phase 8 Schritt 7 ab (`PLAN.md`, `apx_export::map`s Moduldoku):
- * die Kartenansicht selbst. Reverse-Geocoding und GPX-Parsing sind
- * bereits vollständig in `apx-export`s Rust-Unit-Tests (`map.rs`)
- * abgedeckt — hier bewusst nur die Frontend-Verdrahtung.
+ * Deckt Phase 8 Schritt 7 ab (`PLAN.md`, `apx_export::map`s Moduldoku)
+ * sowie dessen Erweiterung um Globus/Heatmap (siehe `DECISIONS.md`
+ * ADR-0044). Reverse-Geocoding und GPX-Parsing sind bereits
+ * vollständig in `apx-export`s Rust-Unit-Tests (`map.rs`) abgedeckt —
+ * hier bewusst nur die Frontend-Verdrahtung.
  */
-test.describe("Karte (Phase 8 Schritt 7)", () => {
-  test("Karte-Knopf schaltet zur Kartenansicht mit der Anzahl geotaggter Fotos", async ({ page }) => {
+test.describe("Karte (Phase 8 Schritt 7 + ADR-0044)", () => {
+  test("Karte-Knopf schaltet zum Globus mit der Anzahl geotaggter Fotos", async ({ page }) => {
     await installTauriMock(page, {
       folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 2 }],
       photosByFolder: { [FOLDER_ID]: [GEOTAGGED_PHOTO, UNTAGGED_PHOTO] },
@@ -36,9 +37,24 @@ test.describe("Karte (Phase 8 Schritt 7)", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Karte" }).click();
 
+    // Standard-Einstieg ist jetzt der Globus (ADR-0044) — "kleinste
+    // Ebene" der Kartenansicht, nicht mehr direkt die flache Karte.
     await expect(page.getByText("1 Foto mit GPS")).toBeVisible();
     const log = await getMockInvokeLog(page);
     expect(log.some((e) => e.cmd === "list_geotagged_photos")).toBe(true);
+  });
+
+  test("Vom Globus zur flachen Karte wechseln zeigt die Heatmap/Pin-Steuerung", async ({ page }) => {
+    await installTauriMock(page, {
+      folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 2 }],
+      photosByFolder: { [FOLDER_ID]: [GEOTAGGED_PHOTO, UNTAGGED_PHOTO] },
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Karte" }).click();
+    await page.getByRole("button", { name: "Zur Karte →" }).click();
+
+    await expect(page.getByRole("button", { name: "🌐 Globus" })).toBeVisible();
+    await expect(page.getByText("GPX-Track importieren…")).toBeVisible();
   });
 
   test("GPX-Import lädt den Track und zeigt die Punktanzahl", async ({ page }) => {
@@ -53,6 +69,7 @@ test.describe("Karte (Phase 8 Schritt 7)", () => {
     });
     await page.goto("/");
     await page.getByRole("button", { name: "Karte" }).click();
+    await page.getByRole("button", { name: "Zur Karte →" }).click();
     await page.getByRole("button", { name: "GPX-Track importieren…" }).click();
 
     await expect(page.getByRole("button", { name: /GPX-Track entfernen \(2 Punkte\)/ })).toBeVisible();

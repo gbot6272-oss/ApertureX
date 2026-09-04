@@ -43,6 +43,13 @@ pub enum TimelineItem {
         source_path: PathBuf,
         in_ms: i64,
         out_ms: i64,
+        /// Tempo-Faktor (Phase 17 Schritt 2) — `1.0` = unverändert,
+        /// `> 1.0` = Zeitraffer (schneller/kürzer), `< 1.0` = Zeitlupe
+        /// (langsamer/länger). Wirkt nur auf das Bild (`setpts`, siehe
+        /// `render_video_clip_segment`) — Ton kommt ohnehin nur über die
+        /// optionale Hintergrundmusik (siehe Moduldoku), kein `atempo`
+        /// nötig.
+        speed: f32,
     },
     Photo {
         width: u32,
@@ -61,7 +68,17 @@ pub enum TimelineItem {
 impl TimelineItem {
     fn duration_seconds(&self) -> f32 {
         match self {
-            Self::VideoClip { in_ms, out_ms, .. } => (*out_ms - *in_ms).max(0) as f32 / 1000.0,
+            Self::VideoClip {
+                in_ms,
+                out_ms,
+                speed,
+                ..
+            } => {
+                let trimmed = (*out_ms - *in_ms).max(0) as f32 / 1000.0;
+                // Schneller abgespielt = kürzeres Segment, langsamer =
+                // längeres — dieselbe Beziehung wie `setpts=PTS/speed`.
+                trimmed / speed.max(0.01)
+            }
             Self::Photo { hold_seconds, .. } | Self::Title { hold_seconds, .. } => *hold_seconds,
         }
     }
@@ -183,7 +200,8 @@ fn render_segment(
             source_path,
             in_ms,
             out_ms,
-        } => render_video_clip_segment(source_path, *in_ms, *out_ms, options, dest_path),
+            speed,
+        } => render_video_clip_segment(source_path, *in_ms, *out_ms, *speed, options, dest_path),
         TimelineItem::Photo {
             width,
             height,
@@ -251,21 +269,32 @@ fn render_video_clip_segment(
     source_path: &Path,
     in_ms: i64,
     out_ms: i64,
+    speed: f32,
     options: &TimelineExportOptions,
     dest_path: &Path,
 ) -> Result<()> {
     let start_secs = in_ms as f64 / 1000.0;
     let duration_secs = (out_ms - in_ms).max(0) as f64 / 1000.0;
     let (w, h) = (options.output_width, options.output_height);
+    let speed = speed.max(0.01);
+
+    // `setpts=PTS/speed`: höheres Tempo staucht die Zeitstempel
+    // (kürzeres Segment), niedrigeres Tempo streckt sie (Zeitlupe) —
+    // bei `speed == 1.0` bewusst weggelassen (No-op, spart einen
+    // Filter-Schritt).
+    let vf = if (speed - 1.0).abs() < f32::EPSILON {
+        format!("scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}")
+    } else {
+        format!(
+            "scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setpts=PTS/{speed}"
+        )
+    };
 
     let output = Command::new("ffmpeg")
         .args(["-y", "-ss", &format!("{start_secs}"), "-i"])
         .arg(source_path)
         .args(["-t", &format!("{duration_secs}")])
-        .args([
-            "-vf",
-            &format!("scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"),
-        ])
+        .args(["-vf", &vf])
         .args(["-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r"])
         .arg(options.fps.to_string())
         .arg(dest_path)
@@ -423,5 +452,38 @@ mod tests {
     fn total_duration_never_goes_negative_for_pathological_overlap() {
         let total = total_duration_after_xfade(&[1.0, 1.0], &[5.0]);
         assert_eq!(total, 0.0);
+    }
+
+    #[test]
+    fn double_speed_halves_the_segment_duration() {
+        let item = TimelineItem::VideoClip {
+            source_path: PathBuf::from("clip.mp4"),
+            in_ms: 0,
+            out_ms: 4000,
+            speed: 2.0,
+        };
+        assert_eq!(item.duration_seconds(), 2.0);
+    }
+
+    #[test]
+    fn half_speed_doubles_the_segment_duration() {
+        let item = TimelineItem::VideoClip {
+            source_path: PathBuf::from("clip.mp4"),
+            in_ms: 0,
+            out_ms: 4000,
+            speed: 0.5,
+        };
+        assert_eq!(item.duration_seconds(), 8.0);
+    }
+
+    #[test]
+    fn normal_speed_keeps_the_trimmed_duration() {
+        let item = TimelineItem::VideoClip {
+            source_path: PathBuf::from("clip.mp4"),
+            in_ms: 1000,
+            out_ms: 4000,
+            speed: 1.0,
+        };
+        assert_eq!(item.duration_seconds(), 3.0);
     }
 }

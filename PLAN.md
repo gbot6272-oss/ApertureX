@@ -1164,7 +1164,7 @@ Volle Suite gebündelt erst im letzten Schritt.
 
 - [x] 0. Scope festzurren, ADR-0045
 - [x] 1. Mehrspur-Timeline-Grundgerüst (Zeitachsen-Dialog, Segment-Rendering + Concat/Übergänge) — `apx_export::timeline` (Zwei-Stufen-Rendering: Segment je Eintrag, Verkettung per `xfade`-Filterkette für Schnitt *und* Überblendung), neuer `render_video_timeline`-Command, neuer `VideoTimelineDialog.tsx` (Reihenfolge/Trim/Haltedauer/Übergang/Auflösung/Musik), Einstiegspunkt „Zeitachse…“ in `Header.tsx`
-- [ ] 2. Geschwindigkeits-Regler pro Clip (Zeitlupe/Zeitraffer)
+- [x] 2. Geschwindigkeits-Regler pro Clip (Zeitlupe/Zeitraffer) — `TimelineItem::VideoClip.speed` + `setpts`-Filter, Tempo-Dropdown je Video-Eintrag in `VideoTimelineDialog.tsx`
 - [ ] 3. Mehr Übergänge (Wisch-/Blende-Varianten über `xfade`)
 - [ ] 4. Text-/Titel-Overlays mit Zeitspanne/Position
 - [ ] 5. Automatische Untertitel (Whisper, Opt-in-Download)

@@ -512,6 +512,11 @@ export interface TimelineItemInput {
   inMs?: number;
   outMs?: number;
   holdSeconds?: number;
+  /** Tempo-Faktor für Video-Einträge (Phase 17 Schritt 2, siehe
+   * `DECISIONS.md` ADR-0045) — `undefined` = `1.0` (unverändert),
+   * `> 1` Zeitraffer, `< 1` Zeitlupe. Für Foto-/Titel-Einträge ohne
+   * Wirkung. */
+  speed?: number;
 }
 
 export interface VideoTimelineOptions {

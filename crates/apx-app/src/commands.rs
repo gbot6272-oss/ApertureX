@@ -1707,6 +1707,11 @@ pub struct TimelineItemInput {
     pub in_ms: Option<i64>,
     pub out_ms: Option<i64>,
     pub hold_seconds: Option<f32>,
+    /// Tempo-Faktor für Video-Einträge (Phase 17 Schritt 2, siehe
+    /// `DECISIONS.md` ADR-0045) — `None`/fehlend = `1.0` (unverändert).
+    /// Wird für Foto-/Titel-Einträge ignoriert (deren "Tempo" ist
+    /// bereits `hold_seconds`).
+    pub speed: Option<f32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1782,10 +1787,15 @@ pub fn render_video_timeline(
             if in_ms < 0 || out_ms <= in_ms {
                 return Err("Ungültiger Zeitbereich in der Zeitachse".to_string());
             }
+            let speed = item.speed.unwrap_or(1.0);
+            if !(0.1..=8.0).contains(&speed) {
+                return Err("Tempo-Faktor muss zwischen 0,1 und 8,0 liegen".to_string());
+            }
             timeline_items.push(apx_export::timeline::TimelineItem::VideoClip {
                 source_path,
                 in_ms,
                 out_ms,
+                speed,
             });
         } else {
             let edl = resolve_current_edl(&state.catalog, photo_id)?;

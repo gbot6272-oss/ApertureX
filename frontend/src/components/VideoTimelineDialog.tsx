@@ -27,12 +27,26 @@ interface DraftItem {
   inSeconds: number;
   outSeconds: number;
   holdSeconds: number;
+  /** Tempo-Faktor (Phase 17 Schritt 2, siehe `DECISIONS.md` ADR-0045)
+   * — nur für Video-Einträge relevant, `1.0` = unverändert. */
+  speed: number;
 }
+
+/** Auswahl an Voreinstellungen für den Tempo-Regler — deckt die
+ * üblichen Zeitlupe-/Zeitraffer-Sprünge ab, ohne einen freien
+ * Zahlen-Regler mit Rundungsfallstricken (z. B. `1.0000001`) zu
+ * brauchen. */
+const SPEED_PRESETS = [0.25, 0.5, 1, 2, 4] as const;
 
 function buildTimelineItems(items: DraftItem[], isVideo: (id: string) => boolean): TimelineItemInput[] {
   return items.map((item) => {
     if (isVideo(item.photoId)) {
-      return { photoId: item.photoId, inMs: Math.round(item.inSeconds * 1000), outMs: Math.round(item.outSeconds * 1000) };
+      return {
+        photoId: item.photoId,
+        inMs: Math.round(item.inSeconds * 1000),
+        outMs: Math.round(item.outSeconds * 1000),
+        speed: item.speed,
+      };
     }
     return { photoId: item.photoId, holdSeconds: item.holdSeconds };
   });
@@ -75,7 +89,7 @@ export function VideoTimelineDialog({ open, photoIds, onClose }: VideoTimelineDi
       photoIds.map((id) => {
         const photo = photoById.get(id);
         const durationSeconds = photo?.duration_ms ? photo.duration_ms / 1000 : 5;
-        return { photoId: id, inSeconds: 0, outSeconds: durationSeconds, holdSeconds: 3 };
+        return { photoId: id, inSeconds: 0, outSeconds: durationSeconds, holdSeconds: 3, speed: 1 };
       }),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -198,6 +212,20 @@ export function VideoTimelineDialog({ open, photoIds, onClose }: VideoTimelineDi
                         onChange={(e) => updateItem(index, { outSeconds: Number(e.target.value) })}
                         className="rounded border border-border bg-bg-panel px-2 py-1"
                       />
+                    </label>
+                    <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
+                      Tempo
+                      <select
+                        value={item.speed}
+                        onChange={(e) => updateItem(index, { speed: Number(e.target.value) })}
+                        className="rounded border border-border bg-bg-panel px-2 py-1"
+                      >
+                        {SPEED_PRESETS.map((speed) => (
+                          <option key={speed} value={speed}>
+                            {speed === 1 ? "Normal" : `${speed}×`}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                   </div>
                 ) : (

@@ -3541,8 +3541,8 @@ pub fn smooth_skin(
     // Nur innerhalb der Gesichtsmaske durch die geglättete Hochfrequenz
     // ersetzen, weich gewichtet nach `person_alpha`s Alpha-Wert.
     let mut final_high = high.clone();
-    for i in 0..pixel_count {
-        let weight = face_mask[i] as f32 / 255.0;
+    for (i, &mask_value) in face_mask.iter().enumerate() {
+        let weight = mask_value as f32 / 255.0;
         if weight <= 0.0 {
             continue;
         }

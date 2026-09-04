@@ -1352,9 +1352,10 @@ export const NEUTRAL_VIRTUAL_APERTURE: VirtualApertureAdjustment = {
 export interface StyleTransferPatch {
   bitmap_width: number;
   bitmap_height: number;
-  /** Auf der Rust-Seite `Vec<u8>` (`pixels`), hier als base64-String
-   * transportiert — siehe `StyleTransferPatchDto` in `lib/tauri.ts`. */
-  pixels: string;
+  /** Spiegelt Rusts `Vec<u8>` (siehe `CompositeLayerSource`s Doku für
+   * dieselbe Konvention) — `StyleTransferPatchDto.pixels_base64` (`lib/
+   * tauri.ts`) wird beim Übernehmen per `base64ToByteArray` decodiert. */
+  pixels: number[];
 }
 
 /** KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — spiegelt
@@ -1631,7 +1632,10 @@ export function writeBasicField(basic: BasicAdjustments, key: string, value: num
 export interface SkyReplacePatch {
   bitmap_width: number;
   bitmap_height: number;
-  pixels: string;
+  /** Spiegelt Rusts `Vec<u8>` — `SkyReplacePatchDto.pixels_base64`
+   * (`lib/tauri.ts`) wird beim Übernehmen per `base64ToByteArray`
+   * decodiert (dieselbe Konvention wie `StyleTransferPatch::pixels`). */
+  pixels: number[];
 }
 
 /** Einmalig berechnetes Hautglätten-Ergebnis (Phase 15 Schritt 5, siehe

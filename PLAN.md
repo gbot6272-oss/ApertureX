@@ -1092,9 +1092,9 @@ Schritten 0–5 (dort nur `cargo check`/`tsc -b`), volle Suite einmalig
 in Schritt 6.
 
 - [x] 0. Scope festzurren, ADR-0042 — fünf Photoshop-exklusive Funktionen real gegen Lightroom recherchiert (Content-Aware Move, Blend-If, Liquify, Content-Aware Scale, automatisches Hautglätten); Seam-Carving-Crate (`seamcarving` v0.2.3) real geprüft und wegen LGPL-3.0-or-later verworfen, Algorithmus wird in Schritt 4 selbst implementiert
-- [ ] 1. Content-Aware Move (Objekt inhaltssensitiv verschieben)
-- [ ] 2. Blend-If: Tonwertbereich-Blending für Compositing-Ebenen
-- [ ] 3. Verflüssigen (Liquify)
-- [ ] 4. Inhaltssensitives Skalieren (Content-Aware Scale / Seam Carving)
-- [ ] 5. Automatisches Hautglätten (gesichtsbewusste Frequenztrennung)
-- [ ] 6. Dokumentation, volle Verifikation, Abnahme
+- [x] 1. Content-Aware Move (Objekt inhaltssensitiv verschieben) — `content_aware_move`-Command (LaMa-Fill der Ausgangsstelle + neue Compositing-Ebene an der Zielposition), `ContentAwareMoveOverlay.tsx`
+- [x] 2. Blend-If: Tonwertbereich-Blending für Compositing-Ebenen — zwei neue `CompositeLayer`-Felder, `stages::composite::blend_if_weight` (weiche Luminanz-Rampe)
+- [x] 3. Verflüssigen (Liquify) — neues `stages::liquify` (Schieben/Verwirbeln/Stauchen/Aufblähen), `LiquifyOverlay.tsx`
+- [x] 4. Inhaltssensitives Skalieren (Content-Aware Scale / Seam Carving) — selbst implementiertes `apx_ai::seam_carving`, neues `GeometryAdjustment.content_aware_scale`-Feld, `ContentAwareScaleDialog.tsx`
+- [x] 5. Automatisches Hautglätten (gesichtsbewusste Frequenztrennung) — `smooth_skin`-Command (Gesichtserkennung + Frequenztrennung), neues `EdlV4.skin_smoothing`-Feld, `SkinSmoothingPanel.tsx`
+- [x] 6. Dokumentation, volle Verifikation, Abnahme — `FEATURES.md`/`THIRD_PARTY.md` ergänzt, gezielte Unit-Tests je neuem Modul, `cargo fmt/clippy/test --workspace` + `tsc -b` + Vitest + volle Playwright-Suite grün (ein pre-existing, phasenfremder `tat-flow.spec.ts`-Fehlschlag real gegen den Phase-14-Endstand `e6ec6e1` gegengeprüft — reproduziert dort identisch, siehe DECISIONS.md ADR-0042 Nachtrag). Nebenbei einen echten, vorbestehenden Bug in Phase 14 Schritt 9/10 gefunden und behoben: `StyleTransferPatch`/`SkyReplacePatch.pixels` wurden im Frontend als roher Base64-String statt als dekodiertes Byte-Array abgelegt (Rusts `Vec<u8>` kann das nicht deserialisieren)

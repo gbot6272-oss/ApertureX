@@ -5617,7 +5617,7 @@ export const useAppStore = create<AppStore>()(
           state.developEdl.style_transfer.patch = {
             bitmap_width: dto.bitmap_width,
             bitmap_height: dto.bitmap_height,
-            pixels: dto.pixels_base64,
+            pixels: base64ToByteArray(dto.pixels_base64),
           };
         });
         void get().commitDevelopEdit("Stiltransfer angewendet");
@@ -5646,7 +5646,7 @@ export const useAppStore = create<AppStore>()(
           state.developEdl.sky_replace = {
             bitmap_width: dto.bitmap_width,
             bitmap_height: dto.bitmap_height,
-            pixels: dto.pixels_base64,
+            pixels: base64ToByteArray(dto.pixels_base64),
           };
         });
         void get().commitDevelopEdit("Himmel ersetzt");

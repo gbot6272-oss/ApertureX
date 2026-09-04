@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { base64ToByteArray } from "../src/lib/edl";
 import { getMockInvokeLog, installTauriMock } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
@@ -68,7 +69,7 @@ test("Stiltransfer: Stil herunterladen, ein Foto stilisieren und den Betrag-Regl
     .toBe(true);
   const afterStylize = await lastCommit(page);
   expect(afterStylize.style_transfer.patch.bitmap_width).toBe(2);
-  expect(afterStylize.style_transfer.patch.pixels).toBe("3t7e3t7e3t7e3t7e");
+  expect(afterStylize.style_transfer.patch.pixels).toEqual(base64ToByteArray("3t7e3t7e3t7e3t7e"));
 
   const amountInput = page.getByRole("spinbutton", { name: "Stiltransfer: Betrag (Zahlenwert)" });
   await amountInput.fill("40");

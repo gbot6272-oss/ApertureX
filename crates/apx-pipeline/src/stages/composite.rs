@@ -290,4 +290,38 @@ mod tests {
         // Ebene (200), also 100.
         assert_eq!(result[0], 100);
     }
+
+    #[test]
+    fn blend_if_shadow_cutoff_hides_the_layer_over_dark_base_pixels() {
+        let base = flat_rgba(4, 4, 10);
+        let layer = CompositeLayer {
+            blend_if_shadow_cutoff: 0.5,
+            ..neutral_layer(CompositeLayerSource {
+                bitmap_width: 1,
+                bitmap_height: 1,
+                pixels: vec![200, 200, 200],
+            })
+        };
+        let result = apply_all(&base, 4, 4, std::slice::from_ref(&layer));
+        // Die Basis-Luminanz (~0.04) liegt weit unter `shadow_cutoff`
+        // (0.5) — die Ebene bleibt hier vollständig ausgeblendet.
+        assert_eq!(result, base);
+    }
+
+    #[test]
+    fn blend_if_highlight_cutoff_hides_the_layer_over_bright_base_pixels() {
+        let base = flat_rgba(4, 4, 250);
+        let layer = CompositeLayer {
+            blend_if_highlight_cutoff: 0.5,
+            ..neutral_layer(CompositeLayerSource {
+                bitmap_width: 1,
+                bitmap_height: 1,
+                pixels: vec![10, 10, 10],
+            })
+        };
+        let result = apply_all(&base, 4, 4, std::slice::from_ref(&layer));
+        // Die Basis-Luminanz (~0.98) liegt weit über `highlight_cutoff`
+        // (0.5) — die Ebene bleibt hier vollständig ausgeblendet.
+        assert_eq!(result, base);
+    }
 }

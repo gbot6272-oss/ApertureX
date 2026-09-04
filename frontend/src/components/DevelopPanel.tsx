@@ -81,8 +81,8 @@ const REPAIR_OPACITY_SPEC: SliderSpec = { key: "opacity", label: "Deckkraft (%)"
 
 // ---- Verflüssigen (Liquify, Phase 15 Schritt 3, siehe DECISIONS.md
 // ADR-0042 — Photoshop-exklusiv, Lightroom hat kein Verformungswerkzeug) --
-const LIQUIFY_RADIUS_SPEC: SliderSpec = { key: "radius", label: "Radius (% der Bildbreite)", min: 2, max: 50, fineStep: 0.5, coarseStep: 5, neutral: 15 };
-const LIQUIFY_STRENGTH_SPEC: SliderSpec = { key: "strength", label: "Stärke (%)", min: 1, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 };
+const LIQUIFY_RADIUS_SPEC: SliderSpec = { key: "radius", label: "Verflüssigen: Wirkbereich (% der Bildbreite)", min: 2, max: 50, fineStep: 0.5, coarseStep: 5, neutral: 15 };
+const LIQUIFY_STRENGTH_SPEC: SliderSpec = { key: "strength", label: "Verflüssigen: Intensität (%)", min: 1, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 };
 
 // ---- Mehrfachbelichtung/Layer-Compositing — Phase 14 Schritt 3, siehe
 // DECISIONS.md ADR-0041 (Lightroom Classic hat "keine klassischen

@@ -345,6 +345,16 @@ Zehn eigenständige Fähigkeiten ohne Lightroom-Entsprechung (siehe `DECISIONS.m
 - [x] KI-Stiltransfer zwischen Fotos — Phase 14 Schritt 9 — Status: Fertig (eingeschränkt) — fünf real lizenzierte feste `fast_neural_style`-Stile statt eines beliebigen Referenzfotos (kein lizenzklares Modell dafür gefunden, siehe ADR-0041 Nachtrag IX)
 - [x] Himmelsaustausch mit automatischer Neubelichtung — Phase 14 Schritt 10 — Status: Fertig (minimaler Umfang) — klassische Segmentierungs-Heuristik + Nutzerfoto als neuer Himmel, grobe Farbangleichung des Vordergrunds; ohne Deckkraft-Regler und mit reduzierter Testabdeckung
 
+## Photoshop-Funktionen ohne Lightroom-Entsprechung (Phase 15)
+
+Fünf echte Photoshop-exklusive Fähigkeiten, gezielt nachgezogen (siehe `DECISIONS.md` ADR-0042 für die Recherche-Belege je Punkt) — vier davon ohne jede neue Abhängigkeit, durch Wiederverwendung bereits bestehender Bausteine (Inpainting, Compositing, Frequenztrennung, Personen-/Gesichtserkennung).
+
+- [x] Content-Aware Move (Objekt inhaltssensitiv verschieben) — Phase 15 Schritt 1 — Status: Fertig — Rechteck aufziehen und an die Zielposition ziehen; die Ausgangsstelle wird per LaMa-Inpainting neu gefüllt, das verschobene Objekt landet als neue Compositing-Ebene an der Zielposition
+- [x] Blend-If (Tonwertbereich-Blending) — Phase 15 Schritt 2 — Status: Fertig (eingeschränkt) — je Compositing-Ebene ein Schatten-/Lichter-Schwellenwert, unterhalb/oberhalb dessen die Ebene weich ausgeblendet wird; die einfachere Ein-Schieberegler-Variante statt Photoshops komplexer Alt-Split-Regler
+- [x] Verflüssigen (Liquify) — Phase 15 Schritt 3 — Status: Fertig — vier Verformungsmodi (Schieben/Verwirbeln/Stauchen/Aufblähen), direkt im Bild gemalt, sofort wirksam
+- [x] Inhaltssensitives Skalieren (Content-Aware Scale / Seam Carving) — Phase 15 Schritt 4 — Status: Fertig — selbst implementierter Seam-Carving-Algorithmus (kein lizenzklares Crate gefunden), Breite/Höhe unabhängig änderbar, erkannte Personen/Gesichter automatisch vor Verzerrung geschützt
+- [x] Automatisches Hautglätten — Phase 15 Schritt 5 — Status: Fertig — Gesichtserkennung + gesichtsbewusste Frequenztrennung in einem Klick, kein manuelles Maskieren nötig
+
 ## Technische Grundlage (Phase 1, keine Endnutzer-Features)
 
 - [x] Rust-Workspace mit Crate-Grenzen (`apx-core`, `apx-raw`, `apx-catalog`, `apx-app`) — Phase 1 — Status: Fertig

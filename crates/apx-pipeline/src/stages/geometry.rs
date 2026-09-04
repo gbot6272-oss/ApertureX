@@ -322,7 +322,7 @@ pub fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::edl::v2::CanvasExtensionPatch;
+    use crate::edl::v2::{CanvasExtensionPatch, ContentAwareScale, ContentAwareScalePatch};
 
     /// Baut ein `size`×`size`-RGBA8-Testbild mit einer eindeutigen
     /// Markierung an einer bestimmten Pixelposition.
@@ -490,5 +490,50 @@ mod tests {
         // grünen Patch, nicht vom grauen Original.
         let border_idx = 0; // (0, 0) liegt außerhalb des Original-Bereichs
         assert_eq!(&result[border_idx..border_idx + 4], &[0, 200, 0, 255]);
+    }
+
+    /// Ohne berechneten Patch bleibt eine gewählte Content-Aware-Scale-
+    /// Zielgröße ein No-Op — dieselbe Konvention wie
+    /// `canvas_extension_without_a_computed_patch_is_a_no_op`.
+    #[test]
+    fn content_aware_scale_without_a_computed_patch_is_a_no_op() {
+        let pixels = marked_image(10, 4, 4);
+        let adjustment = GeometryAdjustment {
+            content_aware_scale: Some(ContentAwareScale {
+                width_fraction: 0.5,
+                height_fraction: 0.5,
+                patch: None,
+            }),
+            ..GeometryAdjustment::NEUTRAL
+        };
+        let (w, h, result) = apply(&pixels, 10, 10, &adjustment);
+        assert_eq!((w, h), (10, 10));
+        assert_eq!(result, pixels);
+    }
+
+    /// Mit berechnetem Patch ändert sich die Ausgabegröße auf genau
+    /// `width_fraction`/`height_fraction` der aktuellen Bildgröße, und
+    /// das Ergebnis kommt erkennbar aus dem Patch (hier eine
+    /// gleichmäßig grüne Bitmap) statt aus dem Original.
+    #[test]
+    fn content_aware_scale_with_a_patch_resizes_to_the_chosen_fraction() {
+        let pixels = marked_image(10, 4, 4);
+        let patch_pixels = vec![0u8, 200, 0]; // 1x1 grüne Patch-Bitmap
+        let adjustment = GeometryAdjustment {
+            content_aware_scale: Some(ContentAwareScale {
+                width_fraction: 0.5,
+                height_fraction: 0.8,
+                patch: Some(ContentAwareScalePatch {
+                    bitmap_width: 1,
+                    bitmap_height: 1,
+                    pixels: patch_pixels,
+                }),
+            }),
+            ..GeometryAdjustment::NEUTRAL
+        };
+        let (w, h, result) = apply(&pixels, 10, 10, &adjustment);
+        assert_eq!((w, h), (5, 8));
+        assert_eq!(result.len(), (w * h * 4) as usize);
+        assert_eq!(&result[0..4], &[0, 200, 0, 255]);
     }
 }

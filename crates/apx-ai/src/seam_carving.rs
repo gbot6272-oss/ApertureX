@@ -275,3 +275,91 @@ pub fn resize_rgb8(
 
     (target_w as u32, target_h as u32, result)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flat_rgb(width: u32, height: u32, rgb: [u8; 3]) -> Vec<u8> {
+        let mut out = vec![0u8; (width * height * 3) as usize];
+        for px in out.chunks_exact_mut(3) {
+            px.copy_from_slice(&rgb);
+        }
+        out
+    }
+
+    #[test]
+    fn resizing_to_the_same_size_is_identity() {
+        let pixels = flat_rgb(8, 8, [100, 120, 140]);
+        let (w, h, out) = resize_rgb8(&pixels, 8, 8, 8, 8, None);
+        assert_eq!((w, h), (8, 8));
+        assert_eq!(out, pixels);
+    }
+
+    #[test]
+    fn shrinking_width_returns_the_requested_size() {
+        let pixels = flat_rgb(20, 10, [50, 50, 50]);
+        let (w, h, out) = resize_rgb8(&pixels, 20, 10, 12, 10, None);
+        assert_eq!((w, h), (12, 10));
+        assert_eq!(out.len(), (12 * 10 * 3) as usize);
+    }
+
+    #[test]
+    fn growing_width_returns_the_requested_size() {
+        let pixels = flat_rgb(10, 10, [50, 50, 50]);
+        let (w, h, out) = resize_rgb8(&pixels, 10, 10, 16, 10, None);
+        assert_eq!((w, h), (16, 10));
+        assert_eq!(out.len(), (16 * 10 * 3) as usize);
+    }
+
+    #[test]
+    fn shrinking_height_returns_the_requested_size() {
+        let pixels = flat_rgb(10, 20, [50, 50, 50]);
+        let (w, h, out) = resize_rgb8(&pixels, 10, 20, 10, 12, None);
+        assert_eq!((w, h), (10, 12));
+        assert_eq!(out.len(), (10 * 12 * 3) as usize);
+    }
+
+    #[test]
+    fn a_fully_protected_region_survives_a_width_shrink() {
+        // Ein Bild mit einer scharfen (hochenergetischen) Kante links
+        // und einer flachen (niedrigenergetischen) Fläche rechts — ohne
+        // Schutzmaske sollte das Verkleinern eher in der flachen Fläche
+        // schneiden. Mit einer vollständig geschützten flachen Fläche
+        // muss der Algorithmus stattdessen durch die Kante schneiden,
+        // die Farbe der geschützten Fläche bleibt danach vollständig
+        // erhalten.
+        let width = 20u32;
+        let height = 6u32;
+        let mut pixels = vec![0u8; (width * height * 3) as usize];
+        for y in 0..height {
+            for x in 0..width {
+                let i = ((y * width + x) * 3) as usize;
+                if x < 10 {
+                    pixels[i] = if x % 2 == 0 { 255 } else { 0 };
+                } else {
+                    pixels[i] = 30;
+                }
+                pixels[i + 1] = pixels[i];
+                pixels[i + 2] = pixels[i];
+            }
+        }
+        let mut protect = vec![0u8; (width * height) as usize];
+        for y in 0..height {
+            for x in 10..width {
+                protect[(y * width + x) as usize] = 255;
+            }
+        }
+        let (w, h, out) = resize_rgb8(&pixels, width, height, 15, height, Some(&protect));
+        assert_eq!((w, h), (15, height));
+        // Die geschützte rechte Fläche (Wert 30) muss vollständig
+        // erhalten bleiben — jedes Pixel im Ergebnis, das aus dieser
+        // Fläche stammt, behält seinen Wert.
+        let flat_pixel_count = out.chunks_exact(3).filter(|px| px[0] == 30).count();
+        assert!(
+            flat_pixel_count >= (10 * height) as usize,
+            "geschützte Fläche wurde verkleinert: {flat_pixel_count} von {} Pixeln",
+            10 * height
+        );
+    }
+}

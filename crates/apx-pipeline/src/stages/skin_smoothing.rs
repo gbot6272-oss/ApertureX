@@ -92,3 +92,76 @@ pub fn apply(
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::edl::v4::SkinSmoothingPatch;
+
+    fn flat_rgba(width: u32, height: u32, value: u8) -> Vec<u8> {
+        let mut out = vec![0u8; (width * height * 4) as usize];
+        for chunk in out.chunks_exact_mut(4) {
+            chunk[0] = value;
+            chunk[1] = value;
+            chunk[2] = value;
+            chunk[3] = 255;
+        }
+        out
+    }
+
+    #[test]
+    fn without_a_patch_the_image_is_unchanged() {
+        let base = flat_rgba(4, 4, 100);
+        let adjustment = SkinSmoothingAdjustment {
+            amount: 1.0,
+            patch: None,
+        };
+        assert_eq!(apply(&base, 4, 4, &adjustment), base);
+    }
+
+    #[test]
+    fn zero_amount_leaves_the_image_unchanged_even_with_a_patch() {
+        let base = flat_rgba(4, 4, 100);
+        let adjustment = SkinSmoothingAdjustment {
+            amount: 0.0,
+            patch: Some(SkinSmoothingPatch {
+                bitmap_width: 1,
+                bitmap_height: 1,
+                pixels: vec![200, 200, 200],
+            }),
+        };
+        assert_eq!(apply(&base, 4, 4, &adjustment), base);
+    }
+
+    #[test]
+    fn full_amount_replaces_the_image_with_the_patch() {
+        let base = flat_rgba(4, 4, 100);
+        let adjustment = SkinSmoothingAdjustment {
+            amount: 1.0,
+            patch: Some(SkinSmoothingPatch {
+                bitmap_width: 1,
+                bitmap_height: 1,
+                pixels: vec![200, 200, 200],
+            }),
+        };
+        let result = apply(&base, 4, 4, &adjustment);
+        for chunk in result.chunks_exact(4) {
+            assert_eq!(chunk, &[200, 200, 200, 255]);
+        }
+    }
+
+    #[test]
+    fn half_amount_blends_halfway_between_base_and_patch() {
+        let base = flat_rgba(4, 4, 0);
+        let adjustment = SkinSmoothingAdjustment {
+            amount: 0.5,
+            patch: Some(SkinSmoothingPatch {
+                bitmap_width: 1,
+                bitmap_height: 1,
+                pixels: vec![200, 200, 200],
+            }),
+        };
+        let result = apply(&base, 4, 4, &adjustment);
+        assert_eq!(result[0], 100);
+    }
+}

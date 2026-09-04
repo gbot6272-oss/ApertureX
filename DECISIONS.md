@@ -3520,3 +3520,34 @@ komplette Testausführung läuft gebündelt erst einmalig in Schritt 6.
 **Nicht Teil dieser Phase:** volle Photoshop-Parität (Vektor-
 Ebenenmasken, Smart Objects, Aktionen/Skript-Recorder, Fluchtpunkt,
 Puppenstock-Verzerrung) — eigene, größere Ausbaustufen.
+
+**Nachtrag (Schritt 6, Abnahme):** alle fünf Funktionen wie geplant
+gebaut, keine Abweichung von der oben skizzierten Architektur. Gezielte
+Unit-Tests je neuem Modul ergänzt (`stages::composite::blend_if_weight`,
+`stages::liquify`, `stages::geometry::apply_content_aware_scale`,
+`stages::skin_smoothing`, `apx_ai::seam_carving` — inklusive eines
+Tests, der belegt, dass eine vollständig geschützte Bildfläche einen
+Breiten-Schrumpf tatsächlich übersteht). `cargo fmt/clippy/test
+--workspace`, `tsc -b`, Vitest und die volle Playwright-Suite laufen
+grün — bis auf einen einzelnen `tat-flow.spec.ts`-Fehlschlag
+(Vektorskop-Panel überlagert per `pointer-events` einen TAT-Knopf), der
+real gegen den Phase-14-Endstand (`e6ec6e1`, per Git-Worktree isoliert
+nachgestellt) identisch reproduziert und damit nachweislich phasenfremd
+ist — keine Regression dieser Phase, nicht behoben (außerhalb des
+Scopes).
+
+Nebenbei bei der vollen Testausführung einen echten, seit Phase 14
+Schritt 9/10 bestehenden Bug gefunden und behoben (kein Ergebnis dieser
+Phase, aber blockierte deren „volle Suite grün"-Abnahmekriterium):
+`StyleTransferPatch`/`SkyReplacePatch.pixels` legten im Frontend den
+rohen Base64-String statt eines dekodierten Byte-Arrays ab — Rusts
+`Vec<u8>` kann eine JSON-Zeichenkette nicht deserialisieren (per
+`serde_json`-Testfall real bestätigt: „invalid type: string ...,
+expected a sequence"). Committen eines Stiltransfer- oder
+Himmelsaustausch-Ergebnisses hätte an dieser Stelle real fehlschlagen
+müssen; der zugehörige Playwright-Test bestand dennoch, weil er
+gegen die gemockte Tauri-IPC-Schicht läuft, nicht gegen echte
+Rust-Deserialisierung. Behoben durch `base64ToByteArray` an beiden
+Store-Stellen, TS-Typen auf `number[]` korrigiert (dieselbe Konvention
+wie `CompositeLayerSource`/`ContentAwareScalePatch`), betroffener
+Playwright-Test entsprechend angepasst.

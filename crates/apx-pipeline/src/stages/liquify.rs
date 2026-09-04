@@ -163,7 +163,7 @@ fn apply_stroke(base: &[u8], width: u32, height: u32, stroke: &LiquifyStroke) ->
     let strength = stroke.strength.clamp(0.0, 1.0);
 
     let first = path[0];
-    let last = *path.last().unwrap();
+    let last = path.last().copied().unwrap_or(first);
     let (mut dx, mut dy) = (last.0 - first.0, last.1 - first.1);
     let len = (dx * dx + dy * dy).sqrt();
     if len > 1e-3 {
@@ -203,4 +203,122 @@ pub fn apply(base: &[u8], width: u32, height: u32, strokes: &[LiquifyStroke]) ->
         current = apply_stroke(&current, width, height, stroke);
     }
     current
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::edl::v4::LiquifyPoint;
+
+    fn point(x: f32, y: f32) -> LiquifyPoint {
+        LiquifyPoint { x, y }
+    }
+
+    fn flat_image(width: u32, height: u32, rgb: [u8; 3]) -> Vec<u8> {
+        let mut out = vec![0u8; (width * height * 4) as usize];
+        for px in out.chunks_exact_mut(4) {
+            px[0] = rgb[0];
+            px[1] = rgb[1];
+            px[2] = rgb[2];
+            px[3] = 255;
+        }
+        out
+    }
+
+    #[test]
+    fn empty_stroke_list_is_identity() {
+        let base = flat_image(6, 6, [10, 20, 30]);
+        assert_eq!(apply(&base, 6, 6, &[]), base);
+    }
+
+    #[test]
+    fn zero_strength_leaves_the_image_unchanged() {
+        let base = flat_image(8, 8, [10, 20, 30]);
+        let stroke = LiquifyStroke {
+            center_path: vec![point(0.5, 0.5)],
+            radius: 0.3,
+            strength: 0.0,
+            mode: LiquifyMode::Twirl,
+        };
+        assert_eq!(apply(&base, 8, 8, &[stroke]), base);
+    }
+
+    #[test]
+    fn a_pixel_far_outside_the_radius_stays_unchanged() {
+        // Ein Farbfleck rechts unten, weit außerhalb des Wirkradius um
+        // die Bildmitte — Bloat um die Mitte darf ihn nicht erreichen.
+        let width = 30u32;
+        let height = 30u32;
+        let mut base = vec![0u8; (width * height * 4) as usize];
+        for px in base.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
+        let corner = (((height - 1) * width + (width - 1)) * 4) as usize;
+        base[corner] = 200;
+        base[corner + 1] = 100;
+        base[corner + 2] = 50;
+        let stroke = LiquifyStroke {
+            center_path: vec![point(0.5, 0.5)],
+            radius: 0.1,
+            strength: 1.0,
+            mode: LiquifyMode::Bloat,
+        };
+        let out = apply(&base, width, height, &[stroke]);
+        assert_eq!(&out[corner..corner + 4], &[200, 100, 50, 255]);
+    }
+
+    #[test]
+    fn bloat_changes_pixels_within_its_radius() {
+        // Ein Farbfleck in der linken Bildhälfte, Rest schwarz — Bloat
+        // um den Fleckrand herum muss die Kante sichtbar verschieben
+        // (das Ergebnis unterscheidet sich vom unveränderten Bild),
+        // ohne die Bildgröße zu ändern.
+        let width = 20u32;
+        let height = 20u32;
+        let mut base = vec![0u8; (width * height * 4) as usize];
+        for y in 0..height {
+            for x in 0..width {
+                let i = ((y * width + x) * 4) as usize;
+                if x < 10 {
+                    base[i] = 200;
+                    base[i + 1] = 200;
+                    base[i + 2] = 200;
+                }
+                base[i + 3] = 255;
+            }
+        }
+        let stroke = LiquifyStroke {
+            center_path: vec![point(0.5, 0.5)],
+            radius: 0.4,
+            strength: 1.0,
+            mode: LiquifyMode::Bloat,
+        };
+        let out = apply(&base, width, height, &[stroke]);
+        assert_eq!(out.len(), base.len());
+        assert_ne!(out, base);
+    }
+
+    #[test]
+    fn push_shifts_pixels_along_the_drag_direction() {
+        // Ein einzelner heller Punkt, ein Push-Strich von links nach
+        // rechts direkt darüber sollte den Punkt sichtbar verschieben.
+        let width = 20u32;
+        let height = 20u32;
+        let mut base = vec![0u8; (width * height * 4) as usize];
+        for px in base.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
+        let mark = ((10 * width + 5) * 4) as usize;
+        base[mark] = 255;
+        base[mark + 1] = 255;
+        base[mark + 2] = 255;
+        let stroke = LiquifyStroke {
+            center_path: vec![point(0.1, 0.5), point(0.9, 0.5)],
+            radius: 0.3,
+            strength: 1.0,
+            mode: LiquifyMode::Push,
+        };
+        let out = apply(&base, width, height, &[stroke]);
+        assert_ne!(out, base);
+    }
 }

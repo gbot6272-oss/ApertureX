@@ -1169,7 +1169,7 @@ Volle Suite gebündelt erst im letzten Schritt.
 - [x] 4. Text-/Titel-Overlays mit Zeitspanne/Position — `TimelineTextOverlay` (Rust-Text-Rasterisierung + `ffmpeg`-`overlay`-Filter statt `drawtext`), Overlay-Editor in `VideoTimelineDialog.tsx`
 - [x] 5. Automatische Untertitel (Whisper, Opt-in-Download) — `apx_ai::subtitles` hinter Cargo-Feature `subtitles` (real mit `--features subtitles` kompiliert), `ggml-base.en.bin` (SHA1 real aus whisper.cpp-README), Transkription -> Text-Overlay-Einträge in `VideoTimelineDialog.tsx`
 - [x] 6. Social-Media-Export-Presets (9:16/1:1/16:9) — reine Frontend-Erweiterung, Backend skaliert bereits "cover" auf beliebiges Seitenverhältnis
-- [ ] 7. Bild-in-Bild / Split-Screen
+- [x] 7. Bild-in-Bild / Split-Screen — `TimelinePipOverlay` (Quelle = normaler `TimelineItem`), Split-Screen als zwei gegenüberliegende 50%-Overlays statt eigenem Mechanismus
 - [ ] 8. Greenscreen/Hintergrund entfernen (MediaPipe Selfie Segmentation)
 - [ ] 9. Video-Stabilisierung (Wiederverwendung `apx-stacking`-Homografie)
 - [ ] 10. Dokumentation, volle Verifikation, Abnahme

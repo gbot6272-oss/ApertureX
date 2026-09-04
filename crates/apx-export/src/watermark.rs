@@ -30,7 +30,7 @@ pub enum WatermarkPosition {
     Center,
 }
 
-fn origin_for(
+pub(crate) fn origin_for(
     position: WatermarkPosition,
     canvas_w: u32,
     canvas_h: u32,

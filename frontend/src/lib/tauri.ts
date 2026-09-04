@@ -537,6 +537,25 @@ export interface TimelineTextOverlayInput {
   colorRgb?: [number, number, number];
 }
 
+/** Ein Bild-in-Bild-/Split-Screen-Overlay (Phase 17 Schritt 7, siehe
+ * `DECISIONS.md` ADR-0045) — die Quelle folgt demselben Vertrag wie
+ * {@link TimelineItemInput}, zusätzlich Zeitspanne/Position/Größe.
+ * Split-Screen ist derselbe Mechanismus mit `scale` nahe `1.0` und
+ * zwei Overlays an gegenüberliegenden Positionen. Siehe
+ * `apx_app::commands::TimelinePipOverlayInput`s Moduldoku. */
+export interface TimelinePipOverlayInput {
+  photoId: string;
+  inMs?: number;
+  outMs?: number;
+  holdSeconds?: number;
+  speed?: number;
+  startSeconds: number;
+  endSeconds: number;
+  position: "top_left" | "top_right" | "bottom_left" | "bottom_right" | "center";
+  /** Anteil an der Ziel-Auflösung, `0.05..=1.0`. */
+  scale: number;
+}
+
 export interface VideoTimelineOptions {
   width: number;
   height: number;
@@ -546,6 +565,7 @@ export interface VideoTimelineOptions {
   transitionSeconds?: number;
   musicPath?: string;
   textOverlays?: TimelineTextOverlayInput[];
+  pipOverlays?: TimelinePipOverlayInput[];
 }
 
 /** Rendert `items` zu einer neuen Video-Zeitachse und legt sie als

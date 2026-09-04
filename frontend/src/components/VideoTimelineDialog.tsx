@@ -4,6 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 import {
   pickFilePath,
   type TimelineItemInput,
+  type TimelinePipOverlayInput,
   type TimelineTextOverlayInput,
   type VideoTimelineOptions,
 } from "../lib/tauri";
@@ -124,6 +125,22 @@ interface DraftOverlay {
   endSeconds: number;
   fontSize: number;
   color: string;
+}
+
+/** Ein Bild-in-Bild-/Split-Screen-Overlay-Entwurf (Phase 17 Schritt 7,
+ * siehe `DECISIONS.md` ADR-0045) — `photoId` verweist auf ein
+ * beliebiges Foto/Video aus der aktuell aktiven Liste, unabhängig von
+ * `items` (eine Bild-in-Bild-Quelle muss nicht Teil der Haupt-
+ * Zeitachse sein, z. B. eine Webcam-Aufnahme über einem
+ * Bildschirmmitschnitt). Video-Quellen spielen bewusst immer ab ihrem
+ * eigenen Anfang für die Dauer des Overlay-Fensters (kein zusätzlicher
+ * Trim-Regler nur für Bild-in-Bild — bewusste Vereinfachung). */
+interface DraftPip {
+  photoId: string;
+  startSeconds: number;
+  endSeconds: number;
+  position: TimelinePipOverlayInput["position"];
+  scale: number;
 }
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -252,6 +269,7 @@ export function VideoTimelineDialog({
   const [fps, setFps] = useState(30);
   const [overlays, setOverlays] = useState<DraftOverlay[]>([]);
   const [overlayFontPath, setOverlayFontPath] = useState("");
+  const [pips, setPips] = useState<DraftPip[]>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -274,6 +292,7 @@ export function VideoTimelineDialog({
       new Array(Math.max(0, photoIds.length - 1)).fill(DEFAULT_TRANSITION),
     );
     setOverlays([]);
+    setPips([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, photoIds]);
 
@@ -395,6 +414,30 @@ export function VideoTimelineDialog({
     setOverlays((prev) => prev.filter((_, i) => i !== index));
   }
 
+  function addPip() {
+    const firstPhotoId = activePhotos[0]?.id ?? "";
+    setPips((prev) => [
+      ...prev,
+      {
+        photoId: firstPhotoId,
+        startSeconds: 0,
+        endSeconds: 3,
+        position: "top_right",
+        scale: 0.3,
+      },
+    ]);
+  }
+
+  function updatePip(index: number, patch: Partial<DraftPip>) {
+    setPips((prev) =>
+      prev.map((pip, i) => (i === index ? { ...pip, ...patch } : pip)),
+    );
+  }
+
+  function removePip(index: number) {
+    setPips((prev) => prev.filter((_, i) => i !== index));
+  }
+
   async function handleRender() {
     if (items.length === 0) return;
     const { width, height } = RESOLUTIONS[resolution];
@@ -421,6 +464,31 @@ export function VideoTimelineDialog({
               fontSize: overlay.fontSize,
               colorRgb: hexToRgb(overlay.color),
             }))
+          : undefined,
+      pipOverlays:
+        pips.length > 0
+          ? pips
+              .filter((pip) => pip.photoId)
+              .map((pip) => {
+                const windowSeconds = Math.max(
+                  0.1,
+                  pip.endSeconds - pip.startSeconds,
+                );
+                const base: TimelinePipOverlayInput = {
+                  photoId: pip.photoId,
+                  startSeconds: pip.startSeconds,
+                  endSeconds: pip.endSeconds,
+                  position: pip.position,
+                  scale: pip.scale,
+                };
+                return isVideo(pip.photoId)
+                  ? {
+                      ...base,
+                      inMs: 0,
+                      outMs: Math.round(windowSeconds * 1000),
+                    }
+                  : { ...base, holdSeconds: windowSeconds };
+              })
           : undefined,
     };
     await renderVideoTimeline(timelineItems, options);
@@ -768,6 +836,122 @@ export function VideoTimelineDialog({
             ))}
             {overlays.length === 0 && (
               <p className="text-xs text-text-muted">Kein Overlay.</p>
+            )}
+          </div>
+        </div>
+
+        <div className="mb-3 rounded border border-border p-2">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-semibold text-text-secondary">
+              Bild-in-Bild / Split-Screen
+            </span>
+            <button
+              type="button"
+              onClick={addPip}
+              disabled={activePhotos.length === 0}
+              className="rounded border border-border px-2 py-0.5 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              + Hinzufügen
+            </button>
+          </div>
+          <p className="mb-2 text-xs text-text-muted">
+            Eine zweite Quelle klein über der Zeitachse einblenden — für echtes
+            Split-Screen zwei Einblendungen mit je 50% Größe an
+            gegenüberliegenden Positionen anlegen.
+          </p>
+          <div className="flex flex-col gap-2">
+            {pips.map((pip, index) => (
+              <div key={index} className="rounded border border-border p-2">
+                <div className="mb-1 flex items-center gap-2">
+                  <select
+                    value={pip.photoId}
+                    onChange={(e) =>
+                      updatePip(index, { photoId: e.target.value })
+                    }
+                    className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-sm"
+                  >
+                    {activePhotos.map((photo) => (
+                      <option key={photo.id} value={photo.id}>
+                        {photo.filename}{" "}
+                        {photo.media_kind === "video" ? "(Video)" : "(Foto)"}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => removePip(index)}
+                    className="shrink-0 rounded border border-border px-1.5 py-0.5 text-xs text-danger hover:border-danger"
+                  >
+                    Entfernen
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                    Start (s)
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      value={pip.startSeconds}
+                      onChange={(e) =>
+                        updatePip(index, {
+                          startSeconds: Number(e.target.value),
+                        })
+                      }
+                      className="w-20 rounded border border-border bg-bg-panel px-2 py-1"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                    Ende (s)
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      value={pip.endSeconds}
+                      onChange={(e) =>
+                        updatePip(index, { endSeconds: Number(e.target.value) })
+                      }
+                      className="w-20 rounded border border-border bg-bg-panel px-2 py-1"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                    Position
+                    <select
+                      value={pip.position}
+                      onChange={(e) =>
+                        updatePip(index, {
+                          position: e.target
+                            .value as TimelinePipOverlayInput["position"],
+                        })
+                      }
+                      className="rounded border border-border bg-bg-panel px-2 py-1"
+                    >
+                      {OVERLAY_POSITIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                    Größe
+                    <select
+                      value={pip.scale}
+                      onChange={(e) =>
+                        updatePip(index, { scale: Number(e.target.value) })
+                      }
+                      className="rounded border border-border bg-bg-panel px-2 py-1"
+                    >
+                      <option value={0.2}>20%</option>
+                      <option value={0.3}>30%</option>
+                      <option value={0.5}>50% (Split-Screen)</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+            ))}
+            {pips.length === 0 && (
+              <p className="text-xs text-text-muted">Keine Einblendung.</p>
             )}
           </div>
         </div>

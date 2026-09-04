@@ -1731,6 +1731,10 @@ pub struct VideoTimelineOptions {
     /// ADR-0045) — Zeiten beziehen sich auf die fertige, verkettete
     /// Sequenz.
     pub text_overlays: Option<Vec<TimelineTextOverlayInput>>,
+    /// Bild-in-Bild-/Split-Screen-Overlays (Phase 17 Schritt 7, siehe
+    /// `DECISIONS.md` ADR-0045) — Zeiten beziehen sich ebenfalls auf die
+    /// fertige, verkettete Sequenz.
+    pub pip_overlays: Option<Vec<TimelinePipOverlayInput>>,
 }
 
 /// Ein Text-Overlay-Eintrag (Phase 17 Schritt 4) — `position` folgt
@@ -1777,6 +1781,133 @@ fn build_timeline_text_overlays(
         .collect()
 }
 
+/// Baut aus den rohen Eingabefeldern eines Zeitachsen-Eintrags (Foto-ID +
+/// optionale Trim-/Haltedauer-/Tempo-Felder) das passende
+/// `TimelineItem` — gemeinsam genutzt von der Haupt-Zeitachse
+/// (`items`) und den Bild-in-Bild-Overlays (Phase 17 Schritt 7,
+/// [`build_timeline_pip_overlays`]), damit die Video-/Foto-Erkennungs-
+/// und Validierungslogik nicht zweimal existiert. Gibt zusätzlich die
+/// `FolderId` zurück (die Haupt-Zeitachse braucht sie für den
+/// Ziel-Ordner, Bild-in-Bild-Overlays ignorieren sie).
+fn build_timeline_item(
+    state: &AppState,
+    photo_id: &str,
+    in_ms: Option<i64>,
+    out_ms: Option<i64>,
+    hold_seconds: Option<f32>,
+    speed: Option<f32>,
+) -> Result<(apx_core::FolderId, apx_export::timeline::TimelineItem), String> {
+    let parsed_id = parse_photo_id(photo_id.to_string())?;
+    let photo = state
+        .catalog
+        .get_photo(parsed_id)
+        .map_err(|err| err.to_string())?;
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    if photo.media_kind == "video" {
+        let in_ms = in_ms.ok_or_else(|| "Video-Eintrag ohne Start-Zeitpunkt".to_string())?;
+        let out_ms = out_ms.ok_or_else(|| "Video-Eintrag ohne End-Zeitpunkt".to_string())?;
+        if in_ms < 0 || out_ms <= in_ms {
+            return Err("Ungültiger Zeitbereich in der Zeitachse".to_string());
+        }
+        let speed = speed.unwrap_or(1.0);
+        if !(0.1..=8.0).contains(&speed) {
+            return Err("Tempo-Faktor muss zwischen 0,1 und 8,0 liegen".to_string());
+        }
+        Ok((
+            photo.folder_id,
+            apx_export::timeline::TimelineItem::VideoClip {
+                source_path,
+                in_ms,
+                out_ms,
+                speed,
+            },
+        ))
+    } else {
+        let edl = resolve_current_edl(&state.catalog, parsed_id)?;
+        let request = apx_export::engine::ExportRequest::new(
+            source_path,
+            edl,
+            apx_export::format::ExportFormat::Jpeg,
+        );
+        let (width, height, rgba) =
+            apx_export::engine::render_to_pixels(Some(&state.pipeline), &request)
+                .map_err(|err| err.to_string())?;
+        Ok((
+            photo.folder_id,
+            apx_export::timeline::TimelineItem::Photo {
+                width,
+                height,
+                rgba,
+                hold_seconds: hold_seconds.unwrap_or(3.0).max(0.1),
+            },
+        ))
+    }
+}
+
+/// Ein Bild-in-Bild-/Split-Screen-Overlay (Phase 17 Schritt 7, siehe
+/// `DECISIONS.md` ADR-0045) — die Quelle (`photo_id` + Trim-/Halte-/
+/// Tempo-Felder) folgt demselben Vertrag wie [`TimelineItemInput`],
+/// zusätzlich Zeitspanne/Position/Größe für die Einblendung. Split-
+/// Screen ist bewusst kein eigener Mechanismus, sondern derselbe
+/// Bild-in-Bild-Overlay mit `scale` nahe `1.0` und zwei Einträgen an
+/// gegenüberliegenden Positionen (siehe Moduldoku-Verweis in ADR-0045).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelinePipOverlayInput {
+    pub photo_id: String,
+    pub in_ms: Option<i64>,
+    pub out_ms: Option<i64>,
+    pub hold_seconds: Option<f32>,
+    pub speed: Option<f32>,
+    pub start_seconds: f32,
+    pub end_seconds: f32,
+    pub position: String,
+    /// Anteil an der Ziel-Videobreite/-höhe (`0.05..=1.0`) — die
+    /// Einblendung behält dasselbe Seitenverhältnis wie die
+    /// Ziel-Auflösung selbst (siehe `apx_export::timeline::
+    /// apply_pip_overlays`s Moduldoku).
+    pub scale: f32,
+}
+
+fn build_timeline_pip_overlays(
+    state: &AppState,
+    overlays: &[TimelinePipOverlayInput],
+) -> Result<Vec<apx_export::timeline::TimelinePipOverlay>, String> {
+    overlays
+        .iter()
+        .map(|overlay| {
+            if overlay.end_seconds <= overlay.start_seconds {
+                return Err("Bild-in-Bild-Overlay: Ende muss nach dem Start liegen".to_string());
+            }
+            if !(0.05..=1.0).contains(&overlay.scale) {
+                return Err(
+                    "Bild-in-Bild-Overlay: Größe muss zwischen 0,05 und 1,0 liegen".to_string(),
+                );
+            }
+            let (_, source) = build_timeline_item(
+                state,
+                &overlay.photo_id,
+                overlay.in_ms,
+                overlay.out_ms,
+                overlay.hold_seconds,
+                overlay.speed,
+            )?;
+            Ok(apx_export::timeline::TimelinePipOverlay {
+                source,
+                start_seconds: overlay.start_seconds,
+                end_seconds: overlay.end_seconds,
+                position: parse_watermark_position(&overlay.position)?,
+                scale: overlay.scale,
+            })
+        })
+        .collect()
+}
+
 /// Rendert `items` zu einer neuen Video-Zeitachse (siehe
 /// `apx_export::timeline`s Moduldoku für den zweistufigen Rendering-
 /// Ansatz) und legt das Ergebnis als neues Katalog-Video im Ordner des
@@ -1813,57 +1944,18 @@ pub fn render_video_timeline(
     let mut timeline_items = Vec::with_capacity(items.len());
     let mut first_folder_id = None;
     for item in &items {
-        let photo_id = parse_photo_id(item.photo_id.clone())?;
-        let photo = state
-            .catalog
-            .get_photo(photo_id)
-            .map_err(|err| err.to_string())?;
+        let (folder_id, timeline_item) = build_timeline_item(
+            &state,
+            &item.photo_id,
+            item.in_ms,
+            item.out_ms,
+            item.hold_seconds,
+            item.speed,
+        )?;
         if first_folder_id.is_none() {
-            first_folder_id = Some(photo.folder_id);
+            first_folder_id = Some(folder_id);
         }
-        let folder = state
-            .catalog
-            .get_folder(photo.folder_id)
-            .map_err(|err| err.to_string())?;
-        let source_path = folder.path.join(&photo.filename);
-
-        if photo.media_kind == "video" {
-            let in_ms = item
-                .in_ms
-                .ok_or_else(|| "Video-Eintrag ohne Start-Zeitpunkt".to_string())?;
-            let out_ms = item
-                .out_ms
-                .ok_or_else(|| "Video-Eintrag ohne End-Zeitpunkt".to_string())?;
-            if in_ms < 0 || out_ms <= in_ms {
-                return Err("Ungültiger Zeitbereich in der Zeitachse".to_string());
-            }
-            let speed = item.speed.unwrap_or(1.0);
-            if !(0.1..=8.0).contains(&speed) {
-                return Err("Tempo-Faktor muss zwischen 0,1 und 8,0 liegen".to_string());
-            }
-            timeline_items.push(apx_export::timeline::TimelineItem::VideoClip {
-                source_path,
-                in_ms,
-                out_ms,
-                speed,
-            });
-        } else {
-            let edl = resolve_current_edl(&state.catalog, photo_id)?;
-            let request = apx_export::engine::ExportRequest::new(
-                source_path,
-                edl,
-                apx_export::format::ExportFormat::Jpeg,
-            );
-            let (width, height, rgba) =
-                apx_export::engine::render_to_pixels(Some(&state.pipeline), &request)
-                    .map_err(|err| err.to_string())?;
-            timeline_items.push(apx_export::timeline::TimelineItem::Photo {
-                width,
-                height,
-                rgba,
-                hold_seconds: item.hold_seconds.unwrap_or(3.0).max(0.1),
-            });
-        }
+        timeline_items.push(timeline_item);
     }
 
     let folder_id = first_folder_id.ok_or_else(|| "Kein Eintrag in der Zeitachse".to_string())?;
@@ -1875,12 +1967,15 @@ pub fn render_video_timeline(
 
     let text_overlays =
         build_timeline_text_overlays(options.text_overlays.as_deref().unwrap_or_default())?;
+    let pip_overlays =
+        build_timeline_pip_overlays(&state, options.pip_overlays.as_deref().unwrap_or_default())?;
     let timeline_options = apx_export::timeline::TimelineExportOptions {
         output_width: options.width,
         output_height: options.height,
         fps: options.fps,
         audio_path: options.music_path.as_ref().map(PathBuf::from),
         text_overlays,
+        pip_overlays,
     };
 
     apx_export::timeline::render_video_timeline(

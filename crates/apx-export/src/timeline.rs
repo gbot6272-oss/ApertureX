@@ -60,6 +60,29 @@ pub struct TimelineTextOverlay {
     pub text_color: [u8; 3],
 }
 
+/// Ein Bild-in-Bild-/Split-Screen-Overlay über einer Zeitspanne der
+/// fertigen Sequenz (Phase 17 Schritt 7, siehe `DECISIONS.md`
+/// ADR-0045) — `source` ist ein ganz normaler [`TimelineItem`] (Video-
+/// Clip, Foto oder Titelkarte), genau wie ein Haupt-Zeitachsen-
+/// Eintrag, nur zusätzlich verkleinert und über die bereits verkettete
+/// Sequenz gelegt statt selbst Teil der Kette zu sein. **Split-Screen
+/// ist bewusst kein eigener Mechanismus** — dieselbe Struktur mit
+/// `scale` nahe `1.0` und zwei Overlays an gegenüberliegenden
+/// Positionen (z. B. `TopLeft`+`TopRight`, je `scale: 0.5`) ergibt ein
+/// Nebeneinander zweier Quellen, ohne eine zweite Kompositions-
+/// Infrastruktur zu brauchen.
+#[derive(Debug, Clone)]
+pub struct TimelinePipOverlay {
+    pub source: TimelineItem,
+    pub start_seconds: f32,
+    pub end_seconds: f32,
+    pub position: WatermarkPosition,
+    /// Anteil an der Ziel-Auflösung (`0.05..=1.0`) — die Einblendung
+    /// behält dasselbe Seitenverhältnis wie die Ziel-Auflösung selbst
+    /// (siehe [`apply_pip_overlays`]s Moduldoku).
+    pub scale: f32,
+}
+
 /// Übergangsart zwischen zwei Zeitachsen-Einträgen (Phase 17 Schritt 3,
 /// siehe `DECISIONS.md` ADR-0045) — bewusst ein eigener, reicherer Typ
 /// statt Wiederverwendung von `video::TransitionKind` (Cut/CrossFade):
@@ -160,6 +183,10 @@ pub struct TimelineExportOptions {
     /// Text-/Titel-Overlays (Phase 17 Schritt 4) — angewendet auf die
     /// bereits verkettete Sequenz, vor dem Einmischen der Musik.
     pub text_overlays: Vec<TimelineTextOverlay>,
+    /// Bild-in-Bild-/Split-Screen-Overlays (Phase 17 Schritt 7) —
+    /// angewendet nach den Text-Overlays, ebenfalls vor dem Einmischen
+    /// der Musik (siehe [`render_video_timeline`]s Reihenfolge).
+    pub pip_overlays: Vec<TimelinePipOverlay>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -258,6 +285,20 @@ pub fn render_video_timeline(
             &overlaid,
         )?;
         video_only_path = overlaid;
+    }
+
+    if !options.pip_overlays.is_empty() {
+        let composited = tmp_dir.path().join("pip.mp4");
+        apply_pip_overlays(
+            &video_only_path,
+            &options.pip_overlays,
+            options.output_width,
+            options.output_height,
+            options.fps,
+            tmp_dir.path(),
+            &composited,
+        )?;
+        video_only_path = composited;
     }
 
     if let Some(audio_path) = &options.audio_path {
@@ -522,6 +563,86 @@ fn apply_text_overlays(
             message: format!("ffmpeg nicht startbar (ist ffmpeg installiert?): {err}"),
         })?;
     check_ffmpeg_output(output, "Text-Overlays einblenden")
+}
+
+/// Blendet `overlays` als Bild-in-Bild-Einblendungen in `video_path`
+/// ein (siehe [`TimelinePipOverlay`]s Dokumentation für den Ansatz).
+/// Jede Overlay-Quelle wird zunächst wie ein ganz normaler Zeitachsen-
+/// Eintrag zu einem eigenen Segment gerendert (`render_segment`), aber
+/// auf `width * scale`×`height * scale` verkleinert (behält damit
+/// dasselbe Seitenverhältnis wie die Ziel-Auflösung, statt eine feste
+/// Box-Form zu erzwingen — ein 9:16-Bild-in-Bild auf einer 9:16-
+/// Zeitachse bleibt also proportional). Anschließend legt eine
+/// `ffmpeg`-`overlay`-Filterkette (mit `enable`-Zeitfenster, wie bei
+/// [`apply_text_overlays`]) jedes verkleinerte Segment an die per
+/// [`watermark::origin_for`] berechnete Position — dieselbe
+/// Positionierungsformel wie beim Text-/Bild-Wasserzeichen.
+fn apply_pip_overlays(
+    video_path: &Path,
+    overlays: &[TimelinePipOverlay],
+    width: u32,
+    height: u32,
+    fps: u32,
+    tmp_dir: &Path,
+    dest_path: &Path,
+) -> Result<()> {
+    const MARGIN: u32 = 16;
+
+    let mut segments = Vec::with_capacity(overlays.len());
+    for (index, overlay) in overlays.iter().enumerate() {
+        let pip_w = ((width as f32 * overlay.scale).round() as u32).max(2);
+        let pip_h = ((height as f32 * overlay.scale).round() as u32).max(2);
+        let pip_options = TimelineExportOptions {
+            output_width: pip_w,
+            output_height: pip_h,
+            fps,
+            audio_path: None,
+            text_overlays: Vec::new(),
+            pip_overlays: Vec::new(),
+        };
+        let segment_path = tmp_dir.join(format!("pip_{index}.mp4"));
+        render_segment(&overlay.source, &pip_options, &segment_path)?;
+        segments.push((segment_path, pip_w, pip_h));
+    }
+
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-y").arg("-i").arg(video_path);
+    for (path, _, _) in &segments {
+        cmd.arg("-i").arg(path);
+    }
+
+    let mut filter = String::new();
+    let mut prev_label = "0:v".to_string();
+    for (index, (_, pip_w, pip_h)) in segments.iter().enumerate() {
+        let overlay = &overlays[index];
+        let (x, y) = watermark::origin_for(overlay.position, width, height, *pip_w, *pip_h, MARGIN);
+        let out_label = if index == segments.len() - 1 {
+            "vout".to_string()
+        } else {
+            format!("p{index}")
+        };
+        filter.push_str(&format!(
+            "[{prev_label}][{}:v]overlay=x={x}:y={y}:enable='between(t,{:.3},{:.3})'[{out_label}];",
+            index + 1,
+            overlay.start_seconds,
+            overlay.end_seconds
+        ));
+        prev_label = out_label;
+    }
+    filter.pop(); // trailing ';'
+
+    let output = cmd
+        .arg("-filter_complex")
+        .arg(&filter)
+        .args(["-map", "[vout]", "-r"])
+        .arg(fps.to_string())
+        .args(["-c:v", "libx264", "-pix_fmt", "yuv420p"])
+        .arg(dest_path)
+        .output()
+        .map_err(|err| ExportError::Video {
+            message: format!("ffmpeg nicht startbar (ist ffmpeg installiert?): {err}"),
+        })?;
+    check_ffmpeg_output(output, "Bild-in-Bild einblenden")
 }
 
 fn mux_audio(video_path: &Path, audio_path: &Path, dest_path: &Path) -> Result<()> {

@@ -1693,6 +1693,258 @@ fn run_ffmpeg_apply_lut_to_video(
     Ok(())
 }
 
+// ---- Greenscreen/Hintergrund entfernen (Phase 17 Schritt 8, siehe --------
+// DECISIONS.md ADR-0045) — Ein-Clip-Command wie apply_lut_filter_to_video
+// oben, bewusst KEIN Zeitachsen-Feature (siehe ADR-0045s Architektur-
+// Begründung): verarbeitet ein Video zu einem neuen Katalog-Video, das
+// man danach wie jedes andere als Zeitachsen-Eintrag verwendet.
+
+/// Öffentliche Download-URL einer ONNX-Konvertierung des MediaPipe-
+/// Selfie-Segmentation-Modells (`onnx-community/mediapipe_selfie_segmentation`,
+/// Hugging Face, folgt deren dokumentiertem `resolve/main/<datei>`-
+/// Schema). **Nicht in dieser Sitzung erreichbar/verifiziert** —
+/// `huggingface.co` ist von dieser Entwicklungs-Sandbox aus blockiert,
+/// genau wie beim LaMa-Modell (Phase 13, [`LAMA_MODEL_URL`]) und dem
+/// ursprünglichen MediaPipe-Modell selbst (siehe `apx_ai::
+/// selfie_segmentation`s Moduldoku für den vollständigen Rechercheweg,
+/// inkl. der geprüften Apache-2.0-Lizenz). **Keine Hash-Prüfung** aus
+/// demselben Grund wie bei `LAMA_MODEL_URL` — eine erfundene
+/// Prüfsumme wäre schlimmer als eine ehrliche Lücke.
+const SELFIE_SEGMENTATION_MODEL_URL: &str =
+    "https://huggingface.co/onnx-community/mediapipe_selfie_segmentation/resolve/main/onnx/model.onnx";
+
+/// Lädt das Selfie-Segmentation-Modell herunter (siehe
+/// [`SELFIE_SEGMENTATION_MODEL_URL`]s Vorbehalt) und hinterlegt den Pfad
+/// in den Einstellungen — dieselbe "keine Hash-Prüfung, ehrlich
+/// dokumentiert"-Logik wie [`download_inpainting_model`].
+#[tauri::command]
+pub async fn download_selfie_segmentation_model(
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let response = reqwest::get(SELFIE_SEGMENTATION_MODEL_URL)
+        .await
+        .map_err(|err| {
+            format!("Download von '{SELFIE_SEGMENTATION_MODEL_URL}' fehlgeschlagen: {err}")
+        })?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Download von '{SELFIE_SEGMENTATION_MODEL_URL}' fehlgeschlagen: HTTP {}",
+            response.status()
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| format!("Antwort konnte nicht gelesen werden: {err}"))?;
+
+    let dest_dir = state.paths.models_dir();
+    std::fs::create_dir_all(&dest_dir).map_err(|err| err.to_string())?;
+    let dest_path = dest_dir.join("selfie_segmentation.onnx");
+    std::fs::write(&dest_path, &bytes).map_err(|err| err.to_string())?;
+
+    let path_string = dest_path.to_string_lossy().to_string();
+    let settings_path = state.paths.settings_file();
+    let mut settings =
+        apx_core::Settings::load_or_default(&settings_path).map_err(|err| err.to_string())?;
+    settings.ai.selfie_segmentation_model_path = Some(path_string.clone());
+    settings
+        .save(&settings_path)
+        .map_err(|err| err.to_string())?;
+
+    Ok(path_string)
+}
+
+/// Entfernt den hinterlegten Modellpfad (löscht die Datei selbst nicht,
+/// siehe [`clear_depth_model_path`]s Begründung).
+#[tauri::command]
+pub fn clear_selfie_segmentation_model_path(state: State<'_, AppState>) -> Result<(), String> {
+    let path = state.paths.settings_file();
+    let mut settings = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    settings.ai.selfie_segmentation_model_path = None;
+    settings.save(&path).map_err(|err| err.to_string())
+}
+
+/// Ersetzt den Hintergrund eines Videos framegenau durch eine einfarbige
+/// Fläche (`background_rgb`) — braucht ein zuvor heruntergeladenes
+/// Modell (siehe [`download_selfie_segmentation_model`]). Nicht-
+/// destruktiv wie jeder andere Video-Bearbeitungs-Command dieser Datei.
+#[tauri::command]
+pub fn remove_video_background(
+    state: State<'_, AppState>,
+    photo_id: String,
+    background_rgb: [u8; 3],
+) -> Result<PhotoDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    if photo.media_kind != "video" {
+        return Err("Hintergrund entfernen funktioniert nur bei Videos".to_string());
+    }
+    let (Some(width), Some(height)) = (photo.width, photo.height) else {
+        return Err("Video-Auflösung unbekannt (fehlende Metadaten)".to_string());
+    };
+    let fps = photo.frame_rate.unwrap_or(30.0).max(1.0);
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let model_path = settings
+        .ai
+        .selfie_segmentation_model_path
+        .filter(|p| !p.trim().is_empty())
+        .ok_or_else(|| {
+            "Kein Hintergrundtrennungs-Modell heruntergeladen — siehe Einstellungen → KI."
+                .to_string()
+        })?;
+    let mut session =
+        apx_ai::selfie_segmentation::SelfieSegmentationSession::load(Path::new(&model_path))
+            .map_err(|err| err.to_string())?;
+
+    let dest_path = unique_sibling_video_path(&folder.path, &source_path, "greenscreen");
+    run_ffmpeg_remove_background(
+        &source_path,
+        &dest_path,
+        width,
+        height,
+        fps,
+        &mut session,
+        background_rgb,
+    )?;
+
+    register_video_result_as_new_photo(&state, photo.folder_id, &dest_path)
+}
+
+/// Zwei gekoppelte `ffmpeg`-Subprozesse, exakt dasselbe Muster wie
+/// [`run_ffmpeg_apply_lut_to_video`] — nur läuft je Frame statt der LUT-
+/// Anwendung eine ONNX-Segmentierungs-Inferenz plus weiche Alpha-
+/// Überblendung mit `background_rgb`.
+fn run_ffmpeg_remove_background(
+    source: &Path,
+    dest: &Path,
+    width: u32,
+    height: u32,
+    fps: f32,
+    session: &mut apx_ai::selfie_segmentation::SelfieSegmentationSession,
+    background_rgb: [u8; 3],
+) -> Result<(), String> {
+    use std::io::{Read, Write};
+
+    let mut decode = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(source)
+        .args(["-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("ffmpeg (Dekodieren) nicht startbar: {err}"))?;
+    let mut decode_stdout = decode
+        .stdout
+        .take()
+        .ok_or_else(|| "ffmpeg-Dekodier-Ausgabe nicht verfügbar".to_string())?;
+
+    let mut encode = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24"])
+        .args([
+            "-s",
+            &format!("{width}x{height}"),
+            "-r",
+            &format!("{fps}"),
+            "-i",
+            "-",
+        ])
+        .arg("-i")
+        .arg(source)
+        .args([
+            "-map", "0:v", "-map", "1:a?", "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+            "-c:a", "copy",
+        ])
+        .arg(dest)
+        .stdin(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("ffmpeg (Kodieren) nicht startbar: {err}"))?;
+    let mut encode_stdin = encode
+        .stdin
+        .take()
+        .ok_or_else(|| "ffmpeg-Kodier-Eingabe nicht verfügbar".to_string())?;
+
+    // Kein eigener Thread hier (anders als beim LUT-Filter): die
+    // ONNX-Sitzung ist nicht `Send` garantiert billig zu klonen, läuft
+    // also im Aufrufer-Thread. `ffmpeg`s eigene Puffer (typischerweise
+    // einige MB) federn den fehlenden Nebenläufigkeits-Puffer ab.
+    let frame_bytes = (width as usize) * (height as usize) * 3;
+    let mut frame = vec![0u8; frame_bytes];
+    let pump_result: Result<(), String> = (|| {
+        loop {
+            match decode_stdout.read_exact(&mut frame) {
+                Ok(()) => {
+                    let mask = session
+                        .person_mask_rgb8(&frame, width, height)
+                        .map_err(|err| err.to_string())?;
+                    let composited = composite_with_background(&frame, &mask, background_rgb);
+                    encode_stdin
+                        .write_all(&composited)
+                        .map_err(|err| format!("Schreiben an ffmpeg fehlgeschlagen: {err}"))?;
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(err) => return Err(format!("Lesen von ffmpeg fehlgeschlagen: {err}")),
+            }
+        }
+        Ok(())
+    })();
+    drop(encode_stdin); // EOF für ffmpeg (Kodieren)
+
+    let decode_status = decode
+        .wait()
+        .map_err(|err| format!("Warten auf ffmpeg (Dekodieren) fehlgeschlagen: {err}"))?;
+    let encode_output = {
+        let status = encode
+            .wait()
+            .map_err(|err| format!("Warten auf ffmpeg (Kodieren) fehlgeschlagen: {err}"))?;
+        let mut stderr = String::new();
+        if let Some(mut pipe) = encode.stderr.take() {
+            let _ = pipe.read_to_string(&mut stderr);
+        }
+        (status, stderr)
+    };
+
+    pump_result?;
+    if !decode_status.success() {
+        let _ = std::fs::remove_file(dest);
+        return Err("ffmpeg (Dekodieren) fehlgeschlagen".to_string());
+    }
+    if !encode_output.0.success() {
+        let _ = std::fs::remove_file(dest);
+        return Err(format!(
+            "ffmpeg (Kodieren) fehlgeschlagen: {}",
+            encode_output.1
+        ));
+    }
+    Ok(())
+}
+
+/// Überblendet `rgb` mit `background_rgb` — Gewichtung je Pixel per
+/// `mask` (`0` = ganz Hintergrund, `255` = ganz Person), weiche Kante
+/// statt hartem Ausschneiden (dieselbe lineare Alpha-Überblendung wie
+/// `apx_pipeline::stages::masks::blend_pixel`s `Normal`-Modus, hier
+/// ohne dessen Ziel-Ebenen-Abhängigkeit noch einmal direkt geschrieben,
+/// weil `apx-pipeline` nicht von `apx-ai` abhängen darf).
+fn composite_with_background(rgb: &[u8], mask: &[u8], background_rgb: [u8; 3]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(rgb.len());
+    for (pixel, &alpha) in rgb.chunks_exact(3).zip(mask.iter()) {
+        let a = alpha as f32 / 255.0;
+        for (channel, &bg) in pixel.iter().zip(background_rgb.iter()) {
+            out.push((*channel as f32 * a + bg as f32 * (1.0 - a)).round() as u8);
+        }
+    }
+    out
+}
+
 /// Ein einzelner Zeitachsen-Eintrag (Phase 17 Schritt 1, siehe
 /// `DECISIONS.md` ADR-0045) — `photo_id` referenziert entweder ein
 /// Video (dann sind `in_ms`/`out_ms` Pflicht) oder ein Foto (dann ist
@@ -4189,6 +4441,10 @@ pub struct AiSettingsDto {
     /// kompiliert wurde (siehe `apx-ai::subtitles`s Moduldoku) —
     /// analog zu `people_feature_compiled` oben.
     pub subtitles_feature_compiled: bool,
+    /// `Some`, sobald der Nutzer den Download des MediaPipe-Selfie-
+    /// Segmentation-Modells bestätigt hat und er erfolgreich war
+    /// (Phase 17 Schritt 8, siehe [`download_selfie_segmentation_model`]).
+    pub selfie_segmentation_model_path: Option<String>,
 }
 
 #[tauri::command]
@@ -4205,6 +4461,7 @@ pub fn get_ai_settings(state: State<'_, AppState>) -> Result<AiSettingsDto, Stri
         style_transfer_model_paths: settings.ai.style_transfer_model_paths,
         whisper_model_path: settings.ai.whisper_model_path,
         subtitles_feature_compiled: cfg!(feature = "subtitles"),
+        selfie_segmentation_model_path: settings.ai.selfie_segmentation_model_path,
     })
 }
 

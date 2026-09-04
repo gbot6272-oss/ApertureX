@@ -483,6 +483,32 @@ export function applyLutFilterToVideo(photoId: string, lut: LutFilterDataDto, st
   return invoke<PhotoDto>("apply_lut_filter_to_video", { photoId, lut, strength });
 }
 
+// ---- Greenscreen/Hintergrund entfernen (Phase 17 Schritt 8, siehe --------
+// DECISIONS.md ADR-0045) -----------------------------------------------------
+
+/** Lädt das MediaPipe-Selfie-Segmentation-ONNX-Modell herunter (Apache-2.0)
+ * — löst erst nach ausdrücklicher Nutzerbestätigung. Liefert den lokalen
+ * Zielpfad zurück. **Keine Hash-Prüfung** (siehe `apx_app::commands::
+ * SELFIE_SEGMENTATION_MODEL_URL`s Moduldoku). */
+export function downloadSelfieSegmentationModel(): Promise<string> {
+  return invoke<string>("download_selfie_segmentation_model");
+}
+
+/** Entfernt nur den hinterlegten Pfad — löscht die heruntergeladene Datei
+ * selbst nicht. */
+export function clearSelfieSegmentationModelPath(): Promise<void> {
+  return invoke<void>("clear_selfie_segmentation_model_path");
+}
+
+/** Ersetzt den Hintergrund eines Videos framegenau durch eine einfarbige
+ * Fläche (`backgroundRgb`) — braucht ein zuvor heruntergeladenes Modell
+ * (siehe `downloadSelfieSegmentationModel`), nicht-destruktiv wie jeder
+ * andere Video-Bearbeitungs-Command. Kann bei langen/hochauflösenden
+ * Videos spürbar dauern (Segmentierung läuft je Einzelbild). */
+export function removeVideoBackground(photoId: string, backgroundRgb: [number, number, number]): Promise<PhotoDto> {
+  return invoke<PhotoDto>("remove_video_background", { photoId, backgroundRgb });
+}
+
 /** Ein Video innerhalb einer `listSimilarVideoGroups`-Gruppe —
  * `folder_id` steht hier separat (nicht auf `PhotoDto` selbst, siehe
  * dessen Rust-Gegenstück `SimilarVideoDto`s Moduldoku), weil nur diese
@@ -1133,6 +1159,9 @@ export interface AiSettingsDto {
    * kompiliert wurde — `VideoTimelineDialog.tsx` zeigt dann einen Hinweis
    * statt der Untertitel-Aktionen. */
   subtitles_feature_compiled: boolean;
+  /** `null`, solange der Nutzer den Download nicht bestätigt hat (Phase 17
+   * Schritt 8, siehe `DECISIONS.md` ADR-0045). */
+  selfie_segmentation_model_path: string | null;
 }
 
 export function getAiSettings(): Promise<AiSettingsDto> {

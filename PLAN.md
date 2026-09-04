@@ -1170,7 +1170,7 @@ Volle Suite gebündelt erst im letzten Schritt.
 - [x] 5. Automatische Untertitel (Whisper, Opt-in-Download) — `apx_ai::subtitles` hinter Cargo-Feature `subtitles` (real mit `--features subtitles` kompiliert), `ggml-base.en.bin` (SHA1 real aus whisper.cpp-README), Transkription -> Text-Overlay-Einträge in `VideoTimelineDialog.tsx`
 - [x] 6. Social-Media-Export-Presets (9:16/1:1/16:9) — reine Frontend-Erweiterung, Backend skaliert bereits "cover" auf beliebiges Seitenverhältnis
 - [x] 7. Bild-in-Bild / Split-Screen — `TimelinePipOverlay` (Quelle = normaler `TimelineItem`), Split-Screen als zwei gegenüberliegende 50%-Overlays statt eigenem Mechanismus
-- [ ] 8. Greenscreen/Hintergrund entfernen (MediaPipe Selfie Segmentation)
+- [x] 8. Greenscreen/Hintergrund entfernen (MediaPipe Selfie Segmentation) — Ein-Clip-Command wie die LUT-Anwendung, ehrliche URL-/Hash-Lücke wie beim LaMa-Modell (huggingface.co blockiert)
 - [ ] 9. Video-Stabilisierung (Wiederverwendung `apx-stacking`-Homografie)
 - [ ] 10. Dokumentation, volle Verifikation, Abnahme
 - [x] `tsc -b`, volle `vitest run`-Suite (251 Tests, 28 neue), `map-flow.spec.ts` grün

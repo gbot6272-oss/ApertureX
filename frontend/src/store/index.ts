@@ -1829,6 +1829,17 @@ interface VideoSlice {
   videoLutError: string | null;
   applyLutFilterToCurrentVideo: (lut: LutFilterData, strength: number) => Promise<void>;
 
+  /** Greenscreen/Hintergrund entfernen (Phase 17 Schritt 8, siehe
+   * `DECISIONS.md` ADR-0045) — Opt-in-Modell-Download (dasselbe Muster
+   * wie `downloadDepthModel`), danach je Video ein Ein-Clip-Command
+   * (dasselbe Muster wie `applyLutFilterToCurrentVideo`). */
+  selfieSegmentationModelDownloading: boolean;
+  downloadSelfieSegmentationModel: () => Promise<void>;
+  clearSelfieSegmentationModelPath: () => Promise<void>;
+  videoBackgroundBusy: boolean;
+  videoBackgroundError: string | null;
+  removeBackgroundFromCurrentVideo: (backgroundRgb: [number, number, number]) => Promise<void>;
+
   /** Ähnliche Videos finden (Phase 16 Schritt 10, siehe `DECISIONS.md`
    * ADR-0043) — arbeitet wie der bestehende Perceptual-Hash-Duplikat-
    * Assistent (Phase 9 Schritt 1), auf Videos beschränkt. Läuft über
@@ -7007,6 +7018,64 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.videoLutBusy = false;
+        });
+      }
+    },
+
+    selfieSegmentationModelDownloading: false,
+
+    downloadSelfieSegmentationModel: async () => {
+      set((state) => {
+        state.selfieSegmentationModelDownloading = true;
+      });
+      try {
+        await api.downloadSelfieSegmentationModel();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.selfieSegmentationModelDownloading = false;
+        });
+      }
+    },
+
+    clearSelfieSegmentationModelPath: async () => {
+      try {
+        await api.clearSelfieSegmentationModelPath();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    videoBackgroundBusy: false,
+    videoBackgroundError: null,
+
+    removeBackgroundFromCurrentVideo: async (backgroundRgb) => {
+      const { selectedPhotoId, selectedFolderId } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.videoBackgroundBusy = true;
+        state.videoBackgroundError = null;
+      });
+      try {
+        const result = await api.removeVideoBackground(selectedPhotoId, backgroundRgb);
+        if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
+        set((state) => {
+          state.selectedPhotoId = result.id;
+        });
+      } catch (err) {
+        set((state) => {
+          state.videoBackgroundError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoBackgroundBusy = false;
         });
       }
     },

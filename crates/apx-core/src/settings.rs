@@ -137,6 +137,12 @@ pub struct AiSettings {
     /// Download nicht ausdrücklich bestätigt hat, derselbe Opt-in wie
     /// `depth_model_path` oben.
     pub whisper_model_path: Option<String>,
+    /// Lokaler Pfad zum heruntergeladenen MediaPipe-Selfie-Segmentation-
+    /// ONNX-Modell (Phase 17 Schritt 8, siehe `DECISIONS.md` ADR-0045,
+    /// `apx_ai::selfie_segmentation`s Moduldoku) — `None`, solange der
+    /// Nutzer den Download nicht ausdrücklich bestätigt hat, derselbe
+    /// Opt-in wie `depth_model_path` oben.
+    pub selfie_segmentation_model_path: Option<String>,
 }
 
 /// Einstellungen für den beobachteten Ordner (Phase 12 Schritt 7, siehe

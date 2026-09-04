@@ -3452,3 +3452,71 @@ kein Duplikat der bereits in ADR-0041/PLAN.md stehenden Details. Zwei
 gezielte Tests für das bis dahin ungetestete `apx-ai::sky_replace`
 (Schritt 10) nachgezogen — keine volle `cargo fmt/clippy/test
 --workspace`- oder Playwright-Suite, nur `tsc -b`.
+
+## ADR-0042: Phase 15 — fünf Photoshop-Funktionen, die es in Lightroom
+nicht gibt
+
+**Status:** Angenommen
+**Kontext:** Phase 14 hat zehn eigenständige Alleinstellungsmerkmale
+ohne Lightroom-Entsprechung geliefert (ADR-0041). Der Nutzer möchte
+jetzt gezielt echte Photoshop-exklusive Fähigkeiten nachziehen — Dinge,
+die es in Lightroom nachweislich nicht gibt, sich aber sauber in die
+bestehende ApertureX-Architektur einfügen und einen spürbaren, visuell
+beeindruckenden Funktionszuwachs bringen. Dieselbe "kostenlos/lokal
+statt bezahlter Cloud-API"-Linie wie Phase 13/14, wo KI zum Einsatz
+kommt.
+
+**Recherche-Disziplin wie in jeder vorherigen Phase:** jede "Lightroom
+hat das nicht"-Behauptung unten wurde per echter Web-Suche gegengeprüft.
+
+| # | Funktion | Befund |
+|---|---|---|
+| 1 | Content-Aware Move | Photoshop-exklusiv, bestätigt per offenem Adobe-Community-Feature-Request "Content Aware Move for Lightroom" — Lightroom hat nur "Content-Aware Remove"/"Generative Remove" (Entfernen), kein Verschieben mit automatischer Neubefüllung der Ausgangsstelle |
+| 2 | Blend-If (Tonwertbereich-Blending) | Photoshop-exklusiv — Adobe-Community-Quelle: "Blend If sliders ... aren't directly replicated in Lightroom's interface" |
+| 3 | Verflüssigen (Liquify) | Photoshop-exklusiv, bestätigt per Adobe-Community-Thread "Come on Adobe, We need liquify in Lightroom already!" |
+| 4 | Inhaltssensitives Skalieren (Content-Aware Scale/Seam Carving) | Photoshop-exklusiv seit CS4 (Adobe lizenzierte die Seam-Carving-Technologie von MERL) — "only Photoshop CS4 supports content aware scaling" |
+| 5 | Automatisches Hautglätten (gesichtsbewusst) | Photoshops "Skin Smoothing"/"Smart Portrait"-Neural-Filter sind Photoshop-exklusiv (teils cloud-pflichtig) — Lightroom hat nur den manuellen Anpassungspinsel, kein automatisches gesichtserkennungsgestütztes Glätten |
+
+**Architektur-Entscheidung — vier von fünf Funktionen ohne jede neue
+Abhängigkeit, durch Wiederverwendung bereits bestehender Bausteine**
+(real in dieser Sitzung gegen den aktuellen Code verifiziert, nicht aus
+Erinnerung an frühere Phasen behauptet):
+
+- `apx_ai::inpaint::InpaintSession::fill_rgb8` (Phase 13 Schritt 1) und
+  `CompositeLayer`/`CompositeLayerSource` (Phase 14 Schritt 3) tragen
+  Schritt 1 (Content-Aware Move) zusammen, ganz ohne neuen EDL-Typ —
+  ein Fill-Patch für die Ausgangsstelle plus eine neue Compositing-
+  Ebene für das verschobene Objekt an der Zielposition.
+- `apx_ai::segmentation::person_alpha` (Hautton-Heuristik, Phase 14
+  Schritt 10 als Vorbild für `sky_alpha`) und
+  `apx_ai::faces::detect_face_regions` (Phase 11 Schritt 5, kein
+  Feature-Gate) plus `stages::frequency_separation::{split,combine}`
+  (Phase 14 Schritt 2, bereits mit frei wählbarem `radius_px`) tragen
+  zusammen Schritt 5 (automatisches Hautglätten) — drei bestehende
+  Bausteine zu einem neuen Automatik-Feature kombiniert.
+- **Real geprüfter Namensunterschied zur ursprünglichen Annahme:** die
+  Hautton-Heuristik heißt `person_alpha`, nicht `skin_alpha`. Das
+  feature-gated `apx_ai::people::PersonEmbedder` liefert Bounding-Box +
+  Embedding, aber **keine Landmark-Koordinaten nach außen** — für
+  Schritt 5 reicht die Bounding-Box aus `faces.rs`, echte Landmarken
+  sind nicht nötig.
+
+**Seam-Carving-Lizenzprüfung (Schritt 4), echter Befund statt
+Annahme:** `seamcarving` (crates.io v0.2.3) existiert und lädt sich per
+`cargo add --dry-run` sauber, ist aber **LGPL-3.0-or-later** lizenziert
+— ein Copyleft mit echten Verlinkungs-/Weitergabepflichten für ein
+statisch gelinktes Rust-Binary, ein Bruch mit der durchgehend
+permissiven Linie (MIT/Apache-2.0/BSD-3-Clause) jeder bisher gewählten
+Abhängigkeit laut `THIRD_PARTY.md`. Kein anderer Treffer auf crates.io.
+**Entscheidung:** Seam Carving selbst implementieren (klassischer, gut
+dokumentierter Algorithmus, Avidan & Shamir, SIGGRAPH 2007) — kein
+Lizenzrisiko, keine neue Abhängigkeit für ganz Phase 15.
+
+**Testdisziplin, explizite Nutzervorgabe für diese Phase:** anders als
+Phase 9–14 kein Test nach den einzelnen Schritten 0–5 (dort nur
+`cargo check`/`tsc -b`-Kompilierprüfung, Commit+Push je Schritt) — die
+komplette Testausführung läuft gebündelt erst einmalig in Schritt 6.
+
+**Nicht Teil dieser Phase:** volle Photoshop-Parität (Vektor-
+Ebenenmasken, Smart Objects, Aktionen/Skript-Recorder, Fluchtpunkt,
+Puppenstock-Verzerrung) — eigene, größere Ausbaustufen.

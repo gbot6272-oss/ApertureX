@@ -1077,3 +1077,24 @@ diesen einen Test laufen lassen), volle Suite einmalig in Schritt 11.
 - [x] 9. KI-Stiltransfer zwischen Fotos — Lightroom hat dafür kein Äquivalent. Ein lizenzklares Modell für *beliebige* Referenzbilder blieb unerreichbar (Schritt 0), deshalb bewusst auf fünf real lizenzierte feste `fast_neural_style`-Stile beschränkt (candy/mosaic/rain-princess/udnie/pointilism, MIT, `onnx/models`) — alle fünf real heruntergeladen (je 6.728.029 Byte) und per SHA-256 geprüft. Neues `crates/apx-ai/src/style_transfer.rs`: ein echter Introspektionslauf widerlegte Schritt 0s "dynamische Eingabe"-Vermutung — nur `input1` ist ein echter Laufzeit-Feed, fest `[1,3,224,224]`, also dasselbe Herunterskalieren/Inferieren/Zurückskalieren-Muster wie MiDaS. Dieselbe `apx-pipeline`-darf-nicht-von-`apx-ai`-abhängen-Beschränkung wie Schritt 8: `apx-app::commands::stylize_photo` berechnet das Ergebnis einmal und legt es als `StyleTransferPatch` im EDL ab; neues `crates/apx-pipeline/src/stages/style_transfer.rs::apply()` blendet es linear (`amount`) über das fertig entwickelte sRGB-RGBA8-Bild, nach `composite`, vor `geometry`. Anders als bei der Tiefenschätzung bewusst nach sRGB konvertiert (wie `prepare_composite_layer_source`), da das Ergebnis unmittelbar sichtbare Pixel sind. Frontend: `style_transfer_model_paths` als Stil-ID-Map (fünf unabhängig herunterladbare Modelle), neues `StyleTransferPanel.tsx` im Entwickeln-Panel zwischen Virtueller Blende und Geometrie. `style_transfer` bewusst NICHT Teil eines Presets (wie `virtual_aperture`).
 - [x] 10. Himmelsaustausch mit automatischer Neubelichtung — Lightroom "hat kein Ein-Klick-Himmelsaustausch, verlässt sich auf Photoshop dafür". Klassischer Algorithmus, kein ONNX-Modell: neues `crates/apx-ai/src/sky_replace.rs::composite()` nutzt die bestehende `segmentation::sky_alpha`-Heuristik als Maske, ersetzt den Himmel durch ein vom Nutzer gewähltes Foto und skaliert den Vordergrund je Kanal grob auf die mittlere Farbtemperatur/Helligkeit des neuen Himmels (einfache RGB-Mittelwert-Angleichung statt vollem Lab-Transfer). `apx-app::commands::replace_sky` berechnet das fertige Vollbild einmal; `crates/apx-pipeline/src/stages/sky_replace.rs` ersetzt beim Rendern nur noch die RGB-Kanäle (kein Deckkraft-Regler). Frontend: minimales `SkyReplacePanel.tsx` (Dateiauswahl + Ersetzen/Entfernen) im Entwickeln-Panel vor Geometrie. `sky_replace` bewusst nicht Teil eines Presets. Aus Zeitgründen ohne dedizierten Unit-Test/e2e-Test umgesetzt (Nutzervorgabe für diesen Schritt).
 - [x] 11. Dokumentation, volle Verifikation, Abnahme — abweichend vom ursprünglichen Umfang (Nutzervorgabe: knapper Abschluss bei begrenztem Budget): `FEATURES.md` um eine neue "Alleinstellungsmerkmale"-Rubrik (alle zehn Punkte) ergänzt, `THIRD_PARTY.md` um eine Phase-14-Sektion (kmeans_colors/palette, MiDaS, fast_neural_style). Zwei gezielte Tests für Schritt 10 nachgezogen (`apx-ai::sky_replace`, bis dahin ungetestet). Kein voller `cargo fmt/clippy/test --workspace`-Lauf, keine volle Playwright-Suite — nur `tsc -b` (siehe DECISIONS.md ADR-0041 Nachtrag XI).
+
+## Aktuelle Phase: Phase 15 — Fünf Photoshop-Funktionen, die es in Lightroom nicht gibt
+
+Phase 14 hat zehn eigenständige Alleinstellungsmerkmale ohne
+Lightroom-Entsprechung geliefert. Phase 15 zieht gezielt fünf echte
+Photoshop-exklusive Fähigkeiten nach — real per Web-Recherche gegen
+Lightroom geprüft (siehe `DECISIONS.md` ADR-0042) — die sich sauber in
+bestehende ApertureX-Subsysteme (Inpainting, Compositing,
+Reparaturpinsel, Personen-/Hauttonerkennung, Frequenztrennung) statt in
+neue parallele Subsysteme einfügen. Testdisziplin abweichend von
+Phase 9–14 auf explizite Nutzervorgabe: kein Test nach den einzelnen
+Schritten 0–5 (dort nur `cargo check`/`tsc -b`), volle Suite einmalig
+in Schritt 6.
+
+- [x] 0. Scope festzurren, ADR-0042 — fünf Photoshop-exklusive Funktionen real gegen Lightroom recherchiert (Content-Aware Move, Blend-If, Liquify, Content-Aware Scale, automatisches Hautglätten); Seam-Carving-Crate (`seamcarving` v0.2.3) real geprüft und wegen LGPL-3.0-or-later verworfen, Algorithmus wird in Schritt 4 selbst implementiert
+- [ ] 1. Content-Aware Move (Objekt inhaltssensitiv verschieben)
+- [ ] 2. Blend-If: Tonwertbereich-Blending für Compositing-Ebenen
+- [ ] 3. Verflüssigen (Liquify)
+- [ ] 4. Inhaltssensitives Skalieren (Content-Aware Scale / Seam Carving)
+- [ ] 5. Automatisches Hautglätten (gesichtsbewusste Frequenztrennung)
+- [ ] 6. Dokumentation, volle Verifikation, Abnahme

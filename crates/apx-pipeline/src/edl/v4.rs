@@ -150,6 +150,25 @@ pub struct CompositeLayer {
     pub offset_x: f32,
     pub offset_y: f32,
     pub source: CompositeLayerSource,
+    /// Photoshop-Funktion "Blend-If" (Phase 15 Schritt 2, siehe
+    /// `DECISIONS.md` ADR-0042) — Lightroom hat keine Tonwertbereich-
+    /// Blending-Regler. Additiv, `#[serde(default)]` liest eine
+    /// gespeicherte Ebene ohne dieses Feld als `0.0` (unverändertes
+    /// bisheriges Verhalten: keine Abblendung nach Tonwert). Luminanz der
+    /// **darunterliegenden** Ebene unterhalb dieses Werts wird weich
+    /// ausgeblendet statt hart abgeschnitten (siehe `stages::composite`s
+    /// Moduldoku für die feste Rampenbreite).
+    #[serde(default)]
+    pub blend_if_shadow_cutoff: f32,
+    /// Gegenstück für Lichter — `#[serde(default = "default_blend_if_highlight_cutoff")]`
+    /// liest eine gespeicherte Ebene ohne dieses Feld als `1.0`
+    /// (unverändertes bisheriges Verhalten).
+    #[serde(default = "default_blend_if_highlight_cutoff")]
+    pub blend_if_highlight_cutoff: f32,
+}
+
+fn default_blend_if_highlight_cutoff() -> f32 {
+    1.0
 }
 
 // ---- KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8) ----

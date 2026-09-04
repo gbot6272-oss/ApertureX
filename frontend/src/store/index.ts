@@ -682,7 +682,15 @@ interface DevelopSlice {
   removeCompositeLayer: (index: number) => void;
   setCompositeLayerField: (
     index: number,
-    field: "visible" | "blend_mode" | "opacity" | "scale" | "offset_x" | "offset_y",
+    field:
+      | "visible"
+      | "blend_mode"
+      | "opacity"
+      | "scale"
+      | "offset_x"
+      | "offset_y"
+      | "blend_if_shadow_cutoff"
+      | "blend_if_highlight_cutoff",
     value: boolean | BlendMode | number,
   ) => void;
   /** Schreibt `developEdl` als neuen Verlaufs-Schritt (siehe `PLAN.md`
@@ -2843,6 +2851,8 @@ export const useAppStore = create<AppStore>()(
               bitmap_height: dto.moved.bitmap_height,
               pixels: base64ToByteArray(dto.moved.pixels_base64),
             },
+            blend_if_shadow_cutoff: 0,
+            blend_if_highlight_cutoff: 1,
           });
           state.contentAwareMoveActive = false;
           state.contentAwareMoveRect = null;
@@ -2924,6 +2934,8 @@ export const useAppStore = create<AppStore>()(
               bitmap_height: dto.bitmap_height,
               pixels: base64ToByteArray(dto.pixels_base64),
             },
+            blend_if_shadow_cutoff: 0,
+            blend_if_highlight_cutoff: 1,
           });
         });
         void get().commitDevelopEdit("Compositing-Ebene hinzugefügt");
@@ -2957,6 +2969,8 @@ export const useAppStore = create<AppStore>()(
               bitmap_height: dto.bitmap_height,
               pixels: base64ToByteArray(dto.pixels_base64),
             },
+            blend_if_shadow_cutoff: 0,
+            blend_if_highlight_cutoff: 1,
           });
         });
         void get().commitDevelopEdit("Compositing-Ebene hinzugefügt");
@@ -3000,6 +3014,12 @@ export const useAppStore = create<AppStore>()(
             break;
           case "offset_y":
             layer.offset_y = value as number;
+            break;
+          case "blend_if_shadow_cutoff":
+            layer.blend_if_shadow_cutoff = value as number;
+            break;
+          case "blend_if_highlight_cutoff":
+            layer.blend_if_highlight_cutoff = value as number;
             break;
         }
       });

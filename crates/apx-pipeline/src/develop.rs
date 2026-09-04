@@ -497,6 +497,8 @@ mod tests {
                 bitmap_height: 1,
                 pixels: vec![250, 250, 250],
             },
+            blend_if_shadow_cutoff: 0.0,
+            blend_if_highlight_cutoff: 1.0,
         };
         let edl = EdlV4 {
             composite_layers: vec![layer],

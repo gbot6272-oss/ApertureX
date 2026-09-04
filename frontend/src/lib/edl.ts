@@ -1232,6 +1232,11 @@ export interface CompositeLayer {
   offset_x: number;
   offset_y: number;
   source: CompositeLayerSource;
+  /** Blend-If (Phase 15 Schritt 2, Photoshop-exklusiv) — Luminanz-
+   * Schwellenwerte des Basis-Pixels, unterhalb/oberhalb derer die Ebene
+   * weich ausgeblendet wird. Neutralwerte `0.0`/`1.0` sind ein No-Op. */
+  blend_if_shadow_cutoff: number;
+  blend_if_highlight_cutoff: number;
 }
 
 /** Eine einmalig berechnete Tiefenkarte (Phase 14 Schritt 8, MiDaS v2.1

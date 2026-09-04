@@ -83,6 +83,8 @@ const COMPOSITE_OPACITY_SPEC: SliderSpec = { key: "opacity", label: "Deckkraft (
 const COMPOSITE_SCALE_SPEC: SliderSpec = { key: "scale", label: "Skalierung (%)", min: 10, max: 300, fineStep: 1, coarseStep: 10, neutral: 100 };
 const COMPOSITE_OFFSET_X_SPEC: SliderSpec = { key: "offset_x", label: "Position X (%)", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 };
 const COMPOSITE_OFFSET_Y_SPEC: SliderSpec = { key: "offset_y", label: "Position Y (%)", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 };
+const COMPOSITE_BLEND_IF_SHADOW_SPEC: SliderSpec = { key: "blend_if_shadow_cutoff", label: "Blend-If Schatten (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 0 };
+const COMPOSITE_BLEND_IF_HIGHLIGHT_SPEC: SliderSpec = { key: "blend_if_highlight_cutoff", label: "Blend-If Lichter (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 100 };
 
 // ---- Node-Editor (Phase 9 Schritt 7, siehe DECISIONS.md ADR-0035) ---------
 //
@@ -1425,6 +1427,18 @@ export function DevelopPanel() {
                     spec={COMPOSITE_OFFSET_Y_SPEC}
                     value={layer.offset_y * 100}
                     onChange={(value) => setCompositeLayerField(index, "offset_y", value / 100)}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
+                  <DevelopSlider
+                    spec={COMPOSITE_BLEND_IF_SHADOW_SPEC}
+                    value={layer.blend_if_shadow_cutoff * 100}
+                    onChange={(value) => setCompositeLayerField(index, "blend_if_shadow_cutoff", value / 100)}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
+                  <DevelopSlider
+                    spec={COMPOSITE_BLEND_IF_HIGHLIGHT_SPEC}
+                    value={layer.blend_if_highlight_cutoff * 100}
+                    onChange={(value) => setCompositeLayerField(index, "blend_if_highlight_cutoff", value / 100)}
                     onCommit={() => void commitDevelopEdit()}
                   />
                 </li>

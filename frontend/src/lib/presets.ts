@@ -37,6 +37,10 @@ import type { RuleNode } from "./ruleTree";
 // stilisiertes Ergebnis (Stiltransfer-Inferenz über dessen konkreten
 // Bildinhalt) — auf ein anderes Foto übertragen wäre es exakt so falsch
 // wie `virtual_aperture.depth_map`.
+//
+// `liquify_strokes` (Phase 15 Schritt 3) ist wie `repair`/`masks`
+// AUSGESCHLOSSEN: jeder Strich ist an konkrete gemalte Bildkoordinaten
+// gebunden, kein auf andere Fotos übertragbarer „Look".
 export type PresetSectionKey = Exclude<
   keyof EdlPayload,
   | "repair"
@@ -48,6 +52,7 @@ export type PresetSectionKey = Exclude<
   | "virtual_aperture"
   | "style_transfer"
   | "sky_replace"
+  | "liquify_strokes"
 >;
 
 export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [

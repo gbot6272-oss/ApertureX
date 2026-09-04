@@ -21,6 +21,7 @@ import { BeforeAfterView } from "./BeforeAfterView";
 import { ContentAwareMoveOverlay } from "./ContentAwareMoveOverlay";
 import { CropOverlay } from "./CropOverlay";
 import { DevelopAnalysisPanel } from "./DevelopAnalysisPanel";
+import { LiquifyOverlay } from "./LiquifyOverlay";
 import { MaskColorOverlay } from "./MaskColorOverlay";
 import { MaskOverlay } from "./MaskOverlay";
 import { ReferenceView } from "./ReferenceView";
@@ -96,6 +97,11 @@ export function Viewer() {
   const contentAwareMoveLoading = useAppStore((s) => s.contentAwareMoveLoading);
   const setContentAwareMoveRect = useAppStore((s) => s.setContentAwareMoveRect);
   const commitContentAwareMove = useAppStore((s) => s.commitContentAwareMove);
+  const liquifyActive = useAppStore((s) => s.liquifyActive);
+  const liquifyStrokes = useAppStore((s) => s.developEdl.liquify_strokes);
+  const liquifyDraftRadius = useAppStore((s) => s.liquifyDraftRadius);
+  const addLiquifyStroke = useAppStore((s) => s.addLiquifyStroke);
+  const removeLiquifyStroke = useAppStore((s) => s.removeLiquifyStroke);
   const repairActive = useAppStore((s) => s.repairActive);
   const repairStrokes = useAppStore((s) => s.developEdl.repair);
   const repairPendingSource = useAppStore((s) => s.repairPendingSource);
@@ -304,7 +310,7 @@ export function Viewer() {
   // Pinselmaske ab (Phase 6 Schritt 4).
   const selectedMaskIsBrush = selectedMask?.components[selectedMaskComponentIndex]?.geometry.kind === "Brush";
   const tatActive = tatMode !== "off";
-  const canPan = !repairActive && !selectedMaskIsBrush && !tatActive && (spaceHeld || effectiveScale > fitScale + 1e-6);
+  const canPan = !repairActive && !liquifyActive && !selectedMaskIsBrush && !tatActive && (spaceHeld || effectiveScale > fitScale + 1e-6);
 
   // TAT-Schwellwert für "neuen Kurvenpunkt statt vorhandenen verschieben"
   // (Eingabewert-Abstand, 0..1) — siehe Store-Moduldoku.
@@ -777,6 +783,19 @@ export function Viewer() {
         />
       )}
 
+      {photo && liquifyActive && imgW > 0 && imgH > 0 && (
+        <LiquifyOverlay
+          imageLeft={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).x}
+          imageTop={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).y}
+          imageWidth={imgW * effectiveScale}
+          imageHeight={imgH * effectiveScale}
+          strokes={liquifyStrokes}
+          radius={liquifyDraftRadius}
+          onPaint={addLiquifyStroke}
+          onRemoveStroke={removeLiquifyStroke}
+        />
+      )}
+
       {photo && repairActive && imgW > 0 && imgH > 0 && (
         <RepairOverlay
           imageLeft={imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, { x: panX, y: panY }).x}
@@ -839,6 +858,7 @@ export function Viewer() {
       {photo &&
         developPanelOpen &&
         !repairActive &&
+        !liquifyActive &&
         !geometryCropActive &&
         !pickerActive &&
         imgW > 0 &&

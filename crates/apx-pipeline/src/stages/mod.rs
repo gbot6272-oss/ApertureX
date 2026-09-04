@@ -25,6 +25,7 @@ pub mod geometry;
 pub mod highlights_shadows;
 pub mod hsl_color_mixer;
 pub mod lens_corrections;
+pub mod liquify;
 pub mod local_contrast;
 pub mod masks;
 pub mod repair;

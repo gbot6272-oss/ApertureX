@@ -40,6 +40,7 @@ import {
   type GuidedLine,
   type HslAdjustment,
   type LensCorrectionAdjustment,
+  type LiquifyMode,
   type ManualTransform,
   type RepairLayer,
   type RepairMode,
@@ -75,6 +76,11 @@ import { VirtualAperturePanel } from "./VirtualAperturePanel";
 const REPAIR_RADIUS_SPEC: SliderSpec = { key: "radius", label: "Radius (% der Bildbreite)", min: 1, max: 50, fineStep: 0.5, coarseStep: 5, neutral: 5 };
 const REPAIR_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Weiche Kante (% der Bildbreite)", min: 0, max: 25, fineStep: 0.5, coarseStep: 2, neutral: 2 };
 const REPAIR_OPACITY_SPEC: SliderSpec = { key: "opacity", label: "Deckkraft (%)", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 100 };
+
+// ---- Verflüssigen (Liquify, Phase 15 Schritt 3, siehe DECISIONS.md
+// ADR-0042 — Photoshop-exklusiv, Lightroom hat kein Verformungswerkzeug) --
+const LIQUIFY_RADIUS_SPEC: SliderSpec = { key: "radius", label: "Radius (% der Bildbreite)", min: 2, max: 50, fineStep: 0.5, coarseStep: 5, neutral: 15 };
+const LIQUIFY_STRENGTH_SPEC: SliderSpec = { key: "strength", label: "Stärke (%)", min: 1, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 };
 
 // ---- Mehrfachbelichtung/Layer-Compositing — Phase 14 Schritt 3, siehe
 // DECISIONS.md ADR-0041 (Lightroom Classic hat "keine klassischen
@@ -115,12 +121,20 @@ const STAGE_ANCHOR_IDS: Record<keyof StageEnabled, string> = {
   virtual_aperture: "stage-virtual_aperture",
   style_transfer: "stage-style_transfer",
   sky_replace: "stage-sky_replace",
+  liquify: "stage-liquify",
   geometry: "stage-geometry",
 };
 
 function openStageAnchor(key: keyof StageEnabled): void {
   document.getElementById(STAGE_ANCHOR_IDS[key])?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
+
+const LIQUIFY_MODE_OPTIONS: ReadonlyArray<{ value: LiquifyMode; label: string }> = [
+  { value: "Push", label: "Schieben" },
+  { value: "Twirl", label: "Verwirbeln" },
+  { value: "Pucker", label: "Stauchen" },
+  { value: "Bloat", label: "Aufblähen" },
+];
 
 const REPAIR_MODE_OPTIONS: ReadonlyArray<{ value: RepairMode; label: string }> = [
   { value: "Clone", label: "Klonen" },
@@ -320,6 +334,15 @@ export function DevelopPanel() {
   const toggleContentAwareMoveTool = useAppStore((s) => s.toggleContentAwareMoveTool);
   const contentAwareMoveRect = useAppStore((s) => s.contentAwareMoveRect);
   const contentAwareMoveLoading = useAppStore((s) => s.contentAwareMoveLoading);
+  const liquifyActive = useAppStore((s) => s.liquifyActive);
+  const toggleLiquifyActive = useAppStore((s) => s.toggleLiquifyActive);
+  const liquifyDraftMode = useAppStore((s) => s.liquifyDraftMode);
+  const setLiquifyDraftMode = useAppStore((s) => s.setLiquifyDraftMode);
+  const liquifyDraftRadius = useAppStore((s) => s.liquifyDraftRadius);
+  const liquifyDraftStrength = useAppStore((s) => s.liquifyDraftStrength);
+  const setLiquifyDraftField = useAppStore((s) => s.setLiquifyDraftField);
+  const liquifyStrokes = useAppStore((s) => s.developEdl.liquify_strokes);
+  const removeLiquifyStroke = useAppStore((s) => s.removeLiquifyStroke);
   const repairDraftMode = useAppStore((s) => s.repairDraftMode);
   const setRepairDraftMode = useAppStore((s) => s.setRepairDraftMode);
   const repairDraftLayer = useAppStore((s) => s.repairDraftLayer);
@@ -1768,6 +1791,66 @@ export function DevelopPanel() {
                     </span>
                     <button type="button" onClick={() => applySensorSpotAsRepairStroke(spot)} className="text-accent underline">
                       Reparieren
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </fieldset>
+
+          {/* Photoshop-Funktion: Verflüssigen (Liquify, Phase 15 Schritt 3,
+              ADR-0042) — Lightroom hat kein Verformungswerkzeug. Rein
+              deterministische CPU-Verzerrung, kein separates „Anwenden"
+              nötig (siehe `stages::liquify`s Moduldoku, `LiquifyOverlay`). */}
+          <fieldset id="stage-liquify" className="flex flex-col gap-3">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Verflüssigen</legend>
+
+            <button
+              type="button"
+              aria-pressed={liquifyActive}
+              onClick={toggleLiquifyActive}
+              className={`rounded border px-2 py-1 text-xs ${liquifyActive ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
+            >
+              Verflüssigen-Pinsel {liquifyActive ? "(aktiv)" : ""}
+            </button>
+            {liquifyActive && <p className="text-xs text-text-muted">Strich im Bild ziehen, um den gewählten Verformungsmodus anzuwenden.</p>}
+
+            <div className="flex gap-1">
+              {LIQUIFY_MODE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={liquifyDraftMode === option.value}
+                  onClick={() => setLiquifyDraftMode(option.value)}
+                  className={`flex-1 rounded border px-2 py-1 text-xs ${liquifyDraftMode === option.value ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            <DevelopSlider
+              spec={LIQUIFY_RADIUS_SPEC}
+              value={liquifyDraftRadius * 100}
+              onChange={(value) => setLiquifyDraftField("radius", value / 100)}
+              onCommit={() => {}}
+            />
+            <DevelopSlider
+              spec={LIQUIFY_STRENGTH_SPEC}
+              value={liquifyDraftStrength * 100}
+              onChange={(value) => setLiquifyDraftField("strength", value / 100)}
+              onCommit={() => {}}
+            />
+
+            {liquifyStrokes.length > 0 && (
+              <ul className="flex flex-col gap-1 text-xs text-text-secondary">
+                {liquifyStrokes.map((stroke, index) => (
+                  <li key={index} className="flex items-center justify-between rounded border border-border px-2 py-1">
+                    <span>
+                      {index + 1}. {LIQUIFY_MODE_OPTIONS.find((option) => option.value === stroke.mode)?.label ?? stroke.mode}
+                    </span>
+                    <button type="button" onClick={() => removeLiquifyStroke(index)} className="text-danger underline">
+                      Entfernen
                     </button>
                   </li>
                 ))}

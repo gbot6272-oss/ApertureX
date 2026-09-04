@@ -814,6 +814,28 @@ export interface RepairStroke {
   layer: RepairLayer;
 }
 
+// ---- Verflüssigen (Liquify, Phase 15 Schritt 3) ----------------------------
+
+/** Verformungsmodus (Photoshop-Namensgebung) — siehe `stages::liquify`s
+ * Moduldoku für die genaue Wirkung jedes Modus. */
+export type LiquifyMode = "Push" | "Twirl" | "Pucker" | "Bloat";
+
+export interface LiquifyPoint {
+  x: number;
+  y: number;
+}
+
+/** Ein einzelner Verflüssigen-Pinselzug (Phase 15 Schritt 3, siehe
+ * `DECISIONS.md` ADR-0042 — Photoshop-exklusiv, Lightroom hat kein
+ * Verformungswerkzeug). `radius`/`strength` sind normiert wie
+ * `RepairStroke.radius` (Bruchteil der Bildbreite bzw. 0..1). */
+export interface LiquifyStroke {
+  center_path: LiquifyPoint[];
+  radius: number;
+  strength: number;
+  mode: LiquifyMode;
+}
+
 // ---- Masken (Phase 6, siehe DECISIONS.md ADR-0032) --------------------------
 
 export interface MaskPoint {
@@ -1182,6 +1204,10 @@ export interface StageEnabled {
    * (siehe `stages::style_transfer`s Moduldoku). */
   style_transfer: boolean;
   sky_replace: boolean;
+  /** Verflüssigen (Phase 15 Schritt 3) — läuft nach `sky_replace`, vor
+   * `geometry`, im fertig entwickelten sRGB-RGBA8-Bild (siehe
+   * `stages::liquify`s Moduldoku). */
+  liquify: boolean;
   geometry: boolean;
 }
 
@@ -1202,6 +1228,7 @@ export const NEUTRAL_STAGE_ENABLED: StageEnabled = {
   virtual_aperture: true,
   style_transfer: true,
   sky_replace: true,
+  liquify: true,
   geometry: true,
 };
 
@@ -1355,6 +1382,7 @@ export const STAGE_NODE_SPECS: readonly StageNodeSpec[] = [
   { key: "virtual_aperture", label: "Virtuelle Blende" },
   { key: "style_transfer", label: "Stiltransfer" },
   { key: "sky_replace", label: "Himmelsaustausch" },
+  { key: "liquify", label: "Verflüssigen" },
   { key: "geometry", label: "Geometrie" },
 ] as const;
 
@@ -1381,6 +1409,7 @@ export interface EdlPayload {
   virtual_aperture: VirtualApertureAdjustment;
   style_transfer: StyleTransferAdjustment;
   sky_replace: SkyReplacePatch | null;
+  liquify_strokes: LiquifyStroke[];
 }
 
 export function neutralEdlPayload(): EdlPayload {
@@ -1405,6 +1434,7 @@ export function neutralEdlPayload(): EdlPayload {
     virtual_aperture: NEUTRAL_VIRTUAL_APERTURE,
     style_transfer: NEUTRAL_STYLE_TRANSFER,
     sky_replace: null,
+    liquify_strokes: [],
   };
 }
 

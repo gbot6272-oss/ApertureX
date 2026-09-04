@@ -73,6 +73,12 @@ pub struct StageEnabled {
     /// vor `geometry`.
     #[serde(default = "default_true")]
     pub sky_replace: bool,
+    /// Verflüssigen (Phase 15 Schritt 3) — läuft nach `sky_replace`, vor
+    /// `geometry`, im fertig entwickelten sRGB-RGBA8-Bild (siehe
+    /// `stages::liquify`s Moduldoku). Dieselbe `default_true`-Begründung
+    /// wie `sky_replace` oben.
+    #[serde(default = "default_true")]
+    pub liquify: bool,
     pub geometry: bool,
 }
 
@@ -100,6 +106,7 @@ impl StageEnabled {
         virtual_aperture: true,
         style_transfer: true,
         sky_replace: true,
+        liquify: true,
         geometry: true,
     };
 }
@@ -281,6 +288,38 @@ pub struct SkyReplacePatch {
     pub pixels: Vec<u8>,
 }
 
+// ---- Verflüssigen (Liquify, Phase 15 Schritt 3) ----------------------------
+
+/// Ein Punkt im gemalten Pfad eines Verflüssigen-Strichs — normierte
+/// Bildkoordinaten (0..1), dieselbe Konvention wie `v2::RepairPoint`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct LiquifyPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// Verformungsmodus (Photoshop-Namensgebung) — siehe `stages::liquify`s
+/// Moduldoku für die genaue Wirkung jedes Modus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LiquifyMode {
+    Push,
+    Twirl,
+    Pucker,
+    Bloat,
+}
+
+/// Ein einzelner Verflüssigen-Pinselzug (Phase 15 Schritt 3, siehe
+/// `DECISIONS.md` ADR-0042 — Photoshop-exklusiv, Lightroom hat kein
+/// Verformungswerkzeug). `radius`/`strength` sind normiert wie
+/// `v2::RepairStroke`s `radius` (Bruchteil der Bildbreite bzw. 0..1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiquifyStroke {
+    pub center_path: Vec<LiquifyPoint>,
+    pub radius: f32,
+    pub strength: f32,
+    pub mode: LiquifyMode,
+}
+
 // ---- Der vollständige EDL v4 -----------------------------------------------
 
 /// Die konkrete EDL-Struktur für Schema-Version 4 — siehe
@@ -327,6 +366,11 @@ pub struct EdlV4 {
     /// Himmelsaustausch (Phase 14 Schritt 10) — additiv, `#[serde(default)]`.
     #[serde(default)]
     pub sky_replace: Option<SkyReplacePatch>,
+    /// Verflüssigen (Phase 15 Schritt 3) — additiv, `#[serde(default)]`
+    /// liest ein gespeichertes `EdlV4` ohne dieses Feld als leere
+    /// Strichliste (unverändertes bisheriges Verhalten).
+    #[serde(default)]
+    pub liquify_strokes: Vec<LiquifyStroke>,
 }
 
 impl EdlV4 {
@@ -354,6 +398,7 @@ impl EdlV4 {
             virtual_aperture: VirtualApertureAdjustment::NEUTRAL,
             style_transfer: StyleTransferAdjustment::NEUTRAL,
             sky_replace: None,
+            liquify_strokes: Vec::new(),
         }
     }
 
@@ -384,6 +429,7 @@ impl EdlV4 {
             virtual_aperture: VirtualApertureAdjustment::NEUTRAL,
             style_transfer: StyleTransferAdjustment::NEUTRAL,
             sky_replace: None,
+            liquify_strokes: Vec::new(),
         }
     }
 }

@@ -23,7 +23,7 @@ import {
   writeBasicField,
   writeBwMixerField,
 } from "../lib/edl";
-import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairLayer, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
+import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, LiquifyMode, LiquifyPoint, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairLayer, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import { computeHarmonizeShifts } from "../lib/colorHarmony";
@@ -657,6 +657,24 @@ interface DevelopSlice {
    * `CompositeLayer` (setzt das Objekt an die Zielposition) an, committet
    * einmal für beide zusammen, setzt Rechteck und Werkzeug zurück. */
   commitContentAwareMove: (destCenterX: number, destCenterY: number) => Promise<void>;
+
+  /** Photoshop-Funktion: Verflüssigen (Liquify, Phase 15 Schritt 3, siehe
+   * `DECISIONS.md` ADR-0042) — Lightroom hat kein Verformungswerkzeug. Ein
+   * Ziehvorgang malt einen Strich, sofort committet (kein separates
+   * „Anwenden" nötig — reine CPU-Verzerrung, siehe `stages::liquify`s
+   * Moduldoku, dasselbe Muster wie `addRepairStroke`). */
+  liquifyActive: boolean;
+  toggleLiquifyActive: () => void;
+  /** Einstellungen für den *nächsten* Strich — dieselbe „nur für neue
+   * Striche"-Konvention wie `repairDraftMode`/-`Radius`/-`Feather`. */
+  liquifyDraftMode: LiquifyMode;
+  liquifyDraftRadius: number;
+  liquifyDraftStrength: number;
+  setLiquifyDraftMode: (mode: LiquifyMode) => void;
+  setLiquifyDraftField: (key: "radius" | "strength", value: number) => void;
+  addLiquifyStroke: (centerPath: LiquifyPoint[]) => void;
+  removeLiquifyStroke: (index: number) => void;
+
   /** Erweitert die Leinwand um die übergebenen Ränder (normierte
    * Bruchteile, `0.0..=1.0`) und lässt LaMa den neuen Rand füllen (Phase
    * 14 Schritt 1) — dasselbe „Anwenden"-Muster wie
@@ -2867,6 +2885,52 @@ export const useAppStore = create<AppStore>()(
           state.contentAwareMoveLoading = false;
         });
       }
+    },
+
+    liquifyActive: false,
+
+    toggleLiquifyActive: () => {
+      set((state) => {
+        state.liquifyActive = !state.liquifyActive;
+      });
+    },
+
+    liquifyDraftMode: "Push",
+    liquifyDraftRadius: 0.15,
+    liquifyDraftStrength: 0.5,
+
+    setLiquifyDraftMode: (mode) => {
+      set((state) => {
+        state.liquifyDraftMode = mode;
+      });
+    },
+
+    setLiquifyDraftField: (key, value) => {
+      set((state) => {
+        if (key === "radius") state.liquifyDraftRadius = value;
+        else state.liquifyDraftStrength = value;
+      });
+    },
+
+    addLiquifyStroke: (centerPath) => {
+      const { liquifyDraftMode, liquifyDraftRadius, liquifyDraftStrength } = get();
+      if (centerPath.length === 0) return;
+      set((state) => {
+        state.developEdl.liquify_strokes.push({
+          center_path: centerPath,
+          radius: liquifyDraftRadius,
+          strength: liquifyDraftStrength,
+          mode: liquifyDraftMode,
+        });
+      });
+      void get().commitDevelopEdit();
+    },
+
+    removeLiquifyStroke: (index) => {
+      set((state) => {
+        state.developEdl.liquify_strokes.splice(index, 1);
+      });
+      void get().commitDevelopEdit();
     },
 
     aiOutpaintLoading: false,

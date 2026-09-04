@@ -501,6 +501,39 @@ export function listSimilarVideoGroups(maxDistance: number): Promise<SimilarVide
   return invoke<SimilarVideoDto[][]>("list_similar_video_groups", { maxDistance });
 }
 
+// ---- Video-Zeitachse (Phase 17 Schritt 1, siehe DECISIONS.md ADR-0045) -----
+
+/** Ein einzelner Zeitachsen-Eintrag — `photoId` referenziert entweder
+ * ein Video (dann sind `inMs`/`outMs` Pflicht) oder ein Foto (dann ist
+ * `holdSeconds` maßgeblich). Siehe `apx_app::commands::TimelineItemInput`s
+ * Moduldoku. */
+export interface TimelineItemInput {
+  photoId: string;
+  inMs?: number;
+  outMs?: number;
+  holdSeconds?: number;
+}
+
+export interface VideoTimelineOptions {
+  width: number;
+  height: number;
+  fps: number;
+  /** `"cut"`/`"cross_fade"` je Übergang — Länge muss `items.length - 1` sein. */
+  transitions: string[];
+  transitionSeconds?: number;
+  musicPath?: string;
+}
+
+/** Rendert `items` zu einer neuen Video-Zeitachse und legt sie als
+ * neues Katalog-Video an — nicht-destruktiv, siehe
+ * `apx_app::commands::render_video_timeline`s Moduldoku. Kann bei
+ * vielen/langen Einträgen spürbar dauern (jeder Eintrag wird erst zu
+ * einem eigenen Segment gerendert, dann verkettet) — die Promise löst
+ * erst nach vollständiger Verarbeitung auf. */
+export function renderVideoTimeline(items: TimelineItemInput[], options: VideoTimelineOptions): Promise<PhotoDto> {
+  return invoke<PhotoDto>("render_video_timeline", { items, options });
+}
+
 // ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------------
 // Anders als der lineare Verlauf oben: siehe `crates/apx-app/src/commands.rs`s
 // Moduldoku für die Abgrenzung. Kein eigener "restore"-Aufruf — die

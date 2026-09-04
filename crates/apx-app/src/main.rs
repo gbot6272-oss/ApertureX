@@ -324,6 +324,7 @@ fn main() {
             commands::denoise_video_audio,
             commands::add_video_audio_track,
             commands::apply_lut_filter_to_video,
+            commands::render_video_timeline,
             commands::undo_develop_edit,
             commands::redo_develop_edit,
             commands::list_develop_history,

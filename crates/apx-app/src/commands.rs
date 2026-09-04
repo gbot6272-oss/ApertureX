@@ -1693,6 +1693,159 @@ fn run_ffmpeg_apply_lut_to_video(
     Ok(())
 }
 
+/// Ein einzelner Zeitachsen-Eintrag (Phase 17 Schritt 1, siehe
+/// `DECISIONS.md` ADR-0045) — `photo_id` referenziert entweder ein
+/// Video (dann sind `in_ms`/`out_ms` Pflicht) oder ein Foto (dann ist
+/// `hold_seconds` maßgeblich, `in_ms`/`out_ms` werden ignoriert). Ein
+/// eigener DTO statt Wiederverwendung von `SlideshowTitleCardOptions`/
+/// `-VideoOptions`, weil eine Zeitachse Video- und Foto-Einträge
+/// gemischt in einer Liste trägt.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineItemInput {
+    pub photo_id: String,
+    pub in_ms: Option<i64>,
+    pub out_ms: Option<i64>,
+    pub hold_seconds: Option<f32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoTimelineOptions {
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+    /// `"cut"`/`"cross_fade"` je Übergang — Länge muss `items.len() - 1`
+    /// sein.
+    pub transitions: Vec<String>,
+    pub transition_seconds: Option<f32>,
+    pub music_path: Option<String>,
+}
+
+/// Rendert `items` zu einer neuen Video-Zeitachse (siehe
+/// `apx_export::timeline`s Moduldoku für den zweistufigen Rendering-
+/// Ansatz) und legt das Ergebnis als neues Katalog-Video im Ordner des
+/// ersten Eintrags an (`register_video_result_as_new_photo`,
+/// wiederverwendet aus Schritt 6) — nicht-destruktiv wie jeder andere
+/// Video-Bearbeitungs-Command dieser Datei: keiner der Quell-Clips
+/// wird verändert.
+#[tauri::command]
+pub fn render_video_timeline(
+    state: State<'_, AppState>,
+    items: Vec<TimelineItemInput>,
+    options: VideoTimelineOptions,
+) -> Result<PhotoDto, String> {
+    if items.is_empty() {
+        return Err("Zeitachse enthält keine Einträge".to_string());
+    }
+    let transitions: Vec<apx_export::video::TransitionKind> = options
+        .transitions
+        .iter()
+        .map(|t| parse_transition_kind(t))
+        .collect::<Result<_, _>>()?;
+    if transitions.len() != items.len() - 1 {
+        return Err(format!(
+            "Erwartete {} Übergänge für {} Einträge, {} übergeben",
+            items.len() - 1,
+            items.len(),
+            transitions.len()
+        ));
+    }
+    if options.width == 0 || options.height == 0 || options.fps == 0 {
+        return Err("Video-Auflösung/Bildrate muss größer null sein".to_string());
+    }
+
+    let mut timeline_items = Vec::with_capacity(items.len());
+    let mut first_folder_id = None;
+    for item in &items {
+        let photo_id = parse_photo_id(item.photo_id.clone())?;
+        let photo = state
+            .catalog
+            .get_photo(photo_id)
+            .map_err(|err| err.to_string())?;
+        if first_folder_id.is_none() {
+            first_folder_id = Some(photo.folder_id);
+        }
+        let folder = state
+            .catalog
+            .get_folder(photo.folder_id)
+            .map_err(|err| err.to_string())?;
+        let source_path = folder.path.join(&photo.filename);
+
+        if photo.media_kind == "video" {
+            let in_ms = item
+                .in_ms
+                .ok_or_else(|| "Video-Eintrag ohne Start-Zeitpunkt".to_string())?;
+            let out_ms = item
+                .out_ms
+                .ok_or_else(|| "Video-Eintrag ohne End-Zeitpunkt".to_string())?;
+            if in_ms < 0 || out_ms <= in_ms {
+                return Err("Ungültiger Zeitbereich in der Zeitachse".to_string());
+            }
+            timeline_items.push(apx_export::timeline::TimelineItem::VideoClip {
+                source_path,
+                in_ms,
+                out_ms,
+            });
+        } else {
+            let edl = resolve_current_edl(&state.catalog, photo_id)?;
+            let request = apx_export::engine::ExportRequest::new(
+                source_path,
+                edl,
+                apx_export::format::ExportFormat::Jpeg,
+            );
+            let (width, height, rgba) =
+                apx_export::engine::render_to_pixels(Some(&state.pipeline), &request)
+                    .map_err(|err| err.to_string())?;
+            timeline_items.push(apx_export::timeline::TimelineItem::Photo {
+                width,
+                height,
+                rgba,
+                hold_seconds: item.hold_seconds.unwrap_or(3.0).max(0.1),
+            });
+        }
+    }
+
+    let folder_id = first_folder_id.ok_or_else(|| "Kein Eintrag in der Zeitachse".to_string())?;
+    let folder = state
+        .catalog
+        .get_folder(folder_id)
+        .map_err(|err| err.to_string())?;
+    let dest_path = unique_timeline_dest_path(&folder.path);
+
+    let timeline_options = apx_export::timeline::TimelineExportOptions {
+        output_width: options.width,
+        output_height: options.height,
+        fps: options.fps,
+        audio_path: options.music_path.as_ref().map(PathBuf::from),
+    };
+
+    apx_export::timeline::render_video_timeline(
+        &timeline_items,
+        &transitions,
+        options.transition_seconds.unwrap_or(1.0),
+        &timeline_options,
+        &dest_path,
+    )
+    .map_err(|err| err.to_string())?;
+
+    register_video_result_as_new_photo(&state, folder_id, &dest_path)
+}
+
+/// `Zeitachse.mp4`, mit `_<n>`-Zähler bei Namenskollision — dieselbe
+/// Konvention wie [`unique_sibling_video_path`], nur ohne einen
+/// einzelnen Quell-Clip, aus dem ein Dateiname abgeleitet werden
+/// könnte (eine Zeitachse kombiniert mehrere Quellen).
+fn unique_timeline_dest_path(folder_path: &Path) -> PathBuf {
+    let mut dest_path = folder_path.join("Zeitachse.mp4");
+    let mut counter = 1u32;
+    while dest_path.exists() {
+        dest_path = folder_path.join(format!("Zeitachse_{counter}.mp4"));
+        counter += 1;
+    }
+    dest_path
+}
+
 /// Geht einen Bearbeitungsschritt zurück. `None`, wenn schon am
 /// Ausgangszustand (kein Rückgängig möglich) — kein Fehler, siehe
 /// `apx_catalog::Catalog::undo_edit`.

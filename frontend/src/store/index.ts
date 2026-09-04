@@ -83,6 +83,8 @@ import type {
   TagRuleDto,
   TemplateDto,
   TemplateKind,
+  TimelineItemInput,
+  VideoTimelineOptions,
   WebGalleryOptions,
   WebGalleryOutcomeDto,
   WorkflowTemplatePayload,
@@ -1839,6 +1841,20 @@ interface VideoSlice {
    * Bedarf zuerst den Ordner, weil ein ähnliches Video aus
    * `similarVideoGroups` in einem völlig anderen Ordner liegen kann. */
   jumpToVideo: (entry: SimilarVideoDto) => Promise<void>;
+
+  /** Video-Zeitachse (Phase 17 Schritt 1, siehe `DECISIONS.md` ADR-0045)
+   * — kombiniert mehrere Fotos/Videos + Übergänge zu einem neuen
+   * Video-Katalog-Asset, siehe `VideoTimelineDialog.tsx` und
+   * `apx_app::commands::render_video_timeline`s Moduldoku. Dasselbe
+   * Muster wie die Diashow oben (`exportSlideshowVideo`), aber mit
+   * echten Videoclips als möglichen Einträgen statt nur Fotos. */
+  videoTimelineDialogOpen: boolean;
+  openVideoTimelineDialog: () => void;
+  closeVideoTimelineDialog: () => void;
+  videoTimelineRunning: boolean;
+  videoTimelineError: string | null;
+  videoTimelineOutcome: PhotoDto | null;
+  renderVideoTimeline: (items: TimelineItemInput[], options: VideoTimelineOptions) => Promise<void>;
 }
 
 export type AppStore = CatalogSlice &
@@ -7014,6 +7030,46 @@ export const useAppStore = create<AppStore>()(
         });
       }
       get().selectPhoto(entry.photo.id);
+    },
+
+    videoTimelineDialogOpen: false,
+    videoTimelineRunning: false,
+    videoTimelineError: null,
+    videoTimelineOutcome: null,
+
+    openVideoTimelineDialog: () => {
+      set((state) => {
+        state.videoTimelineDialogOpen = true;
+      });
+    },
+
+    closeVideoTimelineDialog: () => {
+      set((state) => {
+        state.videoTimelineDialogOpen = false;
+      });
+    },
+
+    renderVideoTimeline: async (items, options) => {
+      set((state) => {
+        state.videoTimelineRunning = true;
+        state.videoTimelineError = null;
+      });
+      try {
+        const outcome = await api.renderVideoTimeline(items, options);
+        const { selectedFolderId } = get();
+        if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
+        set((state) => {
+          state.videoTimelineOutcome = outcome;
+        });
+      } catch (err) {
+        set((state) => {
+          state.videoTimelineError = err instanceof Error ? err.message : String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoTimelineRunning = false;
+        });
+      }
     },
     };
   }),

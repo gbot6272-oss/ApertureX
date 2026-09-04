@@ -17,6 +17,11 @@ tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rayon.workspace = true
+# Zeitachsen-Zwischen-Segmente (Phase 17 Schritt 1, `timeline.rs`) — vorher
+# nur `dev-dependencies` (Tests), jetzt auch von echtem Produktionscode
+# gebraucht (Temp-Verzeichnis für Segment-Dateien vor dem `ffmpeg`-
+# `xfade`-Verketten).
+tempfile = "3"
 # WebP (verlustfrei, reines Rust über image-webp) + AVIF (verlustbehaftet
 # über ravif/rav1e, ebenfalls reines Rust) zusätzlich zu den vom Workspace
 # vorgegebenen JPEG/PNG/TIFF-Features — siehe ADR-0034 Punkt 1.
@@ -71,6 +76,5 @@ gamut-jxl = "0.4.0"
 gamut-core = "2.0.1"
 
 [dev-dependencies]
-tempfile = "3"
 approx = "0.5"
 tokio = { version = "1.53.1", features = ["rt", "macros"] }

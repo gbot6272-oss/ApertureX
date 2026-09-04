@@ -34,6 +34,45 @@ use crate::video::{
     VideoExportOptions,
 };
 
+/// Übergangsart zwischen zwei Zeitachsen-Einträgen (Phase 17 Schritt 3,
+/// siehe `DECISIONS.md` ADR-0045) — bewusst ein eigener, reicherer Typ
+/// statt Wiederverwendung von `video::TransitionKind` (Cut/CrossFade):
+/// letzterer trägt zusätzlich die Live-Canvas-Wiedergabe der Diashow
+/// (`SlideshowPlayer.tsx`), die keine `ffmpeg`-`xfade`-Filternamen
+/// kennt und mit nur zwei Varianten auskommt. Jede Variante außer
+/// `Cut` ist ein Name, den `ffmpeg`s `xfade`-Filter direkt versteht
+/// (siehe `ffmpeg_name()`) — kein eigener Bildmisch-Code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimelineTransitionKind {
+    Cut,
+    Fade,
+    Dissolve,
+    WipeLeft,
+    WipeRight,
+    SlideUp,
+    SlideDown,
+    CircleOpen,
+}
+
+impl TimelineTransitionKind {
+    /// Der `xfade`-Filter-Name — bei `Cut` irrelevant (die Dauer ist
+    /// ohnehin `CUT_TRANSITION_SECONDS`, ein für das Auge nicht
+    /// wahrnehmbarer Bruchteil einer Sekunde), aber ein gültiger Name
+    /// wird trotzdem gebraucht, damit die Filterkette einheitlich
+    /// bleibt (siehe Moduldoku).
+    fn ffmpeg_name(self) -> &'static str {
+        match self {
+            Self::Cut | Self::Fade => "fade",
+            Self::Dissolve => "dissolve",
+            Self::WipeLeft => "wipeleft",
+            Self::WipeRight => "wiperight",
+            Self::SlideUp => "slideup",
+            Self::SlideDown => "slidedown",
+            Self::CircleOpen => "circleopen",
+        }
+    }
+}
+
 /// Ein einzelner Zeitachsen-Eintrag — anders als `TimelineSlide`
 /// referenziert `VideoClip` eine Quelldatei plus Trim-Bereich statt
 /// eines vorab gerenderten Puffers (siehe Moduldoku).
@@ -111,7 +150,7 @@ const CUT_TRANSITION_SECONDS: f32 = 0.04;
 /// aufeinanderfolgenden Einträgen).
 pub fn render_video_timeline(
     items: &[TimelineItem],
-    transitions: &[TransitionKind],
+    transitions: &[TimelineTransitionKind],
     transition_seconds: f32,
     options: &TimelineExportOptions,
     dest_path: &Path,
@@ -158,8 +197,8 @@ pub fn render_video_timeline(
     let gaps: Vec<f32> = transitions
         .iter()
         .map(|t| match t {
-            TransitionKind::Cut => CUT_TRANSITION_SECONDS,
-            TransitionKind::CrossFade => transition_seconds.max(CUT_TRANSITION_SECONDS),
+            TimelineTransitionKind::Cut => CUT_TRANSITION_SECONDS,
+            _ => transition_seconds.max(CUT_TRANSITION_SECONDS),
         })
         .collect();
 
@@ -171,6 +210,7 @@ pub fn render_video_timeline(
             &segment_paths,
             &durations,
             &gaps,
+            transitions,
             options.fps,
             &concatenated,
         )?;
@@ -311,6 +351,7 @@ fn concat_with_xfade(
     segment_paths: &[PathBuf],
     durations: &[f32],
     gaps: &[f32],
+    transitions: &[TimelineTransitionKind],
     fps: u32,
     dest_path: &Path,
 ) -> Result<()> {
@@ -331,8 +372,16 @@ fn concat_with_xfade(
         } else {
             format!("v{i}")
         };
+        // `transitions` fällt bei fehlendem Eintrag (sollte durch die
+        // Längenprüfung in `render_video_timeline` nicht vorkommen) auf
+        // `Fade` zurück, statt zu paniken.
+        let transition_name = transitions
+            .get(i)
+            .copied()
+            .unwrap_or(TimelineTransitionKind::Fade)
+            .ffmpeg_name();
         filter.push_str(&format!(
-            "[{prev_label}][{next_input}]xfade=transition=fade:duration={:.3}:offset={:.3}[{out_label}];",
+            "[{prev_label}][{next_input}]xfade=transition={transition_name}:duration={:.3}:offset={:.3}[{out_label}];",
             gap, offsets[i]
         ));
         prev_label = out_label;

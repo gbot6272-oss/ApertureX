@@ -1720,8 +1720,10 @@ pub struct VideoTimelineOptions {
     pub width: u32,
     pub height: u32,
     pub fps: u32,
-    /// `"cut"`/`"cross_fade"` je Übergang — Länge muss `items.len() - 1`
-    /// sein.
+    /// Je Übergang einer von `"cut"`/`"fade"`/`"dissolve"`/`"wipe_left"`/
+    /// `"wipe_right"`/`"slide_up"`/`"slide_down"`/`"circle_open"` (Phase
+    /// 17 Schritt 3, siehe `parse_timeline_transition_kind`) — Länge
+    /// muss `items.len() - 1` sein.
     pub transitions: Vec<String>,
     pub transition_seconds: Option<f32>,
     pub music_path: Option<String>,
@@ -1743,10 +1745,10 @@ pub fn render_video_timeline(
     if items.is_empty() {
         return Err("Zeitachse enthält keine Einträge".to_string());
     }
-    let transitions: Vec<apx_export::video::TransitionKind> = options
+    let transitions: Vec<apx_export::timeline::TimelineTransitionKind> = options
         .transitions
         .iter()
-        .map(|t| parse_transition_kind(t))
+        .map(|t| parse_timeline_transition_kind(t))
         .collect::<Result<_, _>>()?;
     if transitions.len() != items.len() - 1 {
         return Err(format!(
@@ -6284,6 +6286,27 @@ fn parse_transition_kind(transition: &str) -> Result<apx_export::video::Transiti
     match transition {
         "cut" => Ok(apx_export::video::TransitionKind::Cut),
         "cross_fade" => Ok(apx_export::video::TransitionKind::CrossFade),
+        other => Err(format!("unbekannter Übergang '{other}'")),
+    }
+}
+
+/// Übergänge für die Video-Zeitachse (Phase 17 Schritt 3, siehe
+/// `DECISIONS.md` ADR-0045) — eigener Parser statt Wiederverwendung
+/// von [`parse_transition_kind`], weil `TimelineTransitionKind` mehr
+/// Varianten kennt als die Diashow (`cut`/`cross_fade`).
+fn parse_timeline_transition_kind(
+    transition: &str,
+) -> Result<apx_export::timeline::TimelineTransitionKind, String> {
+    use apx_export::timeline::TimelineTransitionKind as T;
+    match transition {
+        "cut" => Ok(T::Cut),
+        "fade" => Ok(T::Fade),
+        "dissolve" => Ok(T::Dissolve),
+        "wipe_left" => Ok(T::WipeLeft),
+        "wipe_right" => Ok(T::WipeRight),
+        "slide_up" => Ok(T::SlideUp),
+        "slide_down" => Ok(T::SlideDown),
+        "circle_open" => Ok(T::CircleOpen),
         other => Err(format!("unbekannter Übergang '{other}'")),
     }
 }

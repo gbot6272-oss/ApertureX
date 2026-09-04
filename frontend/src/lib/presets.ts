@@ -41,6 +41,12 @@ import type { RuleNode } from "./ruleTree";
 // `liquify_strokes` (Phase 15 Schritt 3) ist wie `repair`/`masks`
 // AUSGESCHLOSSEN: jeder Strich ist an konkrete gemalte Bildkoordinaten
 // gebunden, kein auf andere Fotos übertragbarer „Look".
+//
+// `skin_smoothing` (Phase 15 Schritt 5) ist aus demselben Grund wie
+// `virtual_aperture`/`style_transfer` AUSGESCHLOSSEN: `patch` ist ein
+// für genau ein Foto berechnetes Ergebnis (Gesichtserkennung +
+// Frequenztrennung über dessen konkreten Bildinhalt) — auf ein anderes
+// Foto übertragen wäre es exakt so falsch.
 export type PresetSectionKey = Exclude<
   keyof EdlPayload,
   | "repair"
@@ -53,6 +59,7 @@ export type PresetSectionKey = Exclude<
   | "style_transfer"
   | "sky_replace"
   | "liquify_strokes"
+  | "skin_smoothing"
 >;
 
 export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [

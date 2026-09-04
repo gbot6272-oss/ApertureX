@@ -3444,6 +3444,127 @@ pub fn content_aware_scale(
     })
 }
 
+// ---- Automatisches Hautglätten (Phase 15 Schritt 5, siehe DECISIONS.md
+// ADR-0042) — kombiniert Gesichtserkennung + Frequenztrennung, kein
+// zusätzliches ONNX-Modell. --------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkinSmoothingPatchDto {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    /// Base64-kodiertes interleaved-RGB-`u8`-Ergebnis.
+    pub pixels_base64: String,
+}
+
+/// Erkennt Gesichtsregionen (`apx_ai::faces::detect_face_regions`),
+/// schneidet die Hautton-Alpha-Maske (`apx_ai::segmentation::
+/// person_alpha`) auf diese Regionen zu (verhindert Glätten hautfarbener
+/// Bildbereiche außerhalb von Gesichtern), zerlegt das Bild per
+/// Frequenztrennung mit einem kleineren Radius als `stages::repair`s
+/// Standardwert (feinere Poren-/Textur-Frequenz) und weichzeichnet nur
+/// die Hochfrequenz-Ebene innerhalb der Gesichtsmaske — dieselbe
+/// Retusche-Technik wie Photoshops "Frequenztrennung", hier automatisiert
+/// ohne manuelles Maskieren (siehe `PLAN.md` Phase 15 Schritt 5). Läuft
+/// — wie jede andere KI-Analyse dieses Projekts — auf dem rohen, auf
+/// `apx_ai::segmentation::ANALYSIS_MAX_EDGE` gedeckelten
+/// Dekodierergebnis.
+#[tauri::command]
+pub fn smooth_skin(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<SkinSmoothingPatchDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let faces = apx_ai::faces::detect_face_regions(&linear.pixels, linear.width, linear.height)
+        .map_err(|err| err.to_string())?;
+    if faces.is_empty() {
+        return Err("Keine Gesichter erkannt.".to_string());
+    }
+    let skin_alpha =
+        apx_ai::segmentation::person_alpha(&linear.pixels, linear.width, linear.height)
+            .map_err(|err| err.to_string())?;
+
+    let width = linear.width;
+    let height = linear.height;
+    let pixel_count = (width as usize) * (height as usize);
+
+    let mut face_mask = vec![0u8; pixel_count];
+    for y in 0..height {
+        for x in 0..width {
+            let nx = x as f32 / width as f32;
+            let ny = y as f32 / height as f32;
+            let inside = faces
+                .iter()
+                .any(|f| nx >= f.x && nx < f.x + f.width && ny >= f.y && ny < f.y + f.height);
+            if inside {
+                let idx = (y as usize) * (width as usize) + x as usize;
+                face_mask[idx] = skin_alpha[idx];
+            }
+        }
+    }
+
+    let rgba =
+        apx_pipeline::color::linear_camera_rgb_to_srgb_rgba8(&linear.pixels, linear.cam_to_srgb);
+    let mut rgb_f32 = vec![0f32; pixel_count * 3];
+    for i in 0..pixel_count {
+        rgb_f32[i * 3] = rgba[i * 4] as f32 / 255.0;
+        rgb_f32[i * 3 + 1] = rgba[i * 4 + 1] as f32 / 255.0;
+        rgb_f32[i * 3 + 2] = rgba[i * 4 + 2] as f32 / 255.0;
+    }
+
+    use apx_pipeline::stages::frequency_separation::{
+        combine, default_split_radius_px, low_pass, HIGH_FREQUENCY_OFFSET,
+    };
+    // Kleinerer Trennradius als der für allgemeine Retusche gewählte
+    // Standardwert — feinere Poren-/Textur-Frequenz (siehe Moduldoku).
+    let split_radius = (default_split_radius_px(width) / 2).max(1);
+    let low = low_pass(&rgb_f32, width, height, split_radius);
+    let high: Vec<f32> = rgb_f32
+        .iter()
+        .zip(low.iter())
+        .map(|(&original, &blurred)| (original - blurred + HIGH_FREQUENCY_OFFSET).clamp(0.0, 1.0))
+        .collect();
+
+    // Größerer Radius als die Trennung selbst — verwischt genau die
+    // feine Poren-/Textur-Information, die die Hochfrequenz-Ebene trägt.
+    let smoothing_radius = (split_radius * 4).max(2);
+    let smoothed_high = low_pass(&high, width, height, smoothing_radius);
+
+    // Nur innerhalb der Gesichtsmaske durch die geglättete Hochfrequenz
+    // ersetzen, weich gewichtet nach `person_alpha`s Alpha-Wert.
+    let mut final_high = high.clone();
+    for i in 0..pixel_count {
+        let weight = face_mask[i] as f32 / 255.0;
+        if weight <= 0.0 {
+            continue;
+        }
+        for c in 0..3 {
+            let idx = i * 3 + c;
+            final_high[idx] = high[idx] + (smoothed_high[idx] - high[idx]) * weight;
+        }
+    }
+
+    let smoothed = combine(&low, &final_high);
+    let mut pixels = vec![0u8; pixel_count * 3];
+    for (i, value) in smoothed.iter().enumerate() {
+        pixels[i] = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+    }
+
+    Ok(SkinSmoothingPatchDto {
+        bitmap_width: width,
+        bitmap_height: height,
+        pixels_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &pixels),
+    })
+}
+
 // ---- Mehrfachbelichtung/Layer-Compositing (Phase 14 Schritt 3, siehe
 // DECISIONS.md ADR-0041) ------------------------------------------------------
 //

@@ -69,6 +69,12 @@ pub struct StageEnabled {
     /// `default_true`-Begründung wie `composite`/`virtual_aperture` oben.
     #[serde(default = "default_true")]
     pub style_transfer: bool,
+    /// Automatisches Hautglätten (Phase 15 Schritt 5) — läuft nach
+    /// `style_transfer`, vor `sky_replace` (siehe `stages::
+    /// skin_smoothing`s Moduldoku). Dieselbe `default_true`-Begründung
+    /// wie `style_transfer` oben.
+    #[serde(default = "default_true")]
+    pub skin_smoothing: bool,
     /// Himmelsaustausch (Phase 14 Schritt 10) — läuft nach `style_transfer`,
     /// vor `geometry`.
     #[serde(default = "default_true")]
@@ -105,6 +111,7 @@ impl StageEnabled {
         composite: true,
         virtual_aperture: true,
         style_transfer: true,
+        skin_smoothing: true,
         sky_replace: true,
         liquify: true,
         geometry: true,
@@ -288,6 +295,49 @@ pub struct SkyReplacePatch {
     pub pixels: Vec<u8>,
 }
 
+// ---- Automatisches Hautglätten (Phase 15 Schritt 5) ------------------------
+
+/// Einmalig vorab per `apx-app`s `smooth_skin`-Command berechnetes,
+/// bereits geglättetes Vollbild (gesichtsbewusste Frequenztrennung, siehe
+/// `DECISIONS.md` ADR-0042) — dasselbe „einmal berechnen, bei jedem
+/// Rendern nur noch skalieren"-Muster wie `StyleTransferPatch`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkinSmoothingPatch {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub pixels: Vec<u8>,
+}
+
+/// Automatisches Hautglätten (Phase 15 Schritt 5, siehe `DECISIONS.md`
+/// ADR-0042 — Lightroom hat kein automatisches, gesichtserkennungs-
+/// gestütztes Hautglätten, nur den manuellen Anpassungspinsel). Kombiniert
+/// `apx_ai::faces::detect_face_regions`/`segmentation::person_alpha` und
+/// `stages::frequency_separation::split/combine` (mit kleinerem
+/// `radius_px` als der Reparatur-Standardwert) zu einem einzigen
+/// Automatik-Befehl. `amount` (`0.0..=1.0`) blendet linear zwischen dem
+/// unveränderten Bild und dem vollen Glättungsergebnis — dieselbe
+/// Deckkraft-Konvention wie `StyleTransferAdjustment::amount`. Ohne
+/// `patch` (noch nicht berechnet) bleibt die Stufe ein No-Op.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkinSmoothingAdjustment {
+    pub amount: f32,
+    #[serde(default)]
+    pub patch: Option<SkinSmoothingPatch>,
+}
+
+impl SkinSmoothingAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        patch: None,
+    };
+}
+
+impl Default for SkinSmoothingAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
 // ---- Verflüssigen (Liquify, Phase 15 Schritt 3) ----------------------------
 
 /// Ein Punkt im gemalten Pfad eines Verflüssigen-Strichs — normierte
@@ -363,6 +413,12 @@ pub struct EdlV4 {
     /// bisheriges Verhalten, kein Stiltransfer berechnet).
     #[serde(default)]
     pub style_transfer: StyleTransferAdjustment,
+    /// Automatisches Hautglätten (Phase 15 Schritt 5) — additiv,
+    /// `#[serde(default)]` liest ein gespeichertes `EdlV4` ohne dieses
+    /// Feld als `SkinSmoothingAdjustment::NEUTRAL` (unverändertes
+    /// bisheriges Verhalten, keine Glättung berechnet).
+    #[serde(default)]
+    pub skin_smoothing: SkinSmoothingAdjustment,
     /// Himmelsaustausch (Phase 14 Schritt 10) — additiv, `#[serde(default)]`.
     #[serde(default)]
     pub sky_replace: Option<SkyReplacePatch>,
@@ -397,6 +453,7 @@ impl EdlV4 {
             composite_layers: Vec::new(),
             virtual_aperture: VirtualApertureAdjustment::NEUTRAL,
             style_transfer: StyleTransferAdjustment::NEUTRAL,
+            skin_smoothing: SkinSmoothingAdjustment::NEUTRAL,
             sky_replace: None,
             liquify_strokes: Vec::new(),
         }
@@ -428,6 +485,7 @@ impl EdlV4 {
             composite_layers: Vec::new(),
             virtual_aperture: VirtualApertureAdjustment::NEUTRAL,
             style_transfer: StyleTransferAdjustment::NEUTRAL,
+            skin_smoothing: SkinSmoothingAdjustment::NEUTRAL,
             sky_replace: None,
             liquify_strokes: Vec::new(),
         }

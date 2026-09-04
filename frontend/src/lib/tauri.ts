@@ -1006,6 +1006,21 @@ export function replaceSky(photoId: string, skyImagePath: string): Promise<SkyRe
   return invoke<SkyReplacePatchDto>("replace_sky", { photoId, skyImagePath });
 }
 
+// ---- Automatisches Hautglätten (Phase 15 Schritt 5) -----------------------
+
+export interface SkinSmoothingPatchDto {
+  bitmap_width: number;
+  bitmap_height: number;
+  pixels_base64: string;
+}
+
+/** Erkennt Gesichter und glättet nur die Hautbereiche darin
+ * (gesichtsbewusste Frequenztrennung) — kein Modell-Download nötig. Wirft
+ * einen Fehler, wenn keine Gesichter erkannt wurden. */
+export function smoothSkin(photoId: string): Promise<SkinSmoothingPatchDto> {
+  return invoke<SkinSmoothingPatchDto>("smooth_skin", { photoId });
+}
+
 // ---- KI: Echte Personen-Wiedererkennung (Phase 13 Schritt 8) ---------------
 
 export interface FaceDetectionDto {

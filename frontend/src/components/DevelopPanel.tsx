@@ -62,6 +62,7 @@ import { ContentAwareScaleDialog } from "./ContentAwareScaleDialog";
 import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import { PaletteFrame } from "./PaletteFrame";
 import { SavePresetDialog } from "./SavePresetDialog";
+import { SkinSmoothingPanel } from "./SkinSmoothingPanel";
 import { SkyReplacePanel } from "./SkyReplacePanel";
 import { StyleTransferPanel } from "./StyleTransferPanel";
 import { VirtualAperturePanel } from "./VirtualAperturePanel";
@@ -121,6 +122,7 @@ const STAGE_ANCHOR_IDS: Record<keyof StageEnabled, string> = {
   composite: "stage-composite",
   virtual_aperture: "stage-virtual_aperture",
   style_transfer: "stage-style_transfer",
+  skin_smoothing: "stage-skin_smoothing",
   sky_replace: "stage-sky_replace",
   liquify: "stage-liquify",
   geometry: "stage-geometry",
@@ -1488,6 +1490,14 @@ export function DevelopPanel() {
           <fieldset id="stage-style_transfer" className="flex flex-col gap-2">
             <legend className="mb-1 text-xs font-medium text-text-secondary">Stiltransfer</legend>
             <StyleTransferPanel />
+          </fieldset>
+
+          {/* Photoshop-Funktion: Automatisches Hautglätten (Phase 15
+              Schritt 5, ADR-0042) — läuft nach `style_transfer`, vor
+              `sky_replace` (siehe `stages::skin_smoothing`s Moduldoku). */}
+          <fieldset id="stage-skin_smoothing" className="flex flex-col gap-2">
+            <legend className="mb-1 text-xs font-medium text-text-secondary">Hautglätten</legend>
+            <SkinSmoothingPanel />
           </fieldset>
 
           <fieldset id="stage-sky_replace" className="flex flex-col gap-2">

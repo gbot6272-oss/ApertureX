@@ -1513,6 +1513,19 @@ interface LibraryBacklogSlice {
   replaceSkyForCurrentPhoto: (skyImagePath: string) => Promise<void>;
   clearSkyReplace: () => void;
 
+  /** Automatisches Hautglätten (Phase 15 Schritt 5, siehe
+   * `DECISIONS.md` ADR-0042) — erkennt Gesichter selbst, kein manuelles
+   * Maskieren nötig. Legt das Ergebnis in `developEdl.skin_smoothing.
+   * patch` ab, wirft bei fehlender Gesichtserkennung eine klare
+   * Fehlermeldung (`catalogError`). */
+  skinSmoothing: boolean;
+  smoothSkinForCurrentPhoto: () => Promise<void>;
+  clearSkinSmoothing: () => void;
+  /** Setzt `developEdl.skin_smoothing.amount` (Deckkraft-Regler,
+   * Zwischenwert beim Ziehen — committet erst `DevelopSlider`s
+   * `onCommit`, wie `setBasicField`). */
+  setSkinSmoothingAmount: (value: number) => void;
+
   /** Stapelverarbeitungs-Konsole (Phase 11 Schritt 9, siehe
    * `DECISIONS.md` ADR-0038): eine Regel = `libraryFilter` (wiederverwendet,
    * wie beim normalen Filter-Panel) + eine `BatchAction`. */
@@ -5653,6 +5666,51 @@ export const useAppStore = create<AppStore>()(
         state.developEdl.sky_replace = null;
       });
       void get().commitDevelopEdit("Himmelsaustausch entfernt");
+    },
+
+    skinSmoothing: false,
+
+    smoothSkinForCurrentPhoto: async () => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.skinSmoothing = true;
+      });
+      try {
+        const dto = await api.smoothSkin(developPhotoId);
+        set((state) => {
+          state.developEdl.skin_smoothing.patch = {
+            bitmap_width: dto.bitmap_width,
+            bitmap_height: dto.bitmap_height,
+            pixels: base64ToByteArray(dto.pixels_base64),
+          };
+          if (state.developEdl.skin_smoothing.amount <= 0) {
+            state.developEdl.skin_smoothing.amount = 1;
+          }
+        });
+        void get().commitDevelopEdit("Haut automatisch geglättet");
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.skinSmoothing = false;
+        });
+      }
+    },
+
+    clearSkinSmoothing: () => {
+      set((state) => {
+        state.developEdl.skin_smoothing = { amount: 0, patch: null };
+      });
+      void get().commitDevelopEdit("Hautglätten entfernt");
+    },
+
+    setSkinSmoothingAmount: (value) => {
+      set((state) => {
+        state.developEdl.skin_smoothing.amount = value;
+      });
     },
 
     batchPreview: [],

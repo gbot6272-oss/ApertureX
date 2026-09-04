@@ -21,7 +21,7 @@ use crate::gpu::GpuContext;
 use crate::stages::{
     basic_fused, bw_mixer, calibration, color_grading, composite, curves, details, effects,
     geometry, hsl_color_mixer, lens_corrections, liquify, local_contrast, masks, repair,
-    sky_replace, style_transfer, virtual_aperture, white_balance,
+    skin_smoothing, sky_replace, style_transfer, virtual_aperture, white_balance,
 };
 
 /// Das Ergebnis von [`render_rgba8`] — `width`/`height` beschreiben
@@ -399,10 +399,19 @@ pub fn render_rgba8(
         )
     };
 
-    let skied = if !stages.sky_replace || edl.sky_replace.is_none() {
+    // Automatisches Hautglätten (Phase 15 Schritt 5) — läuft nach
+    // `style_transfer`, vor `sky_replace`, im selben fertig entwickelten
+    // sRGB-RGBA8-Bild (siehe `stages::skin_smoothing`s Moduldoku).
+    let smoothed = if !stages.skin_smoothing || edl.skin_smoothing.amount <= 0.0 {
         styled
     } else {
-        sky_replace::apply(&styled, linear.width, linear.height, &edl.sky_replace)
+        skin_smoothing::apply(&styled, linear.width, linear.height, &edl.skin_smoothing)
+    };
+
+    let skied = if !stages.sky_replace || edl.sky_replace.is_none() {
+        smoothed
+    } else {
+        sky_replace::apply(&smoothed, linear.width, linear.height, &edl.sky_replace)
     };
 
     // Verflüssigen (Phase 15 Schritt 3) — läuft nach `sky_replace`, vor
@@ -825,6 +834,7 @@ mod tests {
             virtual_aperture: crate::edl::v4::VirtualApertureAdjustment::NEUTRAL,
             style_transfer: crate::edl::v4::StyleTransferAdjustment::NEUTRAL,
             sky_replace: None,
+            skin_smoothing: crate::edl::v4::SkinSmoothingAdjustment::NEUTRAL,
             liquify_strokes: Vec::new(),
         };
 

@@ -29,6 +29,7 @@ pub mod liquify;
 pub mod local_contrast;
 pub mod masks;
 pub mod repair;
+pub mod skin_smoothing;
 pub mod sky_replace;
 pub mod style_transfer;
 pub mod virtual_aperture;

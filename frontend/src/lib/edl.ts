@@ -594,6 +594,13 @@ export const STYLE_TRANSFER_SLIDER_SPECS: readonly SliderSpec[] = [
   { key: "amount", label: "Stiltransfer: Betrag", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
 ];
 
+/** Automatisches Hautglätten (Phase 15 Schritt 5) — dieselbe `0..=100`-
+ * UI-Skala für einen intern `0.0..=1.0`-Bruchteil wie
+ * `STYLE_TRANSFER_SLIDER_SPECS` (siehe `SkinSmoothingAdjustment.amount`). */
+export const SKIN_SMOOTHING_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "amount", label: "Hautglätten: Deckkraft", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
+];
+
 // ---- Kalibrierung -----------------------------------------------------------
 
 export type ProcessVersion = "V1";
@@ -1229,6 +1236,10 @@ export interface StageEnabled {
    * `composite`, vor `geometry`, im fertig entwickelten sRGB-RGBA8-Bild
    * (siehe `stages::style_transfer`s Moduldoku). */
   style_transfer: boolean;
+  /** Automatisches Hautglätten (Phase 15 Schritt 5) — läuft nach
+   * `style_transfer`, vor `sky_replace` (siehe `stages::
+   * skin_smoothing`s Moduldoku). */
+  skin_smoothing: boolean;
   sky_replace: boolean;
   /** Verflüssigen (Phase 15 Schritt 3) — läuft nach `sky_replace`, vor
    * `geometry`, im fertig entwickelten sRGB-RGBA8-Bild (siehe
@@ -1253,6 +1264,7 @@ export const NEUTRAL_STAGE_ENABLED: StageEnabled = {
   composite: true,
   virtual_aperture: true,
   style_transfer: true,
+  skin_smoothing: true,
   sky_replace: true,
   liquify: true,
   geometry: true,
@@ -1407,6 +1419,7 @@ export const STAGE_NODE_SPECS: readonly StageNodeSpec[] = [
   { key: "composite", label: "Compositing" },
   { key: "virtual_aperture", label: "Virtuelle Blende" },
   { key: "style_transfer", label: "Stiltransfer" },
+  { key: "skin_smoothing", label: "Hautglätten" },
   { key: "sky_replace", label: "Himmelsaustausch" },
   { key: "liquify", label: "Verflüssigen" },
   { key: "geometry", label: "Geometrie" },
@@ -1434,6 +1447,7 @@ export interface EdlPayload {
   composite_layers: CompositeLayer[];
   virtual_aperture: VirtualApertureAdjustment;
   style_transfer: StyleTransferAdjustment;
+  skin_smoothing: SkinSmoothingAdjustment;
   sky_replace: SkyReplacePatch | null;
   liquify_strokes: LiquifyStroke[];
 }
@@ -1459,6 +1473,7 @@ export function neutralEdlPayload(): EdlPayload {
     composite_layers: [],
     virtual_aperture: NEUTRAL_VIRTUAL_APERTURE,
     style_transfer: NEUTRAL_STYLE_TRANSFER,
+    skin_smoothing: NEUTRAL_SKIN_SMOOTHING,
     sky_replace: null,
     liquify_strokes: [],
   };
@@ -1618,3 +1633,30 @@ export interface SkyReplacePatch {
   bitmap_height: number;
   pixels: string;
 }
+
+/** Einmalig berechnetes Hautglätten-Ergebnis (Phase 15 Schritt 5, siehe
+ * `DECISIONS.md` ADR-0042) — dasselbe „einmal per Command auflösen, bei
+ * jedem Rendern nur noch skalieren"-Muster wie `StyleTransferPatch`.
+ * `pixels` ist interleaved RGB (`0..=255`), spiegelt Rusts `Vec<u8>`
+ * (siehe `CompositeLayerSource`s Doku für dieselbe Konvention). */
+export interface SkinSmoothingPatch {
+  bitmap_width: number;
+  bitmap_height: number;
+  pixels: number[];
+}
+
+/** Automatisches Hautglätten (Phase 15 Schritt 5) — spiegelt
+ * `apx_pipeline::edl::v4::SkinSmoothingAdjustment`. `amount`:
+ * `0.0..=1.0`, blendet linear zwischen unverändertem Bild (`0.0`) und
+ * vollem Glättungsergebnis (`1.0`). Ohne berechnetes Ergebnis
+ * (`patch === null`) bleibt die Stufe wirkungslos, selbst bei
+ * `amount > 0` (siehe `skin_smoothing.rs`s Moduldoku). */
+export interface SkinSmoothingAdjustment {
+  amount: number;
+  patch: SkinSmoothingPatch | null;
+}
+
+export const NEUTRAL_SKIN_SMOOTHING: SkinSmoothingAdjustment = {
+  amount: 0,
+  patch: null,
+};

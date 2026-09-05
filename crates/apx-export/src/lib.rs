@@ -30,6 +30,7 @@ pub mod print;
 pub mod queue;
 pub mod resize;
 pub mod sharpen;
+pub mod timeline;
 pub mod video;
 pub mod watermark;
 pub mod web;

@@ -139,6 +139,17 @@ Abhängigkeit) und nutzt für die Ähnliche-Videos-Suche (Schritt 10)
 denselben bereits vorhandenen `image_hasher` wie die Foto-
 Duplikaterkennung (Phase 9).
 
+## Rust — Phase 17 (siehe `DECISIONS.md` ADR-0045)
+
+| Abhängigkeit | Lizenz | Zweck | Anmerkung |
+|---|---|---|---|
+| `whisper-rs` | Unlicense | Automatische Untertitel (Schritt 5, `apx_ai::subtitles`), hinter Cargo-Feature `subtitles` (standardmäßig aus) | Bindet `whisper.cpp` (MIT, baut dessen gebündelten C/C++-Quellcode lokal per `cmake`, kein Netzwerkzugriff beim Bauen) |
+| Whisper `base.en` (`ggerganov/whisper.cpp`) | MIT (OpenAI Whisper selbst ebenfalls MIT) | Untertitel-Modell (~142 MB) | ggml-Modelldatei, Opt-in-Download, SHA1 real aus `whisper.cpp`s eigenem `models/README.md` übernommen (nur SHA1 verfügbar, keine erfundene SHA-256-Ersatzprüfsumme) |
+| `sha1` | MIT OR Apache-2.0 | Prüfsumme des Whisper-Modell-Downloads | RustCrypto-Familie, dieselbe Herkunft wie das bereits genutzte `sha2` |
+| MediaPipe Selfie Segmentation (Google) | Apache-2.0 | Greenscreen/Hintergrund entfernen (Schritt 8, `apx_ai::selfie_segmentation`) | ONNX-Modell, Opt-in-Download — **keine Hash-Prüfung** (Download-URL folgt Hugging Faces Schema, aber `huggingface.co` ist von dieser Sandbox aus blockiert und wurde nicht tatsächlich abgerufen, dieselbe ehrliche Lücke wie beim LaMa-Modell in Phase 13) |
+
+Ansonsten folgen die Zeitachsen-Erweiterungen (Schritte 1–4, 6–7, 9) durchgehend `ffmpeg`s nativen Filtern (`xfade`/`overlay`/`setpts`) und bereits vorhandener Infrastruktur (`watermark::apply_text_watermark`, `apx-stacking::homography_stitch`) — keine weitere neue Abhängigkeit.
+
 ## Frontend — Nachtrag: Foto-Globus + Dichte-Heatmap (siehe `DECISIONS.md` ADR-0044)
 
 Keine neue npm-Laufzeit-Abhängigkeit. Bewusst selbst implementiert statt

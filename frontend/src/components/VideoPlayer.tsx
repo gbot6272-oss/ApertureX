@@ -5,6 +5,17 @@ import { videoUrl } from "../lib/media";
 import { importLutCubeFile, pickFilePath } from "../lib/tauri";
 import { useAppStore } from "../store";
 
+function hexToRgb(hex: string): [number, number, number] {
+  const match = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!match) return [0, 255, 0];
+  // Drei Fanggruppen im Muster oben, also bei einem Treffer immer gefüllt.
+  return [
+    parseInt(match[1]!, 16),
+    parseInt(match[2]!, 16),
+    parseInt(match[3]!, 16),
+  ];
+}
+
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
   const mins = Math.floor(seconds / 60);
@@ -26,7 +37,9 @@ function formatTime(seconds: number): string {
 export function VideoPlayer() {
   const selectedFolderId = useAppStore((s) => s.selectedFolderId);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
-  const photos = useAppStore((s) => (selectedFolderId ? s.photosByFolder[selectedFolderId] : undefined));
+  const photos = useAppStore((s) =>
+    selectedFolderId ? s.photosByFolder[selectedFolderId] : undefined,
+  );
   const photo = photos?.find((p) => p.id === selectedPhotoId);
 
   const videoTrimStartMs = useAppStore((s) => s.videoTrimStartMs);
@@ -39,7 +52,9 @@ export function VideoPlayer() {
   const commitVideoTrim = useAppStore((s) => s.commitVideoTrim);
 
   const videoSceneChanges = useAppStore((s) => s.videoSceneChanges);
-  const videoSceneChangesLoading = useAppStore((s) => s.videoSceneChangesLoading);
+  const videoSceneChangesLoading = useAppStore(
+    (s) => s.videoSceneChangesLoading,
+  );
   const videoSceneChangesError = useAppStore((s) => s.videoSceneChangesError);
   const detectVideoSceneChanges = useAppStore((s) => s.detectVideoSceneChanges);
   const clearVideoSceneChanges = useAppStore((s) => s.clearVideoSceneChanges);
@@ -47,14 +62,35 @@ export function VideoPlayer() {
 
   const videoAudioBusy = useAppStore((s) => s.videoAudioBusy);
   const videoAudioError = useAppStore((s) => s.videoAudioError);
-  const denoiseCurrentVideoAudio = useAppStore((s) => s.denoiseCurrentVideoAudio);
+  const denoiseCurrentVideoAudio = useAppStore(
+    (s) => s.denoiseCurrentVideoAudio,
+  );
   const addAudioToCurrentVideo = useAppStore((s) => s.addAudioToCurrentVideo);
 
   const builtinLutFilters = useAppStore((s) => s.builtinLutFilters);
   const loadBuiltinLutFilters = useAppStore((s) => s.loadBuiltinLutFilters);
   const videoLutBusy = useAppStore((s) => s.videoLutBusy);
   const videoLutError = useAppStore((s) => s.videoLutError);
-  const applyLutFilterToCurrentVideo = useAppStore((s) => s.applyLutFilterToCurrentVideo);
+  const applyLutFilterToCurrentVideo = useAppStore(
+    (s) => s.applyLutFilterToCurrentVideo,
+  );
+
+  const aiSettings = useAppStore((s) => s.aiSettings);
+  const loadAiSettings = useAppStore((s) => s.loadAiSettings);
+  const selfieSegmentationModelDownloading = useAppStore(
+    (s) => s.selfieSegmentationModelDownloading,
+  );
+  const downloadSelfieSegmentationModel = useAppStore(
+    (s) => s.downloadSelfieSegmentationModel,
+  );
+  const clearSelfieSegmentationModelPath = useAppStore(
+    (s) => s.clearSelfieSegmentationModelPath,
+  );
+  const videoBackgroundBusy = useAppStore((s) => s.videoBackgroundBusy);
+  const videoBackgroundError = useAppStore((s) => s.videoBackgroundError);
+  const removeBackgroundFromCurrentVideo = useAppStore(
+    (s) => s.removeBackgroundFromCurrentVideo,
+  );
 
   const similarVideoGroups = useAppStore((s) => s.similarVideoGroups);
   const similarVideosLoading = useAppStore((s) => s.similarVideosLoading);
@@ -67,13 +103,20 @@ export function VideoPlayer() {
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [denoiseStrength, setDenoiseStrength] = useState<"low" | "medium" | "high">("medium");
+  const [denoiseStrength, setDenoiseStrength] = useState<
+    "low" | "medium" | "high"
+  >("medium");
   const [musicPath, setMusicPath] = useState<string | null>(null);
   const [musicMode, setMusicMode] = useState<"mix" | "replace">("mix");
   const [musicVolume, setMusicVolume] = useState(1);
   const [customLut, setCustomLut] = useState<LutFilterData | null>(null);
   const [selectedLutKey, setSelectedLutKey] = useState<string>("");
   const [lutStrength, setLutStrength] = useState(1);
+  const [backgroundColor, setBackgroundColor] = useState("#00ff00");
+
+  useEffect(() => {
+    if (aiSettings === null) void loadAiSettings();
+  }, [aiSettings, loadAiSettings]);
 
   // Die fünf eingebauten Filter-Looks (dieselben wie im Foto-
   // Entwickeln-Panel, `LutFilterPanel.tsx`) werden lazy beim ersten
@@ -117,14 +160,20 @@ export function VideoPlayer() {
     else video.pause();
   }, []);
 
-  const handleTimelineClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    const video = videoRef.current;
-    const timeline = timelineRef.current;
-    if (!video || !timeline || duration <= 0) return;
-    const rect = timeline.getBoundingClientRect();
-    const fraction = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-    video.currentTime = fraction * duration;
-  }, [duration]);
+  const handleTimelineClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const video = videoRef.current;
+      const timeline = timelineRef.current;
+      if (!video || !timeline || duration <= 0) return;
+      const rect = timeline.getBoundingClientRect();
+      const fraction = Math.min(
+        1,
+        Math.max(0, (event.clientX - rect.left) / rect.width),
+      );
+      video.currentTime = fraction * duration;
+    },
+    [duration],
+  );
 
   // Setzt den jeweiligen Trimm-Punkt auf die aktuelle Wiedergabeposition
   // (Millisekunden, wie `trim_video`s Signatur es erwartet) — dasselbe
@@ -143,22 +192,39 @@ export function VideoPlayer() {
   }, [currentTime, useSceneAsVideoTrim]);
 
   const handlePickMusic = useCallback(async () => {
-    const path = await pickFilePath("Audio", ["mp3", "wav", "ogg", "flac", "m4a", "aac"]);
+    const path = await pickFilePath("Audio", [
+      "mp3",
+      "wav",
+      "ogg",
+      "flac",
+      "m4a",
+      "aac",
+    ]);
     if (path) setMusicPath(path);
   }, []);
 
   if (!photo) return null;
 
-  const similarGroup = similarVideoGroups?.find((group) => group.some((entry) => entry.photo.id === photo.id));
-  const otherSimilarVideos = similarGroup?.filter((entry) => entry.photo.id !== photo.id) ?? [];
+  const similarGroup = similarVideoGroups?.find((group) =>
+    group.some((entry) => entry.photo.id === photo.id),
+  );
+  const otherSimilarVideos =
+    similarGroup?.filter((entry) => entry.photo.id !== photo.id) ?? [];
 
   const progress = duration > 0 ? currentTime / duration : 0;
   const trimStartProgress =
-    videoTrimStartMs !== null && duration > 0 ? Math.min(1, Math.max(0, videoTrimStartMs / 1000 / duration)) : null;
+    videoTrimStartMs !== null && duration > 0
+      ? Math.min(1, Math.max(0, videoTrimStartMs / 1000 / duration))
+      : null;
   const trimEndProgress =
-    videoTrimEndMs !== null && duration > 0 ? Math.min(1, Math.max(0, videoTrimEndMs / 1000 / duration)) : null;
+    videoTrimEndMs !== null && duration > 0
+      ? Math.min(1, Math.max(0, videoTrimEndMs / 1000 / duration))
+      : null;
   const canTrim =
-    videoTrimStartMs !== null && videoTrimEndMs !== null && videoTrimEndMs > videoTrimStartMs && !videoTrimSaving;
+    videoTrimStartMs !== null &&
+    videoTrimEndMs !== null &&
+    videoTrimEndMs > videoTrimStartMs &&
+    !videoTrimSaving;
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 overflow-hidden bg-bg-base p-4">
@@ -169,7 +235,9 @@ export function VideoPlayer() {
         onClick={togglePlay}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
-        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+        onTimeUpdate={(event) =>
+          setCurrentTime(event.currentTarget.currentTime)
+        }
         onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
       />
 
@@ -184,11 +252,17 @@ export function VideoPlayer() {
           onClick={handleTimelineClick}
           className="relative h-2 w-full cursor-pointer rounded-full bg-bg-raised"
         >
-          <div className="absolute inset-y-0 left-0 rounded-full bg-accent" style={{ width: `${progress * 100}%` }} />
+          <div
+            className="absolute inset-y-0 left-0 rounded-full bg-accent"
+            style={{ width: `${progress * 100}%` }}
+          />
           {trimStartProgress !== null && trimEndProgress !== null ? (
             <div
               className="absolute inset-y-0 rounded-full bg-accent/25"
-              style={{ left: `${trimStartProgress * 100}%`, width: `${Math.max(0, trimEndProgress - trimStartProgress) * 100}%` }}
+              style={{
+                left: `${trimStartProgress * 100}%`,
+                width: `${Math.max(0, trimEndProgress - trimStartProgress) * 100}%`,
+              }}
             />
           ) : null}
           {trimStartProgress !== null ? (
@@ -211,7 +285,9 @@ export function VideoPlayer() {
                 key={ms}
                 aria-hidden="true"
                 className="absolute inset-y-0 w-px bg-yellow-500/70"
-                style={{ left: `${Math.min(1, Math.max(0, ms / 1000 / duration)) * 100}%` }}
+                style={{
+                  left: `${Math.min(1, Math.max(0, ms / 1000 / duration)) * 100}%`,
+                }}
               />
             ) : null,
           )}
@@ -235,7 +311,9 @@ export function VideoPlayer() {
             </span>
           </div>
           <span className="text-text-muted">
-            {photo.width && photo.height ? `${photo.width}×${photo.height}` : null}
+            {photo.width && photo.height
+              ? `${photo.width}×${photo.height}`
+              : null}
             {photo.frame_rate ? ` · ${photo.frame_rate.toFixed(2)} fps` : null}
             {photo.video_codec ? ` · ${photo.video_codec}` : null}
             {photo.has_audio === false ? " · ohne Ton" : null}
@@ -255,7 +333,9 @@ export function VideoPlayer() {
             Anfang markieren
           </button>
           <span className="text-text-muted">
-            {videoTrimStartMs !== null ? formatTime(videoTrimStartMs / 1000) : "–"}
+            {videoTrimStartMs !== null
+              ? formatTime(videoTrimStartMs / 1000)
+              : "–"}
           </span>
           <button
             type="button"
@@ -284,7 +364,9 @@ export function VideoPlayer() {
             {videoTrimSaving ? "Schneide…" : "Schneiden"}
           </button>
         </div>
-        {videoTrimError ? <p className="text-xs text-red-500">{videoTrimError}</p> : null}
+        {videoTrimError ? (
+          <p className="text-xs text-red-500">{videoTrimError}</p>
+        ) : null}
 
         {/* Automatisches Zuschneiden (Phase 16 Schritt 7): Szenenwechsel-
             Erkennung per ffmpegs `scdet`-Filter (gelbe Striche auf der
@@ -299,7 +381,9 @@ export function VideoPlayer() {
             disabled={videoSceneChangesLoading}
             className="rounded border border-border px-2 py-0.5 text-text-primary hover:border-accent disabled:opacity-40"
           >
-            {videoSceneChangesLoading ? "Erkenne Szenen…" : "Szenenwechsel erkennen"}
+            {videoSceneChangesLoading
+              ? "Erkenne Szenen…"
+              : "Szenenwechsel erkennen"}
           </button>
           {videoSceneChanges ? (
             <>
@@ -318,7 +402,9 @@ export function VideoPlayer() {
             </>
           ) : null}
         </div>
-        {videoSceneChangesError ? <p className="text-xs text-red-500">{videoSceneChangesError}</p> : null}
+        {videoSceneChangesError ? (
+          <p className="text-xs text-red-500">{videoSceneChangesError}</p>
+        ) : null}
 
         {/* Geräuschreduktion + Musik/Sounds hinzufügen (Phase 16 Schritt 8):
             beide nicht-destruktiv — legen bei Erfolg ein neues Katalog-
@@ -329,7 +415,9 @@ export function VideoPlayer() {
           <span className="text-text-secondary">Entrauschen:</span>
           <select
             value={denoiseStrength}
-            onChange={(e) => setDenoiseStrength(e.target.value as "low" | "medium" | "high")}
+            onChange={(e) =>
+              setDenoiseStrength(e.target.value as "low" | "medium" | "high")
+            }
             className="rounded border border-border bg-bg-panel px-1 py-0.5"
           >
             <option value="low">schwach</option>
@@ -340,7 +428,9 @@ export function VideoPlayer() {
             type="button"
             onClick={() => void denoiseCurrentVideoAudio(denoiseStrength)}
             disabled={videoAudioBusy || photo.has_audio !== true}
-            title={photo.has_audio !== true ? "Video hat keine Tonspur" : undefined}
+            title={
+              photo.has_audio !== true ? "Video hat keine Tonspur" : undefined
+            }
             className="rounded border border-border px-2 py-0.5 text-text-primary hover:border-accent disabled:opacity-40"
           >
             {videoAudioBusy ? "Verarbeite…" : "Entrauschen"}
@@ -358,12 +448,17 @@ export function VideoPlayer() {
           </button>
           {musicPath ? (
             <>
-              <span className="max-w-[12rem] truncate text-text-muted" title={musicPath}>
+              <span
+                className="max-w-[12rem] truncate text-text-muted"
+                title={musicPath}
+              >
                 {musicPath.split(/[/\\]/).pop()}
               </span>
               <select
                 value={musicMode}
-                onChange={(e) => setMusicMode(e.target.value as "mix" | "replace")}
+                onChange={(e) =>
+                  setMusicMode(e.target.value as "mix" | "replace")
+                }
                 className="rounded border border-border bg-bg-panel px-1 py-0.5"
               >
                 <option value="mix">mit Ton mischen</option>
@@ -380,11 +475,15 @@ export function VideoPlayer() {
                   onChange={(e) => setMusicVolume(Number(e.target.value))}
                   className="w-20"
                 />
-                <span className="w-8 text-right text-text-muted">{Math.round(musicVolume * 100)}%</span>
+                <span className="w-8 text-right text-text-muted">
+                  {Math.round(musicVolume * 100)}%
+                </span>
               </label>
               <button
                 type="button"
-                onClick={() => void addAudioToCurrentVideo(musicPath, musicMode, musicVolume)}
+                onClick={() =>
+                  void addAudioToCurrentVideo(musicPath, musicMode, musicVolume)
+                }
                 disabled={videoAudioBusy}
                 className="ml-auto rounded border border-accent bg-accent/10 px-3 py-0.5 font-medium text-accent hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -393,7 +492,9 @@ export function VideoPlayer() {
             </>
           ) : null}
         </div>
-        {videoAudioError ? <p className="text-xs text-red-500">{videoAudioError}</p> : null}
+        {videoAudioError ? (
+          <p className="text-xs text-red-500">{videoAudioError}</p>
+        ) : null}
 
         {/* Filter/LUT auf Video anwenden (Phase 16 Schritt 9): dieselben
             fünf eingebauten Filter-Looks wie im Foto-Entwickeln-Panel
@@ -413,7 +514,9 @@ export function VideoPlayer() {
                 {lut.name}
               </option>
             ))}
-            {customLut ? <option value="custom">{customLut.name} (importiert)</option> : null}
+            {customLut ? (
+              <option value="custom">{customLut.name} (importiert)</option>
+            ) : null}
           </select>
           <button
             type="button"
@@ -435,11 +538,15 @@ export function VideoPlayer() {
                   onChange={(e) => setLutStrength(Number(e.target.value))}
                   className="w-20"
                 />
-                <span className="w-8 text-right text-text-muted">{Math.round(lutStrength * 100)}%</span>
+                <span className="w-8 text-right text-text-muted">
+                  {Math.round(lutStrength * 100)}%
+                </span>
               </label>
               <button
                 type="button"
-                onClick={() => void applyLutFilterToCurrentVideo(selectedLut, lutStrength)}
+                onClick={() =>
+                  void applyLutFilterToCurrentVideo(selectedLut, lutStrength)
+                }
                 disabled={videoLutBusy}
                 className="ml-auto rounded border border-accent bg-accent/10 px-3 py-0.5 font-medium text-accent hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -448,7 +555,67 @@ export function VideoPlayer() {
             </>
           ) : null}
         </div>
-        {videoLutError ? <p className="text-xs text-red-500">{videoLutError}</p> : null}
+        {videoLutError ? (
+          <p className="text-xs text-red-500">{videoLutError}</p>
+        ) : null}
+
+        {/* Greenscreen/Hintergrund entfernen (Phase 17 Schritt 8, siehe
+            `DECISIONS.md` ADR-0045) — Ein-Clip-Command wie die LUT-
+            Anwendung oben, ersetzt den Hintergrund per echter
+            KI-Segmentierung (MediaPipe Selfie Segmentation) framegenau
+            durch eine Fläche in `backgroundColor`. */}
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-xs">
+          <span className="text-text-secondary">Hintergrund entfernen:</span>
+          {aiSettings?.selfie_segmentation_model_path ? (
+            <>
+              <input
+                type="color"
+                value={backgroundColor}
+                onChange={(e) => setBackgroundColor(e.target.value)}
+                className="h-6 w-8 rounded border border-border"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  void removeBackgroundFromCurrentVideo(
+                    hexToRgb(backgroundColor),
+                  )
+                }
+                disabled={videoBackgroundBusy}
+                className="ml-auto rounded border border-accent bg-accent/10 px-3 py-0.5 font-medium text-accent hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {videoBackgroundBusy ? "Verarbeite…" : "Anwenden"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void clearSelfieSegmentationModelPath()}
+                className="text-text-muted underline hover:text-danger"
+              >
+                Modell entfernen
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="text-text-muted">
+                Kein Modell installiert — MediaPipe Selfie Segmentation
+                (Apache-2.0, lokal).
+              </span>
+              <button
+                type="button"
+                disabled={selfieSegmentationModelDownloading}
+                onClick={() => void downloadSelfieSegmentationModel()}
+                className="ml-auto rounded border border-border px-2 py-0.5 text-text-primary hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {selfieSegmentationModelDownloading
+                  ? "Lädt herunter…"
+                  : "Herunterladen"}
+              </button>
+            </>
+          )}
+        </div>
+        {videoBackgroundError ? (
+          <p className="text-xs text-red-500">{videoBackgroundError}</p>
+        ) : null}
 
         {/* Ähnliche Videos finden (Phase 16 Schritt 10): läuft über den
             ganzen Katalog (nicht nur den aktuellen Ordner), siehe
@@ -480,11 +647,15 @@ export function VideoPlayer() {
                 ))}
               </div>
             ) : (
-              <span className="text-text-muted">keine ähnlichen Videos gefunden</span>
+              <span className="text-text-muted">
+                keine ähnlichen Videos gefunden
+              </span>
             )
           ) : null}
         </div>
-        {similarVideosError ? <p className="text-xs text-red-500">{similarVideosError}</p> : null}
+        {similarVideosError ? (
+          <p className="text-xs text-red-500">{similarVideosError}</p>
+        ) : null}
       </div>
     </div>
   );

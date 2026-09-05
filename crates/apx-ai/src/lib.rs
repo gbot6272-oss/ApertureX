@@ -57,9 +57,12 @@ pub mod preset_generator;
 pub mod repair_analysis;
 pub mod seam_carving;
 pub mod segmentation;
+pub mod selfie_segmentation;
 pub mod sky_replace;
 pub mod style_consistency;
 pub mod style_transfer;
+#[cfg(feature = "subtitles")]
+pub mod subtitles;
 pub mod tagging;
 pub mod upright;
 pub mod upscale;

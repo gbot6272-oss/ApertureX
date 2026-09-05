@@ -1143,3 +1143,34 @@ zusammenhängende UI-Erweiterung der bestehenden Kartenansicht) — siehe
 - [x] Dunkle Kartenkacheln — CARTOs "Dark Matter" statt der ursprünglichen hellen OSM-Standard-Kacheln, passend zum technisch-dunklen Anspruch
 - [x] `map-flow.spec.ts` angepasst (Globus ist jetzt der Standard-Einstieg statt der flachen Karte, ein neuer Test deckt den Globus→Karte-Wechsel ab) — real per Playwright-Screenshot visuell verifiziert (echte Kontinent-Silhouette, funktionierende Heatmap-Farbverläufe), dabei zwei echte Bugs gefunden und behoben (Heatmap-Punkte wurden beim Moduswechsel nicht übertragen; die angezeigte Zoomstufe war eingefroren)
 - [x] `tsc -b`, volle `vitest run`-Suite (251 Tests, 28 neue), `map-flow.spec.ts` grün
+
+## Aktuelle Phase: Phase 17 — Video-Editor-Erweiterung
+
+Nutzerwunsch nach Phase 16s "Basis-Videoschnitt": deutlich mehr
+Funktionen, "nicht so krass wie CapCut aber dass man guten Content
+erstellen kann". Nach Rückfrage zusätzlich bestätigt: automatische
+Untertitel, Greenscreen, Bild-in-Bild/Split-Screen, Stabilisierung.
+Siehe `DECISIONS.md` ADR-0045 für die vollständige Architektur-/
+Lizenzrecherche. Kernentscheidung: ein Zeitachsen-**Dialog** (wie
+`SlideshowDialog.tsx`, rendert in einem Rutsch) statt eines
+persistenten, wiederöffenbaren Projekt-Katalogobjekts — Video-Clips
+werden zu Temp-Segmenten gerendert (Trim+Tempo), dann per `ffmpeg`-
+`concat`/`xfade` zusammengefügt; Greenscreen/Stabilisierung bleiben
+zwei weitere Ein-Clip-Commands wie `apply_lut_filter_to_video`.
+Testdisziplin (fortgeführt aus Phase 16, weiterhin in Kraft):
+ausschließlich `cargo check`/`tsc -b` nach den einzelnen Schritten —
+kein `cargo test`, kein Vitest, keine Playwright-Läufe zwischendurch.
+Volle Suite gebündelt erst im letzten Schritt.
+
+- [x] 0. Scope festzurren, ADR-0045
+- [x] 1. Mehrspur-Timeline-Grundgerüst (Zeitachsen-Dialog, Segment-Rendering + Concat/Übergänge) — `apx_export::timeline` (Zwei-Stufen-Rendering: Segment je Eintrag, Verkettung per `xfade`-Filterkette für Schnitt *und* Überblendung), neuer `render_video_timeline`-Command, neuer `VideoTimelineDialog.tsx` (Reihenfolge/Trim/Haltedauer/Übergang/Auflösung/Musik), Einstiegspunkt „Zeitachse…“ in `Header.tsx`
+- [x] 2. Geschwindigkeits-Regler pro Clip (Zeitlupe/Zeitraffer) — `TimelineItem::VideoClip.speed` + `setpts`-Filter, Tempo-Dropdown je Video-Eintrag in `VideoTimelineDialog.tsx`
+- [x] 3. Mehr Übergänge (Wisch-/Blende-Varianten über `xfade`) — `TimelineTransitionKind` (8 Varianten), Übergangs-Auswahl je Lücke in `VideoTimelineDialog.tsx`
+- [x] 4. Text-/Titel-Overlays mit Zeitspanne/Position — `TimelineTextOverlay` (Rust-Text-Rasterisierung + `ffmpeg`-`overlay`-Filter statt `drawtext`), Overlay-Editor in `VideoTimelineDialog.tsx`
+- [x] 5. Automatische Untertitel (Whisper, Opt-in-Download) — `apx_ai::subtitles` hinter Cargo-Feature `subtitles` (real mit `--features subtitles` kompiliert), `ggml-base.en.bin` (SHA1 real aus whisper.cpp-README), Transkription -> Text-Overlay-Einträge in `VideoTimelineDialog.tsx`
+- [x] 6. Social-Media-Export-Presets (9:16/1:1/16:9) — reine Frontend-Erweiterung, Backend skaliert bereits "cover" auf beliebiges Seitenverhältnis
+- [x] 7. Bild-in-Bild / Split-Screen — `TimelinePipOverlay` (Quelle = normaler `TimelineItem`), Split-Screen als zwei gegenüberliegende 50%-Overlays statt eigenem Mechanismus
+- [x] 8. Greenscreen/Hintergrund entfernen (MediaPipe Selfie Segmentation) — Ein-Clip-Command wie die LUT-Anwendung, ehrliche URL-/Hash-Lücke wie beim LaMa-Modell (huggingface.co blockiert)
+- [ ] 9. Video-Stabilisierung (Wiederverwendung `apx-stacking`-Homografie)
+- [ ] 10. Dokumentation, volle Verifikation, Abnahme
+- [x] `tsc -b`, volle `vitest run`-Suite (251 Tests, 28 neue), `map-flow.spec.ts` grün

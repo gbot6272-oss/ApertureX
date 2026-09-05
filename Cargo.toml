@@ -55,6 +55,11 @@ walkdir = "2"
 rayon = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
 sha2 = "0.10"
+# Whisper-Modell-Prüfsumme (Phase 17 Schritt 5, siehe DECISIONS.md
+# ADR-0045) — whisper.cpp veröffentlicht nur SHA1 statt SHA256 für seine
+# ggml-Modelle, deshalb hier zusätzlich zu sha2 (RustCrypto-Familie,
+# dieselbe MIT/Apache-2.0-Herkunft).
+sha1 = "0.11"
 
 [profile.dev]
 # Debug-Builds mit etwas Optimierung: RAW-Dekodierung ist ohne das im

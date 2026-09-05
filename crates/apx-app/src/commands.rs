@@ -1693,6 +1693,764 @@ fn run_ffmpeg_apply_lut_to_video(
     Ok(())
 }
 
+// ---- Greenscreen/Hintergrund entfernen (Phase 17 Schritt 8, siehe --------
+// DECISIONS.md ADR-0045) — Ein-Clip-Command wie apply_lut_filter_to_video
+// oben, bewusst KEIN Zeitachsen-Feature (siehe ADR-0045s Architektur-
+// Begründung): verarbeitet ein Video zu einem neuen Katalog-Video, das
+// man danach wie jedes andere als Zeitachsen-Eintrag verwendet.
+
+/// Öffentliche Download-URL einer ONNX-Konvertierung des MediaPipe-
+/// Selfie-Segmentation-Modells (`onnx-community/mediapipe_selfie_segmentation`,
+/// Hugging Face, folgt deren dokumentiertem `resolve/main/<datei>`-
+/// Schema). **Nicht in dieser Sitzung erreichbar/verifiziert** —
+/// `huggingface.co` ist von dieser Entwicklungs-Sandbox aus blockiert,
+/// genau wie beim LaMa-Modell (Phase 13, [`LAMA_MODEL_URL`]) und dem
+/// ursprünglichen MediaPipe-Modell selbst (siehe `apx_ai::
+/// selfie_segmentation`s Moduldoku für den vollständigen Rechercheweg,
+/// inkl. der geprüften Apache-2.0-Lizenz). **Keine Hash-Prüfung** aus
+/// demselben Grund wie bei `LAMA_MODEL_URL` — eine erfundene
+/// Prüfsumme wäre schlimmer als eine ehrliche Lücke.
+const SELFIE_SEGMENTATION_MODEL_URL: &str =
+    "https://huggingface.co/onnx-community/mediapipe_selfie_segmentation/resolve/main/onnx/model.onnx";
+
+/// Lädt das Selfie-Segmentation-Modell herunter (siehe
+/// [`SELFIE_SEGMENTATION_MODEL_URL`]s Vorbehalt) und hinterlegt den Pfad
+/// in den Einstellungen — dieselbe "keine Hash-Prüfung, ehrlich
+/// dokumentiert"-Logik wie [`download_inpainting_model`].
+#[tauri::command]
+pub async fn download_selfie_segmentation_model(
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let response = reqwest::get(SELFIE_SEGMENTATION_MODEL_URL)
+        .await
+        .map_err(|err| {
+            format!("Download von '{SELFIE_SEGMENTATION_MODEL_URL}' fehlgeschlagen: {err}")
+        })?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Download von '{SELFIE_SEGMENTATION_MODEL_URL}' fehlgeschlagen: HTTP {}",
+            response.status()
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| format!("Antwort konnte nicht gelesen werden: {err}"))?;
+
+    let dest_dir = state.paths.models_dir();
+    std::fs::create_dir_all(&dest_dir).map_err(|err| err.to_string())?;
+    let dest_path = dest_dir.join("selfie_segmentation.onnx");
+    std::fs::write(&dest_path, &bytes).map_err(|err| err.to_string())?;
+
+    let path_string = dest_path.to_string_lossy().to_string();
+    let settings_path = state.paths.settings_file();
+    let mut settings =
+        apx_core::Settings::load_or_default(&settings_path).map_err(|err| err.to_string())?;
+    settings.ai.selfie_segmentation_model_path = Some(path_string.clone());
+    settings
+        .save(&settings_path)
+        .map_err(|err| err.to_string())?;
+
+    Ok(path_string)
+}
+
+/// Entfernt den hinterlegten Modellpfad (löscht die Datei selbst nicht,
+/// siehe [`clear_depth_model_path`]s Begründung).
+#[tauri::command]
+pub fn clear_selfie_segmentation_model_path(state: State<'_, AppState>) -> Result<(), String> {
+    let path = state.paths.settings_file();
+    let mut settings = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    settings.ai.selfie_segmentation_model_path = None;
+    settings.save(&path).map_err(|err| err.to_string())
+}
+
+/// Ersetzt den Hintergrund eines Videos framegenau durch eine einfarbige
+/// Fläche (`background_rgb`) — braucht ein zuvor heruntergeladenes
+/// Modell (siehe [`download_selfie_segmentation_model`]). Nicht-
+/// destruktiv wie jeder andere Video-Bearbeitungs-Command dieser Datei.
+#[tauri::command]
+pub fn remove_video_background(
+    state: State<'_, AppState>,
+    photo_id: String,
+    background_rgb: [u8; 3],
+) -> Result<PhotoDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    if photo.media_kind != "video" {
+        return Err("Hintergrund entfernen funktioniert nur bei Videos".to_string());
+    }
+    let (Some(width), Some(height)) = (photo.width, photo.height) else {
+        return Err("Video-Auflösung unbekannt (fehlende Metadaten)".to_string());
+    };
+    let fps = photo.frame_rate.unwrap_or(30.0).max(1.0);
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let model_path = settings
+        .ai
+        .selfie_segmentation_model_path
+        .filter(|p| !p.trim().is_empty())
+        .ok_or_else(|| {
+            "Kein Hintergrundtrennungs-Modell heruntergeladen — siehe Einstellungen → KI."
+                .to_string()
+        })?;
+    let mut session =
+        apx_ai::selfie_segmentation::SelfieSegmentationSession::load(Path::new(&model_path))
+            .map_err(|err| err.to_string())?;
+
+    let dest_path = unique_sibling_video_path(&folder.path, &source_path, "greenscreen");
+    run_ffmpeg_remove_background(
+        &source_path,
+        &dest_path,
+        width,
+        height,
+        fps,
+        &mut session,
+        background_rgb,
+    )?;
+
+    register_video_result_as_new_photo(&state, photo.folder_id, &dest_path)
+}
+
+/// Zwei gekoppelte `ffmpeg`-Subprozesse, exakt dasselbe Muster wie
+/// [`run_ffmpeg_apply_lut_to_video`] — nur läuft je Frame statt der LUT-
+/// Anwendung eine ONNX-Segmentierungs-Inferenz plus weiche Alpha-
+/// Überblendung mit `background_rgb`.
+fn run_ffmpeg_remove_background(
+    source: &Path,
+    dest: &Path,
+    width: u32,
+    height: u32,
+    fps: f32,
+    session: &mut apx_ai::selfie_segmentation::SelfieSegmentationSession,
+    background_rgb: [u8; 3],
+) -> Result<(), String> {
+    use std::io::{Read, Write};
+
+    let mut decode = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(source)
+        .args(["-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("ffmpeg (Dekodieren) nicht startbar: {err}"))?;
+    let mut decode_stdout = decode
+        .stdout
+        .take()
+        .ok_or_else(|| "ffmpeg-Dekodier-Ausgabe nicht verfügbar".to_string())?;
+
+    let mut encode = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24"])
+        .args([
+            "-s",
+            &format!("{width}x{height}"),
+            "-r",
+            &format!("{fps}"),
+            "-i",
+            "-",
+        ])
+        .arg("-i")
+        .arg(source)
+        .args([
+            "-map", "0:v", "-map", "1:a?", "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+            "-c:a", "copy",
+        ])
+        .arg(dest)
+        .stdin(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("ffmpeg (Kodieren) nicht startbar: {err}"))?;
+    let mut encode_stdin = encode
+        .stdin
+        .take()
+        .ok_or_else(|| "ffmpeg-Kodier-Eingabe nicht verfügbar".to_string())?;
+
+    // Kein eigener Thread hier (anders als beim LUT-Filter): die
+    // ONNX-Sitzung ist nicht `Send` garantiert billig zu klonen, läuft
+    // also im Aufrufer-Thread. `ffmpeg`s eigene Puffer (typischerweise
+    // einige MB) federn den fehlenden Nebenläufigkeits-Puffer ab.
+    let frame_bytes = (width as usize) * (height as usize) * 3;
+    let mut frame = vec![0u8; frame_bytes];
+    let pump_result: Result<(), String> = (|| {
+        loop {
+            match decode_stdout.read_exact(&mut frame) {
+                Ok(()) => {
+                    let mask = session
+                        .person_mask_rgb8(&frame, width, height)
+                        .map_err(|err| err.to_string())?;
+                    let composited = composite_with_background(&frame, &mask, background_rgb);
+                    encode_stdin
+                        .write_all(&composited)
+                        .map_err(|err| format!("Schreiben an ffmpeg fehlgeschlagen: {err}"))?;
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(err) => return Err(format!("Lesen von ffmpeg fehlgeschlagen: {err}")),
+            }
+        }
+        Ok(())
+    })();
+    drop(encode_stdin); // EOF für ffmpeg (Kodieren)
+
+    let decode_status = decode
+        .wait()
+        .map_err(|err| format!("Warten auf ffmpeg (Dekodieren) fehlgeschlagen: {err}"))?;
+    let encode_output = {
+        let status = encode
+            .wait()
+            .map_err(|err| format!("Warten auf ffmpeg (Kodieren) fehlgeschlagen: {err}"))?;
+        let mut stderr = String::new();
+        if let Some(mut pipe) = encode.stderr.take() {
+            let _ = pipe.read_to_string(&mut stderr);
+        }
+        (status, stderr)
+    };
+
+    pump_result?;
+    if !decode_status.success() {
+        let _ = std::fs::remove_file(dest);
+        return Err("ffmpeg (Dekodieren) fehlgeschlagen".to_string());
+    }
+    if !encode_output.0.success() {
+        let _ = std::fs::remove_file(dest);
+        return Err(format!(
+            "ffmpeg (Kodieren) fehlgeschlagen: {}",
+            encode_output.1
+        ));
+    }
+    Ok(())
+}
+
+/// Überblendet `rgb` mit `background_rgb` — Gewichtung je Pixel per
+/// `mask` (`0` = ganz Hintergrund, `255` = ganz Person), weiche Kante
+/// statt hartem Ausschneiden (dieselbe lineare Alpha-Überblendung wie
+/// `apx_pipeline::stages::masks::blend_pixel`s `Normal`-Modus, hier
+/// ohne dessen Ziel-Ebenen-Abhängigkeit noch einmal direkt geschrieben,
+/// weil `apx-pipeline` nicht von `apx-ai` abhängen darf).
+fn composite_with_background(rgb: &[u8], mask: &[u8], background_rgb: [u8; 3]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(rgb.len());
+    for (pixel, &alpha) in rgb.chunks_exact(3).zip(mask.iter()) {
+        let a = alpha as f32 / 255.0;
+        for (channel, &bg) in pixel.iter().zip(background_rgb.iter()) {
+            out.push((*channel as f32 * a + bg as f32 * (1.0 - a)).round() as u8);
+        }
+    }
+    out
+}
+
+/// Ein einzelner Zeitachsen-Eintrag (Phase 17 Schritt 1, siehe
+/// `DECISIONS.md` ADR-0045) — `photo_id` referenziert entweder ein
+/// Video (dann sind `in_ms`/`out_ms` Pflicht) oder ein Foto (dann ist
+/// `hold_seconds` maßgeblich, `in_ms`/`out_ms` werden ignoriert). Ein
+/// eigener DTO statt Wiederverwendung von `SlideshowTitleCardOptions`/
+/// `-VideoOptions`, weil eine Zeitachse Video- und Foto-Einträge
+/// gemischt in einer Liste trägt.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineItemInput {
+    pub photo_id: String,
+    pub in_ms: Option<i64>,
+    pub out_ms: Option<i64>,
+    pub hold_seconds: Option<f32>,
+    /// Tempo-Faktor für Video-Einträge (Phase 17 Schritt 2, siehe
+    /// `DECISIONS.md` ADR-0045) — `None`/fehlend = `1.0` (unverändert).
+    /// Wird für Foto-/Titel-Einträge ignoriert (deren "Tempo" ist
+    /// bereits `hold_seconds`).
+    pub speed: Option<f32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoTimelineOptions {
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+    /// Je Übergang einer von `"cut"`/`"fade"`/`"dissolve"`/`"wipe_left"`/
+    /// `"wipe_right"`/`"slide_up"`/`"slide_down"`/`"circle_open"` (Phase
+    /// 17 Schritt 3, siehe `parse_timeline_transition_kind`) — Länge
+    /// muss `items.len() - 1` sein.
+    pub transitions: Vec<String>,
+    pub transition_seconds: Option<f32>,
+    pub music_path: Option<String>,
+    /// Text-/Titel-Overlays (Phase 17 Schritt 4, siehe `DECISIONS.md`
+    /// ADR-0045) — Zeiten beziehen sich auf die fertige, verkettete
+    /// Sequenz.
+    pub text_overlays: Option<Vec<TimelineTextOverlayInput>>,
+    /// Bild-in-Bild-/Split-Screen-Overlays (Phase 17 Schritt 7, siehe
+    /// `DECISIONS.md` ADR-0045) — Zeiten beziehen sich ebenfalls auf die
+    /// fertige, verkettete Sequenz.
+    pub pip_overlays: Option<Vec<TimelinePipOverlayInput>>,
+}
+
+/// Ein Text-Overlay-Eintrag (Phase 17 Schritt 4) — `position` folgt
+/// [`parse_watermark_position`]s Vertrag (`"top_left"` u. Ä.), `font_path`
+/// ist wie bei den Diashow-Intro-/Outro-Titelkarten Pflicht (keine
+/// eingebettete Schriftart, siehe `watermark`s Moduldoku).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineTextOverlayInput {
+    pub text: String,
+    pub position: String,
+    pub start_seconds: f32,
+    pub end_seconds: f32,
+    pub font_path: String,
+    pub font_size: Option<f32>,
+    pub color_rgb: Option<[u8; 3]>,
+}
+
+fn build_timeline_text_overlays(
+    overlays: &[TimelineTextOverlayInput],
+) -> Result<Vec<apx_export::timeline::TimelineTextOverlay>, String> {
+    overlays
+        .iter()
+        .map(|overlay| {
+            if overlay.end_seconds <= overlay.start_seconds {
+                return Err("Text-Overlay: Ende muss nach dem Start liegen".to_string());
+            }
+            let font_bytes = std::fs::read(&overlay.font_path).map_err(|err| {
+                format!(
+                    "Schriftdatei '{}' konnte nicht gelesen werden: {err}",
+                    overlay.font_path
+                )
+            })?;
+            Ok(apx_export::timeline::TimelineTextOverlay {
+                text: overlay.text.clone(),
+                position: parse_watermark_position(&overlay.position)?,
+                start_seconds: overlay.start_seconds,
+                end_seconds: overlay.end_seconds,
+                font_bytes,
+                font_size_px: overlay.font_size.unwrap_or(48.0),
+                text_color: overlay.color_rgb.unwrap_or([255, 255, 255]),
+            })
+        })
+        .collect()
+}
+
+/// Baut aus den rohen Eingabefeldern eines Zeitachsen-Eintrags (Foto-ID +
+/// optionale Trim-/Haltedauer-/Tempo-Felder) das passende
+/// `TimelineItem` — gemeinsam genutzt von der Haupt-Zeitachse
+/// (`items`) und den Bild-in-Bild-Overlays (Phase 17 Schritt 7,
+/// [`build_timeline_pip_overlays`]), damit die Video-/Foto-Erkennungs-
+/// und Validierungslogik nicht zweimal existiert. Gibt zusätzlich die
+/// `FolderId` zurück (die Haupt-Zeitachse braucht sie für den
+/// Ziel-Ordner, Bild-in-Bild-Overlays ignorieren sie).
+fn build_timeline_item(
+    state: &AppState,
+    photo_id: &str,
+    in_ms: Option<i64>,
+    out_ms: Option<i64>,
+    hold_seconds: Option<f32>,
+    speed: Option<f32>,
+) -> Result<(apx_core::FolderId, apx_export::timeline::TimelineItem), String> {
+    let parsed_id = parse_photo_id(photo_id.to_string())?;
+    let photo = state
+        .catalog
+        .get_photo(parsed_id)
+        .map_err(|err| err.to_string())?;
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    if photo.media_kind == "video" {
+        let in_ms = in_ms.ok_or_else(|| "Video-Eintrag ohne Start-Zeitpunkt".to_string())?;
+        let out_ms = out_ms.ok_or_else(|| "Video-Eintrag ohne End-Zeitpunkt".to_string())?;
+        if in_ms < 0 || out_ms <= in_ms {
+            return Err("Ungültiger Zeitbereich in der Zeitachse".to_string());
+        }
+        let speed = speed.unwrap_or(1.0);
+        if !(0.1..=8.0).contains(&speed) {
+            return Err("Tempo-Faktor muss zwischen 0,1 und 8,0 liegen".to_string());
+        }
+        Ok((
+            photo.folder_id,
+            apx_export::timeline::TimelineItem::VideoClip {
+                source_path,
+                in_ms,
+                out_ms,
+                speed,
+            },
+        ))
+    } else {
+        let edl = resolve_current_edl(&state.catalog, parsed_id)?;
+        let request = apx_export::engine::ExportRequest::new(
+            source_path,
+            edl,
+            apx_export::format::ExportFormat::Jpeg,
+        );
+        let (width, height, rgba) =
+            apx_export::engine::render_to_pixels(Some(&state.pipeline), &request)
+                .map_err(|err| err.to_string())?;
+        Ok((
+            photo.folder_id,
+            apx_export::timeline::TimelineItem::Photo {
+                width,
+                height,
+                rgba,
+                hold_seconds: hold_seconds.unwrap_or(3.0).max(0.1),
+            },
+        ))
+    }
+}
+
+/// Ein Bild-in-Bild-/Split-Screen-Overlay (Phase 17 Schritt 7, siehe
+/// `DECISIONS.md` ADR-0045) — die Quelle (`photo_id` + Trim-/Halte-/
+/// Tempo-Felder) folgt demselben Vertrag wie [`TimelineItemInput`],
+/// zusätzlich Zeitspanne/Position/Größe für die Einblendung. Split-
+/// Screen ist bewusst kein eigener Mechanismus, sondern derselbe
+/// Bild-in-Bild-Overlay mit `scale` nahe `1.0` und zwei Einträgen an
+/// gegenüberliegenden Positionen (siehe Moduldoku-Verweis in ADR-0045).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelinePipOverlayInput {
+    pub photo_id: String,
+    pub in_ms: Option<i64>,
+    pub out_ms: Option<i64>,
+    pub hold_seconds: Option<f32>,
+    pub speed: Option<f32>,
+    pub start_seconds: f32,
+    pub end_seconds: f32,
+    pub position: String,
+    /// Anteil an der Ziel-Videobreite/-höhe (`0.05..=1.0`) — die
+    /// Einblendung behält dasselbe Seitenverhältnis wie die
+    /// Ziel-Auflösung selbst (siehe `apx_export::timeline::
+    /// apply_pip_overlays`s Moduldoku).
+    pub scale: f32,
+}
+
+fn build_timeline_pip_overlays(
+    state: &AppState,
+    overlays: &[TimelinePipOverlayInput],
+) -> Result<Vec<apx_export::timeline::TimelinePipOverlay>, String> {
+    overlays
+        .iter()
+        .map(|overlay| {
+            if overlay.end_seconds <= overlay.start_seconds {
+                return Err("Bild-in-Bild-Overlay: Ende muss nach dem Start liegen".to_string());
+            }
+            if !(0.05..=1.0).contains(&overlay.scale) {
+                return Err(
+                    "Bild-in-Bild-Overlay: Größe muss zwischen 0,05 und 1,0 liegen".to_string(),
+                );
+            }
+            let (_, source) = build_timeline_item(
+                state,
+                &overlay.photo_id,
+                overlay.in_ms,
+                overlay.out_ms,
+                overlay.hold_seconds,
+                overlay.speed,
+            )?;
+            Ok(apx_export::timeline::TimelinePipOverlay {
+                source,
+                start_seconds: overlay.start_seconds,
+                end_seconds: overlay.end_seconds,
+                position: parse_watermark_position(&overlay.position)?,
+                scale: overlay.scale,
+            })
+        })
+        .collect()
+}
+
+/// Rendert `items` zu einer neuen Video-Zeitachse (siehe
+/// `apx_export::timeline`s Moduldoku für den zweistufigen Rendering-
+/// Ansatz) und legt das Ergebnis als neues Katalog-Video im Ordner des
+/// ersten Eintrags an (`register_video_result_as_new_photo`,
+/// wiederverwendet aus Schritt 6) — nicht-destruktiv wie jeder andere
+/// Video-Bearbeitungs-Command dieser Datei: keiner der Quell-Clips
+/// wird verändert.
+#[tauri::command]
+pub fn render_video_timeline(
+    state: State<'_, AppState>,
+    items: Vec<TimelineItemInput>,
+    options: VideoTimelineOptions,
+) -> Result<PhotoDto, String> {
+    if items.is_empty() {
+        return Err("Zeitachse enthält keine Einträge".to_string());
+    }
+    let transitions: Vec<apx_export::timeline::TimelineTransitionKind> = options
+        .transitions
+        .iter()
+        .map(|t| parse_timeline_transition_kind(t))
+        .collect::<Result<_, _>>()?;
+    if transitions.len() != items.len() - 1 {
+        return Err(format!(
+            "Erwartete {} Übergänge für {} Einträge, {} übergeben",
+            items.len() - 1,
+            items.len(),
+            transitions.len()
+        ));
+    }
+    if options.width == 0 || options.height == 0 || options.fps == 0 {
+        return Err("Video-Auflösung/Bildrate muss größer null sein".to_string());
+    }
+
+    let mut timeline_items = Vec::with_capacity(items.len());
+    let mut first_folder_id = None;
+    for item in &items {
+        let (folder_id, timeline_item) = build_timeline_item(
+            &state,
+            &item.photo_id,
+            item.in_ms,
+            item.out_ms,
+            item.hold_seconds,
+            item.speed,
+        )?;
+        if first_folder_id.is_none() {
+            first_folder_id = Some(folder_id);
+        }
+        timeline_items.push(timeline_item);
+    }
+
+    let folder_id = first_folder_id.ok_or_else(|| "Kein Eintrag in der Zeitachse".to_string())?;
+    let folder = state
+        .catalog
+        .get_folder(folder_id)
+        .map_err(|err| err.to_string())?;
+    let dest_path = unique_timeline_dest_path(&folder.path);
+
+    let text_overlays =
+        build_timeline_text_overlays(options.text_overlays.as_deref().unwrap_or_default())?;
+    let pip_overlays =
+        build_timeline_pip_overlays(&state, options.pip_overlays.as_deref().unwrap_or_default())?;
+    let timeline_options = apx_export::timeline::TimelineExportOptions {
+        output_width: options.width,
+        output_height: options.height,
+        fps: options.fps,
+        audio_path: options.music_path.as_ref().map(PathBuf::from),
+        text_overlays,
+        pip_overlays,
+    };
+
+    apx_export::timeline::render_video_timeline(
+        &timeline_items,
+        &transitions,
+        options.transition_seconds.unwrap_or(1.0),
+        &timeline_options,
+        &dest_path,
+    )
+    .map_err(|err| err.to_string())?;
+
+    register_video_result_as_new_photo(&state, folder_id, &dest_path)
+}
+
+/// `Zeitachse.mp4`, mit `_<n>`-Zähler bei Namenskollision — dieselbe
+/// Konvention wie [`unique_sibling_video_path`], nur ohne einen
+/// einzelnen Quell-Clip, aus dem ein Dateiname abgeleitet werden
+/// könnte (eine Zeitachse kombiniert mehrere Quellen).
+fn unique_timeline_dest_path(folder_path: &Path) -> PathBuf {
+    let mut dest_path = folder_path.join("Zeitachse.mp4");
+    let mut counter = 1u32;
+    while dest_path.exists() {
+        dest_path = folder_path.join(format!("Zeitachse_{counter}.mp4"));
+        counter += 1;
+    }
+    dest_path
+}
+
+// ---- Automatische Untertitel (Phase 17 Schritt 5, siehe DECISIONS.md ------
+// ADR-0045) — lokal per Whisper (`apx_ai::subtitles`), hinter dem
+// Cargo-Feature `subtitles` (siehe dessen Moduldoku für die Begründung).
+// Opt-in-Modell-Download wie das MiDaS-/LaMa-Modell oben.
+
+/// Öffentliche Download-URL des `ggml-base.en`-Modells (whisper.cpp), real
+/// aus dessen eigenem `models/download-ggml-model.sh` übernommen
+/// (`src="https://huggingface.co/ggerganov/whisper.cpp"`,
+/// `pfx="resolve/main/ggml"` -> `ggml-base.en.bin`). **Nicht in dieser
+/// Sitzung erreichbar/verifiziert** — `huggingface.co` ist von dieser
+/// Entwicklungs-Sandbox aus blockiert, genau wie beim LaMa-Modell
+/// (Phase 13, [`LAMA_MODEL_URL`]).
+const WHISPER_MODEL_URL: &str =
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin";
+/// SHA1 der `base.en`-Modelldatei — anders als beim LaMa-Modell **real
+/// aus `whisper.cpp`s eigenem `models/README.md` übernommen** (dessen
+/// Prüfsummen-Tabelle, `github.com` ist in dieser Sitzung erreichbar,
+/// `huggingface.co` selbst nicht). **Nur SHA1** (40 Hex-Zeichen) — anders
+/// als [`MIDAS_MODEL_SHA256`] u. Ä. veröffentlicht `whisper.cpp` für seine
+/// Modelle ausschließlich SHA1, keine erfundene SHA-256-Ersatzprüfsumme.
+const WHISPER_MODEL_SHA1: &str = "137c40403d78fd54d454da0f9bd998f78703390c";
+
+/// Lädt das Whisper-`base.en`-Untertitel-Modell herunter, prüft die
+/// Prüfsumme gegen [`WHISPER_MODEL_SHA1`] und hinterlegt den Pfad in den
+/// Einstellungen — dieselbe Verwerfen-bei-Fehlschlag-Logik wie
+/// [`download_depth_model`].
+#[tauri::command]
+pub async fn download_whisper_model(state: State<'_, AppState>) -> Result<String, String> {
+    let response = reqwest::get(WHISPER_MODEL_URL)
+        .await
+        .map_err(|err| format!("Download von '{WHISPER_MODEL_URL}' fehlgeschlagen: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Download von '{WHISPER_MODEL_URL}' fehlgeschlagen: HTTP {}",
+            response.status()
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| format!("Antwort konnte nicht gelesen werden: {err}"))?;
+
+    use sha1::Digest as _;
+    let mut hasher = sha1::Sha1::new();
+    hasher.update(&bytes);
+    // `sha1`s `Digest::finalize()` gibt kein `LowerHex`-fähiges Array
+    // zurück (anders als `sha2` oben) — Byte-für-Byte selbst formatieren.
+    let actual_hash = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    if actual_hash != WHISPER_MODEL_SHA1 {
+        return Err(format!(
+            "Prüfsumme stimmt nicht überein (erwartet {WHISPER_MODEL_SHA1}, erhalten {actual_hash}) — Download verworfen."
+        ));
+    }
+
+    let dest_dir = state.paths.models_dir();
+    std::fs::create_dir_all(&dest_dir).map_err(|err| err.to_string())?;
+    let dest_path = dest_dir.join("ggml-base.en.bin");
+    std::fs::write(&dest_path, &bytes).map_err(|err| err.to_string())?;
+
+    let path_string = dest_path.to_string_lossy().to_string();
+    let settings_path = state.paths.settings_file();
+    let mut settings =
+        apx_core::Settings::load_or_default(&settings_path).map_err(|err| err.to_string())?;
+    settings.ai.whisper_model_path = Some(path_string.clone());
+    settings
+        .save(&settings_path)
+        .map_err(|err| err.to_string())?;
+
+    Ok(path_string)
+}
+
+/// Entfernt den hinterlegten Modellpfad (löscht die Datei selbst nicht,
+/// siehe [`clear_depth_model_path`]s Begründung).
+#[tauri::command]
+pub fn clear_whisper_model_path(state: State<'_, AppState>) -> Result<(), String> {
+    let path = state.paths.settings_file();
+    let mut settings = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    settings.ai.whisper_model_path = None;
+    settings.save(&path).map_err(|err| err.to_string())
+}
+
+/// Extrahiert die Tonspur von `source_path` als rohes `f32`-PCM, 16 kHz,
+/// mono — Whisper verlangt exakt dieses Format (siehe
+/// `apx_ai::subtitles`s Moduldoku). Läuft über `ffmpeg`s Stdout-Pipe
+/// (`-f f32le -` statt einer Zwischendatei) — dieselbe Subprozess-Technik
+/// wie jeder andere `ffmpeg`-Aufruf dieser Datei, nur mit `stdout` statt
+/// einer Zieldatei als Ausgabe.
+fn extract_audio_pcm_f32(source_path: &Path) -> Result<Vec<f32>, String> {
+    let output = std::process::Command::new("ffmpeg")
+        .arg("-i")
+        .arg(source_path)
+        .args(["-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-"])
+        .output()
+        .map_err(|err| format!("ffmpeg nicht startbar (ist ffmpeg installiert?): {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Tonspur-Extraktion fehlgeschlagen: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    if output.stdout.len() % 4 != 0 {
+        return Err("ffmpeg-Ausgabe ist keine gültige f32-PCM-Folge".to_string());
+    }
+    Ok(output
+        .stdout
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SubtitleSegmentDto {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub text: String,
+}
+
+#[cfg(feature = "subtitles")]
+fn transcribe_pcm(
+    model_path: &Path,
+    samples: &[f32],
+    language: Option<&str>,
+) -> Result<Vec<SubtitleSegmentDto>, String> {
+    let session =
+        apx_ai::subtitles::WhisperSession::load(model_path).map_err(|err| err.to_string())?;
+    let segments = session
+        .transcribe(samples, language)
+        .map_err(|err| err.to_string())?;
+    Ok(segments
+        .into_iter()
+        .map(|s| SubtitleSegmentDto {
+            start_ms: s.start_ms,
+            end_ms: s.end_ms,
+            text: s.text,
+        })
+        .collect())
+}
+
+#[cfg(not(feature = "subtitles"))]
+fn transcribe_pcm(
+    _model_path: &Path,
+    _samples: &[f32],
+    _language: Option<&str>,
+) -> Result<Vec<SubtitleSegmentDto>, String> {
+    Err(
+        "Diese Aperture-X-Build wurde ohne automatische Untertitel kompiliert (Cargo-Feature \"subtitles\" fehlt — baut whisper.cpp lokal per cmake, siehe apx-ai::subtitles)."
+            .to_string(),
+    )
+}
+
+/// Transkribiert die Tonspur des Videos `photo_id` per Whisper zu
+/// zeitversehenen Text-Abschnitten — direkt weiterverwendbar als
+/// Text-Overlays (Phase 17 Schritt 4, `TimelineTextOverlayInput`), das
+/// Frontend übernimmt die Zeitstempel/Texte unverändert in den
+/// Overlay-Editor statt sie hier schon als fertige Overlays anzulegen
+/// (Position/Schriftart/Größe bleiben bewusst manuell wählbar).
+/// `language`: ISO-639-1-Kürzel oder `None` für Auto-Erkennung.
+#[tauri::command]
+pub fn transcribe_video_audio(
+    state: State<'_, AppState>,
+    photo_id: String,
+    language: Option<String>,
+) -> Result<Vec<SubtitleSegmentDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    if photo.media_kind != "video" {
+        return Err("Automatische Untertitel funktionieren nur bei Videos".to_string());
+    }
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    let model_path = settings
+        .ai
+        .whisper_model_path
+        .filter(|p| !p.trim().is_empty())
+        .ok_or_else(|| {
+            "Kein Untertitel-Modell heruntergeladen — siehe Einstellungen → KI.".to_string()
+        })?;
+
+    let samples = extract_audio_pcm_f32(&source_path)?;
+    transcribe_pcm(Path::new(&model_path), &samples, language.as_deref())
+}
+
 /// Geht einen Bearbeitungsschritt zurück. `None`, wenn schon am
 /// Ausgangszustand (kein Rückgängig möglich) — kein Fehler, siehe
 /// `apx_catalog::Catalog::undo_edit`.
@@ -3675,6 +4433,18 @@ pub struct AiSettingsDto {
     /// [`download_style_transfer_model`]) — ein fehlender Schlüssel
     /// heißt „dieser Stil noch nicht heruntergeladen".
     pub style_transfer_model_paths: std::collections::BTreeMap<String, String>,
+    /// `Some`, sobald der Nutzer den Download des Whisper-Untertitel-
+    /// Modells bestätigt hat und er erfolgreich war (Phase 17 Schritt 5,
+    /// siehe [`download_whisper_model`]).
+    pub whisper_model_path: Option<String>,
+    /// `true`, wenn diese Build mit dem Cargo-Feature `subtitles`
+    /// kompiliert wurde (siehe `apx-ai::subtitles`s Moduldoku) —
+    /// analog zu `people_feature_compiled` oben.
+    pub subtitles_feature_compiled: bool,
+    /// `Some`, sobald der Nutzer den Download des MediaPipe-Selfie-
+    /// Segmentation-Modells bestätigt hat und er erfolgreich war
+    /// (Phase 17 Schritt 8, siehe [`download_selfie_segmentation_model`]).
+    pub selfie_segmentation_model_path: Option<String>,
 }
 
 #[tauri::command]
@@ -3689,6 +4459,9 @@ pub fn get_ai_settings(state: State<'_, AppState>) -> Result<AiSettingsDto, Stri
         people_feature_compiled: cfg!(feature = "people"),
         depth_model_path: settings.ai.depth_model_path,
         style_transfer_model_paths: settings.ai.style_transfer_model_paths,
+        whisper_model_path: settings.ai.whisper_model_path,
+        subtitles_feature_compiled: cfg!(feature = "subtitles"),
+        selfie_segmentation_model_path: settings.ai.selfie_segmentation_model_path,
     })
 }
 
@@ -6121,6 +6894,27 @@ fn parse_transition_kind(transition: &str) -> Result<apx_export::video::Transiti
     match transition {
         "cut" => Ok(apx_export::video::TransitionKind::Cut),
         "cross_fade" => Ok(apx_export::video::TransitionKind::CrossFade),
+        other => Err(format!("unbekannter Übergang '{other}'")),
+    }
+}
+
+/// Übergänge für die Video-Zeitachse (Phase 17 Schritt 3, siehe
+/// `DECISIONS.md` ADR-0045) — eigener Parser statt Wiederverwendung
+/// von [`parse_transition_kind`], weil `TimelineTransitionKind` mehr
+/// Varianten kennt als die Diashow (`cut`/`cross_fade`).
+fn parse_timeline_transition_kind(
+    transition: &str,
+) -> Result<apx_export::timeline::TimelineTransitionKind, String> {
+    use apx_export::timeline::TimelineTransitionKind as T;
+    match transition {
+        "cut" => Ok(T::Cut),
+        "fade" => Ok(T::Fade),
+        "dissolve" => Ok(T::Dissolve),
+        "wipe_left" => Ok(T::WipeLeft),
+        "wipe_right" => Ok(T::WipeRight),
+        "slide_up" => Ok(T::SlideUp),
+        "slide_down" => Ok(T::SlideDown),
+        "circle_open" => Ok(T::CircleOpen),
         other => Err(format!("unbekannter Übergang '{other}'")),
     }
 }

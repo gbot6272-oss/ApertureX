@@ -81,8 +81,11 @@ import type {
   PreviewCacheStatsDto,
   StackDto,
   TagRuleDto,
+  SubtitleSegmentDto,
   TemplateDto,
   TemplateKind,
+  TimelineItemInput,
+  VideoTimelineOptions,
   WebGalleryOptions,
   WebGalleryOutcomeDto,
   WorkflowTemplatePayload,
@@ -1826,6 +1829,17 @@ interface VideoSlice {
   videoLutError: string | null;
   applyLutFilterToCurrentVideo: (lut: LutFilterData, strength: number) => Promise<void>;
 
+  /** Greenscreen/Hintergrund entfernen (Phase 17 Schritt 8, siehe
+   * `DECISIONS.md` ADR-0045) — Opt-in-Modell-Download (dasselbe Muster
+   * wie `downloadDepthModel`), danach je Video ein Ein-Clip-Command
+   * (dasselbe Muster wie `applyLutFilterToCurrentVideo`). */
+  selfieSegmentationModelDownloading: boolean;
+  downloadSelfieSegmentationModel: () => Promise<void>;
+  clearSelfieSegmentationModelPath: () => Promise<void>;
+  videoBackgroundBusy: boolean;
+  videoBackgroundError: string | null;
+  removeBackgroundFromCurrentVideo: (backgroundRgb: [number, number, number]) => Promise<void>;
+
   /** Ähnliche Videos finden (Phase 16 Schritt 10, siehe `DECISIONS.md`
    * ADR-0043) — arbeitet wie der bestehende Perceptual-Hash-Duplikat-
    * Assistent (Phase 9 Schritt 1), auf Videos beschränkt. Läuft über
@@ -1839,6 +1853,33 @@ interface VideoSlice {
    * Bedarf zuerst den Ordner, weil ein ähnliches Video aus
    * `similarVideoGroups` in einem völlig anderen Ordner liegen kann. */
   jumpToVideo: (entry: SimilarVideoDto) => Promise<void>;
+
+  /** Video-Zeitachse (Phase 17 Schritt 1, siehe `DECISIONS.md` ADR-0045)
+   * — kombiniert mehrere Fotos/Videos + Übergänge zu einem neuen
+   * Video-Katalog-Asset, siehe `VideoTimelineDialog.tsx` und
+   * `apx_app::commands::render_video_timeline`s Moduldoku. Dasselbe
+   * Muster wie die Diashow oben (`exportSlideshowVideo`), aber mit
+   * echten Videoclips als möglichen Einträgen statt nur Fotos. */
+  videoTimelineDialogOpen: boolean;
+  openVideoTimelineDialog: () => void;
+  closeVideoTimelineDialog: () => void;
+  videoTimelineRunning: boolean;
+  videoTimelineError: string | null;
+  videoTimelineOutcome: PhotoDto | null;
+  renderVideoTimeline: (items: TimelineItemInput[], options: VideoTimelineOptions) => Promise<void>;
+
+  /** Automatische Untertitel (Phase 17 Schritt 5, siehe `DECISIONS.md`
+   * ADR-0045) — Opt-in-Whisper-Modell-Download, dasselbe Muster wie
+   * `downloadDepthModel`. */
+  whisperModelDownloading: boolean;
+  downloadWhisperModel: () => Promise<void>;
+  clearWhisperModelPath: () => Promise<void>;
+  videoTranscribing: boolean;
+  videoTranscribeError: string | null;
+  /** Gibt die transkribierten Zeitabschnitte direkt zurück (statt nur im
+   * Store abzulegen) — `VideoTimelineDialog.tsx` baut daraus sofort neue
+   * Text-Overlay-Einträge. */
+  transcribeVideoAudio: (photoId: string, language?: string) => Promise<SubtitleSegmentDto[]>;
 }
 
 export type AppStore = CatalogSlice &
@@ -6981,6 +7022,64 @@ export const useAppStore = create<AppStore>()(
       }
     },
 
+    selfieSegmentationModelDownloading: false,
+
+    downloadSelfieSegmentationModel: async () => {
+      set((state) => {
+        state.selfieSegmentationModelDownloading = true;
+      });
+      try {
+        await api.downloadSelfieSegmentationModel();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.selfieSegmentationModelDownloading = false;
+        });
+      }
+    },
+
+    clearSelfieSegmentationModelPath: async () => {
+      try {
+        await api.clearSelfieSegmentationModelPath();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    videoBackgroundBusy: false,
+    videoBackgroundError: null,
+
+    removeBackgroundFromCurrentVideo: async (backgroundRgb) => {
+      const { selectedPhotoId, selectedFolderId } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.videoBackgroundBusy = true;
+        state.videoBackgroundError = null;
+      });
+      try {
+        const result = await api.removeVideoBackground(selectedPhotoId, backgroundRgb);
+        if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
+        set((state) => {
+          state.selectedPhotoId = result.id;
+        });
+      } catch (err) {
+        set((state) => {
+          state.videoBackgroundError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoBackgroundBusy = false;
+        });
+      }
+    },
+
     similarVideoGroups: null,
     similarVideosLoading: false,
     similarVideosError: null,
@@ -7014,6 +7113,99 @@ export const useAppStore = create<AppStore>()(
         });
       }
       get().selectPhoto(entry.photo.id);
+    },
+
+    videoTimelineDialogOpen: false,
+    videoTimelineRunning: false,
+    videoTimelineError: null,
+    videoTimelineOutcome: null,
+
+    openVideoTimelineDialog: () => {
+      set((state) => {
+        state.videoTimelineDialogOpen = true;
+      });
+    },
+
+    closeVideoTimelineDialog: () => {
+      set((state) => {
+        state.videoTimelineDialogOpen = false;
+      });
+    },
+
+    renderVideoTimeline: async (items, options) => {
+      set((state) => {
+        state.videoTimelineRunning = true;
+        state.videoTimelineError = null;
+      });
+      try {
+        const outcome = await api.renderVideoTimeline(items, options);
+        const { selectedFolderId } = get();
+        if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
+        set((state) => {
+          state.videoTimelineOutcome = outcome;
+        });
+      } catch (err) {
+        set((state) => {
+          state.videoTimelineError = err instanceof Error ? err.message : String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoTimelineRunning = false;
+        });
+      }
+    },
+
+    whisperModelDownloading: false,
+
+    downloadWhisperModel: async () => {
+      set((state) => {
+        state.whisperModelDownloading = true;
+      });
+      try {
+        await api.downloadWhisperModel();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.whisperModelDownloading = false;
+        });
+      }
+    },
+
+    clearWhisperModelPath: async () => {
+      try {
+        await api.clearWhisperModelPath();
+        await get().loadAiSettings();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    videoTranscribing: false,
+    videoTranscribeError: null,
+
+    transcribeVideoAudio: async (photoId, language) => {
+      set((state) => {
+        state.videoTranscribing = true;
+        state.videoTranscribeError = null;
+      });
+      try {
+        return await api.transcribeVideoAudio(photoId, language);
+      } catch (err) {
+        set((state) => {
+          state.videoTranscribeError = err instanceof Error ? err.message : String(err);
+        });
+        return [];
+      } finally {
+        set((state) => {
+          state.videoTranscribing = false;
+        });
+      }
     },
     };
   }),

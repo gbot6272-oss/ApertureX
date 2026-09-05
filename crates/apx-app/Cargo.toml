@@ -46,6 +46,9 @@ percent-encoding = "2"
 # SHA-256-Streaming-Hash jeder importierten Datei. Bereits transitiv im
 # Cargo.lock vorhanden (MIT OR Apache-2.0) — kein neues Lizenzrisiko.
 sha2.workspace = true
+# Whisper-Modell-Prüfsumme (Phase 17 Schritt 5, siehe DECISIONS.md
+# ADR-0045) — `whisper.cpp` veröffentlicht nur SHA1 für seine Modelle.
+sha1.workspace = true
 # KI-Masken-Alpha-Bitmaps als Base64-String über IPC (Phase 7, ADR-0033).
 base64 = "0.22"
 image_hasher = "3.1.1"
@@ -76,6 +79,10 @@ tethering = ["apx-tether/tethering"]
 # libblas/liblapack fehlen in dieser Sandbox und im Standard-CI (dieselbe
 # Konvention wie `tethering` oben).
 people = ["apx-ai/people"]
+# Standardmäßig aus — siehe apx-ai/src/subtitles.rs Moduldoku: baut
+# whisper.cpp lokal per cmake, ein spürbarer zusätzlicher Compile-Schritt
+# (dieselbe Konvention wie `people`/`tethering` oben).
+subtitles = ["apx-ai/subtitles"]
 
 [dev-dependencies]
 tempfile = "3"

@@ -9,6 +9,7 @@ import { ExportDialog } from "./ExportDialog";
 import { ImportDialog } from "./ImportDialog";
 import { PrintDialog } from "./PrintDialog";
 import { SlideshowDialog } from "./SlideshowDialog";
+import { VideoTimelineDialog } from "./VideoTimelineDialog";
 import { TemplatesDialog } from "./TemplatesDialog";
 import { LibraryOrganizeDialog } from "./LibraryOrganizeDialog";
 import { BatchConsoleDialog } from "./BatchConsoleDialog";
@@ -46,6 +47,9 @@ export function Header() {
   const slideshowDialogOpen = useAppStore((s) => s.slideshowDialogOpen);
   const openSlideshowDialog = useAppStore((s) => s.openSlideshowDialog);
   const closeSlideshowDialog = useAppStore((s) => s.closeSlideshowDialog);
+  const videoTimelineDialogOpen = useAppStore((s) => s.videoTimelineDialogOpen);
+  const openVideoTimelineDialog = useAppStore((s) => s.openVideoTimelineDialog);
+  const closeVideoTimelineDialog = useAppStore((s) => s.closeVideoTimelineDialog);
   const bookDialogOpen = useAppStore((s) => s.bookDialogOpen);
   const openBookDialog = useAppStore((s) => s.openBookDialog);
   const closeBookDialog = useAppStore((s) => s.closeBookDialog);
@@ -305,6 +309,17 @@ export function Header() {
       </button>
 
       <SlideshowDialog open={slideshowDialogOpen} photoIds={exportPhotoIds} onClose={closeSlideshowDialog} />
+
+      <button
+        type="button"
+        onClick={openVideoTimelineDialog}
+        disabled={exportPhotoIds.length === 0}
+        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Zeitachse…
+      </button>
+
+      <VideoTimelineDialog open={videoTimelineDialogOpen} photoIds={exportPhotoIds} onClose={closeVideoTimelineDialog} />
 
       <button
         type="button"

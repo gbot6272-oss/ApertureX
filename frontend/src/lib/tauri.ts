@@ -483,6 +483,32 @@ export function applyLutFilterToVideo(photoId: string, lut: LutFilterDataDto, st
   return invoke<PhotoDto>("apply_lut_filter_to_video", { photoId, lut, strength });
 }
 
+// ---- Greenscreen/Hintergrund entfernen (Phase 17 Schritt 8, siehe --------
+// DECISIONS.md ADR-0045) -----------------------------------------------------
+
+/** Lädt das MediaPipe-Selfie-Segmentation-ONNX-Modell herunter (Apache-2.0)
+ * — löst erst nach ausdrücklicher Nutzerbestätigung. Liefert den lokalen
+ * Zielpfad zurück. **Keine Hash-Prüfung** (siehe `apx_app::commands::
+ * SELFIE_SEGMENTATION_MODEL_URL`s Moduldoku). */
+export function downloadSelfieSegmentationModel(): Promise<string> {
+  return invoke<string>("download_selfie_segmentation_model");
+}
+
+/** Entfernt nur den hinterlegten Pfad — löscht die heruntergeladene Datei
+ * selbst nicht. */
+export function clearSelfieSegmentationModelPath(): Promise<void> {
+  return invoke<void>("clear_selfie_segmentation_model_path");
+}
+
+/** Ersetzt den Hintergrund eines Videos framegenau durch eine einfarbige
+ * Fläche (`backgroundRgb`) — braucht ein zuvor heruntergeladenes Modell
+ * (siehe `downloadSelfieSegmentationModel`), nicht-destruktiv wie jeder
+ * andere Video-Bearbeitungs-Command. Kann bei langen/hochauflösenden
+ * Videos spürbar dauern (Segmentierung läuft je Einzelbild). */
+export function removeVideoBackground(photoId: string, backgroundRgb: [number, number, number]): Promise<PhotoDto> {
+  return invoke<PhotoDto>("remove_video_background", { photoId, backgroundRgb });
+}
+
 /** Ein Video innerhalb einer `listSimilarVideoGroups`-Gruppe —
  * `folder_id` steht hier separat (nicht auf `PhotoDto` selbst, siehe
  * dessen Rust-Gegenstück `SimilarVideoDto`s Moduldoku), weil nur diese
@@ -499,6 +525,118 @@ export interface SimilarVideoDto {
  * Moduldoku). */
 export function listSimilarVideoGroups(maxDistance: number): Promise<SimilarVideoDto[][]> {
   return invoke<SimilarVideoDto[][]>("list_similar_video_groups", { maxDistance });
+}
+
+// ---- Video-Zeitachse (Phase 17 Schritt 1, siehe DECISIONS.md ADR-0045) -----
+
+/** Ein einzelner Zeitachsen-Eintrag — `photoId` referenziert entweder
+ * ein Video (dann sind `inMs`/`outMs` Pflicht) oder ein Foto (dann ist
+ * `holdSeconds` maßgeblich). Siehe `apx_app::commands::TimelineItemInput`s
+ * Moduldoku. */
+export interface TimelineItemInput {
+  photoId: string;
+  inMs?: number;
+  outMs?: number;
+  holdSeconds?: number;
+  /** Tempo-Faktor für Video-Einträge (Phase 17 Schritt 2, siehe
+   * `DECISIONS.md` ADR-0045) — `undefined` = `1.0` (unverändert),
+   * `> 1` Zeitraffer, `< 1` Zeitlupe. Für Foto-/Titel-Einträge ohne
+   * Wirkung. */
+  speed?: number;
+}
+
+/** Ein Text-/Titel-Overlay über einer Zeitspanne der fertigen Sequenz
+ * (Phase 17 Schritt 4, siehe `DECISIONS.md` ADR-0045) — Zeiten
+ * beziehen sich auf die verkettete Gesamt-Sequenz, nicht auf einen
+ * einzelnen Eintrag. `position` folgt demselben Vertrag wie das
+ * bestehende Bild-/Text-Wasserzeichen beim Foto-Export
+ * (`"top_left"`/`"top_right"`/`"bottom_left"`/`"bottom_right"`/
+ * `"center"`). Siehe `apx_app::commands::TimelineTextOverlayInput`s
+ * Moduldoku. */
+export interface TimelineTextOverlayInput {
+  text: string;
+  position: "top_left" | "top_right" | "bottom_left" | "bottom_right" | "center";
+  startSeconds: number;
+  endSeconds: number;
+  fontPath: string;
+  fontSize?: number;
+  colorRgb?: [number, number, number];
+}
+
+/** Ein Bild-in-Bild-/Split-Screen-Overlay (Phase 17 Schritt 7, siehe
+ * `DECISIONS.md` ADR-0045) — die Quelle folgt demselben Vertrag wie
+ * {@link TimelineItemInput}, zusätzlich Zeitspanne/Position/Größe.
+ * Split-Screen ist derselbe Mechanismus mit `scale` nahe `1.0` und
+ * zwei Overlays an gegenüberliegenden Positionen. Siehe
+ * `apx_app::commands::TimelinePipOverlayInput`s Moduldoku. */
+export interface TimelinePipOverlayInput {
+  photoId: string;
+  inMs?: number;
+  outMs?: number;
+  holdSeconds?: number;
+  speed?: number;
+  startSeconds: number;
+  endSeconds: number;
+  position: "top_left" | "top_right" | "bottom_left" | "bottom_right" | "center";
+  /** Anteil an der Ziel-Auflösung, `0.05..=1.0`. */
+  scale: number;
+}
+
+export interface VideoTimelineOptions {
+  width: number;
+  height: number;
+  fps: number;
+  /** `"cut"`/`"cross_fade"` je Übergang — Länge muss `items.length - 1` sein. */
+  transitions: string[];
+  transitionSeconds?: number;
+  musicPath?: string;
+  textOverlays?: TimelineTextOverlayInput[];
+  pipOverlays?: TimelinePipOverlayInput[];
+}
+
+/** Rendert `items` zu einer neuen Video-Zeitachse und legt sie als
+ * neues Katalog-Video an — nicht-destruktiv, siehe
+ * `apx_app::commands::render_video_timeline`s Moduldoku. Kann bei
+ * vielen/langen Einträgen spürbar dauern (jeder Eintrag wird erst zu
+ * einem eigenen Segment gerendert, dann verkettet) — die Promise löst
+ * erst nach vollständiger Verarbeitung auf. */
+export function renderVideoTimeline(items: TimelineItemInput[], options: VideoTimelineOptions): Promise<PhotoDto> {
+  return invoke<PhotoDto>("render_video_timeline", { items, options });
+}
+
+// ---- Automatische Untertitel (Phase 17 Schritt 5, siehe DECISIONS.md ------
+// ADR-0045) -------------------------------------------------------------------
+
+/** Lädt das ~142-MB-Whisper-`base.en`-Modell herunter (MIT, `whisper.cpp`,
+ * SHA1-geprüft) — löst erst nach ausdrücklicher Nutzerbestätigung. Liefert
+ * den lokalen Zielpfad zurück. */
+export function downloadWhisperModel(): Promise<string> {
+  return invoke<string>("download_whisper_model");
+}
+
+/** Entfernt nur den hinterlegten Pfad — löscht die heruntergeladene Datei
+ * selbst nicht. */
+export function clearWhisperModelPath(): Promise<void> {
+  return invoke<void>("clear_whisper_model_path");
+}
+
+/** Ein transkribierter Zeitabschnitt — siehe
+ * `apx_ai::subtitles::SubtitleSegment`s Moduldoku. */
+export interface SubtitleSegmentDto {
+  start_ms: number;
+  end_ms: number;
+  text: string;
+}
+
+/** Transkribiert die Tonspur des Videos `photoId` per Whisper — braucht
+ * ein zuvor heruntergeladenes Modell (siehe [`downloadWhisperModel`]).
+ * `language`: ISO-639-1-Kürzel (z. B. `"de"`) oder `undefined` für
+ * Auto-Erkennung. Die zurückgegebenen Zeitabschnitte sind relativ zum
+ * Beginn der Tonspur des jeweiligen Videos — `VideoTimelineDialog.tsx`
+ * verschiebt sie beim Übernehmen in Text-Overlays um die Startposition
+ * des Eintrags in der Gesamt-Sequenz. */
+export function transcribeVideoAudio(photoId: string, language?: string): Promise<SubtitleSegmentDto[]> {
+  return invoke<SubtitleSegmentDto[]>("transcribe_video_audio", { photoId, language: language ?? null });
 }
 
 // ---- Schnappschüsse (Phase 6 Schritt 8) -------------------------------------
@@ -1014,6 +1152,16 @@ export interface AiSettingsDto {
    * `DECISIONS.md` ADR-0041 Nachtrag IX) — ein fehlender Schlüssel heißt
    * „dieser Stil noch nicht heruntergeladen". */
   style_transfer_model_paths: Record<string, string>;
+  /** `null`, solange der Nutzer den Download nicht bestätigt hat (Phase 17
+   * Schritt 5, siehe `DECISIONS.md` ADR-0045). */
+  whisper_model_path: string | null;
+  /** `false`, wenn diese Build ohne das Cargo-Feature `subtitles`
+   * kompiliert wurde — `VideoTimelineDialog.tsx` zeigt dann einen Hinweis
+   * statt der Untertitel-Aktionen. */
+  subtitles_feature_compiled: boolean;
+  /** `null`, solange der Nutzer den Download nicht bestätigt hat (Phase 17
+   * Schritt 8, siehe `DECISIONS.md` ADR-0045). */
+  selfie_segmentation_model_path: string | null;
 }
 
 export function getAiSettings(): Promise<AiSettingsDto> {

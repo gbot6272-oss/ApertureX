@@ -149,6 +149,10 @@ test.describe("Presets-Panel", () => {
     await page.getByRole("button", { name: "Stärke-Test", exact: true }).click();
     await expect.poll(async () => readLastCommittedExposure(page)).toBeCloseTo(0.6, 2);
 
+    // Phase 18 Schritt 4: der Preset-Stärke-Regler liegt jetzt hinter der
+    // Registerkarte „Verlauf & Werkzeuge".
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
+
     const strengthInput = page.getByRole("spinbutton", { name: "Stärke (%) (Zahlenwert)" });
     await expect(strengthInput).toBeVisible();
     await strengthInput.fill("50");

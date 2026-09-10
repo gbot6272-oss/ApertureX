@@ -4,6 +4,14 @@ import type { de } from "./de";
  * file to stay in sync with every key `de.ts` declares — a missing key
  * is a compile error, not a silent runtime fallback. */
 export const en: Record<keyof typeof de, string> = {
+  "developPanel.tab.light": "Light",
+  "developPanel.tab.color": "Color",
+  "developPanel.tab.details": "Details",
+  "developPanel.tab.creative": "Creative",
+  "developPanel.tab.history": "History & Tools",
+  "developPanel.tabs.label": "Develop sections",
+  "masksPanel.tabs.label": "Mask sections",
+
   "header.importFolder": "Import folder",
   "header.importWithTemplate": "Import with template…",
   "header.importWithTemplateTitle": "Import with a selectable mode (copy/move), renaming pattern and presets",

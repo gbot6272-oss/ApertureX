@@ -4424,3 +4424,55 @@ nur der angepassten Spezifikationen) gegen den Produktions-Build:
 verursachter Klick-Abfangfehler) wurde durch einen Vergleichslauf auf
 dem Schritt-2-Stand (`git stash -u`) als bereits vorher bestehend,
 nicht durch diesen Schritt verursacht, bestätigt.
+
+**Nachtrag Schritt 4 (Panels in Registerkarten):** neu
+`components/ui/Tabs.tsx` (`TabBar<T>`, generische Registerkarten-
+Leiste, `role="tablist"`/`role="tab"`, kein Routing/Lazy-Mount — reiner
+`useState` der aufrufenden Komponente, dieselbe Größenordnung wie die
+bereits bestehenden lokalen Tab-Leisten z. B. `CURVE_CHANNEL_TABS`).
+`DevelopPanel.tsx`s 23 Fieldsets (vormals eine durchgehende Scroll-
+Spalte) auf fünf Registerkarten verteilt — exakt die in Schritt 4s
+Planung festgelegte Gruppierung (Licht/Farbe/Details/Kreativ/Verlauf
+& Werkzeuge), Standard-Tab "Licht" (hält die meistgetesteten
+Grundeinstellungs-Regler ohne Tab-Klick sichtbar). Jedes Fieldset
+unverändert übernommen (Inhalt/Props/Store-Anbindung/`id`-Attribute) —
+nur die Sichtbarkeits-Bedingung wurde von `{selectedPhotoId && (...)}`
+auf zusätzlich `activeTab === "…"` erweitert; die Preset-Stärke-
+Fieldset (unabhängig von `selectedPhotoId`, siehe deren eigene
+`{presetStrengthContext && (...)}`-Bedingung im Originalcode) blieb
+bewusst diese Ausnahme, jetzt `{activeTab === "history" &&
+presetStrengthContext && (...)}`. `MasksPanel.tsx` erhielt dieselbe
+Struktur, aber nur drei befüllte Tabs (Licht/Farbe/Details — "Kreativ"/
+"Verlauf & Werkzeuge" hätten keinen Inhalt, da Masken kein Reparatur-/
+Verflüssigen-/Schnappschuss-Äquivalent haben) — eigener
+`masksPanel.tabs.label`-Lokalisierungsschlüssel statt des
+`DevelopPanel`-Schlüssels, damit die beiden gleichzeitig sichtbaren
+`role="tablist"`s (Entwickeln- und Masken-Panel können offen
+nebeneinanderstehen) eindeutige zugängliche Namen tragen.
+
+**Echter, real gefundener Regressions-Fund (nicht nur behauptet):**
+der Node-Editors "Öffnen"-Knopf sprang bisher per `getElementById(...)
+?.scrollIntoView(...)` zum Regler-Abschnitt — nach der Tab-Aufteilung
+wäre das ein stiller No-Op geworden, sobald der Zielanker auf einer
+nicht-aktiven Registerkarte liegt (der Knoten existiert dann schlicht
+nicht im DOM). Behoben durch eine neue `STAGE_TAB_IDS`-Tabelle (welche
+Stufe zu welcher Registerkarte gehört) plus `requestAnimationFrame`-
+Aufschub im Klick-Handler: erst `setActiveTab(...)`, dann — nach dem
+Commit/Repaint — `openStageAnchor(...)`, damit der Anker bereits
+gemountet ist. `node-editor-flow.spec.ts` deckt das jetzt direkt ab
+(`Öffnen` auf eine "Details"-Stufe von der "Verlauf & Werkzeuge"-
+Registerkarte aus, danach `aria-selected` auf dem "Details"-Tab
+geprüft) statt den No-Op nur mit einem zusätzlichen manuellen
+Tab-Klick zu umgehen.
+
+**Ausführung:** die große mechanische Umgruppierung (Fieldset-
+Blöcke verschieben, ohne ihren Inhalt zu verändern) + die Anpassung
+von zwölf betroffenen Playwright-Spezifikationen wurde an einen
+Subagenten mit exakter Fieldset-zu-Tab-Zuordnung delegiert (dieselbe
+Arbeitsteilung wie Schritt 2s Dialog-Migration) — Ergebnis vor meiner
+eigenen Nachbesserung (Öffnen-Fix, Masken-Tablist-Label) bereits
+141/142 grün, danach unverändert 141/142 grün (derselbe vorbestehende
+`tat-flow.spec.ts`-Flake). Volle Suite (nicht nur die angepassten
+Spezifikationen), `vitest run` (251 Tests), `tsc -b`, `vite build` —
+alle zusätzlich selbst erneut verifiziert, nicht nur der Subagenten-
+Bericht übernommen.

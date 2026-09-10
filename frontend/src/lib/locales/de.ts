@@ -4,6 +4,15 @@
  * hartkodierten deutschen Text an derselben Stelle.
  */
 export const de = {
+  // DevelopPanel.tsx/MasksPanel.tsx — Registerkarten (Phase 18 Schritt 4)
+  "developPanel.tab.light": "Licht",
+  "developPanel.tab.color": "Farbe",
+  "developPanel.tab.details": "Details",
+  "developPanel.tab.creative": "Kreativ",
+  "developPanel.tab.history": "Verlauf & Werkzeuge",
+  "developPanel.tabs.label": "Entwickeln-Bereiche",
+  "masksPanel.tabs.label": "Masken-Bereiche",
+
   // Header.tsx — Zeile 1 (Import + Ansicht)
   "header.importFolder": "Ordner importieren",
   "header.importWithTemplate": "Import mit Vorlage…",

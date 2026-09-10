@@ -52,6 +52,8 @@ test("Stiltransfer: Stil herunterladen, ein Foto stilisieren und den Betrag-Regl
   await page.getByRole("button", { name: /Urlaub/ }).click();
   await page.getByRole("img", { name: PHOTO.filename }).click();
   await page.getByRole("button", { name: "Entwickeln" }).click();
+  // Phase 18 Schritt 4: dieser Abschnitt liegt jetzt hinter einer eigenen Registerkarte.
+  await page.getByRole("tab", { name: "Kreativ" }).click();
 
   // Auf die Zeile mit "Mosaik" eingeschränkt, weil "Stilisieren" bei
   // mehreren Stilen vorkommen könnte.

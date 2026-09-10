@@ -83,6 +83,8 @@ test.describe("KI-Funktionen (Phase 7)", () => {
   test("Auto-Quellenfindung setzt den Quellpunkt per Klick automatisch, statt ihn direkt zu übernehmen", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
     await setMockFixtures(page, { repairSourceSuggestion: { x: 0.33, y: 0.44 } });
+    // Phase 18 Schritt 4: dieser Abschnitt liegt jetzt hinter einer eigenen Registerkarte.
+    await page.getByRole("tab", { name: "Kreativ" }).click();
 
     await page.getByRole("button", { name: "Reparatur-Pinsel" }).click();
     await page.getByRole("checkbox", { name: "Quelle automatisch vorschlagen" }).check();
@@ -112,6 +114,7 @@ test.describe("KI-Funktionen (Phase 7)", () => {
   test("Sensorflecken suchen zeigt Fundstellen, 'Reparieren' committet einen ContentAwareFill-Strich", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
     await setMockFixtures(page, { sensorSpots: [{ x: 0.6, y: 0.25, radius: 0.02, strength: 0.9 }] });
+    await page.getByRole("tab", { name: "Kreativ" }).click();
 
     await page.getByRole("button", { name: "Sensorflecken suchen" }).click();
     await expect(page.getByText("Fleck 1 (90 %)")).toBeVisible();

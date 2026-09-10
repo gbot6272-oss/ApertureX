@@ -41,6 +41,17 @@ const DARK_TILE_URL = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}
 const DARK_TILE_ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
+/** Hängt den optionalen, vom Nutzer im Einstellungsdialog hinterlegten
+ * CARTO-API-Schlüssel (siehe `SettingsDialog.tsx`, "Karte"-Reiter) als
+ * `key`-Query-Parameter an — genau der Parametername, den CARTO für
+ * seine Raster-PNG-Basemaps dokumentiert; ohne Schlüssel liefert CARTO
+ * dieselben Kacheln weiterhin, nur mit einem "API key required"-
+ * Wasserzeichen-Overlay. Kein Schlüssel im Repository/Installer
+ * hinterlegt — derselbe Opt-in wie der Anthropic-API-Schlüssel. */
+function tileUrlWithKey(apiKey: string | null | undefined): string {
+  return apiKey ? `${DARK_TILE_URL}?key=${encodeURIComponent(apiKey)}` : DARK_TILE_URL;
+}
+
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -88,6 +99,7 @@ export function MapView() {
   const heatLayerRef = useRef<PhotoHeatLayer | null>(null);
   const routeLayerRef = useRef<L.Polyline | null>(null);
   const gpxLayerRef = useRef<L.Polyline | null>(null);
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
 
   const [mapMode, setMapMode] = useState<"globe" | "map">("globe");
   const [showPins, setShowPins] = useState(false);
@@ -103,10 +115,25 @@ export function MapView() {
   const cancelPlacingGps = useAppStore((s) => s.cancelPlacingGps);
   const loadGpxTrack = useAppStore((s) => s.loadGpxTrack);
   const clearGpxTrack = useAppStore((s) => s.clearGpxTrack);
+  const mapSettings = useAppStore((s) => s.mapSettings);
+  const loadMapSettings = useAppStore((s) => s.loadMapSettings);
 
   useEffect(() => {
     void refreshGeotaggedPhotos();
   }, [refreshGeotaggedPhotos]);
+
+  useEffect(() => {
+    if (!mapSettings) void loadMapSettings();
+  }, [mapSettings, loadMapSettings]);
+
+  // Trägt einen erst nach dem Kartenaufbau geladenen (oder im
+  // Einstellungsdialog geänderten) CARTO-API-Schlüssel nach — die Karte
+  // selbst entsteht unten unabhängig davon, ob `mapSettings` bereits
+  // geladen ist, damit ein langsamer Einstellungs-Ladevorgang den
+  // Kartenaufbau nicht verzögert.
+  useEffect(() => {
+    tileLayerRef.current?.setUrl(tileUrlWithKey(mapSettings?.carto_api_key));
+  }, [mapSettings]);
 
   // Karte einmalig aufbauen — erst, sobald der Modus auf "map"
   // wechselt (der Globus rendert bis dahin sein eigenes Canvas; ein
@@ -115,7 +142,7 @@ export function MapView() {
   useEffect(() => {
     if (mapMode !== "map" || !containerRef.current || mapRef.current) return;
     const map = L.map(containerRef.current).setView([20, 0], 2);
-    L.tileLayer(DARK_TILE_URL, {
+    tileLayerRef.current = L.tileLayer(tileUrlWithKey(mapSettings?.carto_api_key), {
       attribution: DARK_TILE_ATTRIBUTION,
       maxZoom: 19,
     }).addTo(map);
@@ -139,7 +166,15 @@ export function MapView() {
       mapRef.current = null;
       markersLayerRef.current = null;
       heatLayerRef.current = null;
+      tileLayerRef.current = null;
     };
+    // `mapSettings` bewusst nicht in der Abhängigkeitsliste: der
+    // Kartenaufbau soll nur einmal pro Moduswechsel laufen (sonst würde
+    // jede spätere Schlüsseländerung die ganze Karte neu aufbauen statt
+    // nur die Kachel-URL nachzutragen, siehe der `setUrl`-Effekt oben) —
+    // der Anfangswert reicht, weil dieser Effekt beim ersten Aufbau
+    // läuft, lange bevor ein Nutzer den Schlüssel ändern könnte.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapMode]);
 
   // Heatmap-Punkte aktuell halten (unabhängig vom Pin-/Heatmap-

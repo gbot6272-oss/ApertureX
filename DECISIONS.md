@@ -4142,6 +4142,22 @@ angezeigte Zoomstufe war eingefroren (aus einer Ref statt reaktivem
 State gelesen, aktualisierte sich nie nach dem ersten Render). Beide
 behoben, vor dem Commit erneut visuell bestätigt.
 
+**Nachtrag (CARTO-API-Schlüssel gegen das "API key required"-
+Wasserzeichen):** CARTO verlangt für die dunklen Raster-PNG-
+Basemap-Kacheln inzwischen einen eigenen (kostenlosen) API-Schlüssel,
+sonst zeigen die Kacheln ein "API key required"-Wasserzeichen-Overlay
+— ohne Schlüssel funktioniert die Karte aber weiterhin, nur mit diesem
+Hinweis. Neue `apx_core::settings::MapSettings { carto_api_key:
+Option<String> }` (analog zu `AiSettings::anthropic_api_key`,
+dieselbe Klartext-in-lokaler-TOML-Vertrauensgrenze, kein Schlüssel im
+Repository/Installer), neue `get_map_settings`/`set_map_settings`-
+Commands, neuer "Karte"-Reiter im `SettingsDialog.tsx` zur Eingabe.
+`MapView.tsx` hängt den Schlüssel als `key`-Query-Parameter an
+`DARK_TILE_URL` an (genau der von CARTO dokumentierte Parametername)
+— über einen separaten `setUrl()`-Effekt auf der bereits erzeugten
+`L.TileLayer`-Instanz, nicht durch Neuaufbau der ganzen Karte bei
+jeder Einstellungsänderung.
+
 ## ADR-0045: Phase 17 — Video-Editor-Erweiterung (Timeline, Text/Untertitel, Tempo, Greenscreen, Bild-in-Bild, Stabilisierung)
 
 **Kontext:** Phase 16 lieferte "Basis-Videoschnitt" (Schneiden, Szenenerkennung, Entrauschen, Musik, LUT, Ähnliche-Videos — alles **Ein-Clip**-Operationen, jede erzeugt genau eine neue Katalogzeile). Nutzerwunsch: deutlich ausweiten — "nicht so krass wie CapCut, aber dass man guten Content erstellen kann". Nach Rückfrage (siehe Sitzungsverlauf) sollen zusätzlich zu den naheliegenden Kernfunktionen auch automatische Untertitel, Greenscreen, Bild-in-Bild/Split-Screen und Stabilisierung rein — alle vier explizit vom Nutzer bestätigt.

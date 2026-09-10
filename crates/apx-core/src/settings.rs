@@ -145,6 +145,22 @@ pub struct AiSettings {
     pub selfie_segmentation_model_path: Option<String>,
 }
 
+/// Einstellungen für die Karte (Foto-Globus, Phase 15/ADR-0044) — bislang
+/// nur der optionale CARTO-API-Schlüssel für die dunklen Raster-Basemap-
+/// Kacheln (`https://{s}.basemaps.cartocdn.com/dark_all/...`, siehe
+/// `MapView.tsx`). Dieselbe Vertrauensgrenze/derselbe Klartext-in-TOML-
+/// Ansatz wie `AiSettings::anthropic_api_key` — ein lokaler, nicht
+/// synchronisierter Einzelnutzer-Schlüssel, kein mitgelieferter Schlüssel
+/// im Installer (CARTO verlangt inzwischen einen eigenen Account/Key, um
+/// den "API key required"-Wasserzeichen-Hinweis auf den Kacheln zu
+/// vermeiden — ohne Schlüssel funktioniert die Karte weiterhin, nur mit
+/// diesem Hinweis-Overlay).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MapSettings {
+    pub carto_api_key: Option<String>,
+}
+
 /// Einstellungen für den beobachteten Ordner (Phase 12 Schritt 7, siehe
 /// `DECISIONS.md` ADR-0039-Nachtrag III) — ein optionaler lokaler Ordner,
 /// der im Hintergrund periodisch auf neue Dateien geprüft wird, um sie
@@ -181,6 +197,7 @@ pub struct Settings {
     pub catalog: CatalogSettings,
     pub ai: AiSettings,
     pub watched_folder: WatchedFolderSettings,
+    pub map: MapSettings,
 }
 
 impl Settings {

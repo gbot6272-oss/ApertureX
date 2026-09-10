@@ -1509,6 +1509,20 @@ export function setWatchedFolderSettings(settings: WatchedFolderSettingsDto): Pr
   return invoke<void>("set_watched_folder_settings", { settings });
 }
 
+// ---- Karte: CARTO-API-Schlüssel (Foto-Globus, Phase 15/ADR-0044) ---------
+
+export interface MapSettingsDto {
+  carto_api_key: string | null;
+}
+
+export function getMapSettings(): Promise<MapSettingsDto> {
+  return invoke<MapSettingsDto>("get_map_settings");
+}
+
+export function setMapSettings(settings: MapSettingsDto): Promise<void> {
+  return invoke<void>("set_map_settings", { settings });
+}
+
 /** LLM-Modus des Preset-Generators — liefert die EDL-Teilmenge als
  * JSON-String (`lib/presets.ts::parseEdlSubset`). Braucht einen
  * hinterlegten Anthropic-API-Schlüssel. */

@@ -220,12 +220,21 @@ export function MasksPanel() {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-1">
+      {/* Einspaltig statt eines Zwei-Spalten-Rasters (Phase 18-Nachtrag,
+          siehe `DECISIONS.md`): bei der Standard-/Minimalbreite dieser
+          Palette (180–256px, `PaletteFrame`/`useWorkspacePanel`) sind die
+          deutschen Beschriftungen ("+ Linearer Verlauf" u. Ä.) in einer
+          zweispaltigen ~115px-Spalte auf zwei Zeilen umgebrochen — genau
+          der gemeldete "Schrift nicht in den Kästen"-Befund. Volle Breite
+          je Zeile behebt das strukturell, statt Text/Schriftgröße
+          einzeln nachzujustieren; dieselbe volle Breite hatte die
+          längste Beschriftung unten ohnehin schon per `col-span-2`. */}
+      <div className="flex flex-col gap-1">
         <button
           type="button"
           onClick={() => addMask("LinearGradient")}
           disabled={!selectedPhotoId}
-          className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
           + Linearer Verlauf
         </button>
@@ -233,7 +242,7 @@ export function MasksPanel() {
           type="button"
           onClick={() => addMask("RadialGradient")}
           disabled={!selectedPhotoId}
-          className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
           + Radialer Verlauf
         </button>
@@ -241,7 +250,7 @@ export function MasksPanel() {
           type="button"
           onClick={() => addMask("Brush")}
           disabled={!selectedPhotoId}
-          className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
           + Pinsel
         </button>
@@ -249,7 +258,7 @@ export function MasksPanel() {
           type="button"
           onClick={() => addMask("ColorRange")}
           disabled={!selectedPhotoId}
-          className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
           + Farbbereich
         </button>
@@ -257,7 +266,7 @@ export function MasksPanel() {
           type="button"
           onClick={() => addMask("LuminanceRange")}
           disabled={!selectedPhotoId}
-          className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
           + Luminanzbereich
         </button>
@@ -266,7 +275,7 @@ export function MasksPanel() {
           onClick={() => addMask("BlurDepthApprox")}
           disabled={!selectedPhotoId}
           title="Keine echte Tiefenkarte — eine Laplace-Varianz-Schärfeheuristik, funktioniert nur bei echtem Schärfentiefe-Effekt (siehe DECISIONS.md ADR-0038)"
-          className="col-span-2 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
           + Unschärfe-basierte Tiefennäherung
         </button>
@@ -278,7 +287,11 @@ export function MasksPanel() {
           braucht einen Klickpunkt im Bild statt sofort zu erzeugen. */}
       <div className="flex flex-col gap-1 border-t border-border pt-2">
         <h3 className="text-xs font-medium text-text-secondary">KI-Maske hinzufügen</h3>
-        <div className="grid grid-cols-2 gap-1">
+        {/* Einspaltig statt eines Zwei-Spalten-Rasters (siehe Begründung
+            oben) — bei fünf Einträgen wäre die letzte Zeile im Raster
+            außerdem nur halb gefüllt gewesen (ein Knopf in der ersten
+            Spalte allein), was zusätzlich unausgerichtet wirkte. */}
+        <div className="flex flex-col gap-1">
           {AI_MASK_KINDS.map((kind) =>
             kind === "ClickRegion" ? (
               <button
@@ -287,7 +300,7 @@ export function MasksPanel() {
                 onClick={toggleAiMaskClickPicker}
                 disabled={!selectedPhotoId || aiMaskLoading !== null}
                 aria-pressed={aiMaskClickPickerActive}
-                className={`rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${
+                className={`rounded border px-2 py-1 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40 ${
                   aiMaskClickPickerActive ? "border-accent bg-accent/10 text-accent" : "border-border text-text-secondary hover:bg-bg-panel"
                 }`}
               >
@@ -299,7 +312,7 @@ export function MasksPanel() {
                 type="button"
                 onClick={() => void addAiMask(kind)}
                 disabled={!selectedPhotoId || aiMaskLoading !== null}
-                className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {aiMaskLoading === kind ? "…" : AI_MASK_KIND_LABELS[kind]}
               </button>

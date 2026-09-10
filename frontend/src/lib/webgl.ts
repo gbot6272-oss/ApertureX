@@ -141,11 +141,30 @@ export class QuadRenderer {
   }
 
   /** Lädt einen rohen, interleaved RGBA8-Puffer als Textur hoch (neue
-   * Entwickeln-Route, siehe `hooks/useDevelopRender`). */
+   * Entwickeln-Route, siehe `hooks/useDevelopRender`).
+   *
+   * **Kein `UNPACK_FLIP_Y_WEBGL`** — anders als bei `uploadImageBitmap`
+   * (siehe dort): ein per `texImage2D(..., width, height, ..., srcData)`
+   * aus einem rohen `ArrayBufferView` hochgeladener Puffer landet in der
+   * Texturspeicherung bereits so, dass Zeile 0 der Quelle (die oberste
+   * Bildzeile, siehe `apx_pipeline::develop::render_rgba8`) mit
+   * Texturkoordinate v=0 übereinstimmt, die dieser Renderer (siehe
+   * `VERTEX_SHADER`s `gl_Position.y`-Vorzeichenumkehr) an die Bildschirm-
+   * Oberkante bindet — ein zusätzlicher Flip würde das Bild also spiegeln,
+   * nicht korrigieren. Ein `createImageBitmap`-Quellobjekt (der
+   * `uploadImageBitmap`-Zweig) braucht dagegen den Flip, weil der Browser
+   * dessen Zeilenreihenfolge beim Hochladen anders handhabt als bei einem
+   * rohen Array — empirisch durch einen isolierten WebGL-Vergleichstest
+   * bestätigt (siehe `DECISIONS.md`-Nachtrag zu Phase 18): identische
+   * Vier-Farben-Testpixel liefen über beide Upload-Pfade, nur ohne diesen
+   * Flip stimmten beide überein. Betraf zuvor jedes im Entwickeln-Modus
+   * angezeigte Foto als vertikale Spiegelung — bei den meisten Motiven
+   * unauffällig genug, um erst mit einem tatsächlich auf dem Kopf
+   * wirkenden Foto aufzufallen. */
   uploadRgba8(width: number, height: number, pixels: Uint8Array): void {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
   }
 

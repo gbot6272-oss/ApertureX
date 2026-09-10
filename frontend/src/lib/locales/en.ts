@@ -76,6 +76,11 @@ export const en: Record<keyof typeof de, string> = {
   "settings.watchedFolderChoose": "Choose…",
   "settings.watchedFolderPollSeconds": "Poll interval: {seconds}s",
   "settings.watchedFolderHint": "Periodically checks the chosen folder for new files and imports them automatically in place (like \"Import folder\", no copying/moving). Already-imported files are skipped.",
+  "settings.tab.map": "Map",
+  "settings.mapApiKey": "CARTO API key",
+  "settings.mapApiKeyPlaceholder": "Paste key…",
+  "settings.mapApiKeySave": "Save",
+  "settings.mapApiKeyHint": "Removes the \"API key required\" watermark on the map tiles (Map/Photo Globe). The map still works without a key, just with this overlay. Get a free key at carto.com.",
 
   "onboarding.title": "Welcome to Aperture X",
   "onboarding.layout.title": "Basic layout",

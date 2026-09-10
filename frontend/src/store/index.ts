@@ -95,6 +95,7 @@ import type {
   StylePhotoAnalysisDto,
   UiSettingsDto,
   WatchedFolderSettingsDto,
+  MapSettingsDto,
 } from "../lib/tauri";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { RuleNode } from "../lib/ruleTree";
@@ -1234,6 +1235,11 @@ interface AiSlice {
   watchedFolderSettings: WatchedFolderSettingsDto | null;
   loadWatchedFolderSettings: () => Promise<void>;
   saveWatchedFolderSettings: (settings: WatchedFolderSettingsDto) => Promise<void>;
+
+  // -- Karte: CARTO-API-Schlüssel (Foto-Globus, Phase 15/ADR-0044) --
+  mapSettings: MapSettingsDto | null;
+  loadMapSettings: () => Promise<void>;
+  saveMapSettings: (settings: MapSettingsDto) => Promise<void>;
 
   // -- Preset-Generator (Schritt 4) --
   aiSettings: AiSettingsDto | null;
@@ -4849,6 +4855,34 @@ export const useAppStore = create<AppStore>()(
         await api.setWatchedFolderSettings(settings);
         set((state) => {
           state.watchedFolderSettings = settings;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    mapSettings: null,
+
+    loadMapSettings: async () => {
+      try {
+        const settings = await api.getMapSettings();
+        set((state) => {
+          state.mapSettings = settings;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    saveMapSettings: async (settings) => {
+      try {
+        await api.setMapSettings(settings);
+        set((state) => {
+          state.mapSettings = settings;
         });
       } catch (err) {
         set((state) => {

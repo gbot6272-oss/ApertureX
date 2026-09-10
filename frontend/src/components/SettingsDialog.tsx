@@ -11,7 +11,7 @@ interface SettingsDialogProps {
   onClose: () => void;
 }
 
-type Tab = "anzeige" | "sprache" | "import";
+type Tab = "anzeige" | "sprache" | "import" | "karte";
 
 const DEFAULT_ACCENT = "#5b9bd5";
 
@@ -35,6 +35,10 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const watchedFolderSettings = useAppStore((s) => s.watchedFolderSettings);
   const loadWatchedFolderSettings = useAppStore((s) => s.loadWatchedFolderSettings);
   const saveWatchedFolderSettings = useAppStore((s) => s.saveWatchedFolderSettings);
+  const mapSettings = useAppStore((s) => s.mapSettings);
+  const loadMapSettings = useAppStore((s) => s.loadMapSettings);
+  const saveMapSettings = useAppStore((s) => s.saveMapSettings);
+  const [cartoApiKeyInput, setCartoApiKeyInput] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
   useFocusTrap(dialogRef, open);
 
@@ -46,13 +50,26 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     if (open && !watchedFolderSettings) void loadWatchedFolderSettings();
   }, [open, watchedFolderSettings, loadWatchedFolderSettings]);
 
+  useEffect(() => {
+    if (open && !mapSettings) void loadMapSettings();
+  }, [open, mapSettings, loadMapSettings]);
+
+  useEffect(() => {
+    setCartoApiKeyInput(mapSettings?.carto_api_key ?? "");
+  }, [mapSettings]);
+
   if (!open) return null;
 
   const tabLabels: Record<Tab, string> = {
     anzeige: t("settings.tab.display"),
     sprache: t("settings.tab.language"),
     import: t("settings.tab.import"),
+    karte: t("settings.tab.map"),
   };
+
+  function handleSaveCartoApiKey() {
+    void saveMapSettings({ carto_api_key: cartoApiKeyInput.trim() || null });
+  }
 
   function update(patch: Partial<UiSettingsDto>) {
     if (!uiSettings) return;
@@ -183,48 +200,69 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                 </select>
               </label>
             </div>
-          ) : !watchedFolderSettings ? (
-            <p className="text-xs text-text-muted">{t("settings.loading")}</p>
+          ) : tab === "import" ? (
+            !watchedFolderSettings ? (
+              <p className="text-xs text-text-muted">{t("settings.loading")}</p>
+            ) : (
+              <div className="flex flex-col gap-4 text-xs">
+                <label className="flex items-center justify-between gap-2">
+                  <span className="text-text-secondary">{t("settings.watchedFolderEnabled")}</span>
+                  <input
+                    type="checkbox"
+                    checked={watchedFolderSettings.enabled}
+                    onChange={(event) => void saveWatchedFolderSettings({ ...watchedFolderSettings, enabled: event.target.checked })}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="text-text-secondary">{t("settings.watchedFolderPath")}</span>
+                  <div className="flex gap-1">
+                    <input
+                      type="text"
+                      readOnly
+                      value={watchedFolderSettings.path ?? ""}
+                      placeholder={t("settings.watchedFolderChoose")}
+                      className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1"
+                    />
+                    <button type="button" onClick={() => void handlePickWatchedFolder()} className="shrink-0 rounded border border-border px-2 py-1 hover:border-accent">
+                      {t("settings.watchedFolderChoose")}
+                    </button>
+                  </div>
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="text-text-secondary">{t("settings.watchedFolderPollSeconds", { seconds: watchedFolderSettings.poll_seconds })}</span>
+                  <input
+                    type="range"
+                    min={5}
+                    max={300}
+                    step={5}
+                    value={watchedFolderSettings.poll_seconds}
+                    onChange={(event) => void saveWatchedFolderSettings({ ...watchedFolderSettings, poll_seconds: Number(event.target.value) })}
+                  />
+                </label>
+
+                <p className="text-text-muted">{t("settings.watchedFolderHint")}</p>
+              </div>
+            )
           ) : (
             <div className="flex flex-col gap-4 text-xs">
-              <label className="flex items-center justify-between gap-2">
-                <span className="text-text-secondary">{t("settings.watchedFolderEnabled")}</span>
-                <input
-                  type="checkbox"
-                  checked={watchedFolderSettings.enabled}
-                  onChange={(event) => void saveWatchedFolderSettings({ ...watchedFolderSettings, enabled: event.target.checked })}
-                />
-              </label>
-
               <label className="flex flex-col gap-1">
-                <span className="text-text-secondary">{t("settings.watchedFolderPath")}</span>
+                <span className="text-text-secondary">{t("settings.mapApiKey")}</span>
                 <div className="flex gap-1">
                   <input
-                    type="text"
-                    readOnly
-                    value={watchedFolderSettings.path ?? ""}
-                    placeholder={t("settings.watchedFolderChoose")}
+                    type="password"
+                    value={cartoApiKeyInput}
+                    onChange={(event) => setCartoApiKeyInput(event.target.value)}
+                    placeholder={t("settings.mapApiKeyPlaceholder")}
                     className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1"
                   />
-                  <button type="button" onClick={() => void handlePickWatchedFolder()} className="shrink-0 rounded border border-border px-2 py-1 hover:border-accent">
-                    {t("settings.watchedFolderChoose")}
+                  <button type="button" onClick={handleSaveCartoApiKey} className="shrink-0 rounded border border-border px-2 py-1 hover:border-accent">
+                    {t("settings.mapApiKeySave")}
                   </button>
                 </div>
               </label>
-
-              <label className="flex flex-col gap-1">
-                <span className="text-text-secondary">{t("settings.watchedFolderPollSeconds", { seconds: watchedFolderSettings.poll_seconds })}</span>
-                <input
-                  type="range"
-                  min={5}
-                  max={300}
-                  step={5}
-                  value={watchedFolderSettings.poll_seconds}
-                  onChange={(event) => void saveWatchedFolderSettings({ ...watchedFolderSettings, poll_seconds: Number(event.target.value) })}
-                />
-              </label>
-
-              <p className="text-text-muted">{t("settings.watchedFolderHint")}</p>
+              <p className="text-text-muted">{t("settings.mapApiKeyHint")}</p>
             </div>
           )}
         </div>

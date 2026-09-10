@@ -82,6 +82,11 @@ export const de = {
   "settings.watchedFolderChoose": "Wählen…",
   "settings.watchedFolderPollSeconds": "Prüfintervall: {seconds}s",
   "settings.watchedFolderHint": "Prüft den gewählten Ordner regelmäßig auf neue Dateien und importiert sie automatisch an ihrem Ort (wie „Ordner importieren“, kein Kopieren/Verschieben). Bereits importierte Dateien werden dabei übersprungen.",
+  "settings.tab.map": "Karte",
+  "settings.mapApiKey": "CARTO-API-Schlüssel",
+  "settings.mapApiKeyPlaceholder": "Schlüssel einfügen…",
+  "settings.mapApiKeySave": "Speichern",
+  "settings.mapApiKeyHint": "Entfernt den „API key required“-Wasserzeichen-Hinweis auf den Kartenkacheln (Karte/Foto-Globus). Ohne Schlüssel funktioniert die Karte weiterhin, nur mit diesem Hinweis-Overlay. Kostenlosen Schlüssel unter carto.com beantragen.",
 
   // OnboardingDialog.tsx
   "onboarding.title": "Willkommen bei Aperture X",

@@ -6089,6 +6089,49 @@ pub fn set_watched_folder_settings(
     all.save(&path).map_err(|err| err.to_string())
 }
 
+// ---- Karte: CARTO-API-Schlüssel (Foto-Globus, Phase 15/ADR-0044) ----------
+//
+// Dasselbe Lade-/Speicher-Muster wie `get_watched_folder_settings`/
+// `set_watched_folder_settings` oben. `MapView.tsx` liest den Schlüssel
+// über den Store und hängt ihn bei jedem Kachel-Request selbst als
+// `?key=`-Query-Parameter an — hier nur Persistenz/Verwaltung.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MapSettingsDto {
+    /// Liegt im Klartext in der Einstellungsdatei — dieselbe
+    /// Vertrauensgrenze wie `AiSettingsDto::anthropic_api_key`.
+    pub carto_api_key: Option<String>,
+}
+
+impl From<apx_core::MapSettings> for MapSettingsDto {
+    fn from(map: apx_core::MapSettings) -> Self {
+        Self {
+            carto_api_key: map.carto_api_key,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_map_settings(state: State<'_, AppState>) -> Result<MapSettingsDto, String> {
+    let settings = apx_core::Settings::load_or_default(&state.paths.settings_file())
+        .map_err(|err| err.to_string())?;
+    Ok(settings.map.into())
+}
+
+/// `None`/leerer String löscht den hinterlegten Schlüssel.
+#[tauri::command]
+pub fn set_map_settings(
+    state: State<'_, AppState>,
+    settings: MapSettingsDto,
+) -> Result<(), String> {
+    let path = state.paths.settings_file();
+    let mut all = apx_core::Settings::load_or_default(&path).map_err(|err| err.to_string())?;
+    all.map = apx_core::MapSettings {
+        carto_api_key: settings.carto_api_key.filter(|key| !key.trim().is_empty()),
+    };
+    all.save(&path).map_err(|err| err.to_string())
+}
+
 // ---- KI: Preset-Generator (Phase 7 Schritt 4) ------------------------------
 //
 // Alle vier Erzeugungsarten liefern eine EDL-Teilmenge als JSON-String

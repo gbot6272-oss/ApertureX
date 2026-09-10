@@ -473,6 +473,8 @@ fn main() {
             commands::set_ui_settings,
             commands::get_watched_folder_settings,
             commands::set_watched_folder_settings,
+            commands::get_map_settings,
+            commands::set_map_settings,
             commands::generate_preset_from_llm,
             commands::build_preset_prompt_text,
             commands::import_preset_json,

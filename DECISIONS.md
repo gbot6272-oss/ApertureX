@@ -4249,3 +4249,83 @@ Bewusst KEIN Zeitachsen-Feature, sondern ein weiterer Ein-Clip-Command (`remove_
 `remove_video_background()` nutzt exakt dasselbe Zwei-`ffmpeg`-Prozesse-Pipe-Muster wie `apply_lut_filter_to_video` (Phase 16 Schritt 9, `run_ffmpeg_apply_lut_to_video`) — Rohbild-Frames rein, framegenau verarbeitet, Rohbild-Frames raus zur Neukodierung, Original-Tonspur unverändert durchgereicht — hier mit `rgb24` statt `rgba` (keine Alpha-Nutzung nötig) und ohne eigenen Pump-Thread (die ONNX-Sitzung läuft im Aufrufer-Thread statt in einem `'static`-Thread, `ffmpeg`s eigene Puffer federn das ab). Je Frame: `person_mask_rgb8()` liefert eine Alpha-Maske, `composite_with_background()` blendet weich (keine harte Kante) zwischen Originalpixel und der gewählten Hintergrundfarbe.
 
 Frontend: neuer Abschnitt in `VideoPlayer.tsx` (Modell-Download-Status/-Knopf wie beim Tiefenschärfe-Simulator, Farbwähler für die Ersatzfarbe — Standard reines Grün `#00ff00`, daher "Greenscreen" —, Anwenden-Knopf wie bei der LUT-Anwendung).
+
+## ADR-0046: Phase 18 — UI/UX-Overhaul (Design-System, Navigation, Panels, Bewegung)
+
+**Status:** Angenommen
+**Kontext:** Nach ausführlicher Feature-Recherche derselben Sitzung
+(CORS-Fix, CARTO-Kartenschlüssel, dann eine lange Liste realer
+Nutzer-Beschwerden zur Oberfläche samt Screenshot) fiel ein hartes,
+begründetes Urteil: die App wirkt "wie eine billige App, in die keine
+sinnvollen Entscheidungen geflossen sind". Jede Einzelbeschwerde wurde
+vor dieser Phase real im Code verifiziert (nicht aus dem Gedächtnis
+beantwortet), u. a.: `Header.tsx` ist eine flache Zwei-Zeilen-Liste
+aus ~30 Einzelknöpfen mit horizontaler `overflow-x-auto`-Scrollbar,
+keine der 25 `*Dialog.tsx`-Komponenten teilt sich eine gemeinsame
+Overlay-Basis (jede rollt ihre eigene `fixed inset-0 bg-black/50`-
+Variante mit uneinheitlichem vertikalem Versatz, nur 3 von 25 mit
+`useFocusTrap`), `DevelopPanel.tsx` rendert ~29 Fieldsets
+ununterbrochen untereinander (eine einzige sehr lange Scroll-Spalte),
+das Übersicht-Overlay (`QuickDevelopOverlay.tsx`) verdeckt das Foto
+standardmäßig, im gesamten Frontend existieren nur zwei echte CSS-
+`transition`s, keine Bewegungsbibliothek ist installiert, und das
+`@theme`-Token-System in `index.css` definiert nur 9 Farbvariablen
+(keine Abstands-, Typografie-, Radius- oder Schatten-Skala).
+
+**Entscheidung:** ein durchgehendes, hochwertiges Design-System
+(Referenzqualität wie 21st.dev und vergleichbare moderne
+Produktoberflächen — ruhige, gezielte Mikrointeraktionen statt
+Spielerei) über die gesamte bestehende Funktionsfläche legen, **ohne**
+neue Backend-Funktionalität. Kernbausteine:
+
+1. **Token-Fundament** (`index.css`s `@theme`-Block erweitert um
+   `--space-*`/`--text-*`/`--radius-*`/`--shadow-*`/`--ease-*`/
+   `--duration-*`/`--color-bg-overlay`) plus `lib/motion.ts`
+   (`usePrefersReducedMotion()`, liest `uiSettings.reduced_motion`
+   direkt aus dem Store) — nötig, weil die bestehende CSS-
+   `!important`-Bremse (`.apx-reduce-motion`, siehe `index.css` Z.
+   101–117) nur CSS-getriebene Übergänge auf Null zwingt, nicht
+   JS-getimte Mount-/Unmount-Verzögerungen.
+2. **Gemeinsame `Dialog`/`Sheet`-Primitive** (`components/ui/`) ersetzt
+   alle 25 handgerollten Overlay-Fassungen — einheitlicher Backdrop,
+   einheitliche Ein-/Ausblendbewegung, `useFocusTrap` für alle (schließt
+   die 22/25-Lücke), `Sheet` (kantenseitig einschiebend) für große
+   mehrstufige Werkzeuge (Export, Zeitachse, Stapelverarbeitung) statt
+   zentrierter Box — direkte Antwort auf "die aufpoppenden UIs, die
+   immer ontop angezeigt werden".
+3. **Zentrales Kommando-Register** (`lib/commandRegistry.ts`) speist
+   sowohl die neue schlanke Kopfleiste (ein Overflow-Menü statt der
+   bisherigen 19-Knopf-Zweitzeile) als auch `CommandPalette.tsx`
+   (bisher hartcodiert deutsch, unlokalisiert, eigene parallele Liste)
+   — eine neue "KI-Funktionen"-Kategorie mit sichtbarem
+   Modellstatus behebt strukturell das in dieser Sitzung gefundene
+   Auffindbarkeits-Problem (KI-Ausfüllen-Modell-Download war fünf
+   Klicks tief hinter einer Dropdown-Bedingung vergraben).
+4. **`DevelopPanel`/`MasksPanel` in fünf Registerkarten** statt einer
+   durchgehenden 29-Fieldset-Scroll-Spalte — reine Umgruppierung,
+   keine Feld-/Logikänderung.
+5. Gezielte Einzelbugs: `QuickDevelopOverlay` deckt das Foto nur noch
+   bei echtem Hover ab; Histogramm/Vektorskop/Wellenform bekommen
+   `devicePixelRatio`-Skalierung (fehlte, `leafletHeatmap.ts` macht es
+   bereits richtig vor); `PaletteFrame`-Breite/Einklappen animiert
+   sanft statt hartem Sprung.
+6. Abschließender Bewegungs-Politur-Durchgang (Hover-/Fokus-
+   Übergänge, `centerView`-Überblendung) — bewusst zurückhaltend,
+   Ziel "ruhig und hochwertig", nicht "auffällig".
+
+**Ausdrücklich außerhalb des Umfangs:** kein neues Rust-Backend; keine
+vollständige i18n-Übersetzung der laut ADR-0037 bewusst
+unübersetzten ~20 Dialog-**Inhalte** (nur die neue Chrome-Ebene
+bekommt `useT()`-Schlüssel); keine neue Laufzeitabhängigkeit
+(kein Framer-Motion o. ä.) — passend zur bestehenden "keine
+Bibliothek für sowas"-Linie aus `i18n.ts`s eigener Begründung.
+
+**Testdisziplin:** abweichend von Phase 16/17 **nicht** ausschließlich
+Kompilierfehler-Checks zwischendurch — da diese Phase überwiegend
+bestehende, bereits e2e-getestete UI-Struktur mechanisch umbaut
+(insbesondere Schritt 2s 25-Dateien-Dialog-Migration und Schritt 4s
+Panel-Umgruppierung), laufen ab Schritt 2 zusätzlich gezielte
+Playwright-Teilläufe je Schritt; die volle Suite inkl. visueller
+Playwright-Screenshot-Verifikation (gleiche Disziplin wie ADR-0044)
+bündelt sich am Ende in Schritt 7. Reihenfolge und volle Begründung
+je Schritt siehe `PLAN.md` Phase 18.

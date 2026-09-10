@@ -1171,6 +1171,29 @@ Volle Suite gebündelt erst im letzten Schritt.
 - [x] 6. Social-Media-Export-Presets (9:16/1:1/16:9) — reine Frontend-Erweiterung, Backend skaliert bereits "cover" auf beliebiges Seitenverhältnis
 - [x] 7. Bild-in-Bild / Split-Screen — `TimelinePipOverlay` (Quelle = normaler `TimelineItem`), Split-Screen als zwei gegenüberliegende 50%-Overlays statt eigenem Mechanismus
 - [x] 8. Greenscreen/Hintergrund entfernen (MediaPipe Selfie Segmentation) — Ein-Clip-Command wie die LUT-Anwendung, ehrliche URL-/Hash-Lücke wie beim LaMa-Modell (huggingface.co blockiert)
-- [ ] 9. Video-Stabilisierung (Wiederverwendung `apx-stacking`-Homografie)
+- [ ] 9. Video-Stabilisierung (Wiederverwendung `apx-stacking`-Homografie) — **pausiert auf ausdrücklichen Nutzerwunsch, nicht autonom fortsetzen**
 - [ ] 10. Dokumentation, volle Verifikation, Abnahme
 - [x] `tsc -b`, volle `vitest run`-Suite (251 Tests, 28 neue), `map-flow.spec.ts` grün
+
+## Aktuelle Phase: Phase 18 — UI/UX-Overhaul
+
+Nutzerurteil nach eigenem Test der App (Screenshot beigefügt): wirkt
+"wie eine billige App, in die keine sinnvollen Entscheidungen
+geflossen sind" — verwirrendes Layout, zu viel Scrollen, zu viele
+Einzelknöpfe statt zusammenhängender Flächen, aufpoppende Dialoge
+ohne durchgehendes Gefühl. Jede Einzelbeschwerde vorab real im Code
+verifiziert, siehe `DECISIONS.md` ADR-0046 für den vollständigen
+Ist-Zustand-Befund und die Entwurfsentscheidungen. Reines Frontend,
+keine neue Backend-Funktionalität, keine neue Laufzeitabhängigkeit.
+Testdisziplin abweichend von Phase 16/17: ab Schritt 2 zusätzlich
+gezielte Playwright-Teilläufe je Schritt (nicht nur `tsc -b`), volle
+Suite inkl. visueller Verifikation gebündelt in Schritt 7.
+
+- [ ] 0. ADR-0046 + PLAN.md-Abschnitt
+- [ ] 1. Design-Token-Fundament (`index.css` `@theme`-Erweiterung: Abstand/Typografie/Radius/Schatten/Bewegung) + `lib/motion.ts` (`usePrefersReducedMotion()`)
+- [ ] 2. Gemeinsame `Dialog`/`Sheet`-Primitive (`components/ui/`) + Migration aller 25 Dialoge, `CommandPalette`, `KeybindingsCheatsheet`
+- [ ] 3. Navigation: `lib/commandRegistry.ts` + schlanke Kopfleiste (eine Zeile, Such-/Befehlsknopf, Ansicht-Segmentgruppe, Overflow-Menü) + lokalisierte, registergespeiste `CommandPalette` mit neuer "KI-Funktionen"-Kategorie
+- [ ] 4. `DevelopPanel`/`MasksPanel` in fünf Registerkarten statt durchgehender Scroll-Spalte
+- [ ] 5. Gezielte Bugfixes: `QuickDevelopOverlay` verdeckt Foto nicht mehr standardmäßig, `devicePixelRatio`-Skalierung für Histogramm/Vektorskop/Wellenform, sanfte `PaletteFrame`-Breitenanimation
+- [ ] 6. Bewegungs-Politur-Durchgang (Hover-/Fokus-Übergänge, `centerView`-Überblendung)
+- [ ] 7. Dokumentation, volle Verifikation (inkl. visueller Playwright-Screenshots), Abnahme

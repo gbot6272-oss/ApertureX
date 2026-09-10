@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import * as api from "../lib/tauri";
 import { previewUrl } from "../lib/media";
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 interface Point {
   x: number;
@@ -41,8 +42,6 @@ export function LensCalibrationDialog() {
 
   const validLineCount = useMemo(() => lines.filter((line) => line.length >= MIN_POINTS_PER_LINE).length, [lines]);
   const currentLine = lines[lines.length - 1] ?? [];
-
-  if (!open) return null;
 
   function handleImageClick(event: React.MouseEvent<HTMLDivElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -108,8 +107,8 @@ export function LensCalibrationDialog() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-8" onClick={close}>
-      <div onClick={(e) => e.stopPropagation()} className="flex max-h-[90vh] w-full max-w-3xl flex-col gap-3 overflow-y-auto rounded-lg border border-border bg-bg-raised p-4 shadow-xl">
+    <Dialog open={open} onClose={close} label="Objektiv kalibrieren" className="max-w-3xl max-h-[90vh]">
+      <div className="flex flex-col gap-3 p-4">
         <h2 className="text-sm font-semibold text-text-primary">Objektiv kalibrieren</h2>
         <p className="text-xs text-text-secondary">
           Markiere mehrere Punkte entlang einer Linie, die in der Realität gerade ist (z. B. eine Schachbrett-Gitterlinie, eine Wandkante oder der Horizont) — mindestens{" "}
@@ -185,6 +184,6 @@ export function LensCalibrationDialog() {
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

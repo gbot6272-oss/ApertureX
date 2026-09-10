@@ -4329,3 +4329,34 @@ Playwright-Teilläufe je Schritt; die volle Suite inkl. visueller
 Playwright-Screenshot-Verifikation (gleiche Disziplin wie ADR-0044)
 bündelt sich am Ende in Schritt 7. Reihenfolge und volle Begründung
 je Schritt siehe `PLAN.md` Phase 18.
+
+**Nachtrag Schritt 1 (echte Prüfung statt Annahme):** `node_modules/
+tailwindcss/theme.css` real gelesen, bevor Tokens angelegt wurden —
+Tailwind v4 definiert bereits `--radius-*`/`--shadow-*`/`--ease-*`
+als eigenen Theme-Namespace (Werte, keine Utility-Klassen fehlen).
+Deshalb **keine neuen Radius-/Easing-Tokens erfunden**, sondern
+gezielt Tailwinds eigene `--radius-md/-lg/-xl/-2xl` und
+`--shadow-md/-lg/-xl` in `index.css`s `@theme`-Block überschrieben —
+wirkt automatisch auf jede bestehende `rounded-*`/`shadow-*`-Klasse
+im ganzen Frontend, ohne eine einzige Komponente anzufassen. Einzig
+echt fehlend: `--duration-*` (Tailwind hat dafür keinen benannten
+Theme-Namespace, nur numerische `duration-<ms>`-Klassen) — dafür
+`lib/motion.ts` (JS-Konstanten + `usePrefersReducedMotion()`) und
+lose `--duration-fast/-base/-slow`-Variablen außerhalb von `@theme`.
+
+**Nachtrag Schritt 2:** `components/ui/Dialog.tsx` (zentriert) und
+`Sheet.tsx` (kantenseitig, für Export/Zeitachse/Stapelverarbeitung)
+ersetzen alle 25 `*Dialog.tsx` + `CommandPalette.tsx` +
+`KeybindingsCheatsheet.tsx` — Migration in drei parallelen Strängen
+(zwei Subagenten für 19 der mechanisch einfacheren Dialoge, der Rest
+inkl. der Sonderfälle `HistoryTimelineDialog`/`ContentAwareScaleDialog`/
+`CanvasExtendDialog`/`PresetVersionsDialog` — store-gesteuertes `open`
+statt Props — sowie `SettingsDialog`/`OnboardingDialog`/
+`KeybindingsCheatsheet` — vorher eigene `useFocusTrap`-Verdrahtung,
+jetzt entfernt, da `Dialog` das übernimmt — selbst gemacht). Danach
+**echte Laufzeitverifikation statt nur Kompilieren**: 17 Playwright-
+Spezifikationen (alle Dialoge/die Palette/das Cheatsheet betreffend)
+gegen den echten Produktions-Build laufen lassen, alle 49 Tests grün
+— bestätigt, dass Fokus-Falle/Escape/Klick-außerhalb/Formularzustand
+nach der Migration funktional identisch geblieben sind, nicht nur,
+dass der Code kompiliert.

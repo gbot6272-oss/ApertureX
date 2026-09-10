@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { useT } from "../lib/i18n";
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 interface TetherDialogProps {
   open: boolean;
@@ -40,16 +41,9 @@ export function TetherDialog({ open, onClose }: TetherDialogProps) {
     if (open) void refreshImportPresets();
   }, [open, refreshImportPresets]);
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-24" onClick={onClose}>
-      <div
-        role="dialog"
-        aria-label={t("tetherDialog.title")}
-        className="w-full max-w-md rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <Dialog open={open} onClose={onClose} label={t("tetherDialog.title")} className="max-w-md">
+      <div className="p-4">
         <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("tetherDialog.title")}</h2>
 
         {!tetherCamera ? (
@@ -160,6 +154,6 @@ export function TetherDialog({ open, onClose }: TetherDialogProps) {
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

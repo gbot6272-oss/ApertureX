@@ -5,6 +5,7 @@ import { buildSlideItems, type SlideshowSettings, type SlideshowTransition, type
 import { pickFilePath, pickSaveFilePath, type SlideshowVideoOptions } from "../lib/tauri";
 import { useAppStore } from "../store";
 import { SlideshowPlayer } from "./SlideshowPlayer";
+import { Dialog } from "./ui/Dialog";
 
 interface SlideshowDialogProps {
   open: boolean;
@@ -72,9 +73,7 @@ export function SlideshowDialog({ open, photoIds, onClose }: SlideshowDialogProp
     if (open && ffmpegAvailable === null) void checkFfmpegAvailability();
   }, [open, ffmpegAvailable, checkFfmpegAvailability]);
 
-  if (!open) return null;
-
-  const needsFont = (introEnabled && introText.length > 0) || (outroEnabled && outroText.length > 0);
+  const needsFont =(introEnabled && introText.length > 0) || (outroEnabled && outroText.length > 0);
 
   function titleCard(enabled: boolean, text: string, seconds: number, background: string, textColor: string): TitleCardSettings | undefined {
     if (!enabled) return undefined;
@@ -126,11 +125,8 @@ export function SlideshowDialog({ open, photoIds, onClose }: SlideshowDialogProp
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16" onClick={onClose}>
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
-        >
+      <Dialog open={open} onClose={onClose} label={t("slideshowDialog.title")} className="max-w-md">
+        <div className="p-4">
           <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("slideshowDialog.title")}</h2>
           <p className="mb-3 text-xs text-text-muted">
             {t("slideshowDialog.photoCount", { count: photoIds.length, plural: photoIds.length === 1 ? "" : "s" })}
@@ -287,7 +283,7 @@ export function SlideshowDialog({ open, photoIds, onClose }: SlideshowDialogProp
             </button>
           </div>
         </div>
-      </div>
+      </Dialog>
 
       {playerOpen && (
         <SlideshowPlayer

@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { useT } from "../lib/i18n";
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 interface ScriptPluginDialogProps {
   open: boolean;
@@ -39,18 +40,11 @@ export function ScriptPluginDialog({ open, onClose }: ScriptPluginDialogProps) {
   const pluginStatus = useAppStore((s) => s.pluginStatus);
   const runPluginOnCurrent = useAppStore((s) => s.runPluginOnCurrent);
 
-  if (!open) return null;
-
   const noPhoto = !developPhotoId;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-24" onClick={onClose}>
-      <div
-        role="dialog"
-        aria-label={t("scriptPluginDialog.title")}
-        className="w-full max-w-lg rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <Dialog open={open} onClose={onClose} label={t("scriptPluginDialog.title")} className="max-w-lg">
+      <div className="p-4">
         <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("scriptPluginDialog.title")}</h2>
         <p className="mb-3 text-xs text-text-muted">
           {noPhoto ? t("scriptPluginDialog.noPhoto") : t("scriptPluginDialog.activePhoto")}
@@ -149,6 +143,6 @@ export function ScriptPluginDialog({ open, onClose }: ScriptPluginDialogProps) {
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

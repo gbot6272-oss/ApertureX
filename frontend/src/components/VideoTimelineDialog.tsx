@@ -9,6 +9,7 @@ import {
   type VideoTimelineOptions,
 } from "../lib/tauri";
 import { selectActivePhotos, useAppStore } from "../store";
+import { Sheet } from "./ui/Sheet";
 
 interface VideoTimelineDialogProps {
   open: boolean;
@@ -304,8 +305,6 @@ export function VideoTimelineDialog({
     if (open && aiSettings === null) void loadAiSettings();
   }, [open, aiSettings, loadAiSettings]);
 
-  if (!open) return null;
-
   function updateItem(index: number, patch: Partial<DraftItem>) {
     setItems((prev) =>
       prev.map((item, i) => (i === index ? { ...item, ...patch } : item)),
@@ -495,566 +494,558 @@ export function VideoTimelineDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16"
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
-      >
-        <h2 className="mb-1 text-sm font-semibold text-text-primary">
-          Video-Zeitachse
-        </h2>
-        <p className="mb-3 text-xs text-text-muted">
-          {items.length} Eintrag{items.length === 1 ? "" : "e"} — Reihenfolge,
-          Zuschnitt und Übergänge festlegen und als neues Video rendern.
-        </p>
+    <Sheet open={open} onClose={onClose} label="Video-Zeitachse" className="max-w-lg p-4">
+      <h2 className="mb-1 text-sm font-semibold text-text-primary">
+        Video-Zeitachse
+      </h2>
+      <p className="mb-3 text-xs text-text-muted">
+        {items.length} Eintrag{items.length === 1 ? "" : "e"} — Reihenfolge,
+        Zuschnitt und Übergänge festlegen und als neues Video rendern.
+      </p>
 
-        <div className="mb-3 flex flex-col gap-2">
-          {items.map((item, index) => {
-            const photo = photoById.get(item.photoId);
-            const video = isVideo(item.photoId);
-            return (
-              <div key={`${item.photoId}-${index}`}>
-                <div className="rounded border border-border p-2">
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <span
-                      className="min-w-0 flex-1 truncate text-xs text-text-primary"
-                      title={photo?.filename}
-                    >
-                      {index + 1}. {photo?.filename ?? item.photoId}{" "}
-                      {video ? "(Video)" : "(Foto)"}
-                    </span>
-                    <div className="flex shrink-0 gap-1">
-                      <button
-                        type="button"
-                        onClick={() => moveItem(index, -1)}
-                        disabled={index === 0}
-                        className="rounded border border-border px-1.5 py-0.5 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => moveItem(index, 1)}
-                        disabled={index === items.length - 1}
-                        className="rounded border border-border px-1.5 py-0.5 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeItem(index)}
-                        className="rounded border border-border px-1.5 py-0.5 text-xs text-danger hover:border-danger"
-                      >
-                        Entfernen
-                      </button>
-                    </div>
-                  </div>
-                  {video ? (
-                    <div className="flex gap-2">
-                      <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
-                        Start (s)
-                        <input
-                          type="number"
-                          min={0}
-                          step={0.1}
-                          value={item.inSeconds}
-                          onChange={(e) =>
-                            updateItem(index, {
-                              inSeconds: Number(e.target.value),
-                            })
-                          }
-                          className="rounded border border-border bg-bg-panel px-2 py-1"
-                        />
-                      </label>
-                      <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
-                        Ende (s)
-                        <input
-                          type="number"
-                          min={0}
-                          step={0.1}
-                          value={item.outSeconds}
-                          onChange={(e) =>
-                            updateItem(index, {
-                              outSeconds: Number(e.target.value),
-                            })
-                          }
-                          className="rounded border border-border bg-bg-panel px-2 py-1"
-                        />
-                      </label>
-                      <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
-                        Tempo
-                        <select
-                          value={item.speed}
-                          onChange={(e) =>
-                            updateItem(index, { speed: Number(e.target.value) })
-                          }
-                          className="rounded border border-border bg-bg-panel px-2 py-1"
-                        >
-                          {SPEED_PRESETS.map((speed) => (
-                            <option key={speed} value={speed}>
-                              {speed === 1 ? "Normal" : `${speed}×`}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                  ) : null}
-                  {video && aiSettings?.whisper_model_path && (
+      <div className="mb-3 flex flex-col gap-2">
+        {items.map((item, index) => {
+          const photo = photoById.get(item.photoId);
+          const video = isVideo(item.photoId);
+          return (
+            <div key={`${item.photoId}-${index}`}>
+              <div className="rounded border border-border p-2">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span
+                    className="min-w-0 flex-1 truncate text-xs text-text-primary"
+                    title={photo?.filename}
+                  >
+                    {index + 1}. {photo?.filename ?? item.photoId}{" "}
+                    {video ? "(Video)" : "(Foto)"}
+                  </span>
+                  <div className="flex shrink-0 gap-1">
                     <button
                       type="button"
-                      onClick={() => void handleTranscribeItem(index)}
-                      disabled={videoTranscribing}
-                      className="mt-2 rounded border border-border px-2 py-0.5 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                      onClick={() => moveItem(index, -1)}
+                      disabled={index === 0}
+                      className="rounded border border-border px-1.5 py-0.5 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      {videoTranscribing
-                        ? "Transkribiert…"
-                        : "🎙️ Untertitel automatisch generieren"}
+                      ↑
                     </button>
-                  )}
-                  {!video && (
-                    <label className="flex flex-col gap-1 text-xs text-text-secondary">
-                      Haltedauer (s)
+                    <button
+                      type="button"
+                      onClick={() => moveItem(index, 1)}
+                      disabled={index === items.length - 1}
+                      className="rounded border border-border px-1.5 py-0.5 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeItem(index)}
+                      className="rounded border border-border px-1.5 py-0.5 text-xs text-danger hover:border-danger"
+                    >
+                      Entfernen
+                    </button>
+                  </div>
+                </div>
+                {video ? (
+                  <div className="flex gap-2">
+                    <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
+                      Start (s)
                       <input
                         type="number"
-                        min={0.5}
-                        step={0.5}
-                        value={item.holdSeconds}
+                        min={0}
+                        step={0.1}
+                        value={item.inSeconds}
                         onChange={(e) =>
                           updateItem(index, {
-                            holdSeconds: Number(e.target.value),
+                            inSeconds: Number(e.target.value),
                           })
                         }
-                        className="w-24 rounded border border-border bg-bg-panel px-2 py-1"
+                        className="rounded border border-border bg-bg-panel px-2 py-1"
                       />
                     </label>
-                  )}
-                </div>
-                {index < items.length - 1 && (
-                  <div className="my-1 flex items-center gap-2 pl-2 text-xs text-text-muted">
-                    <span>↓ Übergang</span>
-                    <select
-                      value={gapTransitions[index] ?? DEFAULT_TRANSITION}
-                      onChange={(e) => setGapTransition(index, e.target.value)}
-                      className="rounded border border-border bg-bg-panel px-2 py-0.5 text-xs"
-                    >
-                      {TRANSITION_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                    <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
+                      Ende (s)
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={item.outSeconds}
+                        onChange={(e) =>
+                          updateItem(index, {
+                            outSeconds: Number(e.target.value),
+                          })
+                        }
+                        className="rounded border border-border bg-bg-panel px-2 py-1"
+                      />
+                    </label>
+                    <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
+                      Tempo
+                      <select
+                        value={item.speed}
+                        onChange={(e) =>
+                          updateItem(index, { speed: Number(e.target.value) })
+                        }
+                        className="rounded border border-border bg-bg-panel px-2 py-1"
+                      >
+                        {SPEED_PRESETS.map((speed) => (
+                          <option key={speed} value={speed}>
+                            {speed === 1 ? "Normal" : `${speed}×`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
+                ) : null}
+                {video && aiSettings?.whisper_model_path && (
+                  <button
+                    type="button"
+                    onClick={() => void handleTranscribeItem(index)}
+                    disabled={videoTranscribing}
+                    className="mt-2 rounded border border-border px-2 py-0.5 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {videoTranscribing
+                      ? "Transkribiert…"
+                      : "🎙️ Untertitel automatisch generieren"}
+                  </button>
+                )}
+                {!video && (
+                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                    Haltedauer (s)
+                    <input
+                      type="number"
+                      min={0.5}
+                      step={0.5}
+                      value={item.holdSeconds}
+                      onChange={(e) =>
+                        updateItem(index, {
+                          holdSeconds: Number(e.target.value),
+                        })
+                      }
+                      className="w-24 rounded border border-border bg-bg-panel px-2 py-1"
+                    />
+                  </label>
                 )}
               </div>
-            );
-          })}
-          {items.length === 0 && (
-            <p className="text-xs text-text-muted">
-              Keine Einträge — Dialog schließen und Fotos/Videos auswählen.
-            </p>
-          )}
+              {index < items.length - 1 && (
+                <div className="my-1 flex items-center gap-2 pl-2 text-xs text-text-muted">
+                  <span>↓ Übergang</span>
+                  <select
+                    value={gapTransitions[index] ?? DEFAULT_TRANSITION}
+                    onChange={(e) => setGapTransition(index, e.target.value)}
+                    className="rounded border border-border bg-bg-panel px-2 py-0.5 text-xs"
+                  >
+                    {TRANSITION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {items.length === 0 && (
+          <p className="text-xs text-text-muted">
+            Keine Einträge — Dialog schließen und Fotos/Videos auswählen.
+          </p>
+        )}
+      </div>
+
+      <div className="mb-3 rounded border border-border p-2">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-xs font-semibold text-text-secondary">
+            Text-Overlays
+          </span>
+          <button
+            type="button"
+            onClick={addOverlay}
+            className="rounded border border-border px-2 py-0.5 text-xs hover:border-accent"
+          >
+            + Hinzufügen
+          </button>
         </div>
 
-        <div className="mb-3 rounded border border-border p-2">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-semibold text-text-secondary">
-              Text-Overlays
-            </span>
-            <button
-              type="button"
-              onClick={addOverlay}
-              className="rounded border border-border px-2 py-0.5 text-xs hover:border-accent"
-            >
-              + Hinzufügen
-            </button>
-          </div>
-
-          <p className="mb-2 rounded border border-border px-2 py-1 text-xs text-text-secondary">
-            {aiSettings === null ? (
-              "Lädt…"
-            ) : !aiSettings.subtitles_feature_compiled ? (
-              "Diese Build wurde ohne automatische Untertitel kompiliert."
-            ) : aiSettings.whisper_model_path ? (
-              <>
-                Untertitel-Modell installiert.{" "}
-                <button
-                  type="button"
-                  onClick={() => void clearWhisperModelPath()}
-                  className="text-text-muted underline hover:text-danger"
-                >
-                  Entfernen
-                </button>
-              </>
-            ) : (
-              <>
-                Kein Untertitel-Modell installiert — Whisper base.en (MIT, ~142
-                MB, lokal, kein Cloud-Aufruf).{" "}
-                <button
-                  type="button"
-                  disabled={whisperModelDownloading}
-                  onClick={() => void downloadWhisperModel()}
-                  className="text-accent underline disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {whisperModelDownloading ? "Lädt herunter…" : "Herunterladen"}
-                </button>
-              </>
-            )}
-          </p>
-          {videoTranscribeError && (
-            <p className="mb-2 text-xs text-danger">
-              Fehler: {videoTranscribeError}
-            </p>
+        <p className="mb-2 rounded border border-border px-2 py-1 text-xs text-text-secondary">
+          {aiSettings === null ? (
+            "Lädt…"
+          ) : !aiSettings.subtitles_feature_compiled ? (
+            "Diese Build wurde ohne automatische Untertitel kompiliert."
+          ) : aiSettings.whisper_model_path ? (
+            <>
+              Untertitel-Modell installiert.{" "}
+              <button
+                type="button"
+                onClick={() => void clearWhisperModelPath()}
+                className="text-text-muted underline hover:text-danger"
+              >
+                Entfernen
+              </button>
+            </>
+          ) : (
+            <>
+              Kein Untertitel-Modell installiert — Whisper base.en (MIT, ~142
+              MB, lokal, kein Cloud-Aufruf).{" "}
+              <button
+                type="button"
+                disabled={whisperModelDownloading}
+                onClick={() => void downloadWhisperModel()}
+                className="text-accent underline disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {whisperModelDownloading ? "Lädt herunter…" : "Herunterladen"}
+              </button>
+            </>
           )}
+        </p>
+        {videoTranscribeError && (
+          <p className="mb-2 text-xs text-danger">
+            Fehler: {videoTranscribeError}
+          </p>
+        )}
 
-          {overlays.length > 0 && (
-            <div className="mb-2 flex flex-col gap-1 text-xs text-text-secondary">
-              <span>Schriftdatei (für alle Overlays)</span>
-              <div className="flex gap-1">
+        {overlays.length > 0 && (
+          <div className="mb-2 flex flex-col gap-1 text-xs text-text-secondary">
+            <span>Schriftdatei (für alle Overlays)</span>
+            <div className="flex gap-1">
+              <input
+                type="text"
+                readOnly
+                value={overlayFontPath}
+                placeholder="Keine ausgewählt"
+                className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-sm"
+              />
+              <button
+                type="button"
+                onClick={() => void handlePickOverlayFont()}
+                className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent"
+              >
+                Datei wählen…
+              </button>
+            </div>
+            {!overlayFontPath && (
+              <span className="text-danger">
+                Ohne Schriftdatei werden Overlays beim Rendern ignoriert.
+              </span>
+            )}
+          </div>
+        )}
+        <div className="flex flex-col gap-2">
+          {overlays.map((overlay, index) => (
+            <div key={index} className="rounded border border-border p-2">
+              <div className="mb-1 flex items-center gap-2">
                 <input
                   type="text"
-                  readOnly
-                  value={overlayFontPath}
-                  placeholder="Keine ausgewählt"
+                  placeholder="Text"
+                  value={overlay.text}
+                  onChange={(e) =>
+                    updateOverlay(index, { text: e.target.value })
+                  }
                   className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-sm"
                 />
                 <button
                   type="button"
-                  onClick={() => void handlePickOverlayFont()}
-                  className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent"
+                  onClick={() => removeOverlay(index)}
+                  className="shrink-0 rounded border border-border px-1.5 py-0.5 text-xs text-danger hover:border-danger"
                 >
-                  Datei wählen…
+                  Entfernen
                 </button>
               </div>
-              {!overlayFontPath && (
-                <span className="text-danger">
-                  Ohne Schriftdatei werden Overlays beim Rendern ignoriert.
-                </span>
-              )}
-            </div>
-          )}
-          <div className="flex flex-col gap-2">
-            {overlays.map((overlay, index) => (
-              <div key={index} className="rounded border border-border p-2">
-                <div className="mb-1 flex items-center gap-2">
+              <div className="flex flex-wrap gap-2">
+                <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                  Start (s)
                   <input
-                    type="text"
-                    placeholder="Text"
-                    value={overlay.text}
+                    type="number"
+                    min={0}
+                    step={0.1}
+                    value={overlay.startSeconds}
                     onChange={(e) =>
-                      updateOverlay(index, { text: e.target.value })
+                      updateOverlay(index, {
+                        startSeconds: Number(e.target.value),
+                      })
                     }
-                    className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-sm"
+                    className="w-20 rounded border border-border bg-bg-panel px-2 py-1"
                   />
-                  <button
-                    type="button"
-                    onClick={() => removeOverlay(index)}
-                    className="shrink-0 rounded border border-border px-1.5 py-0.5 text-xs text-danger hover:border-danger"
-                  >
-                    Entfernen
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
-                    Start (s)
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.1}
-                      value={overlay.startSeconds}
-                      onChange={(e) =>
-                        updateOverlay(index, {
-                          startSeconds: Number(e.target.value),
-                        })
-                      }
-                      className="w-20 rounded border border-border bg-bg-panel px-2 py-1"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
-                    Ende (s)
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.1}
-                      value={overlay.endSeconds}
-                      onChange={(e) =>
-                        updateOverlay(index, {
-                          endSeconds: Number(e.target.value),
-                        })
-                      }
-                      className="w-20 rounded border border-border bg-bg-panel px-2 py-1"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
-                    Position
-                    <select
-                      value={overlay.position}
-                      onChange={(e) =>
-                        updateOverlay(index, {
-                          position: e.target
-                            .value as TimelineTextOverlayInput["position"],
-                        })
-                      }
-                      className="rounded border border-border bg-bg-panel px-2 py-1"
-                    >
-                      {OVERLAY_POSITIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
-                    Größe
-                    <input
-                      type="number"
-                      min={8}
-                      step={2}
-                      value={overlay.fontSize}
-                      onChange={(e) =>
-                        updateOverlay(index, {
-                          fontSize: Number(e.target.value),
-                        })
-                      }
-                      className="w-16 rounded border border-border bg-bg-panel px-2 py-1"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
-                    Farbe
-                    <input
-                      type="color"
-                      value={overlay.color}
-                      onChange={(e) =>
-                        updateOverlay(index, { color: e.target.value })
-                      }
-                    />
-                  </label>
-                </div>
-              </div>
-            ))}
-            {overlays.length === 0 && (
-              <p className="text-xs text-text-muted">Kein Overlay.</p>
-            )}
-          </div>
-        </div>
-
-        <div className="mb-3 rounded border border-border p-2">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-semibold text-text-secondary">
-              Bild-in-Bild / Split-Screen
-            </span>
-            <button
-              type="button"
-              onClick={addPip}
-              disabled={activePhotos.length === 0}
-              className="rounded border border-border px-2 py-0.5 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              + Hinzufügen
-            </button>
-          </div>
-          <p className="mb-2 text-xs text-text-muted">
-            Eine zweite Quelle klein über der Zeitachse einblenden — für echtes
-            Split-Screen zwei Einblendungen mit je 50% Größe an
-            gegenüberliegenden Positionen anlegen.
-          </p>
-          <div className="flex flex-col gap-2">
-            {pips.map((pip, index) => (
-              <div key={index} className="rounded border border-border p-2">
-                <div className="mb-1 flex items-center gap-2">
-                  <select
-                    value={pip.photoId}
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                  Ende (s)
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.1}
+                    value={overlay.endSeconds}
                     onChange={(e) =>
-                      updatePip(index, { photoId: e.target.value })
+                      updateOverlay(index, {
+                        endSeconds: Number(e.target.value),
+                      })
                     }
-                    className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-sm"
+                    className="w-20 rounded border border-border bg-bg-panel px-2 py-1"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                  Position
+                  <select
+                    value={overlay.position}
+                    onChange={(e) =>
+                      updateOverlay(index, {
+                        position: e.target
+                          .value as TimelineTextOverlayInput["position"],
+                      })
+                    }
+                    className="rounded border border-border bg-bg-panel px-2 py-1"
                   >
-                    {activePhotos.map((photo) => (
-                      <option key={photo.id} value={photo.id}>
-                        {photo.filename}{" "}
-                        {photo.media_kind === "video" ? "(Video)" : "(Foto)"}
+                    {OVERLAY_POSITIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
                       </option>
                     ))}
                   </select>
-                  <button
-                    type="button"
-                    onClick={() => removePip(index)}
-                    className="shrink-0 rounded border border-border px-1.5 py-0.5 text-xs text-danger hover:border-danger"
-                  >
-                    Entfernen
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
-                    Start (s)
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.1}
-                      value={pip.startSeconds}
-                      onChange={(e) =>
-                        updatePip(index, {
-                          startSeconds: Number(e.target.value),
-                        })
-                      }
-                      className="w-20 rounded border border-border bg-bg-panel px-2 py-1"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
-                    Ende (s)
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.1}
-                      value={pip.endSeconds}
-                      onChange={(e) =>
-                        updatePip(index, { endSeconds: Number(e.target.value) })
-                      }
-                      className="w-20 rounded border border-border bg-bg-panel px-2 py-1"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
-                    Position
-                    <select
-                      value={pip.position}
-                      onChange={(e) =>
-                        updatePip(index, {
-                          position: e.target
-                            .value as TimelinePipOverlayInput["position"],
-                        })
-                      }
-                      className="rounded border border-border bg-bg-panel px-2 py-1"
-                    >
-                      {OVERLAY_POSITIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs text-text-secondary">
-                    Größe
-                    <select
-                      value={pip.scale}
-                      onChange={(e) =>
-                        updatePip(index, { scale: Number(e.target.value) })
-                      }
-                      className="rounded border border-border bg-bg-panel px-2 py-1"
-                    >
-                      <option value={0.2}>20%</option>
-                      <option value={0.3}>30%</option>
-                      <option value={0.5}>50% (Split-Screen)</option>
-                    </select>
-                  </label>
-                </div>
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                  Größe
+                  <input
+                    type="number"
+                    min={8}
+                    step={2}
+                    value={overlay.fontSize}
+                    onChange={(e) =>
+                      updateOverlay(index, {
+                        fontSize: Number(e.target.value),
+                      })
+                    }
+                    className="w-16 rounded border border-border bg-bg-panel px-2 py-1"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                  Farbe
+                  <input
+                    type="color"
+                    value={overlay.color}
+                    onChange={(e) =>
+                      updateOverlay(index, { color: e.target.value })
+                    }
+                  />
+                </label>
               </div>
-            ))}
-            {pips.length === 0 && (
-              <p className="text-xs text-text-muted">Keine Einblendung.</p>
-            )}
-          </div>
+            </div>
+          ))}
+          {overlays.length === 0 && (
+            <p className="text-xs text-text-muted">Kein Overlay.</p>
+          )}
         </div>
+      </div>
 
-        <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
-          Überblendungsdauer (s) — gilt für jeden nicht-Schnitt-Übergang oben
-          <input
-            type="number"
-            min={0.1}
-            step={0.1}
-            value={transitionSeconds}
-            onChange={(e) => setTransitionSeconds(Number(e.target.value))}
-            className="rounded border border-border bg-bg-panel px-2 py-1"
-          />
-        </label>
-
-        <div className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
-          <span>Musik (optional)</span>
-          <div className="flex gap-1">
-            <input
-              type="text"
-              readOnly
-              value={musicPath}
-              placeholder="Keine ausgewählt"
-              className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-sm"
-            />
-            <button
-              type="button"
-              onClick={() => void handlePickMusic()}
-              className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent"
-            >
-              Datei wählen…
-            </button>
-          </div>
-        </div>
-
-        <div className="mb-3 flex gap-2">
-          <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
-            Auflösung
-            <select
-              value={resolution}
-              onChange={(e) => setResolution(e.target.value as Resolution)}
-              className="rounded border border-border bg-bg-panel px-2 py-1 text-sm"
-            >
-              {(Object.keys(RESOLUTIONS) as Resolution[]).map((key) => (
-                <option key={key} value={key}>
-                  {RESOLUTIONS[key].label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
-            Bildrate
-            <select
-              value={fps}
-              onChange={(e) => setFps(Number(e.target.value))}
-              className="rounded border border-border bg-bg-panel px-2 py-1 text-sm"
-            >
-              <option value={25}>25</option>
-              <option value={30}>30</option>
-              <option value={60}>60</option>
-            </select>
-          </label>
-        </div>
-
-        {ffmpegAvailable === false && (
-          <p className="mb-2 text-xs text-text-muted">
-            ffmpeg wurde nicht gefunden — Video-Export ist deaktiviert.
-          </p>
-        )}
-        {videoTimelineError && (
-          <p className="mb-2 text-xs text-danger">
-            Fehler: {videoTimelineError}
-          </p>
-        )}
-        {!videoTimelineRunning && videoTimelineOutcome && (
-          <p className="mb-2 text-xs text-text-secondary">
-            Gespeichert als „{videoTimelineOutcome.filename}“.
-          </p>
-        )}
-
-        <div className="flex justify-end gap-2">
+      <div className="mb-3 rounded border border-border p-2">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-xs font-semibold text-text-secondary">
+            Bild-in-Bild / Split-Screen
+          </span>
           <button
             type="button"
-            onClick={onClose}
-            className="rounded border border-border px-3 py-1 text-xs hover:border-accent"
+            onClick={addPip}
+            disabled={activePhotos.length === 0}
+            className="rounded border border-border px-2 py-0.5 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Schließen
+            + Hinzufügen
           </button>
+        </div>
+        <p className="mb-2 text-xs text-text-muted">
+          Eine zweite Quelle klein über der Zeitachse einblenden — für echtes
+          Split-Screen zwei Einblendungen mit je 50% Größe an
+          gegenüberliegenden Positionen anlegen.
+        </p>
+        <div className="flex flex-col gap-2">
+          {pips.map((pip, index) => (
+            <div key={index} className="rounded border border-border p-2">
+              <div className="mb-1 flex items-center gap-2">
+                <select
+                  value={pip.photoId}
+                  onChange={(e) =>
+                    updatePip(index, { photoId: e.target.value })
+                  }
+                  className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-sm"
+                >
+                  {activePhotos.map((photo) => (
+                    <option key={photo.id} value={photo.id}>
+                      {photo.filename}{" "}
+                      {photo.media_kind === "video" ? "(Video)" : "(Foto)"}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => removePip(index)}
+                  className="shrink-0 rounded border border-border px-1.5 py-0.5 text-xs text-danger hover:border-danger"
+                >
+                  Entfernen
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                  Start (s)
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.1}
+                    value={pip.startSeconds}
+                    onChange={(e) =>
+                      updatePip(index, {
+                        startSeconds: Number(e.target.value),
+                      })
+                    }
+                    className="w-20 rounded border border-border bg-bg-panel px-2 py-1"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                  Ende (s)
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.1}
+                    value={pip.endSeconds}
+                    onChange={(e) =>
+                      updatePip(index, { endSeconds: Number(e.target.value) })
+                    }
+                    className="w-20 rounded border border-border bg-bg-panel px-2 py-1"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                  Position
+                  <select
+                    value={pip.position}
+                    onChange={(e) =>
+                      updatePip(index, {
+                        position: e.target
+                          .value as TimelinePipOverlayInput["position"],
+                      })
+                    }
+                    className="rounded border border-border bg-bg-panel px-2 py-1"
+                  >
+                    {OVERLAY_POSITIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-text-secondary">
+                  Größe
+                  <select
+                    value={pip.scale}
+                    onChange={(e) =>
+                      updatePip(index, { scale: Number(e.target.value) })
+                    }
+                    className="rounded border border-border bg-bg-panel px-2 py-1"
+                  >
+                    <option value={0.2}>20%</option>
+                    <option value={0.3}>30%</option>
+                    <option value={0.5}>50% (Split-Screen)</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          ))}
+          {pips.length === 0 && (
+            <p className="text-xs text-text-muted">Keine Einblendung.</p>
+          )}
+        </div>
+      </div>
+
+      <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
+        Überblendungsdauer (s) — gilt für jeden nicht-Schnitt-Übergang oben
+        <input
+          type="number"
+          min={0.1}
+          step={0.1}
+          value={transitionSeconds}
+          onChange={(e) => setTransitionSeconds(Number(e.target.value))}
+          className="rounded border border-border bg-bg-panel px-2 py-1"
+        />
+      </label>
+
+      <div className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
+        <span>Musik (optional)</span>
+        <div className="flex gap-1">
+          <input
+            type="text"
+            readOnly
+            value={musicPath}
+            placeholder="Keine ausgewählt"
+            className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-sm"
+          />
           <button
             type="button"
-            onClick={() => void handleRender()}
-            disabled={
-              items.length === 0 ||
-              videoTimelineRunning ||
-              ffmpegAvailable !== true
-            }
-            className="rounded border border-accent bg-accent/10 px-3 py-1 text-xs text-accent disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => void handlePickMusic()}
+            className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent"
           >
-            {videoTimelineRunning ? "Rendert…" : "Zeitachse rendern"}
+            Datei wählen…
           </button>
         </div>
       </div>
-    </div>
+
+      <div className="mb-3 flex gap-2">
+        <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
+          Auflösung
+          <select
+            value={resolution}
+            onChange={(e) => setResolution(e.target.value as Resolution)}
+            className="rounded border border-border bg-bg-panel px-2 py-1 text-sm"
+          >
+            {(Object.keys(RESOLUTIONS) as Resolution[]).map((key) => (
+              <option key={key} value={key}>
+                {RESOLUTIONS[key].label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-1 flex-col gap-1 text-xs text-text-secondary">
+          Bildrate
+          <select
+            value={fps}
+            onChange={(e) => setFps(Number(e.target.value))}
+            className="rounded border border-border bg-bg-panel px-2 py-1 text-sm"
+          >
+            <option value={25}>25</option>
+            <option value={30}>30</option>
+            <option value={60}>60</option>
+          </select>
+        </label>
+      </div>
+
+      {ffmpegAvailable === false && (
+        <p className="mb-2 text-xs text-text-muted">
+          ffmpeg wurde nicht gefunden — Video-Export ist deaktiviert.
+        </p>
+      )}
+      {videoTimelineError && (
+        <p className="mb-2 text-xs text-danger">
+          Fehler: {videoTimelineError}
+        </p>
+      )}
+      {!videoTimelineRunning && videoTimelineOutcome && (
+        <p className="mb-2 text-xs text-text-secondary">
+          Gespeichert als „{videoTimelineOutcome.filename}“.
+        </p>
+      )}
+
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded border border-border px-3 py-1 text-xs hover:border-accent"
+        >
+          Schließen
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleRender()}
+          disabled={
+            items.length === 0 ||
+            videoTimelineRunning ||
+            ffmpegAvailable !== true
+          }
+          className="rounded border border-accent bg-accent/10 px-3 py-1 text-xs text-accent disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {videoTimelineRunning ? "Rendert…" : "Zeitachse rendern"}
+        </button>
+      </div>
+    </Sheet>
   );
 }

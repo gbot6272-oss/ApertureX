@@ -1,5 +1,6 @@
 import { useT } from "../lib/i18n";
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 interface StackingDialogProps {
   open: boolean;
@@ -31,19 +32,12 @@ export function StackingDialog({ open, onClose }: StackingDialogProps) {
   const runStackPanorama = useAppStore((s) => s.runStackPanorama);
   const runStackAstro = useAppStore((s) => s.runStackAstro);
 
-  if (!open) return null;
-
   const count = multiSelectedIds.length;
   const busy = stackingRunning !== null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-24" onClick={onClose}>
-      <div
-        role="dialog"
-        aria-label={t("stackingDialog.title")}
-        className="w-full max-w-md rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <Dialog open={open} onClose={onClose} label={t("stackingDialog.title")} className="max-w-md">
+      <div className="p-4">
         <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("stackingDialog.title")}</h2>
         <p className="mb-3 text-xs text-text-muted">
           {t("stackingDialog.selectedCount", { count, noun: count === 1 ? t("stackingDialog.photoSingular") : t("stackingDialog.photoPlural") })}
@@ -97,6 +91,6 @@ export function StackingDialog({ open, onClose }: StackingDialogProps) {
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

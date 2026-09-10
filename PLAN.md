@@ -1189,9 +1189,9 @@ Testdisziplin abweichend von Phase 16/17: ab Schritt 2 zusätzlich
 gezielte Playwright-Teilläufe je Schritt (nicht nur `tsc -b`), volle
 Suite inkl. visueller Verifikation gebündelt in Schritt 7.
 
-- [ ] 0. ADR-0046 + PLAN.md-Abschnitt
-- [ ] 1. Design-Token-Fundament (`index.css` `@theme`-Erweiterung: Abstand/Typografie/Radius/Schatten/Bewegung) + `lib/motion.ts` (`usePrefersReducedMotion()`)
-- [ ] 2. Gemeinsame `Dialog`/`Sheet`-Primitive (`components/ui/`) + Migration aller 25 Dialoge, `CommandPalette`, `KeybindingsCheatsheet`
+- [x] 0. ADR-0046 + PLAN.md-Abschnitt
+- [x] 1. Design-Token-Fundament (`index.css` `@theme`-Erweiterung: Radius/Schatten/`--color-bg-overlay`) + `lib/motion.ts` (`usePrefersReducedMotion()`) — Tailwinds eigene `--ease-*`/Typografie-/Radius-/Schatten-Skala bereits vorhanden, nur gezielt überschrieben statt neu erfunden (siehe DECISIONS.md ADR-0046-Nachtrag)
+- [x] 2. Gemeinsame `Dialog`/`Sheet`-Primitive (`components/ui/`) + Migration aller 25 Dialoge, `CommandPalette`, `KeybindingsCheatsheet` — alle 49 zugehörigen Playwright-Tests grün (echte Laufzeitverifikation, nicht nur `tsc -b`)
 - [ ] 3. Navigation: `lib/commandRegistry.ts` + schlanke Kopfleiste (eine Zeile, Such-/Befehlsknopf, Ansicht-Segmentgruppe, Overflow-Menü) + lokalisierte, registergespeiste `CommandPalette` mit neuer "KI-Funktionen"-Kategorie
 - [ ] 4. `DevelopPanel`/`MasksPanel` in fünf Registerkarten statt durchgehender Scroll-Spalte
 - [ ] 5. Gezielte Bugfixes: `QuickDevelopOverlay` verdeckt Foto nicht mehr standardmäßig, `devicePixelRatio`-Skalierung für Histogramm/Vektorskop/Wellenform, sanfte `PaletteFrame`-Breitenanimation

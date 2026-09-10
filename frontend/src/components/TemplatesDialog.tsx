@@ -4,6 +4,7 @@ import { useT } from "../lib/i18n";
 import { exportTemplateToFile, selectFolderDialog } from "../lib/tauri";
 import type { ExportFormat, TemplateDto, TemplateKind, WorkflowTemplatePayload } from "../lib/tauri";
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 interface TemplatesDialogProps {
   open: boolean;
@@ -70,8 +71,6 @@ export function TemplatesDialog({ open, photoIds, onClose }: TemplatesDialogProp
     void refreshPresets();
   }, [open, kind, refreshTemplates, refreshPresets]);
 
-  if (!open) return null;
-
   async function handleSaveGeneric() {
     setError(null);
     if (!newName.trim()) return;
@@ -106,11 +105,8 @@ export function TemplatesDialog({ open, photoIds, onClose }: TemplatesDialogProp
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16" onClick={onClose}>
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
-      >
+    <Dialog open={open} onClose={onClose} label={t("templatesDialog.title")} className="max-w-lg">
+      <div className="p-4">
         <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("templatesDialog.title")}</h2>
         <p className="mb-3 text-xs text-text-muted">{t("templatesDialog.subtitle")}</p>
 
@@ -233,6 +229,6 @@ export function TemplatesDialog({ open, photoIds, onClose }: TemplatesDialogProp
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

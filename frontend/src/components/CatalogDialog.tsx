@@ -15,6 +15,7 @@ import {
   type CatalogInfoDto,
   type RecentCatalogDto,
 } from "../lib/tauri";
+import { Dialog } from "./ui/Dialog";
 
 interface CatalogDialogProps {
   open: boolean;
@@ -59,8 +60,6 @@ export function CatalogDialog({ open, onClose }: CatalogDialogProps) {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- lädt bewusst nur beim Öffnen neu, `refresh` ist keine stabile Referenz.
   }, [open]);
-
-  if (!open) return null;
 
   const handleIntegrityCheck = async () => {
     setIntegrityRunning(true);
@@ -138,8 +137,8 @@ export function CatalogDialog({ open, onClose }: CatalogDialogProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-lg border border-border bg-bg-raised p-4 shadow-xl">
+    <Dialog open={open} onClose={onClose} label={t("catalogDialog.title")} className="max-w-lg">
+      <div className="p-4">
         <h2 className="mb-3 text-sm font-semibold text-text-primary">{t("catalogDialog.title")}</h2>
 
         {error && <p className="mb-3 rounded border border-danger px-2 py-1 text-xs text-danger">{error}</p>}
@@ -248,6 +247,6 @@ export function CatalogDialog({ open, onClose }: CatalogDialogProps) {
           )}
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

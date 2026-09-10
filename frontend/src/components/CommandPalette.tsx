@@ -3,6 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 
 import { folderLabel } from "../lib/format";
 import { selectActivePhotos, useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 interface PaletteEntry {
   id: string;
@@ -142,44 +143,40 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
 
   const filtered = entries.filter((entry) => entry.label.toLowerCase().includes(query.toLowerCase()));
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-32" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-lg border border-border bg-bg-raised shadow-xl" onClick={(event) => event.stopPropagation()}>
-        <input
-          autoFocus
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") onClose();
-            if (event.key === "Enter" && filtered[0]) {
-              filtered[0].run();
-              onClose();
-            }
-          }}
-          placeholder="Befehl, Preset, Foto oder Ordner suchen…"
-          className="w-full border-b border-border bg-transparent px-4 py-3 text-sm outline-none placeholder:text-text-muted"
-        />
-        <ul className="max-h-80 overflow-y-auto p-1">
-          {filtered.length === 0 && <li className="px-3 py-2 text-sm text-text-muted">Keine Treffer.</li>}
-          {filtered.slice(0, 50).map((entry) => (
-            <li key={entry.id}>
-              <button
-                type="button"
-                onClick={() => {
-                  entry.run();
-                  onClose();
-                }}
-                className="flex w-full items-center justify-between gap-2 rounded px-3 py-1.5 text-left text-sm hover:bg-bg-panel"
-              >
-                <span className="truncate">{entry.label}</span>
-                {entry.hint && <span className="shrink-0 text-xs text-text-muted">{entry.hint}</span>}
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
+    <Dialog open={open} onClose={onClose} label="Befehlspalette" className="max-w-lg">
+      <input
+        autoFocus
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") onClose();
+          if (event.key === "Enter" && filtered[0]) {
+            filtered[0].run();
+            onClose();
+          }
+        }}
+        placeholder="Befehl, Preset, Foto oder Ordner suchen…"
+        className="w-full border-b border-border bg-transparent px-4 py-3 text-sm outline-none placeholder:text-text-muted"
+      />
+      <ul className="max-h-80 overflow-y-auto p-1">
+        {filtered.length === 0 && <li className="px-3 py-2 text-sm text-text-muted">Keine Treffer.</li>}
+        {filtered.slice(0, 50).map((entry) => (
+          <li key={entry.id}>
+            <button
+              type="button"
+              onClick={() => {
+                entry.run();
+                onClose();
+              }}
+              className="flex w-full items-center justify-between gap-2 rounded px-3 py-1.5 text-left text-sm hover:bg-bg-panel"
+            >
+              <span className="truncate">{entry.label}</span>
+              {entry.hint && <span className="shrink-0 text-xs text-text-muted">{entry.hint}</span>}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Dialog>
   );
 }

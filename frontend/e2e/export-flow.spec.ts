@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { getMockInvokeLog, installTauriMock } from "./tauri-mock";
+import { getMockInvokeLog, installTauriMock, openOverflowMenu } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -34,8 +34,9 @@ async function setUpWithSelectedPhoto(page: import("@playwright/test").Page, ext
 test.describe("Export (Phase 8 Schritt 1+2)", () => {
   test("Exportieren-Knopf ist ohne Auswahl deaktiviert, mit Auswahl geht der Dialog auf", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
-    await expect(page.getByRole("button", { name: "Exportieren…" })).toBeEnabled();
-    await page.getByRole("button", { name: "Exportieren…" }).click();
+    await openOverflowMenu(page);
+    await expect(page.getByRole("menuitem", { name: "Exportieren…" })).toBeEnabled();
+    await page.getByRole("menuitem", { name: "Exportieren…" }).click();
     await expect(page.getByText("1 Foto mit aktuellem Bearbeitungsstand")).toBeVisible();
   });
 
@@ -45,12 +46,14 @@ test.describe("Export (Phase 8 Schritt 1+2)", () => {
       photosByFolder: { [FOLDER_ID]: [PHOTO] },
     });
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "Exportieren…" })).toBeDisabled();
+    await openOverflowMenu(page);
+    await expect(page.getByRole("menuitem", { name: "Exportieren…" })).toBeDisabled();
   });
 
   test("Export mit gewähltem Zielordner reiht den Auftrag in die Warteschlange ein und zeigt den Abschluss", async ({ page }) => {
     await setUpWithSelectedPhoto(page, { selectFolderResult: "/home/user/Exporte" });
-    await page.getByRole("button", { name: "Exportieren…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Exportieren…" }).click();
 
     await page.getByRole("button", { name: "Wählen…" }).click();
 
@@ -73,7 +76,8 @@ test.describe("Export (Phase 8 Schritt 1+2)", () => {
 
   test("Fehlgeschlagener Export zeigt die Fehlschlagszahl statt den Dialog stillschweigend zu schließen", async ({ page }) => {
     await setUpWithSelectedPhoto(page, { selectFolderResult: "/home/user/Exporte", exportPhotoShouldFail: true });
-    await page.getByRole("button", { name: "Exportieren…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Exportieren…" }).click();
     await page.getByRole("button", { name: "Wählen…" }).click();
 
     await page.getByRole("button", { name: "Exportieren", exact: true }).click();
@@ -83,7 +87,8 @@ test.describe("Export (Phase 8 Schritt 1+2)", () => {
 
   test("Pausieren hält den Auftrag an, Fortsetzen schließt ihn ab", async ({ page }) => {
     await setUpWithSelectedPhoto(page, { selectFolderResult: "/home/user/Exporte", exportQueueStartsPaused: true });
-    await page.getByRole("button", { name: "Exportieren…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Exportieren…" }).click();
     await page.getByRole("button", { name: "Wählen…" }).click();
 
     await page.getByRole("button", { name: "Exportieren", exact: true }).click();
@@ -102,7 +107,8 @@ test.describe("Export (Phase 8 Schritt 1+2)", () => {
       selectFolderResult: "/home/user/Exporte",
       pickFilePathResult: "/home/user/Schriften/Beispiel.ttf",
     });
-    await page.getByRole("button", { name: "Exportieren…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Exportieren…" }).click();
     await page.getByRole("button", { name: "Wählen…" }).click();
 
     await page.getByLabel("Farbraum (ICC)").selectOption("adobe_rgb");
@@ -130,7 +136,8 @@ test.describe("Export (Phase 8 Schritt 1+2)", () => {
     // `apx_export::format`s Unit-Tests abgedeckt — hier nur, dass das
     // Frontend den gewählten Wert überhaupt mitschickt.
     await setUpWithSelectedPhoto(page, { selectFolderResult: "/home/user/Exporte" });
-    await page.getByRole("button", { name: "Exportieren…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Exportieren…" }).click();
     await page.getByRole("button", { name: "Wählen…" }).click();
 
     const formatSelect = page.getByLabel("Format");
@@ -149,7 +156,8 @@ test.describe("Export (Phase 8 Schritt 1+2)", () => {
 
   test("Mehrfachziel-Export reicht das Foto an jedes hinzugefügte Ziel weiter (Phase 12 Schritt 5)", async ({ page }) => {
     await setUpWithSelectedPhoto(page, { selectFolderResult: "/home/user/Exporte" });
-    await page.getByRole("button", { name: "Exportieren…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Exportieren…" }).click();
     await page.getByRole("button", { name: "Wählen…" }).click();
 
     // Erstes Ziel: Standard-Format (JPEG) im gewählten Ordner.

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { getMockInvokeLog, installTauriMock } from "./tauri-mock";
+import { getMockInvokeLog, installTauriMock, openOverflowMenu } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -17,7 +17,8 @@ test.describe("Vorlagen (Phase 8 Schritt 8)", () => {
   test("Vorlagen-Knopf öffnet den Dialog, eine neue Export-Vorlage erscheint in der Liste", async ({ page }) => {
     await installTauriMock(page, { folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }], photosByFolder: { [FOLDER_ID]: [PHOTO] } });
     await page.goto("/");
-    await page.getByRole("button", { name: "Vorlagen…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Vorlagen…" }).click();
     await page.getByLabel("Art").selectOption("export");
     await expect(page.getByText("Keine gespeicherten Vorlagen")).toBeVisible();
 
@@ -42,7 +43,8 @@ test.describe("Vorlagen (Phase 8 Schritt 8)", () => {
     await page.goto("/");
     await page.getByRole("button", { name: /Urlaub/ }).click();
     await page.getByRole("img", { name: PHOTO.filename }).click();
-    await page.getByRole("button", { name: "Vorlagen…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Vorlagen…" }).click();
     await page.getByLabel("Art").selectOption("workflow");
 
     await page.getByLabel("Name").fill("Urlaub-Export");

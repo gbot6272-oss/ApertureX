@@ -4360,3 +4360,67 @@ gegen den echten Produktions-Build laufen lassen, alle 49 Tests grün
 — bestätigt, dass Fokus-Falle/Escape/Klick-außerhalb/Formularzustand
 nach der Migration funktional identisch geblieben sind, nicht nur,
 dass der Code kompiliert.
+
+**Nachtrag Schritt 3 (Navigation):** neu `lib/commandRegistry.ts` —
+ein `useCommandRegistry()`-Hook liefert `{id, label, category, run,
+disabled?, aiStatus?}`-Einträge (Kategorien `output`/`templates`/
+`advanced`/`analysis`/`ai`/`navigation`/`system`), gespeist aus
+genau denselben Store-Aktionen, die vorher `Header.tsx` und
+`CommandPalette.tsx` je für sich hielten — eine Quelle statt zwei.
+`Header.tsx` von zwei Zeilen (~30 Einzelknöpfe) auf eine schlanke
+Zeile umgebaut: Logo, Import, ein auffälliger Such-/Befehlsknopf
+(öffnet `CommandPalette`, ersetzt den vorher nur beiläufigen
+`⌘K`-Hinweistext), die sechs Ansicht-Ziele als eine zusammenhängende
+Segment-Gruppe (unveränderte Klick-Handler, nur neu gerahmt), ein
+neues Overflow-Menü (`components/ui/Menu.tsx`, bewusst **kein**
+`Dialog`-Abkömmling — kein abgedunkelter Hintergrund, da ein
+Overflow-Menü sich als Erweiterung des Auslöser-Knopfs anfühlen soll,
+nicht als Unterbrechung) zeigt das Register gruppiert nach den vier
+bisherigen Zeile-2-Kategorien plus der neuen **"KI-Funktionen"**-
+Kategorie, und ein eigenständiger Einstellungen-Knopf bleibt sichtbar.
+Die `pendingCommand`-Brücke für die neun weiterhin lokal in
+`Header.tsx` gehaltenen Dialoge ist unverändert die Ausführungsstelle.
+
+Die neue KI-Funktionen-Kategorie listet alle neun Opt-in-KI-Features
+(KI-Ausfüllen, Bildranderweiterung, Hautglätten, Himmelsaustausch,
+Stiltransfer, Hintergrund entfernen, Untertitel, Tiefenschärfe-
+Simulator, Personen-Erkennung) mit einem `aiSettings`-gestützten
+Status-Badge ("Bereit"/"Download nötig"/"Nicht verfügbar") und
+springt beim Anklicken direkt zum richtigen Panel/Modus (öffnet das
+Entwickeln-Panel und setzt bei KI-Ausfüllen zusätzlich
+`repairDraftMode`, öffnet den Leinwand-Erweitern-Dialog, wechselt
+`centerView` zu "people"/"viewer" o. ä.) — das behebt strukturell das
+in der letzten Sitzung gefundene Auffindbarkeits-Problem (der
+Download-Hinweis lag vorher nur hinter "Entwickeln → Reparatur-Pinsel
+→ Modus-Dropdown → KI-Ausfüllen wählen").
+
+`CommandPalette.tsx` liest jetzt ebenfalls aus `useCommandRegistry()`
+statt eigener hartcodierter `functionEntries` — Labels laufen über
+`useT()` mit neuen Schlüsseln in `de.ts`/`en.ts` (Chrome-Ebene, siehe
+ADR-0037-Abgrenzung, Dialog-**Inhalte** bleiben unverändert
+unübersetzt). Die reinen Datenquellen (Presets/Fotos/Ordner, kein
+"Befehl") bleiben lokal in der Palette berechnet, ebenso der
+transiente "Import abbrechen"-Eintrag (nur sichtbar während eines
+laufenden Imports, passt nicht ins stabile Register).
+
+**Testfolgen einer Struktur-Änderung, nicht nur Kompilieren:** da
+~19 vormals dauerhaft sichtbare Kopfzeilen-Knöpfe jetzt hinter dem
+Overflow-Menü liegen (als `role="menuitem"` statt `role="button"` —
+bewusste ARIA-Semantik für ein `role="menu"`), mussten die
+entsprechenden Playwright-Spezifikationen angepasst werden: ein neuer
+`openOverflowMenu(page)`-Helfer in `e2e/tauri-mock.ts` öffnet das Menü
+vor jedem betroffenen Zugriff (das Menü schließt sich nach jeder
+Auswahl automatisch wieder und bei jedem Klick außerhalb — z. B. beim
+Auswählen eines Fotos zwischen zwei Menü-Interaktionen —, daher an
+mehreren Stellen mehrfach pro Test aufgerufen). Betroffen: `export-`,
+`print-`, `slideshow-`, `book-`, `web-`, `templates-`,
+`library-organize-`, `metadata-`, `stacking-`, `script-plugin-`,
+`share-`, `tether-`, `library-views-`, `style-consistency-`,
+`versions-compare-` und `import-dialog-flow.spec.ts` (16 Dateien).
+Verifiziert per echtem Playwright-Lauf der **gesamten** Suite (nicht
+nur der angepassten Spezifikationen) gegen den Produktions-Build:
+141 von 142 Tests grün; der eine verbleibende Fehlschlag
+(`tat-flow.spec.ts`, ein durch ein überlappendes Vektorskop-Overlay
+verursachter Klick-Abfangfehler) wurde durch einen Vergleichslauf auf
+dem Schritt-2-Stand (`git stash -u`) als bereits vorher bestehend,
+nicht durch diesen Schritt verursacht, bestätigt.

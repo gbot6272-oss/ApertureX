@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { getMockInvokeLog, installTauriMock } from "./tauri-mock";
+import { getMockInvokeLog, installTauriMock, openOverflowMenu } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -64,7 +64,8 @@ test("Stil-Konsistenz-Check: zeigt nur den Ausreißer und committet dessen Angle
   await page.goto("/");
   await page.getByRole("button", { name: /Urlaub/ }).click();
 
-  await page.getByRole("button", { name: "Organisieren…" }).click();
+  await openOverflowMenu(page);
+  await page.getByRole("menuitem", { name: "Organisieren…" }).click();
   await page.getByRole("button", { name: "Stil-Konsistenz" }).click();
 
   await page.getByRole("button", { name: "Shooting prüfen" }).click();

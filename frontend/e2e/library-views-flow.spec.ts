@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installTauriMock } from "./tauri-mock";
+import { installTauriMock, openOverflowMenu } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -48,7 +48,8 @@ test.describe("Bibliotheks-Ansichten (Phase 9 Schritt 3)", () => {
       },
     });
     await page.goto("/");
-    await page.getByRole("button", { name: "Statistik…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Statistik…" }).click();
 
     await expect(page.getByText("Canon EOS R5: 2")).toBeVisible();
   });
@@ -60,7 +61,8 @@ test.describe("Bibliotheks-Ansichten (Phase 9 Schritt 3)", () => {
     await page.getByRole("img", { name: PHOTO_A.filename }).click();
     await page.getByRole("img", { name: PHOTO_B.filename }).click({ modifiers: ["Control"] });
 
-    await page.getByRole("button", { name: "Vergleichen", exact: true }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Vergleichen", exact: true }).click();
 
     await expect(page.getByLabel("Vergleichsansicht").getByText(PHOTO_A.filename)).toBeVisible();
     await expect(page.getByLabel("Vergleichsansicht").getByText(PHOTO_B.filename)).toBeVisible();

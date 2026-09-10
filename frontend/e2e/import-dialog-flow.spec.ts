@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { getMockInvokeLog, installTauriMock, setMockFixtures } from "./tauri-mock";
+import { getMockInvokeLog, installTauriMock, openOverflowMenu, setMockFixtures } from "./tauri-mock";
 
 const TARGET_DIR = "/home/user/Fotos/Ziel";
 
@@ -22,7 +22,8 @@ test.describe("Import mit Vorlage", () => {
     // separat geprüft).
     await setMockFixtures(page, { selectFolderResult: TARGET_DIR });
 
-    await page.getByRole("button", { name: "Import mit Vorlage…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Import mit Vorlage…" }).click();
     const dialog = page.getByRole("dialog", { name: "Import mit Vorlage" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText(`Quelle: ${TARGET_DIR}`)).toBeVisible();
@@ -69,7 +70,8 @@ test.describe("Import mit Vorlage", () => {
     await page.goto("/");
     await setMockFixtures(page, { selectFolderResult: "/home/user/Fotos/Quelle" });
 
-    await page.getByRole("button", { name: "Import mit Vorlage…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Import mit Vorlage…" }).click();
     const dialog = page.getByRole("dialog", { name: "Import mit Vorlage" });
     await dialog.getByLabel("Import-Preset").selectOption({ label: "Urlaub-Preset" });
 

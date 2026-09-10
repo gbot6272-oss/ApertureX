@@ -220,7 +220,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col bg-bg-base text-text-primary">
-      <Header />
+      <Header onOpenPalette={() => setPaletteOpen(true)} />
       <ErrorBanner />
       {(centerView === "grid" || centerView === "overview") && <FilterBar />}
       <div className="flex flex-1 overflow-hidden">

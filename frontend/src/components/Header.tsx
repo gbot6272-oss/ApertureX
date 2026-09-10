@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { useT } from "../lib/i18n";
+import { MENU_CATEGORIES, useCommandRegistry, type AiFeatureStatus, type CommandCategory } from "../lib/commandRegistry";
+import { useT, type TranslationKey } from "../lib/i18n";
 import { selectFolderDialog } from "../lib/tauri";
 import { useAppStore } from "../store";
 import { BookDialog } from "./BookDialog";
@@ -20,8 +21,22 @@ import { TetherDialog } from "./TetherDialog";
 import { MetadataDialog } from "./MetadataDialog";
 import { StatsCacheDialog } from "./StatsCacheDialog";
 import { CatalogDialog } from "./CatalogDialog";
+import { Menu, type MenuSection } from "./ui/Menu";
 
-export function Header() {
+/** Übersetzungsschlüssel je Overflow-Menü-Kategorie (Phase 18 Schritt 3).
+ * `navigation`/`system` sind hier nur der Typvollständigkeit halber
+ * vertreten — sie tauchen laut `MENU_CATEGORIES` nie im Menü auf. */
+const CATEGORY_LABEL_KEY: Record<CommandCategory, TranslationKey> = {
+  ai: "commands.category.ai",
+  output: "header.group.output",
+  templates: "header.group.templates",
+  advanced: "header.group.advanced",
+  analysis: "header.group.analysis",
+  navigation: "header.viewGrid",
+  system: "header.settings",
+};
+
+export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
   const t = useT();
   const importRunning = useAppStore((s) => s.importRunning);
   const importProgress = useAppStore((s) => s.importProgress);
@@ -39,22 +54,16 @@ export function Header() {
   const metadataPanelOpen = useAppStore((s) => s.metadataPanelOpen);
   const toggleMetadataPanel = useAppStore((s) => s.toggleMetadataPanel);
   const exportDialogOpen = useAppStore((s) => s.exportDialogOpen);
-  const openExportDialog = useAppStore((s) => s.openExportDialog);
   const closeExportDialog = useAppStore((s) => s.closeExportDialog);
   const printDialogOpen = useAppStore((s) => s.printDialogOpen);
-  const openPrintDialog = useAppStore((s) => s.openPrintDialog);
   const closePrintDialog = useAppStore((s) => s.closePrintDialog);
   const slideshowDialogOpen = useAppStore((s) => s.slideshowDialogOpen);
-  const openSlideshowDialog = useAppStore((s) => s.openSlideshowDialog);
   const closeSlideshowDialog = useAppStore((s) => s.closeSlideshowDialog);
   const videoTimelineDialogOpen = useAppStore((s) => s.videoTimelineDialogOpen);
-  const openVideoTimelineDialog = useAppStore((s) => s.openVideoTimelineDialog);
   const closeVideoTimelineDialog = useAppStore((s) => s.closeVideoTimelineDialog);
   const bookDialogOpen = useAppStore((s) => s.bookDialogOpen);
-  const openBookDialog = useAppStore((s) => s.openBookDialog);
   const closeBookDialog = useAppStore((s) => s.closeBookDialog);
   const webDialogOpen = useAppStore((s) => s.webDialogOpen);
-  const openWebDialog = useAppStore((s) => s.openWebDialog);
   const closeWebDialog = useAppStore((s) => s.closeWebDialog);
   const [importDialogSource, setImportDialogSource] = useState<string | null>(null);
   const [templatesDialogOpen, setTemplatesDialogOpen] = useState(false);
@@ -67,9 +76,6 @@ export function Header() {
   const [metadataDialogOpen, setMetadataDialogOpen] = useState(false);
   const [statsDialogOpen, setStatsDialogOpen] = useState(false);
   const [catalogDialogOpen, setCatalogDialogOpen] = useState(false);
-  const openCompareView = useAppStore((s) => s.openCompareView);
-  const openVersionsCompareView = useAppStore((s) => s.openVersionsCompareView);
-  const openSecondaryDisplay = useAppStore((s) => s.openSecondaryDisplay);
   const pendingCommand = useAppStore((s) => s.pendingCommand);
   const clearPendingCommand = useAppStore((s) => s.clearPendingCommand);
 
@@ -93,7 +99,9 @@ export function Header() {
   // `store/index.ts`s `pendingCommand`-Moduldoku): diese neun Dialoge sind
   // bewusst lokaler `useState` in dieser Komponente geblieben, die
   // Befehlspalette ist aber kein Kind von `Header.tsx` und kann sie daher
-  // nicht direkt öffnen.
+  // nicht direkt öffnen. Unverändert seit Phase 10 — das neue
+  // Kommando-Register (Phase 18 Schritt 3) ruft für diese IDs weiterhin
+  // nur `requestCommand(id)` auf statt sie selbst zu öffnen.
   useEffect(() => {
     if (!pendingCommand) return;
     switch (pendingCommand) {
@@ -139,44 +147,69 @@ export function Header() {
     clearPendingCommand();
   }, [pendingCommand, clearPendingCommand, handleImportClick, handleImportWithTemplateClick]);
 
+  // Zentrales Kommando-Register (Phase 18 Schritt 3, siehe
+  // `lib/commandRegistry.ts`s Moduldoku + `DECISIONS.md` ADR-0046
+  // Entwurfsentscheidung 4) — dieselbe Quelle, aus der auch
+  // `CommandPalette.tsx` ihre Einträge zieht. Hier nur zum Aufbau des
+  // Overflow-Menüs verwendet, gruppiert nach Kategorie.
+  const commands = useCommandRegistry();
+  const aiStatusLabel: Record<AiFeatureStatus, string> = {
+    ready: t("commands.ai.status.ready"),
+    "download-needed": t("commands.ai.status.downloadNeeded"),
+    "not-available": t("commands.ai.status.notAvailable"),
+  };
+  const menuSections: MenuSection[] = MENU_CATEGORIES.map((category) => ({
+    id: category,
+    label: t(CATEGORY_LABEL_KEY[category]),
+    items: commands
+      .filter((entry) => entry.category === category)
+      .map((entry) => ({
+        id: entry.id,
+        label: entry.label,
+        disabled: entry.disabled,
+        hint: entry.aiStatus ? aiStatusLabel[entry.aiStatus] : undefined,
+        onSelect: entry.run,
+      })),
+  })).filter((section) => section.items.length > 0);
+
   return (
-    // Zwei Zeilen statt einer einzigen ~20-Knopf-Reihe (Phase 10 Schritt 2,
-    // siehe FEATURES.md "Rechte Werkzeug-Palette, Modul-Umschalter oben"):
-    // Zeile 1 sind die Ansichts-Umschalter (Raster/Karte/Info/Entwickeln,
-    // reines `centerView`-/Panel-Umschalten wie bisher), Zeile 2 gruppiert
-    // die übrigen Modul-Dialoge nach Themen. **Bewusste Vereinfachung**:
-    // kein Lightroom-artiger vollständiger Bildschirmwechsel pro Modul —
-    // jeder Knopf öffnet unverändert denselben, bereits getesteten Dialog
-    // wie zuvor, nur sichtbar gruppiert statt als flache Liste; kein Knopf
-    // wurde umbenannt oder hinter einem Menü versteckt.
-    <header className="flex shrink-0 flex-col border-b border-border bg-bg-raised">
-      <div className="flex h-12 items-center gap-4 overflow-x-auto px-4">
-      <span className="font-semibold tracking-wide">Aperture X</span>
+    // Eine einzige schlanke Zeile statt der vormaligen zwei Zeilen mit
+    // ~30 Einzelknöpfen (Phase 18 Schritt 3, siehe `DECISIONS.md`
+    // ADR-0046 Entwurfsentscheidung 5): Logo, Import, ein auffälliger
+    // Such-/Befehlsknopf (macht die Befehlspalette zum primären statt
+    // versteckten Werkzeug), die sechs Ansicht-Ziele als zusammenhängende
+    // Segment-Gruppe, ein Overflow-Menü für die vier bisherigen
+    // Zeile-2-Gruppen (jetzt aus dem Kommando-Register gespeist) und
+    // Einstellungen. Kein Knopf wurde entfernt oder hinter mehr als
+    // einer zusätzlichen Ebene versteckt — nur die dauerhaft sichtbare
+    // Knopfzahl sinkt drastisch.
+    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-bg-raised px-4">
+      <span className="shrink-0 font-semibold tracking-wide">Aperture X</span>
 
       <button
         type="button"
         onClick={() => void handleImportClick()}
         disabled={importRunning}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+        className="shrink-0 rounded border border-border bg-bg-panel px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
       >
         {t("header.importFolder")}
       </button>
 
+      <ImportDialog open={importDialogSource !== null} sourcePath={importDialogSource ?? ""} onClose={() => setImportDialogSource(null)} />
+
       <button
         type="button"
-        onClick={() => void handleImportWithTemplateClick()}
-        disabled={importRunning}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-        title={t("header.importWithTemplateTitle")}
+        onClick={onOpenPalette}
+        title={t("header.paletteHint")}
+        className="flex shrink-0 items-center gap-2 rounded border border-border bg-bg-panel px-3 py-1 text-sm text-text-secondary transition-colors duration-[var(--duration-fast)] hover:border-accent hover:text-text-primary"
       >
-        {t("header.importWithTemplate")}
+        <span aria-hidden>⌘</span>
+        {t("header.search")}
       </button>
-
-      <ImportDialog open={importDialogSource !== null} sourcePath={importDialogSource ?? ""} onClose={() => setImportDialogSource(null)} />
 
       {importRunning && (
         <>
-          <div className="h-1.5 w-48 shrink-0 overflow-hidden rounded bg-bg-panel">
+          <div className="h-1.5 w-40 shrink-0 overflow-hidden rounded bg-bg-panel">
             <div className="h-full bg-accent transition-[width] duration-150" style={{ width: `${percent}%` }} />
           </div>
           <span className="max-w-xs shrink-0 truncate text-xs text-text-secondary">
@@ -185,7 +218,7 @@ export function Header() {
           <button
             type="button"
             onClick={() => void cancelImport()}
-            className="ml-auto shrink-0 rounded border border-danger px-2 py-1 text-xs text-danger hover:bg-danger/10"
+            className="shrink-0 rounded border border-danger px-2 py-1 text-xs text-danger hover:bg-danger/10"
           >
             {t("header.cancelImport")}
           </button>
@@ -193,7 +226,7 @@ export function Header() {
       )}
 
       {!importRunning && importResult && (
-        <span className="text-xs text-text-secondary">
+        <span className="hidden shrink-0 truncate text-xs text-text-secondary lg:inline">
           {importResult.cancelled ? "Import abgebrochen: " : "Import abgeschlossen: "}
           {importResult.imported} importiert · {importResult.skipped} übersprungen
           {importResult.errorCount > 0 ? ` · ${importResult.errorCount} Fehler` : ""}
@@ -201,313 +234,111 @@ export function Header() {
         </span>
       )}
 
-      <nav aria-label="Ansicht" className="ml-auto flex items-center gap-2">
-      <button
-        type="button"
-        onClick={toggleCenterView}
-        aria-pressed={centerView === "grid"}
-        className={`rounded border px-3 py-1 text-sm ${
-          centerView === "grid" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
-        }`}
-      >
-        {t("header.viewGrid")}
-      </button>
-
-      <button
-        type="button"
-        onClick={() => setCenterView(centerView === "overview" ? "viewer" : "overview")}
-        aria-pressed={centerView === "overview"}
-        className={`rounded border px-3 py-1 text-sm ${
-          centerView === "overview" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
-        }`}
-      >
-        {t("header.viewOverview")}
-      </button>
-
-      <button
-        type="button"
-        onClick={() => setCenterView(centerView === "map" ? "viewer" : "map")}
-        aria-pressed={centerView === "map"}
-        className={`rounded border px-3 py-1 text-sm ${
-          centerView === "map" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
-        }`}
-      >
-        {t("header.viewMap")}
-      </button>
-
-      <button
-        type="button"
-        onClick={() => setCenterView(centerView === "people" ? "viewer" : "people")}
-        aria-pressed={centerView === "people"}
-        className={`rounded border px-3 py-1 text-sm ${
-          centerView === "people" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
-        }`}
-      >
-        {t("header.viewPeople")}
-      </button>
-
-      <button
-        type="button"
-        onClick={toggleMetadataPanel}
-        disabled={!selectedPhotoId && !metadataPanelOpen}
-        aria-pressed={metadataPanelOpen}
-        className={`rounded border px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50 ${
-          metadataPanelOpen ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
-        }`}
-      >
-        {t("header.viewInfo")}
-      </button>
-
-      <button
-        type="button"
-        onClick={toggleDevelopPanel}
-        disabled={!selectedPhotoId && !developPanelOpen}
-        aria-pressed={developPanelOpen}
-        className={`rounded border px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50 ${
-          developPanelOpen ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
-        }`}
-      >
-        {t("header.viewDevelop")}
-      </button>
-      </nav>
-      </div>
-
-      {/* Zeile 2: übrige Module nach Themen gruppiert (Ausgabe / Vorlagen &
-          Organisation / Fortgeschritten / Analyse). */}
-      <div className="flex h-11 items-center gap-4 overflow-x-auto border-t border-border px-4">
-      <nav aria-label={t("header.group.output")} className="flex items-center gap-2">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">{t("header.group.output")}</span>
-      <button
-        type="button"
-        onClick={openExportDialog}
-        disabled={exportPhotoIds.length === 0}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {t("header.export")}
-      </button>
-
-      <ExportDialog open={exportDialogOpen} photoIds={exportPhotoIds} onClose={closeExportDialog} />
-
-      <button
-        type="button"
-        onClick={openPrintDialog}
-        disabled={exportPhotoIds.length === 0}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {t("header.print")}
-      </button>
-
-      <PrintDialog open={printDialogOpen} photoIds={exportPhotoIds} onClose={closePrintDialog} />
-
-      <button
-        type="button"
-        onClick={openSlideshowDialog}
-        disabled={exportPhotoIds.length === 0}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {t("header.slideshow")}
-      </button>
-
-      <SlideshowDialog open={slideshowDialogOpen} photoIds={exportPhotoIds} onClose={closeSlideshowDialog} />
-
-      <button
-        type="button"
-        onClick={openVideoTimelineDialog}
-        disabled={exportPhotoIds.length === 0}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        Zeitachse…
-      </button>
-
-      <VideoTimelineDialog open={videoTimelineDialogOpen} photoIds={exportPhotoIds} onClose={closeVideoTimelineDialog} />
-
-      <button
-        type="button"
-        onClick={openBookDialog}
-        disabled={exportPhotoIds.length === 0}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {t("header.book")}
-      </button>
-
-      <BookDialog open={bookDialogOpen} photoIds={exportPhotoIds} onClose={closeBookDialog} />
-
-      <button
-        type="button"
-        onClick={openWebDialog}
-        disabled={exportPhotoIds.length === 0}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {t("header.web")}
-      </button>
-
-      <WebDialog open={webDialogOpen} photoIds={exportPhotoIds} onClose={closeWebDialog} />
-      </nav>
-
-      <div className="h-6 w-px bg-border" />
-
-      {/* Kein `aria-label` hier (anders als die übrigen Gruppen-Navs):
-          jeder Wert, der "Vorlage" als Teilstring enthält, kollidiert mit
-          `page.getByLabel("Vorlage")` in `print-flow.spec.ts` (Playwrights
-          `getByLabel` ist eine Teilstring-Suche über jedes Element mit
-          passendem Accessible Name, nicht nur über Formularfelder) — bei
-          der vollen e2e-Suite in Schritt 12 gefunden. Die sichtbare
-          `<span>`-Beschriftung bleibt für sehende Nutzer unverändert. */}
-      <nav className="flex items-center gap-2">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">{t("header.group.templates")}</span>
-      <button
-        type="button"
-        onClick={() => setTemplatesDialogOpen(true)}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
-      >
-        {t("header.templates")}
-      </button>
-
-      <TemplatesDialog open={templatesDialogOpen} photoIds={exportPhotoIds} onClose={() => setTemplatesDialogOpen(false)} />
-
-      <button
-        type="button"
-        onClick={() => setOrganizeDialogOpen(true)}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
-      >
-        {t("header.organize")}
-      </button>
-
-      <LibraryOrganizeDialog open={organizeDialogOpen} onClose={() => setOrganizeDialogOpen(false)} />
-
-      <button
-        type="button"
-        onClick={() => setBatchConsoleDialogOpen(true)}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
-      >
-        {t("header.batchConsole")}
-      </button>
-
-      <BatchConsoleDialog open={batchConsoleDialogOpen} onClose={() => setBatchConsoleDialogOpen(false)} />
-
-      <button
-        type="button"
-        onClick={() => setMetadataDialogOpen(true)}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
-      >
-        {t("header.metadata")}
-      </button>
-
-      <MetadataDialog open={metadataDialogOpen} onClose={() => setMetadataDialogOpen(false)} />
-      </nav>
-
-      <div className="h-6 w-px bg-border" />
-
-      <nav aria-label={t("header.group.advanced")} className="flex items-center gap-2">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">{t("header.group.advanced")}</span>
-      <button
-        type="button"
-        onClick={() => setStackingDialogOpen(true)}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
-      >
-        {t("header.stacking")}
-      </button>
-
-      <StackingDialog open={stackingDialogOpen} onClose={() => setStackingDialogOpen(false)} />
-
-      <button
-        type="button"
-        onClick={() => setScriptPluginDialogOpen(true)}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
-      >
-        {t("header.scriptPlugin")}
-      </button>
-
-      <ScriptPluginDialog open={scriptPluginDialogOpen} onClose={() => setScriptPluginDialogOpen(false)} />
-
-      <button
-        type="button"
-        onClick={() => setShareDialogOpen(true)}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
-      >
-        {t("header.share")}
-      </button>
-
-      <ShareDialog open={shareDialogOpen} onClose={() => setShareDialogOpen(false)} />
-
-      <button
-        type="button"
-        onClick={() => setTetherDialogOpen(true)}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
-      >
-        {t("header.tether")}
-      </button>
-
-      <TetherDialog open={tetherDialogOpen} onClose={() => setTetherDialogOpen(false)} />
-      </nav>
-
-      <div className="h-6 w-px bg-border" />
-
-      <nav aria-label={t("header.group.analysis")} className="flex items-center gap-2">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">{t("header.group.analysis")}</span>
-      <button
-        type="button"
-        onClick={() => openCompareView(exportPhotoIds)}
-        disabled={exportPhotoIds.length < 2}
-        title={t("header.compareTitle")}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:opacity-40"
-      >
-        {t("header.compare")}
-      </button>
-
-      <button
-        type="button"
-        onClick={() => void openVersionsCompareView()}
-        disabled={!selectedPhotoId}
-        title={t("header.versionsCompareTitle")}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:opacity-40"
-      >
-        {t("header.versionsCompare")}
-      </button>
-
-      <button
-        type="button"
-        onClick={() => selectedPhotoId && void openSecondaryDisplay(selectedPhotoId)}
-        disabled={!selectedPhotoId}
-        title={t("header.secondaryDisplayTitle")}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent disabled:opacity-40"
-      >
-        {t("header.secondaryDisplay")}
-      </button>
-
-      <button
-        type="button"
-        onClick={() => setStatsDialogOpen(true)}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
-      >
-        {t("header.stats")}
-      </button>
-
-      <button
-        type="button"
-        onClick={() => setCatalogDialogOpen(true)}
-        className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
-      >
-        {t("header.catalog")}
-      </button>
-
-      <StatsCacheDialog open={statsDialogOpen} onClose={() => setStatsDialogOpen(false)} />
-      <CatalogDialog open={catalogDialogOpen} onClose={() => setCatalogDialogOpen(false)} />
-      </nav>
-
-      <div className="ml-auto flex items-center gap-4">
+      <nav aria-label="Ansicht" className="ml-auto flex shrink-0 items-center gap-0.5 rounded border border-border bg-bg-panel p-0.5">
         <button
           type="button"
-          onClick={() => setSettingsDialogOpen(true)}
-          title={t("header.settingsTitle")}
-          className="rounded border border-border bg-bg-panel px-3 py-1 text-sm hover:border-accent"
+          onClick={toggleCenterView}
+          aria-pressed={centerView === "grid"}
+          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+            centerView === "grid" ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          }`}
         >
-          {t("header.settings")}
+          {t("header.viewGrid")}
         </button>
 
-        <span className="text-xs text-text-muted">{t("header.paletteHint")}</span>
-      </div>
-      </div>
+        <button
+          type="button"
+          onClick={() => setCenterView(centerView === "overview" ? "viewer" : "overview")}
+          aria-pressed={centerView === "overview"}
+          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+            centerView === "overview" ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          }`}
+        >
+          {t("header.viewOverview")}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setCenterView(centerView === "map" ? "viewer" : "map")}
+          aria-pressed={centerView === "map"}
+          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+            centerView === "map" ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          }`}
+        >
+          {t("header.viewMap")}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setCenterView(centerView === "people" ? "viewer" : "people")}
+          aria-pressed={centerView === "people"}
+          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+            centerView === "people" ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          }`}
+        >
+          {t("header.viewPeople")}
+        </button>
+
+        <button
+          type="button"
+          onClick={toggleMetadataPanel}
+          disabled={!selectedPhotoId && !metadataPanelOpen}
+          aria-pressed={metadataPanelOpen}
+          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-50 ${
+            metadataPanelOpen ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          }`}
+        >
+          {t("header.viewInfo")}
+        </button>
+
+        <button
+          type="button"
+          onClick={toggleDevelopPanel}
+          disabled={!selectedPhotoId && !developPanelOpen}
+          aria-pressed={developPanelOpen}
+          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-50 ${
+            developPanelOpen ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          }`}
+        >
+          {t("header.viewDevelop")}
+        </button>
+      </nav>
+
+      <Menu
+        label={t("header.overflowMenu")}
+        trigger={<span aria-hidden>⋯</span>}
+        sections={menuSections}
+      />
+
+      <button
+        type="button"
+        onClick={() => setSettingsDialogOpen(true)}
+        title={t("header.settingsTitle")}
+        className="shrink-0 rounded border border-border bg-bg-panel px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] hover:border-accent"
+      >
+        {t("header.settings")}
+      </button>
+
+      {/* Die übrigen, in Zeile 2 vormals nebenstehenden Dialoge bleiben
+          hier gerendert (Inhalt/Props/Store-Anbindung unverändert) — nur
+          ihre Auslöser-Knöpfe sind jetzt Einträge im Kommando-Register/
+          Overflow-Menü statt eigener sichtbarer Knöpfe. */}
+      <ExportDialog open={exportDialogOpen} photoIds={exportPhotoIds} onClose={closeExportDialog} />
+      <PrintDialog open={printDialogOpen} photoIds={exportPhotoIds} onClose={closePrintDialog} />
+      <SlideshowDialog open={slideshowDialogOpen} photoIds={exportPhotoIds} onClose={closeSlideshowDialog} />
+      <VideoTimelineDialog open={videoTimelineDialogOpen} photoIds={exportPhotoIds} onClose={closeVideoTimelineDialog} />
+      <BookDialog open={bookDialogOpen} photoIds={exportPhotoIds} onClose={closeBookDialog} />
+      <WebDialog open={webDialogOpen} photoIds={exportPhotoIds} onClose={closeWebDialog} />
+      <TemplatesDialog open={templatesDialogOpen} photoIds={exportPhotoIds} onClose={() => setTemplatesDialogOpen(false)} />
+      <LibraryOrganizeDialog open={organizeDialogOpen} onClose={() => setOrganizeDialogOpen(false)} />
+      <BatchConsoleDialog open={batchConsoleDialogOpen} onClose={() => setBatchConsoleDialogOpen(false)} />
+      <MetadataDialog open={metadataDialogOpen} onClose={() => setMetadataDialogOpen(false)} />
+      <StackingDialog open={stackingDialogOpen} onClose={() => setStackingDialogOpen(false)} />
+      <ScriptPluginDialog open={scriptPluginDialogOpen} onClose={() => setScriptPluginDialogOpen(false)} />
+      <ShareDialog open={shareDialogOpen} onClose={() => setShareDialogOpen(false)} />
+      <TetherDialog open={tetherDialogOpen} onClose={() => setTetherDialogOpen(false)} />
+      <StatsCacheDialog open={statsDialogOpen} onClose={() => setStatsDialogOpen(false)} />
+      <CatalogDialog open={catalogDialogOpen} onClose={() => setCatalogDialogOpen(false)} />
     </header>
   );
 }

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installTauriMock } from "./tauri-mock";
+import { installTauriMock, openOverflowMenu } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -19,7 +19,8 @@ test.describe("Metadaten (Phase 9 Schritt 2)", () => {
     await page.getByRole("button", { name: /Urlaub/ }).click();
     await page.getByRole("img", { name: PHOTO_A.filename }).click();
 
-    await page.getByRole("button", { name: "Metadaten…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Metadaten…" }).click();
     await page.getByRole("button", { name: "Metadaten & XMP" }).click();
     await page.getByLabel("Titel").fill("Sonnenuntergang");
     await page.getByRole("button", { name: "Metadaten speichern" }).click();
@@ -43,7 +44,8 @@ test.describe("Metadaten (Phase 9 Schritt 2)", () => {
       );
     }, PHOTO_A.id);
 
-    await page.getByRole("button", { name: "Metadaten…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Metadaten…" }).click();
     await page.getByRole("button", { name: "Tag-Regeln" }).click();
     await page.locator("select").filter({ has: page.locator("option", { hasText: "Ziel-Schlagwort" }) }).selectOption({ label: "Berge" });
     await page.getByPlaceholder("Name der Regel").fill("Berge im Objektiv");
@@ -61,7 +63,8 @@ test.describe("Metadaten (Phase 9 Schritt 2)", () => {
     await page.goto("/");
     await page.getByRole("button", { name: /Urlaub/ }).click();
     await page.getByRole("img", { name: PHOTO_A.filename }).click();
-    await page.getByRole("button", { name: "Metadaten…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Metadaten…" }).click();
     await page.getByRole("button", { name: "Metadaten & XMP" }).click();
 
     await page.getByRole("button", { name: ".xmp exportieren" }).click();

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installTauriMock } from "./tauri-mock";
+import { installTauriMock, openOverflowMenu } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -32,7 +32,8 @@ test.describe("Tethered Shooting (Phase 9 Schritt 11)", () => {
     });
     await page.goto("/");
 
-    await page.getByRole("button", { name: "Tethering…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Tethering…" }).click();
     const dialog = page.getByRole("dialog", { name: "Tethered Shooting" });
     await expect(dialog.getByText("Keine Kamera verbunden.")).toBeVisible();
 

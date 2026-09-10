@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installTauriMock } from "./tauri-mock";
+import { installTauriMock, openOverflowMenu } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -27,7 +27,8 @@ test.describe("Stacking (Phase 9 Schritt 8)", () => {
     await page.getByRole("img", { name: PHOTO_A.filename }).first().click();
     await page.getByRole("img", { name: PHOTO_B.filename }).first().click({ modifiers: ["Control"] });
 
-    await page.getByRole("button", { name: "Stacking…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Stacking…" }).click();
     const dialog = page.getByRole("dialog", { name: "Stacking" });
     await expect(dialog.getByText("2 Fotos ausgewählt")).toBeVisible();
 

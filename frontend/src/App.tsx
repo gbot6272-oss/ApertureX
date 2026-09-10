@@ -226,19 +226,29 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <PresetsPanel />
-        {centerView === "grid" ? (
-          <GridView />
-        ) : centerView === "overview" ? (
-          <GridView variant="overview" />
-        ) : centerView === "map" ? (
-          <MapView />
-        ) : centerView === "people" ? (
-          <PeopleView />
-        ) : selectedPhotoIsVideo ? (
-          <VideoPlayer />
-        ) : (
-          <Viewer />
-        )}
+        {/* Sanfter Überblend-Wechsel beim centerView-Wechsel (Phase 18
+            Schritt 6, siehe `DECISIONS.md` ADR-0046) — `key={centerView}`
+            erzwingt einen frischen Mount nur bei einem echten
+            Ansicht-Wechsel (Foto-/Video-Wechsel innerhalb der "viewer"-
+            Ansicht bleibt unter demselben Schlüssel, löst also keine
+            wiederholte Überblendung aus). `index.css`s
+            `.apx-view-fade-in` respektiert `prefers-reduced-motion`/
+            `uiSettings.reduced_motion` automatisch mit. */}
+        <div key={centerView} className="apx-view-fade-in flex flex-1 overflow-hidden">
+          {centerView === "grid" ? (
+            <GridView />
+          ) : centerView === "overview" ? (
+            <GridView variant="overview" />
+          ) : centerView === "map" ? (
+            <MapView />
+          ) : centerView === "people" ? (
+            <PeopleView />
+          ) : selectedPhotoIsVideo ? (
+            <VideoPlayer />
+          ) : (
+            <Viewer />
+          )}
+        </div>
         <MetadataPanel />
         {/* Rechte Werkzeug-Palette (Phase 10 Schritt 2): Entwickeln- und
             Masken-Panel bleiben zwei unabhängig sichtbare/aufklappbare

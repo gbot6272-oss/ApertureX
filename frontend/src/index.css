@@ -177,3 +177,44 @@ body {
   animation-iteration-count: 1 !important;
   transition-duration: 0.001ms !important;
 }
+
+/* Bewegungs-Politur-Durchgang (Phase 18 Schritt 6, siehe `DECISIONS.md`
+   ADR-0046): einheitliche Hover-/Fokus-Übergänge auf allen
+   interaktiven Elementen statt des vorherigen instantanen Wechsels
+   (Ist-Zustand-Befund zu Beginn dieser Phase: nur zwei echte
+   CSS-`transition`s im gesamten Frontend). Global statt je Komponente
+   einzeln nachgetragen — jede der weit über 500 bestehenden
+   `hover:border-accent`/`hover:text-*`/`hover:bg-*`-Klassen im
+   Frontend bekommt die Übergangsanimation automatisch mit, ohne eine
+   einzige Komponente anzufassen (respektiert `prefers-reduced-motion`/
+   `.apx-reduce-motion` oben automatisch mit, da beide `!important`
+   jede `transition-duration` kappen). Explizite `transition-*`-Klassen
+   einzelner Komponenten (z. B. der Import-Fortschrittsbalken) bleiben
+   unverändert wirksam — dieselben Eigenschaften, keine Kollision. */
+button,
+a,
+select,
+[role="tab"],
+[role="menuitem"] {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Sanfter Überblend-Wechsel beim `centerView`-Wechsel (App.tsx) — siehe
+   dortige Verwendung der `.apx-view-fade-in`-Klasse. Als Animation statt
+   Transition, weil die wechselnden Ansichten per `key={centerView}`
+   jedes Mal frisch gemountet werden (Transition bräuchte einen bereits
+   vorhandenen Startzustand im DOM). */
+@keyframes apx-view-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.apx-view-fade-in {
+  animation: apx-view-fade-in var(--duration-base) cubic-bezier(0, 0, 0.2, 1);
+}

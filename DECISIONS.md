@@ -4525,3 +4525,49 @@ Alle drei Fixes ausschließlich per echtem Playwright-Lauf (volle Suite,
 run` (251 Tests) + `tsc -b`/`vite build` verifiziert, zusätzlich mit
 temporären (nicht committeten) Playwright-Screenshots real angeschaut
 statt nur am Code geglaubt — dieselbe Disziplin wie ADR-0044.
+
+**Nachtrag Schritt 6 (Bewegungs-Politur-Durchgang):**
+
+- **Hover-/Fokus-Übergänge auf allen interaktiven Elementen:** statt
+  jeden der weit über 500 bestehenden `hover:border-accent`/
+  `hover:text-*`/`hover:bg-*`-Knöpfe einzeln anzufassen, eine einzige
+  globale Regel in `index.css` (`button, a, select, [role="tab"],
+  [role="menuitem"] { transition-property: color, background-color,
+  border-color, box-shadow, opacity; transition-duration:
+  var(--duration-fast); ... }`) — wirkt automatisch auf jede bereits
+  vorhandene Hover-/Fokus-Klasse im gesamten Frontend, kollidiert nicht
+  mit vereinzelten expliziten `transition-[width]`-Klassen (dieselben
+  Eigenschaften, keine Überschneidung), respektiert
+  `prefers-reduced-motion`/`.apx-reduce-motion` automatisch mit (beide
+  kappen jede `transition-duration` bereits per `!important`).
+- **Sanfter Überblend-Wechsel beim `centerView`-Wechsel:** neue
+  `.apx-view-fade-in`-Keyframe-Animation in `index.css`, in `App.tsx`
+  auf einen neuen `<div key={centerView}>`-Wrapper **nur** um die
+  eigentliche Zentralansicht (Raster/Übersicht/Karte/Personen/Viewer/
+  VideoPlayer) angewendet — bewusst **nicht** um die gesamte
+  `flex flex-1`-Zeile (die auch Sidebar/Presets-Panel/Metadaten-Panel/
+  Entwickeln-Panel enthält), sonst hätten diese dauerhaften
+  Seitenpaletten bei jedem Ansicht-Wechsel unnötig ihren internen
+  Zustand verloren. Der `key` ist `centerView` selbst, nicht z. B. die
+  Foto-ID — ein Foto-/Video-Wechsel innerhalb derselben "viewer"-
+  Ansicht bleibt unter demselben Schlüssel und löst deshalb keine
+  wiederholte Überblendung aus, nur ein echter Wechsel zwischen den
+  sechs Ansicht-Modi tut es.
+- **Anwenden-Rückmeldung bei Preset-Übernahme:** `PresetsPanel.tsx`s
+  Preset-Namen-Knopf bekommt beim Klick einen kurzen
+  Hintergrund-Aufhellungs-Puls (`bg-accent/20`, über
+  `transition-colors duration-slow` wieder ausblendend, per
+  `usePrefersReducedMotion()` auf eine sofortige Rückstellung verkürzt
+  statt der vollen Dauer) — bewusst nur bei Presets, nicht bei jedem
+  einzelnen Regler-Commit: ein Regler zeigt seine Änderung bereits
+  direkt am eigenen Schieberegler-Wert, ein Preset ändert dagegen viele
+  Regler gleichzeitig, ohne dass der Klick selbst sichtbar etwas
+  bewegt — genau dort fehlte eine Bestätigung, dass er etwas bewirkt
+  hat.
+
+Verifiziert per `tsc -b`, `vite build`, voller Playwright-Suite
+(weiterhin 141/142, derselbe vorbestehende Flake) und `vitest run`
+(251 Tests) — die global wirkende CSS-Regel und die `centerView`-
+Umstrukturierung berühren viele bestehende Tests indirekt (jeder
+Knopf-Hover, jeder Ansicht-Wechsel), liefen deshalb bewusst gegen die
+**volle** Suite statt nur gezielter Stichproben.

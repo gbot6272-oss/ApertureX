@@ -4606,3 +4606,107 @@ Laufzeitrisiko für Rust durch diese Phase praktisch ausgeschlossen —
 `cargo test --workspace` bleibt trotzdem ein offener Nachtrag für eine
 Sitzung mit mehr Datenträger-Spielraum, kein stillschweigend
 übergangener Schritt.
+
+## ADR-0046-Nachtrag: Drei reale Nutzungsfehler nach dem Phase-18-Merge
+
+**Status:** Angenommen
+**Kontext:** Der Nutzer hat die gemergte Phase-18-Oberfläche in seiner
+echten Tauri-App benutzt (zwei Screenshots eines realen Fotos,
+`20260901_181501480_iOS.jpeg`, iPhone 16) und drei konkrete Fehler
+gemeldet: (1) das Foto steht in der Großansicht/Entwickeln-Vorschau auf
+dem Kopf, während dieselbe Aufnahme im kleinen Navigator-Miniaturbild
+korrekt orientiert erscheint — ein Korrektheitsfehler, kein
+Stilproblem; (2) die neuen "Masken hinzufügen"-Knöpfe
+(`MasksPanel.tsx`) brechen ihre deutschen Beschriftungen ("+ Linearer
+Verlauf" u. Ä.) in einem zweispaltigen Raster auf zwei Zeilen um, wirkt
+gequetscht; (3) das schwebende Analyse-Panel (Histogramm/Vektorskop/
+Wellenform, `DevelopAnalysisPanel.tsx`) ließ sich weder verschieben
+noch einklappen, und seine beiden Clipping-Anzeige-Knöpfe wirkten am
+rechten Rand abgeschnitten.
+
+**Root-Cause-Untersuchung (1), die Drehung:** Die naheliegende
+Vermutung — ein Fehler in der EXIF-Orientierungs-Anwendung
+(`apx-raw::orientation`/`fallback::decode`) — erwies sich nach
+gründlicher Prüfung als falsch: `orientation.rs`s Pixel-Umordnung ist
+bereits vollständig getestet, und ein neu geschriebener Testfall mit
+einem *echten* JPEG samt eingebettetem EXIF-APP1-Segment (nicht nur
+einem von Hand gesetzten `Orientation`-Wert wie zuvor) bestätigte: die
+EXIF-Auslesung über `kamadak-exif` und ihre Anwendung funktionieren
+korrekt, sowohl über `decode()` (Vorschau-/Vollbild-Route) als auch
+`decode_linear()` (Entwickeln-Route) — beide teilen sich für
+Fallback-Formate denselben `fallback::decode`-Aufruf und liefern damit
+zwangsläufig identisch orientierte Pixel. Der tatsächliche Fehler lag
+eine Ebene höher, im WebGL-Renderer des Viewers
+(`frontend/src/lib/webgl.ts`): `uploadRgba8` (die neue, für die
+Entwickeln-Route rohe RGBA8-Puffer hochladende Methode) setzte wie
+`uploadImageBitmap` (die bestehende, für Vorschau-/Vollbild-Bitmaps
+zuständige Methode) `UNPACK_FLIP_Y_WEBGL = true`. Ein isolierter
+WebGL2-Vergleichstest (eine eigenständige HTML-Seite mit vier
+unterscheidbaren Testfarben in den vier Bildecken, über beide
+Upload-Pfade hochgeladen und real per Playwright-Screenshot
+verglichen) bewies empirisch: für einen rohen, per
+`texImage2D(..., width, height, ..., srcData)` hochgeladenen
+`ArrayBufferView`-Puffer bewirkt derselbe Flip eine vertikale
+Spiegelung gegenüber dem `ImageBitmap`-Pfad — beide Upload-Arten
+brauchen unterschiedliche `UNPACK_FLIP_Y_WEBGL`-Einstellungen, um zum
+selben Ergebnis zu kommen (der Browser behandelt die Zeilenreihenfolge
+eines rohen Arrays beim Hochladen anders als die eines
+`ImageBitmap`-Quellobjekts). Betraf **jedes** im Entwickeln-Modus
+angezeigte Foto als vertikale Spiegelung, fiel aber bei den meisten
+bisherigen Testbildern (symmetrisch wirkende Motive, Farbverlaufs-
+Platzhalter in Playwright-Mocks) nicht auf — erst ein echtes,
+eindeutig "oben"/"unten" erkennbares Motiv machte es sichtbar. Fix:
+`uploadRgba8` setzt jetzt `UNPACK_FLIP_Y_WEBGL = false`. Zusätzlich
+schließt ein neues Testmodul in `crates/apx-raw/src/fallback.rs`
+(vorher ganz ohne Tests) die aufgedeckte Lücke dauerhaft: vier neue
+Tests bauen ein echtes JPEG mit echtem EXIF-Orientation-Tag und prüfen
+`read_exif`, `decode` (180°- und 90°-Fall) sowie die Übereinstimmung
+zwischen `decode` und `decode_linear`.
+
+**(2) Masken-Knopf-Umbruch:** `MasksPanel.tsx`s "Maske hinzufügen"-
+und "KI-Maske hinzufügen"-Abschnitte nutzten ein zweispaltiges
+`grid grid-cols-2`-Raster bei einer Standard-/Minimalpalettenbreite von
+180–256 px (`PaletteFrame`/`useWorkspacePanel`) — bei rund 100 px
+nutzbarer Spaltenbreite abzüglich Knopf-Innenabstand brachen längere
+deutsche Beschriftungen ("+ Linearer Verlauf", "Hintergrund") auf zwei
+Zeilen um. Fix: beide Abschnitte auf ein einspaltiges
+`flex flex-col`-Layout umgestellt (dieselbe volle Breite, die die
+längste Beschriftung, "+ Unschärfe-basierte Tiefennäherung", ohnehin
+schon per `col-span-2` bekam) — behebt strukturell statt einzelne
+Schriftgrößen/Abkürzungen nachzujustieren, und beseitigt nebenbei eine
+unausgerichtete letzte Zeile im fünf-Elemente-KI-Masken-Raster.
+
+**(3) Analyse-Panel unbeweglich:** `DevelopAnalysisPanel.tsx` hatte
+schlicht keine Verschiebe- oder Einklapp-Funktion — fest `absolute
+right-2 top-2`, ohne jede Möglichkeit, es aus dem Weg zu räumen, wenn
+es den darunterliegenden Bildausschnitt verdeckt. Neu: eine volle
+Kopfzeile ("Analyse" + Einklapp-Knopf `▾`/`▸`) dient als Ziehgriff
+(`onMouseDown` + `window`-`mousemove`/`mouseup`-Listener, dasselbe
+Muster wie `Viewer.tsx`s bestehendes Schwenk-Ziehen), die Position wird
+per `transform: translate(...)` relativ zur Standardecke verschoben —
+bewusst nicht `localStorage`-persistiert wie `PaletteFrame`s Breite,
+da dieses Panel eine leichte, foto-lokale Analyse-Überlagerung ist,
+kein dauerhaftes Layout-Element. Die beiden Clipping-Anzeige-Knöpfe
+saßen zuvor in derselben `justify-between`-Zeile wie die drei
+Registerkarten-Knöpfe ohne Umbruchmöglichkeit und liefen bei der
+vorherigen `w-56`-Breite über den rechten Rand hinaus; jetzt
+`flex-wrap` auf dieser Zeile plus etwas mehr Breite (`w-60`). Die neue,
+über die volle Kopfzeilenbreite ziehbare Trefferfläche überlappte bei
+der bisherigen `top-2`-Position die ebenfalls schwebende
+TAT-Werkzeugleiste (`right-3 top-3`) und fing ihr zuvor unbehelligtes
+"TAT: Kurve"/"TAT: HSL"-Klicken ab (aufgedeckt durch die zuvor
+bestehende, jetzt erneut grüne `tat-flow.spec.ts`) — behoben durch
+`top-12` statt `top-2` als neue Standardposition.
+
+Verifiziert per `tsc -b`, `cargo fmt -p apx-raw`, `cargo test -p
+apx-raw` (40 Tests, davon 4 neu), `cargo clippy -p apx-raw
+--all-targets --all-features`, `vitest run` (251 Tests) und der
+**vollständigen** Playwright-Suite (142/142 — der vorbestehende
+`tat-flow.spec.ts`-Flake trat während dieser Untersuchung tatsächlich
+einmal als echte Regression auf, siehe oben, und wurde gefixt statt
+erneut nur dokumentiert). Reale visuelle Verifikation per
+Playwright-Screenshot bestätigt alle drei Fixes am Bildschirm: der
+isolierte WebGL-Vergleichstest zeigt identische Ausrichtung über beide
+Upload-Pfade, das Masken-Panel zeigt alle Knopfbeschriftungen
+einzeilig, das Analyse-Panel lässt sich sichtbar verschieben und auf
+seine Kopfzeile einklappen.

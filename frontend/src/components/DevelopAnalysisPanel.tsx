@@ -262,6 +262,49 @@ export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnab
   // Rules of Hooks (unterschiedliche Hook-Zahl je nach `frame`).
   const [analysisTab, setAnalysisTab] = useState<AnalysisTab>("histogram");
 
+  // Verschiebbar + einklappbar (Phase 18-Nachtrag, siehe `DECISIONS.md`):
+  // bislang fest `absolute right-2 top-2`, ohne jede Möglichkeit, das
+  // Panel aus dem Weg zu räumen, wenn es gerade den darunterliegenden
+  // Bildausschnitt verdeckt — genau der gemeldete "lässt sich weder
+  // verschieben noch minimieren"-Befund. `offset` verschiebt das Panel
+  // per `transform` relativ zu seiner Standardposition (obere rechte
+  // Ecke) statt `left`/`top` neu zu berechnen — bewusst nicht
+  // `localStorage`-persistiert wie `PaletteFrame`s Breite: dieses Panel
+  // ist eine leichte, foto-lokale Analyse-Überlagerung, kein dauerhaftes
+  // Layout-Element.
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [collapsed, setCollapsed] = useState(false);
+  const dragState = useRef<{ startClientX: number; startClientY: number; startOffsetX: number; startOffsetY: number } | null>(null);
+
+  useEffect(() => {
+    function handleMouseMove(event: MouseEvent) {
+      const drag = dragState.current;
+      if (!drag) return;
+      setOffset({
+        x: drag.startOffsetX + (event.clientX - drag.startClientX),
+        y: drag.startOffsetY + (event.clientY - drag.startClientY),
+      });
+    }
+    function handleMouseUp() {
+      dragState.current = null;
+    }
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
+
+  const handleDragHandleMouseDown = (event: React.MouseEvent) => {
+    // Nur die linke Maustaste startet das Ziehen, und nicht, wenn der
+    // Klick eigentlich einem der Knöpfe in der Kopfzeile galt (die
+    // stoppen selbst per `stopPropagation`, siehe unten) — hier zusätzlich
+    // defensiv gegen künftige Erweiterungen der Kopfzeile.
+    if (event.button !== 0) return;
+    dragState.current = { startClientX: event.clientX, startClientY: event.clientY, startOffsetX: offset.x, startOffsetY: offset.y };
+  };
+
   if (!frame) return null;
 
   const histogram = computeHistogram(frame.pixels, frame.width, frame.height);
@@ -275,91 +318,132 @@ export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnab
   const waveform: Waveform | null = analysisTab === "waveform" ? computeWaveform(frame.pixels, frame.width, frame.height) : null;
 
   // `pointer-events-none` auf dem Container, `pointer-events-auto` nur auf
-  // den beiden Schaltflächen — dieses Panel schwebt über dem Viewer und
-  // würde sonst (besonders in einem schmalen Viewer-Ausschnitt neben
-  // vielen offenen Seitenleisten) Bildklicks für Werkzeuge wie den
+  // einzelnen Schaltflächen/der Kopfzeile — dieses Panel schwebt über dem
+  // Viewer und würde sonst (besonders in einem schmalen Viewer-Ausschnitt
+  // neben vielen offenen Seitenleisten) Bildklicks für Werkzeuge wie den
   // Reparatur-Pinsel oder die Weißabgleich-Pipette darunter abfangen.
+  //
+  // `top-12` statt `top-2`: die neue, über die volle Breite ziehbare
+  // Kopfzeile (siehe unten) liegt sonst genau über dem ebenfalls
+  // `absolute right-3 top-3` positionierten TAT-Werkzeugleisten-Block
+  // weiter oben in dieser Datei — vorher fing dort nur ein kleiner
+  // Knopf Klicks ab, jetzt eine volle Zeile, was TAT-Klicks verschluckt
+  // hätte. Etwas Abstand nach unten statt Koordination mit der
+  // TAT-Leiste, da dieses Panel ohnehin frei verschiebbar ist.
   return (
-    <div className="pointer-events-none absolute right-2 top-2 flex w-56 flex-col gap-2 rounded border border-border bg-bg-raised/95 p-2 text-xs shadow-lg">
-      <div>
-        <div className="mb-1 flex items-center justify-between">
-          <div className="flex gap-1">
-            {(Object.keys(ANALYSIS_TAB_LABELS) as AnalysisTab[]).map((tab) => (
+    <div
+      className="pointer-events-none absolute right-2 top-12 flex w-60 flex-col gap-2 rounded border border-border bg-bg-raised/95 p-2 text-xs shadow-lg"
+      style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
+    >
+      {/* Kopfzeile ist der Ziehgriff fürs Verschieben (die ganze Zeile,
+          nicht nur ein kleines Symbol — großzügigere Trefferfläche) plus
+          Einklapp-Knopf. `onMouseDown` auf der Zeile, nicht auf einzelnen
+          Knöpfen — die stoppen die Propagation selbst, sonst würde jeder
+          Klick auf Registerkarte/Knopf zusätzlich das Ziehen starten. */}
+      <div
+        className="pointer-events-auto -m-2 mb-0 flex cursor-grab items-center justify-between rounded-t border-b border-border bg-bg-panel px-2 py-1 active:cursor-grabbing"
+        onMouseDown={handleDragHandleMouseDown}
+      >
+        <span className="pointer-events-none select-none font-semibold text-text-secondary">Analyse</span>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setCollapsed((value) => !value);
+          }}
+          onMouseDown={(event) => event.stopPropagation()}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? "Analyse-Panel ausklappen" : "Analyse-Panel einklappen"}
+          title={collapsed ? "Ausklappen" : "Einklappen"}
+          className="pointer-events-auto rounded border border-border px-1 text-text-secondary hover:border-accent"
+        >
+          {collapsed ? "▸" : "▾"}
+        </button>
+      </div>
+
+      {!collapsed && (
+        <>
+          <div>
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-1">
+              <div className="flex gap-1">
+                {(Object.keys(ANALYSIS_TAB_LABELS) as AnalysisTab[]).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setAnalysisTab(tab)}
+                    aria-pressed={analysisTab === tab}
+                    className={`pointer-events-auto rounded border px-1 text-[10px] ${analysisTab === tab ? "border-accent text-accent" : "border-border text-text-secondary hover:border-accent"}`}
+                  >
+                    {ANALYSIS_TAB_LABELS[tab]}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={onToggleClippingOverlay}
+                  aria-pressed={clippingOverlayEnabled}
+                  title={`Tiefen geclippt: ${shadowPercent.toFixed(1)}%`}
+                  className={`pointer-events-auto rounded border px-1 ${shadowPercent > 0 ? "border-blue-400 text-blue-400" : "border-border text-text-muted"} ${clippingOverlayEnabled ? "bg-blue-400/20" : ""}`}
+                >
+                  ▲
+                </button>
+                <button
+                  type="button"
+                  onClick={onToggleClippingOverlay}
+                  aria-pressed={clippingOverlayEnabled}
+                  title={`Lichter geclippt: ${highlightPercent.toFixed(1)}%`}
+                  className={`pointer-events-auto rounded border px-1 ${highlightPercent > 0 ? "border-danger text-danger" : "border-border text-text-muted"} ${clippingOverlayEnabled ? "bg-danger/20" : ""}`}
+                >
+                  ▲
+                </button>
+              </div>
+            </div>
+            {analysisTab === "histogram" && <HistogramCanvas histogram={histogram} />}
+            {analysisTab === "vectorscope" && vectorscope && <VectorscopeCanvas vectorscope={vectorscope} />}
+            {analysisTab === "waveform" && waveform && <WaveformCanvas waveform={waveform} />}
+            {analysisTab === "histogram" && (
               <button
-                key={tab}
                 type="button"
-                onClick={() => setAnalysisTab(tab)}
-                aria-pressed={analysisTab === tab}
-                className={`pointer-events-auto rounded border px-1 text-[10px] ${analysisTab === tab ? "border-accent text-accent" : "border-border text-text-secondary hover:border-accent"}`}
+                onClick={() => onAutoTone(histogram)}
+                className="pointer-events-auto mt-1 w-full rounded border border-border px-1 py-0.5 hover:border-accent"
+                title="Belichtung/Kontrast aus dem Histogramm ableiten (Perzentil-Heuristik, keine KI)"
               >
-                {ANALYSIS_TAB_LABELS[tab]}
+                Auto-Ton
               </button>
-            ))}
+            )}
           </div>
-          <div className="flex gap-1">
-            <button
-              type="button"
-              onClick={onToggleClippingOverlay}
-              aria-pressed={clippingOverlayEnabled}
-              title={`Tiefen geclippt: ${shadowPercent.toFixed(1)}%`}
-              className={`pointer-events-auto rounded border px-1 ${shadowPercent > 0 ? "border-blue-400 text-blue-400" : "border-border text-text-muted"} ${clippingOverlayEnabled ? "bg-blue-400/20" : ""}`}
-            >
-              ▲
-            </button>
-            <button
-              type="button"
-              onClick={onToggleClippingOverlay}
-              aria-pressed={clippingOverlayEnabled}
-              title={`Lichter geclippt: ${highlightPercent.toFixed(1)}%`}
-              className={`pointer-events-auto rounded border px-1 ${highlightPercent > 0 ? "border-danger text-danger" : "border-border text-text-muted"} ${clippingOverlayEnabled ? "bg-danger/20" : ""}`}
-            >
-              ▲
-            </button>
-          </div>
-        </div>
-        {analysisTab === "histogram" && <HistogramCanvas histogram={histogram} />}
-        {analysisTab === "vectorscope" && vectorscope && <VectorscopeCanvas vectorscope={vectorscope} />}
-        {analysisTab === "waveform" && waveform && <WaveformCanvas waveform={waveform} />}
-        {analysisTab === "histogram" && (
-          <button
-            type="button"
-            onClick={() => onAutoTone(histogram)}
-            className="pointer-events-auto mt-1 w-full rounded border border-border px-1 py-0.5 hover:border-accent"
-            title="Belichtung/Kontrast aus dem Histogramm ableiten (Perzentil-Heuristik, keine KI)"
-          >
-            Auto-Ton
-          </button>
-        )}
-      </div>
 
-      {thumbnailUrl && viewport && (
-        <div>
-          <span className="mb-1 block font-semibold text-text-secondary">Navigator</span>
-          <div className="relative overflow-hidden rounded border border-border">
-            <img src={thumbnailUrl} alt="Navigator" className="block w-full" />
-            <div
-              className="absolute border-2 border-accent"
-              style={{
-                left: `${viewport.x * 100}%`,
-                top: `${viewport.y * 100}%`,
-                width: `${viewport.width * 100}%`,
-                height: `${viewport.height * 100}%`,
-              }}
-            />
+          {thumbnailUrl && viewport && (
+            <div>
+              <span className="mb-1 block font-semibold text-text-secondary">Navigator</span>
+              <div className="relative overflow-hidden rounded border border-border">
+                <img src={thumbnailUrl} alt="Navigator" className="block w-full" />
+                <div
+                  className="absolute border-2 border-accent"
+                  style={{
+                    left: `${viewport.x * 100}%`,
+                    top: `${viewport.y * 100}%`,
+                    width: `${viewport.width * 100}%`,
+                    height: `${viewport.height * 100}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          <div>
+            <span className="font-semibold text-text-secondary">Punktfarbmesser</span>{" "}
+            {pointerSample ? (
+              <span>
+                R {pointerSample.r} · G {pointerSample.g} · B {pointerSample.b}
+              </span>
+            ) : (
+              <span className="text-text-muted">Bild überfahren…</span>
+            )}
           </div>
-        </div>
+        </>
       )}
-
-      <div>
-        <span className="font-semibold text-text-secondary">Punktfarbmesser</span>{" "}
-        {pointerSample ? (
-          <span>
-            R {pointerSample.r} · G {pointerSample.g} · B {pointerSample.b}
-          </span>
-        ) : (
-          <span className="text-text-muted">Bild überfahren…</span>
-        )}
-      </div>
     </div>
   );
 }

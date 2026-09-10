@@ -165,3 +165,117 @@ fn dms_to_decimal(dms: &[exif::Rational], reference: Option<&str>) -> f64 {
         _ => value,
     }
 }
+// Regressionstest für den auf dem Kopf stehenden Großansicht-Fund
+// (`DECISIONS.md`-Nachtrag zu Phase 18): `orientation.rs`s eigene Tests
+// prüfen nur die reine Pixel-Umordnungsmathematik mit einem von Hand
+// gesetzten `Orientation`-Wert, nie den tatsächlichen Weg über
+// `kamadak-exif`s Parsing eines echten JPEG-APP1-Segments — genau dieser
+// Weg war bislang ungetestet (diese Datei hatte vor Phase 18 überhaupt
+// kein Testmodul). Der eigentliche gemeldete Fehler lag zwar nicht hier
+// (siehe `lib/webgl.ts`s `uploadRgba8`-Fix), aber die Untersuchung deckte
+// diese echte Testlücke auf — hier geschlossen, statt sie wieder fallen
+// zu lassen.
+#[cfg(test)]
+mod exif_orientation_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    /// Baut ein minimales, gültiges JPEG mit einem echten APP1/EXIF-Block
+    /// (ein einzelnes Orientation-Tag, 0x0112, little-endian TIFF-Header),
+    /// direkt nach dem SOI-Marker eingefügt — wie ein reales Kamera-JPEG.
+    /// 4×2 Bild, oben links rot, alles andere schwarz, damit sich jede der
+    /// acht Orientierungen am Ort des roten Pixels ablesen lässt.
+    fn build_jpeg_with_orientation(orientation: u16) -> Vec<u8> {
+        let mut img = image::RgbImage::from_pixel(4, 2, image::Rgb([0, 0, 0]));
+        img.put_pixel(0, 0, image::Rgb([255, 0, 0]));
+        let dynamic = image::DynamicImage::ImageRgb8(img);
+        let mut jpeg_bytes = Vec::new();
+        dynamic
+            .write_to(&mut Cursor::new(&mut jpeg_bytes), image::ImageFormat::Jpeg)
+            .expect("jpeg-Kodierung sollte klappen");
+
+        let mut tiff = Vec::new();
+        tiff.extend_from_slice(b"II"); // little-endian
+        tiff.extend_from_slice(&0x002Au16.to_le_bytes());
+        tiff.extend_from_slice(&8u32.to_le_bytes()); // Offset IFD0
+        tiff.extend_from_slice(&1u16.to_le_bytes()); // 1 Eintrag
+        tiff.extend_from_slice(&0x0112u16.to_le_bytes()); // Tag: Orientation
+        tiff.extend_from_slice(&3u16.to_le_bytes()); // Typ: SHORT
+        tiff.extend_from_slice(&1u32.to_le_bytes()); // Anzahl Werte
+        let mut value_field = [0u8; 4];
+        value_field[0..2].copy_from_slice(&orientation.to_le_bytes());
+        tiff.extend_from_slice(&value_field);
+        tiff.extend_from_slice(&0u32.to_le_bytes()); // nächstes IFD: keins
+
+        let mut app1 = Vec::new();
+        app1.extend_from_slice(b"Exif\0\0");
+        app1.extend_from_slice(&tiff);
+        let length = (app1.len() + 2) as u16;
+
+        let mut out = Vec::new();
+        out.extend_from_slice(&jpeg_bytes[0..2]); // SOI
+        out.extend_from_slice(&[0xFF, 0xE1]);
+        out.extend_from_slice(&length.to_be_bytes());
+        out.extend_from_slice(&app1);
+        out.extend_from_slice(&jpeg_bytes[2..]); // Rest ab nach SOI
+
+        out
+    }
+
+    fn write_temp_jpeg(name: &str, orientation: u16) -> std::path::PathBuf {
+        let bytes = build_jpeg_with_orientation(orientation);
+        let path = std::env::temp_dir().join(name);
+        std::fs::write(&path, &bytes).expect("Test-JPEG sollte sich schreiben lassen");
+        path
+    }
+
+    #[test]
+    fn read_exif_finds_the_real_orientation_tag() {
+        let path = write_temp_jpeg("apx_fallback_exif_tag_test.jpg", 6);
+        let exif = read_exif(&path);
+        assert_eq!(exif.and_then(|e| e.orientation), Some(6));
+    }
+
+    #[test]
+    fn decode_rotates_180_for_a_real_exif_orientation_3_jpeg() {
+        let path = write_temp_jpeg("apx_fallback_exif_180_test.jpg", 3);
+        let decoded = decode(&path, None).expect("decode sollte klappen");
+        // Bei einer 180°-Drehung landet das ursprünglich oben-linke rote
+        // Pixel unten rechts.
+        let (w, h) = (decoded.width as usize, decoded.height as usize);
+        let last_idx = ((h - 1) * w + (w - 1)) * 3;
+        assert!(
+            decoded.pixels[last_idx] > decoded.pixels[0],
+            "rotes Pixel sollte nach der 180°-Drehung unten rechts sitzen, nicht oben links"
+        );
+    }
+
+    #[test]
+    fn decode_swaps_dimensions_for_a_real_exif_orientation_6_jpeg() {
+        // Orientation 6 = 90°-Drehung — vertauscht Breite/Höhe des 4×2-
+        // Quellbilds zu 2×4.
+        let path = write_temp_jpeg("apx_fallback_exif_90_test.jpg", 6);
+        let decoded = decode(&path, None).expect("decode sollte klappen");
+        assert_eq!((decoded.width, decoded.height), (2, 4));
+    }
+
+    #[test]
+    fn decode_linear_matches_decode_for_a_real_exif_jpeg() {
+        // `decode_linear` (der von der Entwickeln-Route genutzte
+        // Einstiegspunkt, siehe `pipeline::mod::decode_linear`) muss für
+        // Fallback-Formate exakt dieselbe Orientierung anwenden wie
+        // `decode` (die Vorschau-/Vollbild-Route) — beide teilen sich
+        // denselben `fallback::decode`-Aufruf, hier end-to-end über ein
+        // echtes JPEG bestätigt statt nur durch Code-Lesen angenommen.
+        let path = write_temp_jpeg("apx_fallback_exif_linear_test.jpg", 3);
+        let decoded = decode(&path, None).expect("decode sollte klappen");
+        let linear = crate::decode_linear(&path, None).expect("decode_linear sollte klappen");
+
+        assert_eq!(
+            (decoded.width, decoded.height),
+            (linear.width, linear.height)
+        );
+        let expected: Vec<f32> = decoded.pixels.iter().map(|&v| v as f32 / 65535.0).collect();
+        assert_eq!(linear.pixels, expected);
+    }
+}

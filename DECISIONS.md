@@ -4571,3 +4571,38 @@ Verifiziert per `tsc -b`, `vite build`, voller Playwright-Suite
 Umstrukturierung berühren viele bestehende Tests indirekt (jeder
 Knopf-Hover, jeder Ansicht-Wechsel), liefen deshalb bewusst gegen die
 **volle** Suite statt nur gezielter Stichproben.
+
+**Schritt 7 (Dokumentation, volle Verifikation, Abnahme):**
+`FEATURES.md` §4 nachgezogen (Kopfleiste/Befehlspalette/Paletten-
+Zeilen auf den Phase-18-Stand gebracht, neue Zeile für das Dialog-/
+Sheet-/Bewegungs-Design-System) — keine `THIRD_PARTY.md`-Änderung
+nötig, `package.json`/`package-lock.json` seit Phase 10 Schritt 11
+unverändert (kein neues npm-Paket in dieser Phase, wie in der
+Entwurfsentscheidung festgelegt). Abschließende reale visuelle
+Verifikation per Playwright-Screenshot (Raster, Kopfleiste-Suchknopf +
+Befehlspalette, Overflow-Menü mit der neuen KI-Funktionen-Kategorie
+samt Modellstatus, migrierter Export-Dialog als Sheet, Entwickeln-Panel
+„Licht"- und „Kreativ"-Registerkarte) — alle sechs Ansichten real
+angeschaut, nicht nur am Code angenommen; keine Auffälligkeiten.
+`tsc -b`/`vite build`/`vitest run` (251 Tests)/volle Playwright-Suite
+(141/142, derselbe seit Schritt 3 dokumentierte, unabhängig bestätigte
+`tat-flow.spec.ts`-Flake) am Ende noch einmal komplett grün.
+`cargo fmt --all -- --check` und `cargo clippy --workspace
+--all-targets --all-features -- -D warnings -D clippy::unwrap_used`
+laufen sauber durch (Letzteres kompiliert dabei auch jedes Testziel
+jedes Crates). **Ehrlich begrenzt:** `cargo test --workspace` konnte in
+dieser Sitzung nicht zu Ende laufen — die Sandbox hat ein festes
+Datenträger-Kontingent, ein voller Workspace-Rebuild (u. a. `whisper-
+rs`/`dlib-face-recognition` mit Debug-Symbolen) füllte `target/` auf
+26 GB und erschöpfte das Kontingent vollständig, noch bevor die Tests
+selbst liefen; nach Aufräumen (`target/` gelöscht) reichte der
+verbleibende Spielraum nicht mehr für einen sicheren zweiten Versuch,
+ohne den restlichen Abnahme-Ablauf zu gefährden. Da diese Phase
+nachweislich **keine** Rust-Datei berührt (`git diff --stat` gegen den
+Phase-17-Stand zeigt ausschließlich `frontend/`/`DECISIONS.md`/
+`PLAN.md`/`FEATURES.md`) und der vollständige Workspace-Kompilierlauf
+über `clippy --all-targets` bereits erfolgreich war, ist das
+Laufzeitrisiko für Rust durch diese Phase praktisch ausgeschlossen —
+`cargo test --workspace` bleibt trotzdem ein offener Nachtrag für eine
+Sitzung mit mehr Datenträger-Spielraum, kein stillschweigend
+übergangener Schritt.

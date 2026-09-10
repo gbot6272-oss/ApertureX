@@ -35,6 +35,20 @@
 //! `AbortController` statt eines einfachen `<img src>`, sodass ein
 //! veraltetes Ergebnis zumindest nicht mehr verarbeitet wird, sobald das
 //! nächste Bild angefordert wurde (siehe Viewer, Schritt 9).
+//!
+//! **`Access-Control-Allow-Origin: *` auf jeder Antwort:** weil das
+//! Frontend `fetch()` statt `<img src>` nutzt (siehe oben), prüft der
+//! Browser CORS auch gegen dieses Custom-Protokoll — anders als bei einem
+//! einfachen `<img>`-Tag, der Cross-Origin-Antworten unabhängig von CORS-
+//! Headern anzeigt. In `cargo tauri dev` läuft die Seite selbst unter der
+//! Vite-Dev-Server-Origin (`http://localhost:5173`), während `apx://` als
+//! eigene Origin (`http://apx.localhost` unter Windows) antwortet — ohne
+//! diesen Header schlägt jeder `fetch()` auf `apx://...` mit
+//! `TypeError: Failed to fetch` fehl, obwohl der Server bereits 200 mit
+//! den echten Bilddaten geantwortet hat (der Browser verwirft die Antwort
+//! nach Erhalt). Unbedenklich als Wildcard, weil dieses Protokoll nur
+//! innerhalb der eigenen App-Instanz erreichbar ist, keine Cookies/
+//! Zugangsdaten trägt und nichts anderes als lokale Katalogdaten liefert.
 
 mod cache;
 mod route;
@@ -165,6 +179,7 @@ fn handle_inner<R: Runtime>(
         // damit ein künftiges Re-Rendering (Phase 2, Bearbeitung) nicht
         // durch einen zu aggressiven Cache blockiert wird.
         .header(header::CACHE_CONTROL, "private, max-age=86400")
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .body((*bytes).clone())
         .map_err(|err| HandlerError::internal(err.to_string()))
 }
@@ -215,6 +230,7 @@ fn handle_video_request(
             return Response::builder()
                 .status(StatusCode::RANGE_NOT_SATISFIABLE)
                 .header(header::CONTENT_RANGE, format!("bytes */{file_size}"))
+                .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
                 .body(Vec::new())
                 .map_err(|err| HandlerError::internal(err.to_string()));
         }
@@ -251,6 +267,7 @@ fn handle_video_request(
             format!("bytes {start}-{capped_end}/{file_size}"),
         )
         .header(header::CACHE_CONTROL, "private, max-age=86400")
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .body(buffer)
         .map_err(|err| HandlerError::internal(err.to_string()))
 }
@@ -585,6 +602,7 @@ fn error_response(err: &HandlerError) -> Response<Vec<u8>> {
     Response::builder()
         .status(err.status)
         .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .body(err.message.clone().into_bytes())
         .unwrap_or_else(|_| Response::new(Vec::new()))
 }

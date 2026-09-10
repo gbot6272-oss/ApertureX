@@ -4,6 +4,15 @@
  * hartkodierten deutschen Text an derselben Stelle.
  */
 export const de = {
+  // DevelopPanel.tsx/MasksPanel.tsx — Registerkarten (Phase 18 Schritt 4)
+  "developPanel.tab.light": "Licht",
+  "developPanel.tab.color": "Farbe",
+  "developPanel.tab.details": "Details",
+  "developPanel.tab.creative": "Kreativ",
+  "developPanel.tab.history": "Verlauf & Werkzeuge",
+  "developPanel.tabs.label": "Entwickeln-Bereiche",
+  "masksPanel.tabs.label": "Masken-Bereiche",
+
   // Header.tsx — Zeile 1 (Import + Ansicht)
   "header.importFolder": "Ordner importieren",
   "header.importWithTemplate": "Import mit Vorlage…",
@@ -45,6 +54,31 @@ export const de = {
   "header.settings": "Einstellungen…",
   "header.settingsTitle": "Theme, Sprache, UI-Skalierung, Barrierefreiheit (Phase 10)",
   "header.paletteHint": "Strg/Cmd+K — Befehlspalette",
+  "header.videoTimeline": "Zeitachse…",
+
+  // Header.tsx — schlanke Kopfleiste (Phase 18 Schritt 3, siehe
+  // `DECISIONS.md` ADR-0046): Such-/Befehlsknopf + Overflow-Menü statt
+  // der vormaligen zweiten Knopfzeile.
+  "header.search": "Suchen oder ⌘K",
+  "header.overflowMenu": "Weitere Funktionen",
+
+  // commandRegistry.ts — Kategorie- und KI-Status-Beschriftungen für das
+  // Overflow-Menü und die Befehlspalette (Phase 18 Schritt 3).
+  "commands.category.ai": "KI-Funktionen",
+  "commands.onboarding": "Erste Schritte anzeigen",
+  "commands.cheatsheet": "Tastenkürzel-Übersicht anzeigen",
+  "commands.ai.inpaint": "KI-Ausfüllen",
+  "commands.ai.outpaint": "Bildranderweiterung",
+  "commands.ai.skinSmoothing": "Hautglätten",
+  "commands.ai.skyReplace": "Himmelsaustausch",
+  "commands.ai.styleTransfer": "Stiltransfer",
+  "commands.ai.depth": "Tiefenschärfe-Simulator",
+  "commands.ai.removeBackground": "Hintergrund entfernen",
+  "commands.ai.subtitles": "Untertitel",
+  "commands.ai.people": "Personen-Erkennung",
+  "commands.ai.status.ready": "Bereit",
+  "commands.ai.status.downloadNeeded": "Download nötig",
+  "commands.ai.status.notAvailable": "Nicht verfügbar",
 
   // Sidebar.tsx
   "sidebar.heading": "Ordner",

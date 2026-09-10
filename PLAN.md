@@ -1171,6 +1171,29 @@ Volle Suite gebündelt erst im letzten Schritt.
 - [x] 6. Social-Media-Export-Presets (9:16/1:1/16:9) — reine Frontend-Erweiterung, Backend skaliert bereits "cover" auf beliebiges Seitenverhältnis
 - [x] 7. Bild-in-Bild / Split-Screen — `TimelinePipOverlay` (Quelle = normaler `TimelineItem`), Split-Screen als zwei gegenüberliegende 50%-Overlays statt eigenem Mechanismus
 - [x] 8. Greenscreen/Hintergrund entfernen (MediaPipe Selfie Segmentation) — Ein-Clip-Command wie die LUT-Anwendung, ehrliche URL-/Hash-Lücke wie beim LaMa-Modell (huggingface.co blockiert)
-- [ ] 9. Video-Stabilisierung (Wiederverwendung `apx-stacking`-Homografie)
+- [ ] 9. Video-Stabilisierung (Wiederverwendung `apx-stacking`-Homografie) — **pausiert auf ausdrücklichen Nutzerwunsch, nicht autonom fortsetzen**
 - [ ] 10. Dokumentation, volle Verifikation, Abnahme
 - [x] `tsc -b`, volle `vitest run`-Suite (251 Tests, 28 neue), `map-flow.spec.ts` grün
+
+## Aktuelle Phase: Phase 18 — UI/UX-Overhaul
+
+Nutzerurteil nach eigenem Test der App (Screenshot beigefügt): wirkt
+"wie eine billige App, in die keine sinnvollen Entscheidungen
+geflossen sind" — verwirrendes Layout, zu viel Scrollen, zu viele
+Einzelknöpfe statt zusammenhängender Flächen, aufpoppende Dialoge
+ohne durchgehendes Gefühl. Jede Einzelbeschwerde vorab real im Code
+verifiziert, siehe `DECISIONS.md` ADR-0046 für den vollständigen
+Ist-Zustand-Befund und die Entwurfsentscheidungen. Reines Frontend,
+keine neue Backend-Funktionalität, keine neue Laufzeitabhängigkeit.
+Testdisziplin abweichend von Phase 16/17: ab Schritt 2 zusätzlich
+gezielte Playwright-Teilläufe je Schritt (nicht nur `tsc -b`), volle
+Suite inkl. visueller Verifikation gebündelt in Schritt 7.
+
+- [x] 0. ADR-0046 + PLAN.md-Abschnitt
+- [x] 1. Design-Token-Fundament (`index.css` `@theme`-Erweiterung: Radius/Schatten/`--color-bg-overlay`) + `lib/motion.ts` (`usePrefersReducedMotion()`) — Tailwinds eigene `--ease-*`/Typografie-/Radius-/Schatten-Skala bereits vorhanden, nur gezielt überschrieben statt neu erfunden (siehe DECISIONS.md ADR-0046-Nachtrag)
+- [x] 2. Gemeinsame `Dialog`/`Sheet`-Primitive (`components/ui/`) + Migration aller 25 Dialoge, `CommandPalette`, `KeybindingsCheatsheet` — alle 49 zugehörigen Playwright-Tests grün (echte Laufzeitverifikation, nicht nur `tsc -b`)
+- [x] 3. Navigation: `lib/commandRegistry.ts` (eine Quelle statt zwei) + schlanke Kopfleiste (eine Zeile: Logo/Import/Such-Befehlsknopf/Ansicht-Segmentgruppe/`components/ui/Menu.tsx`-Overflow-Menü/Einstellungen) + lokalisierte, registergespeiste `CommandPalette` mit neuer "KI-Funktionen"-Kategorie (Modellstatus-Badge, springt direkt zum richtigen Panel) — 16 Playwright-Spezifikationen ans neue Overflow-Menü angepasst (`openOverflowMenu()`-Helfer), volle Suite 141/142 grün (1 vorbestehender, unabhängiger Flake bestätigt per Vergleichslauf)
+- [x] 4. `DevelopPanel`/`MasksPanel` in fünf (bzw. drei, `MasksPanel` ohne Kreativ/Verlauf-Inhalt) Registerkarten statt durchgehender Scroll-Spalte (`components/ui/Tabs.tsx`) — jedes Fieldset unverändert übernommen, nur neu gruppiert; echter Regressions-Fund dabei behoben (Node-Editor-"Öffnen" wechselt jetzt automatisch auf die Ziel-Registerkarte statt still zu scheitern); 12 Playwright-Spezifikationen angepasst, volle Suite weiterhin 141/142 grün (derselbe vorbestehende `tat-flow.spec.ts`-Flake)
+- [x] 5. Gezielte Bugfixes: `QuickDevelopOverlay` erscheint nur noch bei echtem Hover (Fokus ohne Hover zeigt ein kleines Eck-Symbol statt der vollen Reglerfläche), `devicePixelRatio`-Skalierung für Histogramm/Vektorskop/Wellenform (`useCanvasDprWidth()`, Offscreen-Canvas + `drawImage` für die beiden `putImageData`-Canvases), sanfte `PaletteFrame`-Breitenanimation beim Ein-/Ausklappen (deaktiviert während aktivem Ziehen) — alle drei real per Playwright-Screenshot sichtgeprüft, volle Suite weiterhin 141/142 grün
+- [x] 6. Bewegungs-Politur-Durchgang: globale Hover-/Fokus-`transition-colors`-Regel (`index.css`, wirkt auf alle bestehenden Knöpfe/Links ohne Einzeländerung), sanfte `.apx-view-fade-in`-Überblendung beim `centerView`-Wechsel (nur um die Zentralansicht, nicht die Seitenpaletten), Anwenden-Rückmeldung bei Preset-Übernahme (kurzer Hintergrund-Puls) — volle Suite weiterhin 141/142 grün
+- [x] 7. Dokumentation (FEATURES.md §4 nachgezogen, kein THIRD_PARTY.md-Nachtrag nötig — keine neue npm-Abhängigkeit), volle Verifikation (`tsc -b`/`vite build`/`vitest run` 251 Tests/volle Playwright-Suite 141/142, `cargo fmt`/`clippy --workspace --all-targets --all-features` sauber; `cargo test --workspace` in dieser Sitzung am Sandbox-Datenträgerkontingent gescheitert, siehe DECISIONS.md ADR-0046 Schritt-7-Nachtrag — offener Nachtrag, kein stillschweigend übersprungener Schritt), reale visuelle Playwright-Screenshot-Verifikation (Raster/Kopfleiste+Palette/Overflow-Menü mit KI-Funktionen/migrierter Export-Sheet/Entwickeln-Tabs), Abnahme

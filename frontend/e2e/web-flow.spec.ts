@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { getMockInvokeLog, installTauriMock } from "./tauri-mock";
+import { getMockInvokeLog, installTauriMock, openOverflowMenu } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -24,17 +24,20 @@ test.describe("Web-Galerie (Phase 8 Schritt 6)", () => {
   test("Web-Knopf ist ohne Auswahl deaktiviert, mit Auswahl geht der Dialog auf", async ({ page }) => {
     await installTauriMock(page, { folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }], photosByFolder: { [FOLDER_ID]: [PHOTO] } });
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "Web…" })).toBeDisabled();
+    await openOverflowMenu(page);
+    await expect(page.getByRole("menuitem", { name: "Web…" })).toBeDisabled();
 
     await page.getByRole("button", { name: /Urlaub/ }).click();
     await page.getByRole("img", { name: PHOTO.filename }).click();
-    await page.getByRole("button", { name: "Web…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Web…" }).click();
     await expect(page.getByText(/^1 Foto —/)).toBeVisible();
   });
 
   test("Export sendet die gewählten Einstellungen und zeigt das Ergebnis", async ({ page }) => {
     await setUpWithSelectedPhoto(page, { selectFolderResult: "/home/user/Web/Galerie" });
-    await page.getByRole("button", { name: "Web…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Web…" }).click();
 
     await page.getByLabel("Titel").fill("Urlaub 2026");
     await page.getByLabel("Theme").selectOption("dark");
@@ -54,7 +57,8 @@ test.describe("Web-Galerie (Phase 8 Schritt 6)", () => {
 
   test("fehlgeschlagener Export zeigt die Fehlermeldung", async ({ page }) => {
     await setUpWithSelectedPhoto(page, { selectFolderResult: "/home/user/Web/Galerie", webExportShouldFail: true });
-    await page.getByRole("button", { name: "Web…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Web…" }).click();
     await page.getByRole("button", { name: "Galerie erzeugen" }).click();
     await expect(page.getByText(/Fehler: Test-Stub: Web-Export fehlgeschlagen/)).toBeVisible();
   });

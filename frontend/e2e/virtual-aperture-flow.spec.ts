@@ -51,6 +51,8 @@ test("Virtuelle Blende: Fokuspunkt per Klick setzen, Tiefenkarte berechnen und d
   await page.getByRole("button", { name: /Urlaub/ }).click();
   await page.getByRole("img", { name: PHOTO.filename }).click();
   await page.getByRole("button", { name: "Entwickeln" }).click();
+  // Phase 18 Schritt 4: dieser Abschnitt liegt jetzt hinter einer eigenen Registerkarte.
+  await page.getByRole("tab", { name: "Kreativ" }).click();
 
   const focusButton = page.getByRole("button", { name: "Fokuspunkt setzen" });
   await focusButton.click();

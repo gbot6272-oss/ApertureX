@@ -47,6 +47,8 @@ async function setUp(page: import("@playwright/test").Page) {
 test.describe("Compositing-Panel (Mehrfachbelichtung)", () => {
   test("fügt eine Ebene aus einem anderen Foto hinzu, blendet sie aus/ein und entfernt sie wieder", async ({ page }) => {
     await setUp(page);
+    // Phase 18 Schritt 4: dieser Abschnitt liegt jetzt hinter einer eigenen Registerkarte.
+    await page.getByRole("tab", { name: "Kreativ" }).click();
 
     await expect(page.getByRole("group", { name: "Compositing" })).toBeVisible();
     await expect(page.getByText("Keine Compositing-Ebenen vorhanden.")).toBeVisible();

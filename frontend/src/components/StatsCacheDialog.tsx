@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { useLocale, useT } from "../lib/i18n";
 import { formatBytes } from "../lib/format";
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 interface StatsCacheDialogProps {
   open: boolean;
@@ -32,11 +33,9 @@ export function StatsCacheDialog({ open, onClose }: StatsCacheDialogProps) {
     void refreshPreviewCacheStats();
   }, [open, refreshCatalogStatistics, refreshPreviewCacheStats]);
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-lg border border-border bg-bg-raised p-4 shadow-xl">
+    <Dialog open={open} onClose={onClose} label={t("statsCacheDialog.title")} className="max-w-md">
+      <div className="p-4">
         <h2 className="mb-3 text-sm font-semibold text-text-primary">{t("statsCacheDialog.title")}</h2>
 
         {stats && (
@@ -92,6 +91,6 @@ export function StatsCacheDialog({ open, onClose }: StatsCacheDialogProps) {
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

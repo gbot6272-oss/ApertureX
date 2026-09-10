@@ -4,6 +4,7 @@ import { RENAME_PATTERN_TOKENS, previewRenamePattern } from "../lib/renamePatter
 import { importPresetModeToImportModeDto, selectFolderDialog } from "../lib/tauri";
 import type { ImportPresetDto, ImportPresetModeDto } from "../lib/tauri";
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 interface ImportDialogProps {
   open: boolean;
@@ -57,8 +58,6 @@ export function ImportDialog({ open, sourcePath, onClose }: ImportDialogProps) {
     setVolumeOverride(null);
   }, [open, refreshImportPresets, loadRemovableVolumes]);
 
-  if (!open) return null;
-
   function insertToken(token: string) {
     setRenamePattern((previous) => `${previous}${token}`);
   }
@@ -98,13 +97,8 @@ export function ImportDialog({ open, sourcePath, onClose }: ImportDialogProps) {
   const canImport = modeChoice === "AddInPlace" || targetDir.trim().length > 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-24" onClick={onClose}>
-      <div
-        role="dialog"
-        aria-label="Import mit Vorlage"
-        className="w-full max-w-md rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <Dialog open={open} onClose={onClose} label="Import mit Vorlage" className="max-w-md">
+      <div className="p-4">
         <h2 className="mb-1 text-sm font-semibold text-text-primary">Import mit Vorlage</h2>
         <p className="mb-1 truncate text-xs text-text-muted" title={effectiveSourcePath}>
           Quelle: {effectiveSourcePath}
@@ -269,6 +263,6 @@ export function ImportDialog({ open, sourcePath, onClose }: ImportDialogProps) {
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

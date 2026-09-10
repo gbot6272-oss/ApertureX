@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useT } from "../lib/i18n";
 import { pickFilePath, pickSaveFilePath, PRINT_SHOP_PRESET_NAMES, type BookOptions, type BookPageTemplate } from "../lib/tauri";
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 interface BookDialogProps {
   open: boolean;
@@ -37,8 +38,6 @@ export function BookDialog({ open, photoIds, onClose }: BookDialogProps) {
   const [title, setTitle] = useState("");
   const [fontPath, setFontPath] = useState("");
 
-  if (!open) return null;
-
   const needsFont = title.length > 0 || template === "photo_with_caption";
 
   async function handlePickFont() {
@@ -62,11 +61,8 @@ export function BookDialog({ open, photoIds, onClose }: BookDialogProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16" onClick={onClose}>
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
-      >
+    <Dialog open={open} onClose={onClose} label={t("bookDialog.title")} className="max-w-md">
+      <div className="p-4">
         <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("bookDialog.title")}</h2>
         <p className="mb-3 text-xs text-text-muted">
           {t("bookDialog.photoCount", { count: photoIds.length, plural: photoIds.length === 1 ? "" : "s" })}
@@ -143,6 +139,6 @@ export function BookDialog({ open, photoIds, onClose }: BookDialogProps) {
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

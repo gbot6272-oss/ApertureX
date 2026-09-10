@@ -8,6 +8,7 @@ import { conditionNode, groupNode } from "../lib/ruleTree";
 import type { RuleNode } from "../lib/ruleTree";
 import { RuleTreeEditor } from "./RuleTreeEditor";
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 function makeDefaultSmartLeaf(): SmartCollectionLeaf {
   return { field: "rating", op: "at_least", value: "4" };
@@ -100,8 +101,6 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
     if (selectedPhotoId) void refreshVirtualCopies(selectedPhotoId);
   }, [open, refreshCollectionFolders, refreshCollections, refreshStacks, refreshColorLabelDefinitions, refreshVirtualCopies, selectedPhotoId]);
 
-  if (!open) return null;
-
   async function handleCreateFolder() {
     if (!newFolderName.trim()) return;
     await createCollectionFolder(newFolderName.trim());
@@ -118,11 +117,8 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
   const virtualCopies = selectedPhotoId ? (virtualCopiesByPhotoId[selectedPhotoId] ?? []) : [];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16" onClick={onClose}>
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
-      >
+    <Dialog open={open} onClose={onClose} label={t("libraryOrganizeDialog.title")} className="max-w-2xl">
+      <div className="p-4">
         <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("libraryOrganizeDialog.title")}</h2>
         <p className="mb-3 text-xs text-text-muted">{t("libraryOrganizeDialog.subtitle")}</p>
 
@@ -454,6 +450,6 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

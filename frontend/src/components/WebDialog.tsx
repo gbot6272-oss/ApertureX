@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useT } from "../lib/i18n";
 import { selectFolderDialog, type GalleryTheme, type WebGalleryOptions, type WebUploadOptions } from "../lib/tauri";
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 interface WebDialogProps {
   open: boolean;
@@ -39,8 +40,6 @@ export function WebDialog({ open, photoIds, onClose }: WebDialogProps) {
   const [password, setPassword] = useState("");
   const [remoteDir, setRemoteDir] = useState("");
 
-  if (!open) return null;
-
   async function handleExport() {
     const destDir = await selectFolderDialog();
     if (!destDir) return;
@@ -56,11 +55,8 @@ export function WebDialog({ open, photoIds, onClose }: WebDialogProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16" onClick={onClose}>
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
-      >
+    <Dialog open={open} onClose={onClose} label={t("webDialog.title")} className="max-w-md">
+      <div className="p-4">
         <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("webDialog.title")}</h2>
         <p className="mb-3 text-xs text-text-muted">
           {t("webDialog.photoCount", { count: photoIds.length, plural: photoIds.length === 1 ? "" : "s" })}
@@ -143,6 +139,6 @@ export function WebDialog({ open, photoIds, onClose }: WebDialogProps) {
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

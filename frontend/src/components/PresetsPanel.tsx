@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { buildChildrenByParent } from "../lib/folderTree";
 import { useT } from "../lib/i18n";
+import { DURATION_SLOW_MS, usePrefersReducedMotion } from "../lib/motion";
 import { buildPresetEdlSubset, PRESET_SECTION_KEYS } from "../lib/presets";
 import type { PresetDto, PresetFolderDto } from "../lib/tauri";
 import { selectPresetConditionMeta, useAppStore } from "../store";
@@ -84,6 +85,24 @@ function PresetRow({ preset, folders, onOpenVersions }: PresetRowProps) {
   const photoMeta = useAppStore(selectPresetConditionMeta);
   const exportPresetAsApxFile = useAppStore((s) => s.exportPresetAsApxFile);
   const exportPresetAsLrtemplateFile = useAppStore((s) => s.exportPresetAsLrtemplateFile);
+  // Anwenden-Rückmeldung (Phase 18 Schritt 6, siehe `DECISIONS.md`
+  // ADR-0046 Entwurfsentscheidung 8): ein Preset ändert viele Regler
+  // gleichzeitig, ohne dass sich der Klick selbst sichtbar irgendwo
+  // "bewegt" — anders als ein einzelner Regler, dessen Wert direkt am
+  // Schieberegler sichtbar wird. Ein kurzes, dezentes Aufleuchten
+  // bestätigt, dass der Klick etwas bewirkt hat.
+  const [justApplied, setJustApplied] = useState(false);
+  const reducedMotion = usePrefersReducedMotion();
+  const justAppliedTimeout = useRef<number | undefined>(undefined);
+
+  useEffect(() => () => window.clearTimeout(justAppliedTimeout.current), []);
+
+  function handleApply() {
+    void applyPreset(preset.id);
+    setJustApplied(true);
+    window.clearTimeout(justAppliedTimeout.current);
+    justAppliedTimeout.current = window.setTimeout(() => setJustApplied(false), reducedMotion ? 0 : DURATION_SLOW_MS * 2);
+  }
 
   function handleRename(event: React.MouseEvent) {
     event.stopPropagation();
@@ -118,9 +137,11 @@ function PresetRow({ preset, folders, onOpenVersions }: PresetRowProps) {
         </button>
         <button
           type="button"
-          onClick={() => void applyPreset(preset.id)}
+          onClick={handleApply}
           disabled={!selectedPhotoId}
-          className="min-w-0 flex-1 truncate text-left text-text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+          className={`min-w-0 flex-1 truncate rounded px-1 -mx-1 text-left text-text-primary transition-colors duration-[var(--duration-slow)] hover:underline disabled:cursor-not-allowed disabled:opacity-40 ${
+            justApplied ? "bg-accent/20" : "bg-transparent"
+          }`}
           title="Preset anwenden"
         >
           {preset.name}

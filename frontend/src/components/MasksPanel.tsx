@@ -22,12 +22,14 @@ import {
   type HslAdjustment,
   type SliderSpec,
 } from "../lib/edl";
+import { useT } from "../lib/i18n";
 import { AI_MASK_KINDS, selectActivePhotos, type MaskKind } from "../store";
 import { MASK_KIND_LABEL, useAppStore } from "../store";
 import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
 import { DevelopSlider } from "./DevelopSlider";
 import { PaletteFrame } from "./PaletteFrame";
+import { TabBar, type TabItem } from "./ui/Tabs";
 
 /** Die sechs Maskentypen, in derselben Reihenfolge wie die „+ …"-Knöpfe
  * oben im Panel — wiederverwendet für „+ Komponente hinzufügen". */
@@ -50,6 +52,15 @@ const LUMINANCE_RANGE_FEATHER_SPEC: SliderSpec = { key: "feather", label: "Weich
 /** Phase 11 Schritt 7 (siehe DECISIONS.md ADR-0038) — `threshold` ist im
  * EDL `0.0..=1.0`, wie oben als Prozent angezeigt. */
 const BLUR_DEPTH_APPROX_THRESHOLD_SPEC: SliderSpec = { key: "threshold", label: "Schärfe-Schwellwert (%)", min: 0, max: 100, fineStep: 1, coarseStep: 5, neutral: 50 };
+
+/**
+ * Die Registerkarten der Masken-Regler (Phase 18 Schritt 4, siehe
+ * `DECISIONS.md` ADR-0046) — nur drei, weil die Masken-Sektionen keine
+ * Entsprechung zu den „Kreativ"-/„Verlauf & Werkzeuge"-Gruppen des
+ * `DevelopPanel`s haben; die Beschriftungen sind dieselben
+ * `developPanel.tab.*`-Schlüssel (generisch genug für beide Panels).
+ */
+type MaskTabId = "light" | "color" | "details";
 
 /**
  * Maskenverwaltung (Phase 6 Schritt 3-7, siehe `DECISIONS.md` ADR-0032) —
@@ -134,6 +145,13 @@ export function MasksPanel() {
   const [activeCurveChannel, setActiveCurveChannel] = useState<keyof CurvesAdjustment>("rgb");
   const [activeHslBand, setActiveHslBand] = useState<keyof HslAdjustment>("red");
   const [selectedColorMixerRegionIndex, setSelectedColorMixerRegionIndex] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<MaskTabId>("light");
+  const t = useT();
+  const maskTabs: ReadonlyArray<TabItem<MaskTabId>> = [
+    { id: "light", label: t("developPanel.tab.light") },
+    { id: "color", label: t("developPanel.tab.color") },
+    { id: "details", label: t("developPanel.tab.details") },
+  ];
 
   // Gruppen (Schritt 7)
   const addMaskGroup = useAppStore((s) => s.addMaskGroup);
@@ -656,6 +674,10 @@ export function MasksPanel() {
       )}
 
       {selectedMask && (
+        <TabBar tabs={maskTabs} active={activeTab} onChange={setActiveTab} label={t("masksPanel.tabs.label")} />
+      )}
+
+      {selectedMask && activeTab === "light" && (
         <fieldset className="flex flex-col gap-2 border-t border-border pt-2">
           <legend className="mb-1 text-xs font-medium text-text-secondary">Grundeinstellungen</legend>
           {BASIC_SLIDER_SPECS.map((spec) => (
@@ -670,7 +692,7 @@ export function MasksPanel() {
         </fieldset>
       )}
 
-      {selectedMask && (
+      {selectedMask && activeTab === "light" && (
         <fieldset className="flex flex-col gap-2 border-t border-border pt-2">
           <legend className="mb-1 text-xs font-medium text-text-secondary">Kurven</legend>
           <div className="flex flex-wrap gap-1">
@@ -697,7 +719,7 @@ export function MasksPanel() {
         </fieldset>
       )}
 
-      {selectedMask && (
+      {selectedMask && activeTab === "light" && (
         <fieldset className="flex flex-col gap-2 border-t border-border pt-2">
           <legend className="mb-1 text-xs font-medium text-text-secondary">HSL</legend>
           <div className="flex flex-wrap gap-1">
@@ -732,7 +754,7 @@ export function MasksPanel() {
         </fieldset>
       )}
 
-      {selectedMask && (
+      {selectedMask && activeTab === "light" && (
         <fieldset className="flex flex-col gap-2 border-t border-border pt-2">
           <legend className="mb-1 text-xs font-medium text-text-secondary">Farbmischer</legend>
           <button
@@ -795,7 +817,7 @@ export function MasksPanel() {
         </fieldset>
       )}
 
-      {selectedMask && (
+      {selectedMask && activeTab === "color" && (
         <fieldset className="flex flex-col gap-2 border-t border-border pt-2">
           <legend className="mb-1 text-xs font-medium text-text-secondary">Color Grading</legend>
           <div className="flex flex-wrap justify-center gap-3">
@@ -826,7 +848,7 @@ export function MasksPanel() {
         </fieldset>
       )}
 
-      {selectedMask && (
+      {selectedMask && activeTab === "details" && (
         <fieldset className="flex flex-col gap-3 border-t border-border pt-2">
           <legend className="mb-1 text-xs font-medium text-text-secondary">Details</legend>
           <div className="flex flex-col gap-2">

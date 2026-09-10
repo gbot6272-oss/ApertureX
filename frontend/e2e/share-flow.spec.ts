@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installTauriMock } from "./tauri-mock";
+import { installTauriMock, openOverflowMenu } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -22,7 +22,8 @@ test.describe("Kollaboration (Phase 9 Schritt 10)", () => {
     await page.getByRole("button", { name: /Urlaub/ }).click();
     await page.getByRole("img", { name: PHOTO.filename }).click();
 
-    await page.getByRole("button", { name: "Kollaboration…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Kollaboration…" }).click();
     const dialog = page.getByRole("dialog", { name: "Kollaboration" });
     await expect(dialog.getByText("1 Foto ausgewählt.")).toBeVisible();
 
@@ -53,7 +54,8 @@ test.describe("Kollaboration (Phase 9 Schritt 10)", () => {
     await page.goto("/");
     await page.getByRole("button", { name: /Urlaub/ }).click();
 
-    await page.getByRole("button", { name: "Kollaboration…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Kollaboration…" }).click();
     const dialog = page.getByRole("dialog", { name: "Kollaboration" });
     await dialog.getByRole("button", { name: "Importieren" }).click();
     await dialog.getByRole("button", { name: ".apxs öffnen…" }).click();

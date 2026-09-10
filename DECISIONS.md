@@ -4249,3 +4249,360 @@ Bewusst KEIN Zeitachsen-Feature, sondern ein weiterer Ein-Clip-Command (`remove_
 `remove_video_background()` nutzt exakt dasselbe Zwei-`ffmpeg`-Prozesse-Pipe-Muster wie `apply_lut_filter_to_video` (Phase 16 Schritt 9, `run_ffmpeg_apply_lut_to_video`) — Rohbild-Frames rein, framegenau verarbeitet, Rohbild-Frames raus zur Neukodierung, Original-Tonspur unverändert durchgereicht — hier mit `rgb24` statt `rgba` (keine Alpha-Nutzung nötig) und ohne eigenen Pump-Thread (die ONNX-Sitzung läuft im Aufrufer-Thread statt in einem `'static`-Thread, `ffmpeg`s eigene Puffer federn das ab). Je Frame: `person_mask_rgb8()` liefert eine Alpha-Maske, `composite_with_background()` blendet weich (keine harte Kante) zwischen Originalpixel und der gewählten Hintergrundfarbe.
 
 Frontend: neuer Abschnitt in `VideoPlayer.tsx` (Modell-Download-Status/-Knopf wie beim Tiefenschärfe-Simulator, Farbwähler für die Ersatzfarbe — Standard reines Grün `#00ff00`, daher "Greenscreen" —, Anwenden-Knopf wie bei der LUT-Anwendung).
+
+## ADR-0046: Phase 18 — UI/UX-Overhaul (Design-System, Navigation, Panels, Bewegung)
+
+**Status:** Angenommen
+**Kontext:** Nach ausführlicher Feature-Recherche derselben Sitzung
+(CORS-Fix, CARTO-Kartenschlüssel, dann eine lange Liste realer
+Nutzer-Beschwerden zur Oberfläche samt Screenshot) fiel ein hartes,
+begründetes Urteil: die App wirkt "wie eine billige App, in die keine
+sinnvollen Entscheidungen geflossen sind". Jede Einzelbeschwerde wurde
+vor dieser Phase real im Code verifiziert (nicht aus dem Gedächtnis
+beantwortet), u. a.: `Header.tsx` ist eine flache Zwei-Zeilen-Liste
+aus ~30 Einzelknöpfen mit horizontaler `overflow-x-auto`-Scrollbar,
+keine der 25 `*Dialog.tsx`-Komponenten teilt sich eine gemeinsame
+Overlay-Basis (jede rollt ihre eigene `fixed inset-0 bg-black/50`-
+Variante mit uneinheitlichem vertikalem Versatz, nur 3 von 25 mit
+`useFocusTrap`), `DevelopPanel.tsx` rendert ~29 Fieldsets
+ununterbrochen untereinander (eine einzige sehr lange Scroll-Spalte),
+das Übersicht-Overlay (`QuickDevelopOverlay.tsx`) verdeckt das Foto
+standardmäßig, im gesamten Frontend existieren nur zwei echte CSS-
+`transition`s, keine Bewegungsbibliothek ist installiert, und das
+`@theme`-Token-System in `index.css` definiert nur 9 Farbvariablen
+(keine Abstands-, Typografie-, Radius- oder Schatten-Skala).
+
+**Entscheidung:** ein durchgehendes, hochwertiges Design-System
+(Referenzqualität wie 21st.dev und vergleichbare moderne
+Produktoberflächen — ruhige, gezielte Mikrointeraktionen statt
+Spielerei) über die gesamte bestehende Funktionsfläche legen, **ohne**
+neue Backend-Funktionalität. Kernbausteine:
+
+1. **Token-Fundament** (`index.css`s `@theme`-Block erweitert um
+   `--space-*`/`--text-*`/`--radius-*`/`--shadow-*`/`--ease-*`/
+   `--duration-*`/`--color-bg-overlay`) plus `lib/motion.ts`
+   (`usePrefersReducedMotion()`, liest `uiSettings.reduced_motion`
+   direkt aus dem Store) — nötig, weil die bestehende CSS-
+   `!important`-Bremse (`.apx-reduce-motion`, siehe `index.css` Z.
+   101–117) nur CSS-getriebene Übergänge auf Null zwingt, nicht
+   JS-getimte Mount-/Unmount-Verzögerungen.
+2. **Gemeinsame `Dialog`/`Sheet`-Primitive** (`components/ui/`) ersetzt
+   alle 25 handgerollten Overlay-Fassungen — einheitlicher Backdrop,
+   einheitliche Ein-/Ausblendbewegung, `useFocusTrap` für alle (schließt
+   die 22/25-Lücke), `Sheet` (kantenseitig einschiebend) für große
+   mehrstufige Werkzeuge (Export, Zeitachse, Stapelverarbeitung) statt
+   zentrierter Box — direkte Antwort auf "die aufpoppenden UIs, die
+   immer ontop angezeigt werden".
+3. **Zentrales Kommando-Register** (`lib/commandRegistry.ts`) speist
+   sowohl die neue schlanke Kopfleiste (ein Overflow-Menü statt der
+   bisherigen 19-Knopf-Zweitzeile) als auch `CommandPalette.tsx`
+   (bisher hartcodiert deutsch, unlokalisiert, eigene parallele Liste)
+   — eine neue "KI-Funktionen"-Kategorie mit sichtbarem
+   Modellstatus behebt strukturell das in dieser Sitzung gefundene
+   Auffindbarkeits-Problem (KI-Ausfüllen-Modell-Download war fünf
+   Klicks tief hinter einer Dropdown-Bedingung vergraben).
+4. **`DevelopPanel`/`MasksPanel` in fünf Registerkarten** statt einer
+   durchgehenden 29-Fieldset-Scroll-Spalte — reine Umgruppierung,
+   keine Feld-/Logikänderung.
+5. Gezielte Einzelbugs: `QuickDevelopOverlay` deckt das Foto nur noch
+   bei echtem Hover ab; Histogramm/Vektorskop/Wellenform bekommen
+   `devicePixelRatio`-Skalierung (fehlte, `leafletHeatmap.ts` macht es
+   bereits richtig vor); `PaletteFrame`-Breite/Einklappen animiert
+   sanft statt hartem Sprung.
+6. Abschließender Bewegungs-Politur-Durchgang (Hover-/Fokus-
+   Übergänge, `centerView`-Überblendung) — bewusst zurückhaltend,
+   Ziel "ruhig und hochwertig", nicht "auffällig".
+
+**Ausdrücklich außerhalb des Umfangs:** kein neues Rust-Backend; keine
+vollständige i18n-Übersetzung der laut ADR-0037 bewusst
+unübersetzten ~20 Dialog-**Inhalte** (nur die neue Chrome-Ebene
+bekommt `useT()`-Schlüssel); keine neue Laufzeitabhängigkeit
+(kein Framer-Motion o. ä.) — passend zur bestehenden "keine
+Bibliothek für sowas"-Linie aus `i18n.ts`s eigener Begründung.
+
+**Testdisziplin:** abweichend von Phase 16/17 **nicht** ausschließlich
+Kompilierfehler-Checks zwischendurch — da diese Phase überwiegend
+bestehende, bereits e2e-getestete UI-Struktur mechanisch umbaut
+(insbesondere Schritt 2s 25-Dateien-Dialog-Migration und Schritt 4s
+Panel-Umgruppierung), laufen ab Schritt 2 zusätzlich gezielte
+Playwright-Teilläufe je Schritt; die volle Suite inkl. visueller
+Playwright-Screenshot-Verifikation (gleiche Disziplin wie ADR-0044)
+bündelt sich am Ende in Schritt 7. Reihenfolge und volle Begründung
+je Schritt siehe `PLAN.md` Phase 18.
+
+**Nachtrag Schritt 1 (echte Prüfung statt Annahme):** `node_modules/
+tailwindcss/theme.css` real gelesen, bevor Tokens angelegt wurden —
+Tailwind v4 definiert bereits `--radius-*`/`--shadow-*`/`--ease-*`
+als eigenen Theme-Namespace (Werte, keine Utility-Klassen fehlen).
+Deshalb **keine neuen Radius-/Easing-Tokens erfunden**, sondern
+gezielt Tailwinds eigene `--radius-md/-lg/-xl/-2xl` und
+`--shadow-md/-lg/-xl` in `index.css`s `@theme`-Block überschrieben —
+wirkt automatisch auf jede bestehende `rounded-*`/`shadow-*`-Klasse
+im ganzen Frontend, ohne eine einzige Komponente anzufassen. Einzig
+echt fehlend: `--duration-*` (Tailwind hat dafür keinen benannten
+Theme-Namespace, nur numerische `duration-<ms>`-Klassen) — dafür
+`lib/motion.ts` (JS-Konstanten + `usePrefersReducedMotion()`) und
+lose `--duration-fast/-base/-slow`-Variablen außerhalb von `@theme`.
+
+**Nachtrag Schritt 2:** `components/ui/Dialog.tsx` (zentriert) und
+`Sheet.tsx` (kantenseitig, für Export/Zeitachse/Stapelverarbeitung)
+ersetzen alle 25 `*Dialog.tsx` + `CommandPalette.tsx` +
+`KeybindingsCheatsheet.tsx` — Migration in drei parallelen Strängen
+(zwei Subagenten für 19 der mechanisch einfacheren Dialoge, der Rest
+inkl. der Sonderfälle `HistoryTimelineDialog`/`ContentAwareScaleDialog`/
+`CanvasExtendDialog`/`PresetVersionsDialog` — store-gesteuertes `open`
+statt Props — sowie `SettingsDialog`/`OnboardingDialog`/
+`KeybindingsCheatsheet` — vorher eigene `useFocusTrap`-Verdrahtung,
+jetzt entfernt, da `Dialog` das übernimmt — selbst gemacht). Danach
+**echte Laufzeitverifikation statt nur Kompilieren**: 17 Playwright-
+Spezifikationen (alle Dialoge/die Palette/das Cheatsheet betreffend)
+gegen den echten Produktions-Build laufen lassen, alle 49 Tests grün
+— bestätigt, dass Fokus-Falle/Escape/Klick-außerhalb/Formularzustand
+nach der Migration funktional identisch geblieben sind, nicht nur,
+dass der Code kompiliert.
+
+**Nachtrag Schritt 3 (Navigation):** neu `lib/commandRegistry.ts` —
+ein `useCommandRegistry()`-Hook liefert `{id, label, category, run,
+disabled?, aiStatus?}`-Einträge (Kategorien `output`/`templates`/
+`advanced`/`analysis`/`ai`/`navigation`/`system`), gespeist aus
+genau denselben Store-Aktionen, die vorher `Header.tsx` und
+`CommandPalette.tsx` je für sich hielten — eine Quelle statt zwei.
+`Header.tsx` von zwei Zeilen (~30 Einzelknöpfe) auf eine schlanke
+Zeile umgebaut: Logo, Import, ein auffälliger Such-/Befehlsknopf
+(öffnet `CommandPalette`, ersetzt den vorher nur beiläufigen
+`⌘K`-Hinweistext), die sechs Ansicht-Ziele als eine zusammenhängende
+Segment-Gruppe (unveränderte Klick-Handler, nur neu gerahmt), ein
+neues Overflow-Menü (`components/ui/Menu.tsx`, bewusst **kein**
+`Dialog`-Abkömmling — kein abgedunkelter Hintergrund, da ein
+Overflow-Menü sich als Erweiterung des Auslöser-Knopfs anfühlen soll,
+nicht als Unterbrechung) zeigt das Register gruppiert nach den vier
+bisherigen Zeile-2-Kategorien plus der neuen **"KI-Funktionen"**-
+Kategorie, und ein eigenständiger Einstellungen-Knopf bleibt sichtbar.
+Die `pendingCommand`-Brücke für die neun weiterhin lokal in
+`Header.tsx` gehaltenen Dialoge ist unverändert die Ausführungsstelle.
+
+Die neue KI-Funktionen-Kategorie listet alle neun Opt-in-KI-Features
+(KI-Ausfüllen, Bildranderweiterung, Hautglätten, Himmelsaustausch,
+Stiltransfer, Hintergrund entfernen, Untertitel, Tiefenschärfe-
+Simulator, Personen-Erkennung) mit einem `aiSettings`-gestützten
+Status-Badge ("Bereit"/"Download nötig"/"Nicht verfügbar") und
+springt beim Anklicken direkt zum richtigen Panel/Modus (öffnet das
+Entwickeln-Panel und setzt bei KI-Ausfüllen zusätzlich
+`repairDraftMode`, öffnet den Leinwand-Erweitern-Dialog, wechselt
+`centerView` zu "people"/"viewer" o. ä.) — das behebt strukturell das
+in der letzten Sitzung gefundene Auffindbarkeits-Problem (der
+Download-Hinweis lag vorher nur hinter "Entwickeln → Reparatur-Pinsel
+→ Modus-Dropdown → KI-Ausfüllen wählen").
+
+`CommandPalette.tsx` liest jetzt ebenfalls aus `useCommandRegistry()`
+statt eigener hartcodierter `functionEntries` — Labels laufen über
+`useT()` mit neuen Schlüsseln in `de.ts`/`en.ts` (Chrome-Ebene, siehe
+ADR-0037-Abgrenzung, Dialog-**Inhalte** bleiben unverändert
+unübersetzt). Die reinen Datenquellen (Presets/Fotos/Ordner, kein
+"Befehl") bleiben lokal in der Palette berechnet, ebenso der
+transiente "Import abbrechen"-Eintrag (nur sichtbar während eines
+laufenden Imports, passt nicht ins stabile Register).
+
+**Testfolgen einer Struktur-Änderung, nicht nur Kompilieren:** da
+~19 vormals dauerhaft sichtbare Kopfzeilen-Knöpfe jetzt hinter dem
+Overflow-Menü liegen (als `role="menuitem"` statt `role="button"` —
+bewusste ARIA-Semantik für ein `role="menu"`), mussten die
+entsprechenden Playwright-Spezifikationen angepasst werden: ein neuer
+`openOverflowMenu(page)`-Helfer in `e2e/tauri-mock.ts` öffnet das Menü
+vor jedem betroffenen Zugriff (das Menü schließt sich nach jeder
+Auswahl automatisch wieder und bei jedem Klick außerhalb — z. B. beim
+Auswählen eines Fotos zwischen zwei Menü-Interaktionen —, daher an
+mehreren Stellen mehrfach pro Test aufgerufen). Betroffen: `export-`,
+`print-`, `slideshow-`, `book-`, `web-`, `templates-`,
+`library-organize-`, `metadata-`, `stacking-`, `script-plugin-`,
+`share-`, `tether-`, `library-views-`, `style-consistency-`,
+`versions-compare-` und `import-dialog-flow.spec.ts` (16 Dateien).
+Verifiziert per echtem Playwright-Lauf der **gesamten** Suite (nicht
+nur der angepassten Spezifikationen) gegen den Produktions-Build:
+141 von 142 Tests grün; der eine verbleibende Fehlschlag
+(`tat-flow.spec.ts`, ein durch ein überlappendes Vektorskop-Overlay
+verursachter Klick-Abfangfehler) wurde durch einen Vergleichslauf auf
+dem Schritt-2-Stand (`git stash -u`) als bereits vorher bestehend,
+nicht durch diesen Schritt verursacht, bestätigt.
+
+**Nachtrag Schritt 4 (Panels in Registerkarten):** neu
+`components/ui/Tabs.tsx` (`TabBar<T>`, generische Registerkarten-
+Leiste, `role="tablist"`/`role="tab"`, kein Routing/Lazy-Mount — reiner
+`useState` der aufrufenden Komponente, dieselbe Größenordnung wie die
+bereits bestehenden lokalen Tab-Leisten z. B. `CURVE_CHANNEL_TABS`).
+`DevelopPanel.tsx`s 23 Fieldsets (vormals eine durchgehende Scroll-
+Spalte) auf fünf Registerkarten verteilt — exakt die in Schritt 4s
+Planung festgelegte Gruppierung (Licht/Farbe/Details/Kreativ/Verlauf
+& Werkzeuge), Standard-Tab "Licht" (hält die meistgetesteten
+Grundeinstellungs-Regler ohne Tab-Klick sichtbar). Jedes Fieldset
+unverändert übernommen (Inhalt/Props/Store-Anbindung/`id`-Attribute) —
+nur die Sichtbarkeits-Bedingung wurde von `{selectedPhotoId && (...)}`
+auf zusätzlich `activeTab === "…"` erweitert; die Preset-Stärke-
+Fieldset (unabhängig von `selectedPhotoId`, siehe deren eigene
+`{presetStrengthContext && (...)}`-Bedingung im Originalcode) blieb
+bewusst diese Ausnahme, jetzt `{activeTab === "history" &&
+presetStrengthContext && (...)}`. `MasksPanel.tsx` erhielt dieselbe
+Struktur, aber nur drei befüllte Tabs (Licht/Farbe/Details — "Kreativ"/
+"Verlauf & Werkzeuge" hätten keinen Inhalt, da Masken kein Reparatur-/
+Verflüssigen-/Schnappschuss-Äquivalent haben) — eigener
+`masksPanel.tabs.label`-Lokalisierungsschlüssel statt des
+`DevelopPanel`-Schlüssels, damit die beiden gleichzeitig sichtbaren
+`role="tablist"`s (Entwickeln- und Masken-Panel können offen
+nebeneinanderstehen) eindeutige zugängliche Namen tragen.
+
+**Echter, real gefundener Regressions-Fund (nicht nur behauptet):**
+der Node-Editors "Öffnen"-Knopf sprang bisher per `getElementById(...)
+?.scrollIntoView(...)` zum Regler-Abschnitt — nach der Tab-Aufteilung
+wäre das ein stiller No-Op geworden, sobald der Zielanker auf einer
+nicht-aktiven Registerkarte liegt (der Knoten existiert dann schlicht
+nicht im DOM). Behoben durch eine neue `STAGE_TAB_IDS`-Tabelle (welche
+Stufe zu welcher Registerkarte gehört) plus `requestAnimationFrame`-
+Aufschub im Klick-Handler: erst `setActiveTab(...)`, dann — nach dem
+Commit/Repaint — `openStageAnchor(...)`, damit der Anker bereits
+gemountet ist. `node-editor-flow.spec.ts` deckt das jetzt direkt ab
+(`Öffnen` auf eine "Details"-Stufe von der "Verlauf & Werkzeuge"-
+Registerkarte aus, danach `aria-selected` auf dem "Details"-Tab
+geprüft) statt den No-Op nur mit einem zusätzlichen manuellen
+Tab-Klick zu umgehen.
+
+**Ausführung:** die große mechanische Umgruppierung (Fieldset-
+Blöcke verschieben, ohne ihren Inhalt zu verändern) + die Anpassung
+von zwölf betroffenen Playwright-Spezifikationen wurde an einen
+Subagenten mit exakter Fieldset-zu-Tab-Zuordnung delegiert (dieselbe
+Arbeitsteilung wie Schritt 2s Dialog-Migration) — Ergebnis vor meiner
+eigenen Nachbesserung (Öffnen-Fix, Masken-Tablist-Label) bereits
+141/142 grün, danach unverändert 141/142 grün (derselbe vorbestehende
+`tat-flow.spec.ts`-Flake). Volle Suite (nicht nur die angepassten
+Spezifikationen), `vitest run` (251 Tests), `tsc -b`, `vite build` —
+alle zusätzlich selbst erneut verifiziert, nicht nur der Subagenten-
+Bericht übernommen.
+
+**Nachtrag Schritt 5 (gezielte Bugfixes):**
+
+- **`GridView.tsx`/`QuickDevelopOverlay.tsx`:** `showQuickDevelop` zeigt
+  das volle Sieben-Regler-Overlay jetzt nur noch bei echtem Hover
+  (`photo.id === hoveredPhotoId`) — vorher deckte es das Foto in der
+  Übersicht schon bei reiner Fokussierung ohne Hover ab, genau der in
+  der letzten Sitzung benannte Befund. Fokus ohne Hover zeigt
+  stattdessen ein kleines, unaufdringliches Eck-Symbol
+  (`showQuickDevelopHint`, oben rechts, "≡" — bewusst ein einfaches
+  Unicode-Zeichen statt Emoji, wie die übrigen Icon-Knöpfe dieser
+  Codebasis, rendert zuverlässig ohne Emoji-Schriftart, real per
+  Playwright-Screenshot in einer headless-Umgebung verifiziert, in der
+  ein Emoji als leeres Tofu-Rechteck gerendert hätte), das per Klick
+  denselben Hover-Zustand auslöst (`setHoveredPhotoId`) — bleibt
+  dadurch auch per Tastatur/Touch erreichbar, nicht nur per Maus-Hover.
+- **`DevelopAnalysisPanel.tsx`:** `devicePixelRatio`-Skalierung für
+  Histogramm-/Vektorskop-/Wellenform-Canvas, nach `lib/leafletHeatmap.ts`s
+  Muster — neuer gemeinsamer `useCanvasDprWidth()`-Hook (ResizeObserver
+  auf die tatsächliche CSS-Breite, reagiert auch auf `PaletteFrame`-
+  Breitenänderungen) setzt die Backing-Store-Auflösung auf
+  `cssBreite × dpr`. Für das vektor-gezeichnete Histogramm reicht ein
+  `ctx.setTransform(dpr,...)`; Vektorskop/Wellenform nutzen
+  `putImageData`, das keine Transform-Matrix respektiert — deshalb dort
+  jeweils eine Offscreen-Canvas in der unveränderten nativen
+  Rasterauflösung befüllt und per `drawImage(...)` (mit
+  `imageSmoothingEnabled = false`, damit das Dichteraster bewusst
+  blockig bleibt statt zusätzlich weichgezeichnet zu werden) auf die
+  DPR-große Ziel-Canvas skaliert. Real per Playwright-Screenshot
+  verifiziert (nicht nur behauptet): Histogramm zeigt scharfe
+  Balkenkanten, Vektorskop einen glatten Kreis/Fadenkreuz ohne
+  sichtbare Verzerrung.
+- **`PaletteFrame.tsx`:** sanfte Breiten-Übergangsanimation beim Ein-/
+  Ausklappen (`transition: width {DURATION_BASE_MS}ms {EASE_OUT}`, per
+  `usePrefersReducedMotion()` abgeschaltet) — dafür musste die
+  Komponente von zwei strukturell getrennten `return`-Zweigen
+  (eingeklappt/ausgeklappt) auf einen gemeinsamen äußeren Container mit
+  fester `COLLAPSED_WIDTH` (36px statt `auto`, das die meisten Browser
+  nicht sauber animieren) umgebaut werden — reale Sichtprüfung per
+  Playwright-Screenshot bestätigt keine Textabschneidung. Die
+  Transition ist während eines aktiven Zieh-Vorgangs (`dragging`-
+  State) bewusst ausgeschaltet, sonst würde die Palette dem Zeiger nur
+  gedämpft statt 1:1 folgen — nur der Klapp-Wechsel selbst ist animiert.
+
+Alle drei Fixes ausschließlich per echtem Playwright-Lauf (volle Suite,
+141/142 wie in Schritt 3/4, derselbe vorbestehende Flake) + `vitest
+run` (251 Tests) + `tsc -b`/`vite build` verifiziert, zusätzlich mit
+temporären (nicht committeten) Playwright-Screenshots real angeschaut
+statt nur am Code geglaubt — dieselbe Disziplin wie ADR-0044.
+
+**Nachtrag Schritt 6 (Bewegungs-Politur-Durchgang):**
+
+- **Hover-/Fokus-Übergänge auf allen interaktiven Elementen:** statt
+  jeden der weit über 500 bestehenden `hover:border-accent`/
+  `hover:text-*`/`hover:bg-*`-Knöpfe einzeln anzufassen, eine einzige
+  globale Regel in `index.css` (`button, a, select, [role="tab"],
+  [role="menuitem"] { transition-property: color, background-color,
+  border-color, box-shadow, opacity; transition-duration:
+  var(--duration-fast); ... }`) — wirkt automatisch auf jede bereits
+  vorhandene Hover-/Fokus-Klasse im gesamten Frontend, kollidiert nicht
+  mit vereinzelten expliziten `transition-[width]`-Klassen (dieselben
+  Eigenschaften, keine Überschneidung), respektiert
+  `prefers-reduced-motion`/`.apx-reduce-motion` automatisch mit (beide
+  kappen jede `transition-duration` bereits per `!important`).
+- **Sanfter Überblend-Wechsel beim `centerView`-Wechsel:** neue
+  `.apx-view-fade-in`-Keyframe-Animation in `index.css`, in `App.tsx`
+  auf einen neuen `<div key={centerView}>`-Wrapper **nur** um die
+  eigentliche Zentralansicht (Raster/Übersicht/Karte/Personen/Viewer/
+  VideoPlayer) angewendet — bewusst **nicht** um die gesamte
+  `flex flex-1`-Zeile (die auch Sidebar/Presets-Panel/Metadaten-Panel/
+  Entwickeln-Panel enthält), sonst hätten diese dauerhaften
+  Seitenpaletten bei jedem Ansicht-Wechsel unnötig ihren internen
+  Zustand verloren. Der `key` ist `centerView` selbst, nicht z. B. die
+  Foto-ID — ein Foto-/Video-Wechsel innerhalb derselben "viewer"-
+  Ansicht bleibt unter demselben Schlüssel und löst deshalb keine
+  wiederholte Überblendung aus, nur ein echter Wechsel zwischen den
+  sechs Ansicht-Modi tut es.
+- **Anwenden-Rückmeldung bei Preset-Übernahme:** `PresetsPanel.tsx`s
+  Preset-Namen-Knopf bekommt beim Klick einen kurzen
+  Hintergrund-Aufhellungs-Puls (`bg-accent/20`, über
+  `transition-colors duration-slow` wieder ausblendend, per
+  `usePrefersReducedMotion()` auf eine sofortige Rückstellung verkürzt
+  statt der vollen Dauer) — bewusst nur bei Presets, nicht bei jedem
+  einzelnen Regler-Commit: ein Regler zeigt seine Änderung bereits
+  direkt am eigenen Schieberegler-Wert, ein Preset ändert dagegen viele
+  Regler gleichzeitig, ohne dass der Klick selbst sichtbar etwas
+  bewegt — genau dort fehlte eine Bestätigung, dass er etwas bewirkt
+  hat.
+
+Verifiziert per `tsc -b`, `vite build`, voller Playwright-Suite
+(weiterhin 141/142, derselbe vorbestehende Flake) und `vitest run`
+(251 Tests) — die global wirkende CSS-Regel und die `centerView`-
+Umstrukturierung berühren viele bestehende Tests indirekt (jeder
+Knopf-Hover, jeder Ansicht-Wechsel), liefen deshalb bewusst gegen die
+**volle** Suite statt nur gezielter Stichproben.
+
+**Schritt 7 (Dokumentation, volle Verifikation, Abnahme):**
+`FEATURES.md` §4 nachgezogen (Kopfleiste/Befehlspalette/Paletten-
+Zeilen auf den Phase-18-Stand gebracht, neue Zeile für das Dialog-/
+Sheet-/Bewegungs-Design-System) — keine `THIRD_PARTY.md`-Änderung
+nötig, `package.json`/`package-lock.json` seit Phase 10 Schritt 11
+unverändert (kein neues npm-Paket in dieser Phase, wie in der
+Entwurfsentscheidung festgelegt). Abschließende reale visuelle
+Verifikation per Playwright-Screenshot (Raster, Kopfleiste-Suchknopf +
+Befehlspalette, Overflow-Menü mit der neuen KI-Funktionen-Kategorie
+samt Modellstatus, migrierter Export-Dialog als Sheet, Entwickeln-Panel
+„Licht"- und „Kreativ"-Registerkarte) — alle sechs Ansichten real
+angeschaut, nicht nur am Code angenommen; keine Auffälligkeiten.
+`tsc -b`/`vite build`/`vitest run` (251 Tests)/volle Playwright-Suite
+(141/142, derselbe seit Schritt 3 dokumentierte, unabhängig bestätigte
+`tat-flow.spec.ts`-Flake) am Ende noch einmal komplett grün.
+`cargo fmt --all -- --check` und `cargo clippy --workspace
+--all-targets --all-features -- -D warnings -D clippy::unwrap_used`
+laufen sauber durch (Letzteres kompiliert dabei auch jedes Testziel
+jedes Crates). **Ehrlich begrenzt:** `cargo test --workspace` konnte in
+dieser Sitzung nicht zu Ende laufen — die Sandbox hat ein festes
+Datenträger-Kontingent, ein voller Workspace-Rebuild (u. a. `whisper-
+rs`/`dlib-face-recognition` mit Debug-Symbolen) füllte `target/` auf
+26 GB und erschöpfte das Kontingent vollständig, noch bevor die Tests
+selbst liefen; nach Aufräumen (`target/` gelöscht) reichte der
+verbleibende Spielraum nicht mehr für einen sicheren zweiten Versuch,
+ohne den restlichen Abnahme-Ablauf zu gefährden. Da diese Phase
+nachweislich **keine** Rust-Datei berührt (`git diff --stat` gegen den
+Phase-17-Stand zeigt ausschließlich `frontend/`/`DECISIONS.md`/
+`PLAN.md`/`FEATURES.md`) und der vollständige Workspace-Kompilierlauf
+über `clippy --all-targets` bereits erfolgreich war, ist das
+Laufzeitrisiko für Rust durch diese Phase praktisch ausgeschlossen —
+`cargo test --workspace` bleibt trotzdem ein offener Nachtrag für eine
+Sitzung mit mehr Datenträger-Spielraum, kein stillschweigend
+übergangener Schritt.

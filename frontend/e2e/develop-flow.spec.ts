@@ -327,6 +327,8 @@ test.describe("Entwickeln-Panel", () => {
     // gibt es hier keine weitere await-Aktion dazwischen, die dafür
     // zufällig genug Zeit ließe.
     await page.waitForTimeout(100);
+    // Phase 18 Schritt 4: dieser Abschnitt liegt jetzt hinter einer eigenen Registerkarte.
+    await page.getByRole("tab", { name: "Farbe" }).click();
 
     const shadowWheel = page.getByRole("slider", { name: "Schatten-Farbrad" });
     await shadowWheel.focus();
@@ -354,6 +356,7 @@ test.describe("Entwickeln-Panel", () => {
   test("Color Grading: Balance und Überblendung committen", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
     await page.getByRole("button", { name: "Entwickeln" }).click();
+    await page.getByRole("tab", { name: "Farbe" }).click();
 
     const balanceInput = page.getByRole("spinbutton", { name: "Balance (Zahlenwert)" });
     await balanceInput.fill("-30");
@@ -421,6 +424,7 @@ test.describe("Entwickeln-Panel", () => {
   test("Details: ein Schärfung-Regler und die Deconvolution-Checkbox committen", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
     await page.getByRole("button", { name: "Entwickeln" }).click();
+    await page.getByRole("tab", { name: "Details" }).click();
 
     const amountInput = page.getByRole("spinbutton", { name: "Schärfung: Betrag (Zahlenwert)" });
     await amountInput.fill("80");
@@ -447,6 +451,7 @@ test.describe("Entwickeln-Panel", () => {
   test("Objektivkorrekturen: ein Profil, die CA-Regler und die manuelle Transformation committen", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
     await page.getByRole("button", { name: "Entwickeln" }).click();
+    await page.getByRole("tab", { name: "Details" }).click();
 
     await page.getByRole("combobox", { name: "Objektivprofil" }).selectOption("generic-wide");
 
@@ -479,6 +484,7 @@ test.describe("Entwickeln-Panel", () => {
   test("Objektivkorrekturen: Guided-Modus zeigt Hilfslinien-Zahlenfelder und committet sie", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
     await page.getByRole("button", { name: "Entwickeln" }).click();
+    await page.getByRole("tab", { name: "Details" }).click();
 
     await page.getByRole("combobox", { name: "Perspektive/Upright" }).selectOption("Guided");
 
@@ -505,6 +511,7 @@ test.describe("Entwickeln-Panel", () => {
   test("Effekte: ein Vignettierung-Regler, ein Körnung-Regler und die Halation-Regler committen", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
     await page.getByRole("button", { name: "Entwickeln" }).click();
+    await page.getByRole("tab", { name: "Details" }).click();
 
     const vignetteAmountInput = page.getByRole("spinbutton", { name: "Vignettierung: Betrag (Zahlenwert)" });
     await vignetteAmountInput.fill("-40");
@@ -547,6 +554,7 @@ test.describe("Entwickeln-Panel", () => {
   test("Geometrie: Winkel, Seitenverhältnis, Raster und Auto-Ausrichtung committen", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
     await page.getByRole("button", { name: "Entwickeln" }).click();
+    await page.getByRole("tab", { name: "Details" }).click();
 
     const angleInput = page.getByRole("spinbutton", { name: "Winkel (Zahlenwert)" });
     await angleInput.fill("8");
@@ -579,6 +587,7 @@ test.describe("Entwickeln-Panel", () => {
   test("Geometrie: Freistellen-Werkzeug zeigt das Rechteck und committet eine Tastatur-Größenänderung", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
     await page.getByRole("button", { name: "Entwickeln" }).click();
+    await page.getByRole("tab", { name: "Details" }).click();
 
     await page.getByRole("button", { name: "Freistellen" }).click();
 
@@ -610,6 +619,7 @@ test.describe("Entwickeln-Panel", () => {
   test("Reparatur: Quellpunkt setzen und Zielpfad malen committet einen Strich, Entfernen committet erneut", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
     await page.getByRole("button", { name: "Entwickeln" }).click();
+    await page.getByRole("tab", { name: "Kreativ" }).click();
 
     const repairButton = page.getByRole("button", { name: "Reparatur-Pinsel" });
     await expect(repairButton).toHaveAttribute("aria-pressed", "false");

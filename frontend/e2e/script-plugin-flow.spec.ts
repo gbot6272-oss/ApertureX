@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installTauriMock } from "./tauri-mock";
+import { installTauriMock, openOverflowMenu } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -23,7 +23,8 @@ test.describe("Skript & Plugins (Phase 9 Schritt 9)", () => {
     await page.getByRole("img", { name: PHOTO.filename }).click();
     await page.getByRole("button", { name: "Entwickeln" }).click();
 
-    await page.getByRole("button", { name: "Skript & Plugins…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Skript & Plugins…" }).click();
     const dialog = page.getByRole("dialog", { name: "Skript & Plugins" });
     await expect(dialog.getByRole("button", { name: "Skript" })).toBeVisible();
 
@@ -38,7 +39,8 @@ test.describe("Skript & Plugins (Phase 9 Schritt 9)", () => {
     await page.getByRole("img", { name: PHOTO.filename }).click();
     await page.getByRole("button", { name: "Entwickeln" }).click();
 
-    await page.getByRole("button", { name: "Skript & Plugins…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Skript & Plugins…" }).click();
     const dialog = page.getByRole("dialog", { name: "Skript & Plugins" });
     await dialog.getByRole("button", { name: "Plugin" }).click();
     await dialog.getByLabel("Plugin-Datei (.so/.dylib/.dll)").fill("/pfad/zu/plugin.so");

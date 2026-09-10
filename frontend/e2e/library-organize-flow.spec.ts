@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installTauriMock } from "./tauri-mock";
+import { installTauriMock, openOverflowMenu } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -17,7 +17,8 @@ test.describe("Bibliothek organisieren (Phase 9 Schritt 1)", () => {
   test("Sammlungssatz anlegen erscheint in der Liste", async ({ page }) => {
     await installTauriMock(page, { folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }], photosByFolder: { [FOLDER_ID]: [PHOTO_A] } });
     await page.goto("/");
-    await page.getByRole("button", { name: "Organisieren…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Organisieren…" }).click();
     await page.getByPlaceholder("Neuer Sammlungssatz").fill("Reisen");
     await page.getByRole("button", { name: "Anlegen" }).first().click();
     await expect(page.getByText("Reisen")).toBeVisible();
@@ -30,8 +31,9 @@ test.describe("Bibliothek organisieren (Phase 9 Schritt 1)", () => {
     await page.getByRole("img", { name: PHOTO_A.filename }).click();
     await page.getByRole("img", { name: PHOTO_B.filename }).click({ modifiers: ["Control"] });
 
-    await page.getByRole("button", { name: "Organisieren…" }).click();
-    // `exact: true` (seit Phase 11 Schritt 9 nötig): der Kopfzeilen-Knopf
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Organisieren…" }).click();
+    // `exact: true` (seit Phase 11 Schritt 9 nötig): der Menü-Eintrag
     // "Stapelverarbeitung…" enthält "Stapel" als Substring und würde die
     // standardmäßige Teilstring-Suche sonst mehrdeutig machen.
     await page.getByRole("button", { name: "Stapel", exact: true }).click();
@@ -49,7 +51,8 @@ test.describe("Bibliothek organisieren (Phase 9 Schritt 1)", () => {
       perceptualDuplicateGroups: [[small, large]],
     });
     await page.goto("/");
-    await page.getByRole("button", { name: "Organisieren…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Organisieren…" }).click();
     await page.getByRole("button", { name: "Duplikate" }).click();
     await page.getByRole("button", { name: "Duplikate suchen" }).click();
 

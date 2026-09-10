@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { useT } from "../lib/i18n";
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 interface ShareDialogProps {
   open: boolean;
@@ -42,18 +43,11 @@ export function ShareDialog({ open, onClose }: ShareDialogProps) {
   const importShareFile = useAppStore((s) => s.importShareFile);
   const resolveShareConflictAction = useAppStore((s) => s.resolveShareConflictAction);
 
-  if (!open) return null;
-
   const exportIds = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-24" onClick={onClose}>
-      <div
-        role="dialog"
-        aria-label={t("shareDialog.title")}
-        className="w-full max-w-lg rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <Dialog open={open} onClose={onClose} label={t("shareDialog.title")} className="max-w-lg">
+      <div className="p-4">
         <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("shareDialog.title")}</h2>
         <p className="mb-3 text-xs text-text-muted">{t("shareDialog.subtitle")}</p>
 
@@ -201,6 +195,6 @@ export function ShareDialog({ open, onClose }: ShareDialogProps) {
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

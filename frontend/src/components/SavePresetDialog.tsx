@@ -10,6 +10,7 @@ import type { PresetLeafCondition, PresetRuleGroup, PresetRules, PresetSectionKe
 import { conditionNode } from "../lib/ruleTree";
 import { RuleTreeEditor } from "./RuleTreeEditor";
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 interface SavePresetDialogProps {
   open: boolean;
@@ -55,8 +56,6 @@ export function SavePresetDialog({ open, onClose }: SavePresetDialogProps) {
   const [selectedSections, setSelectedSections] = useState<Set<PresetSectionKey>>(new Set(PRESET_SECTION_KEYS));
   const [rules, setRules] = useState<DraftRule[]>([]);
 
-  if (!open) return null;
-
   function toggleSection(key: PresetSectionKey) {
     setSelectedSections((previous) => {
       const next = new Set(previous);
@@ -100,13 +99,8 @@ export function SavePresetDialog({ open, onClose }: SavePresetDialogProps) {
   const canSave = name.trim().length > 0 && selectedSections.size > 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-24" onClick={onClose}>
-      <div
-        role="dialog"
-        aria-label="Preset speichern"
-        className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <Dialog open={open} onClose={onClose} label="Preset speichern" className="max-w-sm">
+      <div className="p-4">
         <h2 className="mb-3 text-sm font-semibold text-text-primary">Preset speichern</h2>
 
         <label className="mb-2 flex flex-col gap-1 text-xs text-text-secondary">
@@ -251,6 +245,6 @@ export function SavePresetDialog({ open, onClose }: SavePresetDialogProps) {
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

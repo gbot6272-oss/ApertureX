@@ -4,6 +4,14 @@ import type { de } from "./de";
  * file to stay in sync with every key `de.ts` declares — a missing key
  * is a compile error, not a silent runtime fallback. */
 export const en: Record<keyof typeof de, string> = {
+  "developPanel.tab.light": "Light",
+  "developPanel.tab.color": "Color",
+  "developPanel.tab.details": "Details",
+  "developPanel.tab.creative": "Creative",
+  "developPanel.tab.history": "History & Tools",
+  "developPanel.tabs.label": "Develop sections",
+  "masksPanel.tabs.label": "Mask sections",
+
   "header.importFolder": "Import folder",
   "header.importWithTemplate": "Import with template…",
   "header.importWithTemplateTitle": "Import with a selectable mode (copy/move), renaming pattern and presets",
@@ -43,6 +51,26 @@ export const en: Record<keyof typeof de, string> = {
   "header.settings": "Settings…",
   "header.settingsTitle": "Theme, language, UI scaling, accessibility (Phase 10)",
   "header.paletteHint": "Ctrl/Cmd+K — Command palette",
+  "header.videoTimeline": "Timeline…",
+
+  "header.search": "Search or ⌘K",
+  "header.overflowMenu": "More functions",
+
+  "commands.category.ai": "AI features",
+  "commands.onboarding": "Show onboarding",
+  "commands.cheatsheet": "Show keyboard shortcuts",
+  "commands.ai.inpaint": "AI fill",
+  "commands.ai.outpaint": "Canvas extension",
+  "commands.ai.skinSmoothing": "Skin smoothing",
+  "commands.ai.skyReplace": "Sky replacement",
+  "commands.ai.styleTransfer": "Style transfer",
+  "commands.ai.depth": "Depth-of-field simulator",
+  "commands.ai.removeBackground": "Remove background",
+  "commands.ai.subtitles": "Subtitles",
+  "commands.ai.people": "People recognition",
+  "commands.ai.status.ready": "Ready",
+  "commands.ai.status.downloadNeeded": "Download needed",
+  "commands.ai.status.notAvailable": "Not available",
 
   "sidebar.heading": "Folders",
   "sidebar.empty": "No folders imported yet.",

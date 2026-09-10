@@ -301,7 +301,13 @@ test.describe("Masken-Panel", () => {
 
     type MaskAdjustments = { hsl: { red: { hue: number } }; details: { sharpen_amount: number }; color_grading: { balance: number } };
 
-    const hueInput = page.getByRole("spinbutton", { name: "Farbton (Zahlenwert)" }).nth(1);
+    // Phase 18 Schritt 4: die Masken-Regler liegen jetzt hinter drei
+    // Registerkarten („Licht" ist die Vorgabe, HSL liegt also schon offen).
+    // Die Registerkarten des Entwickeln-Panels heißen genauso, deshalb hier
+    // konsequent auf das Masken-Panel eingegrenzt statt über `.nth(1)`.
+    const masksPanel = page.getByRole("complementary", { name: "Masken" });
+
+    const hueInput = masksPanel.getByRole("spinbutton", { name: "Farbton (Zahlenwert)" });
     await hueInput.fill("30");
     await hueInput.blur();
     await expect
@@ -311,7 +317,8 @@ test.describe("Masken-Panel", () => {
       })
       .toBeCloseTo(30, 1);
 
-    const sharpenInput = page.getByRole("spinbutton", { name: "Schärfung: Betrag (Zahlenwert)" }).nth(1);
+    await masksPanel.getByRole("tab", { name: "Details" }).click();
+    const sharpenInput = masksPanel.getByRole("spinbutton", { name: "Schärfung: Betrag (Zahlenwert)" });
     await sharpenInput.fill("40");
     await sharpenInput.blur();
     await expect
@@ -321,7 +328,8 @@ test.describe("Masken-Panel", () => {
       })
       .toBeCloseTo(40, 1);
 
-    const balanceInput = page.getByRole("spinbutton", { name: "Balance (Zahlenwert)" }).nth(1);
+    await masksPanel.getByRole("tab", { name: "Farbe" }).click();
+    const balanceInput = masksPanel.getByRole("spinbutton", { name: "Balance (Zahlenwert)" });
     await balanceInput.fill("15");
     await balanceInput.blur();
     await expect

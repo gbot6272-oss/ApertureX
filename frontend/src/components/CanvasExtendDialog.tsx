@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 interface MarginState {
   left: number;
@@ -34,8 +35,6 @@ export function CanvasExtendDialog() {
   const [margins, setMargins] = useState<MarginState>(NEUTRAL_MARGINS);
   const [error, setError] = useState<string | null>(null);
 
-  if (!open) return null;
-
   function close() {
     setMargins(NEUTRAL_MARGINS);
     setError(null);
@@ -64,8 +63,8 @@ export function CanvasExtendDialog() {
   const hasAnyMargin = margins.left > 0 || margins.top > 0 || margins.right > 0 || margins.bottom > 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-8" onClick={close}>
-      <div onClick={(e) => e.stopPropagation()} className="flex w-full max-w-md flex-col gap-3 rounded-lg border border-border bg-bg-raised p-4 shadow-xl">
+    <Dialog open={open} onClose={close} label="Leinwand erweitern (KI-Ausfüllen über den Bildrand)" className="max-w-md">
+      <div className="flex flex-col gap-3 p-4">
         <h2 className="text-sm font-semibold text-text-primary">Leinwand erweitern (KI-Ausfüllen über den Bildrand)</h2>
         <p className="text-xs text-text-secondary">
           Vergrößert die Leinwand um die gewählten Ränder (Bruchteil der aktuellen Bildbreite/-höhe) und lässt dieselbe LaMa-KI wie beim Reparatur-Pinsel den neuen Rand füllen —
@@ -126,6 +125,6 @@ export function CanvasExtendDialog() {
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

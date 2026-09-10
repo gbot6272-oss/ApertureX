@@ -1844,3 +1844,18 @@ export async function emitMockEvent(page: Page, eventName: string, payload: unkn
 export async function getMockInvokeLog(page: Page): Promise<Array<{ cmd: string; args: unknown }>> {
   return page.evaluate(() => (window as unknown as Record<string, unknown>).__mockInvokeLog as Array<{ cmd: string; args: unknown }>);
 }
+
+/**
+ * Öffnet das Overflow-Menü der Kopfleiste (Phase 18 Schritt 3, siehe
+ * `DECISIONS.md` ADR-0046, `components/ui/Menu.tsx`). Die vormals
+ * dauerhaft sichtbaren Zeile-2-Knöpfe (Exportieren/Drucken/Vorlagen/
+ * Stacking/Statistik usw.) liegen jetzt als `role="menuitem"`-Einträge
+ * in diesem Menü statt als eigene `role="button"`-Elemente auf der
+ * Kopfleiste — jeder e2e-Test, der einen dieser Einträge braucht, muss
+ * das Menü zuerst darüber öffnen (es schließt sich nach jeder Auswahl
+ * automatisch wieder, muss also vor jedem einzelnen Zugriff erneut
+ * geöffnet werden).
+ */
+export async function openOverflowMenu(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Weitere Funktionen" }).click();
+}

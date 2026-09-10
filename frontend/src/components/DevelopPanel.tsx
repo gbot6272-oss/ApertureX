@@ -47,6 +47,7 @@ import {
   type SliderSpec,
   type StageEnabled,
 } from "../lib/edl";
+import { useT } from "../lib/i18n";
 import { matchesBinding } from "../lib/keybindings";
 import { PRESET_SECTION_KEYS, PRESET_SECTION_LABELS, type PresetSectionKey } from "../lib/presets";
 import { SOFT_PROOF_INTENT_LABELS, SOFT_PROOF_PROFILE_LABELS, type SoftProofIntent, type SoftProofProfile } from "../lib/softProof";
@@ -66,6 +67,7 @@ import { LutFilterPanel } from "./LutFilterPanel";
 import { SkinSmoothingPanel } from "./SkinSmoothingPanel";
 import { SkyReplacePanel } from "./SkyReplacePanel";
 import { StyleTransferPanel } from "./StyleTransferPanel";
+import { TabBar, type TabItem } from "./ui/Tabs";
 import { VirtualAperturePanel } from "./VirtualAperturePanel";
 
 // ---- Reparatur (Klonen/Reparieren) — Phase 4 Schritt 12 --------------------
@@ -134,6 +136,34 @@ function openStageAnchor(key: keyof StageEnabled): void {
   document.getElementById(STAGE_ANCHOR_IDS[key])?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+/** Welche Registerkarte (Phase 18 Schritt 4) den Anker einer Stufe trägt —
+ * `openStageAnchor` allein reicht seit der Tab-Aufteilung nicht mehr: der
+ * Zielanker existiert nur im DOM, wenn seine Registerkarte gerade aktiv
+ * ist, sonst wäre "Öffnen" ein stiller No-Op. `masks` fehlt hier bewusst:
+ * der Anker liegt in `MasksPanel.tsx`, einem eigenen, nicht getabten
+ * Panel. */
+const STAGE_TAB_IDS: Partial<Record<keyof StageEnabled, "light" | "color" | "details" | "creative" | "history">> = {
+  repair: "creative",
+  calibration: "light",
+  basic: "light",
+  local_contrast: "light",
+  details: "details",
+  hsl_color_mixer: "light",
+  color_grading: "color",
+  lens_corrections: "details",
+  effects: "details",
+  treatment: "color",
+  curves: "light",
+  composite: "creative",
+  virtual_aperture: "creative",
+  style_transfer: "creative",
+  skin_smoothing: "creative",
+  sky_replace: "creative",
+  lut_filter: "creative",
+  liquify: "creative",
+  geometry: "details",
+};
+
 const LIQUIFY_MODE_OPTIONS: ReadonlyArray<{ value: LiquifyMode; label: string }> = [
   { value: "Push", label: "Schieben" },
   { value: "Twirl", label: "Verwirbeln" },
@@ -169,6 +199,15 @@ const PRESET_STRENGTH_SPEC: SliderSpec = { key: "strength", label: "Stärke (%)"
 
 const WHITE_BALANCE_KEYS = new Set(["temp_shift_kelvin", "tint_shift"]);
 
+/**
+ * Die fünf Registerkarten des Entwickeln-Panels (Phase 18 Schritt 4,
+ * siehe `DECISIONS.md` ADR-0046) — dieselbe Fieldset-Menge wie zuvor,
+ * nur in benannte Gruppen statt einer einzigen langen Scroll-Spalte
+ * geteilt. `"light"` ist der Standard, damit die
+ * Grundeinstellungen-Regler wie bisher ohne Klick sichtbar sind.
+ */
+type DevelopTabId = "light" | "color" | "details" | "creative" | "history";
+
 /** Die vier numerischen Objektivkorrektur-Regler (Phase 4 Schritt 9,
  * ohne `manual_transform`, `profile_id`, `auto_ca`, `upright_mode`,
  * `guided_lines`). */
@@ -197,6 +236,8 @@ const GUIDED_LINE_FIELDS: ReadonlyArray<keyof GuidedLine> = ["x1", "y1", "x2", "
  * Roundtrip zu rechtfertigen.
  */
 export function DevelopPanel() {
+  const t = useT();
+  const [activeTab, setActiveTab] = useState<DevelopTabId>("light");
   const open = useAppStore((s) => s.developPanelOpen);
   const basic = useAppStore((s) => s.developEdl.basic);
   const setBasicField = useAppStore((s) => s.setBasicField);
@@ -426,6 +467,14 @@ export function DevelopPanel() {
 
   if (!open) return null;
 
+  const developTabs: ReadonlyArray<TabItem<DevelopTabId>> = [
+    { id: "light", label: t("developPanel.tab.light") },
+    { id: "color", label: t("developPanel.tab.color") },
+    { id: "details", label: t("developPanel.tab.details") },
+    { id: "creative", label: t("developPanel.tab.creative") },
+    { id: "history", label: t("developPanel.tab.history") },
+  ];
+
   const whiteBalanceSpecs = BASIC_SLIDER_SPECS.filter((spec) => WHITE_BALANCE_KEYS.has(spec.key));
   const toneSpecs = BASIC_SLIDER_SPECS.filter((spec) => !WHITE_BALANCE_KEYS.has(spec.key));
 
@@ -485,7 +534,11 @@ export function DevelopPanel() {
         </p>
       )}
 
-      {selectedPhotoId && (
+      {(selectedPhotoId || presetStrengthContext) && (
+        <TabBar tabs={developTabs} active={activeTab} onChange={setActiveTab} label={t("developPanel.tabs.label")} />
+      )}
+
+      {selectedPhotoId && activeTab === "history" && (
         <fieldset className="flex flex-col gap-1 rounded border border-border p-2" aria-label="Node-Editor">
           <legend className="mb-1 px-1 text-xs font-medium text-text-secondary">Node-Editor (Rendering-Stufen)</legend>
           <p className="mb-1 text-[11px] text-text-muted">
@@ -499,7 +552,23 @@ export function DevelopPanel() {
                   <input type="checkbox" checked={stageEnabled[stage.key]} onChange={() => toggleStage(stage.key)} aria-label={`${stage.label} aktiv`} />
                   <span className={stageEnabled[stage.key] ? "text-text-primary" : "text-text-muted line-through"}>{stage.label}</span>
                 </label>
-                <button type="button" onClick={() => openStageAnchor(stage.key)} className="rounded px-1.5 py-0.5 text-[11px] text-text-secondary hover:bg-bg-panel">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const tabForStage = STAGE_TAB_IDS[stage.key];
+                    if (tabForStage && tabForStage !== activeTab) {
+                      // Der Zielanker mountet erst nach dem Tab-Wechsel
+                      // (Phase 18 Schritt 4) — ohne den `requestAnimationFrame`-
+                      // Aufschub wäre `openStageAnchor` sonst ein stiller
+                      // No-Op, weil `getElementById` noch nichts findet.
+                      setActiveTab(tabForStage);
+                      requestAnimationFrame(() => openStageAnchor(stage.key));
+                    } else {
+                      openStageAnchor(stage.key);
+                    }
+                  }}
+                  className="rounded px-1.5 py-0.5 text-[11px] text-text-secondary hover:bg-bg-panel"
+                >
                   Öffnen
                 </button>
               </li>
@@ -508,7 +577,7 @@ export function DevelopPanel() {
         </fieldset>
       )}
 
-      {selectedPhotoId && (
+      {selectedPhotoId && activeTab === "history" && (
         <fieldset className="flex flex-col gap-2">
           <legend className="mb-1 text-xs font-medium text-text-secondary">Schnappschüsse</legend>
           <button
@@ -549,7 +618,7 @@ export function DevelopPanel() {
         </fieldset>
       )}
 
-      {selectedPhotoId && (
+      {selectedPhotoId && activeTab === "history" && (
         <fieldset className="flex flex-col gap-1">
           <legend className="mb-1 text-xs font-medium text-text-secondary">Vorher/Nachher</legend>
           <div className="grid grid-cols-2 gap-1">
@@ -589,7 +658,7 @@ export function DevelopPanel() {
         </fieldset>
       )}
 
-      {selectedPhotoId && (
+      {selectedPhotoId && activeTab === "history" && (
         <fieldset className="flex flex-col gap-1">
           <legend className="mb-1 text-xs font-medium text-text-secondary">Referenzansicht</legend>
           <label className="flex items-center gap-2 text-xs text-text-secondary">
@@ -620,7 +689,7 @@ export function DevelopPanel() {
         </fieldset>
       )}
 
-      {selectedPhotoId && (
+      {selectedPhotoId && activeTab === "history" && (
         <fieldset className="flex flex-col gap-2">
           <legend className="mb-1 text-xs font-medium text-text-secondary">Soft-Proof</legend>
           <button
@@ -690,7 +759,7 @@ export function DevelopPanel() {
         </fieldset>
       )}
 
-      {selectedPhotoId && (
+      {selectedPhotoId && activeTab === "history" && (
         <fieldset className="flex flex-col gap-2">
           <legend className="mb-1 text-xs font-medium text-text-secondary">Einstellungen kopieren/einfügen/synchronisieren</legend>
           <div className="flex flex-col gap-1">
@@ -743,7 +812,7 @@ export function DevelopPanel() {
         </fieldset>
       )}
 
-      {presetStrengthContext && (
+      {activeTab === "history" && presetStrengthContext && (
         <fieldset className="flex flex-col gap-2 rounded border border-accent/40 bg-accent/5 p-2">
           <legend className="px-1 text-xs font-medium text-text-secondary">Preset „{presetStrengthContext.presetName}"</legend>
           <DevelopSlider
@@ -760,1178 +829,1198 @@ export function DevelopPanel() {
 
       {selectedPhotoId && (
         <>
-          <fieldset className="flex flex-col gap-3">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Weißabgleich</legend>
+          {activeTab === "light" && (
+            <>
+              <fieldset className="flex flex-col gap-3">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Weißabgleich</legend>
 
-            <div className="flex items-center gap-2">
-              <select
-                aria-label="Weißabgleich-Preset"
-                defaultValue=""
-                onChange={(event) => {
-                  if (event.target.value) applyWhiteBalancePreset(event.target.value);
-                  event.target.value = "";
-                }}
-                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
-              >
-                <option value="" disabled>
-                  Preset wählen…
-                </option>
-                {WHITE_BALANCE_PRESETS.map((preset) => (
-                  <option key={preset.key} value={preset.key}>
-                    {preset.label}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={toggleWbPicker}
-                aria-pressed={wbPickerActive}
-                title="Weißabgleich-Pipette: ins Bild klicken, um einen neutralen Punkt zu setzen"
-                className={`rounded border px-2 py-1 text-xs ${
-                  wbPickerActive ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
-                }`}
-              >
-                Pipette
-              </button>
-            </div>
-            {wbPickerActive && <p className="text-xs text-accent">Klicken Sie in einen neutral-grauen Bildpunkt.</p>}
+                <div className="flex items-center gap-2">
+                  <select
+                    aria-label="Weißabgleich-Preset"
+                    defaultValue=""
+                    onChange={(event) => {
+                      if (event.target.value) applyWhiteBalancePreset(event.target.value);
+                      event.target.value = "";
+                    }}
+                    className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+                  >
+                    <option value="" disabled>
+                      Preset wählen…
+                    </option>
+                    {WHITE_BALANCE_PRESETS.map((preset) => (
+                      <option key={preset.key} value={preset.key}>
+                        {preset.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={toggleWbPicker}
+                    aria-pressed={wbPickerActive}
+                    title="Weißabgleich-Pipette: ins Bild klicken, um einen neutralen Punkt zu setzen"
+                    className={`rounded border px-2 py-1 text-xs ${
+                      wbPickerActive ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
+                    }`}
+                  >
+                    Pipette
+                  </button>
+                </div>
+                {wbPickerActive && <p className="text-xs text-accent">Klicken Sie in einen neutral-grauen Bildpunkt.</p>}
 
-            {whiteBalanceSpecs.map((spec) => (
-              <DevelopSlider
-                key={spec.key}
-                spec={spec}
-                value={readBasicField(basic, spec.key)}
-                onChange={(value) => setBasicField(spec.key, value)}
-                onCommit={() => void commitDevelopEdit()}
-              />
-            ))}
-          </fieldset>
-
-          <fieldset id="stage-basic" className="flex flex-col gap-3">
-            {/* Nur für Assistive Technologien / Tests: gruppiert diese
-                Regler unter einem eigenen Namen, damit z. B. "Sättigung"
-                hier eindeutig von der gleichnamigen HSL-Band-Regler
-                unterscheidbar bleibt (beide Abschnitte sind gleichzeitig
-                sichtbar). Trägt außerdem den Anker für den Node-Editor
-                (Phase 9 Schritt 7) — Textur/Klarheit leben im selben
-                Regler-Satz wie die übrigen Grundeinstellungen, deshalb
-                zeigt `local_contrast` auf denselben Anker. */}
-            <legend className="sr-only">Grundeinstellungen (Ton)</legend>
-            {toneSpecs.map((spec) => (
-              <DevelopSlider
-                key={spec.key}
-                spec={spec}
-                value={readBasicField(basic, spec.key)}
-                onChange={(value) => setBasicField(spec.key, value)}
-                onCommit={() => void commitDevelopEdit()}
-              />
-            ))}
-          </fieldset>
-
-          <fieldset id="stage-curves" className="flex flex-col gap-2">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Kurven</legend>
-            <div className="flex flex-wrap gap-1">
-              {CURVE_CHANNEL_TABS.map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setActiveCurveChannel(tab.key)}
-                  aria-pressed={activeCurveChannel === tab.key}
-                  className={`rounded border px-2 py-1 text-xs ${
-                    activeCurveChannel === tab.key ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            <CurveEditor
-              key={activeCurveChannel}
-              channel={curves[activeCurveChannel]}
-              onChange={(next) => setCurveChannel(activeCurveChannel, next)}
-              onCommit={() => void commitDevelopEdit()}
-            />
-          </fieldset>
-
-          <fieldset id="stage-hsl_color_mixer" className="flex flex-col gap-2">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">HSL</legend>
-            <div className="flex flex-wrap gap-1">
-              {HSL_BAND_TABS.map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setActiveHslBand(tab.key)}
-                  aria-pressed={activeHslBand === tab.key}
-                  className={`rounded border px-2 py-1 text-xs ${
-                    activeHslBand === tab.key ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            <div className="flex flex-col gap-3">
-              {HSL_BAND_SLIDER_SPECS.map((spec) => {
-                const field = spec.key as "hue" | "saturation" | "luminance";
-                return (
+                {whiteBalanceSpecs.map((spec) => (
                   <DevelopSlider
                     key={spec.key}
                     spec={spec}
-                    value={hsl[activeHslBand][field]}
-                    onChange={(value) => setHslBandField(activeHslBand, field, value)}
+                    value={readBasicField(basic, spec.key)}
+                    onChange={(value) => setBasicField(spec.key, value)}
                     onCommit={() => void commitDevelopEdit()}
                   />
-                );
-              })}
-            </div>
-          </fieldset>
+                ))}
+              </fieldset>
 
-          <fieldset className="flex flex-col gap-2">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Farb-Harmonie-Rad</legend>
-            <ColorHarmonyWheel />
-          </fieldset>
+              <fieldset id="stage-basic" className="flex flex-col gap-3">
+                {/* Nur für Assistive Technologien / Tests: gruppiert diese
+                    Regler unter einem eigenen Namen, damit z. B. "Sättigung"
+                    hier eindeutig von der gleichnamigen HSL-Band-Regler
+                    unterscheidbar bleibt (beide Abschnitte sind gleichzeitig
+                    sichtbar). Trägt außerdem den Anker für den Node-Editor
+                    (Phase 9 Schritt 7) — Textur/Klarheit leben im selben
+                    Regler-Satz wie die übrigen Grundeinstellungen, deshalb
+                    zeigt `local_contrast` auf denselben Anker. */}
+                <legend className="sr-only">Grundeinstellungen (Ton)</legend>
+                {toneSpecs.map((spec) => (
+                  <DevelopSlider
+                    key={spec.key}
+                    spec={spec}
+                    value={readBasicField(basic, spec.key)}
+                    onChange={(value) => setBasicField(spec.key, value)}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
+                ))}
+              </fieldset>
 
-          <fieldset id="stage-treatment" className="flex flex-col gap-2">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Behandlung</legend>
-            <div className="flex gap-1" role="group" aria-label="Behandlung">
-              <button
-                type="button"
-                onClick={() => setTreatment("Color")}
-                aria-pressed={treatment === "Color"}
-                className={`flex-1 rounded border px-2 py-1 text-xs ${treatment === "Color" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"}`}
-              >
-                Farbe
-              </button>
-              <button
-                type="button"
-                onClick={() => setTreatment("BlackAndWhite")}
-                aria-pressed={treatment === "BlackAndWhite"}
-                className={`flex-1 rounded border px-2 py-1 text-xs ${treatment === "BlackAndWhite" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"}`}
-              >
-                Schwarzweiß
-              </button>
-            </div>
-            {treatment === "BlackAndWhite" && (
-              <>
+              <fieldset id="stage-curves" className="flex flex-col gap-2">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Kurven</legend>
                 <div className="flex flex-wrap gap-1">
-                  {BW_MIXER_BAND_TABS.map((tab) => (
+                  {CURVE_CHANNEL_TABS.map((tab) => (
                     <button
                       key={tab.key}
                       type="button"
-                      onClick={() => setActiveBwMixerBand(tab.key)}
-                      aria-pressed={activeBwMixerBand === tab.key}
+                      onClick={() => setActiveCurveChannel(tab.key)}
+                      aria-pressed={activeCurveChannel === tab.key}
                       className={`rounded border px-2 py-1 text-xs ${
-                        activeBwMixerBand === tab.key ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
+                        activeCurveChannel === tab.key ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
                       }`}
                     >
                       {tab.label}
                     </button>
                   ))}
                 </div>
-                <DevelopSlider
-                  spec={{ ...BW_MIXER_SLIDER_SPEC, label: BW_MIXER_BAND_TABS.find((t) => t.key === activeBwMixerBand)?.label ?? "" }}
-                  value={bwMixer[activeBwMixerBand]}
-                  onChange={(value) => setBwMixerField(activeBwMixerBand, value)}
+                <CurveEditor
+                  key={activeCurveChannel}
+                  channel={curves[activeCurveChannel]}
+                  onChange={(next) => setCurveChannel(activeCurveChannel, next)}
                   onCommit={() => void commitDevelopEdit()}
                 />
-              </>
-            )}
-          </fieldset>
+              </fieldset>
 
-          <fieldset className="flex flex-col gap-2">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Farbmischer</legend>
-            <button
-              type="button"
-              onClick={toggleColorMixerPicker}
-              disabled={colorMixer.regions.length >= MAX_COLOR_MIXER_REGIONS && !colorMixerPickerActive}
-              aria-pressed={colorMixerPickerActive}
-              title="Region hinzufügen: ins Bild klicken, um eine neue Farbmischer-Region an dieser Farbe anzulegen"
-              className={`rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${
-                colorMixerPickerActive ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
-              }`}
-            >
-              Region hinzufügen
-            </button>
-            {colorMixerPickerActive && <p className="text-xs text-accent">Klicken Sie ins Bild, um eine Region an dieser Farbe anzulegen.</p>}
+              <fieldset id="stage-hsl_color_mixer" className="flex flex-col gap-2">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">HSL</legend>
+                <div className="flex flex-wrap gap-1">
+                  {HSL_BAND_TABS.map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => setActiveHslBand(tab.key)}
+                      aria-pressed={activeHslBand === tab.key}
+                      className={`rounded border px-2 py-1 text-xs ${
+                        activeHslBand === tab.key ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-col gap-3">
+                  {HSL_BAND_SLIDER_SPECS.map((spec) => {
+                    const field = spec.key as "hue" | "saturation" | "luminance";
+                    return (
+                      <DevelopSlider
+                        key={spec.key}
+                        spec={spec}
+                        value={hsl[activeHslBand][field]}
+                        onChange={(value) => setHslBandField(activeHslBand, field, value)}
+                        onCommit={() => void commitDevelopEdit()}
+                      />
+                    );
+                  })}
+                </div>
+              </fieldset>
 
-            {colorMixer.regions.length === 0 && <p className="text-xs text-text-muted">Noch keine Regionen.</p>}
+              <fieldset className="flex flex-col gap-2">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Farbmischer</legend>
+                <button
+                  type="button"
+                  onClick={toggleColorMixerPicker}
+                  disabled={colorMixer.regions.length >= MAX_COLOR_MIXER_REGIONS && !colorMixerPickerActive}
+                  aria-pressed={colorMixerPickerActive}
+                  title="Region hinzufügen: ins Bild klicken, um eine neue Farbmischer-Region an dieser Farbe anzulegen"
+                  className={`rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${
+                    colorMixerPickerActive ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
+                  }`}
+                >
+                  Region hinzufügen
+                </button>
+                {colorMixerPickerActive && <p className="text-xs text-accent">Klicken Sie ins Bild, um eine Region an dieser Farbe anzulegen.</p>}
 
-            <div className="flex flex-wrap gap-1">
-              {colorMixer.regions.map((region, index) => (
-                <span key={index} className="flex items-center gap-1 rounded border border-border bg-bg-panel px-1 py-0.5 text-xs">
+                {colorMixer.regions.length === 0 && <p className="text-xs text-text-muted">Noch keine Regionen.</p>}
+
+                <div className="flex flex-wrap gap-1">
+                  {colorMixer.regions.map((region, index) => (
+                    <span key={index} className="flex items-center gap-1 rounded border border-border bg-bg-panel px-1 py-0.5 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRegionIndex(index)}
+                        aria-pressed={selectedRegionIndex === index}
+                        className={selectedRegionIndex === index ? "text-accent" : "text-text-secondary hover:text-accent"}
+                      >
+                        {Math.round(region.target_hue_degrees)}°
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          removeColorMixerRegion(index);
+                          if (selectedRegionIndex === index) setSelectedRegionIndex(null);
+                        }}
+                        aria-label={`Region bei ${Math.round(region.target_hue_degrees)}° entfernen`}
+                        className="text-text-muted hover:text-danger"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+
+                {selectedRegionIndex !== null && colorMixer.regions[selectedRegionIndex] && (
+                  <div className="flex flex-col gap-3">
+                    {COLOR_MIXER_REGION_SLIDER_SPECS.map((spec) => {
+                      const field = spec.key as keyof ColorMixerRegion;
+                      const region = colorMixer.regions[selectedRegionIndex];
+                      if (!region) return null;
+                      return (
+                        <DevelopSlider
+                          key={spec.key}
+                          spec={spec}
+                          value={region[field]}
+                          onChange={(value) => updateColorMixerRegion(selectedRegionIndex, { [field]: value })}
+                          onCommit={() => void commitDevelopEdit()}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+              </fieldset>
+
+              <fieldset id="stage-calibration" className="flex flex-col gap-3">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Kalibrierung</legend>
+                {/* Nur `V1` existiert — reiner Vorwärtskompatibilitäts-Platzhalter
+                    (siehe `crates/apx-pipeline/src/edl/v2.rs`s Moduldoku),
+                    deshalb kein Auswahl-Widget, nur eine informative Anzeige. */}
+                <p className="text-xs text-text-secondary">Prozessversion: V1</p>
+
+                {CALIBRATION_PRIMARY_ROWS.map((row) => (
+                  <div key={row.key} className="flex flex-col gap-2">
+                    <DevelopSlider
+                      spec={{ key: "hue", label: `Farbton (${row.label})`, min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 }}
+                      value={calibration[row.key].hue}
+                      onChange={(value) => setCalibrationPrimaryField(row.key, "hue", value)}
+                      onCommit={() => void commitDevelopEdit()}
+                    />
+                    <DevelopSlider
+                      spec={{ key: "saturation", label: `Sättigung (${row.label})`, min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 }}
+                      value={calibration[row.key].saturation}
+                      onChange={(value) => setCalibrationPrimaryField(row.key, "saturation", value)}
+                      onCommit={() => void commitDevelopEdit()}
+                    />
+                  </div>
+                ))}
+
+                <DevelopSlider
+                  spec={{ key: "shadow_tint", label: "Schattentönung", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 }}
+                  value={calibration.shadow_tint}
+                  onChange={setCalibrationShadowTint}
+                  onCommit={() => void commitDevelopEdit()}
+                />
+
+                <label className="flex items-center gap-2 text-xs text-text-secondary">
+                  Kameraprofil
+                  <select
+                    aria-label="Kameraprofil"
+                    value={calibration.camera_profile ?? ""}
+                    disabled={Boolean(calibration.dcp_profile)}
+                    onChange={(event) => setCalibrationCameraProfile(event.target.value || null)}
+                    className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {CAMERA_PROFILE_OPTIONS.map((option) => (
+                      <option key={option.label} value={option.value ?? ""}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {/* Echter DCP-Import (Phase 13 Schritt 3, ADR-0040-Nachtrag) — hat
+                    Vorrang vor der Handliste oben, deshalb dort deaktiviert,
+                    solange ein Profil importiert ist. */}
+                <div className="flex items-center justify-between text-xs text-text-secondary">
+                  {calibration.dcp_profile ? (
+                    <>
+                      <span className="truncate" title={calibration.dcp_profile.name}>
+                        DCP: {calibration.dcp_profile.name}
+                      </span>
+                      <button type="button" onClick={clearDcpProfile} className="shrink-0 text-danger underline">
+                        Entfernen
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={dcpProfileImporting}
+                      onClick={() => void importDcpProfile()}
+                      className="rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {dcpProfileImporting ? "Importiert…" : "Adobe-.dcp-Profil importieren…"}
+                    </button>
+                  )}
+                </div>
+              </fieldset>
+            </>
+          )}
+
+          {activeTab === "color" && (
+            <>
+              <fieldset className="flex flex-col gap-2">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Farb-Harmonie-Rad</legend>
+                <ColorHarmonyWheel />
+              </fieldset>
+
+              <fieldset id="stage-treatment" className="flex flex-col gap-2">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Behandlung</legend>
+                <div className="flex gap-1" role="group" aria-label="Behandlung">
                   <button
                     type="button"
-                    onClick={() => setSelectedRegionIndex(index)}
-                    aria-pressed={selectedRegionIndex === index}
-                    className={selectedRegionIndex === index ? "text-accent" : "text-text-secondary hover:text-accent"}
+                    onClick={() => setTreatment("Color")}
+                    aria-pressed={treatment === "Color"}
+                    className={`flex-1 rounded border px-2 py-1 text-xs ${treatment === "Color" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"}`}
                   >
-                    {Math.round(region.target_hue_degrees)}°
+                    Farbe
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      removeColorMixerRegion(index);
-                      if (selectedRegionIndex === index) setSelectedRegionIndex(null);
-                    }}
-                    aria-label={`Region bei ${Math.round(region.target_hue_degrees)}° entfernen`}
-                    className="text-text-muted hover:text-danger"
+                    onClick={() => setTreatment("BlackAndWhite")}
+                    aria-pressed={treatment === "BlackAndWhite"}
+                    className={`flex-1 rounded border px-2 py-1 text-xs ${treatment === "BlackAndWhite" ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"}`}
                   >
-                    ×
+                    Schwarzweiß
                   </button>
-                </span>
-              ))}
-            </div>
+                </div>
+                {treatment === "BlackAndWhite" && (
+                  <>
+                    <div className="flex flex-wrap gap-1">
+                      {BW_MIXER_BAND_TABS.map((tab) => (
+                        <button
+                          key={tab.key}
+                          type="button"
+                          onClick={() => setActiveBwMixerBand(tab.key)}
+                          aria-pressed={activeBwMixerBand === tab.key}
+                          className={`rounded border px-2 py-1 text-xs ${
+                            activeBwMixerBand === tab.key ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+                    <DevelopSlider
+                      spec={{ ...BW_MIXER_SLIDER_SPEC, label: BW_MIXER_BAND_TABS.find((t) => t.key === activeBwMixerBand)?.label ?? "" }}
+                      value={bwMixer[activeBwMixerBand]}
+                      onChange={(value) => setBwMixerField(activeBwMixerBand, value)}
+                      onCommit={() => void commitDevelopEdit()}
+                    />
+                  </>
+                )}
+              </fieldset>
 
-            {selectedRegionIndex !== null && colorMixer.regions[selectedRegionIndex] && (
-              <div className="flex flex-col gap-3">
-                {COLOR_MIXER_REGION_SLIDER_SPECS.map((spec) => {
-                  const field = spec.key as keyof ColorMixerRegion;
-                  const region = colorMixer.regions[selectedRegionIndex];
-                  if (!region) return null;
-                  return (
+              <fieldset id="stage-color_grading" className="flex flex-col gap-2">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Color Grading</legend>
+                <div className="flex flex-wrap justify-center gap-3">
+                  {COLOR_GRADING_WHEEL_TABS.map((tab) => (
+                    <ColorWheel
+                      key={tab.key}
+                      label={tab.label}
+                      wheel={colorGrading[tab.key]}
+                      onChange={(next) => setColorGradingWheel(tab.key, next)}
+                      onCommit={() => void commitDevelopEdit()}
+                    />
+                  ))}
+                </div>
+                <div className="flex flex-col gap-3">
+                  <DevelopSlider
+                    spec={{ key: "balance", label: "Balance", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 }}
+                    value={colorGrading.balance}
+                    onChange={setColorGradingBalance}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
+                  <DevelopSlider
+                    spec={{ key: "blending", label: "Überblendung", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 }}
+                    value={colorGrading.blending}
+                    onChange={setColorGradingBlending}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
+                </div>
+              </fieldset>
+            </>
+          )}
+
+          {activeTab === "details" && (
+            <>
+              <fieldset id="stage-details" className="flex flex-col gap-3">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Details</legend>
+                <div className="flex flex-col gap-2">
+                  {SHARPEN_SLIDER_SPECS.map((spec) => (
                     <DevelopSlider
                       key={spec.key}
                       spec={spec}
-                      value={region[field]}
-                      onChange={(value) => updateColorMixerRegion(selectedRegionIndex, { [field]: value })}
+                      value={details[spec.key as DetailsSliderKey]}
+                      onChange={(value) => setDetailsField(spec.key as DetailsSliderKey, value)}
                       onCommit={() => void commitDevelopEdit()}
                     />
-                  );
-                })}
-              </div>
-            )}
-          </fieldset>
-
-          <fieldset id="stage-color_grading" className="flex flex-col gap-2">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Color Grading</legend>
-            <div className="flex flex-wrap justify-center gap-3">
-              {COLOR_GRADING_WHEEL_TABS.map((tab) => (
-                <ColorWheel
-                  key={tab.key}
-                  label={tab.label}
-                  wheel={colorGrading[tab.key]}
-                  onChange={(next) => setColorGradingWheel(tab.key, next)}
-                  onCommit={() => void commitDevelopEdit()}
-                />
-              ))}
-            </div>
-            <div className="flex flex-col gap-3">
-              <DevelopSlider
-                spec={{ key: "balance", label: "Balance", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 }}
-                value={colorGrading.balance}
-                onChange={setColorGradingBalance}
-                onCommit={() => void commitDevelopEdit()}
-              />
-              <DevelopSlider
-                spec={{ key: "blending", label: "Überblendung", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 }}
-                value={colorGrading.blending}
-                onChange={setColorGradingBlending}
-                onCommit={() => void commitDevelopEdit()}
-              />
-            </div>
-          </fieldset>
-
-          <fieldset id="stage-calibration" className="flex flex-col gap-3">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Kalibrierung</legend>
-            {/* Nur `V1` existiert — reiner Vorwärtskompatibilitäts-Platzhalter
-                (siehe `crates/apx-pipeline/src/edl/v2.rs`s Moduldoku),
-                deshalb kein Auswahl-Widget, nur eine informative Anzeige. */}
-            <p className="text-xs text-text-secondary">Prozessversion: V1</p>
-
-            {CALIBRATION_PRIMARY_ROWS.map((row) => (
-              <div key={row.key} className="flex flex-col gap-2">
-                <DevelopSlider
-                  spec={{ key: "hue", label: `Farbton (${row.label})`, min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 }}
-                  value={calibration[row.key].hue}
-                  onChange={(value) => setCalibrationPrimaryField(row.key, "hue", value)}
-                  onCommit={() => void commitDevelopEdit()}
-                />
-                <DevelopSlider
-                  spec={{ key: "saturation", label: `Sättigung (${row.label})`, min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 }}
-                  value={calibration[row.key].saturation}
-                  onChange={(value) => setCalibrationPrimaryField(row.key, "saturation", value)}
-                  onCommit={() => void commitDevelopEdit()}
-                />
-              </div>
-            ))}
-
-            <DevelopSlider
-              spec={{ key: "shadow_tint", label: "Schattentönung", min: -100, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 }}
-              value={calibration.shadow_tint}
-              onChange={setCalibrationShadowTint}
-              onCommit={() => void commitDevelopEdit()}
-            />
-
-            <label className="flex items-center gap-2 text-xs text-text-secondary">
-              Kameraprofil
-              <select
-                aria-label="Kameraprofil"
-                value={calibration.camera_profile ?? ""}
-                disabled={Boolean(calibration.dcp_profile)}
-                onChange={(event) => setCalibrationCameraProfile(event.target.value || null)}
-                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {CAMERA_PROFILE_OPTIONS.map((option) => (
-                  <option key={option.label} value={option.value ?? ""}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {/* Echter DCP-Import (Phase 13 Schritt 3, ADR-0040-Nachtrag) — hat
-                Vorrang vor der Handliste oben, deshalb dort deaktiviert,
-                solange ein Profil importiert ist. */}
-            <div className="flex items-center justify-between text-xs text-text-secondary">
-              {calibration.dcp_profile ? (
-                <>
-                  <span className="truncate" title={calibration.dcp_profile.name}>
-                    DCP: {calibration.dcp_profile.name}
-                  </span>
-                  <button type="button" onClick={clearDcpProfile} className="shrink-0 text-danger underline">
-                    Entfernen
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  disabled={dcpProfileImporting}
-                  onClick={() => void importDcpProfile()}
-                  className="rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {dcpProfileImporting ? "Importiert…" : "Adobe-.dcp-Profil importieren…"}
-                </button>
-              )}
-            </div>
-          </fieldset>
-
-          <fieldset id="stage-details" className="flex flex-col gap-3">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Details</legend>
-            <div className="flex flex-col gap-2">
-              {SHARPEN_SLIDER_SPECS.map((spec) => (
-                <DevelopSlider
-                  key={spec.key}
-                  spec={spec}
-                  value={details[spec.key as DetailsSliderKey]}
-                  onChange={(value) => setDetailsField(spec.key as DetailsSliderKey, value)}
-                  onCommit={() => void commitDevelopEdit()}
-                />
-              ))}
-              <label className="flex items-center gap-2 text-xs text-text-secondary">
-                <input
-                  type="checkbox"
-                  checked={details.use_deconvolution_sharpen}
-                  onChange={(event) => setDetailsUseDeconvolutionSharpen(event.target.checked)}
-                />
-                Deconvolution-Schärfung (Alternativmodus)
-              </label>
-            </div>
-            <div className="flex flex-col gap-2">
-              {LUMINANCE_NR_SLIDER_SPECS.map((spec) => (
-                <DevelopSlider
-                  key={spec.key}
-                  spec={spec}
-                  value={details[spec.key as DetailsSliderKey]}
-                  onChange={(value) => setDetailsField(spec.key as DetailsSliderKey, value)}
-                  onCommit={() => void commitDevelopEdit()}
-                />
-              ))}
-            </div>
-            <div className="flex flex-col gap-2">
-              {COLOR_NR_SLIDER_SPECS.map((spec) => (
-                <DevelopSlider
-                  key={spec.key}
-                  spec={spec}
-                  value={details[spec.key as DetailsSliderKey]}
-                  onChange={(value) => setDetailsField(spec.key as DetailsSliderKey, value)}
-                  onCommit={() => void commitDevelopEdit()}
-                />
-              ))}
-            </div>
-          </fieldset>
-
-          <fieldset id="stage-lens_corrections" className="flex flex-col gap-3">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Objektivkorrekturen</legend>
-
-            <div className="flex items-center gap-2">
-              <label className="flex flex-1 items-center gap-2 text-xs text-text-secondary">
-                Objektivprofil
-                <select
-                  aria-label="Objektivprofil"
-                  value={lensCorrections.profile_id ?? ""}
-                  onChange={(event) => setLensCorrectionProfile(event.target.value || null)}
-                  className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
-                >
-                  {LENS_PROFILE_OPTIONS.map((option) => (
-                    <option key={option.label} value={option.value ?? ""}>
-                      {option.label}
-                    </option>
                   ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                onClick={() => void manuallyDetectLensProfile()}
-                title="Objektivprofil aus dem EXIF-Objektivstring des Fotos erkennen (Phase 12 Schritt 3, siehe DECISIONS.md ADR-0039)"
-                className="shrink-0 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:border-accent"
-              >
-                Automatisch erkennen
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => setLensCalibrationDialogOpen(true)}
-                title="Objektiv aus eigenen Kalibrierfotos vermessen (Phase 12 Schritt 3 Teil B, siehe DECISIONS.md ADR-0039)"
-                className="rounded border border-border px-2 py-1 text-text-secondary hover:border-accent"
-              >
-                Objektiv kalibrieren…
-              </button>
-              {lensCorrections.custom_distortion_k1 !== null && (
-                <span className="flex items-center gap-1 text-text-secondary">
-                  Eigene Kalibrierung aktiv (k1 = {lensCorrections.custom_distortion_k1.toFixed(4)})
-                  <button type="button" onClick={() => setLensCorrectionCustomDistortionK1(null)} className="text-danger underline">
-                    Entfernen
-                  </button>
-                </span>
-              )}
-            </div>
-
-            <label className="flex items-center gap-2 text-xs text-text-secondary">
-              <input
-                type="checkbox"
-                checked={lensCorrections.auto_ca}
-                onChange={(event) => setLensCorrectionAutoCa(event.target.checked)}
-              />
-              Automatische CA-Korrektur (nutzt Profilwerte)
-            </label>
-
-            {!lensCorrections.auto_ca &&
-              LENS_CA_SLIDER_SPECS.map((spec) => (
-                <DevelopSlider
-                  key={spec.key}
-                  spec={spec}
-                  value={lensCorrections[spec.key as LensNumericKey]}
-                  onChange={(value) => setLensCorrectionField(spec.key as LensNumericKey, value)}
-                  onCommit={() => void commitDevelopEdit()}
-                />
-              ))}
-
-            {LENS_SLIDER_SPECS.map((spec) => (
-              <DevelopSlider
-                key={spec.key}
-                spec={spec}
-                value={lensCorrections[spec.key as LensNumericKey]}
-                onChange={(value) => setLensCorrectionField(spec.key as LensNumericKey, value)}
-                onCommit={() => void commitDevelopEdit()}
-              />
-            ))}
-
-            <label className="flex items-center gap-2 text-xs text-text-secondary">
-              Perspektive/Upright
-              <select
-                aria-label="Perspektive/Upright"
-                value={lensCorrections.upright_mode}
-                onChange={(event) => setLensCorrectionUprightMode(event.target.value as LensCorrectionAdjustment["upright_mode"])}
-                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
-              >
-                {UPRIGHT_MODE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {(lensCorrections.upright_mode === "Level" ||
-              lensCorrections.upright_mode === "Vertical" ||
-              lensCorrections.upright_mode === "Auto" ||
-              lensCorrections.upright_mode === "Full") && (
-              <button
-                type="button"
-                disabled={uprightDetectLoading}
-                onClick={() => void runUprightAutoDetect()}
-                className="rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {uprightDetectLoading ? "Erkennt Kanten…" : "Automatisch erkennen"}
-              </button>
-            )}
-
-            {lensCorrections.upright_mode === "Guided" && (
-              <div className="flex flex-col gap-2">
-                {/* Bewusste Vereinfachung (siehe DECISIONS.md ADR-0030):
-                    Zahlenfelder statt einer Klick-Interaktion im Viewer —
-                    eine echte Linienauswahl per Klick wäre eine eigene,
-                    größere UI-Aufgabe (SVG-Overlay, Ziehgriffe). */}
-                <p className="text-xs text-text-secondary">Hilfslinien (normierte Bildkoordinaten 0–1)</p>
-                {[0, 1].map((lineIndex) => {
-                  const line: GuidedLine = lensCorrections.guided_lines[lineIndex] ?? {
-                    x1: 0,
-                    y1: 0,
-                    x2: 0,
-                    y2: 0,
-                  };
-                  return (
-                    <div key={lineIndex} className="grid grid-cols-4 gap-1">
-                      {GUIDED_LINE_FIELDS.map((field) => (
-                        <label key={field} className="flex flex-col text-[10px] text-text-secondary">
-                          {`L${lineIndex + 1}.${field}`}
-                          <input
-                            type="number"
-                            step={0.01}
-                            aria-label={`Linie ${lineIndex + 1}: ${field}`}
-                            value={line[field]}
-                            onChange={(event) =>
-                              setLensCorrectionGuidedLineField(lineIndex as 0 | 1, field, Number(event.target.value))
-                            }
-                            onBlur={() => void commitDevelopEdit()}
-                            className="w-full rounded border border-border bg-bg-base px-1 py-0.5 text-right text-text-primary"
-                          />
-                        </label>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            <div className="flex flex-col gap-2">
-              <p className="text-xs text-text-secondary">Manuelle Transformation</p>
-              {MANUAL_TRANSFORM_SLIDER_SPECS.map((spec) => (
-                <DevelopSlider
-                  key={spec.key}
-                  spec={spec}
-                  value={lensCorrections.manual_transform[spec.key as keyof ManualTransform]}
-                  onChange={(value) => setLensCorrectionManualTransformField(spec.key as keyof ManualTransform, value)}
-                  onCommit={() => void commitDevelopEdit()}
-                />
-              ))}
-            </div>
-          </fieldset>
-
-          <fieldset id="stage-effects" className="flex flex-col gap-3">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Effekte</legend>
-            <div className="flex flex-col gap-2">
-              {POST_VIGNETTE_SLIDER_SPECS.map((spec) => (
-                <DevelopSlider
-                  key={spec.key}
-                  spec={spec}
-                  value={effects[spec.key as keyof EffectsAdjustment]}
-                  onChange={(value) => setEffectsField(spec.key as keyof EffectsAdjustment, value)}
-                  onCommit={() => void commitDevelopEdit()}
-                />
-              ))}
-            </div>
-            <div className="flex flex-col gap-2">
-              {GRAIN_SLIDER_SPECS.map((spec) => (
-                <DevelopSlider
-                  key={spec.key}
-                  spec={spec}
-                  value={effects[spec.key as keyof EffectsAdjustment]}
-                  onChange={(value) => setEffectsField(spec.key as keyof EffectsAdjustment, value)}
-                  onCommit={() => void commitDevelopEdit()}
-                />
-              ))}
-            </div>
-            {/* Echte Halation-/Bloom-Simulation (Phase 14 Schritt 4,
-                ADR-0041): Lightroom Classic "cannot create true film
-                halation, only a soft bloom approximation". */}
-            <div className="flex flex-col gap-2 border-t border-border pt-2">
-              <p className="text-xs text-text-muted">Halation (Lichter-Ausblutung, z. B. Filmlook)</p>
-              {HALATION_SLIDER_SPECS.map((spec) => (
-                <DevelopSlider
-                  key={spec.key}
-                  spec={spec}
-                  value={effects[spec.key as keyof EffectsAdjustment]}
-                  onChange={(value) => setEffectsField(spec.key as keyof EffectsAdjustment, value)}
-                  onCommit={() => void commitDevelopEdit()}
-                />
-              ))}
-            </div>
-          </fieldset>
-
-          <fieldset id="stage-composite" className="flex flex-col gap-2">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Compositing</legend>
-            <p className="text-xs text-text-muted">Mehrfachbelichtung: legt ein weiteres Foto oder eine Textur (z. B. ein Lichtleck) über das aktuelle Bild.</p>
-
-            <label className="flex items-center gap-2 text-xs text-text-secondary">
-              Foto
-              <select
-                aria-label="Ebenen-Quellfoto"
-                value={compositeSourcePhotoId}
-                onChange={(event) => setCompositeSourcePhotoId(event.target.value)}
-                className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-1.5 py-0.5"
-              >
-                <option value="">Foto wählen…</option>
-                {otherPhotosForReference.map((photo) => (
-                  <option key={photo.id} value={photo.id}>
-                    {photo.filename}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="flex gap-1.5">
-              <button
-                type="button"
-                onClick={() => compositeSourcePhotoId && void addCompositeLayerFromPhoto(compositeSourcePhotoId)}
-                disabled={!compositeSourcePhotoId || compositeLayerLoading}
-                className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                + Ebene aus Foto
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void (async () => {
-                    const path = await pickFilePath("Bild", ["png", "jpg", "jpeg", "webp", "tiff", "bmp"]);
-                    if (path) void addCompositeLayerFromTexture(path);
-                  })();
-                }}
-                disabled={compositeLayerLoading}
-                className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                + Ebene aus Textur…
-              </button>
-            </div>
-            {compositeLayerLoading && <p className="text-xs text-text-muted">Löst Ebenenquelle auf…</p>}
-
-            {compositeLayers.length === 0 && <p className="text-xs text-text-muted">Keine Compositing-Ebenen vorhanden.</p>}
-
-            <ul className="flex flex-col gap-2">
-              {compositeLayers.map((layer, index) => (
-                <li key={index} className="flex flex-col gap-2 rounded border border-border px-2 py-1.5">
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setCompositeLayerField(index, "visible", !layer.visible)}
-                      aria-label={layer.visible ? `Ebene ${index + 1} ausblenden` : `Ebene ${index + 1} einblenden`}
-                      aria-pressed={layer.visible}
-                      className={`shrink-0 ${layer.visible ? "text-accent" : "text-text-muted"}`}
-                      title="Sichtbarkeit"
-                    >
-                      {layer.visible ? "👁" : "🚫"}
-                    </button>
-                    <span className="min-w-0 flex-1 truncate text-xs text-text-primary">Ebene {index + 1}</span>
-                    <button type="button" onClick={() => removeCompositeLayer(index)} className="shrink-0 text-danger" aria-label={`Ebene ${index + 1} löschen`}>
-                      ×
-                    </button>
-                  </div>
-
                   <label className="flex items-center gap-2 text-xs text-text-secondary">
-                    Blend-Modus
+                    <input
+                      type="checkbox"
+                      checked={details.use_deconvolution_sharpen}
+                      onChange={(event) => setDetailsUseDeconvolutionSharpen(event.target.checked)}
+                    />
+                    Deconvolution-Schärfung (Alternativmodus)
+                  </label>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {LUMINANCE_NR_SLIDER_SPECS.map((spec) => (
+                    <DevelopSlider
+                      key={spec.key}
+                      spec={spec}
+                      value={details[spec.key as DetailsSliderKey]}
+                      onChange={(value) => setDetailsField(spec.key as DetailsSliderKey, value)}
+                      onCommit={() => void commitDevelopEdit()}
+                    />
+                  ))}
+                </div>
+                <div className="flex flex-col gap-2">
+                  {COLOR_NR_SLIDER_SPECS.map((spec) => (
+                    <DevelopSlider
+                      key={spec.key}
+                      spec={spec}
+                      value={details[spec.key as DetailsSliderKey]}
+                      onChange={(value) => setDetailsField(spec.key as DetailsSliderKey, value)}
+                      onCommit={() => void commitDevelopEdit()}
+                    />
+                  ))}
+                </div>
+              </fieldset>
+
+              <fieldset id="stage-lens_corrections" className="flex flex-col gap-3">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Objektivkorrekturen</legend>
+
+                <div className="flex items-center gap-2">
+                  <label className="flex flex-1 items-center gap-2 text-xs text-text-secondary">
+                    Objektivprofil
                     <select
-                      aria-label={`Blend-Modus Ebene ${index + 1}`}
-                      value={layer.blend_mode}
-                      onChange={(event) => setCompositeLayerField(index, "blend_mode", event.target.value as BlendMode)}
-                      className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-1.5 py-0.5"
+                      aria-label="Objektivprofil"
+                      value={lensCorrections.profile_id ?? ""}
+                      onChange={(event) => setLensCorrectionProfile(event.target.value || null)}
+                      className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
                     >
-                      {BLEND_MODE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
+                      {LENS_PROFILE_OPTIONS.map((option) => (
+                        <option key={option.label} value={option.value ?? ""}>
                           {option.label}
                         </option>
                       ))}
                     </select>
                   </label>
-
-                  <DevelopSlider
-                    spec={COMPOSITE_OPACITY_SPEC}
-                    value={layer.opacity * 100}
-                    onChange={(value) => setCompositeLayerField(index, "opacity", value / 100)}
-                    onCommit={() => void commitDevelopEdit()}
-                  />
-                  <DevelopSlider
-                    spec={COMPOSITE_SCALE_SPEC}
-                    value={layer.scale * 100}
-                    onChange={(value) => setCompositeLayerField(index, "scale", value / 100)}
-                    onCommit={() => void commitDevelopEdit()}
-                  />
-                  <DevelopSlider
-                    spec={COMPOSITE_OFFSET_X_SPEC}
-                    value={layer.offset_x * 100}
-                    onChange={(value) => setCompositeLayerField(index, "offset_x", value / 100)}
-                    onCommit={() => void commitDevelopEdit()}
-                  />
-                  <DevelopSlider
-                    spec={COMPOSITE_OFFSET_Y_SPEC}
-                    value={layer.offset_y * 100}
-                    onChange={(value) => setCompositeLayerField(index, "offset_y", value / 100)}
-                    onCommit={() => void commitDevelopEdit()}
-                  />
-                  <DevelopSlider
-                    spec={COMPOSITE_BLEND_IF_SHADOW_SPEC}
-                    value={layer.blend_if_shadow_cutoff * 100}
-                    onChange={(value) => setCompositeLayerField(index, "blend_if_shadow_cutoff", value / 100)}
-                    onCommit={() => void commitDevelopEdit()}
-                  />
-                  <DevelopSlider
-                    spec={COMPOSITE_BLEND_IF_HIGHLIGHT_SPEC}
-                    value={layer.blend_if_highlight_cutoff * 100}
-                    onChange={(value) => setCompositeLayerField(index, "blend_if_highlight_cutoff", value / 100)}
-                    onCommit={() => void commitDevelopEdit()}
-                  />
-                </li>
-              ))}
-            </ul>
-          </fieldset>
-
-          {/* KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14
-              Schritt 8, ADR-0041 Nachtrag VIII) — läuft nach dem
-              Halation-Kurzschluss, vor `masks` (siehe `develop.rs`s
-              Moduldoku), in der Anzeige aber neben `composite` platziert
-              (dieselbe Vereinfachung wie bei allen übrigen Knoten:
-              Anzeigereihenfolge = `STAGE_NODE_SPECS`). */}
-          <fieldset id="stage-virtual_aperture" className="flex flex-col gap-2">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Virtuelle Blende</legend>
-            <VirtualAperturePanel />
-          </fieldset>
-
-          {/* KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9,
-              ADR-0041 Nachtrag IX) — läuft nach `composite`, vor
-              `geometry` (siehe `stages::style_transfer`s Moduldoku). */}
-          <fieldset id="stage-style_transfer" className="flex flex-col gap-2">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Stiltransfer</legend>
-            <StyleTransferPanel />
-          </fieldset>
-
-          {/* Photoshop-Funktion: Automatisches Hautglätten (Phase 15
-              Schritt 5, ADR-0042) — läuft nach `style_transfer`, vor
-              `sky_replace` (siehe `stages::skin_smoothing`s Moduldoku). */}
-          <fieldset id="stage-skin_smoothing" className="flex flex-col gap-2">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Hautglätten</legend>
-            <SkinSmoothingPanel />
-          </fieldset>
-
-          <fieldset id="stage-sky_replace" className="flex flex-col gap-2">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Himmelsaustausch</legend>
-            <SkyReplacePanel />
-          </fieldset>
-
-          {/* Filter-/LUT-Bibliothek (Phase 16 Schritt 1, ADR-0043) — läuft
-              nach `sky_replace`, vor `liquify` (siehe `stages::
-              lut_filter`s Moduldoku). */}
-          <fieldset id="stage-lut_filter" className="flex flex-col gap-2">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Filter</legend>
-            <LutFilterPanel />
-          </fieldset>
-
-          <fieldset id="stage-geometry" className="flex flex-col gap-3">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Geometrie</legend>
-            <button
-              type="button"
-              aria-pressed={geometryCropActive}
-              onClick={toggleGeometryCropActive}
-              className={`rounded border px-2 py-1 text-xs ${geometryCropActive ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
-            >
-              Freistellen {geometryCropActive ? "(aktiv)" : ""}
-            </button>
-
-            <DevelopSlider
-              spec={{ key: "angle_degrees", label: "Winkel", min: -45, max: 45, fineStep: 0.1, coarseStep: 1, neutral: 0 }}
-              value={geometry.angle_degrees}
-              onChange={setGeometryAngle}
-              onCommit={() => void commitDevelopEdit()}
-            />
-
-            <label className="flex items-center gap-2 text-xs text-text-secondary">
-              Seitenverhältnis
-              <select
-                aria-label="Seitenverhältnis"
-                value={geometry.aspect_ratio ?? ""}
-                onChange={(event) => setGeometryAspectRatio(event.target.value ? Number(event.target.value) : null)}
-                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
-              >
-                {ASPECT_RATIO_PRESETS.map((option) => (
-                  <option key={option.label} value={option.value ?? ""}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="flex items-center gap-2 text-xs text-text-secondary">
-              Raster
-              <select
-                aria-label="Rasterüberlagerung"
-                value={geometry.overlay}
-                onChange={(event) => setGeometryOverlay(event.target.value as GridOverlay)}
-                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
-              >
-                {GRID_OVERLAY_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="flex items-center gap-2 text-xs text-text-secondary">
-              <input
-                type="checkbox"
-                checked={geometry.auto_horizon}
-                onChange={(event) => setGeometryAutoHorizon(event.target.checked)}
-              />
-              Automatische Ausrichtung (nur EXIF-Ausrichtung, siehe ADR-0028)
-            </label>
-
-            <button
-              type="button"
-              onClick={() => setCanvasExtendDialogOpen(true)}
-              title="Leinwand per KI-Ausfüllen über den Bildrand hinaus erweitern (Phase 14 Schritt 1, siehe DECISIONS.md ADR-0041)"
-              className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:border-accent"
-            >
-              Leinwand erweitern (KI)…
-            </button>
-
-            {/* Photoshop-Funktion: Content-Aware Scale / Seam Carving
-                (Phase 15 Schritt 4, ADR-0042) — klassischer Algorithmus,
-                kein Modell-Download nötig. */}
-            <button
-              type="button"
-              onClick={() => setContentAwareScaleDialogOpen(true)}
-              title="Breite/Höhe unabhängig ändern, ohne wichtige Bildinhalte zu verzerren (Phase 15 Schritt 4, siehe DECISIONS.md ADR-0042)"
-              className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:border-accent"
-            >
-              Inhaltssensitiv skalieren…
-            </button>
-          </fieldset>
-
-          <fieldset id="stage-repair" className="flex flex-col gap-3">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Reparatur (Klonen/Reparieren)</legend>
-
-            {/* Frequenztrennungs-Ansichtsmodus (Phase 14 Schritt 2,
-                ADR-0041): zeigt Tieffrequenz/Hochfrequenz statt des
-                normalen Bilds im Viewer — reine Anzeige, verändert
-                developEdl nicht. */}
-            <label className="flex items-center gap-2 text-xs text-text-secondary">
-              Ansicht
-              <select
-                aria-label="Frequenztrennungs-Ansicht"
-                value={frequencyViewMode}
-                onChange={(event) => setFrequencyViewMode(event.target.value as FrequencyViewMode)}
-                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
-              >
-                <option value="Normal">Normal</option>
-                <option value="LowFrequency">Tieffrequenz (Ton/Farbe)</option>
-                <option value="HighFrequency">Hochfrequenz (Textur/Poren)</option>
-              </select>
-            </label>
-
-            <button
-              type="button"
-              aria-pressed={repairActive}
-              onClick={toggleRepairActive}
-              className={`rounded border px-2 py-1 text-xs ${repairActive ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
-            >
-              Reparatur-Pinsel {repairActive ? "(aktiv)" : ""}
-            </button>
-
-            {/* Photoshop-Funktion: Content-Aware Move (Phase 15 Schritt 1,
-                ADR-0042) — nutzt dieselbe LaMa-Session wie das
-                KI-Ausfüllen oben, aber als eigenständiges Werkzeug (kein
-                `RepairMode`, siehe `content_aware_move`s Moduldoku). */}
-            <button
-              type="button"
-              aria-pressed={contentAwareMoveActive}
-              onClick={toggleContentAwareMoveTool}
-              disabled={!aiSettings?.inpainting_model_path}
-              title={!aiSettings?.inpainting_model_path ? "Braucht das KI-Ausfüllen-Modell (siehe oben)" : undefined}
-              className={`rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${contentAwareMoveActive ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
-            >
-              Objekt verschieben (Content-Aware Move) {contentAwareMoveActive ? "(aktiv)" : ""}
-            </button>
-            {contentAwareMoveActive && (
-              <p className="text-xs text-text-muted">
-                {contentAwareMoveRect
-                  ? "Auswahl an die Zielposition ziehen und loslassen."
-                  : "Rechteck um das zu verschiebende Objekt aufziehen."}
-                {contentAwareMoveLoading && " Berechnet…"}
-              </p>
-            )}
-
-            {repairActive && (
-              <p className="text-xs text-text-muted">
-                {repairDraftMode === "ContentAwareFill"
-                  ? "Ziel im Bild malen (Ziehen) — kein Quellpunkt nötig, der Füllinhalt kommt aus der Umgebung."
-                  : repairDraftMode === "AiInpaint"
-                    ? "Ziel im Bild malen (Ziehen) — kein Quellpunkt nötig. Danach unten „Anwenden“ klicken, um die KI-Inferenz auszulösen."
-                    : repairPendingSource
-                      ? "Ziel im Bild malen (Ziehen), um den Strich abzuschließen."
-                      : "Quellpunkt im Bild anklicken."}
-                {repairDraftMode !== "ContentAwareFill" && repairDraftMode !== "AiInpaint" && repairPendingSource && (
-                  <button type="button" onClick={cancelRepairSource} className="ml-2 underline">
-                    Quellpunkt verwerfen
+                  <button
+                    type="button"
+                    onClick={() => void manuallyDetectLensProfile()}
+                    title="Objektivprofil aus dem EXIF-Objektivstring des Fotos erkennen (Phase 12 Schritt 3, siehe DECISIONS.md ADR-0039)"
+                    className="shrink-0 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:border-accent"
+                  >
+                    Automatisch erkennen
                   </button>
-                )}
-              </p>
-            )}
+                </div>
 
-            <label className="flex items-center gap-2 text-xs text-text-secondary">
-              Modus
-              <select
-                aria-label="Reparatur-Modus"
-                value={repairDraftMode}
-                onChange={(event) => setRepairDraftMode(event.target.value as RepairMode)}
-                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
-              >
-                {REPAIR_MODE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {/* Frequenztrennung (Phase 14 Schritt 2, ADR-0041): Lightroom
-                hat kein eingebautes Frequenztrennungs-Werkzeug wie
-                Photoshop — lässt den Strich gezielt nur auf Ton/Farbe
-                oder nur auf Textur wirken, siehe stages::repair. */}
-            <label className="flex items-center gap-2 text-xs text-text-secondary">
-              Ebene
-              <select
-                aria-label="Frequenz-Ebene"
-                value={repairDraftLayer}
-                onChange={(event) => setRepairDraftLayer(event.target.value as RepairLayer)}
-                className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
-              >
-                {REPAIR_LAYER_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {/* KI-Ausfüllen (Phase 13 Schritt 1, ADR-0040): echtes
-                LaMa-Modell, opt-in-Download (~208 MB, Apache-2.0,
-                `Carve/LaMa-ONNX`, lokal — kein Text-Prompt, kein
-                Cloud-Aufruf). Ohne heruntergeladenes Modell schlägt
-                „Anwenden" oben mit einer klaren Fehlermeldung fehl. */}
-            {repairDraftMode === "AiInpaint" && (
-              <p className="rounded border border-border px-2 py-1 text-xs text-text-secondary">
-                {aiSettings?.inpainting_model_path ? (
-                  "KI-Ausfüllen-Modell installiert."
-                ) : (
-                  <>
-                    Kein Modell installiert — LaMa-Inpainting (Apache-2.0, ~208 MB, lokal, kein Cloud-Aufruf).{" "}
-                    <button
-                      type="button"
-                      disabled={inpaintingModelDownloading}
-                      onClick={() => void downloadInpaintingModel()}
-                      className="text-accent underline disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      {inpaintingModelDownloading ? "Lädt herunter…" : "Herunterladen"}
-                    </button>
-                  </>
-                )}
-              </p>
-            )}
-
-            {/* Auto-Quellenfindung (Phase 7 Schritt 3, ADR-0033) — nur für
-                Klonen/Reparieren sinnvoll, ContentAwareFill/AiInpaint
-                brauchen ohnehin keinen Quellpunkt. */}
-            {repairDraftMode !== "ContentAwareFill" && repairDraftMode !== "AiInpaint" && (
-              <label className="flex items-center gap-2 text-xs text-text-secondary">
-                <input type="checkbox" checked={autoSourceModeActive} onChange={toggleAutoSourceMode} />
-                Quelle automatisch vorschlagen
-                {repairSourceSuggestionLoading && <span className="text-text-muted">(sucht…)</span>}
-              </label>
-            )}
-
-            <DevelopSlider
-              spec={REPAIR_RADIUS_SPEC}
-              value={repairDraftRadius * 100}
-              onChange={(value) => setRepairDraftField("radius", value / 100)}
-              onCommit={() => {}}
-            />
-            <DevelopSlider
-              spec={REPAIR_FEATHER_SPEC}
-              value={repairDraftFeather * 100}
-              onChange={(value) => setRepairDraftField("feather", value / 100)}
-              onCommit={() => {}}
-            />
-            <DevelopSlider
-              spec={REPAIR_OPACITY_SPEC}
-              value={repairDraftOpacity * 100}
-              onChange={(value) => setRepairDraftField("opacity", value / 100)}
-              onCommit={() => {}}
-            />
-
-            {repairStrokes.length > 0 && (
-              <ul className="flex flex-col gap-1 text-xs text-text-secondary">
-                {repairStrokes.map((stroke, index) => (
-                  <li key={index} className="flex items-center justify-between rounded border border-border px-2 py-1">
-                    <span>
-                      {index + 1}.{" "}
-                      {stroke.mode === "Heal"
-                        ? "Reparieren"
-                        : stroke.mode === "ContentAwareFill"
-                          ? "Inhaltsbasiert gefüllt"
-                          : stroke.mode === "AiInpaint"
-                            ? stroke.ai_fill
-                              ? "KI-ausgefüllt"
-                              : "KI-Ausfüllen (noch nicht angewendet)"
-                            : "Klonen"}
-                    </span>
-                    <span className="flex items-center gap-2">
-                      {/* KI-Ausfüllen läuft nicht automatisch (siehe
-                          Moduldoku `runAiInpaintForStroke`) — ein
-                          gemalter, noch nicht angewendeter Strich zeigt
-                          hier den expliziten Auslöser. */}
-                      {stroke.mode === "AiInpaint" && !stroke.ai_fill && (
-                        <button
-                          type="button"
-                          disabled={!selectedPhotoId || aiInpaintLoadingIndex !== null}
-                          onClick={() => void runAiInpaintForStroke(index)}
-                          className="text-accent underline disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          {aiInpaintLoadingIndex === index ? "Berechnet…" : "Anwenden"}
-                        </button>
-                      )}
-                      <button type="button" onClick={() => removeRepairStroke(index)} className="text-danger underline">
+                <div className="flex items-center gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setLensCalibrationDialogOpen(true)}
+                    title="Objektiv aus eigenen Kalibrierfotos vermessen (Phase 12 Schritt 3 Teil B, siehe DECISIONS.md ADR-0039)"
+                    className="rounded border border-border px-2 py-1 text-text-secondary hover:border-accent"
+                  >
+                    Objektiv kalibrieren…
+                  </button>
+                  {lensCorrections.custom_distortion_k1 !== null && (
+                    <span className="flex items-center gap-1 text-text-secondary">
+                      Eigene Kalibrierung aktiv (k1 = {lensCorrections.custom_distortion_k1.toFixed(4)})
+                      <button type="button" onClick={() => setLensCorrectionCustomDistortionK1(null)} className="text-danger underline">
                         Entfernen
                       </button>
                     </span>
-                  </li>
+                  )}
+                </div>
+
+                <label className="flex items-center gap-2 text-xs text-text-secondary">
+                  <input
+                    type="checkbox"
+                    checked={lensCorrections.auto_ca}
+                    onChange={(event) => setLensCorrectionAutoCa(event.target.checked)}
+                  />
+                  Automatische CA-Korrektur (nutzt Profilwerte)
+                </label>
+
+                {!lensCorrections.auto_ca &&
+                  LENS_CA_SLIDER_SPECS.map((spec) => (
+                    <DevelopSlider
+                      key={spec.key}
+                      spec={spec}
+                      value={lensCorrections[spec.key as LensNumericKey]}
+                      onChange={(value) => setLensCorrectionField(spec.key as LensNumericKey, value)}
+                      onCommit={() => void commitDevelopEdit()}
+                    />
+                  ))}
+
+                {LENS_SLIDER_SPECS.map((spec) => (
+                  <DevelopSlider
+                    key={spec.key}
+                    spec={spec}
+                    value={lensCorrections[spec.key as LensNumericKey]}
+                    onChange={(value) => setLensCorrectionField(spec.key as LensNumericKey, value)}
+                    onCommit={() => void commitDevelopEdit()}
+                  />
                 ))}
-              </ul>
-            )}
 
-            {/* Sensorflecken-Visualisierung (Phase 7 Schritt 3, ADR-0033)
-                — reine Analyse, legt selbst keine Striche an; die
-                orangen Kreise im Bild (`RepairOverlay.tsx`) markieren die
-                Fundstellen. */}
-            <div className="flex items-center gap-1 border-t border-border pt-2">
-              <button
-                type="button"
-                disabled={!selectedPhotoId || sensorSpotsLoading}
-                onClick={() => void detectSensorSpotsForCurrentPhoto(0.5)}
-                className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {sensorSpotsLoading ? "Suche…" : "Sensorflecken suchen"}
-              </button>
-              {sensorSpotCandidates.length > 0 && (
-                <button type="button" onClick={clearSensorSpots} className="text-xs text-text-muted hover:text-danger">
-                  Verwerfen
-                </button>
-              )}
-            </div>
-            {sensorSpotCandidates.length > 0 && (
-              <ul className="flex flex-col gap-1 text-xs text-text-secondary">
-                {sensorSpotCandidates.map((spot, index) => (
-                  <li key={index} className="flex items-center justify-between rounded border border-border px-2 py-1">
-                    <span>
-                      Fleck {index + 1} ({Math.round(spot.strength * 100)} %)
-                    </span>
-                    <button type="button" onClick={() => applySensorSpotAsRepairStroke(spot)} className="text-accent underline">
-                      Reparieren
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </fieldset>
+                <label className="flex items-center gap-2 text-xs text-text-secondary">
+                  Perspektive/Upright
+                  <select
+                    aria-label="Perspektive/Upright"
+                    value={lensCorrections.upright_mode}
+                    onChange={(event) => setLensCorrectionUprightMode(event.target.value as LensCorrectionAdjustment["upright_mode"])}
+                    className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+                  >
+                    {UPRIGHT_MODE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-          {/* Photoshop-Funktion: Verflüssigen (Liquify, Phase 15 Schritt 3,
-              ADR-0042) — Lightroom hat kein Verformungswerkzeug. Rein
-              deterministische CPU-Verzerrung, kein separates „Anwenden"
-              nötig (siehe `stages::liquify`s Moduldoku, `LiquifyOverlay`). */}
-          <fieldset id="stage-liquify" className="flex flex-col gap-3">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Verflüssigen</legend>
+                {(lensCorrections.upright_mode === "Level" ||
+                  lensCorrections.upright_mode === "Vertical" ||
+                  lensCorrections.upright_mode === "Auto" ||
+                  lensCorrections.upright_mode === "Full") && (
+                  <button
+                    type="button"
+                    disabled={uprightDetectLoading}
+                    onClick={() => void runUprightAutoDetect()}
+                    className="rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {uprightDetectLoading ? "Erkennt Kanten…" : "Automatisch erkennen"}
+                  </button>
+                )}
 
-            <button
-              type="button"
-              aria-pressed={liquifyActive}
-              onClick={toggleLiquifyActive}
-              className={`rounded border px-2 py-1 text-xs ${liquifyActive ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
-            >
-              Verflüssigen-Pinsel {liquifyActive ? "(aktiv)" : ""}
-            </button>
-            {liquifyActive && <p className="text-xs text-text-muted">Strich im Bild ziehen, um den gewählten Verformungsmodus anzuwenden.</p>}
+                {lensCorrections.upright_mode === "Guided" && (
+                  <div className="flex flex-col gap-2">
+                    {/* Bewusste Vereinfachung (siehe DECISIONS.md ADR-0030):
+                        Zahlenfelder statt einer Klick-Interaktion im Viewer —
+                        eine echte Linienauswahl per Klick wäre eine eigene,
+                        größere UI-Aufgabe (SVG-Overlay, Ziehgriffe). */}
+                    <p className="text-xs text-text-secondary">Hilfslinien (normierte Bildkoordinaten 0–1)</p>
+                    {[0, 1].map((lineIndex) => {
+                      const line: GuidedLine = lensCorrections.guided_lines[lineIndex] ?? {
+                        x1: 0,
+                        y1: 0,
+                        x2: 0,
+                        y2: 0,
+                      };
+                      return (
+                        <div key={lineIndex} className="grid grid-cols-4 gap-1">
+                          {GUIDED_LINE_FIELDS.map((field) => (
+                            <label key={field} className="flex flex-col text-[10px] text-text-secondary">
+                              {`L${lineIndex + 1}.${field}`}
+                              <input
+                                type="number"
+                                step={0.01}
+                                aria-label={`Linie ${lineIndex + 1}: ${field}`}
+                                value={line[field]}
+                                onChange={(event) =>
+                                  setLensCorrectionGuidedLineField(lineIndex as 0 | 1, field, Number(event.target.value))
+                                }
+                                onBlur={() => void commitDevelopEdit()}
+                                className="w-full rounded border border-border bg-bg-base px-1 py-0.5 text-right text-text-primary"
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
-            <div className="flex gap-1">
-              {LIQUIFY_MODE_OPTIONS.map((option) => (
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs text-text-secondary">Manuelle Transformation</p>
+                  {MANUAL_TRANSFORM_SLIDER_SPECS.map((spec) => (
+                    <DevelopSlider
+                      key={spec.key}
+                      spec={spec}
+                      value={lensCorrections.manual_transform[spec.key as keyof ManualTransform]}
+                      onChange={(value) => setLensCorrectionManualTransformField(spec.key as keyof ManualTransform, value)}
+                      onCommit={() => void commitDevelopEdit()}
+                    />
+                  ))}
+                </div>
+              </fieldset>
+
+              <fieldset id="stage-effects" className="flex flex-col gap-3">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Effekte</legend>
+                <div className="flex flex-col gap-2">
+                  {POST_VIGNETTE_SLIDER_SPECS.map((spec) => (
+                    <DevelopSlider
+                      key={spec.key}
+                      spec={spec}
+                      value={effects[spec.key as keyof EffectsAdjustment]}
+                      onChange={(value) => setEffectsField(spec.key as keyof EffectsAdjustment, value)}
+                      onCommit={() => void commitDevelopEdit()}
+                    />
+                  ))}
+                </div>
+                <div className="flex flex-col gap-2">
+                  {GRAIN_SLIDER_SPECS.map((spec) => (
+                    <DevelopSlider
+                      key={spec.key}
+                      spec={spec}
+                      value={effects[spec.key as keyof EffectsAdjustment]}
+                      onChange={(value) => setEffectsField(spec.key as keyof EffectsAdjustment, value)}
+                      onCommit={() => void commitDevelopEdit()}
+                    />
+                  ))}
+                </div>
+                {/* Echte Halation-/Bloom-Simulation (Phase 14 Schritt 4,
+                    ADR-0041): Lightroom Classic "cannot create true film
+                    halation, only a soft bloom approximation". */}
+                <div className="flex flex-col gap-2 border-t border-border pt-2">
+                  <p className="text-xs text-text-muted">Halation (Lichter-Ausblutung, z. B. Filmlook)</p>
+                  {HALATION_SLIDER_SPECS.map((spec) => (
+                    <DevelopSlider
+                      key={spec.key}
+                      spec={spec}
+                      value={effects[spec.key as keyof EffectsAdjustment]}
+                      onChange={(value) => setEffectsField(spec.key as keyof EffectsAdjustment, value)}
+                      onCommit={() => void commitDevelopEdit()}
+                    />
+                  ))}
+                </div>
+              </fieldset>
+
+              <fieldset id="stage-geometry" className="flex flex-col gap-3">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Geometrie</legend>
                 <button
-                  key={option.value}
                   type="button"
-                  aria-pressed={liquifyDraftMode === option.value}
-                  onClick={() => setLiquifyDraftMode(option.value)}
-                  className={`flex-1 rounded border px-2 py-1 text-xs ${liquifyDraftMode === option.value ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
+                  aria-pressed={geometryCropActive}
+                  onClick={toggleGeometryCropActive}
+                  className={`rounded border px-2 py-1 text-xs ${geometryCropActive ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
                 >
-                  {option.label}
+                  Freistellen {geometryCropActive ? "(aktiv)" : ""}
                 </button>
-              ))}
-            </div>
 
-            <DevelopSlider
-              spec={LIQUIFY_RADIUS_SPEC}
-              value={liquifyDraftRadius * 100}
-              onChange={(value) => setLiquifyDraftField("radius", value / 100)}
-              onCommit={() => {}}
-            />
-            <DevelopSlider
-              spec={LIQUIFY_STRENGTH_SPEC}
-              value={liquifyDraftStrength * 100}
-              onChange={(value) => setLiquifyDraftField("strength", value / 100)}
-              onCommit={() => {}}
-            />
+                <DevelopSlider
+                  spec={{ key: "angle_degrees", label: "Winkel", min: -45, max: 45, fineStep: 0.1, coarseStep: 1, neutral: 0 }}
+                  value={geometry.angle_degrees}
+                  onChange={setGeometryAngle}
+                  onCommit={() => void commitDevelopEdit()}
+                />
 
-            {liquifyStrokes.length > 0 && (
-              <ul className="flex flex-col gap-1 text-xs text-text-secondary">
-                {liquifyStrokes.map((stroke, index) => (
-                  <li key={index} className="flex items-center justify-between rounded border border-border px-2 py-1">
-                    <span>
-                      {index + 1}. {LIQUIFY_MODE_OPTIONS.find((option) => option.value === stroke.mode)?.label ?? stroke.mode}
-                    </span>
-                    <button type="button" onClick={() => removeLiquifyStroke(index)} className="text-danger underline">
-                      Entfernen
+                <label className="flex items-center gap-2 text-xs text-text-secondary">
+                  Seitenverhältnis
+                  <select
+                    aria-label="Seitenverhältnis"
+                    value={geometry.aspect_ratio ?? ""}
+                    onChange={(event) => setGeometryAspectRatio(event.target.value ? Number(event.target.value) : null)}
+                    className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+                  >
+                    {ASPECT_RATIO_PRESETS.map((option) => (
+                      <option key={option.label} value={option.value ?? ""}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="flex items-center gap-2 text-xs text-text-secondary">
+                  Raster
+                  <select
+                    aria-label="Rasterüberlagerung"
+                    value={geometry.overlay}
+                    onChange={(event) => setGeometryOverlay(event.target.value as GridOverlay)}
+                    className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+                  >
+                    {GRID_OVERLAY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="flex items-center gap-2 text-xs text-text-secondary">
+                  <input
+                    type="checkbox"
+                    checked={geometry.auto_horizon}
+                    onChange={(event) => setGeometryAutoHorizon(event.target.checked)}
+                  />
+                  Automatische Ausrichtung (nur EXIF-Ausrichtung, siehe ADR-0028)
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => setCanvasExtendDialogOpen(true)}
+                  title="Leinwand per KI-Ausfüllen über den Bildrand hinaus erweitern (Phase 14 Schritt 1, siehe DECISIONS.md ADR-0041)"
+                  className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:border-accent"
+                >
+                  Leinwand erweitern (KI)…
+                </button>
+
+                {/* Photoshop-Funktion: Content-Aware Scale / Seam Carving
+                    (Phase 15 Schritt 4, ADR-0042) — klassischer Algorithmus,
+                    kein Modell-Download nötig. */}
+                <button
+                  type="button"
+                  onClick={() => setContentAwareScaleDialogOpen(true)}
+                  title="Breite/Höhe unabhängig ändern, ohne wichtige Bildinhalte zu verzerren (Phase 15 Schritt 4, siehe DECISIONS.md ADR-0042)"
+                  className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:border-accent"
+                >
+                  Inhaltssensitiv skalieren…
+                </button>
+              </fieldset>
+            </>
+          )}
+
+          {activeTab === "creative" && (
+            <>
+              <fieldset id="stage-repair" className="flex flex-col gap-3">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Reparatur (Klonen/Reparieren)</legend>
+
+                {/* Frequenztrennungs-Ansichtsmodus (Phase 14 Schritt 2,
+                    ADR-0041): zeigt Tieffrequenz/Hochfrequenz statt des
+                    normalen Bilds im Viewer — reine Anzeige, verändert
+                    developEdl nicht. */}
+                <label className="flex items-center gap-2 text-xs text-text-secondary">
+                  Ansicht
+                  <select
+                    aria-label="Frequenztrennungs-Ansicht"
+                    value={frequencyViewMode}
+                    onChange={(event) => setFrequencyViewMode(event.target.value as FrequencyViewMode)}
+                    className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+                  >
+                    <option value="Normal">Normal</option>
+                    <option value="LowFrequency">Tieffrequenz (Ton/Farbe)</option>
+                    <option value="HighFrequency">Hochfrequenz (Textur/Poren)</option>
+                  </select>
+                </label>
+
+                <button
+                  type="button"
+                  aria-pressed={repairActive}
+                  onClick={toggleRepairActive}
+                  className={`rounded border px-2 py-1 text-xs ${repairActive ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
+                >
+                  Reparatur-Pinsel {repairActive ? "(aktiv)" : ""}
+                </button>
+
+                {/* Photoshop-Funktion: Content-Aware Move (Phase 15 Schritt 1,
+                    ADR-0042) — nutzt dieselbe LaMa-Session wie das
+                    KI-Ausfüllen oben, aber als eigenständiges Werkzeug (kein
+                    `RepairMode`, siehe `content_aware_move`s Moduldoku). */}
+                <button
+                  type="button"
+                  aria-pressed={contentAwareMoveActive}
+                  onClick={toggleContentAwareMoveTool}
+                  disabled={!aiSettings?.inpainting_model_path}
+                  title={!aiSettings?.inpainting_model_path ? "Braucht das KI-Ausfüllen-Modell (siehe oben)" : undefined}
+                  className={`rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${contentAwareMoveActive ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
+                >
+                  Objekt verschieben (Content-Aware Move) {contentAwareMoveActive ? "(aktiv)" : ""}
+                </button>
+                {contentAwareMoveActive && (
+                  <p className="text-xs text-text-muted">
+                    {contentAwareMoveRect
+                      ? "Auswahl an die Zielposition ziehen und loslassen."
+                      : "Rechteck um das zu verschiebende Objekt aufziehen."}
+                    {contentAwareMoveLoading && " Berechnet…"}
+                  </p>
+                )}
+
+                {repairActive && (
+                  <p className="text-xs text-text-muted">
+                    {repairDraftMode === "ContentAwareFill"
+                      ? "Ziel im Bild malen (Ziehen) — kein Quellpunkt nötig, der Füllinhalt kommt aus der Umgebung."
+                      : repairDraftMode === "AiInpaint"
+                        ? "Ziel im Bild malen (Ziehen) — kein Quellpunkt nötig. Danach unten „Anwenden“ klicken, um die KI-Inferenz auszulösen."
+                        : repairPendingSource
+                          ? "Ziel im Bild malen (Ziehen), um den Strich abzuschließen."
+                          : "Quellpunkt im Bild anklicken."}
+                    {repairDraftMode !== "ContentAwareFill" && repairDraftMode !== "AiInpaint" && repairPendingSource && (
+                      <button type="button" onClick={cancelRepairSource} className="ml-2 underline">
+                        Quellpunkt verwerfen
+                      </button>
+                    )}
+                  </p>
+                )}
+
+                <label className="flex items-center gap-2 text-xs text-text-secondary">
+                  Modus
+                  <select
+                    aria-label="Reparatur-Modus"
+                    value={repairDraftMode}
+                    onChange={(event) => setRepairDraftMode(event.target.value as RepairMode)}
+                    className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+                  >
+                    {REPAIR_MODE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {/* Frequenztrennung (Phase 14 Schritt 2, ADR-0041): Lightroom
+                    hat kein eingebautes Frequenztrennungs-Werkzeug wie
+                    Photoshop — lässt den Strich gezielt nur auf Ton/Farbe
+                    oder nur auf Textur wirken, siehe stages::repair. */}
+                <label className="flex items-center gap-2 text-xs text-text-secondary">
+                  Ebene
+                  <select
+                    aria-label="Frequenz-Ebene"
+                    value={repairDraftLayer}
+                    onChange={(event) => setRepairDraftLayer(event.target.value as RepairLayer)}
+                    className="flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+                  >
+                    {REPAIR_LAYER_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {/* KI-Ausfüllen (Phase 13 Schritt 1, ADR-0040): echtes
+                    LaMa-Modell, opt-in-Download (~208 MB, Apache-2.0,
+                    `Carve/LaMa-ONNX`, lokal — kein Text-Prompt, kein
+                    Cloud-Aufruf). Ohne heruntergeladenes Modell schlägt
+                    „Anwenden" oben mit einer klaren Fehlermeldung fehl. */}
+                {repairDraftMode === "AiInpaint" && (
+                  <p className="rounded border border-border px-2 py-1 text-xs text-text-secondary">
+                    {aiSettings?.inpainting_model_path ? (
+                      "KI-Ausfüllen-Modell installiert."
+                    ) : (
+                      <>
+                        Kein Modell installiert — LaMa-Inpainting (Apache-2.0, ~208 MB, lokal, kein Cloud-Aufruf).{" "}
+                        <button
+                          type="button"
+                          disabled={inpaintingModelDownloading}
+                          onClick={() => void downloadInpaintingModel()}
+                          className="text-accent underline disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {inpaintingModelDownloading ? "Lädt herunter…" : "Herunterladen"}
+                        </button>
+                      </>
+                    )}
+                  </p>
+                )}
+
+                {/* Auto-Quellenfindung (Phase 7 Schritt 3, ADR-0033) — nur für
+                    Klonen/Reparieren sinnvoll, ContentAwareFill/AiInpaint
+                    brauchen ohnehin keinen Quellpunkt. */}
+                {repairDraftMode !== "ContentAwareFill" && repairDraftMode !== "AiInpaint" && (
+                  <label className="flex items-center gap-2 text-xs text-text-secondary">
+                    <input type="checkbox" checked={autoSourceModeActive} onChange={toggleAutoSourceMode} />
+                    Quelle automatisch vorschlagen
+                    {repairSourceSuggestionLoading && <span className="text-text-muted">(sucht…)</span>}
+                  </label>
+                )}
+
+                <DevelopSlider
+                  spec={REPAIR_RADIUS_SPEC}
+                  value={repairDraftRadius * 100}
+                  onChange={(value) => setRepairDraftField("radius", value / 100)}
+                  onCommit={() => {}}
+                />
+                <DevelopSlider
+                  spec={REPAIR_FEATHER_SPEC}
+                  value={repairDraftFeather * 100}
+                  onChange={(value) => setRepairDraftField("feather", value / 100)}
+                  onCommit={() => {}}
+                />
+                <DevelopSlider
+                  spec={REPAIR_OPACITY_SPEC}
+                  value={repairDraftOpacity * 100}
+                  onChange={(value) => setRepairDraftField("opacity", value / 100)}
+                  onCommit={() => {}}
+                />
+
+                {repairStrokes.length > 0 && (
+                  <ul className="flex flex-col gap-1 text-xs text-text-secondary">
+                    {repairStrokes.map((stroke, index) => (
+                      <li key={index} className="flex items-center justify-between rounded border border-border px-2 py-1">
+                        <span>
+                          {index + 1}.{" "}
+                          {stroke.mode === "Heal"
+                            ? "Reparieren"
+                            : stroke.mode === "ContentAwareFill"
+                              ? "Inhaltsbasiert gefüllt"
+                              : stroke.mode === "AiInpaint"
+                                ? stroke.ai_fill
+                                  ? "KI-ausgefüllt"
+                                  : "KI-Ausfüllen (noch nicht angewendet)"
+                                : "Klonen"}
+                        </span>
+                        <span className="flex items-center gap-2">
+                          {/* KI-Ausfüllen läuft nicht automatisch (siehe
+                              Moduldoku `runAiInpaintForStroke`) — ein
+                              gemalter, noch nicht angewendeter Strich zeigt
+                              hier den expliziten Auslöser. */}
+                          {stroke.mode === "AiInpaint" && !stroke.ai_fill && (
+                            <button
+                              type="button"
+                              disabled={!selectedPhotoId || aiInpaintLoadingIndex !== null}
+                              onClick={() => void runAiInpaintForStroke(index)}
+                              className="text-accent underline disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {aiInpaintLoadingIndex === index ? "Berechnet…" : "Anwenden"}
+                            </button>
+                          )}
+                          <button type="button" onClick={() => removeRepairStroke(index)} className="text-danger underline">
+                            Entfernen
+                          </button>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {/* Sensorflecken-Visualisierung (Phase 7 Schritt 3, ADR-0033)
+                    — reine Analyse, legt selbst keine Striche an; die
+                    orangen Kreise im Bild (`RepairOverlay.tsx`) markieren die
+                    Fundstellen. */}
+                <div className="flex items-center gap-1 border-t border-border pt-2">
+                  <button
+                    type="button"
+                    disabled={!selectedPhotoId || sensorSpotsLoading}
+                    onClick={() => void detectSensorSpotsForCurrentPhoto(0.5)}
+                    className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {sensorSpotsLoading ? "Suche…" : "Sensorflecken suchen"}
+                  </button>
+                  {sensorSpotCandidates.length > 0 && (
+                    <button type="button" onClick={clearSensorSpots} className="text-xs text-text-muted hover:text-danger">
+                      Verwerfen
                     </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </fieldset>
+                  )}
+                </div>
+                {sensorSpotCandidates.length > 0 && (
+                  <ul className="flex flex-col gap-1 text-xs text-text-secondary">
+                    {sensorSpotCandidates.map((spot, index) => (
+                      <li key={index} className="flex items-center justify-between rounded border border-border px-2 py-1">
+                        <span>
+                          Fleck {index + 1} ({Math.round(spot.strength * 100)} %)
+                        </span>
+                        <button type="button" onClick={() => applySensorSpotAsRepairStroke(spot)} className="text-accent underline">
+                          Reparieren
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </fieldset>
 
-          <fieldset className="flex flex-col gap-2">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">Entrauschung &amp; Hochskalierung</legend>
-            <p className="text-xs text-text-muted">Klassische Algorithmen (Bilateral-Filter, kantengerichtete Interpolation), keine Modellinferenz — schreiben eine neue Datei neben dem Original, ändern die Bearbeitung nicht.</p>
-            <div className="flex gap-1">
-              <button
-                type="button"
-                disabled={!selectedPhotoId || enhanceRunning !== null}
-                onClick={() => selectedPhotoId && void runDenoise(selectedPhotoId)}
-                className="flex-1 rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {enhanceRunning === "denoise" ? "Entrauscht…" : "Entrauschen"}
-              </button>
-              <button
-                type="button"
-                disabled={!selectedPhotoId || enhanceRunning !== null}
-                onClick={() => selectedPhotoId && void runUpscale(selectedPhotoId)}
-                className="flex-1 rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {enhanceRunning === "upscale" ? "Skaliert…" : "2× hochskalieren"}
-              </button>
-            </div>
-            {enhanceStatus && <p className="text-xs text-text-muted">{enhanceStatus}</p>}
-          </fieldset>
+              {/* Photoshop-Funktion: Verflüssigen (Liquify, Phase 15 Schritt 3,
+                  ADR-0042) — Lightroom hat kein Verformungswerkzeug. Rein
+                  deterministische CPU-Verzerrung, kein separates „Anwenden"
+                  nötig (siehe `stages::liquify`s Moduldoku, `LiquifyOverlay`). */}
+              <fieldset id="stage-liquify" className="flex flex-col gap-3">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Verflüssigen</legend>
 
-          <fieldset className="flex flex-col gap-2">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">DNG-Konvertierung</legend>
-            <p className="text-xs text-text-muted">
-              Schreibt eine „Linear DNG" aus den unveränderten, kamera-nativen RAW-Daten (nicht dem entwickelten
-              Rendering) neben das Original — ein Rohdatenformat mit demosaicten statt der ursprünglichen
-              Bayer-Mosaik-Daten, siehe Dokumentation.
-            </p>
-            <button
-              type="button"
-              disabled={!selectedPhotoId || enhanceRunning !== null}
-              onClick={() => selectedPhotoId && void runConvertToDng(selectedPhotoId)}
-              className="rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {enhanceRunning === "dng" ? "Konvertiert…" : "Als DNG konvertieren"}
-            </button>
-          </fieldset>
+                <button
+                  type="button"
+                  aria-pressed={liquifyActive}
+                  onClick={toggleLiquifyActive}
+                  className={`rounded border px-2 py-1 text-xs ${liquifyActive ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
+                >
+                  Verflüssigen-Pinsel {liquifyActive ? "(aktiv)" : ""}
+                </button>
+                {liquifyActive && <p className="text-xs text-text-muted">Strich im Bild ziehen, um den gewählten Verformungsmodus anzuwenden.</p>}
+
+                <div className="flex gap-1">
+                  {LIQUIFY_MODE_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-pressed={liquifyDraftMode === option.value}
+                      onClick={() => setLiquifyDraftMode(option.value)}
+                      className={`flex-1 rounded border px-2 py-1 text-xs ${liquifyDraftMode === option.value ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+
+                <DevelopSlider
+                  spec={LIQUIFY_RADIUS_SPEC}
+                  value={liquifyDraftRadius * 100}
+                  onChange={(value) => setLiquifyDraftField("radius", value / 100)}
+                  onCommit={() => {}}
+                />
+                <DevelopSlider
+                  spec={LIQUIFY_STRENGTH_SPEC}
+                  value={liquifyDraftStrength * 100}
+                  onChange={(value) => setLiquifyDraftField("strength", value / 100)}
+                  onCommit={() => {}}
+                />
+
+                {liquifyStrokes.length > 0 && (
+                  <ul className="flex flex-col gap-1 text-xs text-text-secondary">
+                    {liquifyStrokes.map((stroke, index) => (
+                      <li key={index} className="flex items-center justify-between rounded border border-border px-2 py-1">
+                        <span>
+                          {index + 1}. {LIQUIFY_MODE_OPTIONS.find((option) => option.value === stroke.mode)?.label ?? stroke.mode}
+                        </span>
+                        <button type="button" onClick={() => removeLiquifyStroke(index)} className="text-danger underline">
+                          Entfernen
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </fieldset>
+
+              {/* KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9,
+                  ADR-0041 Nachtrag IX) — läuft nach `composite`, vor
+                  `geometry` (siehe `stages::style_transfer`s Moduldoku). */}
+              <fieldset id="stage-style_transfer" className="flex flex-col gap-2">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Stiltransfer</legend>
+                <StyleTransferPanel />
+              </fieldset>
+
+              {/* Photoshop-Funktion: Automatisches Hautglätten (Phase 15
+                  Schritt 5, ADR-0042) — läuft nach `style_transfer`, vor
+                  `sky_replace` (siehe `stages::skin_smoothing`s Moduldoku). */}
+              <fieldset id="stage-skin_smoothing" className="flex flex-col gap-2">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Hautglätten</legend>
+                <SkinSmoothingPanel />
+              </fieldset>
+
+              <fieldset id="stage-sky_replace" className="flex flex-col gap-2">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Himmelsaustausch</legend>
+                <SkyReplacePanel />
+              </fieldset>
+
+              {/* Filter-/LUT-Bibliothek (Phase 16 Schritt 1, ADR-0043) — läuft
+                  nach `sky_replace`, vor `liquify` (siehe `stages::
+                  lut_filter`s Moduldoku). */}
+              <fieldset id="stage-lut_filter" className="flex flex-col gap-2">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Filter</legend>
+                <LutFilterPanel />
+              </fieldset>
+
+              <fieldset id="stage-composite" className="flex flex-col gap-2">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Compositing</legend>
+                <p className="text-xs text-text-muted">Mehrfachbelichtung: legt ein weiteres Foto oder eine Textur (z. B. ein Lichtleck) über das aktuelle Bild.</p>
+
+                <label className="flex items-center gap-2 text-xs text-text-secondary">
+                  Foto
+                  <select
+                    aria-label="Ebenen-Quellfoto"
+                    value={compositeSourcePhotoId}
+                    onChange={(event) => setCompositeSourcePhotoId(event.target.value)}
+                    className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-1.5 py-0.5"
+                  >
+                    <option value="">Foto wählen…</option>
+                    {otherPhotosForReference.map((photo) => (
+                      <option key={photo.id} value={photo.id}>
+                        {photo.filename}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => compositeSourcePhotoId && void addCompositeLayerFromPhoto(compositeSourcePhotoId)}
+                    disabled={!compositeSourcePhotoId || compositeLayerLoading}
+                    className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    + Ebene aus Foto
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void (async () => {
+                        const path = await pickFilePath("Bild", ["png", "jpg", "jpeg", "webp", "tiff", "bmp"]);
+                        if (path) void addCompositeLayerFromTexture(path);
+                      })();
+                    }}
+                    disabled={compositeLayerLoading}
+                    className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    + Ebene aus Textur…
+                  </button>
+                </div>
+                {compositeLayerLoading && <p className="text-xs text-text-muted">Löst Ebenenquelle auf…</p>}
+
+                {compositeLayers.length === 0 && <p className="text-xs text-text-muted">Keine Compositing-Ebenen vorhanden.</p>}
+
+                <ul className="flex flex-col gap-2">
+                  {compositeLayers.map((layer, index) => (
+                    <li key={index} className="flex flex-col gap-2 rounded border border-border px-2 py-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setCompositeLayerField(index, "visible", !layer.visible)}
+                          aria-label={layer.visible ? `Ebene ${index + 1} ausblenden` : `Ebene ${index + 1} einblenden`}
+                          aria-pressed={layer.visible}
+                          className={`shrink-0 ${layer.visible ? "text-accent" : "text-text-muted"}`}
+                          title="Sichtbarkeit"
+                        >
+                          {layer.visible ? "👁" : "🚫"}
+                        </button>
+                        <span className="min-w-0 flex-1 truncate text-xs text-text-primary">Ebene {index + 1}</span>
+                        <button type="button" onClick={() => removeCompositeLayer(index)} className="shrink-0 text-danger" aria-label={`Ebene ${index + 1} löschen`}>
+                          ×
+                        </button>
+                      </div>
+
+                      <label className="flex items-center gap-2 text-xs text-text-secondary">
+                        Blend-Modus
+                        <select
+                          aria-label={`Blend-Modus Ebene ${index + 1}`}
+                          value={layer.blend_mode}
+                          onChange={(event) => setCompositeLayerField(index, "blend_mode", event.target.value as BlendMode)}
+                          className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-1.5 py-0.5"
+                        >
+                          {BLEND_MODE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <DevelopSlider
+                        spec={COMPOSITE_OPACITY_SPEC}
+                        value={layer.opacity * 100}
+                        onChange={(value) => setCompositeLayerField(index, "opacity", value / 100)}
+                        onCommit={() => void commitDevelopEdit()}
+                      />
+                      <DevelopSlider
+                        spec={COMPOSITE_SCALE_SPEC}
+                        value={layer.scale * 100}
+                        onChange={(value) => setCompositeLayerField(index, "scale", value / 100)}
+                        onCommit={() => void commitDevelopEdit()}
+                      />
+                      <DevelopSlider
+                        spec={COMPOSITE_OFFSET_X_SPEC}
+                        value={layer.offset_x * 100}
+                        onChange={(value) => setCompositeLayerField(index, "offset_x", value / 100)}
+                        onCommit={() => void commitDevelopEdit()}
+                      />
+                      <DevelopSlider
+                        spec={COMPOSITE_OFFSET_Y_SPEC}
+                        value={layer.offset_y * 100}
+                        onChange={(value) => setCompositeLayerField(index, "offset_y", value / 100)}
+                        onCommit={() => void commitDevelopEdit()}
+                      />
+                      <DevelopSlider
+                        spec={COMPOSITE_BLEND_IF_SHADOW_SPEC}
+                        value={layer.blend_if_shadow_cutoff * 100}
+                        onChange={(value) => setCompositeLayerField(index, "blend_if_shadow_cutoff", value / 100)}
+                        onCommit={() => void commitDevelopEdit()}
+                      />
+                      <DevelopSlider
+                        spec={COMPOSITE_BLEND_IF_HIGHLIGHT_SPEC}
+                        value={layer.blend_if_highlight_cutoff * 100}
+                        onChange={(value) => setCompositeLayerField(index, "blend_if_highlight_cutoff", value / 100)}
+                        onCommit={() => void commitDevelopEdit()}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </fieldset>
+
+              {/* KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14
+                  Schritt 8, ADR-0041 Nachtrag VIII) — läuft nach dem
+                  Halation-Kurzschluss, vor `masks` (siehe `develop.rs`s
+                  Moduldoku), in der Anzeige aber neben `composite` platziert
+                  (dieselbe Vereinfachung wie bei allen übrigen Knoten:
+                  Anzeigereihenfolge = `STAGE_NODE_SPECS`). */}
+              <fieldset id="stage-virtual_aperture" className="flex flex-col gap-2">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Virtuelle Blende</legend>
+                <VirtualAperturePanel />
+              </fieldset>
+            </>
+          )}
+
+          {activeTab === "history" && (
+            <>
+              <fieldset className="flex flex-col gap-2">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">Entrauschung &amp; Hochskalierung</legend>
+                <p className="text-xs text-text-muted">Klassische Algorithmen (Bilateral-Filter, kantengerichtete Interpolation), keine Modellinferenz — schreiben eine neue Datei neben dem Original, ändern die Bearbeitung nicht.</p>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    disabled={!selectedPhotoId || enhanceRunning !== null}
+                    onClick={() => selectedPhotoId && void runDenoise(selectedPhotoId)}
+                    className="flex-1 rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {enhanceRunning === "denoise" ? "Entrauscht…" : "Entrauschen"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPhotoId || enhanceRunning !== null}
+                    onClick={() => selectedPhotoId && void runUpscale(selectedPhotoId)}
+                    className="flex-1 rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {enhanceRunning === "upscale" ? "Skaliert…" : "2× hochskalieren"}
+                  </button>
+                </div>
+                {enhanceStatus && <p className="text-xs text-text-muted">{enhanceStatus}</p>}
+              </fieldset>
+
+              <fieldset className="flex flex-col gap-2">
+                <legend className="mb-1 text-xs font-medium text-text-secondary">DNG-Konvertierung</legend>
+                <p className="text-xs text-text-muted">
+                  Schreibt eine „Linear DNG" aus den unveränderten, kamera-nativen RAW-Daten (nicht dem entwickelten
+                  Rendering) neben das Original — ein Rohdatenformat mit demosaicten statt der ursprünglichen
+                  Bayer-Mosaik-Daten, siehe Dokumentation.
+                </p>
+                <button
+                  type="button"
+                  disabled={!selectedPhotoId || enhanceRunning !== null}
+                  onClick={() => selectedPhotoId && void runConvertToDng(selectedPhotoId)}
+                  className="rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {enhanceRunning === "dng" ? "Konvertiert…" : "Als DNG konvertieren"}
+                </button>
+              </fieldset>
+            </>
+          )}
         </>
       )}
     </PaletteFrame>

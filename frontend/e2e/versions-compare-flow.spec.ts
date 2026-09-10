@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installTauriMock } from "./tauri-mock";
+import { installTauriMock, openOverflowMenu } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -24,12 +24,14 @@ test.describe("Vergleichs-Grid: Versionen (Phase 9 Schritt 7)", () => {
     await page.getByRole("button", { name: "Raster" }).click();
     await page.getByRole("img", { name: PHOTO.filename }).first().click();
 
-    await page.getByRole("button", { name: "Organisieren…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Organisieren…" }).click();
     await page.getByRole("button", { name: "Virtuelle Kopien" }).click();
     await page.getByRole("button", { name: "Virtuelle Kopie vom ausgewählten Foto erstellen" }).click();
     await page.getByRole("button", { name: "Schließen" }).click();
 
-    await page.getByRole("button", { name: "Versionen vergleichen" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Versionen vergleichen" }).click();
 
     const compareView = page.getByLabel("Vergleichsansicht");
     await expect(compareView.getByText(/Vergleichsansicht — 2 Fotos/)).toBeVisible();

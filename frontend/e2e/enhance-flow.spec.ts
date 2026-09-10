@@ -26,6 +26,9 @@ test.describe("Entrauschung & Hochskalierung (Phase 9 Schritt 6)", () => {
     await page.getByRole("img", { name: PHOTO.filename }).click();
     await page.getByRole("button", { name: "Entwickeln" }).click();
 
+    // Phase 18 Schritt 4: dieser Abschnitt liegt jetzt hinter einer eigenen Registerkarte.
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
+
     const group = page.getByRole("group", { name: "Entrauschung & Hochskalierung" });
     await group.getByRole("button", { name: "Entrauschen" }).click();
     await expect(page.getByText("Entrauscht: /home/user/Fotos/Urlaub/IMG_0001_entrauscht.png")).toBeVisible();
@@ -53,6 +56,8 @@ test.describe("DNG-Konvertierung (Phase 11 Schritt 1)", () => {
     await page.getByRole("button", { name: /Urlaub/ }).click();
     await page.getByRole("img", { name: PHOTO.filename }).click();
     await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
 
     const group = page.getByRole("group", { name: "DNG-Konvertierung" });
     await group.getByRole("button", { name: "Als DNG konvertieren" }).click();

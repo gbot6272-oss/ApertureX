@@ -4,6 +4,7 @@ import { useT } from "../lib/i18n";
 import type { ExportFormat, ExportPhotoOptions, IccProfileChoice, WatermarkPosition } from "../lib/tauri";
 import { pickFilePath, selectFolderDialog } from "../lib/tauri";
 import { useAppStore } from "../store";
+import { Sheet } from "./ui/Sheet";
 
 interface ExportDialogProps {
   open: boolean;
@@ -91,8 +92,6 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
   const [watermarkOpacity, setWatermarkOpacity] = useState(0.7);
   const [metadataMake, setMetadataMake] = useState("");
   const [metadataCopyright, setMetadataCopyright] = useState("");
-
-  if (!open) return null;
 
   async function handlePickDestFolder() {
     const path = await selectFolderDialog();
@@ -184,328 +183,323 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
   const supportsQuality = format === "jpeg" || format === "avif" || format === "jxl";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16" onClick={onClose}>
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
-      >
-        <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("exportDialog.title")}</h2>
-        <p className="mb-3 text-xs text-text-muted">
-          {t("exportDialog.photoCount", { count: photoIds.length, plural: photoIds.length === 1 ? "" : "s" })}
-        </p>
+    <Sheet open={open} onClose={onClose} label={t("exportDialog.title")} className="max-w-md p-4">
+      <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("exportDialog.title")}</h2>
+      <p className="mb-3 text-xs text-text-muted">
+        {t("exportDialog.photoCount", { count: photoIds.length, plural: photoIds.length === 1 ? "" : "s" })}
+      </p>
 
-        <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
-          {t("exportDialog.destFolder")}
-          <div className="flex gap-1">
-            <input
-              type="text"
-              readOnly
-              value={destFolder}
-              placeholder={t("exportDialog.chooseFolder")}
-              className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-sm"
-            />
-            <button
-              type="button"
-              onClick={() => void handlePickDestFolder()}
-              className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent"
-            >
-              {t("exportDialog.choose")}
-            </button>
-          </div>
-        </label>
-
-        {/* Mehrfachziel-Export (Phase 12 Schritt 5, siehe DECISIONS.md
-            ADR-0039) — jedes Formular unten gilt für den aktuellen
-            Zielordner; "+ Weiteres Ziel hinzufügen" merkt sich eine
-            Momentaufnahme davon, "Alle Ziele exportieren" reicht photoIds
-            an jedes gemerkte Ziel einzeln weiter. */}
-        {destinations.length > 0 && (
-          <div className="mb-3 flex flex-col gap-1 rounded border border-border p-2">
-            <p className="text-xs font-semibold text-text-secondary">{t("exportDialog.destinations")}</p>
-            <ul className="flex flex-col gap-1">
-              {destinations.map((d) => (
-                <li key={d.id} className="flex items-center justify-between gap-2 rounded border border-border px-2 py-1 text-xs">
-                  <span className="min-w-0 flex-1 truncate" title={d.label}>
-                    {d.label}
-                  </span>
-                  <button type="button" onClick={() => removeDestination(d.id)} className="shrink-0 rounded border border-border px-1.5 py-0.5 hover:border-danger">
-                    {t("exportDialog.removeDestination")}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={addCurrentAsDestination}
-          disabled={!destFolder}
-          className="mb-3 w-full rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {t("exportDialog.addDestination")}
-        </button>
-
-        <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
-          {t("exportDialog.format")}
-          <select
-            value={format}
-            onChange={(e) => setFormat(e.target.value as ExportFormat)}
-            className="rounded border border-border bg-bg-panel px-2 py-1 text-sm"
+      <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
+        {t("exportDialog.destFolder")}
+        <div className="flex gap-1">
+          <input
+            type="text"
+            readOnly
+            value={destFolder}
+            placeholder={t("exportDialog.chooseFolder")}
+            className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-sm"
+          />
+          <button
+            type="button"
+            onClick={() => void handlePickDestFolder()}
+            className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent"
           >
-            {(Object.keys(FORMAT_LABELS) as ExportFormat[]).map((key) => (
-              <option key={key} value={key}>
-                {FORMAT_LABELS[key]}
-              </option>
+            {t("exportDialog.choose")}
+          </button>
+        </div>
+      </label>
+
+      {/* Mehrfachziel-Export (Phase 12 Schritt 5, siehe DECISIONS.md
+          ADR-0039) — jedes Formular unten gilt für den aktuellen
+          Zielordner; "+ Weiteres Ziel hinzufügen" merkt sich eine
+          Momentaufnahme davon, "Alle Ziele exportieren" reicht photoIds
+          an jedes gemerkte Ziel einzeln weiter. */}
+      {destinations.length > 0 && (
+        <div className="mb-3 flex flex-col gap-1 rounded border border-border p-2">
+          <p className="text-xs font-semibold text-text-secondary">{t("exportDialog.destinations")}</p>
+          <ul className="flex flex-col gap-1">
+            {destinations.map((d) => (
+              <li key={d.id} className="flex items-center justify-between gap-2 rounded border border-border px-2 py-1 text-xs">
+                <span className="min-w-0 flex-1 truncate" title={d.label}>
+                  {d.label}
+                </span>
+                <button type="button" onClick={() => removeDestination(d.id)} className="shrink-0 rounded border border-border px-1.5 py-0.5 hover:border-danger">
+                  {t("exportDialog.removeDestination")}
+                </button>
+              </li>
             ))}
-          </select>
-        </label>
+          </ul>
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={addCurrentAsDestination}
+        disabled={!destFolder}
+        className="mb-3 w-full rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {t("exportDialog.addDestination")}
+      </button>
 
-        {supportsQuality && (
-          <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
-            {t("exportDialog.quality", { value: quality })}
-            <input
-              type="range"
-              min={1}
-              max={100}
-              value={quality}
-              onChange={(e) => setQuality(Number(e.target.value))}
-            />
-          </label>
-        )}
+      <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
+        {t("exportDialog.format")}
+        <select
+          value={format}
+          onChange={(e) => setFormat(e.target.value as ExportFormat)}
+          className="rounded border border-border bg-bg-panel px-2 py-1 text-sm"
+        >
+          {(Object.keys(FORMAT_LABELS) as ExportFormat[]).map((key) => (
+            <option key={key} value={key}>
+              {FORMAT_LABELS[key]}
+            </option>
+          ))}
+        </select>
+      </label>
 
-        {supportsBitDepth16 && (
-          <label className="mb-3 flex items-center gap-2 text-xs text-text-secondary">
-            <input type="checkbox" checked={bitDepth16} onChange={(e) => setBitDepth16(e.target.checked)} />
-            {t("exportDialog.bitDepth16")}
-          </label>
-        )}
-
-        <fieldset className="mb-3 flex flex-col gap-1">
-          <legend className="mb-1 text-xs font-medium text-text-secondary">{t("exportDialog.sizeLimit")}</legend>
-          <label className="flex items-center gap-2 text-xs">
-            <input type="radio" checked={sizeMode === "original"} onChange={() => setSizeMode("original")} />
-            {t("exportDialog.originalSize")}
-          </label>
-          <label className="flex items-center gap-2 text-xs">
-            <input type="radio" checked={sizeMode === "edge"} onChange={() => setSizeMode("edge")} />
-            {t("exportDialog.longerEdgeAtMost")}
-            <input
-              type="number"
-              min={1}
-              value={maxEdge}
-              onChange={(e) => setMaxEdge(Number(e.target.value))}
-              disabled={sizeMode !== "edge"}
-              className="w-20 rounded border border-border bg-bg-panel px-1 py-0.5 disabled:opacity-50"
-            />
-            px
-          </label>
-          <label className="flex items-center gap-2 text-xs">
-            <input type="radio" checked={sizeMode === "megapixels"} onChange={() => setSizeMode("megapixels")} />
-            {t("exportDialog.atMost")}
-            <input
-              type="number"
-              min={0.1}
-              step={0.1}
-              value={maxMegapixels}
-              onChange={(e) => setMaxMegapixels(Number(e.target.value))}
-              disabled={sizeMode !== "megapixels"}
-              className="w-20 rounded border border-border bg-bg-panel px-1 py-0.5 disabled:opacity-50"
-            />
-            {t("exportDialog.megapixels")}
-          </label>
-        </fieldset>
-
-        {format === "jpeg" && (
-          <label className="mb-3 flex items-center gap-2 text-xs text-text-secondary">
-            <input type="checkbox" checked={limitFileSize} onChange={(e) => setLimitFileSize(e.target.checked)} />
-            {t("exportDialog.targetFileSizeAtMost")}
-            <input
-              type="number"
-              min={1}
-              value={maxFileSizeKb}
-              onChange={(e) => setMaxFileSizeKb(Number(e.target.value))}
-              disabled={!limitFileSize}
-              className="w-20 rounded border border-border bg-bg-panel px-1 py-0.5 disabled:opacity-50"
-            />
-            {t("exportDialog.kbOverridesQuality")}
-          </label>
-        )}
-
+      {supportsQuality && (
         <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
-          {t("exportDialog.outputSharpening", { value: sharpenAmount === 0 ? t("exportDialog.off") : sharpenAmount.toFixed(1) })}
+          {t("exportDialog.quality", { value: quality })}
           <input
             type="range"
-            min={0}
-            max={2}
-            step={0.1}
-            value={sharpenAmount}
-            onChange={(e) => setSharpenAmount(Number(e.target.value))}
+            min={1}
+            max={100}
+            value={quality}
+            onChange={(e) => setQuality(Number(e.target.value))}
           />
         </label>
+      )}
 
-        <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
-          {t("exportDialog.colorSpace")}
+      {supportsBitDepth16 && (
+        <label className="mb-3 flex items-center gap-2 text-xs text-text-secondary">
+          <input type="checkbox" checked={bitDepth16} onChange={(e) => setBitDepth16(e.target.checked)} />
+          {t("exportDialog.bitDepth16")}
+        </label>
+      )}
+
+      <fieldset className="mb-3 flex flex-col gap-1">
+        <legend className="mb-1 text-xs font-medium text-text-secondary">{t("exportDialog.sizeLimit")}</legend>
+        <label className="flex items-center gap-2 text-xs">
+          <input type="radio" checked={sizeMode === "original"} onChange={() => setSizeMode("original")} />
+          {t("exportDialog.originalSize")}
+        </label>
+        <label className="flex items-center gap-2 text-xs">
+          <input type="radio" checked={sizeMode === "edge"} onChange={() => setSizeMode("edge")} />
+          {t("exportDialog.longerEdgeAtMost")}
+          <input
+            type="number"
+            min={1}
+            value={maxEdge}
+            onChange={(e) => setMaxEdge(Number(e.target.value))}
+            disabled={sizeMode !== "edge"}
+            className="w-20 rounded border border-border bg-bg-panel px-1 py-0.5 disabled:opacity-50"
+          />
+          px
+        </label>
+        <label className="flex items-center gap-2 text-xs">
+          <input type="radio" checked={sizeMode === "megapixels"} onChange={() => setSizeMode("megapixels")} />
+          {t("exportDialog.atMost")}
+          <input
+            type="number"
+            min={0.1}
+            step={0.1}
+            value={maxMegapixels}
+            onChange={(e) => setMaxMegapixels(Number(e.target.value))}
+            disabled={sizeMode !== "megapixels"}
+            className="w-20 rounded border border-border bg-bg-panel px-1 py-0.5 disabled:opacity-50"
+          />
+          {t("exportDialog.megapixels")}
+        </label>
+      </fieldset>
+
+      {format === "jpeg" && (
+        <label className="mb-3 flex items-center gap-2 text-xs text-text-secondary">
+          <input type="checkbox" checked={limitFileSize} onChange={(e) => setLimitFileSize(e.target.checked)} />
+          {t("exportDialog.targetFileSizeAtMost")}
+          <input
+            type="number"
+            min={1}
+            value={maxFileSizeKb}
+            onChange={(e) => setMaxFileSizeKb(Number(e.target.value))}
+            disabled={!limitFileSize}
+            className="w-20 rounded border border-border bg-bg-panel px-1 py-0.5 disabled:opacity-50"
+          />
+          {t("exportDialog.kbOverridesQuality")}
+        </label>
+      )}
+
+      <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
+        {t("exportDialog.outputSharpening", { value: sharpenAmount === 0 ? t("exportDialog.off") : sharpenAmount.toFixed(1) })}
+        <input
+          type="range"
+          min={0}
+          max={2}
+          step={0.1}
+          value={sharpenAmount}
+          onChange={(e) => setSharpenAmount(Number(e.target.value))}
+        />
+      </label>
+
+      <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
+        {t("exportDialog.colorSpace")}
+        <select
+          value={iccProfile}
+          onChange={(e) => setIccProfile(e.target.value as IccProfileChoice)}
+          className="rounded border border-border bg-bg-panel px-2 py-1 text-sm"
+        >
+          {(Object.keys(ICC_LABELS) as IccProfileChoice[]).map((key) => (
+            <option key={key} value={key}>
+              {ICC_LABELS[key]}
+            </option>
+          ))}
+        </select>
+      </label>
+      {iccProfile === "custom" && (
+        <div className="mb-3 flex gap-1">
+          <input
+            type="text"
+            readOnly
+            value={iccProfilePath}
+            placeholder={t("exportDialog.chooseIccFile")}
+            className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+          />
+          <button type="button" onClick={() => void handlePickIccFile()} className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent">
+            {t("exportDialog.choose")}
+          </button>
+        </div>
+      )}
+
+      <fieldset className="mb-3 flex flex-col gap-1">
+        <legend className="mb-1 text-xs font-medium text-text-secondary">{t("exportDialog.watermark")}</legend>
+        <label className="mb-1 flex flex-col gap-1 text-xs text-text-secondary">
+          {t("exportDialog.watermarkKind")}
           <select
-            value={iccProfile}
-            onChange={(e) => setIccProfile(e.target.value as IccProfileChoice)}
-            className="rounded border border-border bg-bg-panel px-2 py-1 text-sm"
+            value={watermarkMode}
+            onChange={(e) => setWatermarkMode(e.target.value as WatermarkMode)}
+            className="rounded border border-border bg-bg-panel px-2 py-1 text-xs"
           >
-            {(Object.keys(ICC_LABELS) as IccProfileChoice[]).map((key) => (
-              <option key={key} value={key}>
-                {ICC_LABELS[key]}
-              </option>
-            ))}
+            <option value="none">{t("exportDialog.watermarkNone")}</option>
+            <option value="text">{t("exportDialog.watermarkText")}</option>
+            <option value="image">{t("exportDialog.watermarkImage")}</option>
           </select>
         </label>
-        {iccProfile === "custom" && (
-          <div className="mb-3 flex gap-1">
+        {watermarkMode === "text" && (
+          <>
             <input
               type="text"
-              readOnly
-              value={iccProfilePath}
-              placeholder={t("exportDialog.chooseIccFile")}
-              className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+              value={watermarkText}
+              onChange={(e) => setWatermarkText(e.target.value)}
+              placeholder={t("exportDialog.text")}
+              className="mb-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
             />
-            <button type="button" onClick={() => void handlePickIccFile()} className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent">
-              {t("exportDialog.choose")}
-            </button>
-          </div>
-        )}
-
-        <fieldset className="mb-3 flex flex-col gap-1">
-          <legend className="mb-1 text-xs font-medium text-text-secondary">{t("exportDialog.watermark")}</legend>
-          <label className="mb-1 flex flex-col gap-1 text-xs text-text-secondary">
-            {t("exportDialog.watermarkKind")}
-            <select
-              value={watermarkMode}
-              onChange={(e) => setWatermarkMode(e.target.value as WatermarkMode)}
-              className="rounded border border-border bg-bg-panel px-2 py-1 text-xs"
-            >
-              <option value="none">{t("exportDialog.watermarkNone")}</option>
-              <option value="text">{t("exportDialog.watermarkText")}</option>
-              <option value="image">{t("exportDialog.watermarkImage")}</option>
-            </select>
-          </label>
-          {watermarkMode === "text" && (
-            <>
-              <input
-                type="text"
-                value={watermarkText}
-                onChange={(e) => setWatermarkText(e.target.value)}
-                placeholder={t("exportDialog.text")}
-                className="mb-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
-              />
-              <div className="mb-1 flex gap-1">
-                <input
-                  type="text"
-                  readOnly
-                  value={watermarkFontPath}
-                  placeholder={t("exportDialog.chooseFontFile")}
-                  className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
-                />
-                <button type="button" onClick={() => void handlePickFontFile()} className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent">
-                  {t("exportDialog.choose")}
-                </button>
-              </div>
-            </>
-          )}
-          {watermarkMode === "image" && (
             <div className="mb-1 flex gap-1">
               <input
                 type="text"
                 readOnly
-                value={watermarkImagePath}
-                placeholder={t("exportDialog.chooseImageFile")}
+                value={watermarkFontPath}
+                placeholder={t("exportDialog.chooseFontFile")}
                 className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
               />
-              <button type="button" onClick={() => void handlePickWatermarkImage()} className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent">
+              <button type="button" onClick={() => void handlePickFontFile()} className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent">
                 {t("exportDialog.choose")}
               </button>
             </div>
-          )}
-          {watermarkMode !== "none" && (
-            <>
-              <select
-                value={watermarkPosition}
-                onChange={(e) => setWatermarkPosition(e.target.value as WatermarkPosition)}
-                className="mb-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
-              >
-                {(Object.keys(POSITION_LABELS) as WatermarkPosition[]).map((key) => (
-                  <option key={key} value={key}>
-                    {POSITION_LABELS[key]}
-                  </option>
-                ))}
-              </select>
-              <label className="flex items-center gap-2 text-xs">
-                {t("exportDialog.opacity", { percent: Math.round(watermarkOpacity * 100) })}
-                <input type="range" min={0} max={1} step={0.05} value={watermarkOpacity} onChange={(e) => setWatermarkOpacity(Number(e.target.value))} />
-              </label>
-            </>
-          )}
-        </fieldset>
-
-        {format === "jpeg" && (
-          <fieldset className="mb-3 flex flex-col gap-1">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">{t("exportDialog.metadataJpegOnly")}</legend>
-            <input
-              type="text"
-              value={metadataMake}
-              onChange={(e) => setMetadataMake(e.target.value)}
-              placeholder={t("exportDialog.make")}
-              className="mb-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
-            />
-            <input
-              type="text"
-              value={metadataCopyright}
-              onChange={(e) => setMetadataCopyright(e.target.value)}
-              placeholder={t("exportDialog.copyright")}
-              className="rounded border border-border bg-bg-panel px-2 py-1 text-xs"
-            />
-          </fieldset>
+          </>
         )}
-
-        {exportProgress && (
-          <div className="mb-2 flex items-center gap-2 text-xs text-text-secondary">
-            <span>
-              {t("exportDialog.progress", { done: exportProgress.done, total: exportProgress.total })}
-              {exportProgress.failed > 0 ? ` (${t("exportDialog.failedCount", { count: exportProgress.failed })})` : ""}
-            </span>
-            {exportRunning && (
-              <button type="button" onClick={() => void toggleExportQueuePause()} className="rounded border border-border px-2 py-0.5 text-xs hover:border-accent">
-                {exportQueuePaused ? t("exportDialog.resume") : t("exportDialog.pause")}
-              </button>
-            )}
+        {watermarkMode === "image" && (
+          <div className="mb-1 flex gap-1">
+            <input
+              type="text"
+              readOnly
+              value={watermarkImagePath}
+              placeholder={t("exportDialog.chooseImageFile")}
+              className="min-w-0 flex-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+            />
+            <button type="button" onClick={() => void handlePickWatermarkImage()} className="shrink-0 rounded border border-border px-2 py-1 text-xs hover:border-accent">
+              {t("exportDialog.choose")}
+            </button>
           </div>
         )}
-        {exportError && <p className="mb-2 text-xs text-danger">{t("exportDialog.error", { message: exportError })}</p>}
-        {!exportRunning && exportProgress && exportProgress.done > 0 && (
-          <p className="mb-2 text-xs text-text-secondary">{t("exportDialog.filesWritten", { count: exportProgress.done - exportProgress.failed })}</p>
-        )}
-
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded border border-border px-3 py-1 text-xs hover:border-accent">
-            {t("exportDialog.close")}
-          </button>
-          {destinations.length > 0 && (
-            <button
-              type="button"
-              onClick={() => void handleExportAllDestinations()}
-              disabled={photoIds.length === 0 || exportRunning}
-              className="rounded border border-accent bg-accent/10 px-3 py-1 text-xs text-accent disabled:cursor-not-allowed disabled:opacity-50"
+        {watermarkMode !== "none" && (
+          <>
+            <select
+              value={watermarkPosition}
+              onChange={(e) => setWatermarkPosition(e.target.value as WatermarkPosition)}
+              className="mb-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
             >
-              {exportRunning ? t("exportDialog.exporting") : t("exportDialog.exportAllDestinations", { count: destinations.length })}
+              {(Object.keys(POSITION_LABELS) as WatermarkPosition[]).map((key) => (
+                <option key={key} value={key}>
+                  {POSITION_LABELS[key]}
+                </option>
+              ))}
+            </select>
+            <label className="flex items-center gap-2 text-xs">
+              {t("exportDialog.opacity", { percent: Math.round(watermarkOpacity * 100) })}
+              <input type="range" min={0} max={1} step={0.05} value={watermarkOpacity} onChange={(e) => setWatermarkOpacity(Number(e.target.value))} />
+            </label>
+          </>
+        )}
+      </fieldset>
+
+      {format === "jpeg" && (
+        <fieldset className="mb-3 flex flex-col gap-1">
+          <legend className="mb-1 text-xs font-medium text-text-secondary">{t("exportDialog.metadataJpegOnly")}</legend>
+          <input
+            type="text"
+            value={metadataMake}
+            onChange={(e) => setMetadataMake(e.target.value)}
+            placeholder={t("exportDialog.make")}
+            className="mb-1 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+          />
+          <input
+            type="text"
+            value={metadataCopyright}
+            onChange={(e) => setMetadataCopyright(e.target.value)}
+            placeholder={t("exportDialog.copyright")}
+            className="rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+          />
+        </fieldset>
+      )}
+
+      {exportProgress && (
+        <div className="mb-2 flex items-center gap-2 text-xs text-text-secondary">
+          <span>
+            {t("exportDialog.progress", { done: exportProgress.done, total: exportProgress.total })}
+            {exportProgress.failed > 0 ? ` (${t("exportDialog.failedCount", { count: exportProgress.failed })})` : ""}
+          </span>
+          {exportRunning && (
+            <button type="button" onClick={() => void toggleExportQueuePause()} className="rounded border border-border px-2 py-0.5 text-xs hover:border-accent">
+              {exportQueuePaused ? t("exportDialog.resume") : t("exportDialog.pause")}
             </button>
           )}
+        </div>
+      )}
+      {exportError && <p className="mb-2 text-xs text-danger">{t("exportDialog.error", { message: exportError })}</p>}
+      {!exportRunning && exportProgress && exportProgress.done > 0 && (
+        <p className="mb-2 text-xs text-text-secondary">{t("exportDialog.filesWritten", { count: exportProgress.done - exportProgress.failed })}</p>
+      )}
+
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={onClose} className="rounded border border-border px-3 py-1 text-xs hover:border-accent">
+          {t("exportDialog.close")}
+        </button>
+        {destinations.length > 0 && (
           <button
             type="button"
-            onClick={() => void handleExport()}
-            disabled={!destFolder || photoIds.length === 0 || exportRunning}
+            onClick={() => void handleExportAllDestinations()}
+            disabled={photoIds.length === 0 || exportRunning}
             className="rounded border border-accent bg-accent/10 px-3 py-1 text-xs text-accent disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {exportRunning ? t("exportDialog.exporting") : t("exportDialog.export")}
+            {exportRunning ? t("exportDialog.exporting") : t("exportDialog.exportAllDestinations", { count: destinations.length })}
           </button>
-        </div>
+        )}
+        <button
+          type="button"
+          onClick={() => void handleExport()}
+          disabled={!destFolder || photoIds.length === 0 || exportRunning}
+          className="rounded border border-accent bg-accent/10 px-3 py-1 text-xs text-accent disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {exportRunning ? t("exportDialog.exporting") : t("exportDialog.export")}
+        </button>
       </div>
-    </div>
+    </Sheet>
   );
 }

@@ -5,6 +5,7 @@ import type { PresetSectionKey } from "../lib/presets";
 import { addPresetVersion, listPresetVersions } from "../lib/tauri";
 import type { PresetVersionDto } from "../lib/tauri";
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 interface PresetVersionsDialogProps {
   presetId: string | null;
@@ -66,20 +67,13 @@ export function PresetVersionsDialog({ presetId, presetName, onClose }: PresetVe
     }
   }
 
-  if (!presetId) return null;
-
   const versionA = versions.find((v) => v.id === versionAId);
   const versionB = versions.find((v) => v.id === versionBId);
   const diff = versionA && versionB ? diffEdlSubsets(parseEdlSubset(versionA.edl_subset_json), parseEdlSubset(versionB.edl_subset_json)) : [];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-24" onClick={onClose}>
-      <div
-        role="dialog"
-        aria-label={`Versionen: ${presetName}`}
-        className="w-full max-w-lg rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <Dialog open={presetId !== null} onClose={onClose} label={`Versionen: ${presetName}`} className="max-w-lg">
+      <div className="p-4">
         <h2 className="mb-3 text-sm font-semibold text-text-primary">Versionen: {presetName}</h2>
 
         <button
@@ -161,6 +155,6 @@ export function PresetVersionsDialog({ presetId, presetName, onClose }: PresetVe
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

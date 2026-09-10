@@ -22,6 +22,9 @@ test.describe("Schwarzweiß-Mixer (Phase 9 Schritt 5)", () => {
     await page.getByRole("img", { name: PHOTO.filename }).click();
     await page.getByRole("button", { name: "Entwickeln" }).click();
 
+    // Phase 18 Schritt 4: dieser Abschnitt liegt jetzt hinter einer eigenen Registerkarte.
+    await page.getByRole("tab", { name: "Farbe" }).click();
+
     const treatmentGroup = page.getByRole("group", { name: "Behandlung" });
     await treatmentGroup.getByRole("button", { name: "Schwarzweiß" }).click();
 

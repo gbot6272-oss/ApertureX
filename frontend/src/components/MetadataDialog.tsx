@@ -4,6 +4,7 @@ import { useT } from "../lib/i18n";
 import type { PresetCondition, PresetConditionField, PresetConditionOperator } from "../lib/presets";
 import { PRESET_CONDITION_FIELD_OPTIONS, PRESET_CONDITION_OPERATOR_OPTIONS } from "../lib/presets";
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 interface MetadataDialogProps {
   open: boolean;
@@ -90,8 +91,6 @@ export function MetadataDialog({ open, onClose }: MetadataDialogProps) {
     setNewFieldValue("");
   }, [open, selectedPhoto]);
 
-  if (!open) return null;
-
   async function handleCreateRule() {
     if (!ruleName.trim() || !ruleKeywordId) return;
     const condition: PresetCondition = { field: ruleField, op: ruleOp, value: ruleValue, section: null };
@@ -135,11 +134,8 @@ export function MetadataDialog({ open, onClose }: MetadataDialogProps) {
   const extraFieldEntries = Object.entries(customMetadataDraft).filter(([key]) => !wellKnownKeys.has(key));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-16" onClick={onClose}>
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
-      >
+    <Dialog open={open} onClose={onClose} label={t("metadataDialog.title")} className="max-w-2xl">
+      <div className="p-4">
         <h2 className="mb-1 text-sm font-semibold text-text-primary">{t("metadataDialog.title")}</h2>
         <p className="mb-3 text-xs text-text-muted">{t("metadataDialog.subtitle")}</p>
 
@@ -371,6 +367,6 @@ export function MetadataDialog({ open, onClose }: MetadataDialogProps) {
           </div>
         )}
       </div>
-    </div>
+    </Dialog>
   );
 }

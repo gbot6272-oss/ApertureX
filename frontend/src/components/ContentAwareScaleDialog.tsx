@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 const NEUTRAL_FRACTION = 1;
 const MIN_FRACTION = 0.3;
@@ -28,8 +29,6 @@ export function ContentAwareScaleDialog() {
   const [heightFraction, setHeightFraction] = useState(NEUTRAL_FRACTION);
   const [error, setError] = useState<string | null>(null);
 
-  if (!open) return null;
-
   function close() {
     setWidthFraction(NEUTRAL_FRACTION);
     setHeightFraction(NEUTRAL_FRACTION);
@@ -55,8 +54,8 @@ export function ContentAwareScaleDialog() {
   const hasChange = widthFraction !== NEUTRAL_FRACTION || heightFraction !== NEUTRAL_FRACTION;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-8" onClick={close}>
-      <div onClick={(e) => e.stopPropagation()} className="flex w-full max-w-md flex-col gap-3 rounded-lg border border-border bg-bg-raised p-4 shadow-xl">
+    <Dialog open={open} onClose={close} label="Inhaltssensitiv skalieren (Content-Aware Scale)" className="max-w-md">
+      <div className="flex flex-col gap-3 p-4">
         <h2 className="text-sm font-semibold text-text-primary">Inhaltssensitiv skalieren (Content-Aware Scale)</h2>
         <p className="text-xs text-text-secondary">
           Ändert Breite/Höhe unabhängig voneinander, ohne wichtige Bildinhalte sichtbar zu verzerren (Seam-Carving-Algorithmus) — erkannte Personen/Gesichter werden dabei
@@ -119,6 +118,6 @@ export function ContentAwareScaleDialog() {
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

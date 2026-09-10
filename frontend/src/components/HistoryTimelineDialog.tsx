@@ -5,6 +5,7 @@ import { listDevelopHistory } from "../lib/tauri";
 import type { EditHistoryEntryDto } from "../lib/tauri";
 import { parseEdlEnvelopeJson } from "../lib/edl";
 import { useAppStore } from "../store";
+import { Dialog } from "./ui/Dialog";
 
 function formatValue(value: unknown): string {
   if (value === undefined) return "(nicht gesetzt)";
@@ -56,8 +57,6 @@ export function HistoryTimelineDialog() {
     }
   }
 
-  if (!open) return null;
-
   const times = entries.map((entry) => new Date(entry.created_at).getTime()).filter((ms) => !Number.isNaN(ms));
   const minTime = times.length > 0 ? Math.min(...times) : 0;
   const maxTime = times.length > 0 ? Math.max(...times) : 0;
@@ -76,105 +75,98 @@ export function HistoryTimelineDialog() {
   const diff = edlA && edlB ? diffEdlSubsets(buildPresetEdlSubset(edlA, PRESET_SECTION_KEYS), buildPresetEdlSubset(edlB, PRESET_SECTION_KEYS)) : [];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-24" onClick={toggleHistoryDialog}>
-      <div
-        role="dialog"
-        aria-label="Verlauf"
-        className="w-full max-w-2xl rounded-lg border border-border bg-bg-raised p-4 shadow-xl"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <h2 className="mb-3 text-sm font-semibold text-text-primary">Verlauf — Zeitleiste &amp; Vergleich</h2>
+    <Dialog open={open} onClose={toggleHistoryDialog} label="Verlauf" className="max-w-2xl p-4">
+      <h2 className="mb-3 text-sm font-semibold text-text-primary">Verlauf — Zeitleiste &amp; Vergleich</h2>
 
-        {entries.length === 0 ? (
-          <p className="text-xs text-text-muted">Noch keine Bearbeitungsschritte für dieses Foto.</p>
-        ) : (
-          <>
-            <div className="mb-4" aria-label="Zeitleiste" role="group">
-              <div className="relative h-8 rounded border border-border bg-bg-panel">
+      {entries.length === 0 ? (
+        <p className="text-xs text-text-muted">Noch keine Bearbeitungsschritte für dieses Foto.</p>
+      ) : (
+        <>
+          <div className="mb-4" aria-label="Zeitleiste" role="group">
+            <div className="relative h-8 rounded border border-border bg-bg-panel">
+              {entries.map((entry) => (
+                <button
+                  key={entry.sequence}
+                  type="button"
+                  onClick={() => void gotoDevelopHistory(entry.sequence)}
+                  title={`#${entry.sequence}${entry.label ? ` — ${entry.label}` : ""} — ${new Date(entry.created_at).toLocaleString()}`}
+                  aria-label={`Zu Verlaufsschritt #${entry.sequence} springen`}
+                  className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-accent bg-accent/70 hover:bg-accent"
+                  style={{ left: `${positionPercent(entry)}%` }}
+                />
+              ))}
+            </div>
+            <div className="mt-1 flex justify-between text-[11px] text-text-muted">
+              <span>{entries[0] ? new Date(entries[0].created_at).toLocaleString() : ""}</span>
+              <span>{entries[entries.length - 1] ? new Date(entries[entries.length - 1]!.created_at).toLocaleString() : ""}</span>
+            </div>
+          </div>
+
+          <div className="mb-3 flex gap-2 text-xs">
+            <label className="flex flex-1 flex-col gap-1 text-text-secondary">
+              Schritt A
+              <select
+                aria-label="Verlaufsschritt A"
+                value={sequenceA ?? ""}
+                onChange={(event) => setSequenceA(Number(event.target.value))}
+                className="rounded border border-border bg-bg-panel px-2 py-1"
+              >
                 {entries.map((entry) => (
-                  <button
-                    key={entry.sequence}
-                    type="button"
-                    onClick={() => void gotoDevelopHistory(entry.sequence)}
-                    title={`#${entry.sequence}${entry.label ? ` — ${entry.label}` : ""} — ${new Date(entry.created_at).toLocaleString()}`}
-                    aria-label={`Zu Verlaufsschritt #${entry.sequence} springen`}
-                    className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-accent bg-accent/70 hover:bg-accent"
-                    style={{ left: `${positionPercent(entry)}%` }}
-                  />
+                  <option key={entry.sequence} value={entry.sequence}>
+                    #{entry.sequence}{entry.label ? ` — ${entry.label}` : ""}
+                  </option>
                 ))}
-              </div>
-              <div className="mt-1 flex justify-between text-[11px] text-text-muted">
-                <span>{entries[0] ? new Date(entries[0].created_at).toLocaleString() : ""}</span>
-                <span>{entries[entries.length - 1] ? new Date(entries[entries.length - 1]!.created_at).toLocaleString() : ""}</span>
-              </div>
-            </div>
+              </select>
+            </label>
+            <label className="flex flex-1 flex-col gap-1 text-text-secondary">
+              Schritt B
+              <select
+                aria-label="Verlaufsschritt B"
+                value={sequenceB ?? ""}
+                onChange={(event) => setSequenceB(Number(event.target.value))}
+                className="rounded border border-border bg-bg-panel px-2 py-1"
+              >
+                {entries.map((entry) => (
+                  <option key={entry.sequence} value={entry.sequence}>
+                    #{entry.sequence}{entry.label ? ` — ${entry.label}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
 
-            <div className="mb-3 flex gap-2 text-xs">
-              <label className="flex flex-1 flex-col gap-1 text-text-secondary">
-                Schritt A
-                <select
-                  aria-label="Verlaufsschritt A"
-                  value={sequenceA ?? ""}
-                  onChange={(event) => setSequenceA(Number(event.target.value))}
-                  className="rounded border border-border bg-bg-panel px-2 py-1"
-                >
-                  {entries.map((entry) => (
-                    <option key={entry.sequence} value={entry.sequence}>
-                      #{entry.sequence}{entry.label ? ` — ${entry.label}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-1 flex-col gap-1 text-text-secondary">
-                Schritt B
-                <select
-                  aria-label="Verlaufsschritt B"
-                  value={sequenceB ?? ""}
-                  onChange={(event) => setSequenceB(Number(event.target.value))}
-                  className="rounded border border-border bg-bg-panel px-2 py-1"
-                >
-                  {entries.map((entry) => (
-                    <option key={entry.sequence} value={entry.sequence}>
-                      #{entry.sequence}{entry.label ? ` — ${entry.label}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <div className="max-h-64 overflow-y-auto rounded border border-border">
-              {diff.length === 0 ? (
-                <p className="p-2 text-xs text-text-muted">Keine Unterschiede zwischen den gewählten Schritten.</p>
-              ) : (
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-border text-text-secondary">
-                      <th className="p-1.5">Feld</th>
-                      <th className="p-1.5">A</th>
-                      <th className="p-1.5">B</th>
+          <div className="max-h-64 overflow-y-auto rounded border border-border">
+            {diff.length === 0 ? (
+              <p className="p-2 text-xs text-text-muted">Keine Unterschiede zwischen den gewählten Schritten.</p>
+            ) : (
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-border text-text-secondary">
+                    <th className="p-1.5">Feld</th>
+                    <th className="p-1.5">A</th>
+                    <th className="p-1.5">B</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {diff.map((entry) => (
+                    <tr key={entry.path} className="border-b border-border last:border-0">
+                      <td className="p-1.5 font-mono text-text-primary">{entry.path}</td>
+                      <td className="p-1.5 text-text-secondary">{formatValue(entry.a)}</td>
+                      <td className="p-1.5 text-text-secondary">{formatValue(entry.b)}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {diff.map((entry) => (
-                      <tr key={entry.path} className="border-b border-border last:border-0">
-                        <td className="p-1.5 font-mono text-text-primary">{entry.path}</td>
-                        <td className="p-1.5 text-text-secondary">{formatValue(entry.a)}</td>
-                        <td className="p-1.5 text-text-secondary">{formatValue(entry.b)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </>
-        )}
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
 
-        <div className="mt-3 flex justify-end">
-          <button type="button" onClick={toggleHistoryDialog} className="rounded border border-border px-3 py-1 text-xs text-text-secondary hover:bg-bg-panel">
-            Schließen
-          </button>
-        </div>
+      <div className="mt-3 flex justify-end">
+        <button type="button" onClick={toggleHistoryDialog} className="rounded border border-border px-3 py-1 text-xs text-text-secondary hover:bg-bg-panel">
+          Schließen
+        </button>
       </div>
-    </div>
+    </Dialog>
   );
 }

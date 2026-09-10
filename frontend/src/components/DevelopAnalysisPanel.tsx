@@ -26,15 +26,48 @@ interface DevelopAnalysisPanelProps {
   onAutoTone: (histogram: Histogram) => void;
 }
 
-function HistogramCanvas({ histogram }: { histogram: Histogram }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+/** Backing-Store-Breite an die tatsächliche CSS-Breite × `devicePixelRatio`
+ * koppeln (Phase 18 Schritt 5, siehe `DECISIONS.md` ADR-0046) — dasselbe
+ * Muster wie `lib/leafletHeatmap.ts`s DPR-Skalierung. Ohne das bleibt die
+ * Canvas-Bitmap auf ihrer anfänglichen Breite eingefroren, während
+ * `className="w-full"` sie per CSS beliebig hochskaliert — auf HiDPI-
+ * Displays (oder einer per `PaletteFrame` breitgezogenen Palette)
+ * sichtbar unscharf. Nur die Breite ist hier dynamisch — die Höhe jedes
+ * Analyse-Canvas ist bewusst ein fester CSS-Pixelwert (unverändert
+ * gegenüber vorher), ein `ResizeObserver` hält die Breite auch bei
+ * Paletten-Größenänderungen aktuell.
+ */
+function useCanvasDprWidth(canvasRef: React.RefObject<HTMLCanvasElement | null>): { cssWidth: number; dpr: number } {
+  const [state, setState] = useState<{ cssWidth: number; dpr: number }>(() => ({ cssWidth: 0, dpr: Math.max(1, window.devicePixelRatio || 1) }));
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const update = () => setState({ cssWidth: canvas.getBoundingClientRect().width, dpr: Math.max(1, window.devicePixelRatio || 1) });
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [canvasRef]);
+
+  return state;
+}
+
+function HistogramCanvas({ histogram }: { histogram: Histogram }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { cssWidth, dpr } = useCanvasDprWidth(canvasRef);
+  const cssHeight = 80;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || cssWidth === 0) return;
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const { width, height } = canvas;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const width = cssWidth;
+    const height = cssHeight;
     ctx.clearRect(0, 0, width, height);
     ctx.fillStyle = "#1a1a1a";
     ctx.fillRect(0, 0, width, height);
@@ -58,9 +91,9 @@ function HistogramCanvas({ histogram }: { histogram: Histogram }) {
       ctx.fill();
     }
     ctx.globalCompositeOperation = "source-over";
-  }, [histogram]);
+  }, [histogram, cssWidth, dpr]);
 
-  return <canvas ref={canvasRef} width={256} height={80} className="w-full rounded" aria-label="Histogramm" />;
+  return <canvas ref={canvasRef} className="w-full rounded" style={{ height: cssHeight }} aria-label="Histogramm" />;
 }
 
 /** Vektorskop-Canvas (Phase 14 Schritt 6, siehe `lib/vectorscope.ts`s
@@ -70,14 +103,25 @@ function HistogramCanvas({ histogram }: { histogram: Histogram }) {
  * Kreis-Raster darüber. */
 function VectorscopeCanvas({ vectorscope }: { vectorscope: Vectorscope }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { cssWidth, dpr } = useCanvasDprWidth(canvasRef);
+  const cssHeight = vectorscope.size;
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!canvas || cssWidth === 0) return;
     const { size, grid, maxCount } = vectorscope;
-    const imageData = ctx.createImageData(size, size);
+
+    // Die Dichte-Heatmap bleibt in ihrer nativen Rasterauflösung
+    // berechnet (unverändert) — `putImageData` respektiert keine
+    // Transform-Matrix, deshalb erst auf eine Offscreen-Canvas in
+    // Rasterauflösung geschrieben und von dort per `drawImage` auf die
+    // DPR-große Ziel-Canvas skaliert (Phase 18 Schritt 5).
+    const offscreen = document.createElement("canvas");
+    offscreen.width = size;
+    offscreen.height = size;
+    const offCtx = offscreen.getContext("2d");
+    if (!offCtx) return;
+    const imageData = offCtx.createImageData(size, size);
     const max = Math.max(1, maxCount);
     const bg = 26;
     for (let i = 0; i < size * size; i++) {
@@ -93,11 +137,23 @@ function VectorscopeCanvas({ vectorscope }: { vectorscope: Vectorscope }) {
       imageData.data[offset + 2] = Math.round(bg + intensity * (160 - bg));
       imageData.data[offset + 3] = 255;
     }
-    ctx.putImageData(imageData, 0, 0);
+    offCtx.putImageData(imageData, 0, 0);
 
-    const cx = size / 2;
-    const cy = size / 2;
-    const radius = size / 2 - 1;
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    // Das Raster bleibt bewusst blockig (Dichte-Heatmap), nicht
+    // zusätzlich weichgezeichnet — nur die Skalierung selbst soll auf
+    // HiDPI nicht zusätzlich unscharf wirken.
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height);
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const cx = cssWidth / 2;
+    const cy = cssHeight / 2;
+    const radius = Math.min(cssWidth, cssHeight) / 2 - 1;
     ctx.strokeStyle = "rgba(255,255,255,0.25)";
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -109,9 +165,9 @@ function VectorscopeCanvas({ vectorscope }: { vectorscope: Vectorscope }) {
     ctx.moveTo(cx, cy - radius);
     ctx.lineTo(cx, cy + radius);
     ctx.stroke();
-  }, [vectorscope]);
+  }, [vectorscope, cssWidth, cssHeight, dpr]);
 
-  return <canvas ref={canvasRef} width={vectorscope.size} height={vectorscope.size} className="w-full rounded" aria-label="Vektorskop" />;
+  return <canvas ref={canvasRef} className="w-full rounded" style={{ height: cssHeight }} aria-label="Vektorskop" />;
 }
 
 /** Wellenform-Canvas (Phase 14 Schritt 6, siehe `lib/waveform.ts`s
@@ -123,14 +179,24 @@ function VectorscopeCanvas({ vectorscope }: { vectorscope: Vectorscope }) {
  * Hand, weil `putImageData` selbst keinen Blend-Modus kennt). */
 function WaveformCanvas({ waveform }: { waveform: Waveform }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { cssWidth, dpr } = useCanvasDprWidth(canvasRef);
+  const cssHeight = 80;
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!canvas || cssWidth === 0) return;
     const { columns, rows, r, g, b, maxCount } = waveform;
-    const imageData = ctx.createImageData(columns, rows);
+
+    // Dieselbe Offscreen-Canvas-Strategie wie `VectorscopeCanvas` (Phase
+    // 18 Schritt 5): die Dichteberechnung bleibt in ihrer nativen
+    // Rasterauflösung unverändert, nur die Skalierung auf die tatsächliche
+    // CSS-Anzeigegröße × `devicePixelRatio` ist neu.
+    const offscreen = document.createElement("canvas");
+    offscreen.width = columns;
+    offscreen.height = rows;
+    const offCtx = offscreen.getContext("2d");
+    if (!offCtx) return;
+    const imageData = offCtx.createImageData(columns, rows);
     const max = Math.max(1, maxCount);
     const bg = 26;
 
@@ -160,10 +226,18 @@ function WaveformCanvas({ waveform }: { waveform: Waveform }) {
         imageData.data[offset + 3] = 255;
       }
     }
-    ctx.putImageData(imageData, 0, 0);
-  }, [waveform]);
+    offCtx.putImageData(imageData, 0, 0);
 
-  return <canvas ref={canvasRef} width={waveform.columns} height={waveform.rows} className="h-20 w-full rounded" aria-label="Wellenform" />;
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height);
+  }, [waveform, cssWidth, cssHeight, dpr]);
+
+  return <canvas ref={canvasRef} className="w-full rounded" style={{ height: cssHeight }} aria-label="Wellenform" />;
 }
 
 /**

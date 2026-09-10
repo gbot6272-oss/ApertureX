@@ -59,18 +59,29 @@ test.describe("Workflow: Schnappschüsse + Vorher/Nachher", () => {
     await exposureInput.blur();
     await expect.poll(async () => lastCommittedExposure(page)).toBeCloseTo(0.8, 2);
 
+    // Phase 18 Schritt 4: Schnappschüsse/Vorher-Nachher/Kopieren/Referenz/
+    // Soft-Proof liegen jetzt hinter der Registerkarte „Verlauf & Werkzeuge",
+    // die Grundeinstellungs-Regler hinter „Licht" — vor jeder Nutzung
+    // umschalten.
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
+
     page.once("dialog", (dialog) => void dialog.accept("Erste Version"));
     await page.getByRole("button", { name: "+ Schnappschuss vom aktuellen Stand" }).click();
     await expect(page.getByRole("button", { name: "Erste Version", exact: true })).toBeVisible();
 
     // Weiter bearbeiten, dann den Schnappschuss wiederherstellen.
+    await page.getByRole("tab", { name: "Licht" }).click();
     await exposureInput.fill("-1.2");
     await exposureInput.blur();
     await expect.poll(async () => lastCommittedExposure(page)).toBeCloseTo(-1.2, 2);
 
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await page.getByRole("button", { name: "Erste Version", exact: true }).click();
     await expect.poll(async () => lastCommittedExposure(page)).toBeCloseTo(0.8, 2);
+    await page.getByRole("tab", { name: "Licht" }).click();
     await expect(exposureInput).toHaveValue("0.8");
+
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
 
     page.once("dialog", (dialog) => void dialog.accept("Referenz"));
     await page.getByTitle("Umbenennen").click();
@@ -82,6 +93,7 @@ test.describe("Workflow: Schnappschüsse + Vorher/Nachher", () => {
 
   test("Vorher/Nachher-Modi schalten die Ansicht um, jeweils nur ein Modus aktiv", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
 
     const sideBySideButton = page.getByRole("button", { name: "Links/Rechts" });
     const stackedButton = page.getByRole("button", { name: "Oben/Unten" });
@@ -131,14 +143,18 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
     // Alle Sektionen sind per Vorgabe markiert (siehe `DevelopPanel.tsx`s
     // `workflowSections`-Initialwert) — Kopieren übernimmt also auch die
     // Belichtung.
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await page.getByRole("button", { name: "Kopieren" }).click();
 
+    await page.getByRole("tab", { name: "Licht" }).click();
     await exposureInput.fill("-1.2");
     await exposureInput.blur();
     await expect.poll(async () => lastCommittedExposure(page)).toBeCloseTo(-1.2, 2);
 
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await page.getByRole("button", { name: "Einfügen" }).click();
     await expect.poll(async () => lastCommittedExposure(page)).toBeCloseTo(0.8, 2);
+    await page.getByRole("tab", { name: "Licht" }).click();
     await expect(exposureInput).toHaveValue("0.8");
   });
 
@@ -148,8 +164,10 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
     // "Vorherige übernehmen" ist deaktiviert, solange noch kein anderes
     // Foto im Entwickeln-Modul offen war.
     const applyPreviousButton = page.getByRole("button", { name: "Vorherige übernehmen" });
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await expect(applyPreviousButton).toBeDisabled();
 
+    await page.getByRole("tab", { name: "Licht" }).click();
     const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" }).first();
     await exposureInput.fill("0.6");
     await exposureInput.blur();
@@ -159,10 +177,12 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
     // lädt automatisch dessen (neutralen) Stand; `lastDevelopPhotoId`
     // merkt sich dabei das erste Foto.
     await page.getByRole("img", { name: PHOTO_2.filename }).click();
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await expect(applyPreviousButton).toBeEnabled();
 
     await applyPreviousButton.click();
     await expect.poll(async () => lastExposureFor(page, PHOTO_2.id)).toBeCloseTo(0.6, 2);
+    await page.getByRole("tab", { name: "Licht" }).click();
     await expect(exposureInput).toHaveValue("0.6");
   });
 
@@ -175,13 +195,16 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
     await page.getByRole("img", { name: PHOTO_2.filename }).click({ modifiers: ["Control"] });
 
     const syncButton = page.getByRole("button", { name: "Auf 1 weitere ausgewählte Foto synchronisieren" });
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await expect(syncButton).toBeEnabled();
 
+    await page.getByRole("tab", { name: "Licht" }).click();
     const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" }).first();
     await exposureInput.fill("0.5");
     await exposureInput.blur();
     await expect.poll(async () => lastExposureFor(page, PHOTO_2.id)).toBeCloseTo(0.5, 2);
 
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await syncButton.click();
     await expect.poll(async () => lastExposureFor(page, PHOTO.id)).toBeCloseTo(0.5, 2);
   });
@@ -190,8 +213,10 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
     await setUpWithSelectedPhoto(page, [PHOTO_2]);
     await page.getByRole("img", { name: PHOTO_2.filename }).click({ modifiers: ["Control"] });
 
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await page.getByRole("checkbox", { name: /Auto-Sync/ }).check();
 
+    await page.getByRole("tab", { name: "Licht" }).click();
     const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" }).first();
     await exposureInput.fill("-0.3");
     await exposureInput.blur();
@@ -213,6 +238,7 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
 test.describe("Workflow: Referenzansicht + Soft-Proof", () => {
   test("Referenzansicht zeigt Referenz- und Arbeitsbild nebeneinander an und lässt sich wieder ausblenden", async ({ page }) => {
     await setUpWithSelectedPhoto(page, [PHOTO_2]);
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
 
     await expect(page.getByLabel("Referenzansicht")).toHaveCount(0);
 
@@ -235,6 +261,7 @@ test.describe("Workflow: Referenzansicht + Soft-Proof", () => {
 
   test("Soft-Proof schaltet Zielprofil/Renderpriorität/Warnung/Papierweiß frei, ohne einen Commit auszulösen", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
 
     await expect(page.getByLabel("Soft-Proof-Zielprofil")).toHaveCount(0);
 

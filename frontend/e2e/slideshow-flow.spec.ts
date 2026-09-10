@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { getMockInvokeLog, installTauriMock } from "./tauri-mock";
+import { getMockInvokeLog, installTauriMock, openOverflowMenu } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -42,32 +42,37 @@ test.describe("Diashow (Phase 8 Schritt 4)", () => {
       photosByFolder: { [FOLDER_ID]: [PHOTO] },
     });
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "Diashow…" })).toBeDisabled();
+    await openOverflowMenu(page);
+    await expect(page.getByRole("menuitem", { name: "Diashow…" })).toBeDisabled();
 
     await page.getByRole("button", { name: /Urlaub/ }).click();
     await page.getByRole("img", { name: PHOTO.filename }).click();
-    await expect(page.getByRole("button", { name: "Diashow…" })).toBeEnabled();
-    await page.getByRole("button", { name: "Diashow…" }).click();
+    await openOverflowMenu(page);
+    await expect(page.getByRole("menuitem", { name: "Diashow…" })).toBeEnabled();
+    await page.getByRole("menuitem", { name: "Diashow…" }).click();
     await expect(page.getByText("1 Foto", { exact: true })).toBeVisible();
   });
 
   test("fehlendes ffmpeg deaktiviert den Video-Export-Knopf und zeigt einen Hinweis", async ({ page }) => {
     await setUpWithSelectedPhoto(page, { ffmpegAvailable: false });
-    await page.getByRole("button", { name: "Diashow…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Diashow…" }).click();
     await expect(page.getByText(/ffmpeg wurde auf diesem Rechner nicht gefunden/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Als Video exportieren (MP4)" })).toBeDisabled();
   });
 
   test("Abspielen öffnet die Live-Wiedergabe mit einer Leinwand", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
-    await page.getByRole("button", { name: "Diashow…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Diashow…" }).click();
     await page.getByRole("button", { name: "Abspielen" }).click();
     await expect(page.getByRole("dialog", { name: "Diashow-Wiedergabe" }).locator("canvas")).toBeVisible();
   });
 
   test("Abbruch des Speichern-unter-Dialogs löst keinen export_slideshow_video-Aufruf aus", async ({ page }) => {
     await setUpWithSelectedPhoto(page, { pickSaveFilePathResult: null });
-    await page.getByRole("button", { name: "Diashow…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Diashow…" }).click();
     await page.getByRole("button", { name: "Als Video exportieren (MP4)" }).click();
 
     const log = await getMockInvokeLog(page);
@@ -79,7 +84,8 @@ test.describe("Diashow (Phase 8 Schritt 4)", () => {
       pickSaveFilePathResult: "/home/user/Videos/Diashow.mp4",
       pickFilePathResult: "/home/user/Musik/song.mp3",
     });
-    await page.getByRole("button", { name: "Diashow…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Diashow…" }).click();
 
     await page.getByLabel("Dauer je Foto (s)").fill("5");
     await page.getByLabel("Übergang").selectOption("cut");
@@ -115,7 +121,8 @@ test.describe("Diashow (Phase 8 Schritt 4)", () => {
       pickSaveFilePathResult: "/home/user/Videos/Diashow.mp4",
       pickFilePathResult: "/home/user/Schriften/Font.ttf",
     });
-    await page.getByRole("button", { name: "Diashow…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Diashow…" }).click();
 
     await page.getByRole("checkbox", { name: "Intro-Bildschirm" }).check();
     await page.getByPlaceholder("Text").fill("Willkommen");
@@ -135,7 +142,8 @@ test.describe("Diashow (Phase 8 Schritt 4)", () => {
       pickSaveFilePathResult: "/home/user/Videos/Diashow.mp4",
       slideshowVideoShouldFail: true,
     });
-    await page.getByRole("button", { name: "Diashow…" }).click();
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Diashow…" }).click();
     await page.getByRole("button", { name: "Als Video exportieren (MP4)" }).click();
     await expect(page.getByText(/Fehler: Test-Stub: Video-Export fehlgeschlagen/)).toBeVisible();
   });

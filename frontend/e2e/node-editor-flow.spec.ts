@@ -21,6 +21,8 @@ test.describe("Node-Editor (Phase 9 Schritt 7)", () => {
     await page.getByRole("button", { name: /Urlaub/ }).click();
     await page.getByRole("img", { name: PHOTO.filename }).click();
     await page.getByRole("button", { name: "Entwickeln" }).click();
+    // Phase 18 Schritt 4: der Node-Editor liegt jetzt hinter einer eigenen Registerkarte.
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
 
     const nodeEditor = page.getByRole("group", { name: "Node-Editor" });
     await expect(nodeEditor.getByText("Grundeinstellungen")).toBeVisible();
@@ -42,10 +44,12 @@ test.describe("Node-Editor (Phase 9 Schritt 7)", () => {
     expect(stageEnabled.basic).toBe(true);
     expect(stageEnabled.curves).toBe(true);
 
-    // "Öffnen" springt zum zugehörigen Regler-Abschnitt statt zu
-    // navigieren — muss ohne Fehler funktionieren, auch wenn der Anker
-    // (bei "Details") bereits sichtbar ist.
+    // "Öffnen" springt zum zugehörigen Regler-Abschnitt — seit Phase 18
+    // Schritt 4 liegt der Anker ggf. auf einer anderen Registerkarte als
+    // "Verlauf & Werkzeuge" (hier: "Details"); `STAGE_TAB_IDS` schaltet
+    // dafür automatisch dorthin um, kein manueller Tab-Klick nötig.
     await nodeEditor.getByRole("listitem").filter({ hasText: "Details" }).getByRole("button", { name: "Öffnen" }).click();
+    await expect(page.getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
     await expect(page.getByRole("group", { name: "Details" })).toBeVisible();
   });
 });

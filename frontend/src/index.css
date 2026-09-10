@@ -15,9 +15,57 @@
   --color-accent: #5b9bd5;
   --color-danger: #e07a5f;
   --color-success: #7fb069;
+  /* Neue Oberflächen-Stufe (Phase 18, ADR-0046) — der Backdrop hinter
+     der neuen gemeinsamen Dialog-/Sheet-Primitive (`components/ui/`).
+     Bewusst als eigener Token statt einer Ad-hoc-`bg-black/50`-Klasse
+     pro Dialog, damit sich das (in Schritt 2 von 25 Stellen auf eine
+     Primitive migrierte) Overlay-Erscheinungsbild an einer Stelle
+     pflegen lässt. */
+  --color-bg-overlay: rgb(10 10 10 / 55%);
 
   --font-sans:
     system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* Radius-Skala (Phase 18, ADR-0046) — überschreibt Tailwinds
+     Standardwerte (0.125rem–2rem) an derselben Stelle, damit jede
+     bestehende `rounded-md`/`rounded-lg`/`rounded-xl`/`rounded-2xl`-
+     Verwendung im gesamten Frontend (577+ Stellen) ohne
+     Einzeländerung die etwas großzügigere, "hochwertiger" wirkende
+     Rundung bekommt — bewusst kein neuer Klassenname, nur verfeinerte
+     Werte für die schon überall genutzten Standardklassen. */
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.375rem;
+
+  /* Schatten-/Elevation-Skala (Phase 18, ADR-0046) — Tailwinds
+     Standardschatten sind für helle Oberflächen kalibriert (niedrige
+     Deckkraft auf reinem Schwarz) und auf dem dunklen Grundton dieser
+     App (`--color-bg-base: #1a1a1a`) kaum sichtbar. Dieselben
+     Tailwind-Variablennamen, verstärkte Werte für sichtbare Tiefe auf
+     dunklem Grund — das helle Theme unten (`[data-theme="light"]`)
+     bekommt eine eigene, sanftere Überschreibung. */
+  --shadow-md: 0 6px 16px -4px rgb(0 0 0 / 45%), 0 2px 6px -2px rgb(0 0 0 / 35%);
+  --shadow-lg: 0 12px 28px -6px rgb(0 0 0 / 50%), 0 4px 10px -4px rgb(0 0 0 / 35%);
+  --shadow-xl: 0 24px 48px -10px rgb(0 0 0 / 55%), 0 8px 16px -6px rgb(0 0 0 / 40%);
+}
+
+/* Bewegungs-Tokens (Phase 18, ADR-0046) — bewusst außerhalb von
+   `@theme`: Tailwind v4 generiert aus `--duration-*`/eigenen
+   Zeit-Tokens keine Utility-Klassen (anders als `--color-*`/
+   `--radius-*`/`--shadow-*`/`--ease-*`, die Tailwind selbst schon als
+   Theme-Namespace kennt — `--ease-in/-out/-in-out` sind bereits
+   Tailwind-Standardwerte, hier absichtlich nicht dupliziert). Nutzung
+   über Tailwinds beliebige-Werte-Syntax, z. B.
+   `duration-[var(--duration-base)]`, oder direkt per `style`. Dieselbe
+   Werte-Quelle wie `lib/motion.ts`s JS-Konstanten (dort als Zahl
+   dupliziert, weil `getComputedStyle`-Auslesen für einen einfachen
+   `setTimeout`-Wert unnötigen Umweg bedeuten würde) — bei einer
+   künftigen Wertänderung beide Stellen zusammen anpassen. */
+:root {
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
 }
 
 * {
@@ -71,6 +119,16 @@ body {
   --color-accent: #3d76a8;
   --color-danger: #c0503a;
   --color-success: #4f8a4f;
+  --color-bg-overlay: rgb(40 36 28 / 40%);
+
+  /* Dieselbe Begründung wie die dunklen Schatten-Overrides oben, nur
+     umgekehrt: die verstärkten dunkelmodus-tauglichen Schattenwerte
+     wären auf hellem Grund zu hart — hier näher an Tailwinds sanfteren
+     Standardwerten, nur geringfügig kräftiger für dieselbe
+     "hochwertige Tiefe"-Wirkung. */
+  --shadow-md: 0 4px 10px -3px rgb(35 32 25 / 18%), 0 2px 4px -2px rgb(35 32 25 / 12%);
+  --shadow-lg: 0 10px 22px -6px rgb(35 32 25 / 20%), 0 4px 8px -4px rgb(35 32 25 / 14%);
+  --shadow-xl: 0 20px 38px -10px rgb(35 32 25 / 22%), 0 8px 14px -6px rgb(35 32 25 / 15%);
 }
 
 /* Barrierefreiheit (Phase 10 Schritt 6, siehe FEATURES.md UI-Anforderungen)
@@ -91,6 +149,10 @@ body {
   --color-accent: #7cc0ff;
   --color-danger: #ff8a6b;
   --color-success: #7fe89b;
+  /* Undurchsichtig statt transluzent — im Kontrastmodus geht es um
+     maximale Lesbarkeit, ein durchscheinender Dialog-Hintergrund
+     würde dem entgegenlaufen. */
+  --color-bg-overlay: #000000;
 }
 
 /* Reduzierte Bewegung: sowohl die Betriebssystem-Einstellung
@@ -114,4 +176,45 @@ body {
   animation-duration: 0.001ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.001ms !important;
+}
+
+/* Bewegungs-Politur-Durchgang (Phase 18 Schritt 6, siehe `DECISIONS.md`
+   ADR-0046): einheitliche Hover-/Fokus-Übergänge auf allen
+   interaktiven Elementen statt des vorherigen instantanen Wechsels
+   (Ist-Zustand-Befund zu Beginn dieser Phase: nur zwei echte
+   CSS-`transition`s im gesamten Frontend). Global statt je Komponente
+   einzeln nachgetragen — jede der weit über 500 bestehenden
+   `hover:border-accent`/`hover:text-*`/`hover:bg-*`-Klassen im
+   Frontend bekommt die Übergangsanimation automatisch mit, ohne eine
+   einzige Komponente anzufassen (respektiert `prefers-reduced-motion`/
+   `.apx-reduce-motion` oben automatisch mit, da beide `!important`
+   jede `transition-duration` kappen). Explizite `transition-*`-Klassen
+   einzelner Komponenten (z. B. der Import-Fortschrittsbalken) bleiben
+   unverändert wirksam — dieselben Eigenschaften, keine Kollision. */
+button,
+a,
+select,
+[role="tab"],
+[role="menuitem"] {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Sanfter Überblend-Wechsel beim `centerView`-Wechsel (App.tsx) — siehe
+   dortige Verwendung der `.apx-view-fade-in`-Klasse. Als Animation statt
+   Transition, weil die wechselnden Ansichten per `key={centerView}`
+   jedes Mal frisch gemountet werden (Transition bräuchte einen bereits
+   vorhandenen Startzustand im DOM). */
+@keyframes apx-view-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.apx-view-fade-in {
+  animation: apx-view-fade-in var(--duration-base) cubic-bezier(0, 0, 0.2, 1);
 }

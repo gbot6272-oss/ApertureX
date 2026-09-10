@@ -385,13 +385,18 @@ function AiPresetGeneratorSection() {
           placeholder="z. B. warmer, kontrastreicher Filmlook"
           className="w-full resize-none rounded border border-border bg-bg-panel px-2 py-1 text-xs"
         />
-        <div className="flex gap-1">
+        {/* Einspaltig statt nebeneinander (Phase 18-Nachtrag, siehe
+            `DECISIONS.md`): zwei `flex-1`-Knöpfe nebeneinander waren bei
+            dieser Palettenbreite zu schmal für "Aus Beschreibung
+            erzeugen"/"Prompt für Claude-App" und brachen mehrzeilig um —
+            derselbe Befund wie bei den Masken-Knöpfen. */}
+        <div className="flex flex-col gap-1">
           <button
             type="button"
             disabled={!hasApiKey || !description.trim() || presetGeneratorLoading}
             onClick={() => void generatePresetFromDescription(description)}
             title={hasApiKey ? undefined : "Erst einen Anthropic-API-Schlüssel hinterlegen"}
-            className="flex-1 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
           >
             {presetGeneratorLoading ? "Erzeuge…" : "Aus Beschreibung erzeugen"}
           </button>
@@ -400,7 +405,7 @@ function AiPresetGeneratorSection() {
             disabled={!description.trim()}
             onClick={() => void handleCopyPrompt()}
             title="Prompt in die Zwischenablage kopieren, zum Einfügen in die Claude-App (claude.ai) — kein API-Schlüssel nötig"
-            className="flex-1 rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
           >
             {promptCopied ? "Kopiert!" : "Prompt für Claude-App"}
           </button>

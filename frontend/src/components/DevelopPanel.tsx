@@ -1768,14 +1768,20 @@ export function DevelopPanel() {
                 </button>
                 {liquifyActive && <p className="text-xs text-text-muted">Strich im Bild ziehen, um den gewählten Verformungsmodus anzuwenden.</p>}
 
-                <div className="flex gap-1">
+                {/* `flex-wrap` statt eines starren Einzeilers (Phase
+                    18-Nachtrag, siehe `DECISIONS.md`): vier Knöpfe mit
+                    `flex-1` liefen bei der schmaleren Palettenbreite auf
+                    "Verwirbeln"/"Aufblähen" mittendrin um — bricht jetzt
+                    kontrolliert in eine zweite Zeile statt einzelne
+                    Wörter zu zerreißen. */}
+                <div className="flex flex-wrap gap-1">
                   {LIQUIFY_MODE_OPTIONS.map((option) => (
                     <button
                       key={option.value}
                       type="button"
                       aria-pressed={liquifyDraftMode === option.value}
                       onClick={() => setLiquifyDraftMode(option.value)}
-                      className={`flex-1 rounded border px-2 py-1 text-xs ${liquifyDraftMode === option.value ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
+                      className={`flex-1 basis-[45%] rounded border px-2 py-1 text-xs ${liquifyDraftMode === option.value ? "border-accent bg-accent/20 text-accent" : "border-border text-text-secondary"}`}
                     >
                       {option.label}
                     </button>
@@ -1982,12 +1988,16 @@ export function DevelopPanel() {
               <fieldset className="flex flex-col gap-2">
                 <legend className="mb-1 text-xs font-medium text-text-secondary">Entrauschung &amp; Hochskalierung</legend>
                 <p className="text-xs text-text-muted">Klassische Algorithmen (Bilateral-Filter, kantengerichtete Interpolation), keine Modellinferenz — schreiben eine neue Datei neben dem Original, ändern die Bearbeitung nicht.</p>
-                <div className="flex gap-1">
+                {/* `flex-wrap` statt starrem Einzeiler (siehe Begründung
+                    beim Verflüssigen-Modus oben) — "2× hochskalieren" ist
+                    bei der schmaleren Palettenbreite zu lang für die
+                    halbe Zeile. */}
+                <div className="flex flex-wrap gap-1">
                   <button
                     type="button"
                     disabled={!selectedPhotoId || enhanceRunning !== null}
                     onClick={() => selectedPhotoId && void runDenoise(selectedPhotoId)}
-                    className="flex-1 rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex-1 basis-[45%] rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {enhanceRunning === "denoise" ? "Entrauscht…" : "Entrauschen"}
                   </button>
@@ -1995,7 +2005,7 @@ export function DevelopPanel() {
                     type="button"
                     disabled={!selectedPhotoId || enhanceRunning !== null}
                     onClick={() => selectedPhotoId && void runUpscale(selectedPhotoId)}
-                    className="flex-1 rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex-1 basis-[45%] rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {enhanceRunning === "upscale" ? "Skaliert…" : "2× hochskalieren"}
                   </button>

@@ -545,13 +545,18 @@ export function MasksPanel() {
               </li>
             ))}
           </ul>
-          <div className="grid grid-cols-2 gap-1">
+          {/* Einspaltig statt Zwei-Spalten-Raster (siehe Begründung bei
+              den „Maske hinzufügen"-Knöpfen weiter oben) — „+ Komponente:
+              …" ist mit den längeren Maskennamen noch länger als jene
+              Beschriftungen und bräche in einer schmalen Spalte erst
+              recht um. */}
+          <div className="flex flex-col gap-1">
             {MASK_KINDS.map((kind) => (
               <button
                 key={kind}
                 type="button"
                 onClick={() => addMaskComponent(selectedMask.id, kind)}
-                className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel"
+                className="rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel"
               >
                 + Komponente: {MASK_KIND_LABEL[kind]}
               </button>

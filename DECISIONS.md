@@ -4710,3 +4710,58 @@ isolierte WebGL-Vergleichstest zeigt identische Ausrichtung über beide
 Upload-Pfade, das Masken-Panel zeigt alle Knopfbeschriftungen
 einzeilig, das Analyse-Panel lässt sich sichtbar verschieben und auf
 seine Kopfzeile einklappen.
+
+**Nachtrag II — gezielter Rundgang durch die restliche Oberfläche:**
+Nach dem Merge auf `main` bat der Nutzer ausdrücklich um denselben
+Rundgang durch die restliche Oberfläche, den er ursprünglich mit
+angefragt hatte. Systematisch nach demselben Muster wie (2) oben
+gesucht (`grid grid-cols-2`/`-cols-3`/`-cols-4` und `flex`+`flex-1`-
+Knopfreihen in allen Komponenten, die eine der schmalen, ziehbaren
+`PaletteFrame`-Paletten (180–288 px, siehe `useWorkspacePanel`)
+füllen — Dialoge blieben außen vor, die sind deutlich breiter und
+zeigten keine vergleichbaren Funde) und drei weitere echte Fälle
+desselben Bugs gefunden, alle mit demselben Fix-Muster behoben:
+
+- `MasksPanel.tsx`s "+ Komponente hinzufügen"-Raster (Zweispaltig,
+  Beschriftung "+ Komponente: {Maskenname}" — noch länger als die
+  bereits gefixten "+ Maske hinzufügen"-Knöpfe) → einspaltig.
+- `PresetsPanel.tsx`s KI-Preset-Generator-Knopfpaar ("Aus Beschreibung
+  erzeugen"/"Prompt für Claude-App", zwei `flex-1`-Knöpfe
+  nebeneinander) → einspaltig gestapelt. War bereits in Schritt 7s
+  eigenem Abnahme-Screenshot sichtbar mehrzeilig umgebrochen, wurde
+  aber erst jetzt als derselbe Bug erkannt und behoben.
+- `DevelopPanel.tsx`: zwei Vierer-/Zweier-Knopfreihen mit `flex-1`
+  (Verflüssigen-Modus "Schieben"/"Verwirbeln"/"Stauchen"/"Aufblähen";
+  Entrauschen/"2× hochskalieren") wären bei der schmaleren
+  Palettenbreite mittenim-Wort umgebrochen. Hier bewusst **nicht**
+  einspaltig gestapelt (anders als die "+ Hinzufügen"-Knopfreihen
+  oben) — das sind Lightroom-artige Segment-Umschalter, bei denen eine
+  zusammenhängende Reihe zur Bedienlogik gehört. Stattdessen
+  `flex-wrap` mit `basis-[45%]` je Knopf: bei ausreichender Breite
+  bleibt die Reihe einzeilig wie bisher, bei zu wenig Platz bricht sie
+  kontrolliert in eine zweite Zeile statt Wörter zu zerreißen.
+
+Alle übrigen `grid-cols-*`-Fundstellen (`DevelopPanel.tsx`s
+Vorher/Nachher-Vierergruppe, Kopieren/Einfügen-Zeile, Guided-Upright-
+Zahlenfelder; `PresetsPanel.tsx`s Referenzbild/Variationen;
+`ContentAwareScaleDialog.tsx`/`CanvasExtendDialog.tsx`) wurden geprüft
+und sind mit ihren tatsächlichen Beschriftungslängen bei jeder
+zulässigen Palettenbreite unproblematisch — bewusst unverändert
+gelassen statt vorsorglich überall umzubauen. Ebenso geprüft und ohne
+Fund: alle anderen `absolute`-positionierten schwebenden Overlays
+(`GlobeView`/`ColorHarmonyWheel`/Viewer-Overlays/`ReferenceView`/
+`BeforeAfterView`) sind entweder reine Anzeige-Badges oder SVG-
+Zeichenflächen ohne eigene Bedienelemente — `DevelopAnalysisPanel` war
+das einzige davon mit einer echten Kopfzeile/mehreren Knöpfen, die
+eine Verschieben-/Einklappen-Funktion gebraucht hätte.
+
+Verifiziert per `tsc -b`, `vitest run` (251 Tests), voller
+Playwright-Suite (142/142) und realer Screenshot-Kontrolle (Presets-
+Panel-Knöpfe jetzt einzeilig, bei 1900 px Fensterbreite — die
+schmalere Zielbreite ließ sich in der Sandbox nicht zuverlässig per
+Playwright nachstellen, da der Palettenbreite-Ziehgriff auf
+`onPointerDown` statt `onMouseDown` reagiert und Playwrights
+`page.mouse`-API ihn in diesem Lauf nicht zuverlässig auslöste — die
+`flex-wrap`-Fixes selbst sind aber ein reines, risikoarmes CSS-
+Sicherheitsnetz ohne Logikänderung, das bei ausreichender Breite exakt
+dasselbe Erscheinungsbild wie zuvor liefert).

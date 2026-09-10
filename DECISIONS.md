@@ -4476,3 +4476,52 @@ eigenen Nachbesserung (Öffnen-Fix, Masken-Tablist-Label) bereits
 Spezifikationen), `vitest run` (251 Tests), `tsc -b`, `vite build` —
 alle zusätzlich selbst erneut verifiziert, nicht nur der Subagenten-
 Bericht übernommen.
+
+**Nachtrag Schritt 5 (gezielte Bugfixes):**
+
+- **`GridView.tsx`/`QuickDevelopOverlay.tsx`:** `showQuickDevelop` zeigt
+  das volle Sieben-Regler-Overlay jetzt nur noch bei echtem Hover
+  (`photo.id === hoveredPhotoId`) — vorher deckte es das Foto in der
+  Übersicht schon bei reiner Fokussierung ohne Hover ab, genau der in
+  der letzten Sitzung benannte Befund. Fokus ohne Hover zeigt
+  stattdessen ein kleines, unaufdringliches Eck-Symbol
+  (`showQuickDevelopHint`, oben rechts, "≡" — bewusst ein einfaches
+  Unicode-Zeichen statt Emoji, wie die übrigen Icon-Knöpfe dieser
+  Codebasis, rendert zuverlässig ohne Emoji-Schriftart, real per
+  Playwright-Screenshot in einer headless-Umgebung verifiziert, in der
+  ein Emoji als leeres Tofu-Rechteck gerendert hätte), das per Klick
+  denselben Hover-Zustand auslöst (`setHoveredPhotoId`) — bleibt
+  dadurch auch per Tastatur/Touch erreichbar, nicht nur per Maus-Hover.
+- **`DevelopAnalysisPanel.tsx`:** `devicePixelRatio`-Skalierung für
+  Histogramm-/Vektorskop-/Wellenform-Canvas, nach `lib/leafletHeatmap.ts`s
+  Muster — neuer gemeinsamer `useCanvasDprWidth()`-Hook (ResizeObserver
+  auf die tatsächliche CSS-Breite, reagiert auch auf `PaletteFrame`-
+  Breitenänderungen) setzt die Backing-Store-Auflösung auf
+  `cssBreite × dpr`. Für das vektor-gezeichnete Histogramm reicht ein
+  `ctx.setTransform(dpr,...)`; Vektorskop/Wellenform nutzen
+  `putImageData`, das keine Transform-Matrix respektiert — deshalb dort
+  jeweils eine Offscreen-Canvas in der unveränderten nativen
+  Rasterauflösung befüllt und per `drawImage(...)` (mit
+  `imageSmoothingEnabled = false`, damit das Dichteraster bewusst
+  blockig bleibt statt zusätzlich weichgezeichnet zu werden) auf die
+  DPR-große Ziel-Canvas skaliert. Real per Playwright-Screenshot
+  verifiziert (nicht nur behauptet): Histogramm zeigt scharfe
+  Balkenkanten, Vektorskop einen glatten Kreis/Fadenkreuz ohne
+  sichtbare Verzerrung.
+- **`PaletteFrame.tsx`:** sanfte Breiten-Übergangsanimation beim Ein-/
+  Ausklappen (`transition: width {DURATION_BASE_MS}ms {EASE_OUT}`, per
+  `usePrefersReducedMotion()` abgeschaltet) — dafür musste die
+  Komponente von zwei strukturell getrennten `return`-Zweigen
+  (eingeklappt/ausgeklappt) auf einen gemeinsamen äußeren Container mit
+  fester `COLLAPSED_WIDTH` (36px statt `auto`, das die meisten Browser
+  nicht sauber animieren) umgebaut werden — reale Sichtprüfung per
+  Playwright-Screenshot bestätigt keine Textabschneidung. Die
+  Transition ist während eines aktiven Zieh-Vorgangs (`dragging`-
+  State) bewusst ausgeschaltet, sonst würde die Palette dem Zeiger nur
+  gedämpft statt 1:1 folgen — nur der Klapp-Wechsel selbst ist animiert.
+
+Alle drei Fixes ausschließlich per echtem Playwright-Lauf (volle Suite,
+141/142 wie in Schritt 3/4, derselbe vorbestehende Flake) + `vitest
+run` (251 Tests) + `tsc -b`/`vite build` verifiziert, zusätzlich mit
+temporären (nicht committeten) Playwright-Screenshots real angeschaut
+statt nur am Code geglaubt — dieselbe Disziplin wie ADR-0044.

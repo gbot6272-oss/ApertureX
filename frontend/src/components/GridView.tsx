@@ -118,12 +118,16 @@ export function GridView({ variant = "grid" }: GridViewProps) {
                 {rowPhotos.map((photo) => {
                   const isSelected = multiSelectedIds.includes(photo.id);
                   const isFocused = photo.id === selectedPhotoId;
-                  // Übersichtsansicht: Overlay bei Hover *oder* Auswahl
-                  // zeigen (siehe `GridViewProps`s Moduldoku), nicht bei
-                  // beidem parallel für mehrere Kacheln — sonst müsste
-                  // `QuickDevelopOverlay` für jede sichtbare Kachel den
-                  // Bearbeitungsstand laden statt gezielt nur für eine.
-                  const showQuickDevelop = isOverview && (photo.id === hoveredPhotoId || (hoveredPhotoId === null && isFocused));
+                  // Übersichtsansicht: das volle Sieben-Regler-Overlay nur
+                  // bei echtem Hover (Phase 18 Schritt 5, siehe
+                  // `DECISIONS.md` ADR-0046 — vorher deckte es das Foto
+                  // schon bei reiner Fokussierung ohne Hover ab, was in der
+                  // Nutzer-Rückmeldung als "verdeckt das Foto in der
+                  // Übersicht standardmäßig" bemängelt wurde). Fokus ohne
+                  // Hover zeigt stattdessen nur ein kleines Eck-Symbol
+                  // (`showQuickDevelopHint` unten), das Foto bleibt sichtbar.
+                  const showQuickDevelop = isOverview && photo.id === hoveredPhotoId;
+                  const showQuickDevelopHint = isOverview && !showQuickDevelop && isFocused;
                   return (
                     <div
                       key={photo.id}
@@ -180,6 +184,24 @@ export function GridView({ variant = "grid" }: GridViewProps) {
                             </div>
                           )}
                           {showQuickDevelop && <QuickDevelopOverlay photoId={photo.id} />}
+                          {showQuickDevelopHint && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setHoveredPhotoId(photo.id);
+                              }}
+                              title="Schnellentwicklung anzeigen"
+                              aria-label="Schnellentwicklung anzeigen"
+                              className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded bg-bg-base/85 text-xs text-text-secondary shadow transition-colors duration-[var(--duration-fast)] hover:text-accent"
+                            >
+                              {/* Einfaches Unicode-Zeichen statt Emoji (wie
+                                  die übrigen Icon-Knöpfe dieser Codebasis,
+                                  z. B. ✎/↶/↷/‹/›) — rendert zuverlässig ohne
+                                  Emoji-Schriftart. */}
+                              ≡
+                            </button>
+                          )}
                         </>
                       ) : (
                         <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-bg-base/85 px-1.5 py-1">

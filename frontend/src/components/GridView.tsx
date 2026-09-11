@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { previewUrl } from "../lib/media";
+import { playCue } from "../lib/sound";
 import { resolveSelectionMode, selectActivePhotos, useAppStore } from "../store";
 import { QuickDevelopOverlay } from "./QuickDevelopOverlay";
 import { ColorLabelPicker, FlagToggle, RatingStars } from "./RatingFlagColor";
@@ -141,10 +142,15 @@ export function GridView({ variant = "grid" }: GridViewProps) {
                       // vollwertig fokussierbar.
                       role="button"
                       tabIndex={0}
-                      onClick={(event) => (isOverview ? selectPhoto(photo.id) : togglePhotoSelection(photo.id, resolveSelectionMode(event)))}
+                      onClick={(event) => {
+                        playCue("select");
+                        if (isOverview) selectPhoto(photo.id);
+                        else togglePhotoSelection(photo.id, resolveSelectionMode(event));
+                      }}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
+                          playCue("select");
                           if (isOverview) {
                             selectPhoto(photo.id);
                           } else {
@@ -156,7 +162,7 @@ export function GridView({ variant = "grid" }: GridViewProps) {
                       onMouseLeave={() => isOverview && setHoveredPhotoId((current) => (current === photo.id ? null : current))}
                       title={photo.missing ? `${photo.filename} (Datei fehlt)` : photo.filename}
                       style={{ width: cellSize, height: cellSize }}
-                      className={`relative shrink-0 cursor-pointer overflow-hidden rounded border-2 text-left ${
+                      className={`apx-grid-cell-in relative shrink-0 cursor-pointer overflow-hidden rounded border-2 text-left ${
                         isFocused ? "border-accent" : isSelected ? "border-accent/50" : "border-transparent hover:border-border"
                       } ${photo.missing ? "opacity-40" : ""}`}
                     >

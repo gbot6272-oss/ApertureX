@@ -4852,3 +4852,140 @@ Registerkarte lädt jetzt ohne Fehlerbanner, ein Abschnitt lässt sich
 sichtbar zu- und wieder aufklappen (Pfeil dreht sich, Inhalt
 verschwindet/erscheint), und der Node-Editor-"Öffnen"-Sprung klappt
 einen zuvor zugeklappten Zielabschnitt zuverlässig wieder auf.
+
+## ADR-0047: Phase 19 — Animationen + UI-Sounds (Start/Beenden, Klick,
+Scroll, Bearbeitung im Prozess)
+
+**Kontext.** Nutzerwunsch (verbatim): Animationen für Start/Beenden,
+Klick, Scroll, Bearbeitung-im-Prozess/Laden, ein echter Ladeschirm
+statt der grauen Fläche beim Start, dazu UI-Sounds — insgesamt
+mindestens 30 Animationen/Sounds, nach Möglichkeit auf fertigem statt
+selbst gebautem Material aufbauend ("premium").
+
+**Realer Befund zur Netzwerk-Umgebung (wichtig für die Auswahl
+unten).** Diese Sitzung läuft mit einer restriktiven Egress-Policy:
+`WebFetch`/`curl` auf alle getesteten Asset-/Sound-Marktplätze
+(LottieFiles, Kenney, Freesound, Mixkit, Pixabay, sfxmint.com,
+videoeditingsfx.com, Zapsplat, fonts.google.com, unpkg.com,
+cdn.jsdelivr.net, cdnjs.cloudflare.com) schlägt mit `EGRESS_BLOCKED`
+bzw. `403` fehl. Erreichbar sind ausschließlich GitHub
+(`github.com`/`raw.githubusercontent.com`) und die Paket-Registries
+(`registry.npmjs.org`, die auch `pnpm add` nutzt). "Fertige Premium-
+Assets von einer Website holen" ist in dieser Umgebung technisch
+nicht möglich — echte, kostenlos/lizenzfrei nutzbare npm-Pakete sind
+der einzige praktikable Weg zu produktionsreifem statt komplett
+selbst gebautem Material.
+
+**Entscheidung — zwei neue npm-Abhängigkeiten (mit Nutzer-Zustimmung
+nach Abwägung, siehe unten):**
+
+1. **`gsap` 3.15** (Animation) — seit April 2025 (Webflow-Übernahme
+   von GreenSock) zu 100 % kostenlos inklusive aller vorher
+   kostenpflichtigen Plugins (ScrollTrigger, SplitText, Flip,
+   MorphSVG, ...), keine Lizenz-/Attributionspflicht, Industriestandard.
+   Weicht von ADR-0046s expliziter "keine neue Bewegungs-Laufzeit-
+   Abhängigkeit"-Entscheidung ab — dort war GSAP noch teilweise
+   kostenpflichtig; das hat sich seither geändert, und der bereits
+   integrierte `ui-ux-pro-max`-Skill (siehe THIRD_PARTY.md) liefert
+   17 fertige, GSAP-basierte Bewegungs-Rezepte (Timing/Easing/
+   Performance-Hinweise/Barrierefreiheit) direkt einsatzbereit — ohne
+   GSAP selbst blieben diese Rezepte ungenutzt.
+2. **`uisfx` 0.4** (UI-Sounds) — MIT-Code + **CC0-Audio** (gemeinfrei,
+   keine Attributionspflicht), null Laufzeit-Abhängigkeiten, ~12 kB
+   komprimierte Web-Audio-Runtime, 78 semantische Sound-Cues (`click`-
+   artige `select`/`press`, `open`/`close`, `undo`/`redo`, `expand`/
+   `collapse`, `success`/`error`/`warning`, `processing`/`loading`,
+   `drag-start`/`drop`, u. v. m.) über 12 austauschbare Klangwelten
+   ("Packs"), vollständig offline (kein Laufzeit-Nachladen von
+   Audiodateien — wichtig für eine Desktop-App ohne verlässliche
+   Netzwerkverbindung). Quelle: `github.com/romainsimon/uisfx`,
+   `npmjs.com/package/uisfx`.
+
+Beide Pakete wurden dem Nutzer vor der Umsetzung als konkrete
+Kandidaten samt Lizenz-/Abhängigkeits-Kompromiss vorgelegt
+(`AskUserQuestion`) — Zustimmung zu "GSAP + uisfx nutzen" und zur
+Klangwelt **"glass"** ("Bright, crystalline, premium — Media, finance,
+luxury products") als App-Standard, in den Einstellungen umschalt-/
+deaktivierbar.
+
+**Fundament (`frontend/src/lib/sound.ts`, `lib/motion.ts`
+unverändert wiederverwendet):** ein modulweiter `uisfx`-Player-
+Singleton (nicht pro Komponente — `uisfx` begrenzt Polyphonie/
+Cooldowns global). Persistenz bewusst NICHT über `uisfx`s eigenes
+`localStorage`-Feature, sondern über das bestehende `uiSettings`/
+Rust-Settings-TOML (`sound_enabled`/`sound_volume_percent`/
+`sound_pack`, neue Felder in `apx_core::UiSettings`, `#[serde(default)]`
+macht das rückwärtskompatibel zu bestehenden Einstellungsdateien).
+`unlockSound()` an die erste vertrauenswürdige Zeiger-/Tastatur-
+Interaktion gebunden (Browser-Autoplay-Policy).
+
+**Start-Ladeschirm (`StartupSplash.tsx`):** ersetzt die zuvor
+kommentarlos graue Fläche durch einen sich öffnenden Iris-Ring
+(SVG-Kreis, per `stroke-dashoffset` "gezeichnet" — kein Logo-Bild
+nötig/verfügbar, passt inhaltlich zu "Aperture") + Wortmarke, per GSAP
+animiert. Bewusst als zusätzliches `pointer-events-none`-Overlay
+implementiert, NICHT als Gate vor dem restlichen `App.tsx`-Baum: der
+Baum mountet unverändert sofort weiter, nur die Fläche legt sich kurz
+sichtbar darüber und blendet sich aus, sobald `uiSettings` UND
+`catalogStatus` geladen sind. Das hält das Risiko für die bestehende
+Test-Suite (deren `getByRole`-Locators ohnehin automatisch abwarten)
+klein, zeigt bei einem echten langsamen ersten Start (großer Katalog)
+aber trotzdem einen hochwertigen Übergang statt eines grauen Blitzes.
+
+**Beenden-Übergang (`ShutdownOverlay.tsx` + `App.tsx`s
+`useShutdownTransition`):** fängt `getCurrentWindow().onCloseRequested`
+ab, zeigt kurz eine Übergangsfläche + spielt einen Sound, bevor das
+Fenster tatsächlich schließt.
+
+**Realer, in dieser Sitzung tatsächlich aufgetretener Fehler beim
+ersten Versuch:** `getCurrentWindow()` liest synchron
+`window.__TAURI_INTERNALS__.metadata.currentWindow.label` (siehe
+`@tauri-apps/api/window`s Quelltext). Weder `tauri-mock.ts` (Playwright-
+Tests) noch ein per `vite preview` ohne Tauri-Hülle geöffneter
+Browser-Tab setzen dieses Feld — der Aufruf wirft dann sofort. Ein
+ungefangener Wurf in einem `useEffect` reißt in React die gesamte
+Baum-Wurzel mit: die **komplette** Playwright-Suite (alle 142 Tests)
+schlug beim ersten Versuch mit 30-Sekunden-Timeout fehl, weil die App
+gar nicht mehr rendert. Gefunden durch den in dieser Sitzung
+etablierten Ablauf ("nach jeder substanziellen Änderung die volle
+Suite laufen lassen, nicht nur `tsc -b`") — behoben durch `try`/`catch`
+um jeden `getCurrentWindow()`-Aufruf: fehlt der echte Tauri-
+Fensterkontext, bleibt der Hook ein folgenloser No-op statt die App
+zum Absturz zu bringen. Nach dem Fix: 142/142 grün.
+
+**Akkordeon-Sound ohne 36 Einzelstellen anzufassen:** `<details
+className="apx-collapsible">` (Phase 18-Nachtrag, `DevelopPanel.tsx`/
+`MasksPanel.tsx`) bekommt seinen `expand`/`collapse`-Cue über EINEN
+global auf `document` registrierten `toggle`-Listener in der
+Capture-Phase (`lib/sound.ts`s `useAccordionSounds`) — das native
+`toggle`-Ereignis von `<details>` bubbelt nicht, erreicht einen
+Capture-Phase-Listener auf einem Vorfahren aber trotzdem (Capture
+läuft unabhängig vom Bubbling von der Wurzel zum Ziel).
+
+**Sound- und Bewegungs-Anwendungsstellen dieser Phase:**
+`components/ui/Dialog.tsx`/`Sheet.tsx` (open/close, mit
+Erstmontage-Wächter gegen einen Sound beim App-Start für jeden der 25
+dauerhaft gemounteten Dialoge), `ui/Menu.tsx` (expand/collapse/select),
+`ui/Tabs.tsx` (select bei echtem Wechsel), `App.tsx`/`DevelopPanel.tsx`
+(undo/redo), `GridView.tsx` (select-Klick auf eine Kachel + neue
+`.apx-grid-cell-in`-CSS-Scroll-Reveal-Animation je virtualisierter
+Zeile — bewusst reines CSS statt einer GSAP-Tween-Instanz pro Kachel,
+da `GridView.tsx` mit `@tanstack/react-virtual` virtualisiert und
+Zeilen laufend neu mountet), `store/index.ts`s `exportPhotos`
+(processing beim Start, success/error beim Abschluss).
+
+**Ausdrücklich (noch) nicht abgedeckt, spätere Iteration:** Sound-
+/Animations-Feedback für die einzelnen KI-Verarbeitungsschritte
+(Hautglätten, Stiltransfer, Himmelsaustausch usw.) und für
+Drag&Drop-Gesten (Masken-Ziehgriffe, Paletten-Größenänderung) — das
+Fundament (`playCue`, die 78 Cues, die GSAP-Presets) deckt das ab,
+die konkrete Verdrahtung an jeder einzelnen Stelle blieb aus
+Zeit-/Risikogründen dieser Sitzung offen.
+
+Verifiziert: `cargo fmt --check`, `cargo clippy -p apx-core -p
+apx-app --all-targets` (sauber), `cargo test -p apx-core settings`
+(6/6, inkl. TOML-Rundlauf mit den drei neuen Feldern), `tsc -b`,
+`vitest run` (251/251), volle Playwright-Suite (142/142) — sowohl vor
+dem `getCurrentWindow`-Fix (rot, 0/142) als auch danach (grün,
+142/142), reale Bildschirm-Kontrolle des Start-Ladeschirms und der
+neuen Sound-Einstellungen.

@@ -193,6 +193,13 @@ nachgeholt statt eines weiteren stillschweigenden Nachtrags.
 | `@tauri-apps/api` | MIT OR Apache-2.0 | Tauri-Frontend-Bindings | Unkritisch |
 | `@tauri-apps/cli` | Apache-2.0 OR MIT | Installer-Bau (`tauri build`), Phase 10 Schritt 11 | Reines Build-Werkzeug (DevDependency), nicht im ausgelieferten App-Bundle enthalten — trotzdem eingetragen (siehe Regel oben: jede hinzugefügte Bibliothek) |
 
+## Frontend — Phase 19 (siehe `DECISIONS.md` ADR-0047)
+
+| Paket | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `gsap` (3.15) | Eigene "Standard No-Charge License" (seit April 2025, Webflow-Übernahme von GreenSock: 100 % kostenlos inkl. aller vormals kostenpflichtigen Plugins — ScrollTrigger, SplitText, Flip, MorphSVG usw. —, keine Attributionspflicht, kommerzielle Nutzung ausdrücklich erlaubt) | Animationen (Start-Ladeschirm, Beenden-Übergang, künftige Mikrointeraktionen) | Industriestandard; die 17 fertigen GSAP-Bewegungsrezepte des bereits integrierten `.claude/skills/ui-ux-pro-max`-Skills (siehe unten) sind ohne diese Laufzeitabhängigkeit ungenutzt geblieben |
+| `uisfx` (0.4) | MIT (Code) + **CC0-1.0** (generierte Audiodateien, gemeinfrei, keine Attributionspflicht) | UI-Sounds (78 semantische Cues × 12 Klangwelten, App-Standard: "glass") | Null Laufzeit-Abhängigkeiten, ~12 kB komprimierte Web-Audio-Runtime, vollständig offline (kein Nachladen von Audiodateien zur Laufzeit) — Quelle: `github.com/romainsimon/uisfx` |
+
 ## Testdaten (`testdata/`)
 
 Werden beim Beschaffen einzeln mit Quelle und Lizenz eingetragen, sobald sie in Phase 1 hinzukommen (Vorgabe: nur frei lizenzierte RAWs, z. B. von raw.pixls.us, CC0). Aktuell: **noch keine Testdateien vorhanden.**

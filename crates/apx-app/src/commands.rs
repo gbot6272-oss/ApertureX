@@ -5993,6 +5993,9 @@ pub struct UiSettingsDto {
     pub high_contrast: bool,
     pub reduced_motion: bool,
     pub onboarding_seen: bool,
+    pub sound_enabled: bool,
+    pub sound_volume_percent: u16,
+    pub sound_pack: String,
 }
 
 impl From<apx_core::UiSettings> for UiSettingsDto {
@@ -6005,6 +6008,9 @@ impl From<apx_core::UiSettings> for UiSettingsDto {
             high_contrast: ui.high_contrast,
             reduced_motion: ui.reduced_motion,
             onboarding_seen: ui.onboarding_seen,
+            sound_enabled: ui.sound_enabled,
+            sound_volume_percent: ui.sound_volume_percent,
+            sound_pack: ui.sound_pack,
         }
     }
 }
@@ -6032,6 +6038,13 @@ pub fn set_ui_settings(state: State<'_, AppState>, settings: UiSettingsDto) -> R
         high_contrast: settings.high_contrast,
         reduced_motion: settings.reduced_motion,
         onboarding_seen: settings.onboarding_seen,
+        sound_enabled: settings.sound_enabled,
+        sound_volume_percent: settings.sound_volume_percent.clamp(0, 100),
+        sound_pack: if settings.sound_pack.trim().is_empty() {
+            "glass".to_string()
+        } else {
+            settings.sound_pack
+        },
     };
     all.save(&path).map_err(|err| err.to_string())
 }

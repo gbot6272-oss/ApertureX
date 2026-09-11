@@ -51,6 +51,7 @@ import { useT } from "../lib/i18n";
 import { matchesBinding } from "../lib/keybindings";
 import { PRESET_SECTION_KEYS, PRESET_SECTION_LABELS, type PresetSectionKey } from "../lib/presets";
 import { SOFT_PROOF_INTENT_LABELS, SOFT_PROOF_PROFILE_LABELS, type SoftProofIntent, type SoftProofProfile } from "../lib/softProof";
+import { playCue } from "../lib/sound";
 import { pickFilePath } from "../lib/tauri";
 import { selectActivePhotos, useAppStore } from "../store";
 import { ColorHarmonyWheel } from "./ColorHarmonyWheel";
@@ -461,9 +462,11 @@ export function DevelopPanel() {
       // wenn dieses Panel geschlossen ist).
       if (matchesBinding(event, "redo")) {
         event.preventDefault();
+        playCue("redo");
         void redoDevelop();
       } else if (matchesBinding(event, "undo")) {
         event.preventDefault();
+        playCue("undo");
         void undoDevelop();
       }
     }

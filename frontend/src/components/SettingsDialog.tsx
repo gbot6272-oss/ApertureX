@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { useT } from "../lib/i18n";
+import { SOUND_PACKS, previewPack } from "../lib/sound";
 import { selectFolderDialog, type UiSettingsDto } from "../lib/tauri";
 import { resetWorkspaceLayout } from "../lib/workspaceLayout";
 import { useAppStore } from "../store";
@@ -163,6 +164,49 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                 checked={uiSettings.reduced_motion}
                 onChange={(event) => update({ reduced_motion: event.target.checked })}
               />
+            </label>
+
+            {/* UI-Sounds (Phase 19, siehe `DECISIONS.md` ADR-0047) —
+                bewusst unabhängig von `reduced_motion`: Bewegung und Ton
+                sind zwei getrennte Zugänglichkeits-/Geschmacksfragen. */}
+            <label className="flex items-center justify-between gap-2">
+              <span className="text-text-secondary">{t("settings.soundEnabled")}</span>
+              <input
+                type="checkbox"
+                checked={uiSettings.sound_enabled}
+                onChange={(event) => update({ sound_enabled: event.target.checked })}
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-text-secondary">{t("settings.soundVolume", { percent: uiSettings.sound_volume_percent })}</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={uiSettings.sound_volume_percent}
+                onChange={(event) => update({ sound_volume_percent: Number(event.target.value) })}
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-text-secondary">{t("settings.soundPack")}</span>
+              <select
+                value={uiSettings.sound_pack}
+                onChange={(event) => {
+                  const pack = event.target.value;
+                  update({ sound_pack: pack });
+                  previewPack(pack as (typeof SOUND_PACKS)[number]["id"]);
+                }}
+                className="rounded border border-border bg-bg-panel px-2 py-1"
+              >
+                {SOUND_PACKS.map((pack) => (
+                  <option key={pack.id} value={pack.id}>
+                    {pack.label} — {pack.description}
+                  </option>
+                ))}
+              </select>
             </label>
 
             <button

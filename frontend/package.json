@@ -14,10 +14,12 @@
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.10",
     "@tauri-apps/api": "^2.1.1",
+    "gsap": "^3.15.0",
     "immer": "^11.1.18",
     "leaflet": "^1.9.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "uisfx": "^0.4.0",
     "zustand": "^5.0.15"
   },
   "devDependencies": {

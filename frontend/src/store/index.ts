@@ -44,6 +44,7 @@ import type { PresetCondition, PresetConditionPhotoMeta, PresetEdlSubset, Preset
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
 import type { SoftProofIntent, SoftProofProfile } from "../lib/softProof";
+import { playCue } from "../lib/sound";
 import * as api from "../lib/tauri";
 import type {
   AiSettingsDto,
@@ -5154,6 +5155,7 @@ export const useAppStore = create<AppStore>()(
         state.exportProgress = { done: 0, total: 0, failed: 0 };
         state.exportQueuePaused = false;
       });
+      playCue("processing");
 
       let firstError: string | null = null;
       try {
@@ -5187,6 +5189,7 @@ export const useAppStore = create<AppStore>()(
         state.exportRunning = false;
         state.exportError = firstError;
       });
+      playCue(firstError || progress.failed > 0 ? "error" : "success");
       await api.clearFinishedExportJobs();
     },
 

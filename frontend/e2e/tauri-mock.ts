@@ -135,6 +135,13 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       high_contrast: false,
       reduced_motion: false,
       onboarding_seen: true,
+      // Phase 19 (siehe `DECISIONS.md` ADR-0047): in Tests standardmäßig
+      // aus, damit kein Test unerwartet echte Web-Audio-Wiedergabe
+      // auslöst — ein Sound-spezifischer Test schaltet das gezielt per
+      // `setMockFixtures` ein.
+      sound_enabled: false,
+      sound_volume_percent: 70,
+      sound_pack: "glass",
     },
     // Beobachteter Ordner (Phase 12 Schritt 7) — derselbe Aus-Default wie
     // im echten Backend (`apx_core::settings::WatchedFolderSettings`).
@@ -612,6 +619,9 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         high_contrast: boolean;
         reduced_motion: boolean;
         onboarding_seen: boolean;
+        sound_enabled: boolean;
+        sound_volume_percent: number;
+        sound_pack: string;
       };
       watchedFolderSettings: {
         path: string | null;

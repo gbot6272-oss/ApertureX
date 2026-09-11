@@ -219,6 +219,29 @@ select,
   animation: apx-view-fade-in var(--duration-base) cubic-bezier(0, 0, 0.2, 1);
 }
 
+/* Scroll-Reveal für Raster-/Übersichts-Kacheln (Phase 19, siehe
+   `DECISIONS.md` ADR-0047) — `GridView.tsx` virtualisiert (`@tanstack/
+   react-virtual`): Zeilen werden beim Scrollen laufend neu gemountet.
+   Eine reine CSS-Animation statt einer GSAP-Timeline pro Kachel, weil
+   sie bei jedem Neu-Mount automatisch (und ohne JS-Overhead pro
+   Scroll-Frame) erneut abspielt — bei tausenden virtualisierten Zellen
+   wäre eine GSAP-Tween-Instanz pro Kachel unnötig teuer. Reduzierte
+   Bewegung kappt `animation-duration` bereits oben global auf ~0. */
+@keyframes apx-grid-cell-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.apx-grid-cell-in {
+  animation: apx-grid-cell-in var(--duration-base) cubic-bezier(0, 0, 0.2, 1);
+}
+
 /* Einklappbare Regler-Abschnitte (Phase 18-Nachtrag "UI übersichtlicher/
    weniger Scrollen", siehe DECISIONS.md) — `DevelopPanel.tsx`/
    `MasksPanel.tsx` ersetzen ihre `<fieldset>`/`<legend>`-Abschnitte durch

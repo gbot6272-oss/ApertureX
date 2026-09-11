@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { DURATION_FAST_MS, usePrefersReducedMotion } from "../../lib/motion";
+import { playCue } from "../../lib/sound";
 
 export interface MenuItem {
   id: string;
@@ -35,7 +36,10 @@ export function Menu({ label, trigger, sections, align = "end" }: { label: strin
       if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
     }
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        playCue("collapse");
+        setOpen(false);
+      }
     }
     window.addEventListener("mousedown", onPointerDown);
     window.addEventListener("keydown", onKeyDown);
@@ -53,7 +57,13 @@ export function Menu({ label, trigger, sections, align = "end" }: { label: strin
         aria-expanded={open}
         aria-label={label}
         title={label}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() =>
+          setOpen((value) => {
+            const next = !value;
+            playCue(next ? "expand" : "collapse");
+            return next;
+          })
+        }
         className={`rounded border px-3 py-1 text-sm ${open ? "border-accent bg-accent/10 text-accent" : "border-border bg-bg-panel hover:border-accent"}`}
       >
         {trigger}
@@ -77,6 +87,7 @@ export function Menu({ label, trigger, sections, align = "end" }: { label: strin
                   role="menuitem"
                   disabled={item.disabled}
                   onClick={() => {
+                    playCue("select");
                     item.onSelect();
                     setOpen(false);
                   }}

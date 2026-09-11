@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { useFocusTrap } from "../../lib/a11y";
 import { DURATION_BASE_MS, usePrefersReducedMotion } from "../../lib/motion";
+import { playCue } from "../../lib/sound";
 
 export interface SheetProps {
   open: boolean;
@@ -35,15 +36,22 @@ export function Sheet({
   const [entered, setEntered] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const reducedMotion = usePrefersReducedMotion();
+  // Siehe `Dialog.tsx`s identischer Wächter-Kommentar — verhindert einen
+  // Sound beim allerersten Rendern jedes dauerhaft gemounteten Sheets.
+  const isFirstRenderRef = useRef(true);
 
   useFocusTrap(panelRef, open);
 
   useEffect(() => {
     if (open) {
       setMounted(true);
+      if (!isFirstRenderRef.current) playCue("open");
+      isFirstRenderRef.current = false;
       const raf = requestAnimationFrame(() => setEntered(true));
       return () => cancelAnimationFrame(raf);
     }
+    if (!isFirstRenderRef.current) playCue("close");
+    isFirstRenderRef.current = false;
     setEntered(false);
     const delay = reducedMotion ? 0 : DURATION_BASE_MS;
     const timeout = setTimeout(() => setMounted(false), delay);

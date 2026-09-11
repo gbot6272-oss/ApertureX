@@ -1196,12 +1196,7 @@ Fix: siehe `DECISIONS.md` ADR-0047.
 - [x] 5. (in Schritt 0 miterledigt, siehe oben) Sound-Einstellungen-UI
 - [x] 6. Dokumentation (`DECISIONS.md` ADR-0047), volle Verifikation: `cargo fmt --check`/`cargo clippy -p apx-core -p apx-app --all-targets` sauber, `cargo test -p apx-core settings` (6/6, TOML-Rundlauf mit den drei neuen Feldern), `tsc -b`, `vitest run` (251/251), volle Playwright-Suite (142/142 nach dem Fix), reale Screenshot-Kontrolle (Start-Ladeschirm, neue Sound-Einstellungen)
 
-**Bewusst offen für eine spätere Iteration** (Fundament steht, konkrete
-Verdrahtung an jeder einzelnen Stelle war in dieser Sitzung aus Zeit-/
-Risikogründen nicht mehr drin): Sound-/Animations-Feedback für
-einzelne KI-Verarbeitungsschritte (Hautglätten, Stiltransfer,
-Himmelsaustausch usw.) und für Drag&Drop-Gesten (Masken-Ziehgriffe,
-Paletten-Größenänderung).
+- [x] Nachtrag: KI-Verarbeitung + Drag&Drop nachgeholt (Nutzerwunsch "Alles machen") — 56 `playCue("processing")`-Stellen in 45 Store-Aktionen (Hautglätten/Stiltransfer/Himmelsaustausch, KI-Ausfüllen/-Outpainting, Content-Aware Move/Scale, alle vier Stacking-Arten, alle sechs Preset-Generator-Varianten, alle sieben Opt-in-Modell-Downloads, Video-Werkzeuge, Skript/Plugin/Freigabe, Drucken/Diashow/Buch/Web-Export/Workflow/Batch), bewusst ohne triviale Navigations-/Listen-Ladezustände; `MaskOverlay.tsx`s zentrale Ziehgriff-Funktionen (`drag-start`/`drop`) und `PaletteFrame.tsx`s Breiten-Ziehgriff + Ein-/Ausklapp-Knöpfe — siehe DECISIONS.md ADR-0047-Nachtrag; `tsc -b`/`vitest run` (251)/volle Playwright-Suite (142/142) grün
 
 ## Aktuelle Phase: Phase 18 — UI/UX-Overhaul
 

@@ -4989,3 +4989,55 @@ apx-app --all-targets` (sauber), `cargo test -p apx-core settings`
 dem `getCurrentWindow`-Fix (rot, 0/142) als auch danach (grün,
 142/142), reale Bildschirm-Kontrolle des Start-Ladeschirms und der
 neuen Sound-Einstellungen.
+
+## ADR-0047-Nachtrag: KI-Verarbeitung + Drag&Drop — die beiden zuvor
+offen gelassenen Punkte nachgeholt
+
+Nutzerwunsch (verbatim): "Alles machen" — als Antwort auf die
+explizit benannte Restarbeit am Ende von ADR-0047 (Sound-/Animations-
+Feedback für einzelne KI-Verarbeitungsschritte und für Drag&Drop-
+Gesten).
+
+**KI-Verarbeitung:** systematischer Durchgang durch `store/index.ts`
+nach jedem `*Loading`/`*Running`/`*Busy`/`*Downloading`/`*ing`-Zustand,
+der eine echte, spürbar lange Backend-Operation begleitet (nicht nur
+eine triviale Listen-Abfrage) — 56 Stellen in 45 Aktionen bekamen
+`playCue("processing")` beim Start und `playCue("success")`/
+`playCue("error")` am Ende, darunter alle drei vom Nutzer namentlich
+genannten (Hautglätten `smoothSkinForCurrentPhoto`, Stiltransfer
+`stylizePhotoWithStyle`, Himmelsaustausch `replaceSkyForCurrentPhoto`)
+sowie u. a.: KI-Ausfüllen (`runAiInpaint`, Content-Aware Move/Scale),
+KI-Ausfüllen über Bildränder (`runAiOutpaint`), die fünf KI-Masken,
+Entrauschen/Hochskalieren/DNG-Konvertierung, Fokus-/HDR-/Panorama-/
+Astro-Stacking (alle vier), Perspektive-Autoerkennung, Sensorflecken-
+Suche + Reparatur-Quellenvorschlag, Farb-Harmonie-Extraktion,
+Duplikat-/Stilkonsistenz-Erkennung, Auto-Tagging, alle sechs Preset-
+Generator-Varianten (LLM/Referenzbild/Variationen/Lernen), Skript-/
+Plugin-Ausführung, Kollaborations-Freigabe (Export/Import), Video:
+Szenenwechsel-Erkennung, Geräuschreduktion, Musik hinzufügen, LUT-
+Anwendung, Hintergrund entfernen, ähnliche Videos finden, Zeitleisten-
+Export, alle sieben Opt-in-Modell-Downloads (LaMa-Inpainting, Tiefe/
+Virtuelle-Blende, Stiltransfer je Stil, Selfie-Segmentierung,
+Personen-Erkennung, Whisper), Drucken/Diashow-Export/Buch-Export/
+Web-Export/Workflow-Vorlage, Batch-Verarbeitung anwenden. Bewusst
+ausgenommen: reine Navigations-/Listen-Ladezustände ohne deliberate
+Nutzeraktion (Personen-/Gesichter-Liste beim Ansicht-Wechsel,
+Kamera-Dateiliste, Stapel-Live-Vorschau während der Kriterien-
+Eingabe) — ein Sound bei jedem Ansicht-Wechsel bzw. jedem Tastendruck
+wäre aufdringlich statt hochwertig (dieselbe Abwägung wie `uisfx`s
+eigene Barrierefreiheits-Leitlinie "Debounce frequent notifications").
+`LensCalibrationDialog.tsx`s eigenständige (nicht über den Store
+laufende) `handleCalibrate`-Funktion bekam dieselbe Behandlung.
+
+**Drag&Drop:** `MaskOverlay.tsx`s zentrale `startDrag`/
+`handleBrushPointerDown`/`handlePointerUp`-Funktionen (bedienen alle
+Masken-Ziehgriffe — linearer/radialer Verlauf, Pinselstrich — an
+einer Stelle) bekamen `drag-start`/`drop`; `PaletteFrame.tsx`s
+Breiten-Ziehgriff (`onPointerDown`/`onPointerUp`) ebenso, dazu
+`expand`/`collapse` für die beiden Ein-/Ausklapp-Knöpfe (vorher nur
+über den globalen `<details>`-Akkordeon-Listener abgedeckt, nicht für
+Paletten selbst).
+
+Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
+Playwright-Suite (142/142), `cargo fmt --check` (keine Rust-Datei in
+diesem Nachtrag geändert).

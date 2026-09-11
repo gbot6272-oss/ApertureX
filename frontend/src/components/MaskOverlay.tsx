@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 
 import { radialGradientAxisHandlePositions, radialGradientBoundaryPoints, type MaskGeometry, type MaskPoint } from "../lib/edl";
+import { playCue } from "../lib/sound";
 
 interface MaskOverlayProps {
   /** Position/Größe des angezeigten Bildes in Bildschirm-Pixeln, wie bei
@@ -96,6 +97,7 @@ export function MaskOverlay({
       event.currentTarget.setPointerCapture(event.pointerId);
       setDragHandle(handle);
       dragStart.current = { x: event.clientX, y: event.clientY, geometry };
+      playCue("drag-start");
     },
     [geometry],
   );
@@ -109,6 +111,7 @@ export function MaskOverlay({
       brushPaintingRef.current = true;
       brushPathRef.current = [point];
       setDrawingBrushPath(brushPathRef.current);
+      playCue("drag-start");
     },
     [geometry.kind],
   );
@@ -180,12 +183,16 @@ export function MaskOverlay({
       const path = brushPathRef.current;
       brushPathRef.current = [];
       setDrawingBrushPath(null);
-      if (path.length > 0) onPaintBrushStroke?.(thinBrushPath(path));
+      if (path.length > 0) {
+        playCue("drop");
+        onPaintBrushStroke?.(thinBrushPath(path));
+      }
       return;
     }
 
     if (dragHandle) {
       setDragHandle(null);
+      playCue("drop");
       onCommit();
     }
   }, [dragHandle, onCommit, onPaintBrushStroke]);

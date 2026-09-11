@@ -2105,9 +2105,11 @@ export const useAppStore = create<AppStore>()(
         state.importResult = null;
         state.importErrors = [];
       });
+      playCue("processing");
       try {
         await api.importFolder(path);
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.importRunning = false;
           state.importErrors.push(String(err));
@@ -2122,9 +2124,11 @@ export const useAppStore = create<AppStore>()(
         state.importResult = null;
         state.importErrors = [];
       });
+      playCue("processing");
       try {
         await api.importFolderWithMode(path, mode, renamePattern);
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.importRunning = false;
           state.importErrors.push(String(err));
@@ -2190,6 +2194,7 @@ export const useAppStore = create<AppStore>()(
     },
 
     finishImport: (result) => {
+      playCue(result.errorCount > 0 ? "error" : "success");
       set((state) => {
         state.importRunning = false;
         state.importResult = result;
@@ -2559,12 +2564,15 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.enhanceRunning = "denoise";
       });
+      playCue("processing");
       try {
         const path = await api.denoisePhoto(photoId);
         set((state) => {
           state.enhanceStatus = `Entrauscht: ${path}`;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.enhanceStatus = String(err);
         });
@@ -2579,12 +2587,15 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.enhanceRunning = "upscale";
       });
+      playCue("processing");
       try {
         const path = await api.upscalePhoto(photoId);
         set((state) => {
           state.enhanceStatus = `Hochskaliert: ${path}`;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.enhanceStatus = String(err);
         });
@@ -2599,12 +2610,15 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.enhanceRunning = "dng";
       });
+      playCue("processing");
       try {
         const path = await api.convertPhotoToDng(photoId);
         set((state) => {
           state.enhanceStatus = `Als DNG konvertiert: ${path}`;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.enhanceStatus = String(err);
         });
@@ -2786,6 +2800,7 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.uprightDetectLoading = true;
       });
+      playCue("processing");
       try {
         const dto = await api.detectUprightCorrection(selectedPhotoId, mode);
         set((state) => {
@@ -2797,8 +2812,10 @@ export const useAppStore = create<AppStore>()(
             transform.horizontal = dto.horizontal;
           }
         });
+        playCue("success");
         void get().commitDevelopEdit("Perspektive automatisch erkannt");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -2979,6 +2996,7 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.aiInpaintLoadingIndex = index;
       });
+      playCue("processing");
       try {
         const dto = await api.runAiInpaint(selectedPhotoId, x0, y0, x1 - x0, y1 - y0);
         set((state) => {
@@ -2994,8 +3012,10 @@ export const useAppStore = create<AppStore>()(
             pixels: base64ToByteArray(dto.pixels_base64),
           };
         });
+        playCue("success");
         void get().commitDevelopEdit("KI-Ausfüllen angewendet");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -3029,6 +3049,7 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.contentAwareMoveLoading = true;
       });
+      playCue("processing");
       try {
         const dto = await api.contentAwareMove(
           selectedPhotoId,
@@ -3082,8 +3103,10 @@ export const useAppStore = create<AppStore>()(
           state.contentAwareMoveActive = false;
           state.contentAwareMoveRect = null;
         });
+        playCue("success");
         void get().commitDevelopEdit("Objekt inhaltssensitiv verschoben");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -3150,6 +3173,7 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.aiOutpaintLoading = true;
       });
+      playCue("processing");
       try {
         const dto = await api.runAiOutpaint(selectedPhotoId, marginLeft, marginTop, marginRight, marginBottom);
         set((state) => {
@@ -3165,8 +3189,10 @@ export const useAppStore = create<AppStore>()(
             },
           };
         });
+        playCue("success");
         void get().commitDevelopEdit("Leinwand erweitert");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -3200,6 +3226,7 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.contentAwareScaleLoading = true;
       });
+      playCue("processing");
       try {
         const dto = await api.contentAwareScale(selectedPhotoId, widthFraction, heightFraction);
         set((state) => {
@@ -3213,8 +3240,10 @@ export const useAppStore = create<AppStore>()(
             },
           };
         });
+        playCue("success");
         void get().commitDevelopEdit("Inhaltssensitiv skaliert");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -3238,6 +3267,7 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.compositeLayerLoading = true;
       });
+      playCue("processing");
       try {
         const dto = await api.prepareCompositeLayerSource(photoId, null);
         set((state) => {
@@ -3257,8 +3287,10 @@ export const useAppStore = create<AppStore>()(
             blend_if_highlight_cutoff: 1,
           });
         });
+        playCue("success");
         void get().commitDevelopEdit("Compositing-Ebene hinzugefügt");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -3273,6 +3305,7 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.compositeLayerLoading = true;
       });
+      playCue("processing");
       try {
         const dto = await api.prepareCompositeLayerSource(null, texturePath);
         set((state) => {
@@ -3292,8 +3325,10 @@ export const useAppStore = create<AppStore>()(
             blend_if_highlight_cutoff: 1,
           });
         });
+        playCue("success");
         void get().commitDevelopEdit("Compositing-Ebene hinzugefügt");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -4682,6 +4717,7 @@ export const useAppStore = create<AppStore>()(
         state.aiMaskLoading = kind;
         state.aiMaskClickPickerActive = false;
       });
+      playCue("processing");
       try {
         const dto = await api.generateAiMask(selectedPhotoId, AI_MASK_KIND_TO_BACKEND[kind], click?.x, click?.y);
         const geometry: MaskGeometry = {
@@ -4698,8 +4734,10 @@ export const useAppStore = create<AppStore>()(
           state.selectedMaskId = id;
           state.selectedMaskComponentIndex = 0;
         });
+        playCue("success");
         void get().commitDevelopEdit(`KI-Maske „${name}" hinzugefügt`);
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -4726,12 +4764,15 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.repairSourceSuggestionLoading = true;
       });
+      playCue("processing");
       try {
         const dto = await api.suggestRepairSource(selectedPhotoId, targetX, targetY, repairDraftRadius);
         set((state) => {
           state.repairPendingSource = { x: dto.x, y: dto.y };
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -4751,12 +4792,15 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.sensorSpotsLoading = true;
       });
+      playCue("processing");
       try {
         const spots = await api.detectSensorSpots(selectedPhotoId, sensitivity, 20);
         set((state) => {
           state.sensorSpotCandidates = spots;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -4924,10 +4968,13 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.inpaintingModelDownloading = true;
       });
+      playCue("processing");
       try {
         await api.downloadInpaintingModel();
         await get().loadAiSettings();
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -4948,13 +4995,16 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.presetGeneratorLoading = true;
       });
+      playCue("processing");
       try {
         const json = await api.generatePresetFromLlm(trimmed);
         set((state) => {
           state.presetGeneratorPreview = [parseEdlSubset(json)];
           state.presetGeneratorSelectedIndex = 0;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -4984,13 +5034,16 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.presetGeneratorLoading = true;
       });
+      playCue("processing");
       try {
         const validated = await api.importPresetJson(trimmed);
         set((state) => {
           state.presetGeneratorPreview = [parseEdlSubset(validated)];
           state.presetGeneratorSelectedIndex = 0;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -5007,6 +5060,7 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.presetGeneratorLoading = true;
       });
+      playCue("processing");
       try {
         const json = await api.generatePresetFromReference(selectedPhotoId);
         if (json) {
@@ -5015,7 +5069,9 @@ export const useAppStore = create<AppStore>()(
             state.presetGeneratorSelectedIndex = 0;
           });
         }
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -5030,13 +5086,16 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.presetGeneratorLoading = true;
       });
+      playCue("processing");
       try {
         const jsonList = await api.generatePresetVariations(serializeEdlSubset(base), count, seed);
         set((state) => {
           state.presetGeneratorPreview = jsonList.map(parseEdlSubset);
           state.presetGeneratorSelectedIndex = 0;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -5052,13 +5111,16 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.presetGeneratorLoading = true;
       });
+      playCue("processing");
       try {
         const json = await api.learnPresetFromPhotos(photoIds, sections);
         set((state) => {
           state.presetGeneratorPreview = [parseEdlSubset(json)];
           state.presetGeneratorSelectedIndex = 0;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -5099,12 +5161,15 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.tagSuggestionsLoading = true;
       });
+      playCue("processing");
       try {
         const tags = await api.suggestTags(photoId);
         set((state) => {
           state.tagSuggestions = tags;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -5235,12 +5300,15 @@ export const useAppStore = create<AppStore>()(
         state.printRunning = true;
         state.printError = null;
       });
+      playCue("processing");
       try {
         const outcome = await api.printPhotos(photoIds, destPath, options);
         set((state) => {
           state.printLastOutcome = outcome;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.printError = err instanceof Error ? err.message : String(err);
         });
@@ -5283,12 +5351,15 @@ export const useAppStore = create<AppStore>()(
         state.videoExportRunning = true;
         state.videoExportError = null;
       });
+      playCue("processing");
       try {
         const outcome = await api.exportSlideshowVideo(photoIds, destPath, options);
         set((state) => {
           state.videoExportOutcome = outcome;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.videoExportError = err instanceof Error ? err.message : String(err);
         });
@@ -5323,12 +5394,15 @@ export const useAppStore = create<AppStore>()(
         state.bookExportRunning = true;
         state.bookExportError = null;
       });
+      playCue("processing");
       try {
         const outcome = await api.exportBookPdf(photoIds, destPath, options);
         set((state) => {
           state.bookExportOutcome = outcome;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.bookExportError = err instanceof Error ? err.message : String(err);
         });
@@ -5363,12 +5437,15 @@ export const useAppStore = create<AppStore>()(
         state.webExportRunning = true;
         state.webExportError = null;
       });
+      playCue("processing");
       try {
         const outcome = await api.exportWebGallery(photoIds, destDir, options);
         set((state) => {
           state.webExportOutcome = outcome;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.webExportError = err instanceof Error ? err.message : String(err);
         });
@@ -5460,6 +5537,7 @@ export const useAppStore = create<AppStore>()(
         state.workflowRunning = true;
         state.workflowProgress = { done: 0, total: photoIds.length, failed: 0 };
       });
+      playCue("processing");
       try {
         const version = await api.latestPresetVersion(template.presetId);
         const subset = parseEdlSubset(version.edl_subset_json);
@@ -5479,6 +5557,7 @@ export const useAppStore = create<AppStore>()(
             });
           }
         }
+        playCue(get().workflowProgress?.failed ? "error" : "success");
       } finally {
         set((state) => {
           state.workflowRunning = false;
@@ -5605,11 +5684,13 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.perceptualDuplicatesRunning = true;
       });
+      playCue("processing");
       try {
         const groups = await api.listPerceptualDuplicateGroups(maxDistance);
         set((state) => {
           state.perceptualDuplicateGroups = groups;
         });
+        playCue("success");
       } finally {
         set((state) => {
           state.perceptualDuplicatesRunning = false;
@@ -5623,11 +5704,13 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.styleConsistencyRunning = true;
       });
+      playCue("processing");
       try {
         const result = await api.analyzeStyleConsistency(selectedFolderId);
         set((state) => {
           state.styleConsistencyResult = result;
         });
+        playCue("success");
       } finally {
         set((state) => {
           state.styleConsistencyRunning = false;
@@ -5678,11 +5761,13 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.colorPaletteLoading = true;
       });
+      playCue("processing");
       try {
         const palette = await api.extractColorPalette(developPhotoId);
         set((state) => {
           state.colorPalette = palette;
         });
+        playCue("success");
       } finally {
         set((state) => {
           state.colorPaletteLoading = false;
@@ -5711,10 +5796,13 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.depthModelDownloading = true;
       });
+      playCue("processing");
       try {
         await api.downloadDepthModel();
         await get().loadAiSettings();
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -5767,6 +5855,7 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.depthEstimating = true;
       });
+      playCue("processing");
       try {
         const dto = await api.estimatePhotoDepth(developPhotoId);
         set((state) => {
@@ -5776,8 +5865,10 @@ export const useAppStore = create<AppStore>()(
             depth: dto.depth_base64,
           };
         });
+        playCue("success");
         void get().commitDevelopEdit("Tiefenkarte berechnet");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -5794,10 +5885,13 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.styleTransferModelDownloading = style;
       });
+      playCue("processing");
       try {
         await api.downloadStyleTransferModel(style);
         await get().loadAiSettings();
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -5833,6 +5927,7 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.styleTransferStylizing = true;
       });
+      playCue("processing");
       try {
         const dto = await api.stylizePhoto(developPhotoId, style);
         set((state) => {
@@ -5842,8 +5937,10 @@ export const useAppStore = create<AppStore>()(
             pixels: base64ToByteArray(dto.pixels_base64),
           };
         });
+        playCue("success");
         void get().commitDevelopEdit("Stiltransfer angewendet");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -5862,6 +5959,7 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.skyReplacing = true;
       });
+      playCue("processing");
       try {
         const dto = await api.replaceSky(developPhotoId, skyImagePath);
         set((state) => {
@@ -5871,8 +5969,10 @@ export const useAppStore = create<AppStore>()(
             pixels: base64ToByteArray(dto.pixels_base64),
           };
         });
+        playCue("success");
         void get().commitDevelopEdit("Himmel ersetzt");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -5898,6 +5998,7 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.skinSmoothing = true;
       });
+      playCue("processing");
       try {
         const dto = await api.smoothSkin(developPhotoId);
         set((state) => {
@@ -5910,8 +6011,10 @@ export const useAppStore = create<AppStore>()(
             state.developEdl.skin_smoothing.amount = 1;
           }
         });
+        playCue("success");
         void get().commitDevelopEdit("Haut automatisch geglättet");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -6077,6 +6180,7 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.batchApplying = true;
       });
+      playCue("processing");
       try {
         const batchId = await api.applyBatchRule(criteria, action);
         set((state) => {
@@ -6084,6 +6188,7 @@ export const useAppStore = create<AppStore>()(
           state.batchLastUndoCount = null;
         });
         await get().previewBatchRule(criteria);
+        playCue("success");
       } finally {
         set((state) => {
           state.batchApplying = false;
@@ -6099,6 +6204,7 @@ export const useAppStore = create<AppStore>()(
         state.batchLastUndoCount = count;
         state.batchLastId = null;
       });
+      playCue("undo");
     },
 
     peopleGroups: [],
@@ -6196,13 +6302,16 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.detectingFaces = true;
       });
+      playCue("processing");
       try {
         const faces = await api.detectFacesForPhoto(photoId);
         set((state) => {
           state.facesForSelectedPhoto = faces;
         });
         await get().refreshPeople();
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -6219,10 +6328,13 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.peopleModelsDownloading = true;
       });
+      playCue("processing");
       try {
         await api.downloadPeopleModels();
         await get().loadAiSettings();
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -6559,13 +6671,16 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.stackingRunning = "focus";
       });
+      playCue("processing");
       try {
         const result = await api.stackFocus(multiSelectedIds);
         set((state) => {
           state.stackingStatus = `Fokus-Stack fertig: ${result.width}×${result.height}`;
         });
+        playCue("success");
         if (get().selectedFolderId) await get().loadPhotosForFolder(get().selectedFolderId!);
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.stackingStatus = String(err);
         });
@@ -6582,13 +6697,16 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.stackingRunning = "hdr";
       });
+      playCue("processing");
       try {
         const result = await api.stackHdr(multiSelectedIds);
         set((state) => {
           state.stackingStatus = `HDR-Zusammenführung fertig: ${result.width}×${result.height}`;
         });
+        playCue("success");
         if (get().selectedFolderId) await get().loadPhotosForFolder(get().selectedFolderId!);
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.stackingStatus = String(err);
         });
@@ -6605,13 +6723,16 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.stackingRunning = "panorama";
       });
+      playCue("processing");
       try {
         const result = await api.stackPanorama(multiSelectedIds);
         set((state) => {
           state.stackingStatus = `Panorama fertig: ${result.width}×${result.height}`;
         });
+        playCue("success");
         if (get().selectedFolderId) await get().loadPhotosForFolder(get().selectedFolderId!);
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.stackingStatus = String(err);
         });
@@ -6628,13 +6749,16 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.stackingRunning = "astro";
       });
+      playCue("processing");
       try {
         const result = await api.stackAstro(multiSelectedIds, sigma);
         set((state) => {
           state.stackingStatus = `Astro-Stack fertig: ${result.width}×${result.height}`;
         });
+        playCue("success");
         if (get().selectedFolderId) await get().loadPhotosForFolder(get().selectedFolderId!);
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.stackingStatus = String(err);
         });
@@ -6654,6 +6778,7 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.scriptRunning = true;
       });
+      playCue("processing");
       try {
         await api.runDevelopScript(developPhotoId, script);
         // Das Backend committet direkt (siehe `apx_app::commands::
@@ -6663,7 +6788,9 @@ export const useAppStore = create<AppStore>()(
         set((state) => {
           state.scriptStatus = "Skript angewendet";
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.scriptStatus = String(err);
         });
@@ -6683,12 +6810,15 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.pluginRunning = true;
       });
+      playCue("processing");
       try {
         const path = await api.runPluginCustomEffect(developPhotoId, pluginPath, param);
         set((state) => {
           state.pluginStatus = `Plugin angewendet: ${path}`;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.pluginStatus = String(err);
         });
@@ -6707,12 +6837,15 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.shareRunning = true;
       });
+      playCue("processing");
       try {
         const path = await api.exportCatalogShare(photoIds, name);
         set((state) => {
           state.shareExportStatus = path ? `Freigabe geschrieben: ${path}` : null;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.shareExportStatus = String(err);
         });
@@ -6727,12 +6860,15 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.shareRunning = true;
       });
+      playCue("processing");
       try {
         const result = await api.importCatalogShare();
         set((state) => {
           if (result) state.shareImportResult = result;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.shareExportStatus = String(err);
         });
@@ -6946,12 +7082,15 @@ export const useAppStore = create<AppStore>()(
         state.videoSceneChangesLoading = true;
         state.videoSceneChangesError = null;
       });
+      playCue("processing");
       try {
         const timestamps = await api.detectVideoSceneChanges(selectedPhotoId);
         set((state) => {
           state.videoSceneChanges = timestamps;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.videoSceneChangesError = String(err);
         });
@@ -6991,13 +7130,16 @@ export const useAppStore = create<AppStore>()(
         state.videoAudioBusy = true;
         state.videoAudioError = null;
       });
+      playCue("processing");
       try {
         const result = await api.denoiseVideoAudio(selectedPhotoId, strength);
         if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
         set((state) => {
           state.selectedPhotoId = result.id;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.videoAudioError = String(err);
         });
@@ -7015,13 +7157,16 @@ export const useAppStore = create<AppStore>()(
         state.videoAudioBusy = true;
         state.videoAudioError = null;
       });
+      playCue("processing");
       try {
         const result = await api.addVideoAudioTrack(selectedPhotoId, audioPath, mode, musicVolume);
         if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
         set((state) => {
           state.selectedPhotoId = result.id;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.videoAudioError = String(err);
         });
@@ -7042,13 +7187,16 @@ export const useAppStore = create<AppStore>()(
         state.videoLutBusy = true;
         state.videoLutError = null;
       });
+      playCue("processing");
       try {
         const result = await api.applyLutFilterToVideo(selectedPhotoId, lut, strength);
         if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
         set((state) => {
           state.selectedPhotoId = result.id;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.videoLutError = String(err);
         });
@@ -7065,10 +7213,13 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.selfieSegmentationModelDownloading = true;
       });
+      playCue("processing");
       try {
         await api.downloadSelfieSegmentationModel();
         await get().loadAiSettings();
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });
@@ -7100,13 +7251,16 @@ export const useAppStore = create<AppStore>()(
         state.videoBackgroundBusy = true;
         state.videoBackgroundError = null;
       });
+      playCue("processing");
       try {
         const result = await api.removeVideoBackground(selectedPhotoId, backgroundRgb);
         if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
         set((state) => {
           state.selectedPhotoId = result.id;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.videoBackgroundError = String(err);
         });
@@ -7126,12 +7280,15 @@ export const useAppStore = create<AppStore>()(
         state.similarVideosLoading = true;
         state.similarVideosError = null;
       });
+      playCue("processing");
       try {
         const groups = await api.listSimilarVideoGroups(maxDistance);
         set((state) => {
           state.similarVideoGroups = groups;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.similarVideosError = String(err);
         });
@@ -7174,6 +7331,7 @@ export const useAppStore = create<AppStore>()(
         state.videoTimelineRunning = true;
         state.videoTimelineError = null;
       });
+      playCue("processing");
       try {
         const outcome = await api.renderVideoTimeline(items, options);
         const { selectedFolderId } = get();
@@ -7181,7 +7339,9 @@ export const useAppStore = create<AppStore>()(
         set((state) => {
           state.videoTimelineOutcome = outcome;
         });
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.videoTimelineError = err instanceof Error ? err.message : String(err);
         });
@@ -7198,10 +7358,13 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.whisperModelDownloading = true;
       });
+      playCue("processing");
       try {
         await api.downloadWhisperModel();
         await get().loadAiSettings();
+        playCue("success");
       } catch (err) {
+        playCue("error");
         set((state) => {
           state.catalogError = String(err);
         });

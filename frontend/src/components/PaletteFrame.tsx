@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { DURATION_BASE_MS, EASE_OUT, usePrefersReducedMotion } from "../lib/motion";
+import { playCue } from "../lib/sound";
 import { useWorkspacePanel } from "../lib/workspaceLayout";
 
 interface PaletteFrameProps {
@@ -50,6 +51,7 @@ export function PaletteFrame({ id, side, defaultWidth, label, className = "", ch
   const onPointerUp = useCallback(() => {
     dragState.current = null;
     setDragging(false);
+    playCue("drop");
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerUp);
   }, [onPointerMove]);
@@ -58,6 +60,7 @@ export function PaletteFrame({ id, side, defaultWidth, label, className = "", ch
     (event: React.PointerEvent) => {
       dragState.current = { startX: event.clientX, startWidth: width };
       setDragging(true);
+      playCue("drag-start");
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerup", onPointerUp);
     },
@@ -75,7 +78,10 @@ export function PaletteFrame({ id, side, defaultWidth, label, className = "", ch
         <div className={`flex w-full shrink-0 flex-col items-center gap-2 bg-bg-raised p-1 ${side === "left" ? "border-r" : "border-l"} border-border`}>
           <button
             type="button"
-            onClick={toggleCollapsed}
+            onClick={() => {
+              playCue("expand");
+              toggleCollapsed();
+            }}
             title={`${label} einblenden`}
             aria-label={`${label} einblenden`}
             className="rounded border border-border px-1 py-2 text-xs text-text-secondary hover:border-accent hover:text-text-primary"
@@ -90,7 +96,10 @@ export function PaletteFrame({ id, side, defaultWidth, label, className = "", ch
             <div className="flex items-center justify-end px-1 pt-1">
               <button
                 type="button"
-                onClick={toggleCollapsed}
+                onClick={() => {
+                  playCue("collapse");
+                  toggleCollapsed();
+                }}
                 title={`${label} einklappen`}
                 aria-label={`${label} einklappen`}
                 className="rounded px-1 text-xs text-text-muted hover:text-text-primary"

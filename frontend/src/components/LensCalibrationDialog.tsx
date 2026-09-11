@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 
 import * as api from "../lib/tauri";
 import { previewUrl } from "../lib/media";
+import { playCue } from "../lib/sound";
 import { useAppStore } from "../store";
 import { Dialog } from "./ui/Dialog";
 
@@ -89,11 +90,14 @@ export function LensCalibrationDialog() {
   async function handleCalibrate() {
     setBusy(true);
     setError(null);
+    playCue("processing");
     try {
       const usableLines = lines.filter((line) => line.length >= MIN_POINTS_PER_LINE);
       const k1 = await api.calibrateLensDistortion(usableLines);
       setResult(k1);
+      playCue("success");
     } catch (err) {
+      playCue("error");
       setError(String(err));
     } finally {
       setBusy(false);

@@ -87,6 +87,28 @@ pub fn srgb_gamma(linear: f32) -> f32 {
     }
 }
 
+/// Umkehrung von [`srgb_gamma`] (EOTF) — wandelt einen bereits
+/// sRGB-gammakodierten `[0, 1]`-Wert zurück in lineares Licht.
+///
+/// Gebraucht von `pipeline::decode_linear`s Fallback-Zweig
+/// (JPEG/PNG/TIFF): diese Formate liefern bereits gammakodierte Bytes,
+/// keine rohen Sensordaten. Ohne diese Umkehrung würde
+/// `apx-pipeline::color::linear_camera_rgb_to_srgb_rgba8` — das für
+/// echte RAWs korrekt linear-Licht erwartet und am Ende erneut
+/// `srgb_gamma` anwendet — die Gammakurve ein zweites Mal auf bereits
+/// gammakodierte Werte anwenden. Das hellt Mitten/Lichter systematisch
+/// auf und erzeugt genau das vom Nutzer gemeldete überbelichtete,
+/// verblasste Bild im Entwickeln-Modus für JPEG-Quellen (siehe
+/// `DECISIONS.md` ADR-0048).
+pub fn srgb_gamma_inverse(encoded: f32) -> f32 {
+    let v = encoded.clamp(0.0, 1.0);
+    if v <= 0.040_45 {
+        v / 12.92
+    } else {
+        ((v + 0.055) / 1.055).powf(2.4)
+    }
+}
+
 /// Wandelt einen `[0, 1]`-Gamma-korrigierten Wert in 16-Bit um.
 pub fn to_u16(gamma_corrected: f32) -> u16 {
     (gamma_corrected.clamp(0.0, 1.0) * 65535.0).round() as u16
@@ -141,5 +163,34 @@ mod tests {
         assert_eq!(to_u16(1.0), 65535);
         assert_eq!(to_u16(-1.0), 0);
         assert_eq!(to_u16(2.0), 65535);
+    }
+
+    #[test]
+    fn gamma_inverse_undoes_gamma_across_the_full_range() {
+        for i in 0..=20 {
+            let linear = i as f32 / 20.0;
+            let roundtrip = srgb_gamma_inverse(srgb_gamma(linear));
+            assert!(
+                (roundtrip - linear).abs() < 1e-4,
+                "Hin- und Rückweg sollten sich für {linear} nahezu aufheben, war {roundtrip}"
+            );
+        }
+    }
+
+    #[test]
+    fn gamma_inverse_zero_and_one_map_to_zero_and_one() {
+        assert_eq!(srgb_gamma_inverse(0.0), 0.0);
+        assert!((srgb_gamma_inverse(1.0) - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn gamma_inverse_darkens_midtones_relative_to_the_encoded_value() {
+        // Die Umkehrfunktion muss einen gammakodierten Mittelwert klar
+        // abdunkeln (lineares Licht liegt bei sRGB-Mitten deutlich unter
+        // dem kodierten Byte-Wert) — genau der fehlende Schritt, der
+        // ohne diese Funktion zur doppelten Gammakodierung und damit zur
+        // Überbelichtung führte (siehe `DECISIONS.md` ADR-0048).
+        let encoded = 0.5;
+        assert!(srgb_gamma_inverse(encoded) < encoded);
     }
 }

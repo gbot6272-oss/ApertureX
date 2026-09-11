@@ -267,6 +267,15 @@ mod exif_orientation_tests {
         // `decode` (die Vorschau-/Vollbild-Route) — beide teilen sich
         // denselben `fallback::decode`-Aufruf, hier end-to-end über ein
         // echtes JPEG bestätigt statt nur durch Code-Lesen angenommen.
+        //
+        // Die Pixelwerte selbst sind NICHT mehr byte-identisch zu `decode`
+        // (nur reskaliert) — seit Phase 20 (ADR-0048) linearisiert
+        // `decode_linear` die bereits gammakodierten JPEG-Bytes echt via
+        // `srgb_gamma_inverse`, sonst würde `apx-pipeline`s
+        // `linear_camera_rgb_to_srgb_rgba8` die Gammakurve ein zweites Mal
+        // anwenden und das Bild überbelichten. Ein linearisierter Wert
+        // muss daher (außer an den Rändern 0/1) klar unter dem
+        // gammakodierten Ausgangswert liegen.
         let path = write_temp_jpeg("apx_fallback_exif_linear_test.jpg", 3);
         let decoded = decode(&path, None).expect("decode sollte klappen");
         let linear = crate::decode_linear(&path, None).expect("decode_linear sollte klappen");
@@ -275,7 +284,24 @@ mod exif_orientation_tests {
             (decoded.width, decoded.height),
             (linear.width, linear.height)
         );
-        let expected: Vec<f32> = decoded.pixels.iter().map(|&v| v as f32 / 65535.0).collect();
-        assert_eq!(linear.pixels, expected);
+        assert_eq!(linear.pixels.len(), decoded.pixels.len());
+        let mut saw_darkened_midtone = false;
+        for (&encoded_u16, &lin) in decoded.pixels.iter().zip(linear.pixels.iter()) {
+            let encoded = encoded_u16 as f32 / 65535.0;
+            assert!((0.0..=1.0).contains(&lin));
+            if encoded > 0.05 && encoded < 0.95 {
+                assert!(
+                    lin <= encoded + 1e-4,
+                    "linearisierter Wert {lin} sollte nicht über dem gammakodierten {encoded} liegen"
+                );
+                if lin < encoded - 1e-3 {
+                    saw_darkened_midtone = true;
+                }
+            }
+        }
+        assert!(
+            saw_darkened_midtone,
+            "mindestens ein Mittenwert sollte durch die Gamma-Umkehrung sichtbar abgedunkelt werden"
+        );
     }
 }

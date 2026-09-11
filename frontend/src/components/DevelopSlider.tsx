@@ -1,6 +1,8 @@
-import type { ChangeEvent, KeyboardEvent } from "react";
+import type { ChangeEvent, KeyboardEvent, PointerEvent } from "react";
 
 import { applyArrowStep, clampSliderValue, type SliderSpec } from "../lib/edl";
+import { playCue } from "../lib/sound";
+import { useAppStore } from "../store";
 
 interface DevelopSliderProps {
   spec: SliderSpec;
@@ -21,13 +23,38 @@ interface DevelopSliderProps {
  * Weißabgleich hat zwei Werte) einzelner Implementierungen.
  */
 export function DevelopSlider({ spec, value, onChange, onCommit }: DevelopSliderProps) {
+  const setDevelopLiveDragging = useAppStore((s) => s.setDevelopLiveDragging);
+
   function handleSliderChange(event: ChangeEvent<HTMLInputElement>) {
     onChange(Number(event.target.value));
   }
 
+  // Verkleinert die Live-Vorschau-Auflösung in `Viewer.tsx`, solange
+  // tatsächlich am Schieberegler gezogen wird (siehe `developIsLiveDragging`-
+  // Moduldoku im Store, `DECISIONS.md` ADR-0048) — Klicks auf die Leiste
+  // ohne Ziehen lösen `pointerdown` zwar auch aus, sind aber nur ein
+  // einzelner Regler-Tick, kein Performance-Problem.
+  function handlePointerDown(event: PointerEvent<HTMLInputElement>) {
+    if (event.button !== 0) return;
+    setDevelopLiveDragging(true);
+  }
+
+  // "release" statt "select" (Phase 20, siehe `DECISIONS.md` ADR-0048):
+  // ein Regler, der losgelassen wird, ist kein Auswahl-Vorgang — `uisfx`
+  // bietet mit "release" ("A pressed control springs back") den
+  // semantisch passenden Cue. Zuvor hatte KEINER der ~40 Entwickeln-
+  // Regler einen eigenen Sound, obwohl sie die mit Abstand am
+  // häufigsten benutzten Bedienelemente der App sind — direkte Ursache
+  // der Nutzer-Rückmeldung "es gibt maximal 3 Sounds".
+  function handleCommit() {
+    setDevelopLiveDragging(false);
+    playCue("release");
+    onCommit();
+  }
+
   function handleDoubleClick() {
     onChange(spec.neutral);
-    onCommit();
+    handleCommit();
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -81,7 +108,8 @@ export function DevelopSlider({ spec, value, onChange, onCommit }: DevelopSlider
         onDoubleClick={handleDoubleClick}
         onKeyDown={handleKeyDown}
         onKeyUp={handleKeyUp}
-        onPointerUp={onCommit}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handleCommit}
       />
     </div>
   );

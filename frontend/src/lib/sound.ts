@@ -55,7 +55,7 @@ function getPlayer(): UISFXPlayer {
     // Bedarf (Web-Audio "lazy") angelegt — dieser Aufruf selbst führt in
     // keiner Umgebung (auch nicht in Playwright/jsdom ohne Audiogerät)
     // zu einem Fehler.
-    player = createUISFX({ pack: DEFAULT_PACK, enabled: false, volume: 0.7 });
+    player = createUISFX({ pack: DEFAULT_PACK, enabled: false, volume: 0.85 });
   }
   return player;
 }

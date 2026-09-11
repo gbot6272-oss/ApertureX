@@ -179,26 +179,64 @@ body {
 }
 
 /* Bewegungs-Politur-Durchgang (Phase 18 Schritt 6, siehe `DECISIONS.md`
-   ADR-0046): einheitliche Hover-/Fokus-Übergänge auf allen
-   interaktiven Elementen statt des vorherigen instantanen Wechsels
-   (Ist-Zustand-Befund zu Beginn dieser Phase: nur zwei echte
-   CSS-`transition`s im gesamten Frontend). Global statt je Komponente
-   einzeln nachgetragen — jede der weit über 500 bestehenden
-   `hover:border-accent`/`hover:text-*`/`hover:bg-*`-Klassen im
-   Frontend bekommt die Übergangsanimation automatisch mit, ohne eine
-   einzige Komponente anzufassen (respektiert `prefers-reduced-motion`/
-   `.apx-reduce-motion` oben automatisch mit, da beide `!important`
-   jede `transition-duration` kappen). Explizite `transition-*`-Klassen
-   einzelner Komponenten (z. B. der Import-Fortschrittsbalken) bleiben
-   unverändert wirksam — dieselben Eigenschaften, keine Kollision. */
+   ADR-0046, in Phase 20/ADR-0048 auf deutlich mehr Elementarten
+   ausgeweitet — Nutzer-Rückmeldung "für das allermeiste gibt es
+   überhaupt keine Animation, kein Hover, kein gar NIX"): einheitliche
+   Hover-/Fokus-Übergänge auf allen interaktiven Elementen statt des
+   vorherigen instantanen Wechsels (Ist-Zustand-Befund zu Beginn von
+   Phase 18: nur zwei echte CSS-`transition`s im gesamten Frontend).
+   Global statt je Komponente einzeln nachgetragen — jede der weit über
+   500 bestehenden `hover:border-accent`/`hover:text-*`/`hover:bg-*`-
+   Klassen im Frontend bekommt die Übergangsanimation automatisch mit,
+   ohne eine einzige Komponente anzufassen (respektiert
+   `prefers-reduced-motion`/`.apx-reduce-motion` oben automatisch mit, da
+   beide `!important` jede `transition-duration` kappen). Explizite
+   `transition-*`-Klassen einzelner Komponenten (z. B. der
+   Import-Fortschrittsbalken) bleiben unverändert wirksam — dieselben
+   Eigenschaften, keine Kollision.
+
+   Phase 20 ergänzt gezielt die Elementarten, die die ursprüngliche Liste
+   ausließ, obwohl sie im Code längst `hover:*`-Klassen tragen: `role="button"`
+   (u. a. `GridView.tsx`s Raster-Kacheln, diverse Icon-Knöpfe, die aus
+   HTML-Verschachtelungsgründen kein `<button>` sein dürfen), Formular-
+   Steuerelemente (Regler, Checkbox, Radio, `<label>`), sowie alle
+   übrigen per `role`/`tabIndex` fokussierbaren Custom-Widgets. */
 button,
 a,
 select,
+label,
+summary,
+input[type="range"],
+input[type="checkbox"],
+input[type="radio"],
 [role="tab"],
-[role="menuitem"] {
-  transition-property: color, background-color, border-color, box-shadow, opacity;
+[role="menuitem"],
+[role="button"],
+[role="checkbox"],
+[role="radio"],
+[role="switch"],
+[role="option"],
+[tabindex="0"] {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
   transition-duration: var(--duration-fast);
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Spürbare, aber ruhige Hover-/Aktiv-Rückmeldung für Elemente mit
+   `role="button"`, die (aus den oben genannten HTML-Verschachtelungs-
+   Gründen) kein `<button>` sein können und deshalb häufig ganz ohne
+   eigene Hover-Klasse blieben (z. B. `GridView.tsx`s Raster-Kacheln
+   tragen zwar `hover:border-border`, aber keine Hintergrund-/Skalierungs-
+   Rückmeldung). Bewusst nur ein sehr dezenter Skalierungs-Effekt (kein
+   Schatten/Versatz — das würde bei dicht gepackten Rasterkacheln
+   benachbarte Zellen optisch verschieben lassen) statt einer neuen
+   Hintergrundfarbe, die mit bestehenden `hover:*`-Klassen kollidieren
+   könnte. */
+[role="button"]:hover {
+  transform: scale(1.015);
+}
+[role="button"]:active {
+  transform: scale(0.985);
 }
 
 /* Sanfter Überblend-Wechsel beim `centerView`-Wechsel (App.tsx) — siehe

@@ -32,6 +32,7 @@ use color::{cam_to_srgb_matrix, to_u16, ColorPipeline};
 // Formel für den neuen Entwickeln-Renderpfad ein zweites Mal
 // abzuschreiben (siehe `DECISIONS.md` ADR-0019).
 pub use color::srgb_gamma;
+use color::srgb_gamma_inverse;
 use demosaic::{demosaic_full, demosaic_half};
 
 /// Ergebnis von [`decode`]: interleaved 16-Bit-RGB, Zeile für Zeile,
@@ -117,15 +118,30 @@ pub fn decode(path: &Path, max_edge: Option<u32>) -> Result<DecodedImage> {
 /// Für Fallback-Formate (JPEG/PNG/TIFF) gibt es keinen Sensor-
 /// Weißabgleich zum Rückgängigmachen — hier wird bewusst vereinfacht der
 /// bereits fertige sRGB-Puffer aus [`decode`] direkt als `LinearImage`
-/// mit neutralen As-shot-Koeffizienten weitergereicht (technisch nicht
-/// linear, sondern schon gammakodiert — für Phase 2s Regler auf
-/// Fallback-Formaten ausreichend, siehe `PLAN.md` Phase 2 Schritt 4).
+/// weitergereicht, mit neutralen As-shot-Koeffizienten und Einheitsmatrix
+/// (keine Kamera-Farbmatrix nötig, die Pixel sind bereits sRGB-nah).
+///
+/// **Echte Linearisierung (`srgb_gamma_inverse`):** [`decode`] liefert für
+/// diese Formate bereits *gammakodierte* Bytes (keine rohen Sensordaten)
+/// — `apx-pipeline::color::linear_camera_rgb_to_srgb_rgba8` erwartet aber
+/// echtes lineares Licht und wendet am Ende der EDL-Kette selbst erneut
+/// `srgb_gamma` an. Ohne diese Umkehrung hier würde die Gammakurve auf
+/// dieselben Werte zweimal angewendet — das hellt Mitten/Lichter
+/// systematisch auf und erzeugte genau das vom Nutzer gemeldete
+/// überbelichtete, verblasste Bild im Entwickeln-Modus für JPEG-Quellen
+/// (Foto-Handykameras liefern praktisch immer JPEG). Behoben in Phase 20,
+/// siehe `DECISIONS.md` ADR-0048 — vormals stand hier fälschlich nur ein
+/// reines `u16`→`f32`-Reskalieren ohne Gamma-Umkehrung.
 pub fn decode_linear(path: &Path, max_edge: Option<u32>) -> Result<LinearImage> {
     match classify(path) {
         FileKind::Raw => decode_raw_linear(path, max_edge),
         FileKind::Fallback => {
             let decoded = crate::fallback::decode(path, max_edge)?;
-            let pixels = decoded.pixels.iter().map(|&v| v as f32 / 65535.0).collect();
+            let pixels = decoded
+                .pixels
+                .iter()
+                .map(|&v| srgb_gamma_inverse(v as f32 / 65535.0))
+                .collect();
             Ok(LinearImage {
                 width: decoded.width,
                 height: decoded.height,

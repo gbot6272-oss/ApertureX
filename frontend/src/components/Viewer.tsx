@@ -35,6 +35,18 @@ import { RepairOverlay } from "./RepairOverlay";
 const MIN_FULL_EDGE = 1024;
 const MAX_FULL_EDGE = 4096;
 
+// Live-Zieh-Auflösung (Phase 20, siehe `DECISIONS.md` ADR-0048): solange
+// aktiv an einem Regler/Kurvenpunkt/TAT-Ziehgriff gezogen wird
+// (`developIsLiveDragging`, siehe Store-Moduldoku), rendert die
+// `develop/...`-Route in dieser deutlich kleineren Auflösung statt der
+// vollen, an die Anzeigegröße gekoppelten `targetFullEdge` (die auf
+// großen/hochauflösenden Bildschirmen bis zu `MAX_FULL_EDGE` reichen
+// kann) — derselbe "reduzierte Live-Vorschau beim Ziehen"-Kompromiss wie
+// in Lightroom/Capture One, gegen die von Nutzern gemeldeten "ewigen
+// Bearbeitungszeiten" beim Reglerziehen. Nach dem Loslassen (Commit)
+// rendert die nächste Anfrage wieder in voller Auflösung.
+const LIVE_DRAG_MAX_EDGE = 1280;
+
 export function Viewer() {
   const selectedFolderId = useAppStore((s) => s.selectedFolderId);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
@@ -84,6 +96,8 @@ export function Viewer() {
   const setTatCurveChannel = useAppStore((s) => s.setTatCurveChannel);
   const setCurveChannel = useAppStore((s) => s.setCurveChannel);
   const setHslBandField = useAppStore((s) => s.setHslBandField);
+  const developIsLiveDragging = useAppStore((s) => s.developIsLiveDragging);
+  const setDevelopLiveDragging = useAppStore((s) => s.setDevelopLiveDragging);
   const pickerActive =
     wbPickerActive ||
     colorMixerPickerActive ||
@@ -157,7 +171,8 @@ export function Viewer() {
   const renderedEdl = hoverPresetSubset ? mergeEdlSubset(developEdl, hoverPresetSubset) : developEdl;
   const developEdlJson = developPanelOpen && photo ? buildEdlEnvelopeJson(renderedEdl) : null;
   const developPhotoId = developPanelOpen ? (photo?.id ?? null) : null;
-  const developMaxEdge = photo && containerSize.width > 0 ? targetFullEdge : undefined;
+  const developMaxEdge =
+    photo && containerSize.width > 0 ? (developIsLiveDragging ? Math.min(LIVE_DRAG_MAX_EDGE, targetFullEdge) : targetFullEdge) : undefined;
   const developFrame = useDevelopRender(developPhotoId, developEdlJson, developMaxEdge);
 
   // Echter Soft-Proof (Phase 12 Schritt 6, siehe `DECISIONS.md`
@@ -339,6 +354,13 @@ export function Viewer() {
         const g = developFrame.pixels[index + 1] ?? 0;
         const b = developFrame.pixels[index + 2] ?? 0;
 
+        // Reduzierte Live-Vorschau-Auflösung für die Dauer des TAT-Ziehens
+        // (siehe `LIVE_DRAG_MAX_EDGE`-Moduldoku oben) — derselbe Wächter
+        // wie `DevelopSlider.tsx`s Regler-Ziehen, hier direkt gesetzt statt
+        // über die Komponente, da der TAT-Ziehgriff kein `<input
+        // type="range">` ist.
+        setDevelopLiveDragging(true);
+
         if (tatMode === "curve") {
           const channel = developEdl.curves[tatCurveChannel];
           const points = channel.kind === "Points" ? channel.points : [{ input: 0, output: 0 }, { input: 1, output: 1 }];
@@ -405,6 +427,7 @@ export function Viewer() {
       developEdl.curves,
       developEdl.hsl,
       setCurveChannel,
+      setDevelopLiveDragging,
       pickerActive,
       canPan,
     ],
@@ -489,9 +512,10 @@ export function Viewer() {
     dragState.current = null;
     if (tatDragState.current) {
       tatDragState.current = null;
+      setDevelopLiveDragging(false);
       void commitDevelopEdit();
     }
-  }, [commitDevelopEdit]);
+  }, [commitDevelopEdit, setDevelopLiveDragging]);
 
   const handleMouseLeave = useCallback(() => {
     endDrag();

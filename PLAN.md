@@ -1175,6 +1175,24 @@ Volle Suite gebündelt erst im letzten Schritt.
 - [ ] 10. Dokumentation, volle Verifikation, Abnahme
 - [x] `tsc -b`, volle `vitest run`-Suite (251 Tests, 28 neue), `map-flow.spec.ts` grün
 
+## Aktuelle Phase: Phase 20 — Qualitätsoffensive nach Phase 19
+
+Nutzer-Rückmeldung nach eigenem Test der echten, laufenden App:
+Phase-19-Ergebnis wirke nicht wie dokumentiert ("maximal 3 Sounds",
+"kein Hover, kein gar nix", Start-Ladeschirm kaum wahrnehmbar), dazu
+drei bis dahin unbekannte Fehler (überbelichtetes/verblasstes Foto im
+Entwickeln-Modus, automatisches Auswählen beim Verschieben, lange
+Bearbeitungszeiten). Vollständiger Befund + alle Entwurfsentscheidungen:
+siehe `DECISIONS.md` ADR-0048.
+
+- [x] 0. ADR-0048 + PLAN.md-Abschnitt; `PROMPTS.md` erschöpfend gesucht — existiert nicht im Repository, Nutzer im Antworttext informiert
+- [x] 1. Überbelichtung im Entwickeln-Modus für JPEG/PNG/TIFF-Quellen behoben: `srgb_gamma_inverse` (EOTF) neu in `apx-raw/src/pipeline/color.rs`, angewendet in `decode_linear()`s Fallback-Zweig (vorher fehlende Linearisierung führte zu doppelter Gammakodierung im gesamten Downstream — Entwickeln-Vorschau, Export, KI-Verarbeitung); Test `decode_linear_matches_decode_for_a_real_exif_jpeg` entsprechend angepasst
+- [x] 2. Automatisches Auswählen beim Foto-Verschieben behoben: Klick-vs-Ziehen-Bewegungswächter (6 px) in `GridView.tsx`/`Filmstrip.tsx` + `draggable={false}` auf den Vorschaubildern
+- [x] 3. Lange Bearbeitungszeiten: neues `developIsLiveDragging`-Store-Feld, `Viewer.tsx` rendert die Live-Vorschau während aktivem Regler-/TAT-Ziehen in reduzierter Auflösung (`LIVE_DRAG_MAX_EDGE=1280`) statt der vollen Anzeigeauflösung (bis 4096 px auf großen/Retina-Bildschirmen)
+- [x] 4. Start-Ladeschirm deutlich verstärkt: `MIN_VISIBLE_MS=900` Mindestanzeigedauer unabhängig von der tatsächlichen Ladezeit, doppelter gegenläufig rotierender Iris-Ring (96 statt 64 px) mit weichem Leuchten, größeres Wortzeichen + Untertitel
+- [x] 5. Hover/Fokus-Übergänge ausgeweitet (`index.css`: zusätzlich `role="button"`/`"checkbox"`/`"radio"`/`"switch"`/`"option"`, `[tabindex="0"]`, `label`, `summary`, Regler/Checkbox/Radio-Inputs, plus dezente Skalierungs-Rückmeldung für `role="button"`-Elemente) + `DevelopSlider.tsx` bekommt erstmals einen eigenen Sound (`uisfx`s `"release"`-Cue beim Loslassen, nicht pro Zieh-Tick); Standard-Lautstärke `sound_volume_percent` von 70 auf 85 angehoben
+- [x] 6. Dokumentation (`DECISIONS.md` ADR-0048), volle Verifikation
+
 ## Aktuelle Phase: Phase 19 — Animationen + UI-Sounds
 
 Nutzerwunsch: Animationen (Start/Beenden, Klick, Scroll, Bearbeitung-

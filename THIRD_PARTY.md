@@ -201,6 +201,14 @@ Werden beim Beschaffen einzeln mit Quelle und Lizenz eingetragen, sobald sie in 
 |---|---|---|---|
 | _(noch leer)_ | | | |
 
+## Entwicklungswerkzeuge (`.claude/`)
+
+Reine Claude-Code-Skills/-Nachschlagewerke für die Entwicklung dieses Projekts — kein Code, keine Daten, kein Build-Schritt landet im ausgelieferten App-Bundle. Trotzdem eingetragen (siehe Regel oben: jede hinzugefügte Sache wird eingetragen).
+
+| Skill | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `.claude/skills/ui-ux-pro-max/` (aus [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill), nur der `ui-ux-pro-max`-Teilbaum) | MIT | Durchsuchbare UI/UX-Referenzdaten (Barrierefreiheit-/Interaktions-/Bewegungs-Richtlinien, Farb-/Typografie-Paarungen, Tailwind-Stack-Hinweise) für die Entwicklungs-Session — kein Laufzeitcode, keine Netzwerkabfrage, reines lokales `python3`-Nachschlage-Skript über mitgelieferte CSV-Dateien | Auf Nutzerwunsch installiert; nur der in sich geschlossene `ui-ux-pro-max`-Skill übernommen (nicht die übrigen sechs Skills des Original-Repos — Logo/Slide/Banner/Marken-Design sind für diese Desktop-App irrelevant, `ui-styling` allein brächte 5,8 MB an Canvas-Schriftdateien mit, die hier nirgends verwendet werden) |
+
 ---
 
 *Einträge für Phase 2 und später kommen hinzu, sobald die jeweilige Phase startet.*

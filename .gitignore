@@ -36,6 +36,10 @@ crates/apx-app/gen/schemas/
 .DS_Store
 Thumbs.db
 
+# Python-Bytecode (z. B. beim Ausführen des .claude/skills/ui-ux-pro-max-Skripts erzeugt)
+__pycache__/
+*.pyc
+
 # Logs
 *.log
 /logs/

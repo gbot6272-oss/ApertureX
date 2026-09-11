@@ -4765,3 +4765,90 @@ Playwright nachstellen, da der Palettenbreite-Ziehgriff auf
 `flex-wrap`-Fixes selbst sind aber ein reines, risikoarmes CSS-
 Sicherheitsnetz ohne Logikänderung, das bei ausreichender Breite exakt
 dasselbe Erscheinungsbild wie zuvor liefert).
+
+## ADR-0046-Nachtrag III: Entwickeln-Panel einklappbare Abschnitte + Filter-Test-Lücke
+
+**Status:** Angenommen
+**Kontext:** Auf konkrete Nachfrage, welche der vier Entwickeln-
+Registerkarten (Licht/Farbe/Details/Kreativ) "tatsächlich funktional"
+sein sollen und wo "weniger gescrollt" werden soll, ergab eine reale
+Bildschirm-Kontrolle aller fünf Registerkarten (Licht, Farbe, Details,
+Kreativ, Verlauf & Werkzeuge) bei 1000 px Fensterhöhe zwei Befunde:
+(1) ein echter, bislang unbemerkter Fehler — die Kreativ-Registerkarte
+zeigte dauerhaft einen roten Fehlerbanner "Test-Stub: unbekannter
+invoke-Befehl 'list_builtin_lut_filters'", weil `e2e/tauri-mock.ts`
+für diesen seit Phase 16 Schritt 2 bestehenden echten Rust-Befehl
+(`crates/apx-app/src/commands.rs`, dort korrekt registriert) nie einen
+Mock-Fall bekommen hatte — betraf nur die Testumgebung, nicht die
+echte App, deckte aber eine reale Testlücke im "Filter"-Abschnitt der
+Kreativ-Registerkarte auf; (2) das strukturelle Kernproblem: jede der
+fünf Registerkarten bündelt seit Phase 18 Schritt 4 zwar mehrere
+vormals einzeln durchscrollte Fieldsets, zeigt sie aber weiterhin alle
+gleichzeitig und vollständig an — "Kreativ" allein enthält acht
+Unterabschnitte (Reparatur/Verflüssigen/Stiltransfer/Hautglätten/
+Himmelsaustausch/Filter/Compositing/Virtuelle Blende), "Licht" fünf
+(Weißabgleich/Grundeinstellungen/Kurven/HSL/Farbmischer/Kalibrierung)
+— das behobene "zu viel Scrollen"-Problem aus ADR-0046 bestand
+dadurch strukturell unverändert fort, nur eine Ebene tiefer (zwischen
+Registerkarten statt zwischen der einen langen Spalte).
+
+**Entscheidung (2), einklappbare Abschnitte statt Umstrukturierung:**
+Alle 30 `<fieldset>`/`<legend>`-Abschnittspaare in `DevelopPanel.tsx`
+und alle 6 in `MasksPanel.tsx` (dieselbe Sechs-Sektionen-Reglerstruktur
+für die ausgewählte Maske) wurden durch native `<details open>`/
+`<summary>` ersetzt (neue `.apx-collapsible`-Klasse in `index.css`:
+versteckter nativer Marker, eigener ▸/▾-Pfeil mit
+`transform: rotate(90deg)`-Übergang beim Öffnen/Schließen, respektiert
+`prefers-reduced-motion`/`.apx-reduce-motion` automatisch mit über
+dieselbe bereits bestehende globale Übergangsregel). Bewusst **nicht**
+serialisiert/`localStorage`-persistiert und bewusst alle mit `open`
+vorbelegt (nicht defaultmäßig zugeklappt) — jeder Abschnitt bleibt
+beim ersten Betrachten unverändert vollständig sichtbar, **nichts**
+verschwindet ungefragt hinter einem weiteren Klick, nur die
+Möglichkeit zum Zuklappen kommt neu hinzu. Wer die Regler kennt, die
+er gerade nicht braucht, klappt sie weg und reduziert damit den
+Scrollweg spürbar (v. a. in "Kreativ"/"Licht"); wer die App zum ersten
+Mal öffnet, sieht exakt dasselbe Bild wie vorher. `openStageAnchor()`
+(Node-Editor-"Öffnen"-Sprung, Phase 9 Schritt 7/Phase 18 Schritt 4)
+klappt das Zielelement jetzt zusätzlich per `element.open = true` auf,
+bevor es dorthin scrollt — sonst wäre "Öffnen" auf einem zuvor
+zugeklappten Abschnitt ein stiller Leerlauf gewesen.
+
+**Naheliegende, aber verworfene Umsetzung — `aria-label` überall
+identisch zum sichtbaren Titel:** Ein `<details>` bekommt seinen
+zugänglichen Namen (anders als `<fieldset>`+`<legend>`, dort per
+Spezifikation "Name from content") **nicht** automatisch aus seinem
+`<summary>`-Text — empirisch mit einem isolierten Playwright-
+Vergleichstest bewiesen: identischer Aufbau, `fieldset`+`legend`
+liefert `getByRole("group", { name: "Details" })` einen Treffer,
+`details`+`summary` keinen. Da im bestehenden Test-Bestand mehrfach
+`getByRole("group", { name: "<Legendentext>" })` verwendet wird (u. a.
+`node-editor-flow.spec.ts`, `develop-flow.spec.ts`), bekam jedes neue
+`<details>` probeweise ein `aria-label` identisch zum sichtbaren
+`<summary>`-Text. Das brach zwei Tests: `aria-label="Vorher/Nachher"`
+und `aria-label="Referenzansicht"` kollidierten mit den *echten*,
+gleichnamigen `aria-label`s von `BeforeAfterView.tsx`/
+`ReferenceView.tsx` (die nur bei aktivem Modus im DOM erscheinen und
+per `getByLabel(...).toHaveCount(0)` auf Abwesenheit geprüft werden,
+da Playwrights `getByLabel` — anders als `getByRole("group", {name})`
+— jedes Element mit passendem `aria-label` matcht, nicht nur
+Formularelemente). Für genau diese zwei Abschnitte blieb das
+`aria-label` deshalb weg (kein Test verlangt dafür einen
+Gruppennamen); alle übrigen 34 behielten ihr `aria-label` unverändert.
+Volle Playwright-Suite bestätigte anschließend 142/142 — keine
+weiteren Kollisionen.
+
+**Nebenbefund, sichtbar gemacht statt `sr-only` versteckt:** Der
+"Grundeinstellungen (Ton)"-Abschnitt in `DevelopPanel.tsx` hatte bisher
+eine rein für Screenreader/Tests gedachte `sr-only`-Legende (kein
+sichtbarer Titel, ging optisch nahtlos in den vorherigen
+Weißabgleich-Abschnitt über) — jetzt wie alle anderen Abschnitte
+sichtbar betitelt, da genau diese fehlende optische Grenze zur
+"unübersichtlich"-Beschwerde beitrug.
+
+Verifiziert per `tsc -b`, `vitest run` (251 Tests), voller
+Playwright-Suite (142/142) und realer Bildschirm-Kontrolle: Kreativ-
+Registerkarte lädt jetzt ohne Fehlerbanner, ein Abschnitt lässt sich
+sichtbar zu- und wieder aufklappen (Pfeil dreht sich, Inhalt
+verschwindet/erscheint), und der Node-Editor-"Öffnen"-Sprung klappt
+einen zuvor zugeklappten Zielabschnitt zuverlässig wieder auf.

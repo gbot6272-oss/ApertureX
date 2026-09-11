@@ -696,8 +696,8 @@ export function MasksPanel() {
       )}
 
       {selectedMask && activeTab === "light" && (
-        <fieldset className="flex flex-col gap-2 border-t border-border pt-2">
-          <legend className="mb-1 text-xs font-medium text-text-secondary">Grundeinstellungen</legend>
+        <details open className="apx-collapsible flex flex-col gap-2 border-t border-border pt-2" aria-label="Grundeinstellungen">
+          <summary className="mb-1 text-xs font-medium text-text-secondary">Grundeinstellungen</summary>
           {BASIC_SLIDER_SPECS.map((spec) => (
             <DevelopSlider
               key={spec.key}
@@ -707,12 +707,12 @@ export function MasksPanel() {
               onCommit={commitMaskDrag}
             />
           ))}
-        </fieldset>
+        </details>
       )}
 
       {selectedMask && activeTab === "light" && (
-        <fieldset className="flex flex-col gap-2 border-t border-border pt-2">
-          <legend className="mb-1 text-xs font-medium text-text-secondary">Kurven</legend>
+        <details open className="apx-collapsible flex flex-col gap-2 border-t border-border pt-2" aria-label="Kurven">
+          <summary className="mb-1 text-xs font-medium text-text-secondary">Kurven</summary>
           <div className="flex flex-wrap gap-1">
             {CURVE_CHANNEL_TABS.map((tab) => (
               <button
@@ -734,12 +734,12 @@ export function MasksPanel() {
             onChange={(next) => setMaskCurveChannel(selectedMask.id, activeCurveChannel, next)}
             onCommit={commitMaskDrag}
           />
-        </fieldset>
+        </details>
       )}
 
       {selectedMask && activeTab === "light" && (
-        <fieldset className="flex flex-col gap-2 border-t border-border pt-2">
-          <legend className="mb-1 text-xs font-medium text-text-secondary">HSL</legend>
+        <details open className="apx-collapsible flex flex-col gap-2 border-t border-border pt-2" aria-label="HSL">
+          <summary className="mb-1 text-xs font-medium text-text-secondary">HSL</summary>
           <div className="flex flex-wrap gap-1">
             {HSL_BAND_TABS.map((tab) => (
               <button
@@ -769,12 +769,12 @@ export function MasksPanel() {
               );
             })}
           </div>
-        </fieldset>
+        </details>
       )}
 
       {selectedMask && activeTab === "light" && (
-        <fieldset className="flex flex-col gap-2 border-t border-border pt-2">
-          <legend className="mb-1 text-xs font-medium text-text-secondary">Farbmischer</legend>
+        <details open className="apx-collapsible flex flex-col gap-2 border-t border-border pt-2" aria-label="Farbmischer">
+          <summary className="mb-1 text-xs font-medium text-text-secondary">Farbmischer</summary>
           <button
             type="button"
             onClick={toggleMaskColorMixerPicker}
@@ -832,12 +832,12 @@ export function MasksPanel() {
               })}
             </div>
           )}
-        </fieldset>
+        </details>
       )}
 
       {selectedMask && activeTab === "color" && (
-        <fieldset className="flex flex-col gap-2 border-t border-border pt-2">
-          <legend className="mb-1 text-xs font-medium text-text-secondary">Color Grading</legend>
+        <details open className="apx-collapsible flex flex-col gap-2 border-t border-border pt-2" aria-label="Color Grading">
+          <summary className="mb-1 text-xs font-medium text-text-secondary">Color Grading</summary>
           <div className="flex flex-wrap justify-center gap-3">
             {COLOR_GRADING_WHEEL_TABS.map((tab) => (
               <ColorWheel
@@ -863,12 +863,12 @@ export function MasksPanel() {
               onCommit={commitMaskDrag}
             />
           </div>
-        </fieldset>
+        </details>
       )}
 
       {selectedMask && activeTab === "details" && (
-        <fieldset className="flex flex-col gap-3 border-t border-border pt-2">
-          <legend className="mb-1 text-xs font-medium text-text-secondary">Details</legend>
+        <details open className="apx-collapsible flex flex-col gap-3 border-t border-border pt-2" aria-label="Details">
+          <summary className="mb-1 text-xs font-medium text-text-secondary">Details</summary>
           <div className="flex flex-col gap-2">
             {SHARPEN_SLIDER_SPECS.map((spec) => (
               <DevelopSlider
@@ -910,7 +910,7 @@ export function MasksPanel() {
               />
             ))}
           </div>
-        </fieldset>
+        </details>
       )}
     </PaletteFrame>
   );

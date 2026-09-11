@@ -133,7 +133,14 @@ const STAGE_ANCHOR_IDS: Record<keyof StageEnabled, string> = {
 };
 
 function openStageAnchor(key: keyof StageEnabled): void {
-  document.getElementById(STAGE_ANCHOR_IDS[key])?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const target = document.getElementById(STAGE_ANCHOR_IDS[key]);
+  // Die Regler-Abschnitte sind seit dem Phase-18-Nachtrag einzeln
+  // einklappbare `<details>` (siehe `index.css` `.apx-collapsible`) — ohne
+  // dieses Aufklappen würde "Öffnen" nur zu einem zugeklappten, leeren
+  // Abschnitt scrollen, statt die dahinterliegenden Regler tatsächlich
+  // sichtbar zu machen.
+  if (target instanceof HTMLDetailsElement) target.open = true;
+  target?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 /** Welche Registerkarte (Phase 18 Schritt 4) den Anker einer Stufe trägt —
@@ -539,8 +546,8 @@ export function DevelopPanel() {
       )}
 
       {selectedPhotoId && activeTab === "history" && (
-        <fieldset className="flex flex-col gap-1 rounded border border-border p-2" aria-label="Node-Editor">
-          <legend className="mb-1 px-1 text-xs font-medium text-text-secondary">Node-Editor (Rendering-Stufen)</legend>
+        <details open className="apx-collapsible flex flex-col gap-1 rounded border border-border p-2" aria-label="Node-Editor">
+          <summary className="mb-1 px-1 text-xs font-medium text-text-secondary">Node-Editor (Rendering-Stufen)</summary>
           <p className="mb-1 text-[11px] text-text-muted">
             Feste Reihenfolge, keine frei verschiebbaren Knoten — jede Stufe lässt sich ein-/ausschalten und öffnet per Klick den zugehörigen Regler-Abschnitt.
           </p>
@@ -574,12 +581,12 @@ export function DevelopPanel() {
               </li>
             ))}
           </ol>
-        </fieldset>
+        </details>
       )}
 
       {selectedPhotoId && activeTab === "history" && (
-        <fieldset className="flex flex-col gap-2">
-          <legend className="mb-1 text-xs font-medium text-text-secondary">Schnappschüsse</legend>
+        <details open className="apx-collapsible flex flex-col gap-2" aria-label="Schnappschüsse">
+          <summary className="mb-1 text-xs font-medium text-text-secondary">Schnappschüsse</summary>
           <button
             type="button"
             onClick={() => {
@@ -615,12 +622,19 @@ export function DevelopPanel() {
               </li>
             ))}
           </ul>
-        </fieldset>
+        </details>
       )}
 
+      {/* Kein `aria-label="Vorher/Nachher"` auf dem folgenden `<details>`
+          (anders als die übrigen Abschnitte, siehe Kommentar bei
+          `.apx-collapsible` in `index.css`) — würde mit
+          `BeforeAfterView.tsx`s eigenem, gleichnamigem `aria-label`
+          kollidieren, das genau bei aktivem Vorher/Nachher-Modus
+          erscheint und per `getByLabel` eigens auf An-/Abwesenheit
+          geprüft wird. */}
       {selectedPhotoId && activeTab === "history" && (
-        <fieldset className="flex flex-col gap-1">
-          <legend className="mb-1 text-xs font-medium text-text-secondary">Vorher/Nachher</legend>
+        <details open className="apx-collapsible flex flex-col gap-1">
+          <summary className="mb-1 text-xs font-medium text-text-secondary">Vorher/Nachher</summary>
           <div className="grid grid-cols-2 gap-1">
             <button
               type="button"
@@ -655,12 +669,15 @@ export function DevelopPanel() {
               Geteilt vertikal
             </button>
           </div>
-        </fieldset>
+        </details>
       )}
 
+      {/* Kein `aria-label="Referenzansicht"` auf dem folgenden `<details>`,
+          dieselbe Kollision wie beim Vorher/Nachher-Abschnitt oben —
+          `ReferenceView.tsx` trägt bereits denselben Namen. */}
       {selectedPhotoId && activeTab === "history" && (
-        <fieldset className="flex flex-col gap-1">
-          <legend className="mb-1 text-xs font-medium text-text-secondary">Referenzansicht</legend>
+        <details open className="apx-collapsible flex flex-col gap-1">
+          <summary className="mb-1 text-xs font-medium text-text-secondary">Referenzansicht</summary>
           <label className="flex items-center gap-2 text-xs text-text-secondary">
             Referenzfoto
             <select
@@ -686,12 +703,12 @@ export function DevelopPanel() {
           >
             Referenzansicht {referenceViewActive ? "ausblenden" : "anzeigen"}
           </button>
-        </fieldset>
+        </details>
       )}
 
       {selectedPhotoId && activeTab === "history" && (
-        <fieldset className="flex flex-col gap-2">
-          <legend className="mb-1 text-xs font-medium text-text-secondary">Soft-Proof</legend>
+        <details open className="apx-collapsible flex flex-col gap-2" aria-label="Soft-Proof">
+          <summary className="mb-1 text-xs font-medium text-text-secondary">Soft-Proof</summary>
           <button
             type="button"
             onClick={toggleSoftProof}
@@ -756,12 +773,12 @@ export function DevelopPanel() {
               </label>
             </>
           )}
-        </fieldset>
+        </details>
       )}
 
       {selectedPhotoId && activeTab === "history" && (
-        <fieldset className="flex flex-col gap-2">
-          <legend className="mb-1 text-xs font-medium text-text-secondary">Einstellungen kopieren/einfügen/synchronisieren</legend>
+        <details open className="apx-collapsible flex flex-col gap-2" aria-label="Einstellungen kopieren/einfügen/synchronisieren">
+          <summary className="mb-1 text-xs font-medium text-text-secondary">Einstellungen kopieren/einfügen/synchronisieren</summary>
           <div className="flex flex-col gap-1">
             {PRESET_SECTION_KEYS.map((key) => (
               <label key={key} className="flex items-center gap-2 text-xs text-text-secondary">
@@ -809,12 +826,12 @@ export function DevelopPanel() {
             <input type="checkbox" checked={autoSyncActive} onChange={toggleAutoSync} />
             Auto-Sync (jede Änderung sofort auf die übrige Auswahl übertragen, alle Sektionen)
           </label>
-        </fieldset>
+        </details>
       )}
 
       {activeTab === "history" && presetStrengthContext && (
-        <fieldset className="flex flex-col gap-2 rounded border border-accent/40 bg-accent/5 p-2">
-          <legend className="px-1 text-xs font-medium text-text-secondary">Preset „{presetStrengthContext.presetName}"</legend>
+        <details open className="apx-collapsible flex flex-col gap-2 rounded border border-accent/40 bg-accent/5 p-2" aria-label={`Preset „${presetStrengthContext.presetName}"`}>
+          <summary className="px-1 text-xs font-medium text-text-secondary">Preset „{presetStrengthContext.presetName}"</summary>
           <DevelopSlider
             spec={PRESET_STRENGTH_SPEC}
             value={presetStrengthContext.strength}
@@ -824,15 +841,15 @@ export function DevelopPanel() {
           <button type="button" onClick={dismissPresetStrengthContext} className="self-end text-xs text-text-muted underline">
             Stärke-Regler schließen
           </button>
-        </fieldset>
+        </details>
       )}
 
       {selectedPhotoId && (
         <>
           {activeTab === "light" && (
             <>
-              <fieldset className="flex flex-col gap-3">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Weißabgleich</legend>
+              <details open className="apx-collapsible flex flex-col gap-3" aria-label="Weißabgleich">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Weißabgleich</summary>
 
                 <div className="flex items-center gap-2">
                   <select
@@ -876,18 +893,26 @@ export function DevelopPanel() {
                     onCommit={() => void commitDevelopEdit()}
                   />
                 ))}
-              </fieldset>
+              </details>
 
-              <fieldset id="stage-basic" className="flex flex-col gap-3">
-                {/* Nur für Assistive Technologien / Tests: gruppiert diese
-                    Regler unter einem eigenen Namen, damit z. B. "Sättigung"
-                    hier eindeutig von der gleichnamigen HSL-Band-Regler
+              <details id="stage-basic" open className="apx-collapsible flex flex-col gap-3" aria-label="Grundeinstellungen (Ton)">
+                {/* Eigener benannter Abschnitt statt nahtlos an
+                    „Weißabgleich" anzuschließen: gruppiert diese Regler
+                    unter einem eigenen Namen, damit z. B. "Sättigung" hier
+                    eindeutig von der gleichnamigen HSL-Band-Regler
                     unterscheidbar bleibt (beide Abschnitte sind gleichzeitig
-                    sichtbar). Trägt außerdem den Anker für den Node-Editor
-                    (Phase 9 Schritt 7) — Textur/Klarheit leben im selben
-                    Regler-Satz wie die übrigen Grundeinstellungen, deshalb
-                    zeigt `local_contrast` auf denselben Anker. */}
-                <legend className="sr-only">Grundeinstellungen (Ton)</legend>
+                    sichtbar) — ursprünglich nur als `sr-only`-Legende für
+                    genau diesen Zweck gedacht, seit dem Phase-18-Nachtrag
+                    (einklappbare `<details>`-Abschnitte, siehe
+                    `index.css` `.apx-collapsible`) bewusst sichtbar
+                    gemacht: vorher ging der Übergang zwischen
+                    Weißabgleich- und Grundeinstellungen-Reglern optisch
+                    ohne jede Grenze ineinander über. Trägt außerdem den
+                    Anker für den Node-Editor (Phase 9 Schritt 7) —
+                    Textur/Klarheit leben im selben Regler-Satz wie die
+                    übrigen Grundeinstellungen, deshalb zeigt
+                    `local_contrast` auf denselben Anker. */}
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Grundeinstellungen (Ton)</summary>
                 {toneSpecs.map((spec) => (
                   <DevelopSlider
                     key={spec.key}
@@ -897,10 +922,10 @@ export function DevelopPanel() {
                     onCommit={() => void commitDevelopEdit()}
                   />
                 ))}
-              </fieldset>
+              </details>
 
-              <fieldset id="stage-curves" className="flex flex-col gap-2">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Kurven</legend>
+              <details id="stage-curves" open className="apx-collapsible flex flex-col gap-2" aria-label="Kurven">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Kurven</summary>
                 <div className="flex flex-wrap gap-1">
                   {CURVE_CHANNEL_TABS.map((tab) => (
                     <button
@@ -922,10 +947,10 @@ export function DevelopPanel() {
                   onChange={(next) => setCurveChannel(activeCurveChannel, next)}
                   onCommit={() => void commitDevelopEdit()}
                 />
-              </fieldset>
+              </details>
 
-              <fieldset id="stage-hsl_color_mixer" className="flex flex-col gap-2">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">HSL</legend>
+              <details id="stage-hsl_color_mixer" open className="apx-collapsible flex flex-col gap-2" aria-label="HSL">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">HSL</summary>
                 <div className="flex flex-wrap gap-1">
                   {HSL_BAND_TABS.map((tab) => (
                     <button
@@ -955,10 +980,10 @@ export function DevelopPanel() {
                     );
                   })}
                 </div>
-              </fieldset>
+              </details>
 
-              <fieldset className="flex flex-col gap-2">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Farbmischer</legend>
+              <details open className="apx-collapsible flex flex-col gap-2" aria-label="Farbmischer">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Farbmischer</summary>
                 <button
                   type="button"
                   onClick={toggleColorMixerPicker}
@@ -1019,10 +1044,10 @@ export function DevelopPanel() {
                     })}
                   </div>
                 )}
-              </fieldset>
+              </details>
 
-              <fieldset id="stage-calibration" className="flex flex-col gap-3">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Kalibrierung</legend>
+              <details id="stage-calibration" open className="apx-collapsible flex flex-col gap-3" aria-label="Kalibrierung">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Kalibrierung</summary>
                 {/* Nur `V1` existiert — reiner Vorwärtskompatibilitäts-Platzhalter
                     (siehe `crates/apx-pipeline/src/edl/v2.rs`s Moduldoku),
                     deshalb kein Auswahl-Widget, nur eine informative Anzeige. */}
@@ -1093,19 +1118,19 @@ export function DevelopPanel() {
                     </button>
                   )}
                 </div>
-              </fieldset>
+              </details>
             </>
           )}
 
           {activeTab === "color" && (
             <>
-              <fieldset className="flex flex-col gap-2">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Farb-Harmonie-Rad</legend>
+              <details open className="apx-collapsible flex flex-col gap-2" aria-label="Farb-Harmonie-Rad">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Farb-Harmonie-Rad</summary>
                 <ColorHarmonyWheel />
-              </fieldset>
+              </details>
 
-              <fieldset id="stage-treatment" className="flex flex-col gap-2">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Behandlung</legend>
+              <details id="stage-treatment" open className="apx-collapsible flex flex-col gap-2" aria-label="Behandlung">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Behandlung</summary>
                 <div className="flex gap-1" role="group" aria-label="Behandlung">
                   <button
                     type="button"
@@ -1149,10 +1174,10 @@ export function DevelopPanel() {
                     />
                   </>
                 )}
-              </fieldset>
+              </details>
 
-              <fieldset id="stage-color_grading" className="flex flex-col gap-2">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Color Grading</legend>
+              <details id="stage-color_grading" open className="apx-collapsible flex flex-col gap-2" aria-label="Color Grading">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Color Grading</summary>
                 <div className="flex flex-wrap justify-center gap-3">
                   {COLOR_GRADING_WHEEL_TABS.map((tab) => (
                     <ColorWheel
@@ -1178,14 +1203,14 @@ export function DevelopPanel() {
                     onCommit={() => void commitDevelopEdit()}
                   />
                 </div>
-              </fieldset>
+              </details>
             </>
           )}
 
           {activeTab === "details" && (
             <>
-              <fieldset id="stage-details" className="flex flex-col gap-3">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Details</legend>
+              <details id="stage-details" open className="apx-collapsible flex flex-col gap-3" aria-label="Details">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Details</summary>
                 <div className="flex flex-col gap-2">
                   {SHARPEN_SLIDER_SPECS.map((spec) => (
                     <DevelopSlider
@@ -1227,10 +1252,10 @@ export function DevelopPanel() {
                     />
                   ))}
                 </div>
-              </fieldset>
+              </details>
 
-              <fieldset id="stage-lens_corrections" className="flex flex-col gap-3">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Objektivkorrekturen</legend>
+              <details id="stage-lens_corrections" open className="apx-collapsible flex flex-col gap-3" aria-label="Objektivkorrekturen">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Objektivkorrekturen</summary>
 
                 <div className="flex items-center gap-2">
                   <label className="flex flex-1 items-center gap-2 text-xs text-text-secondary">
@@ -1387,10 +1412,10 @@ export function DevelopPanel() {
                     />
                   ))}
                 </div>
-              </fieldset>
+              </details>
 
-              <fieldset id="stage-effects" className="flex flex-col gap-3">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Effekte</legend>
+              <details id="stage-effects" open className="apx-collapsible flex flex-col gap-3" aria-label="Effekte">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Effekte</summary>
                 <div className="flex flex-col gap-2">
                   {POST_VIGNETTE_SLIDER_SPECS.map((spec) => (
                     <DevelopSlider
@@ -1428,10 +1453,10 @@ export function DevelopPanel() {
                     />
                   ))}
                 </div>
-              </fieldset>
+              </details>
 
-              <fieldset id="stage-geometry" className="flex flex-col gap-3">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Geometrie</legend>
+              <details id="stage-geometry" open className="apx-collapsible flex flex-col gap-3" aria-label="Geometrie">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Geometrie</summary>
                 <button
                   type="button"
                   aria-pressed={geometryCropActive}
@@ -1509,14 +1534,14 @@ export function DevelopPanel() {
                 >
                   Inhaltssensitiv skalieren…
                 </button>
-              </fieldset>
+              </details>
             </>
           )}
 
           {activeTab === "creative" && (
             <>
-              <fieldset id="stage-repair" className="flex flex-col gap-3">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Reparatur (Klonen/Reparieren)</legend>
+              <details id="stage-repair" open className="apx-collapsible flex flex-col gap-3" aria-label="Reparatur (Klonen/Reparieren)">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Reparatur (Klonen/Reparieren)</summary>
 
                 {/* Frequenztrennungs-Ansichtsmodus (Phase 14 Schritt 2,
                     ADR-0041): zeigt Tieffrequenz/Hochfrequenz statt des
@@ -1749,14 +1774,14 @@ export function DevelopPanel() {
                     ))}
                   </ul>
                 )}
-              </fieldset>
+              </details>
 
               {/* Photoshop-Funktion: Verflüssigen (Liquify, Phase 15 Schritt 3,
                   ADR-0042) — Lightroom hat kein Verformungswerkzeug. Rein
                   deterministische CPU-Verzerrung, kein separates „Anwenden"
                   nötig (siehe `stages::liquify`s Moduldoku, `LiquifyOverlay`). */}
-              <fieldset id="stage-liquify" className="flex flex-col gap-3">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Verflüssigen</legend>
+              <details id="stage-liquify" open className="apx-collapsible flex flex-col gap-3" aria-label="Verflüssigen">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Verflüssigen</summary>
 
                 <button
                   type="button"
@@ -1815,39 +1840,39 @@ export function DevelopPanel() {
                     ))}
                   </ul>
                 )}
-              </fieldset>
+              </details>
 
               {/* KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9,
                   ADR-0041 Nachtrag IX) — läuft nach `composite`, vor
                   `geometry` (siehe `stages::style_transfer`s Moduldoku). */}
-              <fieldset id="stage-style_transfer" className="flex flex-col gap-2">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Stiltransfer</legend>
+              <details id="stage-style_transfer" open className="apx-collapsible flex flex-col gap-2" aria-label="Stiltransfer">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Stiltransfer</summary>
                 <StyleTransferPanel />
-              </fieldset>
+              </details>
 
               {/* Photoshop-Funktion: Automatisches Hautglätten (Phase 15
                   Schritt 5, ADR-0042) — läuft nach `style_transfer`, vor
                   `sky_replace` (siehe `stages::skin_smoothing`s Moduldoku). */}
-              <fieldset id="stage-skin_smoothing" className="flex flex-col gap-2">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Hautglätten</legend>
+              <details id="stage-skin_smoothing" open className="apx-collapsible flex flex-col gap-2" aria-label="Hautglätten">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Hautglätten</summary>
                 <SkinSmoothingPanel />
-              </fieldset>
+              </details>
 
-              <fieldset id="stage-sky_replace" className="flex flex-col gap-2">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Himmelsaustausch</legend>
+              <details id="stage-sky_replace" open className="apx-collapsible flex flex-col gap-2" aria-label="Himmelsaustausch">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Himmelsaustausch</summary>
                 <SkyReplacePanel />
-              </fieldset>
+              </details>
 
               {/* Filter-/LUT-Bibliothek (Phase 16 Schritt 1, ADR-0043) — läuft
                   nach `sky_replace`, vor `liquify` (siehe `stages::
                   lut_filter`s Moduldoku). */}
-              <fieldset id="stage-lut_filter" className="flex flex-col gap-2">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Filter</legend>
+              <details id="stage-lut_filter" open className="apx-collapsible flex flex-col gap-2" aria-label="Filter">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Filter</summary>
                 <LutFilterPanel />
-              </fieldset>
+              </details>
 
-              <fieldset id="stage-composite" className="flex flex-col gap-2">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Compositing</legend>
+              <details id="stage-composite" open className="apx-collapsible flex flex-col gap-2" aria-label="Compositing">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Compositing</summary>
                 <p className="text-xs text-text-muted">Mehrfachbelichtung: legt ein weiteres Foto oder eine Textur (z. B. ein Lichtleck) über das aktuelle Bild.</p>
 
                 <label className="flex items-center gap-2 text-xs text-text-secondary">
@@ -1968,7 +1993,7 @@ export function DevelopPanel() {
                     </li>
                   ))}
                 </ul>
-              </fieldset>
+              </details>
 
               {/* KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14
                   Schritt 8, ADR-0041 Nachtrag VIII) — läuft nach dem
@@ -1976,17 +2001,17 @@ export function DevelopPanel() {
                   Moduldoku), in der Anzeige aber neben `composite` platziert
                   (dieselbe Vereinfachung wie bei allen übrigen Knoten:
                   Anzeigereihenfolge = `STAGE_NODE_SPECS`). */}
-              <fieldset id="stage-virtual_aperture" className="flex flex-col gap-2">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Virtuelle Blende</legend>
+              <details id="stage-virtual_aperture" open className="apx-collapsible flex flex-col gap-2" aria-label="Virtuelle Blende">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Virtuelle Blende</summary>
                 <VirtualAperturePanel />
-              </fieldset>
+              </details>
             </>
           )}
 
           {activeTab === "history" && (
             <>
-              <fieldset className="flex flex-col gap-2">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">Entrauschung &amp; Hochskalierung</legend>
+              <details open className="apx-collapsible flex flex-col gap-2" aria-label="Entrauschung &amp; Hochskalierung">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Entrauschung &amp; Hochskalierung</summary>
                 <p className="text-xs text-text-muted">Klassische Algorithmen (Bilateral-Filter, kantengerichtete Interpolation), keine Modellinferenz — schreiben eine neue Datei neben dem Original, ändern die Bearbeitung nicht.</p>
                 {/* `flex-wrap` statt starrem Einzeiler (siehe Begründung
                     beim Verflüssigen-Modus oben) — "2× hochskalieren" ist
@@ -2011,10 +2036,10 @@ export function DevelopPanel() {
                   </button>
                 </div>
                 {enhanceStatus && <p className="text-xs text-text-muted">{enhanceStatus}</p>}
-              </fieldset>
+              </details>
 
-              <fieldset className="flex flex-col gap-2">
-                <legend className="mb-1 text-xs font-medium text-text-secondary">DNG-Konvertierung</legend>
+              <details open className="apx-collapsible flex flex-col gap-2" aria-label="DNG-Konvertierung">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">DNG-Konvertierung</summary>
                 <p className="text-xs text-text-muted">
                   Schreibt eine „Linear DNG" aus den unveränderten, kamera-nativen RAW-Daten (nicht dem entwickelten
                   Rendering) neben das Original — ein Rohdatenformat mit demosaicten statt der ursprünglichen
@@ -2028,7 +2053,7 @@ export function DevelopPanel() {
                 >
                   {enhanceRunning === "dng" ? "Konvertiert…" : "Als DNG konvertieren"}
                 </button>
-              </fieldset>
+              </details>
             </>
           )}
         </>

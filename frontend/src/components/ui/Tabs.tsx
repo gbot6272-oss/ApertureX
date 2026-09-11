@@ -1,3 +1,5 @@
+import { playCue } from "../../lib/sound";
+
 /**
  * Gemeinsame Registerkarten-Leiste (Phase 18 Schritt 4, siehe
  * `DECISIONS.md` ADR-0046) — von `DevelopPanel.tsx` und `MasksPanel.tsx`
@@ -31,7 +33,10 @@ export function TabBar<T extends string>({
           type="button"
           role="tab"
           aria-selected={active === tab.id}
-          onClick={() => onChange(tab.id)}
+          onClick={() => {
+            if (tab.id !== active) playCue("select");
+            onChange(tab.id);
+          }}
           className={`flex-1 rounded px-2 py-1 text-xs transition-colors duration-[var(--duration-fast)] ${
             active === tab.id ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}

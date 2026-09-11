@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { CommandPalette } from "./components/CommandPalette";
 import { CompareGridView } from "./components/CompareGridView";
@@ -18,11 +19,77 @@ import { PeopleView } from "./components/PeopleView";
 import { PresetsPanel } from "./components/PresetsPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
+import { StartupSplash } from "./components/StartupSplash";
 import { VideoPlayer } from "./components/VideoPlayer";
 import { Viewer } from "./components/Viewer";
+import { ShutdownOverlay } from "./components/ShutdownOverlay";
 import { useImportEvents } from "./hooks/useImportEvents";
 import { matchesBinding } from "./lib/keybindings";
+import { usePrefersReducedMotion } from "./lib/motion";
+import { applySoundSettings, playCue, useAccordionSounds, useUnlockSoundOnFirstInteraction } from "./lib/sound";
 import { useAppStore } from "./store";
+
+const SHUTDOWN_TRANSITION_MS = 420;
+
+/**
+ * Beenden-Übergang (Phase 19, siehe `ShutdownOverlay.tsx`s Moduldoku) —
+ * fängt das erste Schließen-Ereignis des Fensters ab (`preventDefault`),
+ * zeigt kurz die Übergangsfläche + spielt einen Sound, dann schließt das
+ * Fenster tatsächlich. `confirmedRef` verhindert eine Endlosschleife:
+ * das zweite (selbst ausgelöste) `close()` darf nicht erneut abgefangen
+ * werden.
+ *
+ * `getCurrentWindow()` liest synchron `window.__TAURI_INTERNALS__.
+ * metadata.currentWindow.label` (siehe `@tauri-apps/api/window`s
+ * Quelltext) — sowohl in Playwright-Tests (`tauri-mock.ts` setzt kein
+ * `metadata`-Feld) als auch im per `vite preview` ohne Tauri-Hülle
+ * geöffneten Browser-Tab ist dieses Feld nicht vorhanden, der Aufruf
+ * wirft dann sofort. Ein ungefangener Wurf in einem `useEffect` reißt
+ * in React die ganze Baum-Wurzel mit (genau das brach beim ersten
+ * Versuch dieser Funktion die komplette Test-Suite) — deshalb hier
+ * bewusst in `try`/`catch`: fehlt der echte Tauri-Fensterkontext, bleibt
+ * dieser Hook ein folgenloser No-op, statt die App zum Absturz zu
+ * bringen.
+ */
+function useShutdownTransition(): boolean {
+  const [closing, setClosing] = useState(false);
+  const confirmedRef = useRef(false);
+  const reducedMotion = usePrefersReducedMotion();
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    try {
+      void getCurrentWindow()
+        .onCloseRequested((event) => {
+          if (confirmedRef.current) return;
+          event.preventDefault();
+          setClosing(true);
+          playCue("stop");
+          const delay = reducedMotion ? 0 : SHUTDOWN_TRANSITION_MS;
+          setTimeout(() => {
+            confirmedRef.current = true;
+            try {
+              void getCurrentWindow().close();
+            } catch {
+              // Siehe Moduldoku oben.
+            }
+          }, delay);
+        })
+        .then((fn) => {
+          unlisten = fn;
+        })
+        .catch(() => {
+          // Kein echtes Tauri-Fenster (Browser-Vorschau/Tests) — siehe
+          // Moduldoku oben.
+        });
+    } catch {
+      // Siehe Moduldoku oben.
+    }
+    return () => unlisten?.();
+  }, [reducedMotion]);
+
+  return closing;
+}
 
 async function toggleFullscreen(): Promise<void> {
   if (document.fullscreenElement) {
@@ -77,6 +144,14 @@ export default function App() {
   const redoLibraryAction = useAppStore((s) => s.redoLibraryAction);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
+  // Start-Ladeschirm (Phase 19, siehe `StartupSplash.tsx`s Moduldoku) —
+  // "bereit" heißt: die beiden für den ersten sinnvollen Bildschirm
+  // nötigen Ladevorgänge sind durch. `refreshFolders` fließt bewusst
+  // nicht mit ein: dessen Ergebnis zeigt sich ohnehin erst in der
+  // Seitenleiste, ein Warten darauf würde den Splash unnötig verlängern.
+  const catalogStatus = useAppStore((s) => s.catalogStatus);
+  const appReady = uiSettings !== null && catalogStatus !== null;
+  const shuttingDown = useShutdownTransition();
 
   useEffect(() => {
     void refreshFolders();
@@ -106,7 +181,19 @@ export default function App() {
     } else {
       root.style.removeProperty("--color-accent");
     }
+
+    // UI-Sounds (Phase 19, siehe `DECISIONS.md` ADR-0047) — derselbe
+    // "Store schreibt, dieser Effekt wendet an"-Mechanismus wie oben.
+    if (uiSettings) {
+      applySoundSettings(uiSettings);
+    }
   }, [uiSettings]);
+
+  // Web-Audio darf laut Browser-Autoplay-Policy erst nach einer echten
+  // Zeiger-/Tastatur-Interaktion starten (siehe `lib/sound.ts`).
+  useUnlockSoundOnFirstInteraction();
+  // App-weiter Akkordeon-Sound (siehe `lib/sound.ts`s Moduldoku).
+  useAccordionSounds();
 
   // Onboarding (Phase 10 Schritt 9): einmaliges automatisches Erstanzeigen
   // über uiSettings.onboarding_seen, sobald die Einstellungen tatsächlich
@@ -181,11 +268,13 @@ export default function App() {
       // denselben Tastendruck reagieren.
       if (!developPanelOpen && matchesBinding(event, "redo")) {
         event.preventDefault();
+        playCue("redo");
         void redoLibraryAction();
         return;
       }
       if (!developPanelOpen && matchesBinding(event, "undo")) {
         event.preventDefault();
+        playCue("undo");
         void undoLibraryAction();
         return;
       }
@@ -220,6 +309,8 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col bg-bg-base text-text-primary">
+      <StartupSplash ready={appReady} />
+      <ShutdownOverlay visible={shuttingDown} />
       <Header onOpenPalette={() => setPaletteOpen(true)} />
       <ErrorBanner />
       {(centerView === "grid" || centerView === "overview") && <FilterBar />}

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { useFocusTrap } from "../../lib/a11y";
 import { DURATION_BASE_MS, usePrefersReducedMotion } from "../../lib/motion";
+import { playCue } from "../../lib/sound";
 
 export interface DialogProps {
   open: boolean;
@@ -48,19 +49,29 @@ export function Dialog({
   const [entered, setEntered] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const reducedMotion = usePrefersReducedMotion();
+  // Verhindert einen Sound beim allerersten Rendern (jeder Dialog wird
+  // laut Modul-Doku oben dauerhaft mit `open={false}` gerendert, nicht
+  // erst bei Bedarf gemountet — ohne diese Wächter würde jeder der 25
+  // Dialoge beim App-Start einmal lautlos-gemeinten "close"-Cue
+  // auslösen).
+  const isFirstRenderRef = useRef(true);
 
   useFocusTrap(panelRef, open);
 
   useEffect(() => {
     if (open) {
       setMounted(true);
+      if (!isFirstRenderRef.current) playCue("open");
       // Erst im nächsten Frame auf "eingeblendet" schalten, sonst
       // startet der Übergang bereits im Zielzustand (kein sichtbarer
       // Sprung von unsichtbar zu sichtbar möglich, wenn beides im
       // selben Layout-Zyklus passiert).
+      isFirstRenderRef.current = false;
       const raf = requestAnimationFrame(() => setEntered(true));
       return () => cancelAnimationFrame(raf);
     }
+    if (!isFirstRenderRef.current) playCue("close");
+    isFirstRenderRef.current = false;
     setEntered(false);
     const delay = reducedMotion ? 0 : DURATION_BASE_MS;
     const timeout = setTimeout(() => setMounted(false), delay);

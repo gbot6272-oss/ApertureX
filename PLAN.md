@@ -1175,6 +1175,29 @@ Volle Suite gebündelt erst im letzten Schritt.
 - [ ] 10. Dokumentation, volle Verifikation, Abnahme
 - [x] `tsc -b`, volle `vitest run`-Suite (251 Tests, 28 neue), `map-flow.spec.ts` grün
 
+## Aktuelle Phase: Phase 19 — Animationen + UI-Sounds
+
+Nutzerwunsch: Animationen (Start/Beenden, Klick, Scroll, Bearbeitung-
+im-Prozess/Laden, echter Ladeschirm statt grauer Fläche) + UI-Sounds,
+insgesamt mind. 30, nach Möglichkeit auf fertigem statt komplett
+selbst gebautem Material aufbauend. Netzwerk-Policy dieser Umgebung
+blockiert alle getesteten Asset-/Sound-Marktplätze (nur GitHub/npm
+erreichbar) — zwei neue, vollständig kostenlose/lizenzfreie
+npm-Abhängigkeiten (`gsap`, `uisfx`) statt externer Downloads, nach
+Abwägung mit dem Nutzer bestätigt. Details, Entwurfsentscheidungen und
+ein real aufgetretener, die ganze Test-Suite brechender Fehler samt
+Fix: siehe `DECISIONS.md` ADR-0047.
+
+- [x] 0. ADR-0047 + `pnpm add gsap uisfx`, `lib/sound.ts` (uisfx-Wrapper, Player-Singleton), Rust `UiSettings` um `sound_enabled`/`sound_volume_percent`/`sound_pack` erweitert (DTO + Commands + `tauri-mock.ts`), `SettingsDialog.tsx`-Steuerfläche (an/aus, Lautstärke, Klangwelt-Auswahl mit Vorhören)
+- [x] 1. `StartupSplash.tsx` (sich öffnender Iris-Ring + Wortmarke statt grauer Fläche, GSAP, non-blocking Overlay) + `ShutdownOverlay.tsx`/`useShutdownTransition` (fängt `onCloseRequested` ab) — dabei realer Fund: ungeschützter `getCurrentWindow()`-Aufruf brach beim ersten Versuch die komplette 142-Test-Suite (0/142), da `__TAURI_INTERNALS__.metadata` weder im Playwright-Mock noch im `vite preview`-Browser-Tab existiert; behoben per `try`/`catch`, danach 142/142 grün
+- [x] 2. Globale Mikrointeraktionen: `components/ui/Dialog.tsx`/`Sheet.tsx` (open/close-Sound, Erstmontage-Wächter), `ui/Menu.tsx` (expand/collapse/select), `ui/Tabs.tsx` (select), `App.tsx`/`DevelopPanel.tsx` (undo/redo), Akkordeon (`lib/sound.ts`s `useAccordionSounds`, ein einziger delegierter `toggle`-Listener in der Capture-Phase statt 36 Einzelstellen)
+- [x] 3. `GridView.tsx`: neue `.apx-grid-cell-in`-CSS-Scroll-Reveal-Animation je virtualisierter Kachel (reines CSS statt GSAP-Tween pro Kachel, da `@tanstack/react-virtual` laufend neu mountet) + `select`-Klick-Sound
+- [x] 4. `store/index.ts`s `exportPhotos`: `processing`-Sound beim Start, `success`/`error` beim Abschluss
+- [x] 5. (in Schritt 0 miterledigt, siehe oben) Sound-Einstellungen-UI
+- [x] 6. Dokumentation (`DECISIONS.md` ADR-0047), volle Verifikation: `cargo fmt --check`/`cargo clippy -p apx-core -p apx-app --all-targets` sauber, `cargo test -p apx-core settings` (6/6, TOML-Rundlauf mit den drei neuen Feldern), `tsc -b`, `vitest run` (251/251), volle Playwright-Suite (142/142 nach dem Fix), reale Screenshot-Kontrolle (Start-Ladeschirm, neue Sound-Einstellungen)
+
+- [x] Nachtrag: KI-Verarbeitung + Drag&Drop nachgeholt (Nutzerwunsch "Alles machen") — 56 `playCue("processing")`-Stellen in 45 Store-Aktionen (Hautglätten/Stiltransfer/Himmelsaustausch, KI-Ausfüllen/-Outpainting, Content-Aware Move/Scale, alle vier Stacking-Arten, alle sechs Preset-Generator-Varianten, alle sieben Opt-in-Modell-Downloads, Video-Werkzeuge, Skript/Plugin/Freigabe, Drucken/Diashow/Buch/Web-Export/Workflow/Batch), bewusst ohne triviale Navigations-/Listen-Ladezustände; `MaskOverlay.tsx`s zentrale Ziehgriff-Funktionen (`drag-start`/`drop`) und `PaletteFrame.tsx`s Breiten-Ziehgriff + Ein-/Ausklapp-Knöpfe — siehe DECISIONS.md ADR-0047-Nachtrag; `tsc -b`/`vitest run` (251)/volle Playwright-Suite (142/142) grün
+
 ## Aktuelle Phase: Phase 18 — UI/UX-Overhaul
 
 Nutzerurteil nach eigenem Test der App (Screenshot beigefügt): wirkt

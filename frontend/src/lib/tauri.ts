@@ -1483,6 +1483,12 @@ export interface UiSettingsDto {
   high_contrast: boolean;
   reduced_motion: boolean;
   onboarding_seen: boolean;
+  /** UI-Sounds an/aus (Phase 19, siehe `DECISIONS.md` ADR-0047). */
+  sound_enabled: boolean;
+  /** Lautstärke der UI-Sounds, 0–100. */
+  sound_volume_percent: number;
+  /** `uisfx`-Klangwelt, siehe `lib/sound.ts`s `SOUND_PACKS`. */
+  sound_pack: string;
 }
 
 export function getUiSettings(): Promise<UiSettingsDto> {

@@ -40,6 +40,18 @@ pub struct UiSettings {
     /// — steuert nur das automatische Erstanzeigen, nicht die manuelle
     /// erneute Aufrufbarkeit über die Befehlspalette.
     pub onboarding_seen: bool,
+    /// UI-Sounds an/aus (Phase 19, siehe `DECISIONS.md` ADR-0047) —
+    /// unabhängig von `reduced_motion`: manche Nutzer wollen Bewegung,
+    /// aber keinen Ton, oder umgekehrt.
+    pub sound_enabled: bool,
+    /// Lautstärke der UI-Sounds in Prozent, 0–100.
+    pub sound_volume_percent: u16,
+    /// Klangwelt (`uisfx`-"Pack", z. B. "glass"/"studio"/"minimal"/
+    /// "cinematic") — siehe `frontend/src/lib/sound.ts`. Freitext statt
+    /// Enum, damit ein künftiges `uisfx`-Update mit weiteren Packs ohne
+    /// Rust-seitige Änderung nutzbar ist; ungültige Werte fängt das
+    /// Frontend beim Aufbau des Players ab (Fallback auf "glass").
+    pub sound_pack: String,
 }
 
 impl Default for UiSettings {
@@ -52,6 +64,9 @@ impl Default for UiSettings {
             high_contrast: false,
             reduced_motion: false,
             onboarding_seen: false,
+            sound_enabled: true,
+            sound_volume_percent: 70,
+            sound_pack: "glass".to_string(),
         }
     }
 }

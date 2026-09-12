@@ -420,7 +420,7 @@ export function importLutCubeFile(): Promise<LutFilterDataDto | null> {
   return invoke<LutFilterDataDto | null>("import_lut_cube_file");
 }
 
-/** Die fünf eingebauten, selbst erstellten Filter-Looks (Phase 16
+/** Die zehn eingebauten, selbst erstellten Filter-Looks (Phase 16
  * Schritt 2, siehe `apx_pipeline::builtin_luts`s Moduldoku — original
  * erstellt, kein externer Download). Reine Berechnung serverseitig,
  * sinnvoll einmalig pro Sitzung zu laden statt bei jedem Panel-Öffnen

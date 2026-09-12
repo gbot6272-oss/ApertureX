@@ -1,11 +1,12 @@
 //! Eingebaute, selbst erstellte Filter-Looks (Phase 16 Schritt 2, siehe
-//! `DECISIONS.md` ADR-0043-Nachtrag) — bewusst NICHT von einer der real
-//! recherchierten externen LUT-Quellen heruntergeladen: keine einzelne
-//! Quelle mit "Hunderte/Tausende einheitlich lizenzierte Filter"
-//! gefunden, freie LUT-Pakete haben eine über Dutzende Quellen
-//! verstreute, uneinheitliche Lizenzlage (siehe ADR-0043). Fünf
-//! einfache, selbst formulierte Farbverläufe als Startpunkt — dieselbe
-//! Rolle wie Lightrooms eigene mitgelieferte "Creative"-Profile: original
+//! `DECISIONS.md` ADR-0043-Nachtrag; auf zehn erweitert in Phase 22,
+//! ADR-0050 — Nutzerwunsch "mehr Farbprofile") — bewusst NICHT von einer
+//! der real recherchierten externen LUT-Quellen heruntergeladen: keine
+//! einzelne Quelle mit "Hunderte/Tausende einheitlich lizenzierte
+//! Filter" gefunden, freie LUT-Pakete haben eine über Dutzende Quellen
+//! verstreute, uneinheitliche Lizenzlage (siehe ADR-0043). Zehn
+//! einfache, selbst formulierte Farbverläufe — dieselbe Rolle wie
+//! Lightrooms eigene mitgelieferte "Creative"-Profile: original
 //! erstellt, kein Redistributions-/Lizenzrisiko, weil kein fremdes Werk
 //! enthalten ist. Ergänzt (nicht ersetzt) den freien `.cube`-Import aus
 //! Schritt 1 — für "Hunderte/Tausende Effekte" bringt der Nutzer eigene
@@ -32,15 +33,25 @@ pub enum BuiltinLut {
     HighContrastBw,
     Faded,
     TealOrange,
+    VintageFilm,
+    CinematicBlue,
+    GoldenHour,
+    Noir,
+    Pastel,
 }
 
 impl BuiltinLut {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 10] = [
         Self::Warm,
         Self::Cool,
         Self::HighContrastBw,
         Self::Faded,
         Self::TealOrange,
+        Self::VintageFilm,
+        Self::CinematicBlue,
+        Self::GoldenHour,
+        Self::Noir,
+        Self::Pastel,
     ];
 
     pub fn id(self) -> &'static str {
@@ -50,6 +61,11 @@ impl BuiltinLut {
             Self::HighContrastBw => "high_contrast_bw",
             Self::Faded => "faded",
             Self::TealOrange => "teal_orange",
+            Self::VintageFilm => "vintage_film",
+            Self::CinematicBlue => "cinematic_blue",
+            Self::GoldenHour => "golden_hour",
+            Self::Noir => "noir",
+            Self::Pastel => "pastel",
         }
     }
 
@@ -60,6 +76,11 @@ impl BuiltinLut {
             Self::HighContrastBw => "Kontrastreich S/W",
             Self::Faded => "Verblasst",
             Self::TealOrange => "Kino Teal-Orange",
+            Self::VintageFilm => "Vintage-Film",
+            Self::CinematicBlue => "Kino-Blau",
+            Self::GoldenHour => "Goldene Stunde",
+            Self::Noir => "Film Noir",
+            Self::Pastel => "Pastell",
         }
     }
 
@@ -91,6 +112,48 @@ impl BuiltinLut {
                     r + 0.10 * hi - 0.04 * lo,
                     g + 0.03 * hi + 0.02 * lo,
                     b - 0.06 * hi + 0.08 * lo,
+                ]
+            }
+            // Sepia-artiger Warmstich + deutlich angehobene, insbesondere
+            // blaue Schwarzwerte (klassischer Alt-Film-Look) — stärker
+            // farbstichig als `Faded`, das nur neutral aufhellt.
+            Self::VintageFilm => [r * 0.92 + 0.10, g * 0.86 + 0.08, b * 0.75 + 0.05],
+            // Split-Tone, der (anders als `TealOrange`) nur die Schatten
+            // einfärbt — Lichter bleiben nahezu neutral, für einen
+            // ruhigeren, "moodigen" Kino-Look statt eines auffälligen
+            // Zwei-Farben-Kontrasts.
+            Self::CinematicBlue => {
+                let l = luminance(r, g, b);
+                let shadow = (1.0 - l).powf(1.5);
+                [r - 0.05 * shadow, g - 0.01 * shadow, b + 0.14 * shadow]
+            }
+            // Warmer Goldstich, stärker in den Lichtern als in den
+            // Schatten (steigt mit der Luminanz statt umgekehrt).
+            Self::GoldenHour => {
+                let l = luminance(r, g, b);
+                [
+                    r + 0.08 + 0.05 * l,
+                    g + 0.04 + 0.02 * l,
+                    b - 0.08 - 0.03 * l,
+                ]
+            }
+            // Dramatischeres Schwarzweiß als `HighContrastBw`: stärkere
+            // S-Kurve plus zusätzliches Abdunkeln der bereits dunklen
+            // Bereiche ("gecrushte" Schwarzwerte, klassischer Noir-Look).
+            Self::Noir => {
+                let l = luminance(r, g, b);
+                let c = 0.5 + (l - 0.5) * 1.7;
+                let crushed = if c < 0.12 { c * 0.4 } else { c };
+                [crushed, crushed, crushed]
+            }
+            // Entsättigt Richtung Luminanz (weicherer Kontrast) und hebt
+            // alle Kanäle leicht an — der "Pastell"-Gegenpol zu `Noir`.
+            Self::Pastel => {
+                let l = luminance(r, g, b);
+                [
+                    r * 0.7 + l * 0.3 + 0.08,
+                    g * 0.7 + l * 0.3 + 0.08,
+                    b * 0.7 + l * 0.3 + 0.06,
                 ]
             }
         }

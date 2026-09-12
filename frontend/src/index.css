@@ -408,3 +408,107 @@ button:not(:disabled):active {
 .apx-collapsible > summary:hover::before {
   color: var(--color-text-secondary);
 }
+
+/* "Bessere Regler" (Phase 22, siehe `DECISIONS.md` ADR-0050) — jeder
+   `<input type="range">` in der App (die ~40 Entwickeln-Regler über
+   `DevelopSlider.tsx` plus die übrigen freistehenden Regler in Export-/
+   Druck-/Leinwand-Dialogen, Einstellungen, Viewer-Zoom, Video-
+   Wiedergabe) rannte bis dahin komplett unstilisiert — der nackte
+   Browser-Standard (grauer Balken, runder Punkt), während jede andere
+   Fläche der App längst eigene Tokens/Liquid-Glass-Optik trägt. Eigene
+   Track-/Griff-Gestaltung über die `-webkit-*`-Pseudoelemente reicht:
+   Tauris drei Ziel-WebViews (WebView2 unter Windows, WKWebView unter
+   macOS, WebKitGTK unter Linux) sind alle WebKit-/Blink-Abkömmlinge und
+   verstehen dieselben `-webkit-slider-*`-Selektoren; `-moz-*` zusätzlich
+   nur als Bonus für einen direkten Firefox-Aufruf von `vite preview`,
+   nicht der reale Auslieferungspfad dieser App (siehe `DECISIONS.md`
+   ADR-0010). `-webkit-appearance: none` entfernt zuerst die native
+   Optik vollständig, danach volle eigene Kontrolle über Maße/Farben. */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 1rem;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-border);
+}
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-border);
+}
+
+/* `.apx-range` (nur `DevelopSlider.tsx`): `--range-progress` wird pro
+   Regler aus dem aktuellen Wert berechnet (siehe dortige Moduldoku) —
+   färbt den Balken bis zum aktuellen Wert in der Akzentfarbe ein, statt
+   ihn durchgehend einfarbig zu lassen. Firefox bekommt dieselbe Optik
+   kostenlos über sein natives `::-moz-range-progress`-Pseudoelement,
+   ohne die JS-Berechnung zu brauchen. */
+input[type="range"].apx-range::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, var(--color-accent) var(--range-progress), var(--color-border) var(--range-progress));
+}
+input[type="range"].apx-range::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-accent);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 2px solid var(--color-bg-raised);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 35%);
+  transition:
+    transform var(--duration-fast) cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow var(--duration-fast) cubic-bezier(0.4, 0, 0.2, 1);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 2px solid var(--color-bg-raised);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 35%);
+  transition:
+    transform var(--duration-fast) cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow var(--duration-fast) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Griff-Rückmeldung: spürbar beim Ziehen, dezent beim bloßen Überfahren
+   — dieselbe Zwei-Stufen-Logik wie die App-weite Knopf-Skalierung
+   (Phase 20, ADR-0048-Nachtrag). `:active` deckt sowohl den Griff selbst
+   als auch ein Antippen der Leiste ab (der native Sprung ans
+   Klickziel bleibt dabei Browser-Standardverhalten, unverändert). */
+input[type="range"]:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.3);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 45%);
+}
+input[type="range"]:hover::-moz-range-thumb {
+  transform: scale(1.15);
+}
+input[type="range"]:active::-moz-range-thumb {
+  transform: scale(1.3);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 45%);
+}
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 40%, transparent);
+}

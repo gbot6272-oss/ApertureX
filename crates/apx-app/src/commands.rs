@@ -1084,7 +1084,7 @@ impl From<apx_pipeline::edl::LutFilterData> for LutFilterDataDto {
     }
 }
 
-/// Liefert die fünf eingebauten, selbst erstellten Filter-Looks
+/// Liefert die zehn eingebauten, selbst erstellten Filter-Looks
 /// (`apx_pipeline::builtin_luts`, siehe dessen Moduldoku — original
 /// erstellt statt von einer externen Quelle heruntergeladen, dieselbe
 /// Rolle wie Lightrooms eigene mitgelieferte "Creative"-Profile). Reine

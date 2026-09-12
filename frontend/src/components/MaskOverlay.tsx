@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 
 import { radialGradientAxisHandlePositions, radialGradientBoundaryPoints, type MaskGeometry, type MaskPoint } from "../lib/edl";
 import { playCue } from "../lib/sound";
+import { useAppStore } from "../store";
 
 interface MaskOverlayProps {
   /** Position/Größe des angezeigten Bildes in Bildschirm-Pixeln, wie bei
@@ -90,6 +91,13 @@ export function MaskOverlay({
   const [drawingBrushPath, setDrawingBrushPath] = useState<MaskPoint[] | null>(null);
   const brushPathRef = useRef<MaskPoint[]>([]);
   const brushPaintingRef = useRef(false);
+  // Reduzierte Live-Vorschau-Auflösung auch beim Masken-Ziehen (Phase 22,
+  // siehe `DECISIONS.md` ADR-0050) — Phase 20 hatte dieses Store-Feld nur
+  // für Entwickeln-Regler/TAT-Ziehgriffe gesetzt (`DevelopSlider.tsx`/
+  // `Viewer.tsx`), Masken-Ziehgriffe/Pinselstriche lösten trotz identisch
+  // häufiger `onChange`-Aufrufe pro Zeigerbewegung weiterhin volle
+  // Auflösung pro Tick aus — derselbe Kompromiss wie bei den Reglern.
+  const setDevelopLiveDragging = useAppStore((s) => s.setDevelopLiveDragging);
 
   const startDrag = useCallback(
     (handle: DragHandle, event: React.PointerEvent) => {
@@ -97,9 +105,10 @@ export function MaskOverlay({
       event.currentTarget.setPointerCapture(event.pointerId);
       setDragHandle(handle);
       dragStart.current = { x: event.clientX, y: event.clientY, geometry };
+      setDevelopLiveDragging(true);
       playCue("drag-start");
     },
-    [geometry],
+    [geometry, setDevelopLiveDragging],
   );
 
   const handleBrushPointerDown = useCallback(
@@ -111,9 +120,10 @@ export function MaskOverlay({
       brushPaintingRef.current = true;
       brushPathRef.current = [point];
       setDrawingBrushPath(brushPathRef.current);
+      setDevelopLiveDragging(true);
       playCue("drag-start");
     },
-    [geometry.kind],
+    [geometry.kind, setDevelopLiveDragging],
   );
 
   const handlePointerMove = useCallback(
@@ -183,6 +193,7 @@ export function MaskOverlay({
       const path = brushPathRef.current;
       brushPathRef.current = [];
       setDrawingBrushPath(null);
+      setDevelopLiveDragging(false);
       if (path.length > 0) {
         playCue("drop");
         onPaintBrushStroke?.(thinBrushPath(path));
@@ -192,10 +203,11 @@ export function MaskOverlay({
 
     if (dragHandle) {
       setDragHandle(null);
+      setDevelopLiveDragging(false);
       playCue("drop");
       onCommit();
     }
-  }, [dragHandle, onCommit, onPaintBrushStroke]);
+  }, [dragHandle, onCommit, onPaintBrushStroke, setDevelopLiveDragging]);
 
   const handleKeyDown = useCallback(
     (handle: DragHandle) => (event: React.KeyboardEvent) => {

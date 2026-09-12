@@ -5353,3 +5353,88 @@ UI-Hilfetexte (siehe Entscheidung 4).
 
 Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
 Playwright-Suite (142/142, `PLAYWRIGHT_CHROMIUM_PATH` gesetzt).
+
+## ADR-0050: Phase 22 — ESC-Schnellmenü, schnelleres Masken-Ziehen,
+echte Regler-Optik, zehn Farbprofile
+
+Nutzerwunsch (verbatim, sinngemäß): "weiter überarbeiten — Menü, wenn
+man ESC drückt, dort sollen auch Einstellungen zu finden sein,
+schnellere Bearbeitung, bessere Regler, mehr Farbprofile, alles muss
+sich smoother anfühlen".
+
+**Ist-Zustand-Befund:**
+
+- `Escape` schloss bis dahin ausschließlich eine bereits offene
+  Überlagerung (`close-overlay`-Tastenkürzel, siehe `lib/keybindings.ts`)
+  — im Grundzustand (nichts offen) tat die Taste nichts. Die
+  Befehlspalette (`CommandPalette.tsx`, `Strg/Cmd+K`) listet
+  "Einstellungen…" bereits als durchsuchbaren Befehl
+  (`commandRegistry.ts`), war über `Escape` aber nicht erreichbar.
+- `input[type="range"]` — sowohl die ~40 `DevelopSlider.tsx`-Regler als
+  auch die übrigen freistehenden Regler (Export/Druck/Leinwand/
+  Einstellungen/Viewer-Zoom/Video) — hatte in der gesamten App **keine**
+  eigene CSS-Regel: reiner, unstilisierter Browser-Standard.
+- `MaskOverlay.tsx`s Ziehgriffe (linearer/radialer Verlauf, Pinsel)
+  aktualisieren `developEdl` pro Zeigerbewegung genau wie
+  `DevelopSlider.tsx`/der TAT-Ziehgriff in `Viewer.tsx` — aber nur
+  Letztere setzten in Phase 20 `developIsLiveDragging`, das
+  `Viewer.tsx`s Live-Vorschau auf eine reduzierte Auflösung umschaltet.
+  Masken-Ziehen rendertee deshalb weiterhin bei jedem Tick in voller
+  Auflösung.
+- `apx_pipeline::builtin_luts` (Phase 16 Schritt 2, ADR-0043-Nachtrag)
+  lieferte fünf selbst formulierte, parametrische Farb-Looks — bewusst
+  original erstellt statt von einer externen Quelle heruntergeladen
+  (siehe dortige Moduldoku: keine einzelne Quelle mit einheitlicher
+  Lizenzlage gefunden).
+
+**Entscheidungen:**
+
+1. **`Escape` öffnet die Befehlspalette, wenn nichts offen ist** —
+   `App.tsx`s zentraler `close-overlay`-Zweig prüft zusätzlich
+   `document.querySelector('[role="dialog"]')` (erreicht auch die ~25
+   lokal in `Header.tsx` gehaltenen Dialoge, deren Zustand `App.tsx`
+   sonst nicht kennt) plus die App.tsx-eigenen Überlagerungs-Flags; ist
+   nichts davon offen, öffnet derselbe Tastendruck die Befehlspalette
+   statt wirkungslos zu bleiben — Einstellungen sind darüber jetzt
+   direkt per Escape erreichbar, ohne eine zweite, separate
+   Menü-Komponente zu bauen.
+2. **Reduzierte Live-Auflösung auch beim Masken-Ziehen** —
+   `MaskOverlay.tsx` setzt `developIsLiveDragging` jetzt an denselben
+   Stellen (`startDrag`/`handleBrushPointerDown` → `true`,
+   `handlePointerUp` → `false`) wie `DevelopSlider.tsx` es seit Phase 20
+   tut — derselbe, bereits etablierte Kompromiss (`LIVE_DRAG_MAX_EDGE`),
+   nur konsequent auf einen zweiten, bis dahin übersehenen
+   Ziehgriff-Pfad ausgeweitet.
+3. **Echte Regler-Optik** — neue `input[type="range"]`-Regeln in
+   `index.css`: eigener, dünner Balken statt des Browser-Standards, ein
+   `--range-progress`-Wert (von `DevelopSlider.tsx` pro Regler aus
+   Wert/Min/Max berechnet) färbt den Balken bis zum aktuellen Wert in
+   der Akzentfarbe; ein eigener runder Griff mit Hover-/Halte-
+   Skalierung (dieselbe Zwei-Stufen-Logik wie die App-weite Knopf-
+   Skalierung aus Phase 20); eine dezente Strichmarkierung am
+   Neutralwert (zeigt, wohin ein Doppelklick zurücksetzt). Nur
+   `-webkit-*`-Pseudoelemente ausführlich gepflegt (nicht zusätzlich
+   `-moz-*`): Tauris drei Ziel-WebViews (WebView2/WKWebView/WebKitGTK)
+   sind alle WebKit-/Blink-Abkömmlinge, Firefox ist kein realer
+   Auslieferungspfad dieser App (siehe ADR-0010).
+4. **Fünf neue eingebaute Farbprofile** (`builtin_luts.rs`):
+   Vintage-Film, Kino-Blau, Goldene Stunde, Film Noir, Pastell —
+   dieselbe original-parametrische Herangehensweise wie die
+   bestehenden fünf, macht zehn insgesamt. `e2e/tauri-mock.ts`s
+   Mock-Liste entsprechend erweitert.
+
+**Bewusst außerhalb dieses Umfangs belassen:** eine tiefere Rust-
+seitige Profiling-Untersuchung der Bearbeitungs-Zeiten über die
+Masken-Ziehgriffe hinaus (Phase 20 hat die grundsätzliche
+Live-Auflösungs-Architektur bereits etabliert und dokumentiert — dieser
+Nachtrag überträgt sie konsequent auf den einen übersehenen Pfad,
+statt eine neue Profiling-Runde zu eröffnen); eine zweite,
+eigenständige "Schnellmenü"-Komponente statt der Wiederverwendung der
+Befehlspalette (die vorhandene Palette ist bereits durchsuchbar,
+kategorisiert und lokalisiert — eine zweite, separate Menü-Oberfläche
+für denselben Zweck wäre Duplikation).
+
+Verifiziert: `cargo fmt --check`/`clippy -p apx-pipeline -p apx-core
+--all-targets` sauber, `cargo test -p apx-pipeline` (251/251, inkl.
+dreier weiterhin grüner `builtin_luts`-Tests mit den fünf neuen
+Einträgen), `tsc -b` sauber, `vitest run` (251/251).

@@ -5996,3 +5996,48 @@ Eigenheit" (siehe oben). Reale visuelle Verifikation per Playwright-
 Screenshot (Kopfzeile, Statistik-Dialog mit sichtbarer Schatten-/
 Kantenwirkung) sowie direkte Pixel-/`getComputedStyle`-Messung statt
 reinem Screenshot-Eyeballing.
+
+## ADR-0055-Nachtrag: Werte deutlich verstärkt + strukturelle Grenze
+real nachgewiesen (Kopfzeile kann architektonisch nicht wie iOS
+Control Center aussehen)
+
+Nutzerkritik (ein reales iOS-Control-Center-Referenzfoto beigefügt):
+das bisherige Ergebnis sei "nicht ansatzweise" das gezeigte Liquid
+Glass. Berechtigt — zwei getrennte, real untersuchte Ursachen:
+
+1. **Werte zu zurückhaltend.** `--glass-bg`/`-bg-strong` waren dunkle,
+   recht deckende Grautöne (`rgb(32 32 32 / 44%)`) mit nur `165%`
+   Sättigung — das dämpft durchscheinende Farbe stark, statt sie wie im
+   Referenzfoto vivide durchscheinen zu lassen. Verstärkt auf hellere,
+   durchsichtigere Töne (`rgb(70 70 78 / 30%)` bzw. `rgb(60 60 70 /
+   40%)`), `--glass-saturate` von `165%` auf `220%`, `--glass-blur` von
+   `26px` auf `18px` (weniger Weichzeichnung, mehr Sättigung ergibt
+   sichtbar mehr Farbe statt eines matschigen Grau-Verlaufs),
+   `--glass-sheen`/`-edge-shadow`-Deckkraft ebenfalls angehoben.
+2. **Strukturelle Grenze für Kopfzeile/angedockte Paletten, real per
+   Test nachgewiesen (nicht nur vermutet):** ein Playwright-Test mit
+   einem knallbunten Test-Hintergrund auf `body` zeigte in der
+   Kopfzeile GAR KEINE Farbe — Ursache: `App.tsx`s Wurzel-`<div
+   className="... bg-bg-base">` überdeckt `body` vollständig und
+   deckend; `body`s eigener Hintergrund ist dadurch nirgends sichtbar.
+   Ein zweiter Test mit demselben bunten Verlauf auf dem zentralen
+   Inhaltsbereich (`<main>`, dort wo im echten Betrieb Fotos liegen)
+   bestätigte: der **Dialog** (der als echtes Overlay ÜBER diesem
+   Bereich liegt) zeigt danach deutlich sichtbare, durchscheinende
+   Farbe — die **Kopfzeile** dagegen weiterhin nicht, weil sie in
+   `App.tsx`s Flexbox-Layout eine eigene, mit dem Fotobereich nicht
+   überlappende Zeile ist (anders als iOS Control Center, das als
+   Overlay ÜBER dem Homescreen-Hintergrund schwebt). Kein CSS-
+   Wertetuning kann daran etwas ändern, solange die Kopfzeile
+   strukturell nie denselben Bildschirmbereich wie ein Foto belegt —
+   das ist eine Layout-Frage, keine Farb-/Blur-Frage. Nicht angetastet
+   (ein Umbau der Kopfzeile zu einem über den Inhalt schwebenden
+   Overlay wäre ein eigenständiger, für ein Profi-Fotowerkzeug
+   fragwürdiger Eingriff, den der Nutzer nicht verlangt hat) — aber
+   hier dokumentiert, damit klar ist, wo die Grenze liegt und warum.
+
+Verifiziert an einem eigens gebauten Vergleichstest (bunter Farbverlauf
+hinter `<main>`, Dialog geöffnet) — deutlich sichtbarer Sättigungs-/
+Farbdurchschein-Sprung gegenüber dem Vorher-Screenshot, per Playwright-
+Screenshot bestätigt. `tsc -b`, `vite build`, `vitest run` (251/251),
+volle Playwright-Suite (142/142) weiterhin grün.

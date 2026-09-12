@@ -149,18 +149,18 @@
      von 62%/78% auf 44%/60% gesenkt, Weichzeichnung von 20px auf 26px
      angehoben, damit Text trotz mehr Durchsicht lesbar bleibt (mehr
      Blur kompensiert weniger deckende Grundfarbe). */
-  --glass-bg: rgb(32 32 32 / 44%);
-  --glass-bg-strong: rgb(28 28 28 / 60%);
-  --glass-border: rgb(255 255 255 / 12%);
+  --glass-bg: rgb(70 70 78 / 30%);
+  --glass-bg-strong: rgb(60 60 70 / 40%);
+  --glass-border: rgb(255 255 255 / 18%);
   --glass-sheen: linear-gradient(
     135deg,
-    rgb(255 255 255 / 14%) 0%,
-    rgb(255 255 255 / 2%) 30%,
+    rgb(255 255 255 / 22%) 0%,
+    rgb(255 255 255 / 4%) 30%,
     rgb(255 255 255 / 0%) 55%,
-    rgb(255 255 255 / 6%) 100%
+    rgb(255 255 255 / 10%) 100%
   );
-  --glass-blur: 26px;
-  --glass-saturate: 165%;
+  --glass-blur: 18px;
+  --glass-saturate: 220%;
   /* Phase 25 Nachtrag (siehe DECISIONS.md, aktuelles ADR + PROMPTS.md
      Prompt 1): echte Glas-Verzerrung statt reinem Weichzeichner —
      `GlassDistortionFilter.tsx`s einmalig im DOM gehaltene

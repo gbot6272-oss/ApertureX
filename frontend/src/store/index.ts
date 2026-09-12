@@ -1655,6 +1655,20 @@ interface LibraryBacklogSlice {
    * in `developEdl.lut_filter.lut` und committet — dasselbe Muster wie
    * `importLutFilterForCurrentPhoto`, nur ohne Datei-Dialog. */
   applyBuiltinLutFilter: (index: number) => void;
+  /** Wärmt `api.registerLutFilterTable` für `developEdl.lut_filter.lut`
+   * vor, falls dessen `id` in dieser Sitzung noch nicht registriert
+   * wurde (Phase 25, siehe `DECISIONS.md`, aktuelles ADR) — muss laufen,
+   * bevor `lib/edl.ts`s `buildDevelopPreviewEdlJson` die `table` aus der
+   * Live-Vorschau-Anfrage herausschneidet, sonst fällt der Server auf
+   * "kein Filter" zurück. `applyBuiltinLutFilter`/
+   * `importLutFilterForCurrentPhoto` rufen dies direkt nach dem Setzen
+   * auf; `Viewer.tsx` zusätzlich beim Öffnen des Entwickeln-Panels bzw.
+   * Fotowechsel (deckt den Fall ab, dass ein bereits gespeicherter
+   * Filter geladen wird, ohne dass eine der beiden Aktionen lief — z. B.
+   * nach einem App-Neustart, wenn der Cache leer ist). Idempotent (kein
+   * Effekt, wenn `id` schon registriert wurde), daher gefahrlos mehrfach
+   * aufrufbar. */
+  ensureLutFilterTableRegistered: () => void;
 
   /** Pinsel-Modus für punktuelle Filter-Anwendung (Phase 16 Schritt 3,
    * siehe `DECISIONS.md` ADR-0043) — dasselbe „ein Ziehvorgang malt
@@ -1995,6 +2009,15 @@ export type AppStore = CatalogSlice &
   MetadataSlice &
   LibraryViewsSlice &
   VideoSlice;
+
+// Welche LUT-`id`s bereits per `registerLutFilterTable` an den Server
+// gemeldet wurden — reines Sitzungs-Gedächtnis (Phase 25, siehe
+// `DECISIONS.md`, aktuelles ADR), bewusst außerhalb des Zustands selbst:
+// es beeinflusst keine Anzeige, nur ob `ensureLutFilterTableRegistered`
+// den (billigen, aber unnötigen) IPC-Aufruf noch einmal auslöst. Ein
+// erneuter Aufruf nach einem verworfenen Fehlschlag ist explizit erlaubt
+// (siehe dort) — ein `Set` statt eines `Map`s mit Zeitstempeln reicht.
+const registeredLutFilterTableIds = new Set<string>();
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -6150,11 +6173,13 @@ export const useAppStore = create<AppStore>()(
             table: dto.table,
             domain_min: dto.domain_min,
             domain_max: dto.domain_max,
+            id: dto.id,
           };
           if (state.developEdl.lut_filter.strength <= 0) {
             state.developEdl.lut_filter.strength = 1;
           }
         });
+        get().ensureLutFilterTableRegistered();
         void get().commitDevelopEdit(`Filter „${dto.name}“ angewendet`);
       } catch (err) {
         set((state) => {
@@ -6207,7 +6232,26 @@ export const useAppStore = create<AppStore>()(
           state.developEdl.lut_filter.strength = 1;
         }
       });
+      get().ensureLutFilterTableRegistered();
       void get().commitDevelopEdit(`Filter „${lut.name}“ angewendet`);
+    },
+
+    ensureLutFilterTableRegistered: () => {
+      const lut = get().developEdl.lut_filter.lut;
+      if (!lut || !lut.id || lut.table.length === 0) return;
+      if (registeredLutFilterTableIds.has(lut.id)) return;
+      // Optimistisch sofort eintragen (nicht erst nach Erfolg): ein
+      // doppelter, gleichzeitig laufender Aufruf für dieselbe `id` (z. B.
+      // `applyBuiltinLutFilter` und `Viewer.tsx`s Effekt kurz
+      // hintereinander) soll nicht zweimal denselben Datensatz senden.
+      registeredLutFilterTableIds.add(lut.id);
+      void api.registerLutFilterTable(lut.id, lut.size, lut.table).catch((err) => {
+        // Fehlschlag rückgängig machen erlaubt einen erneuten Versuch
+        // beim nächsten Aufruf, statt den Filter für die ganze Sitzung
+        // stillschweigend kaputt zu lassen.
+        registeredLutFilterTableIds.delete(lut.id);
+        console.error("LUT-Tabelle konnte nicht vorgewärmt werden:", err);
+      });
     },
 
     lutFilterBrushActive: false,

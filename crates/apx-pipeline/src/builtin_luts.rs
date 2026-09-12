@@ -180,12 +180,14 @@ pub fn generate(kind: BuiltinLut, size: u32) -> LutFilterData {
             }
         }
     }
+    let id = crate::stages::lut_filter::compute_lut_id(n, &table);
     LutFilterData {
         name: kind.name().to_string(),
         size: n,
         table,
         domain_min: [0.0, 0.0, 0.0],
         domain_max: [1.0, 1.0, 1.0],
+        id,
     }
 }
 

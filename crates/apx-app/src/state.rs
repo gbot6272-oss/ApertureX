@@ -8,7 +8,7 @@ use apx_catalog::Catalog;
 use apx_core::AppPaths;
 use apx_export::engine::ExportRequest;
 use apx_export::queue::ExportQueue;
-use apx_pipeline::{tile_cache::TileCache, GpuContext};
+use apx_pipeline::{lut_table_cache::LutTableCache, tile_cache::TileCache, GpuContext};
 use tokio_util::sync::CancellationToken;
 
 /// Ein in die Export-Warteschlange eingereihter Auftrag (Phase 8
@@ -41,6 +41,14 @@ pub struct AppState {
     /// Zwischenspeicher für das teure `apx_raw::decode_linear`-Ergebnis
     /// pro Foto+Auflösung, siehe `apx_pipeline::tile_cache`.
     pub tile_cache: Arc<TileCache>,
+    /// Zwischenspeicher für vollständige LUT-Rastertabellen (Phase 25,
+    /// siehe `DECISIONS.md`, aktuelles ADR, und
+    /// `apx_pipeline::lut_table_cache`s Moduldoku) — trennt die selten
+    /// wechselnde, große Nutzlast eines gewählten Filter-Looks von der
+    /// bei jedem Regler-Tick neu übertragenen `develop/...`-Live-
+    /// Vorschau-EDL, sonst war "Filter verändern das Bild nicht wirklich"
+    /// die Folge.
+    pub lut_table_cache: Arc<LutTableCache>,
     /// Export-Warteschlange (Phase 8 Schritt 2, `DECISIONS.md` ADR-0034)
     /// — ein einzelner Hintergrund-Worker (siehe `main.rs`) arbeitet sie
     /// ab; `commands.rs`s `enqueue_export_photo`/`export_queue_progress`/

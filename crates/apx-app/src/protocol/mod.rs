@@ -161,12 +161,21 @@ fn handle_inner<R: Runtime>(
 
     let pipeline = state.pipeline.clone();
     let tile_cache = state.tile_cache.clone();
+    let lut_table_cache = state.lut_table_cache.clone();
     let paths = state.paths.clone();
 
     let (content_type, cache_key) = response_meta(&parsed);
     let bytes = cache
         .get_or_compute(cache_key, move || {
-            compute(&catalog, &pipeline, &tile_cache, &paths, &parsed).map_err(|err| err.message)
+            compute(
+                &catalog,
+                &pipeline,
+                &tile_cache,
+                &lut_table_cache,
+                &paths,
+                &parsed,
+            )
+            .map_err(|err| err.message)
         })
         .map_err(HandlerError::internal)?;
 
@@ -378,6 +387,7 @@ fn compute(
     catalog: &Catalog,
     pipeline: &apx_pipeline::GpuContext,
     tile_cache: &apx_pipeline::tile_cache::TileCache,
+    lut_table_cache: &apx_pipeline::lut_table_cache::LutTableCache,
     paths: &apx_core::AppPaths,
     request: &ImageRequest,
 ) -> Result<Vec<u8>, HandlerError> {
@@ -394,7 +404,15 @@ fn compute(
             soft_proof,
             edl_json,
         } => compute_develop(
-            catalog, pipeline, tile_cache, paths, *photo_id, *max_edge, soft_proof, edl_json,
+            catalog,
+            pipeline,
+            tile_cache,
+            lut_table_cache,
+            paths,
+            *photo_id,
+            *max_edge,
+            soft_proof,
+            edl_json,
         ),
         ImageRequest::Music { path } => compute_music(path),
         ImageRequest::Video { .. } => {
@@ -471,6 +489,7 @@ fn compute_develop(
     catalog: &Catalog,
     pipeline: &apx_pipeline::GpuContext,
     tile_cache: &apx_pipeline::tile_cache::TileCache,
+    lut_table_cache: &apx_pipeline::lut_table_cache::LutTableCache,
     paths: &apx_core::AppPaths,
     photo_id: PhotoId,
     max_edge: Option<u32>,
@@ -478,7 +497,18 @@ fn compute_develop(
     edl_json: &str,
 ) -> Result<Vec<u8>, HandlerError> {
     let envelope = apx_core::EdlEnvelope::from_json_str(edl_json)?;
-    let edl = apx_pipeline::edl::from_envelope(&envelope).map_err(apx_core::AppError::from)?;
+    let mut edl = apx_pipeline::edl::from_envelope(&envelope).map_err(apx_core::AppError::from)?;
+    // Löst `edl.lut_filter.lut` gegen den Server-Cache auf (bzw. frischt
+    // ihn auf) — siehe `LutFilterData`s Moduldoku und
+    // `lut_table_cache::LutTableCache`s Moduldoku für den Bug, den das
+    // behebt ("Filter verändern das Bild nicht wirklich" / spürbare
+    // Verlangsamung bei aktivem Filter). Muss vor `render_rgba8` laufen,
+    // egal ob `lut_filter` in `StageEnabled` aktiv ist — eine leere,
+    // ungelöste `table` würde die Stufe sonst fälschlich als "zu wenig
+    // Daten" überspringen, selbst wenn der Cache die echten Daten hätte.
+    if let Some(lut) = &mut edl.lut_filter.lut {
+        lut_table_cache.resolve(lut);
+    }
 
     let source_path = resolve_source_path(catalog, paths, photo_id)?;
 
@@ -862,11 +892,13 @@ mod tests {
             }
         };
         let tile_cache = apx_pipeline::tile_cache::TileCache::new();
+        let lut_table_cache = apx_pipeline::lut_table_cache::LutTableCache::new();
 
         let bytes = compute_develop(
             &catalog,
             &pipeline,
             &tile_cache,
+            &lut_table_cache,
             &paths,
             photo_id,
             Some(32),
@@ -899,11 +931,13 @@ mod tests {
             }
         };
         let tile_cache = apx_pipeline::tile_cache::TileCache::new();
+        let lut_table_cache = apx_pipeline::lut_table_cache::LutTableCache::new();
 
         let result = compute_develop(
             &catalog,
             &pipeline,
             &tile_cache,
+            &lut_table_cache,
             &paths,
             photo_id,
             Some(32),
@@ -911,5 +945,96 @@ mod tests {
             "nicht-valides-json",
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn compute_develop_resolves_lut_table_from_cache_on_second_request() {
+        let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
+        let catalog = Catalog::open_in_memory().expect("Katalog");
+        let photo_id = setup_photo(tmp.path(), &catalog);
+        let paths = test_paths(tmp.path());
+        let pipeline = match apx_pipeline::GpuContext::new_blocking() {
+            Ok(ctx) => ctx,
+            Err(_) => {
+                eprintln!("übersprungen: kein GPU-Adapter in dieser Umgebung verfügbar");
+                return;
+            }
+        };
+        let tile_cache = apx_pipeline::tile_cache::TileCache::new();
+        let lut_table_cache = apx_pipeline::lut_table_cache::LutTableCache::new();
+
+        // Invertiert jeden Kanal auf einem 2er-Raster — deutlich sichtbar
+        // gegenüber dem neutralen Bild, falls die LUT tatsächlich greift.
+        let table: Vec<f32> = (0..8u32)
+            .flat_map(|i| {
+                let r = (i & 1) as f32;
+                let g = ((i >> 1) & 1) as f32;
+                let b = ((i >> 2) & 1) as f32;
+                [1.0 - r, 1.0 - g, 1.0 - b]
+            })
+            .collect();
+        let id = apx_pipeline::stages::lut_filter::compute_lut_id(2, &table);
+        let mut edl = apx_pipeline::edl::EdlV4::neutral();
+        edl.lut_filter = apx_pipeline::edl::LutFilterAdjustment {
+            strength: 1.0,
+            lut: Some(apx_pipeline::edl::LutFilterData {
+                name: "Invert".to_string(),
+                size: 2,
+                table: table.clone(),
+                domain_min: [0.0, 0.0, 0.0],
+                domain_max: [1.0, 1.0, 1.0],
+                id: id.clone(),
+            }),
+            strokes: Vec::new(),
+        };
+        let full_json = apx_core::EdlEnvelope::new(
+            apx_pipeline::EDL_SCHEMA_VERSION,
+            serde_json::to_value(&edl).expect("EDL serialisierbar"),
+        )
+        .to_json_string()
+        .expect("Umschlag serialisierbar");
+
+        // Erste Anfrage: volle Tabelle mitgeliefert, wärmt den Cache auf.
+        let first = compute_develop(
+            &catalog,
+            &pipeline,
+            &tile_cache,
+            &lut_table_cache,
+            &paths,
+            photo_id,
+            Some(8),
+            &None,
+            &full_json,
+        )
+        .expect("sollte rendern");
+
+        // Zweite Anfrage: Tabelle bewusst leer (simuliert die getrimmte
+        // Live-Vorschau-URL) — muss trotzdem aus dem Cache aufgelöst
+        // werden und dasselbe Ergebnis liefern wie mit voller Tabelle.
+        edl.lut_filter.lut.as_mut().expect("lut gesetzt").table = Vec::new();
+        let trimmed_json = apx_core::EdlEnvelope::new(
+            apx_pipeline::EDL_SCHEMA_VERSION,
+            serde_json::to_value(&edl).expect("EDL serialisierbar"),
+        )
+        .to_json_string()
+        .expect("Umschlag serialisierbar");
+
+        let second = compute_develop(
+            &catalog,
+            &pipeline,
+            &tile_cache,
+            &lut_table_cache,
+            &paths,
+            photo_id,
+            Some(8),
+            &None,
+            &trimmed_json,
+        )
+        .expect("sollte trotz leerer Tabelle rendern (aus dem Cache aufgelöst)");
+
+        assert_eq!(
+            first, second,
+            "eine leere, aber per `id` referenzierte Tabelle muss dasselbe Ergebnis liefern wie die volle Tabelle"
+        );
     }
 }

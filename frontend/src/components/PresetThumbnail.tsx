@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useDevelopPreviewThumbnail } from "../hooks/useDevelopRender";
-import { buildEdlEnvelopeJson, type EdlPayload } from "../lib/edl";
+import { buildDevelopPreviewEdlJson, type EdlPayload } from "../lib/edl";
 import { applyRulesToSubset, mergeEdlSubset, parseEdlSubset, parseRules, type PresetConditionPhotoMeta } from "../lib/presets";
 import { latestPresetVersion } from "../lib/tauri";
 
@@ -50,7 +50,7 @@ export function PresetThumbnail({
         const rules = parseRules(conditionsJson);
         const subset = applyRulesToSubset(rawSubset, rules, photoMeta) ?? {};
         const merged = mergeEdlSubset(currentEdl, subset);
-        setEdlJson(buildEdlEnvelopeJson(merged));
+        setEdlJson(buildDevelopPreviewEdlJson(merged));
       } catch {
         // Kein Thumbnail statt eines Absturzes — z. B. wenn das Preset
         // zwischenzeitlich gelöscht wurde.

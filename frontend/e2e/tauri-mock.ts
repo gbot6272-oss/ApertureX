@@ -933,14 +933,24 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           "Goldene Stunde",
           "Film Noir",
           "Pastell",
-        ].map((name) => ({
+        ].map((name, index) => ({
           name,
           size: 2,
           table: identityCube,
           domain_min: [0, 0, 0],
           domain_max: [1, 1, 1],
+          // Phase 25: fester, eindeutiger Test-Platzhalter statt des
+          // echten Inhalts-Hashs (`compute_lut_id`) — reicht hier, da
+          // der Test-Stub `register_lut_filter_table` unten ohnehin
+          // keinen echten Cache führt.
+          id: `test-builtin-lut-${index}`,
         }));
       }
+      // Phase 25 (siehe DECISIONS.md ADR-0053): wärmt im echten Backend
+      // `AppState::lut_table_cache` vor — im Test-Stub gibt es keinen
+      // Server-Cache, also reicht ein reines No-op.
+      case "register_lut_filter_table":
+        return null;
       case "create_new_catalog":
       case "switch_active_catalog":
       case "run_catalog_optimize":

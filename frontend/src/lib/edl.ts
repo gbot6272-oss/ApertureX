@@ -1538,6 +1538,36 @@ export function buildEdlEnvelopeJson(payload: EdlPayload): string {
   });
 }
 
+/**
+ * Wie {@link buildEdlEnvelopeJson}, aber für die live nachgeführte
+ * `develop/...`-Vorschau-Route bestimmt (Phase 25, siehe `DECISIONS.md`,
+ * aktuelles ADR, und `LutFilterData`s Moduldoku): steckt ein gewählter
+ * Filter-Look eine `id`, wird die u. U. mehrere hundert KB große `table`
+ * NICHT mit ins JSON gepackt — der Server löst sie aus seinem
+ * `LutTableCache` auf (vorgewärmt über `registerLutFilterTable`, siehe
+ * `store/index.ts`s `applyBuiltinLutFilter`/
+ * `importLutFilterForCurrentPhoto`/`ensureLutFilterTableRegistered`).
+ *
+ * **Nur für Vorschau-Anfragen verwenden, nie für `applyDevelopEdit`/
+ * `createSnapshot`** — die persistierte `edit_history` muss die volle
+ * Tabelle behalten (portabel, unabhängig vom flüchtigen Server-Cache
+ * nach einem Neustart), siehe `buildEdlEnvelopeJson`s Aufrufstellen.
+ * Ohne gewählten Filter (`lut === null`) oder ohne `id` (alte, vor
+ * diesem Feld geladene Session-Daten) verhält sich dies identisch zu
+ * `buildEdlEnvelopeJson` — strikt nicht-regressiv.
+ */
+export function buildDevelopPreviewEdlJson(payload: EdlPayload): string {
+  const lut = payload.lut_filter.lut;
+  if (!lut || !lut.id || lut.table.length === 0) {
+    return buildEdlEnvelopeJson(payload);
+  }
+  const trimmed: EdlPayload = {
+    ...payload,
+    lut_filter: { ...payload.lut_filter, lut: { ...lut, table: [] } },
+  };
+  return buildEdlEnvelopeJson(trimmed);
+}
+
 /** Liest ein `EdlPayload` aus einem `EdlEnvelope`-JSON-String (z. B. aus
  * `current_develop_edit`/`undo_develop_edit`/`redo_develop_edit`). Gibt
  * bei unbekannter Schema-Version oder unlesbarer Nutzlast `null` zurück,
@@ -1726,10 +1756,17 @@ export interface LutFilterData {
   size: number;
   /** `size^3 * 3` Zahlen, r am schnellsten variierend — siehe
    * `apx_pipeline::lut_cube::ParsedLut::table`s Moduldoku für die genaue
-   * Indizierung. */
+   * Indizierung. Für die Live-Vorschau-Route (siehe
+   * `buildDevelopPreviewEdlJson`) darf dies ein leeres Array sein, wenn
+   * `id` gesetzt ist — der Server löst dann gegen seinen
+   * `LutTableCache` auf, siehe dessen Moduldoku. */
   table: number[];
   domain_min: [number, number, number];
   domain_max: [number, number, number];
+  /** Inhalts-Hash über `size`+`table`, von `apx_pipeline::stages::
+   * lut_filter::compute_lut_id` berechnet — Rust liefert ihn bei jedem
+   * gewählten Filter (Bibliothek/`.cube`-Import) bereits mit. */
+  id: string;
 }
 
 /** Ein Punkt im gemalten Pfad eines Filter-Pinselstrichs (Phase 16

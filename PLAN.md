@@ -1175,6 +1175,42 @@ Volle Suite gebündelt erst im letzten Schritt.
 - [ ] 10. Dokumentation, volle Verifikation, Abnahme
 - [x] `tsc -b`, volle `vitest run`-Suite (251 Tests, 28 neue), `map-flow.spec.ts` grün
 
+## Aktuelle Phase: Phase 25 — Premium-UI-Plan + Bugfixes (Performance, Filter)
+
+Nutzerwunsch: UI wirkt "immer noch nicht premium genug" — ein
+5-Schritt-Plan für ein durchdachteres, premium-mäßigeres UI soll
+ausgearbeitet, präsentiert und direkt umgesetzt werden (keine
+Rückfrage abwarten); zusätzlich zwei konkrete Bugs fixen: "alles
+dauert so lange" (allgemeine Performance-Klage) sowie Filter/eigene
+`.cube`-Dateien und sogar die mitgelieferten Presets verändern das
+Bild nicht wirklich.
+
+- [x] 1. Bugfix Filter/Performance (siehe `DECISIONS.md` ADR-0053):
+  real untersucht statt vermutet — die Bild-/LUT-Mathematik selbst war
+  korrekt (Trilineare Interpolation, Rasterreihenfolge, Stufen-Gate,
+  `strength`-Default alle geprüft und bestätigt fehlerfrei); der echte
+  Fehler lag in der Übertragung — `buildEdlEnvelopeJson` schickte die
+  komplette LUT-Rastertabelle (300 KB–1 MB+ JSON) bei **jedem** Regler-
+  Tick erneut im URL-Pfad der `develop/...`-Live-Vorschau-Route, was
+  sowohl die spürbare Verlangsamung bei aktivem Filter erklärt als
+  auch — bei genügend großer Tabelle — zu scheiternden Anfragen führte,
+  deren Fehler `useDevelopRender`s Fehlerpfad nur stumm loggt (kein
+  sichtbarer Fehler, der zuletzt erfolgreiche Rahmen bleibt einfach
+  stehen — "der Filter verändert das Bild nicht"). Fix: neuer
+  Inhalts-Hash `LutFilterData::id` + serverseitiger
+  `apx_pipeline::lut_table_cache::LutTableCache` + neue
+  `buildDevelopPreviewEdlJson`, die die Tabelle aus der Live-Vorschau
+  herausschneidet, sobald der Server sie einmal kennt (`Tauri`-Befehl
+  `register_lut_filter_table` wärmt proaktiv vor). Persistierte
+  `edit_history` behält weiterhin die volle Tabelle (unverändert über
+  `buildEdlEnvelopeJson`), strikt nicht-regressiv für alte Daten ohne
+  `id`. Verifiziert: `cargo test -p apx-pipeline`/`-p apx-app protocol`
+  (neue `LutTableCache`-Tests + Rundlauf-Test mit absichtlich leerer
+  Tabelle), `cargo fmt`/`clippy -D warnings` sauber, `tsc -b`,
+  `vitest run` (251/251), volle Playwright-Suite (142/142).
+- [ ] 0. 5-Schritt-Premium-UI-Plan ausarbeiten, präsentieren, direkt
+  ausführen (noch offen)
+
 ## Aktuelle Phase: Phase 24 — Transparenz, Karten-Bugfixes, zehn neue Animationen, mehr Übersicht
 
 Nutzerwunsch: UI transparenter, Kartenbugs (fehlerhafte Anzeige, keine

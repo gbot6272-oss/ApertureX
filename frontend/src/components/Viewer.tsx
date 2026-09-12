@@ -5,7 +5,7 @@ import { useElementSize } from "../hooks/useElementSize";
 import { useImageBitmap } from "../hooks/useImageBitmap";
 import { computeAutoTone } from "../lib/autoTone";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
-import { buildEdlEnvelopeJson, CURVE_CHANNEL_TABS, nearestHslBand, visibleMasks, type CurvesAdjustment, type HslAdjustment } from "../lib/edl";
+import { buildDevelopPreviewEdlJson, CURVE_CHANNEL_TABS, nearestHslBand, visibleMasks, type CurvesAdjustment, type HslAdjustment } from "../lib/edl";
 import { formatShutter } from "../lib/format";
 import { buildClippingOverlay } from "../lib/histogram";
 import { computeMaskPinPosition } from "../lib/maskPins";
@@ -142,6 +142,7 @@ export function Viewer() {
   const removeMaskBrushStroke = useAppStore((s) => s.removeMaskBrushStroke);
   const removeRepairStroke = useAppStore((s) => s.removeRepairStroke);
   const commitDevelopEdit = useAppStore((s) => s.commitDevelopEdit);
+  const ensureLutFilterTableRegistered = useAppStore((s) => s.ensureLutFilterTableRegistered);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -170,11 +171,25 @@ export function Viewer() {
   // überschreibt rein visuell, welche EDL gerendert wird — `developEdl`
   // selbst bleibt unverändert, solange nicht tatsächlich geklickt wird.
   const renderedEdl = hoverPresetSubset ? mergeEdlSubset(developEdl, hoverPresetSubset) : developEdl;
-  const developEdlJson = developPanelOpen && photo ? buildEdlEnvelopeJson(renderedEdl) : null;
+  const developEdlJson = developPanelOpen && photo ? buildDevelopPreviewEdlJson(renderedEdl) : null;
   const developPhotoId = developPanelOpen ? (photo?.id ?? null) : null;
   const developMaxEdge =
     photo && containerSize.width > 0 ? (developIsLiveDragging ? Math.min(LIVE_DRAG_MAX_EDGE, targetFullEdge) : targetFullEdge) : undefined;
   const developFrame = useDevelopRender(developPhotoId, developEdlJson, developMaxEdge);
+
+  // Wärmt den serverseitigen LUT-Tabellen-Cache vor, sobald ein Foto mit
+  // bereits gespeichertem Filter ins Entwickeln-Panel kommt (Öffnen des
+  // Panels oder Fotowechsel) — deckt den Fall ab, dass weder
+  // `applyBuiltinLutFilter` noch `importLutFilterForCurrentPhoto` in
+  // dieser Sitzung liefen (z. B. nach einem App-Neustart), bevor
+  // `developEdlJson` oben bereits die getrimmte, nur-`id`-Variante an
+  // die Live-Vorschau schickt (Phase 25, siehe `DECISIONS.md`, aktuelles
+  // ADR). `ensureLutFilterTableRegistered` ist idempotent.
+  const developLutId = developEdl.lut_filter.lut?.id ?? null;
+  useEffect(() => {
+    if (!developPanelOpen || !developLutId) return;
+    ensureLutFilterTableRegistered();
+  }, [developPanelOpen, developPhotoId, developLutId, ensureLutFilterTableRegistered]);
 
   // Echter Soft-Proof (Phase 12 Schritt 6, siehe `DECISIONS.md`
   // ADR-0039-Nachtrag II): eine **separate** zweite Anfrage über dieselbe

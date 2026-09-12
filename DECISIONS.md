@@ -5704,3 +5704,98 @@ Playwright-Suite (142/142 — insbesondere `map-flow.spec.ts`
 `presets-flow.spec.ts`/`library-flow.spec.ts`, `viewer-flow.spec.ts`/
 `Filmstreifen-Virtualisierung` [Sanftscroll] — alle vollständig grün,
 da keine `title`/`aria-label`/Text-Selektoren verändert wurden).
+
+## ADR-0053: Phase 25 Schritt 1 — Bugfix: Filter/`.cube`-LUTs verändern
+das Bild nicht wirklich (+ Performance-Ursache)
+
+Nutzerwunsch (verbatim, Ausschnitt): "fixe außerdem den bug, dass alles
+so lang dauert und dass filter/eigene .cube dateien und sogar die von
+dir gegebenen presets das bild nicht wirklich verändern".
+
+**Untersuchung (real geprüft, nicht angenommen):** Die Bildlogik selbst
+war korrekt — `stages::lut_filter::apply`s trilineare Interpolation,
+`sample_lut`s Tabellen-Indizierung (`r` am schnellsten variierend) und
+die Rasterreihenfolge in `builtin_luts::generate`/`lut_cube::
+parse_cube_bytes` stimmen exakt überein (per Test bestätigt), die
+`StageEnabled`-Gate ist standardmäßig aktiv, `strength` wird beim
+Anwenden korrekt auf `1.0` gesetzt, falls zuvor `0`. Der tatsächliche
+Fehler lag eine Ebene höher, in der **Übertragung**:
+`frontend/src/lib/edl.ts`s `buildEdlEnvelopeJson(payload)` serialisiert
+das komplette EDL — inklusive der vollen `LutFilterData::table` — direkt
+in den URL-Pfad der `develop/...`-Live-Vorschau-Route
+(`crates/apx-app/src/protocol/mod.rs`), und zwar bei **jedem einzelnen**
+Regler-Tick (`useDevelopRender`s `requestAnimationFrame`-Entprellung
+löst pro Frame höchstens eine Anfrage aus, aber jede davon trägt die
+komplette `table` erneut mit, unabhängig davon, welches Feld sich
+gerade änderte). Nachgemessen (echtes `JSON.stringify` +
+`encodeURIComponent` eines realistischen Rasters): ein eingebauter
+17er-Look allein ergibt bereits **~314 KB** JSON-Nutzlast, ein
+importiertes 33er-`.cube` **über eine Megabyte** — pro Vorschau-
+Anfrage, nicht einmalig. Zwei Konsequenzen ergeben sich direkt daraus,
+beide vom Nutzer berichtet:
+
+1. **"alles dauert so lange"**: jede Vorschau-Anfrage bei aktivem
+   Filter musste dieses Vielfache an JSON serialisieren/parsen, als
+   String-Cache-Schlüssel in `apx-app`s `ImageCache` hashen/vergleichen
+   und über den Custom-Protokoll-IPC-Weg transportieren — spürbar
+   langsamer als ohne Filter, bei jedem Regler-Tick erneut.
+2. **"Filter verändern das Bild nicht wirklich"**: bei genügend großer
+   Tabelle (insbesondere importierte `.cube`-Dateien mit größerem
+   Raster) wird die Anfrage groß genug, um beim Parsen/Transport zu
+   scheitern. `hooks/useDevelopRender.ts`s Fehlerpfad reagiert auf
+   einen fehlgeschlagenen `fetch()` nur mit `console.error(...)` — der
+   zuletzt erfolgreich gerenderte (unveränderte) Rahmen bleibt
+   sichtbar. Für den Nutzer sieht das exakt aus wie "der Filter tut
+   nichts", ohne jede sichtbare Fehlermeldung.
+
+**Entscheidung — Inhalts-adressierter Server-Cache statt Neuübertragung
+bei jedem Tick:**
+
+1. `apx_pipeline::edl::LutFilterData` bekommt ein neues Feld `id: String`
+   (`#[serde(default)]`, leer bei alten `edit_history`-Einträgen) — ein
+   FNV-1a-Inhalts-Hash über `size`+`table`
+   (`stages::lut_filter::compute_lut_id`, neu). Sowohl
+   `builtin_luts::generate` als auch die `.cube`-Import-DTO-Konvertierung
+   (`apx-app`s `commands.rs`) berechnen ihn.
+2. Neuer `apx_pipeline::lut_table_cache::LutTableCache` (Muster wie
+   `tile_cache::TileCache`, aber unbegrenzt statt LRU-begrenzt — die
+   Anzahl unterschiedlicher LUTs pro Sitzung bleibt immer klein): hält
+   vollständige Tabellen unter ihrer `id`. `resolve(&mut LutFilterData)`
+   füllt eine leer ankommende `table` aus dem Cache auf, oder frischt
+   den Cache selbstheilend auf, wenn eine volle `table` ankommt (deckt
+   einen App-Neustart ab, ohne dass das Frontend das Timing kennen
+   muss). Als `AppState::lut_table_cache` verdrahtet, in
+   `protocol::mod::compute_develop` vor `render_rgba8` aufgerufen.
+3. `frontend/src/lib/edl.ts`s neue `buildDevelopPreviewEdlJson(payload)`
+   — wie `buildEdlEnvelopeJson`, aber schneidet `lut_filter.lut.table`
+   heraus, sobald `id` gesetzt ist. **Nur** für die Live-Vorschau-
+   Aufrufstellen (`Viewer.tsx`, `PresetThumbnail.tsx`, `ReferenceView.tsx`)
+   verwendet — `applyDevelopEdit`/`createSnapshot` (die persistierte
+   `edit_history`) behalten weiterhin die volle Tabelle über die
+   unveränderte `buildEdlEnvelopeJson`, damit ein Katalog unabhängig vom
+   flüchtigen Server-Cache portabel bleibt.
+4. Neuer Tauri-Befehl `register_lut_filter_table(id, size, table)` wärmt
+   den Cache proaktiv vor — `store/index.ts`s `applyBuiltinLutFilter`/
+   `importLutFilterForCurrentPhoto` rufen ihn direkt nach dem Setzen des
+   Filters auf, `Viewer.tsx` zusätzlich beim Öffnen des Entwickeln-
+   Panels/Fotowechsel (deckt den Fall ab, dass ein bereits gespeicherter
+   Filter geladen wird, ohne dass eine der beiden Aktionen in dieser
+   Sitzung lief). Ein modulweites `Set<string>` in `store/index.ts`
+   verhindert doppelte Registrierungen pro Sitzung, ohne den
+   selbstheilenden Cache-Pfad in Schritt 2 zur Korrektheitsvoraussetzung
+   zu machen — beide Mechanismen zusammen machen den Fix robust gegen
+   Aufruf-Reihenfolge.
+
+Strikt nicht-regressiv: fehlt `id` (alte, vor diesem Feld
+gespeicherte Session-Daten) oder ist `table` bereits leer ohne
+gewählten Filter, verhalten sich beide neuen Funktionen exakt wie die
+alten — kein Sonderfall kann schlechter rendern als vorher.
+
+Verifiziert: `cargo test -p apx-pipeline` (neue Tests in
+`lut_table_cache.rs` + `stages::lut_filter::compute_lut_id`-Abdeckung),
+`cargo test -p apx-app protocol` (neuer Test
+`compute_develop_resolves_lut_table_from_cache_on_second_request` —
+rendert einmal mit voller Tabelle, einmal mit absichtlich leerer
+Tabelle + `id`, beide Ergebnisse müssen byte-identisch sein),
+`cargo fmt`/`cargo clippy -D warnings` sauber für `apx-pipeline`/
+`apx-app`, `tsc -b` sauber.

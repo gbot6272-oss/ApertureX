@@ -355,18 +355,49 @@ impl Default for SkinSmoothingAdjustment {
 /// die vollständigen Rasterdaten werden direkt hier eingebettet statt nur
 /// ein Dateipfad referenziert, damit ein Katalog portabel bleibt (kein
 /// stiller Bruch, wenn die ursprüngliche `.cube`-Datei später verschoben
-/// oder gelöscht wird). Größenordnung ist unkritisch: ein 33er-Raster
-/// sind ~432 KB, deutlich kleiner als ein `StyleTransferPatch`/
-/// `SkyReplacePatch`, die bereits ein volles Bild einbetten.
+/// oder gelöscht wird). Größenordnung ist für die **persistierte**
+/// Ablage (`edit_history.edl_json`, einmalig pro Commit) unkritisch: ein
+/// 33er-Raster sind ~432 KB, deutlich kleiner als ein
+/// `StyleTransferPatch`/`SkyReplacePatch`, die bereits ein volles Bild
+/// einbetten.
+///
+/// **Für die live nachgeführte `develop/...`-Vorschau-Route dagegen war
+/// genau das der Bug hinter "Filter verändern das Bild nicht wirklich"
+/// (siehe `DECISIONS.md`, aktuelles ADR):** `table` steckte dort in
+/// **jeder einzelnen** Vorschau-Anfrage (jeder Regler-Tick, nicht nur
+/// beim Wählen des Filters) im URL-Pfad — bei einem 17er-Raster bereits
+/// über 300 KB JSON pro Anfrage, bei einem importierten 33er-Raster über
+/// eine Megabyte. Das machte nicht nur jede Vorschau-Anfrage spürbar
+/// langsamer, sondern führte bei genügend großen Rastern dazu, dass die
+/// Anfrage fehlschlug — sichtbar für Aufrufende nur als stilles
+/// `console.error` (`useDevelopRender`s Fehlerpfad aktualisiert den
+/// zuletzt erfolgreich gerenderten Rahmen nicht), also exakt "das Bild
+/// verändert sich nicht". `id` (Inhalts-Hash, siehe
+/// `stages::lut_filter::compute_lut_id`) löst das: die Vorschau-Route
+/// sendet `table` nur noch beim allerersten Mal (bzw. nach einem
+/// App-Neustart) mit, `apx-pipeline::lut_table_cache::LutTableCache`
+/// hält die Tabelle serverseitig unter `id` vor — siehe dessen Moduldoku.
+/// `#[serde(default)]`: alte, vor diesem Feld gespeicherte
+/// `edit_history`-Einträge lesen als `id == ""`, was die Auflösung über
+/// den Cache bewusst überspringt (`table` ist bei ihnen ohnehin immer
+/// vollständig vorhanden) — dieselbe Rückwärtskompatibilitäts-Konvention
+/// wie `CompositeLayer::composite`s `default_true`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LutFilterData {
     pub name: String,
     pub size: u32,
     /// `size^3 * 3` Floats, r am schnellsten variierend — siehe
     /// `lut_cube::ParsedLut::table`s Moduldoku für die genaue Indizierung.
+    /// Für die Live-Vorschau-Route darf dies ein leerer Vektor sein, wenn
+    /// `id` gesetzt ist — siehe [`LutFilterData`]s Moduldoku.
     pub table: Vec<f32>,
     pub domain_min: [f32; 3],
     pub domain_max: [f32; 3],
+    /// Inhalts-Hash über `size` + `table` (siehe
+    /// `stages::lut_filter::compute_lut_id`), leer bei alten
+    /// Katalog-Einträgen ohne dieses Feld.
+    #[serde(default)]
+    pub id: String,
 }
 
 /// Ein Punkt im gemalten Pfad eines Filter-Pinselstrichs — normierte

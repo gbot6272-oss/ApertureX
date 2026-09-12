@@ -1001,6 +1001,12 @@ pub struct LutFilterDataDto {
     pub table: Vec<f32>,
     pub domain_min: [f32; 3],
     pub domain_max: [f32; 3],
+    /// Inhalts-Hash, siehe `LutFilterData::id`s Moduldoku — das Frontend
+    /// schickt diesen anschließend bei jeder `develop/...`-Live-
+    /// Vorschau-Anfrage statt der vollen `table` (siehe
+    /// `register_lut_filter_table`).
+    #[serde(default)]
+    pub id: String,
 }
 
 impl From<LutFilterDataDto> for apx_pipeline::edl::LutFilterData {
@@ -1011,12 +1017,14 @@ impl From<LutFilterDataDto> for apx_pipeline::edl::LutFilterData {
             table: dto.table,
             domain_min: dto.domain_min,
             domain_max: dto.domain_max,
+            id: dto.id,
         }
     }
 }
 
 impl From<apx_pipeline::lut_cube::ParsedLut> for LutFilterDataDto {
     fn from(parsed: apx_pipeline::lut_cube::ParsedLut) -> Self {
+        let id = apx_pipeline::stages::lut_filter::compute_lut_id(parsed.size, &parsed.table);
         Self {
             name: parsed
                 .title
@@ -1025,6 +1033,7 @@ impl From<apx_pipeline::lut_cube::ParsedLut> for LutFilterDataDto {
             table: parsed.table,
             domain_min: parsed.domain_min,
             domain_max: parsed.domain_max,
+            id,
         }
     }
 }
@@ -1080,6 +1089,7 @@ impl From<apx_pipeline::edl::LutFilterData> for LutFilterDataDto {
             table: data.table,
             domain_min: data.domain_min,
             domain_max: data.domain_max,
+            id: data.id,
         }
     }
 }
@@ -1096,6 +1106,30 @@ pub fn list_builtin_lut_filters() -> Vec<LutFilterDataDto> {
         .into_iter()
         .map(|kind| apx_pipeline::builtin_luts::generate(kind, 17).into())
         .collect()
+}
+
+/// Wärmt `AppState::lut_table_cache` proaktiv für `id` vor (Phase 25,
+/// siehe `DECISIONS.md`, aktuelles ADR, und `LutFilterData`s Moduldoku)
+/// — das Frontend ruft dies einmal auf, sobald ein Filter-Look gewählt
+/// wird (Bibliothekseintrag oder `.cube`-Import) bzw. sobald das
+/// Entwickeln-Panel für ein Foto mit bereits gespeichertem Filter
+/// geöffnet wird, **bevor** es die erste `develop/...`-Live-
+/// Vorschauanfrage mit leerer `table` (nur `id`) stellt. Ohne diesen
+/// Vorab-Aufruf würde `LutTableCache::resolve` zwar beim allerersten Mal
+/// automatisch aus einer vollen `table` selbst aufwärmen (siehe dessen
+/// Moduldoku), das Frontend müsste dafür aber wissen, wann genau das
+/// "allererste Mal" ist — dieser explizite Befehl macht die Reihenfolge
+/// robust statt sich auf ein Timing-Detail zu verlassen. Ein leeres `id`
+/// oder eine zu kurze `table` werden ignoriert (`LutTableCache::
+/// register` bzw. der bestehende `apply`-Sicherheitsweg fangen das ab).
+#[tauri::command]
+pub fn register_lut_filter_table(
+    state: State<'_, AppState>,
+    id: String,
+    size: u32,
+    table: Vec<f32>,
+) {
+    state.lut_table_cache.register(&id, size, &table);
 }
 
 // ---- Video-Bearbeitung (Phase 16 Schritt 6) --------------------------------

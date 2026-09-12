@@ -296,6 +296,7 @@ fn main() {
             active_import,
             pipeline,
             tile_cache: Arc::new(apx_pipeline::tile_cache::TileCache::new()),
+            lut_table_cache: Arc::new(apx_pipeline::lut_table_cache::LutTableCache::new()),
             export_queue,
             tether: Arc::new(Mutex::new(None)),
         })
@@ -319,6 +320,7 @@ fn main() {
             commands::import_dcp_profile,
             commands::import_lut_cube_file,
             commands::list_builtin_lut_filters,
+            commands::register_lut_filter_table,
             commands::trim_video,
             commands::detect_video_scene_changes,
             commands::denoise_video_audio,

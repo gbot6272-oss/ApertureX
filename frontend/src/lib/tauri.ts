@@ -410,6 +410,10 @@ export interface LutFilterDataDto {
   table: number[];
   domain_min: [number, number, number];
   domain_max: [number, number, number];
+  /** Inhalts-Hash (Phase 25, siehe `DECISIONS.md`, aktuelles ADR) —
+   * siehe `lib/edl.ts`s `LutFilterData.id`-Feld und
+   * `registerLutFilterTable`s Moduldoku. */
+  id: string;
 }
 
 /** Öffnet einen Datei-Dialog für eine `.cube`-3D-LUT-Datei und parst sie
@@ -427,6 +431,27 @@ export function importLutCubeFile(): Promise<LutFilterDataDto | null> {
  * neu anzufragen (siehe `store`s `loadBuiltinLutFilters`). */
 export function listBuiltinLutFilters(): Promise<LutFilterDataDto[]> {
   return invoke<LutFilterDataDto[]>("list_builtin_lut_filters");
+}
+
+/**
+ * Wärmt den serverseitigen `LutTableCache` für `id` vor (Phase 25, siehe
+ * `DECISIONS.md`, aktuelles ADR) — behebt den Bug, bei dem Filter/
+ * `.cube`-Importe das Bild nicht wirklich veränderten: die
+ * `develop/...`-Live-Vorschau-Route bekam bislang bei **jedem** Regler-
+ * Tick die komplette `table` (bei einem 17er-Raster über 300 KB JSON,
+ * bei einem importierten 33er-Raster über eine Megabyte) erneut im
+ * URL-Pfad übertragen, was nicht nur spürbar langsamer war, sondern bei
+ * großen Rastern die Anfrage scheitern ließ — sichtbar für Nutzer nur
+ * als "das Bild verändert sich nicht" (`useDevelopRender`s Fehlerpfad
+ * aktualisiert den zuletzt erfolgreich gerenderten Rahmen nicht).
+ *
+ * `store/index.ts`s `ensureLutFilterTableRegistered` ruft dies einmal
+ * pro `id` und Sitzung auf, **bevor** `lib/edl.ts`s
+ * `buildDevelopPreviewEdlJson` die `table` aus der Vorschau-Anfrage
+ * herausschneidet — danach reicht `id` allein, der Server löst
+ * serverseitig auf. */
+export function registerLutFilterTable(id: string, size: number, table: number[]): Promise<void> {
+  return invoke<void>("register_lut_filter_table", { id, size, table });
 }
 
 // ---- Video-Bearbeitung (Phase 16 Schritt 6) --------------------------------

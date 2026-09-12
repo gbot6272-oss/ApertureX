@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useDevelopPreviewThumbnail } from "../hooks/useDevelopRender";
 import { useElementSize } from "../hooks/useElementSize";
-import { buildEdlEnvelopeJson } from "../lib/edl";
+import { buildDevelopPreviewEdlJson } from "../lib/edl";
 import * as api from "../lib/tauri";
 import { clampZoom, computeBaseScale, imageOrigin, nextZoomStep, panForZoomAtCursor } from "../lib/viewerMath";
 import { QuadRenderer } from "../lib/webgl";
@@ -168,7 +168,7 @@ export function ReferenceView({ workingPhotoId, workingEdlJson, maxEdge }: Refer
       try {
         const position = await api.currentDevelopEdit(referencePhotoId);
         if (cancelled) return;
-        setReferenceEdlJson(buildEdlEnvelopeJson(edlFromHistoryPosition(position)));
+        setReferenceEdlJson(buildDevelopPreviewEdlJson(edlFromHistoryPosition(position)));
       } catch (err) {
         console.error("Referenzfoto-Stand konnte nicht geladen werden:", err);
         if (!cancelled) setReferenceEdlJson(null);

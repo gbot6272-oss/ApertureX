@@ -65,7 +65,12 @@ impl Default for UiSettings {
             reduced_motion: false,
             onboarding_seen: false,
             sound_enabled: true,
-            sound_volume_percent: 70,
+            // 85 statt zuvor 70 (Phase 20, siehe `DECISIONS.md` ADR-0048):
+            // Nutzer-Rückmeldung nach Phase 19 war, dass Sounds im
+            // normalen Gebrauch kaum wahrnehmbar wirkten — 70 % war zu
+            // leise, um gegen normale Systemlautstärke/Umgebungsgeräusche
+            // wahrgenommen zu werden.
+            sound_volume_percent: 85,
             sound_pack: "glass".to_string(),
         }
     }

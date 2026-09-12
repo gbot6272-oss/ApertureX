@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import gsap from "gsap";
 
 import { useFocusTrap } from "../../lib/a11y";
-import { DURATION_BASE_MS, usePrefersReducedMotion } from "../../lib/motion";
+import { usePrefersReducedMotion } from "../../lib/motion";
 import { playCue } from "../../lib/sound";
 
 export interface SheetProps {
@@ -24,6 +25,11 @@ export interface SheetProps {
  * (Fokus-Falle, Escape, verzögertes Entfernen aus dem DOM für die
  * Ausblendbewegung, `usePrefersReducedMotion()`) — nur die Bewegung
  * selbst ist eine horizontale Verschiebung statt Skalieren/Einblenden.
+ *
+ * **Echte GSAP-Bewegung statt reiner CSS-Transition (Phase 20, siehe
+ * DECISIONS.md ADR-0048)** — dieselbe Begründung/Drei-Effekt-Struktur
+ * wie `Dialog.tsx`: spürbares Einschieben mit leichtem Überschwingen
+ * statt der vorherigen 32-px-`translate-x`-CSS-Transition.
  */
 export function Sheet({
   open,
@@ -34,6 +40,7 @@ export function Sheet({
 }: SheetProps) {
   const [mounted, setMounted] = useState(open);
   const [entered, setEntered] = useState(false);
+  const backdropRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const reducedMotion = usePrefersReducedMotion();
   // Siehe `Dialog.tsx`s identischer Wächter-Kommentar — verhindert einen
@@ -47,16 +54,37 @@ export function Sheet({
       setMounted(true);
       if (!isFirstRenderRef.current) playCue("open");
       isFirstRenderRef.current = false;
+      if (reducedMotion) {
+        setEntered(true);
+        return;
+      }
       const raf = requestAnimationFrame(() => setEntered(true));
       return () => cancelAnimationFrame(raf);
     }
     if (!isFirstRenderRef.current) playCue("close");
     isFirstRenderRef.current = false;
     setEntered(false);
-    const delay = reducedMotion ? 0 : DURATION_BASE_MS;
-    const timeout = setTimeout(() => setMounted(false), delay);
-    return () => clearTimeout(timeout);
+    if (reducedMotion) setMounted(false);
   }, [open, reducedMotion]);
+
+  useEffect(() => {
+    if (!entered || reducedMotion) return;
+    const ctx = gsap.context(() => {
+      gsap.fromTo(backdropRef.current, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: "power1.out" });
+      gsap.fromTo(panelRef.current, { x: 48 }, { x: 0, duration: 0.36, ease: "back.out(1.4)" });
+    });
+    return () => ctx.revert();
+  }, [entered, reducedMotion]);
+
+  useEffect(() => {
+    if (open || reducedMotion || !mounted) return;
+    const tl = gsap.timeline({ onComplete: () => setMounted(false) });
+    tl.to(panelRef.current, { x: 32, duration: 0.2, ease: "power1.in" }, 0);
+    tl.to(backdropRef.current, { opacity: 0, duration: 0.2, ease: "power1.in" }, 0);
+    return () => {
+      tl.kill();
+    };
+  }, [open, mounted, reducedMotion]);
 
   useEffect(() => {
     if (!open) return;
@@ -71,9 +99,9 @@ export function Sheet({
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex justify-end bg-bg-overlay backdrop-blur-sm transition-opacity duration-[var(--duration-base)] ${
-        entered ? "opacity-100" : "opacity-0"
-      }`}
+      ref={backdropRef}
+      className="fixed inset-0 z-50 flex justify-end bg-bg-overlay backdrop-blur-sm"
+      style={{ opacity: reducedMotion ? 1 : entered ? undefined : 0 }}
       onClick={onClose}
     >
       <div
@@ -82,9 +110,8 @@ export function Sheet({
         aria-modal="true"
         aria-label={label}
         onClick={(event) => event.stopPropagation()}
-        className={`h-full w-full overflow-y-auto border-l border-border bg-bg-raised shadow-xl transition-transform duration-[var(--duration-base)] ${
-          entered ? "translate-x-0" : "translate-x-8"
-        } ${className}`}
+        className={`h-full w-full overflow-y-auto border-l border-border bg-bg-raised shadow-xl ${className}`}
+        style={reducedMotion ? undefined : { transform: entered ? undefined : "translateX(2rem)" }}
       >
         {children}
       </div>

@@ -763,6 +763,15 @@ interface DevelopSlice {
    * 2 Schritt 7), keine Business-Logik hängt daran. */
   developLastLatencyMs: number | null;
   setDevelopLatencyMs: (ms: number) => void;
+  /** Ob gerade aktiv an einem Regler/Kurvenpunkt/TAT-Ziehgriff gezogen
+   * wird (Phase 20, siehe `DECISIONS.md` ADR-0048) — `Viewer.tsx` rendert
+   * die Live-Vorschau währenddessen in einer kleineren Auflösung
+   * (siehe `LIVE_DRAG_MAX_EDGE`), um auf großen/hochauflösenden
+   * Bildschirmen die von Nutzern gemeldeten "ewigen Bearbeitungszeiten"
+   * beim Ziehen zu vermeiden — nach dem Loslassen (Commit) rendert die
+   * nächste Anfrage wieder in voller Vorschau-Auflösung. */
+  developIsLiveDragging: boolean;
+  setDevelopLiveDragging: (active: boolean) => void;
 }
 
 // ---- Library-Slice (ab Phase 3: Raster, Bewertung/Flagge/Farbe,
@@ -3496,6 +3505,14 @@ export const useAppStore = create<AppStore>()(
     setDevelopLatencyMs: (ms) => {
       set((state) => {
         state.developLastLatencyMs = ms;
+      });
+    },
+
+    developIsLiveDragging: false,
+
+    setDevelopLiveDragging: (active) => {
+      set((state) => {
+        state.developIsLiveDragging = active;
       });
     },
 

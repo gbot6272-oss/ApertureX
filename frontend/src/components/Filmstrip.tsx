@@ -33,6 +33,14 @@ export function Filmstrip() {
   const photos = useAppStore(useShallow(selectActivePhotos));
   const togglePhotoSelection = useAppStore((s) => s.togglePhotoSelection);
 
+  // Klick-vs-Ziehen-Unterscheidung (Phase 20, siehe `DECISIONS.md`
+  // ADR-0048, dieselbe Begründung wie in `GridView.tsx`): der Streifen
+  // ist selbst horizontal ziehbar scrollbar (`overflow-x-auto`) — ohne
+  // diesen Wächter wählt ein Ziehen zum Durchblättern/Scrollen ungewollt
+  // das Foto aus, über dem der Zeiger beim Loslassen gerade liegt.
+  const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
+  const CLICK_MOVE_THRESHOLD_PX = 6;
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: photos.length,
@@ -60,7 +68,17 @@ export function Filmstrip() {
             <button
               key={photo.id}
               type="button"
-              onClick={(event) => togglePhotoSelection(photo.id, resolveSelectionMode(event))}
+              onMouseDown={(event) => {
+                pointerDownPosRef.current = { x: event.clientX, y: event.clientY };
+              }}
+              onClick={(event) => {
+                const start = pointerDownPosRef.current;
+                pointerDownPosRef.current = null;
+                if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > CLICK_MOVE_THRESHOLD_PX) {
+                  return;
+                }
+                togglePhotoSelection(photo.id, resolveSelectionMode(event));
+              }}
               // Siehe PHASE1_PROMPT.md Abschnitt 9, Akzeptanzkriterium 8:
               // eine außerhalb der App gelöschte Datei wird beim nächsten
               // Öffnen des Ordners als `missing` markiert (Backend:
@@ -78,7 +96,13 @@ export function Filmstrip() {
                 photo.id === selectedPhotoId ? "border-accent" : multiSelectedIds.includes(photo.id) ? "border-accent/50" : "border-transparent hover:border-border"
               } ${photo.missing ? "opacity-40" : ""}`}
             >
-              <img src={previewUrl(photo.id, 0)} alt={photo.filename} className="h-full w-full object-cover" loading="lazy" />
+              <img
+                src={previewUrl(photo.id, 0)}
+                alt={photo.filename}
+                className="h-full w-full object-cover"
+                loading="lazy"
+                draggable={false}
+              />
               {photo.missing && (
                 <span className="absolute right-1 bottom-1 rounded bg-bg-base/80 px-1 text-[10px] leading-tight text-danger">fehlt</span>
               )}

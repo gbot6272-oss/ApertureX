@@ -26,7 +26,7 @@ import { ShutdownOverlay } from "./components/ShutdownOverlay";
 import { useImportEvents } from "./hooks/useImportEvents";
 import { matchesBinding } from "./lib/keybindings";
 import { usePrefersReducedMotion } from "./lib/motion";
-import { applySoundSettings, playCue, useAccordionSounds, useUnlockSoundOnFirstInteraction } from "./lib/sound";
+import { applySoundSettings, playCue, useAccordionSounds, useButtonPressSounds, useUnlockSoundOnFirstInteraction } from "./lib/sound";
 import { useAppStore } from "./store";
 
 const SHUTDOWN_TRANSITION_MS = 420;
@@ -194,6 +194,9 @@ export default function App() {
   useUnlockSoundOnFirstInteraction();
   // App-weiter Akkordeon-Sound (siehe `lib/sound.ts`s Moduldoku).
   useAccordionSounds();
+  // App-weites Tastenanschlag-Geräusch für jeden Knopf (siehe
+  // `lib/sound.ts`s Moduldoku — Phase 20 ADR-0048-Nachtrag).
+  useButtonPressSounds();
 
   // Onboarding (Phase 10 Schritt 9): einmaliges automatisches Erstanzeigen
   // über uiSettings.onboarding_seen, sobald die Einstellungen tatsächlich

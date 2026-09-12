@@ -5041,3 +5041,208 @@ Paletten selbst).
 Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
 Playwright-Suite (142/142), `cargo fmt --check` (keine Rust-Datei in
 diesem Nachtrag geändert).
+
+## ADR-0048: Phase 20 — Qualitätsoffensive nach Phase 19: reale
+Bildbelichtung, Klick-vs-Ziehen, Bearbeitungszeiten, sichtbar mehr
+Bewegung/Klang
+
+Nutzer-Rückmeldung (verbatim, gekürzt um Tippfehler/Großschreibung
+sinngemäß erhalten): Phase 19 fühle sich in der echten, laufenden App
+nicht wie die dokumentierte Arbeit an — "maximal 3 Sounds", "kein
+Hover, kein gar nix", ein Start-Ladeschirm, der praktisch nicht
+wahrnehmbar sei ("ein Rad, das sich 200 ms dreht"), dazu drei konkrete,
+bis dahin nicht dokumentierte Fehler: ein komplett überbelichtetes/
+verblasstes Foto im Entwickeln-Modus (Screenshot eines iPhone-JPEGs
+mit neutralen Reglern beigefügt), automatisches Auswählen beim bloßen
+Verschieben eines Fotos, und spürbar lange Bearbeitungszeiten.
+
+**Befund — warum ein grüner Testlauf und eine schlecht wirkende App
+gleichzeitig wahr sein konnten:** die 142/142 Playwright- und 251/251
+Vitest-Tests aus Phase 19 prüfen, DASS Animationen/Sounds an den
+verdrahteten Stellen auslösen, nicht WIE stark/hörbar/lang sie
+wirken — eine `strokeDashoffset`-Öffnen-Animation, die exakt einmal
+für 0,8 s abspielt, ist testbar korrekt und trotzdem im echten
+Gebrauch fast unsichtbar, wenn `ready` (weil der Katalog schnell lädt)
+schon nach 100–300 ms wahr wird und der Splash sich sofort wieder
+ausblendet. Die Hover-Übergangsregel aus Phase 18 Schritt 6 deckte nur
+`button, a, select, [role="tab"], [role="menuitem"]` ab — nicht
+`role="button"` (u. a. `GridView.tsx`s Rasterkacheln selbst), Regler,
+Checkboxen, Radios, `<label>`. Und der mit Abstand meistgenutzte
+Bedienelement-Typ der App, die ~40 `DevelopSlider`-Instanzen, hatte
+bis dahin **keinen einzigen** eigenen Sound — direkte Ursache von
+"maximal 3 Sounds".
+
+**Befund — Überbelichtung im Entwickeln-Modus (reale, bestätigte
+Bild-Pipeline-Regression, kein Wahrnehmungsproblem):**
+`apx_raw::pipeline::decode_linear()` gibt für Fallback-Formate (JPEG/
+PNG/TIFF — praktisch jedes Handyfoto) seit jeher nur `u16`→`f32`-
+reskalierte, aber weiterhin sRGB-**gammakodierte** Pixel zurück (siehe
+die zugehörige Modul-Doku, die das explizit als bewusste Phase-2-
+Vereinfachung beschrieb). `apx_pipeline::color::
+linear_camera_rgb_to_srgb_rgba8()` — der gemeinsame letzte Schritt
+sowohl des Entwickeln-Live-Renderpfads als auch von
+`apx-export::engine::render_to_pixels` — erwartet aber echtes
+lineares Licht und wendet selbst am Ende erneut `srgb_gamma()` an.
+Für RAW-Quellen (`decode_raw_linear`, echtes lineares Licht) ist das
+korrekt; für JPEG/PNG/TIFF wurde die Gammakurve dadurch **zweimal**
+angewendet — hellt Mitten/Lichter systematisch auf und erzeugt exakt
+das gemeldete überbelichtete/verblasste Bild. Betraf nicht nur die
+Voransicht, sondern auch den echten Export (`apx-export/src/
+engine.rs` nutzt denselben `decode_linear`→`render_rgba8`-Pfad) sowie
+alle KI-Verarbeitungsschritte, die über `decode_linear` lesen (Masken,
+Upright, Vergleich, u. v. a. in `apx-app/src/commands.rs`) — dort
+bislang nur als Konsistenz-Schiefstand zwischen RAW- (echt linear) und
+Fallback-Quellen (fälschlich noch gammakodiert), nicht notwendig als
+sichtbarer Fehler.
+
+**Befund — automatisches Auswählen "beim Verschieben":** weder
+`GridView.tsx` noch `Filmstrip.tsx` unterschieden zwischen einem
+reinen Klick und einem Ziehen (z. B. beim Versuch, per Maus über die
+Kacheln/den Streifen zu scrollen, oder ausgelöst durch das
+Standard-Browser-Verhalten, dass ein `<img>` ohne `draggable={false}`
+ziehbar ist) — der Browser feuert nach `mousedown`/`mouseup` ein
+`click`, unabhängig davon, wie weit sich der Zeiger dazwischen bewegt
+hat, solange kein Bewegungs-Wächter das abfängt.
+
+**Befund — Bearbeitungszeiten:** die Rendering-Architektur selbst
+(`tile_cache` für den teuren Dekodier-Schritt, `requestAnimationFrame`-
+Entprellung, Anfrageabbruch bei neuerer Anfrage, GPU-Pfad,
+`decode_ms`/`render_ms`-Tracing) ist bereits bewusst auf das 16-ms-Ziel
+aus `PLAN.md` Phase 2 Schritt 7 ausgelegt — aber jede Live-Anfrage
+rendert bislang in derselben, an die Anzeigegröße gekoppelten
+Auflösung (bis zu `MAX_FULL_EDGE`=4096 px Kante auf großen/
+hochauflösenden Bildschirmen), ob der Regler gerade aktiv gezogen wird
+oder nicht. Auf großen/Retina-Bildschirmen bedeutet das volle
+Pipeline-Rendering (Masken, Kurven, HSL, …) bei jedem einzelnen
+Zieh-Tick.
+
+**Entscheidungen:**
+
+1. **`srgb_gamma_inverse` (EOTF)** neu in `apx-raw/src/pipeline/
+   color.rs`, angewendet in `decode_linear()`s Fallback-Zweig — macht
+   Fallback-Quellen echt linear, genau wie RAW-Quellen es bereits
+   waren, statt einer Sonderbehandlung nur für den Entwickeln-
+   Renderpfad. Test `decode_linear_matches_decode_for_a_real_exif_jpeg`
+   entsprechend angepasst (prüft jetzt, dass linearisierte Mittenwerte
+   sichtbar unter den gammakodierten liegen, statt Byte-Identität
+   einzufordern).
+2. **Klick-vs-Ziehen-Wächter** in `GridView.tsx`/`Filmstrip.tsx`:
+   `onMouseDown` merkt sich die Startposition, `onClick` verwirft die
+   Auswahl, wenn der Zeiger sich seither mehr als 6 px bewegt hat;
+   zusätzlich `draggable={false}` auf den Vorschaubildern (verhindert
+   den nativen Bild-Zieh-Ghost, der diese Geste erst auslöste).
+3. **`developIsLiveDragging`** neu im Store, gesetzt von
+   `DevelopSlider.tsx` (Regler-`pointerdown`/-`pointerup`) und
+   `Viewer.tsx` (TAT-Ziehgriff-Start/-Ende) — `Viewer.tsx` rendert die
+   Live-Vorschau währenddessen mit `LIVE_DRAG_MAX_EDGE`=1280 px statt
+   der vollen Anzeigeauflösung, genau wie Lightroom/Capture One
+   während des Ziehens eine reduzierte Vorschau zeigen. Nach dem
+   Loslassen (Commit) rendert die nächste Anfrage wieder in voller
+   Auflösung.
+4. **Start-Ladeschirm deutlich verstärkt:** `MIN_VISIBLE_MS`=900 ms
+   Mindestanzeigedauer unabhängig davon, wie schnell `ready` wahr
+   wird (behebt "200 ms" strukturell statt nur kosmetisch);
+   doppelter, gegenläufig rotierender Iris-Ring (96 px statt 64 px)
+   mit weichem Leuchten (`glowRef`) statt eines einzelnen kleinen
+   Rings; größeres, in Sperrschrift einblendendes Wortzeichen plus
+   Untertitel "Wird geladen …" statt nur des Namenszugs.
+5. **Hover/Fokus-Übergänge ausgeweitet** (`index.css`): die Phase-18-
+   Regel deckt jetzt zusätzlich `role="button"`, `role="checkbox"`,
+   `role="radio"`, `role="switch"`, `role="option"`, `[tabindex="0"]`,
+   `label`, `summary`, `input[type="range"|"checkbox"|"radio"]` ab
+   (vorher nur `button, a, select, [role="tab"], [role="menuitem"]`),
+   dazu eine dezente Skalierungs-Rückmeldung (`scale(1.015)` Hover,
+   `scale(0.985)` aktiv) speziell für `role="button"`-Elemente, die aus
+   HTML-Verschachtelungsgründen kein `<button>` sein können (u. a.
+   `GridView.tsx`s Rasterkacheln) und bis dahin trotz eigener
+   `hover:*`-Klassen ganz ohne Übergangsanimation blieben.
+6. **`DevelopSlider.tsx` bekommt einen eigenen Sound** — `uisfx`s
+   `"release"`-Cue ("A pressed control springs back") beim Loslassen/
+   Commit, nicht bei jedem Zieh-Tick (das wäre Lärm statt Feedback).
+   Semantisch passender als eine Wiederverwendung von `"select"`.
+   Default-Lautstärke `sound_volume_percent` in `apx-core::settings::
+   UiSettings::default()` von 70 auf 85 angehoben — 70 % erwies sich
+   im normalen Gebrauch gegen Systemlautstärke/Umgebungsgeräusche als
+   zu leise, um überhaupt wahrgenommen zu werden.
+7. **`PROMPTS.md`**, auf das der Nutzer für "echte Animationen"
+   verwiesen hat, existiert nachweislich nicht in diesem Repository
+   (erschöpfende Suche: `find`/`grep` über den gesamten Baum, auch
+   `.git`-Historie-unabhängig) — einzig ähnlich benannte Datei ist das
+   historische `PHASE1_PROMPT.md` (Phase-1-Planungsdokument, keine
+   Animations-Referenzsammlung). Ohne diese Datei war der konkrete
+   Verweis nicht umsetzbar; dem Nutzer im Antworttext mitgeteilt statt
+   stillschweigend ignoriert.
+
+**Bewusst außerhalb dieses Umfangs belassen:** ein vollständiger
+Bewegungs-/Klang-Neuentwurf jeder der über 500 `hover:*`-Stellen
+einzeln (die globale CSS-Regel deckt sie strukturell ab, ohne jede
+Komponente einzeln anzufassen); ein neues Logo-Bild-Asset (weiterhin
+kein Netzwerkzugriff auf externe Asset-Quellen in dieser Umgebung,
+siehe ADR-0047); eine Kachel-basierte Entwickeln-Pipeline für echte
+16-ms-Ziehreaktionen bei jeder Auflösung (die reduzierte
+Zieh-Auflösung ist der pragmatische Zwischenschritt, ein echtes
+Kachel-Rendering wäre ein eigener, deutlich größerer Umbau).
+
+Verifiziert: `cargo test -p apx-raw` (43/43, inkl. drei neuer
+`srgb_gamma_inverse`-Tests + angepasstem JPEG-Linearisierungstest),
+`cargo test -p apx-pipeline -p apx-export` (251/251 — bestätigt, dass
+kein Downstream-Konsument von `decode_linear` durch die Linearisierung
+bricht), `tsc -b` sauber, `vitest run` (251/251).
+
+## ADR-0048-Nachtrag: Echte GSAP-Bewegung + app-weites Knopf-Feedback
+
+Nutzerwunsch (verbatim, sinngemäß): "Bugs war eine Sache aber was ist
+mit der Scheiß zu den fehlenden Animationen und Sounds und allem
+anderen was bemängelt wurde" — die erste Phase-20-Runde (Startup-
+Splash, Regler-Sound, Hover-CSS-Ausweitung) wurde zu Recht als nicht
+ausreichend empfunden.
+
+**Kernbefund:** `gsap` steht seit Phase 19 als Abhängigkeit bereit,
+wurde bis zu diesem Nachtrag aber real nur in **zwei** Dateien
+tatsächlich verwendet (`StartupSplash.tsx`, `ShutdownOverlay.tsx`).
+Die gemeinsame `ui/Dialog.tsx`/`ui/Sheet.tsx`-Hülle, die sich über 25
+Dialoge, `CommandPalette` und `KeybindingsCheatsheet` teilen, lief
+weiterhin über eine reine 8/32-px-CSS-Transition aus Phase 18 — direkt
+verantwortlich für den Eindruck "kein gar nix", trotz der als "echte
+Animationsbibliothek" beschafften `gsap`-Abhängigkeit. Zusätzlich
+hatten echte `<button>`-Elemente (die weit überwiegende Mehrheit aller
+Klickflächen der App) außer einem Farbwechsel **keine** physische
+Rückmeldung — nur `role="button"`-Elemente (Rasterkacheln u. Ä.)
+hatten seit dem ersten Phase-20-Durchgang eine Skalierungs-Animation.
+
+**Entscheidungen:**
+
+1. **`ui/Dialog.tsx`/`ui/Sheet.tsx` auf echte GSAP-Tweens umgestellt**
+   statt der bisherigen CSS-Transition — Dialog skaliert mit
+   spürbarem Überschwingen herein (`scale(0.94)→1`, `back.out(1.6)`),
+   Sheet schiebt sich mit demselben Überschwingen von der Kante ein.
+   Dieselbe Drei-Effekt-Struktur wie `StartupSplash.tsx` (Mount+Sound
+   / Eintritt-Tween ausgelöst von einem `entered`-Flag / Austritt-Tween
+   ausgelöst von `open === false`, `onComplete` entfernt das Panel erst
+   danach aus dem DOM) — vermeidet die Falle, dass ein einzelner
+   `useEffect` mit `open`/`reducedMotion` als einzige Abhängigkeiten
+   nicht erneut liefe, wenn nur `mounted`/`entered` intern kippen.
+   Betrifft strukturell jeden der 25+ Aufrufer, ohne einen einzigen
+   davon anzufassen.
+2. **App-weites Tastenanschlag-Feedback für JEDEN `<button>`**: neues
+   `useButtonPressSounds()` in `lib/sound.ts` — ein einzelner
+   delegierter `pointerdown`-Listener auf `document` (Capture-Phase,
+   dasselbe Muster wie `useAccordionSounds`) spielt `uisfx`s
+   dedizierten `"press"`-Cue (Kategorie "input", genau für diesen
+   Zweck) bei jedem nicht-deaktivierten `button`/`role="button"`
+   app-weit — läuft bewusst zusätzlich zu einem eventuellen
+   spezifischeren Sound der Komponente selbst (der feuert beim
+   `click`, also etwas später als `pointerdown`), dasselbe
+   Schichtungsprinzip wie ein physisches Anschlaggeräusch plus ein
+   Ergebnis-Ton danach. `index.css`: Eindrücken-Skalierung
+   (`scale(0.985)` bei `:active`) jetzt auch für echte `<button>`-
+   Elemente, nicht mehr nur `role="button"` — bewusst nur `:active`
+   (kein `:hover`), da viele Knöpfe dicht in Werkzeugleisten stehen und
+   ein Hover-Skalieren sie gegeneinander verschieben würde.
+
+Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
+Playwright-Suite (142/142 — inkl. Fund/Behebung eines
+Umgebungsproblems in dieser Sitzung: die erste Verifikationsrunde
+schlug mit 142/142 Fehlschlägen fehl, weil `PLAYWRIGHT_CHROMIUM_PATH`
+nicht gesetzt war — kein Code-Regression, nach Setzen des Pfads lief
+die Suite grün).

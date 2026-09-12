@@ -64,6 +64,19 @@ export function GridView({ variant = "grid" }: GridViewProps) {
 
   const [hoveredPhotoId, setHoveredPhotoId] = useState<string | null>(null);
 
+  // Klick-vs-Ziehen-Unterscheidung (Phase 20, siehe `DECISIONS.md`
+  // ADR-0048): der Browser feuert nach einem `mousedown`/`mouseup`-Paar
+  // ein `click`, selbst wenn der Zeiger dazwischen deutlich bewegt wurde
+  // (z. B. beim Versuch, die Rasteransicht per Ziehen zu verschieben/zu
+  // scrollen, oder beim — vom nativen `<img draggable>`-Verhalten
+  // ausgelösten — Versuch, ein Foto zu verschieben). Ohne diese Wächter
+  // wählte jede solche Zieh-Geste ungewollt ein Foto aus, genau der von
+  // Nutzern gemeldete "automatisches Auswählen beim Foto-Verschieben"-
+  // Fehler. `useRef` statt `useState`, weil der Wert nur innerhalb einer
+  // einzigen Klick-Geste gebraucht wird und keinen Re-Render auslösen soll.
+  const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
+  const CLICK_MOVE_THRESHOLD_PX = 6;
+
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -142,7 +155,23 @@ export function GridView({ variant = "grid" }: GridViewProps) {
                       // vollwertig fokussierbar.
                       role="button"
                       tabIndex={0}
+                      onMouseDown={(event) => {
+                        pointerDownPosRef.current = { x: event.clientX, y: event.clientY };
+                      }}
                       onClick={(event) => {
+                        // Nur auswählen, wenn sich der Zeiger seit dem
+                        // `mousedown` kaum bewegt hat — siehe Kommentar bei
+                        // `pointerDownPosRef` oben. Kein gespeicherter
+                        // Startpunkt (z. B. Klick per Touch/Assistiv-
+                        // Technologie ohne vorheriges `mousedown`) zählt
+                        // weiterhin als normaler Klick.
+                        const start = pointerDownPosRef.current;
+                        pointerDownPosRef.current = null;
+                        if (start) {
+                          const dx = event.clientX - start.x;
+                          const dy = event.clientY - start.y;
+                          if (Math.hypot(dx, dy) > CLICK_MOVE_THRESHOLD_PX) return;
+                        }
                         playCue("select");
                         if (isOverview) selectPhoto(photo.id);
                         else togglePhotoSelection(photo.id, resolveSelectionMode(event));
@@ -171,6 +200,13 @@ export function GridView({ variant = "grid" }: GridViewProps) {
                         alt={photo.filename}
                         className="h-full w-full object-cover"
                         loading="lazy"
+                        // `<img>` ist im Browser standardmäßig ziehbar —
+                        // ohne dies löst ein Zieh-Versuch auf der Kachel
+                        // (z. B. beim Verschieben-Versuch oder beim Scrollen
+                        // per Ziehen) einen nativen Bild-Drag statt eines
+                        // einfachen Klicks aus (siehe `pointerDownPosRef`-
+                        // Kommentar oben, `DECISIONS.md` ADR-0048).
+                        draggable={false}
                       />
                       {photo.missing && (
                         <span className="absolute right-1 top-1 rounded bg-bg-base/80 px-1 text-[10px] leading-tight text-danger">

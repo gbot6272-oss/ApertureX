@@ -1175,6 +1175,21 @@ Volle Suite gebündelt erst im letzten Schritt.
 - [ ] 10. Dokumentation, volle Verifikation, Abnahme
 - [x] `tsc -b`, volle `vitest run`-Suite (251 Tests, 28 neue), `map-flow.spec.ts` grün
 
+## Aktuelle Phase: Phase 21 — Liquid-Glass-Überarbeitung, Spotlight-Tutorial
+
+Nutzerwunsch: gesamte Oberfläche im "Liquid Glass"-Materialstil,
+weniger überladene Hilfetexte, einfacher zu navigieren, ein
+Einführungstutorial am Anfang mit Beispielfoto und Fokus auf echte
+Bedienelemente. Details, Recherche (`ui-ux-pro-max`-Skill) und
+Entwurfsentscheidungen: siehe `DECISIONS.md` ADR-0049.
+
+- [x] 0. ADR-0049 + PLAN.md-Abschnitt, Recherche über `ui-ux-pro-max`-Skill (Liquid-Glass-Stil, GSAP-Presets, Onboarding-UX-Regeln)
+- [x] 1. Liquid-Glass-Token-Fundament (`index.css`: `--glass-*`, `.apx-glass`/`.apx-glass-strong` — translucente Grundfarbe + `backdrop-filter` + Glanz-Verlauf als zweite `background-image`-Ebene; Kontrastmodus deaktiviert Transluzenz/Weichzeichnung vollständig)
+- [x] 2. Angewendet auf `ui/Dialog.tsx`, `ui/Sheet.tsx`, `ui/Menu.tsx`, `PaletteFrame.tsx` (zentral, deckt alle sechs Aufrufer ab) und `Header.tsx` statt einzelner `bg-bg-raised`-Flächen
+- [x] 3. `OnboardingTour.tsx` ersetzt `OnboardingDialog.tsx`: echte Spotlight-Tour über `data-tour="..."`-markierte Bedienelemente (Sidebar/Import/Ansichten/Entwickeln/Suche/Filmstreifen), Vier-Rechteck-Aussparungstechnik, Inline-SVG-Beispielfoto auf der Begrüßungskarte, Zurück-/Überspringen-Knöpfe immer verfügbar
+- [x] 4. Gezielter Kürzungs-Durchgang: `settings.watchedFolderHint`/`settings.mapApiKeyHint` von je zwei bis drei Sätzen auf einen knappen Satz gekürzt; tote `onboarding.layout.*`/`onboarding.import.*`/`onboarding.develop.*`/`onboarding.palette.*`/`onboarding.shortcuts.*`/`onboarding.start`-Lokalisierungsschlüssel entfernt (nur von der abgelösten `OnboardingDialog.tsx` gelesen)
+- [x] 5. Dokumentation (`DECISIONS.md` ADR-0049), volle Verifikation: `tsc -b`, `vitest run` (251/251), volle Playwright-Suite (142/142)
+
 ## Aktuelle Phase: Phase 20 — Qualitätsoffensive nach Phase 19
 
 Nutzer-Rückmeldung nach eigenem Test der echten, laufenden App:

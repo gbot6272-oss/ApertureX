@@ -149,7 +149,7 @@ export function Dialog({
         aria-modal="true"
         aria-label={label}
         onClick={(event) => event.stopPropagation()}
-        className={`max-h-[85vh] w-full overflow-y-auto rounded-xl border border-border bg-bg-raised shadow-xl ${className}`}
+        className={`apx-glass-strong max-h-[85vh] w-full overflow-y-auto rounded-xl border border-[var(--glass-border)] shadow-xl ${className}`}
         style={{ opacity: reducedMotion ? 1 : entered ? undefined : 0 }}
       >
         {children}

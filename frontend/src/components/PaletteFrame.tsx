@@ -29,6 +29,14 @@ const COLLAPSED_WIDTH = 36;
  * (eingeklappt=false) bleiben unverändert, damit jeder bestehende
  * e2e-Test, der Inhalte dieser Paletten anspricht, ohne Anpassung
  * weiterläuft; Ziehen/Einklappen ist rein additiv.
+ *
+ * Trägt seit Phase 21 (Liquid-Glass-Überarbeitung, `DECISIONS.md`
+ * ADR-0049) zentral die `apx-glass`-Materialklasse (siehe `index.css`)
+ * auf beiden Zuständen (ein-/ausgeklappt) — alle sechs Aufrufer
+ * (Sidebar/Presets/Metadaten/Entwickeln/Masken-Panel) bekommen die
+ * neue Glas-Optik dadurch automatisch, ohne selbst `bg-bg-raised` zu
+ * setzen; sie liefern nur noch Rand-/Abstands-/Lückenklassen über
+ * `className`.
  */
 export function PaletteFrame({ id, side, defaultWidth, label, className = "", children }: PaletteFrameProps) {
   const { width, collapsed, toggleCollapsed, setWidth } = useWorkspacePanel(id, defaultWidth);
@@ -75,7 +83,7 @@ export function PaletteFrame({ id, side, defaultWidth, label, className = "", ch
       style={{ width: collapsed ? COLLAPSED_WIDTH : width, transition }}
     >
       {collapsed ? (
-        <div className={`flex w-full shrink-0 flex-col items-center gap-2 bg-bg-raised p-1 ${side === "left" ? "border-r" : "border-l"} border-border`}>
+        <div className={`apx-glass flex w-full shrink-0 flex-col items-center gap-2 p-1 ${side === "left" ? "border-r" : "border-l"} border-[var(--glass-border)]`}>
           <button
             type="button"
             onClick={() => {
@@ -92,7 +100,7 @@ export function PaletteFrame({ id, side, defaultWidth, label, className = "", ch
         </div>
       ) : (
         <>
-          <aside className={`flex w-full shrink-0 flex-col overflow-y-auto ${className}`} aria-label={label}>
+          <aside className={`apx-glass flex w-full shrink-0 flex-col overflow-y-auto ${className}`} aria-label={label}>
             <div className="flex items-center justify-end px-1 pt-1">
               <button
                 type="button"

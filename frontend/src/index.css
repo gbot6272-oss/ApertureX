@@ -68,6 +68,87 @@
   --duration-slow: 320ms;
 }
 
+/* Liquid-Glass-Token-Fundament (Phase 21, siehe `DECISIONS.md`
+   ADR-0049) — Nutzerwunsch: die gesamte App-Chrome (Kopfleiste,
+   angedockte Paletten, Dialoge/Sheets, Überlauf-Menü) im "Liquid
+   Glass"-Materialstil statt der bisherigen flach-deckenden Flächen.
+   Bewusst als eigene Token-Ebene neben den bestehenden `--color-bg-*`-
+   Farbtönen (nicht als deren Ersatz): `--color-bg-raised`/`-panel`
+   bleiben die deckende Grundfarbe für Flächen, die keine Transluzenz
+   vertragen (z. B. Formularfelder), `--glass-*` beschreibt zusätzlich
+   nur die neue `.apx-glass`-Materialoberfläche unten.
+   `backdrop-filter` ist teuer, wenn er auf sehr viele gleichzeitig
+   sichtbare Elemente angewendet wird — deshalb bewusst NUR auf die
+   wenigen, meist einmal vorhandenen App-Chrome-Flächen (Kopfleiste,
+   angedockte Paletten via `PaletteFrame.tsx`, Dialog/Sheet/Menü),
+   nicht auf einzelne Rasterkacheln o. Ä. */
+:root {
+  --glass-bg: rgb(32 32 32 / 62%);
+  --glass-bg-strong: rgb(28 28 28 / 78%);
+  --glass-border: rgb(255 255 255 / 12%);
+  --glass-sheen: linear-gradient(
+    135deg,
+    rgb(255 255 255 / 14%) 0%,
+    rgb(255 255 255 / 2%) 30%,
+    rgb(255 255 255 / 0%) 55%,
+    rgb(255 255 255 / 6%) 100%
+  );
+  --glass-blur: 20px;
+  --glass-saturate: 165%;
+}
+
+:root[data-theme="light"] {
+  --glass-bg: rgb(255 255 255 / 62%);
+  --glass-bg-strong: rgb(255 255 255 / 80%);
+  --glass-border: rgb(35 32 25 / 10%);
+  --glass-sheen: linear-gradient(
+    135deg,
+    rgb(255 255 255 / 55%) 0%,
+    rgb(255 255 255 / 10%) 30%,
+    rgb(255 255 255 / 0%) 55%,
+    rgb(35 32 25 / 4%) 100%
+  );
+}
+
+/* Kontrastmodus (siehe `--color-bg-overlay`s identische Begründung
+   oben): im Kontrastmodus geht es um maximale Lesbarkeit — Transluzenz
+   und ein weicher Schleier widersprechen dem. `--glass-blur: 0px`
+   deaktiviert den `backdrop-filter` faktisch (eine 0-px-Weichzeichnung
+   verändert den Hintergrund nicht mehr sichtbar), `--glass-bg`/
+   `-bg-strong` werden voll deckend. */
+:root[data-contrast="high"] {
+  --glass-bg: var(--color-bg-raised);
+  --glass-bg-strong: var(--color-bg-raised);
+  --glass-border: var(--color-border);
+  --glass-sheen: none;
+  --glass-blur: 0px;
+}
+
+/* Die eigentliche Materialoberfläche — ersetzt `bg-bg-raised`/
+   `bg-bg-panel` an den wenigen App-Chrome-Stellen aus der Moduldoku
+   oben. Der Schleier (`--glass-sheen`) liegt als zweite
+   `background-image`-Ebene über der Grundfarbe — beide Ebenen derselben
+   Box-`background`, dadurch automatisch und ohne `z-index`-/Stapel-
+   kontext-Klimmzüge hinter jeglichem Inhalt (ein eigenes
+   `::before`-Pseudo-Element für den Schleier hätte hier unnötige
+   Stapelreihenfolge-Fallstricke mit dem `position: relative` der
+   Aufrufer riskiert). */
+.apx-glass {
+  position: relative;
+  background-color: var(--glass-bg);
+  background-image: var(--glass-sheen);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+.apx-glass-strong {
+  position: relative;
+  background-color: var(--glass-bg-strong);
+  background-image: var(--glass-sheen);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
 * {
   box-sizing: border-box;
 }

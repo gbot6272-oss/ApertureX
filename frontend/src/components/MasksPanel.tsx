@@ -206,7 +206,7 @@ export function MasksPanel() {
   }
 
   return (
-    <PaletteFrame id="masks" side="right" defaultWidth={256} label="Masken" className="gap-3 border-l border-border bg-bg-raised p-3">
+    <PaletteFrame id="masks" side="right" defaultWidth={256} label="Masken" className="gap-3 border-l border-[var(--glass-border)] p-3">
       <div className="flex items-center justify-between">
         <h2 id="stage-masks" className="text-sm font-semibold text-text-primary">Masken</h2>
         <button

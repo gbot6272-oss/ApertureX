@@ -14,7 +14,7 @@ import { KeybindingsCheatsheet } from "./components/KeybindingsCheatsheet";
 import { MapView } from "./components/MapView";
 import { MasksPanel } from "./components/MasksPanel";
 import { MetadataPanel } from "./components/MetadataPanel";
-import { OnboardingDialog } from "./components/OnboardingDialog";
+import { OnboardingTour } from "./components/OnboardingTour";
 import { PeopleView } from "./components/PeopleView";
 import { PresetsPanel } from "./components/PresetsPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -361,7 +361,7 @@ export default function App() {
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <SettingsDialog open={settingsDialogOpen} onClose={() => setSettingsDialogOpen(false)} />
       <KeybindingsCheatsheet open={cheatsheetOpen} onClose={() => setCheatsheetOpen(false)} />
-      <OnboardingDialog open={onboardingOpen} onClose={closeOnboarding} />
+      <OnboardingTour open={onboardingOpen} onClose={closeOnboarding} />
     </div>
   );
 }

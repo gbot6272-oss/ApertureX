@@ -144,6 +144,11 @@ export default function App() {
   const developPanelOpen = useAppStore((s) => s.developPanelOpen);
   const undoLibraryAction = useAppStore((s) => s.undoLibraryAction);
   const redoLibraryAction = useAppStore((s) => s.redoLibraryAction);
+  // Fokus-Modus + "Lichter aus" (Phase 26, siehe `DECISIONS.md` ADR-0056).
+  const focusMode = useAppStore((s) => s.focusMode);
+  const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
+  const lightsOut = useAppStore((s) => s.lightsOut);
+  const cycleLightsOut = useAppStore((s) => s.cycleLightsOut);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
   // Start-Ladeschirm (Phase 19, siehe `StartupSplash.tsx`s Moduldoku) —
@@ -308,6 +313,18 @@ export default function App() {
         }
       } else if (matchesBinding(event, "fullscreen")) {
         void toggleFullscreen();
+      } else if (matchesBinding(event, "focus-mode")) {
+        // Phase 26 (siehe `DECISIONS.md` ADR-0056) — beide Modi laufen
+        // bewusst durch dieselbe `matchesBinding`-Kette wie alle anderen
+        // globalen Kürzel, sind also über das Cheatsheet umbelegbar und
+        // durch den `isEditable`-Wächter oben automatisch aus
+        // Eingabefeldern/Reglern herausgehalten.
+        event.preventDefault();
+        playCue(focusMode ? "expand" : "collapse");
+        toggleFocusMode();
+      } else if (matchesBinding(event, "lights-out")) {
+        event.preventDefault();
+        cycleLightsOut();
       } else if (selectedPhotoId && /^[0-5]$/.test(event.key)) {
         // Bewertungs-Tastenkürzel (Lightroom-Konvention), siehe
         // `PLAN.md` Phase 3, Schritt 6 — bewusst nicht Teil von
@@ -345,9 +362,16 @@ export default function App() {
       <Header onOpenPalette={() => setPaletteOpen(true)} />
       <ErrorBanner />
       {(centerView === "grid" || centerView === "overview") && <FilterBar />}
+      {/* Fokus-Modus (Phase 26, siehe `DECISIONS.md` ADR-0056): die
+          angedockten Paletten und der Filmstreifen werden nicht nur
+          versteckt, sondern gar nicht erst gerendert — sonst liefen ihre
+          Effekte (Vorschau-Nachladen, Histogramm-Zeichnen) im
+          ausgeblendeten Zustand weiter. Ihr jeweils eigener Ein-/
+          Ausklapp-Zustand (`useWorkspacePanel`, localStorage) bleibt
+          davon unberührt und kommt beim Verlassen unverändert zurück. */}
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
-        <PresetsPanel />
+        {!focusMode && <Sidebar />}
+        {!focusMode && <PresetsPanel />}
         {/* Sanfter Überblend-Wechsel beim centerView-Wechsel (Phase 18
             Schritt 6, siehe `DECISIONS.md` ADR-0046) — `key={centerView}`
             erzwingt einen frischen Mount nur bei einem echten
@@ -356,7 +380,15 @@ export default function App() {
             wiederholte Überblendung aus). `index.css`s
             `.apx-view-fade-in` respektiert `prefers-reduced-motion`/
             `uiSettings.reduced_motion` automatisch mit. */}
-        <div key={centerView} className="apx-view-fade-in flex flex-1 overflow-hidden">
+        {/* Bei aktivem "Lichter aus" hebt sich allein der Bildbereich über
+            die Dimm-Ebene (`z-20`, siehe unten) — genau das ist der Sinn
+            des Modus: die Umgebung verschwindet, das Foto bleibt hell.
+            Bleibt unter der Kopfzeile (`z-30`), deren `backdrop-filter`
+            dadurch die abgedunkelte Umgebung abtastet und selbst dunkel
+            wird. Ohne aktiven Modus bewusst KEINE Stapelkontext-Klasse
+            (siehe ADR-0055: ein unnötig gesetzter `z-index` hat hier
+            schon einmal das Overflow-Menü verdeckt). */}
+        <div key={centerView} className={`apx-view-fade-in flex flex-1 overflow-hidden ${lightsOut === "off" ? "" : "relative z-[25]"}`}>
           {centerView === "grid" ? (
             <GridView />
           ) : centerView === "overview" ? (
@@ -371,19 +403,36 @@ export default function App() {
             <Viewer />
           )}
         </div>
-        <MetadataPanel />
+        {!focusMode && <MetadataPanel />}
         {/* Rechte Werkzeug-Palette (Phase 10 Schritt 2): Entwickeln- und
             Masken-Panel bleiben zwei unabhängig sichtbare/aufklappbare
             Bereiche (nicht exklusiv verdeckende Reiter — viele bestehende
             e2e-Tests bedienen Entwickeln- und Maskenregler im selben
             Ablauf), aber unter einer gemeinsamen visuellen Außenhülle statt
             zweier lose nebeneinanderstehender <aside>s. */}
-        <div className="flex shrink-0">
-          <DevelopPanel />
-          <MasksPanel />
-        </div>
+        {!focusMode && (
+          <div className="flex shrink-0">
+            <DevelopPanel />
+            <MasksPanel />
+          </div>
+        )}
       </div>
-      <Filmstrip />
+      {!focusMode && <Filmstrip />}
+      {/* "Lichter aus" (Phase 26): eine reine Sichtebene ÜBER der
+          gesamten App, aber UNTER der Kopfzeile (`z-30`) und unter
+          Dialogen (`z-50`) — der zentrale Bildbereich bleibt dadurch
+          unangetastet hell, während Paletten/Filmstreifen/Filterleiste
+          abgedunkelt werden. `pointer-events-none`: der Modus dimmt nur
+          optisch, er sperrt die Bedienung nicht (sonst wäre er ohne
+          Tastatur nicht mehr verlassbar). */}
+      {lightsOut !== "off" && (
+        <div
+          aria-hidden
+          data-testid="lights-out-overlay"
+          className="pointer-events-none fixed inset-0 z-20 transition-[background-color] duration-[var(--duration-base)]"
+          style={{ backgroundColor: lightsOut === "dim" ? "rgb(0 0 0 / 55%)" : "rgb(0 0 0 / 92%)" }}
+        />
+      )}
       <CompareGridView />
       <HistoryTimelineDialog />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />

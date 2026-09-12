@@ -6126,3 +6126,115 @@ Screenshots dem Nutzer geschickt.
 `tsc -b`: sauber. `vitest run`: 251/251. Volle Playwright-Suite:
 142/142 (inklusive der zunächst gefundenen und behobenen
 `tat-flow.spec.ts`-Regression).
+
+## ADR-0056: Phase 26 — drei Ansichts-Funktionen, die erst durch die schwebende Kopfzeile möglich wurden
+
+Nutzerwunsch nach dem Layout-Umbau: "Noch mehr Funktionen". Statt
+beliebiger Zusätze bewusst genau die drei Funktionen gebaut, die aus
+der neuen Struktur (Kopfzeile als Overlay, ADR-0055-Nachtrag III)
+folgerichtig entstehen — die Chrome liegt jetzt ÜBER dem Bild, also
+ist "Chrome wegnehmen" plötzlich eine sinnvolle, sichtbare Geste.
+
+1. **Fokus-Modus** (`t`, Store: `focusMode`): blendet Sidebar, Presets-,
+   Metadaten-, Entwickeln- und Masken-Palette sowie den Filmstreifen
+   aus — übrig bleiben Foto und schwebende Kopfzeile. Die Paletten
+   werden nicht per CSS versteckt, sondern **gar nicht gerendert**:
+   sonst liefen ihre Effekte (Vorschau-Nachladen, Histogramm-Zeichnen)
+   unsichtbar weiter. Der je Palette gespeicherte Ein-/Ausklappzustand
+   (`useWorkspacePanel`, localStorage) bleibt unberührt und kommt beim
+   Verlassen unverändert zurück — der Modus legt sich nur temporär
+   darüber.
+2. **Lichter aus** (`l`, Store: `lightsOut`, Ringtausch
+   `off` → `dim` → `black`): dimmt die Umgebung, das Foto bleibt hell.
+   Umgesetzt über eine `fixed inset-0`-Sichtebene auf `z-20`; der
+   zentrale Bildbereich hebt sich bei aktivem Modus auf `z-[25]` und
+   liegt damit darüber. Die Kopfzeile (`z-30`) bleibt oberhalb beider
+   Ebenen — ihr `backdrop-filter` tastet dadurch die bereits
+   abgedunkelte Umgebung ab und wird selbst dunkel, was genau der
+   gewünschte Effekt ist. `pointer-events-none` auf der Dimm-Ebene:
+   der Modus verdunkelt nur, er sperrt die Bedienung nicht (sonst wäre
+   er ohne Tastatur nicht mehr verlassbar). Ohne aktiven Modus bekommt
+   der Bildbereich bewusst KEINE Stapelkontext-Klasse — ein unnötig
+   gesetzter `z-index` hat in ADR-0055 schon einmal das Overflow-Menü
+   verdeckt.
+3. **Schwebende Zoom-Steuerung** im Viewer (unten links, zwischen
+   TAT-Leiste oben rechts und Info-Overlay unten rechts): die
+   Zoomstufe war bis hier ausschließlich über Tastatur (`0`/`1`/`+`/
+   `-`) und Mausrad erreichbar und nur als Prozentzahl im
+   Info-Overlay ablesbar — ohne Tastatur gab es keinen Weg, gezielt
+   auf 100 % zu gehen. Nutzt dieselben Store-Aktionen wie die
+   Tastenkürzel, keine eigene Zoom-Logik.
+
+**Tastenbelegung — bewusste Abweichung von Lightroom.** Lightroom legt
+diese beiden Modi auf `Tab` bzw. `L`. `l` ist übernommen, `tab`
+bewusst NICHT: Tab ist die Tastatur-Navigationstaste schlechthin, sie
+global abzufangen würde die Bedienung ohne Maus app-weit brechen —
+dieselbe Barrierefreiheits-Linie wie `reduced_motion`/Kontrastmodus/
+Fokus-Fallen an anderer Stelle. Stattdessen `t`; wer `Tab` trotzdem
+will, kann es im Cheatsheet selbst umbelegen (beide Kürzel laufen über
+`KEYBINDING_ACTIONS`/`matchesBinding`, sind also umbelegbar und durch
+den bestehenden `isEditable`-Wächter automatisch aus Eingabefeldern
+und `role="slider"`-Widgets herausgehalten).
+
+**Auffindbarkeit.** Beide Modi stehen zusätzlich im Kommando-Register
+(`commandRegistry.ts`, Kategorie `navigation`) mit zustandsabhängiger
+Beschriftung ("Lichter aus: Umgebung dimmen" → "… ganz abdunkeln" →
+"Lichter an: Umgebung zurückholen"), erscheinen also in der
+Befehlspalette und sind in `de.ts`/`en.ts` übersetzt. Genau das war
+ADR-0046s Befund: eine Funktion, die es nur auf einer Taste gibt, ist
+für die meisten Nutzer nicht vorhanden.
+
+**Lesbarkeitsschutz als eigener Punkt.** Beim Durchsehen der eigenen
+Screenshots der vorherigen Runde real aufgefallen (nicht vermutet):
+der Platzhaltertext der Befehlspalette stand vor einem hellen
+Sonnenuntergang-Foto und war kaum noch lesbar — eine direkte Folge
+davon, dass Glasflächen seit Nachtrag III echte Fotofarbe durchlassen.
+Zwei Maßnahmen: neuer Token `--glass-text-shadow` auf `.apx-glass`/
+`.apx-glass-strong` (dunkler Schlagschatten im Dunkel-Theme, heller im
+Hell-Theme, `none` im Kontrastmodus, wo Zeichenschärfe Vorrang hat)
+und der Platzhalter selbst von `text-text-muted` auf
+`text-text-secondary`.
+
+**Real gefundene Regression — dieselbe Kaskaden-Falle zum dritten
+Mal.** Die volle Playwright-Suite meldete nach dem ersten Durchgang
+**8 Fehlschläge** (nicht "alles grün"): sechs Tests, die in das Bild
+klicken (KI-Maske, Weißabgleich-Pipette, Farbmischer, Farbbereich-
+Maske, TAT, Virtuelle Blende), plus zwei Selektor-Kollisionen.
+Ursache der sechs, per `document.elementFromPoint` am echten
+Klickpunkt gemessen statt geraten: die Zoom-Steuerung trug
+`apx-glass` UND `absolute bottom-3 left-3` auf demselben Element —
+`.apx-glass` setzt aber unlayered `position: relative`, was Tailwinds
+`absolute`-Utility (`@layer utilities`) grundsätzlich schlägt. Die
+Leiste war dadurch ein normales Flex-Kind von `<main>` (`items-center
+justify-center`) und saß **mittig im Bild**, genau auf dem Klickpunkt
+(gemessen: Box bei y=274 statt y≈578, 248px breit in einem 224px
+breiten Bereich). Behoben durch einen äußeren, ungestylten
+Positionierungs-Rahmen um die Glasfläche (`pointer-events-none`
+außen, `pointer-events-auto` innen) statt eines weiteren
+Spezifitäts-Patches — und `.apx-glass` in `index.css` trägt jetzt
+eine ausdrückliche Warnung für künftige Aufrufer, weil dieselbe Falle
+in dieser Sitzung bereits dreimal zugeschlagen hat (`z-index` beim
+Überlauf-Menü, `fixed` bei der Kopfzeile, jetzt `absolute` hier).
+
+Die zwei übrigen Fehlschläge waren echte Selektor-Kollisionen, keine
+Funktionsfehler: `print-flow`s `getByLabel("Zoom")` traf jetzt auch
+die neue Viewer-Steuerung (auf den Druck-Dialog eingegrenzt), und
+`viewer-flow`s `getByText(/100 %/)` traf drei Elemente (prüft jetzt
+gezielt die neue, eindeutige Zoomanzeige — genauer als vorher, die
+Aussage des Tests bleibt dieselbe).
+
+**Methodischer Nachtrag zur Verifikation selbst:** der erste
+Suite-Lauf lief als `npx playwright test | tail -6` — dadurch war der
+gemeldete Exit-Code der von `tail` (immer 0), und die Zusammenfassung
+"135 passed" wurde beinahe als Erfolg gelesen, obwohl 143 Tests
+existieren. Aufgefallen ist es nur, weil die Zahl nicht zur erwarteten
+143 passte. Konsequenz: Suite-Läufe ab hier in eine Logdatei
+schreiben und den echten Exit-Code prüfen, nicht durch `tail` pipen.
+
+Verifiziert: neuer e2e-Test `focus-lights-zoom-flow.spec.ts` prüft
+alle drei Funktionen real (Paletten verschwinden/kommen zurück,
+Dimm-Ebene durchläuft beide Stufen mit gemessener
+`background-color`, Zoom springt über die Knöpfe auf 100 % und
+zurück auf Einpassen). `tsc -b` sauber, `vitest run` 251/251, volle
+Playwright-Suite nach den Korrekturen 143/143 (Exit-Code real
+geprüft).

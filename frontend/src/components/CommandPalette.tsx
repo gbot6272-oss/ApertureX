@@ -104,7 +104,13 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           }
         }}
         placeholder="Befehl, Preset, Foto oder Ordner suchen…"
-        className="w-full border-b border-border bg-transparent px-4 py-3 text-sm outline-none placeholder:text-text-muted"
+        /* Phase 26: `placeholder:text-text-secondary` statt `-muted` —
+           die Palette liegt seit Nachtrag III über echtem Fotoinhalt,
+           der auch hell sein kann; die schwächste Textstufe war dort
+           real kaum noch lesbar (an einem eigenen Screenshot über einem
+           Sonnenuntergang aufgefallen). Der neue `--glass-text-shadow`
+           in `index.css` deckt den Rest ab. */
+        className="w-full border-b border-border bg-transparent px-4 py-3 text-sm outline-none placeholder:text-text-secondary"
       />
       <ul className="max-h-80 overflow-y-auto p-1">
         {filtered.length === 0 && <li className="px-3 py-2 text-sm text-text-muted">Keine Treffer.</li>}

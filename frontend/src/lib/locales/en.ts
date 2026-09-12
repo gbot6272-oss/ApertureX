@@ -57,6 +57,11 @@ export const en: Record<keyof typeof de, string> = {
   "header.overflowMenu": "More functions",
 
   "commands.category.ai": "AI features",
+  "commands.focusMode.on": "Focus mode: hide panels",
+  "commands.focusMode.off": "Exit focus mode: show panels",
+  "commands.lightsOut.on": "Lights out: dim surroundings",
+  "commands.lightsOut.darker": "Lights out: go fully dark",
+  "commands.lightsOut.off": "Lights on: restore surroundings",
   "commands.onboarding": "Show onboarding",
   "commands.cheatsheet": "Show keyboard shortcuts",
   "commands.ai.inpaint": "AI fill",

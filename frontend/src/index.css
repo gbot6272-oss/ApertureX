@@ -173,6 +173,14 @@
      Tönungs-Ebene wie `--glass-sheen`. */
   --glass-distortion: url(#apx-glass-distortion);
   --glass-edge-shadow: inset 1px 1px 1px 0 rgb(255 255 255 / 14%), inset -1px -1px 1px 0 rgb(255 255 255 / 8%);
+  /* Lesbarkeitsschutz (Phase 26, siehe `DECISIONS.md` ADR-0056): seit
+     die Kopfzeile schwebt und Dialoge/Menus echte Fotofarbe
+     durchlassen, steht heller Text zeitweise vor einem HELLEN Foto
+     (real an einem eigenen Screenshot aufgefallen: der Platzhaltertext
+     der Befehlspalette vor einem Sonnenuntergang). Ein dezenter
+     Schlagschatten haelt den Kontrast, ohne die Glasoptik ueber
+     dunklem Grund zu veraendern. */
+  --glass-text-shadow: 0 1px 2px rgb(0 0 0 / 45%);
 }
 
 :root[data-theme="light"] {
@@ -187,6 +195,8 @@
     rgb(35 32 25 / 4%) 100%
   );
   --glass-edge-shadow: inset 1px 1px 1px 0 rgb(255 255 255 / 65%), inset -1px -1px 1px 0 rgb(35 32 25 / 6%);
+  /* Hell-Theme: dunkler Text, der Schutz muss deshalb hell sein. */
+  --glass-text-shadow: 0 1px 2px rgb(255 255 255 / 55%);
 }
 
 /* Kontrastmodus (siehe `--color-bg-overlay`s identische Begründung
@@ -205,6 +215,9 @@
   --glass-blur: 0px;
   --glass-distortion: none;
   --glass-edge-shadow: none;
+  /* Deckende Flaechen brauchen keinen Schlagschatten - und im
+     Kontrastmodus hat maximale Zeichenschaerfe Vorrang. */
+  --glass-text-shadow: none;
 }
 
 /* Die eigentliche Materialoberfläche — ersetzt `bg-bg-raised`/
@@ -223,9 +236,22 @@
    Inhalt). `border-radius: inherit` hält beide Ebenen deckungsgleich
    mit abgerundeten Aufrufern (Dialog/Sheet/Menü), ohne dass jede
    Aufrufstelle den Radius doppelt pflegen müsste. */
+/* ACHTUNG fuer Aufrufer: diese Klasse setzt `position: relative` (die
+   `::before`/`::after`-Ebenen unten brauchen einen positionierten
+   Vorfahren) — und unlayered CSS wie diese Datei schlaegt Tailwinds
+   `@layer utilities` in der Kaskade grundsaetzlich. Eine Positionierungs-
+   Utility (`absolute`/`fixed`/`sticky`) direkt AUF demselben Element ist
+   deshalb wirkungslos; stattdessen einen aeusseren, ungestylten
+   Positionierungs-Rahmen um die Glasflaeche legen (so macht es
+   `Viewer.tsx`s Zoom-Steuerung). Diese Falle ist in dieser Sitzung
+   dreimal real zugeschlagen: `z-index` beim Ueberlauf-Menue (ADR-0055),
+   `fixed` bei der Kopfzeile (ADR-0055-Nachtrag III, dort gezielt per
+   `header.apx-glass` ueberschrieben) und `absolute` bei der
+   Zoom-Steuerung (ADR-0056). */
 .apx-glass,
 .apx-glass-strong {
   position: relative;
+  text-shadow: var(--glass-text-shadow);
   /* `isolation: isolate` statt eines hart gesetzten `z-index: 0` —
      mehrere Aufrufstellen (u. a. `ui/Menu.tsx`s Dropdown) setzen ihr
      eigenes `z-40`/`z-50` über eine Tailwind-Utility-Klasse auf

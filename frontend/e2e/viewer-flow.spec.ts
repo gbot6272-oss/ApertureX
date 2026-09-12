@@ -134,7 +134,11 @@ test.describe("Start -> Import -> Auswahl -> Viewer", () => {
     // Taste "1" schaltet auf exakt 100 % Zoom (siehe Viewer.tsx).
     await page.locator("main").click(); // Fokus auf den Viewer-Bereich legen
     await page.keyboard.press("1");
-    await expect(page.getByText(/100 %/)).toBeVisible();
+    // Gezielt die Zoomanzeige der (seit Phase 26 vorhandenen)
+    // schwebenden Zoom-Steuerung statt eines Regex ueber die ganze
+    // Seite: "100 %" steht inzwischen auch im Info-Overlay und auf dem
+    // 100-%-Knopf. Prueft dieselbe Aussage genauer als vorher.
+    await expect(page.getByTestId("zoom-readout")).toHaveText("100 %");
 
     // Das Bild wurde tatsächlich über `fetch()` + `createImageBitmap()`
     // geladen (nicht nur eine leere Fläche) — der Canvas hat also

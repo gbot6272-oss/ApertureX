@@ -65,6 +65,11 @@ export const de = {
   // commandRegistry.ts — Kategorie- und KI-Status-Beschriftungen für das
   // Overflow-Menü und die Befehlspalette (Phase 18 Schritt 3).
   "commands.category.ai": "KI-Funktionen",
+  "commands.focusMode.on": "Fokus-Modus: Paletten ausblenden",
+  "commands.focusMode.off": "Fokus-Modus beenden: Paletten einblenden",
+  "commands.lightsOut.on": "Lichter aus: Umgebung dimmen",
+  "commands.lightsOut.darker": "Lichter aus: ganz abdunkeln",
+  "commands.lightsOut.off": "Lichter an: Umgebung zurückholen",
   "commands.onboarding": "Erste Schritte anzeigen",
   "commands.cheatsheet": "Tastenkürzel-Übersicht anzeigen",
   "commands.ai.inpaint": "KI-Ausfüllen",

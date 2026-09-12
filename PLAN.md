@@ -1292,6 +1292,54 @@ Bild nicht wirklich.
   Fotobereich (Beweis für echten Farbdurchschein) UND ohne (zeigt die
   Rasteransicht bewusst unverändert).
 
+## Aktuelle Phase: Phase 26 — Das Foto im Mittelpunkt (drei neue Ansichts-Funktionen)
+
+Nutzerwunsch nach dem Kopfzeilen-Umbau: "Noch mehr Funktionen". Statt
+beliebiger Zusätze genau die Funktionen gebaut, die aus der neuen
+Struktur folgen (die Chrome liegt jetzt über dem Bild, also wird
+"Chrome wegnehmen" zur sinnvollen Geste). Untersuchung/Entscheidungen:
+siehe `DECISIONS.md` ADR-0056.
+
+- [x] 1. **Fokus-Modus** (`t`): blendet Sidebar, Presets-, Metadaten-,
+  Entwickeln-, Masken-Palette und Filmstreifen aus — die Paletten
+  werden gar nicht erst gerendert (sonst liefen ihre Effekte
+  unsichtbar weiter), ihr gespeicherter Ein-/Ausklappzustand bleibt
+  unberührt und kommt beim Verlassen zurück.
+- [x] 2. **Lichter aus** (`l`, dreistufig aus → gedimmt → schwarz):
+  Dimm-Sichtebene auf `z-20`, der Bildbereich hebt sich bei aktivem
+  Modus auf `z-[25]` darüber, die Kopfzeile bleibt auf `z-30` und
+  wird durch ihren eigenen `backdrop-filter` mit abgedunkelt.
+  `pointer-events-none` — der Modus verdunkelt, er sperrt nicht.
+- [x] 3. **Schwebende Zoom-Steuerung** im Viewer (unten links):
+  Prozentanzeige, +/−, Einpassen, 100 % — vorher war die Zoomstufe
+  ausschließlich per Tastatur/Mausrad erreichbar und nur im
+  Info-Overlay ablesbar.
+- [x] 4. **Lesbarkeitsschutz für Glasflächen**: an den eigenen
+  Screenshots der Vorrunde real aufgefallen (Platzhaltertext der
+  Befehlspalette vor hellem Foto kaum lesbar, direkte Folge davon,
+  dass Glas seit Nachtrag III echte Fotofarbe durchlässt) — neuer
+  Token `--glass-text-shadow` (hell/dunkel/Kontrastmodus getrennt)
+  plus hellerer Platzhalter.
+- [x] 5. **Auffindbarkeit**: beide Modi im Kommando-Register
+  (Befehlspalette) mit zustandsabhängiger Beschriftung, in `de.ts`/
+  `en.ts` übersetzt, Tastenkürzel über `KEYBINDING_ACTIONS` umbelegbar
+  und im Cheatsheet gelistet. `Tab` bewusst NICHT belegt (würde die
+  Tastaturnavigation app-weit brechen) — stattdessen `t`.
+- [x] 6. Verifikation: neuer e2e-Test `focus-lights-zoom-flow.spec.ts`
+  prüft alle drei Funktionen real. Die volle Suite fing dabei **8 echte
+  Fehlschläge**: die Zoom-Steuerung trug `apx-glass` zusammen mit
+  `absolute` auf demselben Element — `.apx-glass`s unlayered
+  `position: relative` schlägt Tailwinds Utility, die Leiste saß
+  dadurch mittig IM Bild statt unten links und fing die Bildklicks ab,
+  auf denen sechs bestehende Tests beruhen (per `elementFromPoint` am
+  echten Klickpunkt gemessen). Behoben über einen äußeren
+  Positionierungs-Rahmen; `.apx-glass` trägt jetzt eine Warnung für
+  künftige Aufrufer (dieselbe Falle traf in dieser Sitzung bereits
+  `z-index` und `fixed`). Zwei weitere Fehlschläge waren
+  Selektor-Kollisionen ("Zoom", "100 %") — beide Tests präzisiert,
+  ihre Aussage unverändert. `tsc -b` sauber, `vitest run` 251/251,
+  volle Playwright-Suite danach 143/143 mit real geprüftem Exit-Code.
+
 ## Aktuelle Phase: Phase 24 — Transparenz, Karten-Bugfixes, zehn neue Animationen, mehr Übersicht
 
 Nutzerwunsch: UI transparenter, Kartenbugs (fehlerhafte Anzeige, keine

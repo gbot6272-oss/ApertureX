@@ -73,6 +73,14 @@ export function useCommandRegistry(): CommandEntry[] {
   const openVersionsCompareView = useAppStore((s) => s.openVersionsCompareView);
   const openSecondaryDisplay = useAppStore((s) => s.openSecondaryDisplay);
   const aiSettings = useAppStore((s) => s.aiSettings);
+  // Ansichtsmodi (Phase 26, siehe `DECISIONS.md` ADR-0056) — bewusst
+  // auch hier eingetragen und nicht nur als Tastenkuerzel: genau das
+  // war ADR-0046s Befund (eine Funktion, die es nur auf einer Taste
+  // gibt, ist fuer die meisten Nutzer nicht vorhanden).
+  const focusMode = useAppStore((s) => s.focusMode);
+  const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
+  const lightsOut = useAppStore((s) => s.lightsOut);
+  const cycleLightsOut = useAppStore((s) => s.cycleLightsOut);
 
   const exportPhotoIds = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
 
@@ -90,6 +98,18 @@ export function useCommandRegistry(): CommandEntry[] {
       { id: "fn:view-people", label: t("header.viewPeople"), category: "navigation", run: () => setCenterView("people") },
       { id: "fn:view-info", label: t("header.viewInfo"), category: "navigation", run: toggleMetadataPanel },
       { id: "fn:view-develop", label: t("header.viewDevelop"), category: "navigation", run: toggleDevelopPanel },
+      {
+        id: "fn:focus-mode",
+        label: focusMode ? t("commands.focusMode.off") : t("commands.focusMode.on"),
+        category: "navigation",
+        run: toggleFocusMode,
+      },
+      {
+        id: "fn:lights-out",
+        label: lightsOut === "off" ? t("commands.lightsOut.on") : lightsOut === "dim" ? t("commands.lightsOut.darker") : t("commands.lightsOut.off"),
+        category: "navigation",
+        run: cycleLightsOut,
+      },
 
       // Ausgabe
       { id: "fn:export", label: t("header.export"), category: "output", disabled: exportPhotoIds.length === 0, run: openExportDialog },
@@ -248,5 +268,9 @@ export function useCommandRegistry(): CommandEntry[] {
     openSecondaryDisplay,
     setSettingsDialogOpen,
     aiSettings,
+    focusMode,
+    toggleFocusMode,
+    lightsOut,
+    cycleLightsOut,
   ]);
 }

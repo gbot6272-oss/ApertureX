@@ -893,6 +893,23 @@ interface LibrarySlice {
   metadataPanelOpen: boolean;
   toggleMetadataPanel: () => void;
 
+  /** Fokus-Modus (Phase 26, siehe `DECISIONS.md` ADR-0056): blendet ALLE
+   * angedockten Paletten und den Filmstreifen aus, sodass nur noch das
+   * Foto und die (seit Nachtrag III schwebende) Kopfzeile übrig bleiben.
+   * Bewusst kein Ersatz für das einzelne Ein-/Ausklappen je Palette
+   * (`PaletteFrame`/`useWorkspacePanel`) — der merkt sich weiterhin
+   * seinen eigenen Zustand, dieser Modus legt sich nur temporär darüber
+   * und gibt beim Verlassen exakt die vorherige Anordnung zurück. */
+  focusMode: boolean;
+  toggleFocusMode: () => void;
+
+  /** "Lichter aus" (Phase 26, Lightroom-Konvention): dimmt die gesamte
+   * Umgebung stufenweise ab, damit das Auge die Bildwirkung ohne den
+   * Einfluss heller Bedienflächen beurteilen kann. Drei Stufen im
+   * Ringtausch: `off` → `dim` → `black` → `off`. */
+  lightsOut: "off" | "dim" | "black";
+  cycleLightsOut: () => void;
+
   photoKeywords: Record<string, KeywordDto[]>;
   loadKeywordsForPhoto: (photoId: string) => Promise<void>;
   addKeywordToPhoto: (photoId: string, name: string) => Promise<void>;
@@ -3736,6 +3753,22 @@ export const useAppStore = create<AppStore>()(
       if (willOpen && selectedPhotoId) {
         void get().loadKeywordsForPhoto(selectedPhotoId);
       }
+    },
+
+    focusMode: false,
+
+    toggleFocusMode: () => {
+      set((state) => {
+        state.focusMode = !state.focusMode;
+      });
+    },
+
+    lightsOut: "off",
+
+    cycleLightsOut: () => {
+      set((state) => {
+        state.lightsOut = state.lightsOut === "off" ? "dim" : state.lightsOut === "dim" ? "black" : "off";
+      });
     },
 
     photoKeywords: {},

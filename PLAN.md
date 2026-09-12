@@ -1522,46 +1522,58 @@ LUT-Look ist die Grundgradation, die Kreativ-Stufe legt sich darüber.
 Feste, dokumentierte Reihenfolge innerhalb der Stufe: Korrektur →
 Atmosphäre → Optik → Licht → Gradation → Auflage.
 
-- [ ] 1. **Farbabgleich zu Referenzfoto** (Reinhard-Statistiktransfer im
+- [x] 1. **Farbabgleich zu Referenzfoto** (Reinhard-Statistiktransfer im
   Lab-Raum): übernimmt Mittelwert und Streuung der Farbverteilung eines
   Referenzfotos. Macht eine ganze Serie in einem Klick einheitlich —
   der praktischste der zehn Punkte.
-- [ ] 2. **Atmosphärischer Tiefennebel (KI)**: nutzt die bereits
+- [x] 2. **Atmosphärischer Tiefennebel (KI)**: nutzt die bereits
   vorhandene MiDaS-Tiefenkarte (`estimate_photo_depth`, bisher nur für
   die Virtuelle Blende) und legt entfernungsabhängigen Dunst/Nebel in
   wählbarer Farbe über das Bild. Erzeugt echte Tiefenstaffelung statt
   eines flachen Verlaufs.
-- [ ] 3. **KI-Motiv-Freistellung + Hintergrundbehandlung**: klassische
+- [x] 3. **KI-Motiv-Freistellung + Hintergrundbehandlung**: klassische
   Segmentierung (`apx_ai::segmentation::subject_alpha`, kein
   Modell-Download nötig) trennt Motiv und Hintergrund; der Hintergrund
   lässt sich separat weichzeichnen, abdunkeln und entsättigen.
   Porträt-Arbeitspferd.
-- [ ] 4. **Tilt-Shift / Miniatur**: gerichtetes Schärfeband mit
+- [x] 4. **Tilt-Shift / Miniatur**: gerichtetes Schärfeband mit
   weichem Abfall nach oben und unten plus Sättigungsanhebung.
-- [ ] 5. **Sonnenstrahlen (God Rays)**: radiale Lichtschleppen aus einem
+- [x] 5. **Sonnenstrahlen (God Rays)**: radiale Lichtschleppen aus einem
   frei setzbaren Sonnenpunkt, gespeist aus den hellsten Bildpartien.
-- [ ] 6. **Orton-Glanz**: weichgezeichnete, aufgehellte Kopie im
+- [x] 6. **Orton-Glanz**: weichgezeichnete, aufgehellte Kopie im
   Negativ-Multiplikation-Modus — der Traumglanz-Klassiker.
-- [ ] 7. **Filmlabor-Prozesse**: Bleach Bypass (Silber nicht
+- [x] 7. **Filmlabor-Prozesse**: Bleach Bypass (Silber nicht
   ausgebleicht: hoher Kontrast, entsättigt) und Cross-Processing
   (Kanalkurven gegeneinander verschoben).
-- [ ] 8. **Verlaufsabbildung (Gradient Map / Duotone)**: bildet die
+- [x] 8. **Verlaufsabbildung (Gradient Map / Duotone)**: bildet die
   Helligkeit auf einen Drei-Farb-Verlauf ab (Tiefen/Mitten/Lichter).
-- [ ] 9. **Farbisolierung (Color Pop)**: ein wählbarer Farbtonbereich
+- [x] 9. **Farbisolierung (Color Pop)**: ein wählbarer Farbtonbereich
   bleibt farbig, der Rest wird stufenlos entsättigt.
-- [ ] 10. **Lichtlecks (Analog-Lichtstimmung)**: gerichtete, farbige
+- [x] 10. **Lichtlecks (Analog-Lichtstimmung)**: gerichtete, farbige
   Lichteinfälle am Bildrand nach dem Vorbild undichter Filmkameras.
-- [ ] 11. **Neues `.cube`-Template "Retro Fuji Thailand"**: als echte
+- [x] 11. **Neues `.cube`-Template "Retro Fuji Thailand"**: als echte
   `.cube`-Datei im Projekt UND als eingebauter Filter (elfter
   `BuiltinLut`), damit er sofort in der Filter-Bibliothek steht.
   Charakter: warme, leicht ausgewaschene Schatten mit Grünstich,
   gedämpfte Lichter mit Gelb-Orange-Kippung, angehobener Schwarzpunkt
   (Retro-Negativ), kräftige, aber nicht neonartige Türkistöne im
   Wasser/Himmel.
-- [ ] 12. **UI im Liquid-Glass-Stil**: eigenes Kreativ-Panel mit
+- [x] 12. **UI im Liquid-Glass-Stil**: eigenes Kreativ-Panel mit
   Glasflächen, Hover-Zuständen, kurzen Beschriftungen ohne
   Erklärabsätze, klare Gruppierung; zwei Ein-Klick-KI-Knöpfe
   ("Tiefenkarte berechnen", "Motiv freistellen").
-- [ ] 13. Verifikation: Rust-Unit-Tests je Funktion, neuer e2e-Test,
+- [x] 13. Verifikation: Rust-Unit-Tests je Funktion, neuer e2e-Test,
   `cargo fmt`/`clippy`/`test`, `tsc -b`, `vitest run`, volle
   Playwright-Suite mit real geprüftem Exit-Code, dann Push.
+- [x] 14. **Nebenbefund, real nachgemessen statt angenommen:** beim Bau
+  von Punkt 2/3 stellte sich heraus, dass die seit Phase 14 bestehende
+  Tiefenkarte der Virtuellen Blende als base64-STRING ins EDL ging,
+  während die Rust-Seite ein `Vec<u8>` liest — das gesamte EDL war
+  damit unparsbar, sobald eine Tiefenkarte existierte, und der
+  Fehlerpfad protokolliert nur still (dieselbe Fehlerklasse wie der
+  LUT-Bug aus Phase 25). Behoben; der neue e2e-Test prüft für die
+  Motivmaske ausdrücklich, dass ein Zahlen-Array ankommt. Zusätzlich
+  korrigiert: `virtual-aperture-flow.spec.ts` hatte den kaputten
+  base64-Vertrag ausdrücklich festgeschrieben (`toBe("gICA…")`) — die
+  Zusicherung prüft jetzt die 16 dekodierten Bytes, also das Format, das
+  Rust wirklich deserialisiert. Siehe ADR-0057.

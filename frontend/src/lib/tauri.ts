@@ -2241,3 +2241,34 @@ export function importFromCamera(
 ): Promise<PhotoDto | null> {
   return invoke<PhotoDto | null>("import_from_camera", { folder, name, presetName: presetName ?? null });
 }
+
+// ---- Kreativ-Werkzeuge (Phase 27, siehe DECISIONS.md ADR-0057) -------------
+
+export interface SubjectMaskDto {
+  bitmapWidth: number;
+  bitmapHeight: number;
+  /** Base64-kodierte `0..=255`-Alphamaske (`255` = Motiv). */
+  alphaBase64: string;
+}
+
+/** Trennt Motiv und Hintergrund für die Hintergrundbehandlung der
+ * Kreativ-Stufe. Anders als Tiefenkarte/Stiltransfer braucht das **kein**
+ * heruntergeladenes Modell — klassische Saliency, läuft sofort. */
+export function segmentPhotoSubject(photoId: string): Promise<SubjectMaskDto> {
+  return invoke<SubjectMaskDto>("segment_photo_subject", { photoId });
+}
+
+export interface ColorStatsDto {
+  lMean: number;
+  lStd: number;
+  aMean: number;
+  aStd: number;
+  bMean: number;
+  bStd: number;
+}
+
+/** Liest die Farbstatistik eines Referenzfotos für den Farbabgleich —
+ * nur sechs Zahlen, kein zweites Bild im EDL. */
+export function computeReferenceColorStats(photoId: string): Promise<ColorStatsDto> {
+  return invoke<ColorStatsDto>("compute_reference_color_stats", { photoId });
+}

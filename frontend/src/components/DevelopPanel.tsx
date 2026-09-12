@@ -57,6 +57,7 @@ import { selectActivePhotos, useAppStore } from "../store";
 import { ColorHarmonyWheel } from "./ColorHarmonyWheel";
 import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
+import { CreativePanel } from "./CreativePanel";
 import { DevelopSlider } from "./DevelopSlider";
 import { LensCalibrationDialog } from "./LensCalibrationDialog";
 import { CanvasExtendDialog } from "./CanvasExtendDialog";
@@ -1544,6 +1545,13 @@ export function DevelopPanel() {
 
           {activeTab === "creative" && (
             <>
+              {/* Die zehn Kreativ-Werkzeuge aus Phase 27 stehen bewusst
+                  GANZ OBEN in dieser Registerkarte: sie haben von allem
+                  hier den groessten Bildeffekt, und der Nutzer soll sie
+                  nicht erst hinter acht aufklappbaren Abschnitten
+                  suchen muessen (siehe DECISIONS.md ADR-0057). */}
+              <CreativePanel />
+
               <details id="stage-repair" open className="apx-collapsible flex flex-col gap-3" aria-label="Reparatur (Klonen/Reparieren)">
                 <summary className="mb-1 text-xs font-medium text-text-secondary">Reparatur (Klonen/Reparieren)</summary>
 

@@ -6238,3 +6238,127 @@ Dimm-Ebene durchläuft beide Stufen mit gemessener
 zurück auf Einpassen). `tsc -b` sauber, `vitest run` 251/251, volle
 Playwright-Suite nach den Korrekturen 143/143 (Exit-Code real
 geprüft).
+
+## ADR-0057: Phase 27 — zehn Kreativ-Werkzeuge mit großem Bildeffekt + Retro-Fuji-Thailand-Filter
+
+Nutzerwunsch: zehn weitere Funktionen, die "wirklich bei der Bearbeitung
+von Fotos helfen, anspruchsvoll, teilweise mit KI, wirklich sichtbare
+Erfolge erzielend", dazu ein `.cube`-Template im Retro-Fujifilm-
+Thailand-Look und eine Liquid-Glass-UI dafür.
+
+### Eine Stufe statt zehn
+
+Zehn einzelne Pipeline-Stufen wären zehnmal dasselbe Gerüst (EDL-Feld,
+`StageEnabled`-Flag, `develop.rs`-Zweig, Modul, Tests) für dieselbe
+Mathematik. Stattdessen EIN Feld `creative: CreativeAdjustments` mit
+zehn Unterstrukturen, EIN Modul `stages/creative.rs`, EIN Flag,
+EIN Pipeline-Zweig. Position: nach `lut_filter`, vor `liquify` — der
+LUT-Look ist die Grundgradation, die Kreativ-Stufe legt sich darüber.
+
+Die Reihenfolge **innerhalb** der Stufe ist fest und begründet
+(Korrektur → Atmosphäre → Optik → Licht → Gradation → Auflage): der
+Farbabgleich korrigiert die Grundfarbigkeit und muss deshalb vor allem
+Gestalterischen laufen; Nebel liegt „in der Luft" vor dem Motiv;
+Freistellung und Tilt-Shift sind optische Trennung; Sonnenstrahlen und
+Orton sind additives Licht; Filmlabor und Verlaufsabbildung graduieren
+das Gesamtbild inklusive dieses Lichts; die Farbisolierung arbeitet auf
+dem fertigen Farbergebnis; das Lichtleck liegt zum Schluss obenauf, wie
+im echten Labor.
+
+### Die zehn
+
+1. **Farbabgleich zu Referenzfoto** — Reinhard-Statistiktransfer
+   (Mittelwert + Streuung je Achse) in einem Gegenfarbenraum statt in
+   exaktem CIELAB: für einen Statistiktransfer zählt nur, dass die drei
+   Achsen weitgehend entkoppelt sind, nicht ihre exakte Normierung. Ein
+   Test prüft, dass Hin- und Rückrechnung die Ausgangsfarbe
+   rekonstruiert. Neuer Befehl `compute_reference_color_stats` liefert
+   sechs Zahlen — kein zweites Bild im EDL.
+2. **Atmosphärischer Tiefennebel** — nutzt die bereits vorhandene
+   MiDaS-Tiefenkarte (`estimate_photo_depth`, bisher nur Virtuelle
+   Blende). Einmal berechnen reicht für beide Werkzeuge.
+3. **KI-Motiv-Freistellung** — neuer Befehl `segment_photo_subject` auf
+   Basis der klassischen Center-Surround-Saliency
+   (`apx_ai::segmentation::subject_alpha`). Bewusst **kein**
+   Modell-Download: anders als Tiefenkarte/Stiltransfer läuft die
+   Funktion damit sofort, ohne Einstellungs-Umweg.
+4. **Tilt-Shift**, 5. **Sonnenstrahlen**, 6. **Orton-Glanz**,
+   7. **Filmlabor** (Bleach Bypass + Cross-Processing),
+   8. **Verlaufsabbildung**, 9. **Farbisolierung**, 10. **Lichtlecks** —
+   alle als geschlossene Formeln auf dem fertig entwickelten
+   sRGB-Bild, keine externen Daten.
+
+### Realer Bug dabei gefunden: die Tiefenkarte kam nie in Rust an
+
+Beim Bau von Punkt 2 und 3 stellte sich die Frage, wie eine Bytekarte
+überhaupt über die Tauri-Grenze kommt. Statt es anzunehmen, empirisch
+geprüft (Wegwerf-Test mit beiden Kandidaten-Formaten):
+
+    STRING -> Err("invalid type: string \"AAEC\", expected a sequence")
+    ARRAY  -> Ok(4)
+
+Die Rust-Seite ist ein schlichtes `Vec<u8>` ohne base64-Deserialisierer.
+`estimateDepthForCurrentPhoto` legte aber seit Phase 14 den **rohen
+base64-String** in `virtual_aperture.depth_map.depth` ab (alle anderen
+Patches im Projekt nutzen korrekt `base64ToByteArray`). Folge: sobald
+eine Tiefenkarte berechnet war, scheiterte das Parsen des gesamten EDL —
+und weil `useDevelopRender`s Fehlerpfad den Fehler nur still
+protokolliert, blieb einfach der zuletzt erfolgreiche Rahmen stehen.
+**Exakt dieselbe Fehlerklasse wie der LUT-Bug aus Phase 25**, und aus
+demselben Grund unentdeckt: die e2e-Tests laufen gegen den Mock, der
+das EDL nie durch Rust parst. Behoben (TS-Typ jetzt `number[]`, Store
+konvertiert), der neue e2e-Test prüft für die Motivmaske ausdrücklich,
+dass ein Zahlen-Array ankommt.
+
+Nachtrag zur Testlage: ein **bestehender** Test hat den kaputten Vertrag
+ausdrücklich festgeschrieben — `virtual-aperture-flow.spec.ts` prüfte
+`expect(...depth_map.depth).toBe("gICAgICAgICAgICAgICAgA==")`, also genau
+den base64-String, den Rust nie lesen konnte. Ein grüner Test war hier
+also kein Nachweis, sondern die Konservierung des Fehlers. Korrigiert auf
+den Vertrag, den die Rust-Seite tatsächlich deserialisiert (16 dekodierte
+Bytes mit Wert 128), mit Kommentar im Test, damit die Zusicherung nicht
+irgendwann „vereinfacht" zurückgedreht wird. Lehre, dieselbe wie aus dem
+LUT-Bug: eine Zusicherung, die nur den Mock gegen sich selbst prüft,
+kostet Vertrauen statt welches zu schaffen — Wire-Formate gehören gegen
+die echte Rust-Deserialisierung geprüft.
+
+### Retro Fuji Thailand
+
+Als echte `.cube`-Datei (`assets/luts/`, 33er Raster) **und** als elfter
+eingebauter Filter. Vier Merkmale, jedes als eigener Term: angehobener
+Schwarzpunkt mit Grünstich (Negativfilm hat kein echtes Schwarz, Fuji
+kippt unten ins Grüne), gedämpfte, nach Gelb-Orange gekippte Lichter,
+gezielte Türkis-Anhebung **nur dort, wo Blau ohnehin dominiert** (Wasser
+und Himmel, nicht pauschal), flachere Mitten. Original erstellt, kein
+fremdes Werk enthalten. Ein Test parst die ausgelieferte Datei und
+vergleicht sie Rasterpunkt für Rasterpunkt gegen die eingebaute Formel —
+beide können nicht auseinanderlaufen.
+
+### UI
+
+Ein Kreativ-Panel ganz oben in der Registerkarte „Kreativ" (nicht hinter
+acht Aufklapp-Abschnitten): je Werkzeug eine Glaskachel mit Titel, EINEM
+Halbsatz Wirkung und den Reglern, Hover hebt Rand und Schatten an, eine
+aktive Kachel bekommt Akzentrand und ein „aktiv"-Zeichen. Die beiden
+Ein-Klick-Vorbereitungen stehen in der Kachel, zu der sie gehören, nicht
+in einem separaten KI-Bereich. Reihenfolge = Verarbeitungsreihenfolge.
+
+### Bewusst nicht gemacht
+
+`creative` ist **keine** Preset-Sektion (anders als `lut_filter`): zwei
+der zehn tragen fotospezifisch berechnete Karten (Tiefenkarte,
+Motivmaske). Die in ein Preset zu übernehmen hieße, die Tiefe EINES
+Fotos auf ein anderes anzuwenden — ein stiller, schwer zu findender
+Fehler. Die übrigen acht wären für sich preset-fähig; sie erst
+aufzunehmen, wenn die beiden Karten beim Speichern gezielt
+herausgeschnitten werden, ist der saubere Weg (offener Nachtrag).
+
+Verifiziert: 15 neue Rust-Unit-Tests (darunter einer, der für jede der
+zehn Funktionen einzeln nachweist, dass sie das Bild real verändert),
+ein Test für die `.cube`-Datei gegen den eingebauten Filter, ein neuer
+e2e-Test für Panel/Regler/Ein-Klick-Knöpfe. `cargo fmt`/`clippy
+--workspace --all-targets` sauber, `cargo test -p apx-pipeline`
+271/271 und `cargo test --workspace` komplett grün, `tsc -b`,
+`vitest run` 251/251, volle Playwright-Suite 144/144 mit real geprüftem
+Exit-Code (`PLAYWRIGHT_EXIT=0`, in eine Logdatei umgeleitet statt durch
+`tail` gepipet — siehe ADR-0056).

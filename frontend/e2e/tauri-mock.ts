@@ -1453,6 +1453,20 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "estimate_photo_depth":
         return fixtures.depthMapResult;
 
+      // ---- Kreativ-Werkzeuge (Phase 27) — die eigentliche Bildmathematik
+      // ist in `stages::creative`s 15 Rust-Unit-Tests abgedeckt; hier nur
+      // die beiden Vorbereitungs-Befehle. -------------------------------
+      case "segment_photo_subject":
+        return {
+          bitmapWidth: 4,
+          bitmapHeight: 4,
+          // 16 Byte: obere Haelfte Motiv (255), untere Hintergrund (0).
+          alphaBase64: btoa(String.fromCharCode(...Array.from({ length: 16 }, (_, i) => (i < 8 ? 255 : 0)))),
+        };
+
+      case "compute_reference_color_stats":
+        return { lMean: 0.52, lStd: 0.21, aMean: 0.04, aStd: 0.09, bMean: -0.03, bStd: 0.08 };
+
       // ---- KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — die
       // echte fast_neural_style-Inferenz ist bereits in
       // `apx-ai::style_transfer`s Rust-Unit-Tests abgedeckt. ---------------

@@ -4,6 +4,9 @@ import { immer } from "zustand/middleware/immer";
 import {
   AI_MASK_KIND_LABELS,
   base64ToByteArray,
+  NEUTRAL_CREATIVE,
+  type CreativeAdjustments,
+  type FilmLabProcess,
   BASIC_SLIDER_SPECS,
   buildEdlEnvelopeJson,
   clampSliderValue,
@@ -1648,6 +1651,30 @@ interface LibraryBacklogSlice {
    * Zwischenwert beim Ziehen — committet erst `DevelopSlider`s
    * `onCommit`, wie `setBasicField`). */
   setSkinSmoothingAmount: (value: number) => void;
+
+  // ---- Kreativ-Werkzeuge (Phase 27, siehe DECISIONS.md ADR-0057) ----------
+  /** Setzt einen beliebigen Zahlenregler der zehn Kreativ-Werkzeuge.
+   * EIN generischer Setter statt ~35 einzelner: die Werkzeuge liegen
+   * auch in der Pipeline in EINER Stufe, und jeder Regler ist derselbe
+   * "Pfad + Zahl"-Fall. `group` ist der Name des Werkzeugs,
+   * `field` der Reglername darin. */
+  setCreativeField: (group: keyof CreativeAdjustments, field: string, value: number) => void;
+  /** Setzt den Filmlabor-Prozess (einziges nicht-numerische Feld). */
+  setFilmLabProcess: (process: FilmLabProcess) => void;
+  /** Setzt alle zehn Werkzeuge auf neutral zurueck. */
+  resetCreative: () => void;
+  subjectSegmenting: boolean;
+  /** Trennt Motiv und Hintergrund fuer das aktuelle Foto und legt die
+   * Maske in `developEdl.creative.subject_focus.mask` ab. Braucht kein
+   * Modell (klassische Saliency). */
+  segmentSubjectForCurrentPhoto: () => Promise<void>;
+  /** Uebernimmt die Tiefenkarte aus der Virtuellen Blende fuer den
+   * Tiefennebel — oder berechnet sie, falls noch keine vorliegt. */
+  useDepthMapForHaze: () => Promise<void>;
+  colorMatchLoading: boolean;
+  /** Liest die Farbstatistik eines Referenzfotos und legt sie als Ziel
+   * des Farbabgleichs ab. */
+  setColorMatchReference: (referencePhotoId: string) => Promise<void>;
 
   /** Filter-/LUT-Bibliothek (Phase 16 Schritt 1, siehe `DECISIONS.md`
    * ADR-0043) — öffnet einen Datei-Dialog für eine `.cube`-Datei, legt
@@ -5991,6 +6018,120 @@ export const useAppStore = create<AppStore>()(
       void get().commitDevelopEdit("Fokuspunkt gesetzt");
     },
 
+    setCreativeField: (group, field, value) => {
+      set((state) => {
+        const target = state.developEdl.creative[group] as unknown as Record<string, number>;
+        target[field] = value;
+      });
+    },
+
+    setFilmLabProcess: (process) => {
+      set((state) => {
+        state.developEdl.creative.film_lab.process = process;
+      });
+    },
+
+    resetCreative: () => {
+      set((state) => {
+        state.developEdl.creative = structuredClone(NEUTRAL_CREATIVE);
+      });
+      void get().commitDevelopEdit("Kreativ-Werkzeuge zurückgesetzt");
+    },
+
+    subjectSegmenting: false,
+
+    segmentSubjectForCurrentPhoto: async () => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.subjectSegmenting = true;
+      });
+      playCue("processing");
+      try {
+        const dto = await api.segmentPhotoSubject(developPhotoId);
+        set((state) => {
+          state.developEdl.creative.subject_focus.mask = {
+            bitmap_width: dto.bitmapWidth,
+            bitmap_height: dto.bitmapHeight,
+            alpha: base64ToByteArray(dto.alphaBase64),
+          };
+          // Ohne sichtbare Wirkung waere der Knopf fuer den Nutzer
+          // folgenlos — ein brauchbarer Startwert macht das Ergebnis
+          // sofort sichtbar (Regler bleiben frei verstellbar).
+          if (
+            state.developEdl.creative.subject_focus.blur === 0 &&
+            state.developEdl.creative.subject_focus.darken === 0 &&
+            state.developEdl.creative.subject_focus.desaturate === 0
+          ) {
+            state.developEdl.creative.subject_focus.blur = 0.5;
+          }
+        });
+        playCue("success");
+        void get().commitDevelopEdit("Motiv freigestellt");
+      } catch (err) {
+        playCue("error");
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.subjectSegmenting = false;
+        });
+      }
+    },
+
+    useDepthMapForHaze: async () => {
+      const existing = get().developEdl.virtual_aperture.depth_map;
+      if (!existing) {
+        // Dieselbe Tiefenkarte wie die Virtuelle Blende — einmal
+        // berechnen reicht fuer beide Werkzeuge.
+        await get().estimateDepthForCurrentPhoto();
+      }
+      const depth = get().developEdl.virtual_aperture.depth_map;
+      if (!depth) return;
+      set((state) => {
+        state.developEdl.creative.depth_haze.depth_map = structuredClone(depth);
+        if (state.developEdl.creative.depth_haze.amount === 0) {
+          state.developEdl.creative.depth_haze.amount = 0.6;
+        }
+      });
+      void get().commitDevelopEdit("Tiefennebel aktiviert");
+    },
+
+    colorMatchLoading: false,
+
+    setColorMatchReference: async (referencePhotoId) => {
+      set((state) => {
+        state.colorMatchLoading = true;
+      });
+      playCue("processing");
+      try {
+        const stats = await api.computeReferenceColorStats(referencePhotoId);
+        set((state) => {
+          const cm = state.developEdl.creative.color_match;
+          cm.target_l_mean = stats.lMean;
+          cm.target_l_std = stats.lStd;
+          cm.target_a_mean = stats.aMean;
+          cm.target_a_std = stats.aStd;
+          cm.target_b_mean = stats.bMean;
+          cm.target_b_std = stats.bStd;
+          cm.has_target = true;
+          if (cm.amount === 0) cm.amount = 0.75;
+        });
+        playCue("success");
+        void get().commitDevelopEdit("Farbabgleich übernommen");
+      } catch (err) {
+        playCue("error");
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.colorMatchLoading = false;
+        });
+      }
+    },
+
     setVirtualApertureAmount: (value) => {
       set((state) => {
         state.developEdl.virtual_aperture.amount = value;
@@ -6012,7 +6153,10 @@ export const useAppStore = create<AppStore>()(
           state.developEdl.virtual_aperture.depth_map = {
             bitmap_width: dto.bitmap_width,
             bitmap_height: dto.bitmap_height,
-            depth: dto.depth_base64,
+            // `base64ToByteArray` wie bei jedem anderen Patch — die
+            // Rust-Seite liest ein `Vec<u8>`, kein base64 (siehe
+            // `DepthMapPatch`s Doku in `lib/edl.ts`).
+            depth: base64ToByteArray(dto.depth_base64),
           };
         });
         playCue("success");

@@ -1360,9 +1360,17 @@ export interface CompositeLayer {
 export interface DepthMapPatch {
   bitmap_width: number;
   bitmap_height: number;
-  /** Auf der Rust-Seite `Vec<u8>` (`depth`), hier als base64-String
-   * transportiert — siehe `DepthMapDto` in `lib/tauri.ts`. */
-  depth: string;
+  /** Ein Byte je Pixel, `255` = am naechsten.
+   *
+   * **Muss ein Zahlen-Array sein, kein base64-String** (Phase 27 real
+   * nachgemessen, siehe DECISIONS.md ADR-0057): die Rust-Seite ist ein
+   * schlichtes `Vec<u8>` ohne base64-Deserialisierer — ein String
+   * scheitert dort mit "invalid type: string, expected a sequence",
+   * und weil `useDevelopRender`s Fehlerpfad den Fehler nur still
+   * protokolliert, bliebe einfach der zuletzt erfolgreiche Rahmen
+   * stehen (dieselbe Fehlerklasse wie der LUT-Bug aus Phase 25).
+   * `lib/tauri.ts`s `base64ToByteArray` macht die Umwandlung. */
+  depth: number[];
 }
 
 /** KI-Tiefenschärfe-Simulator "Virtuelle Blende" (Phase 14 Schritt 8) —
@@ -1474,6 +1482,156 @@ export const STAGE_NODE_SPECS: readonly StageNodeSpec[] = [
 
 /** Spiegelt `apx_pipeline::edl::v4::EdlV4` — der komplette Inhalt eines
  * `EdlEnvelope.payload`. */
+
+// ---- Kreativ-Werkzeuge (Phase 27, siehe DECISIONS.md ADR-0057) ------------
+// Spiegelt `crates/apx-pipeline/src/edl/v4.rs`s `CreativeAdjustments`.
+// Alle zehn liegen in EINEM Feld, weil die Pipeline sie auch in EINER
+// Stufe anwendet (`stages/creative.rs`).
+
+/** `255` = Motiv, `0` = Hintergrund; ein Byte je Pixel. */
+export interface SubjectMaskPatch {
+  bitmap_width: number;
+  bitmap_height: number;
+  alpha: number[];
+}
+
+export interface ColorMatchAdjustment {
+  amount: number;
+  target_l_mean: number;
+  target_l_std: number;
+  target_a_mean: number;
+  target_a_std: number;
+  target_b_mean: number;
+  target_b_std: number;
+  /** Ohne Referenzfoto bleibt die Funktion ein No-Op — siehe Rust-Doku. */
+  has_target: boolean;
+}
+
+export interface DepthHazeAdjustment {
+  amount: number;
+  start: number;
+  end: number;
+  color_r: number;
+  color_g: number;
+  color_b: number;
+  depth_map: DepthMapPatch | null;
+}
+
+export interface SubjectFocusAdjustment {
+  blur: number;
+  darken: number;
+  desaturate: number;
+  mask: SubjectMaskPatch | null;
+}
+
+export interface TiltShiftAdjustment {
+  amount: number;
+  center: number;
+  width: number;
+  angle_deg: number;
+  saturation: number;
+}
+
+export interface GodRaysAdjustment {
+  amount: number;
+  sun_x: number;
+  sun_y: number;
+  threshold: number;
+  decay: number;
+  color_r: number;
+  color_g: number;
+  color_b: number;
+}
+
+export interface OrtonAdjustment {
+  amount: number;
+  radius: number;
+  threshold: number;
+}
+
+export type FilmLabProcess = "BleachBypass" | "CrossProcess";
+
+export interface FilmLabAdjustment {
+  amount: number;
+  process: FilmLabProcess;
+}
+
+export interface GradientMapAdjustment {
+  amount: number;
+  shadow_r: number;
+  shadow_g: number;
+  shadow_b: number;
+  mid_r: number;
+  mid_g: number;
+  mid_b: number;
+  highlight_r: number;
+  highlight_g: number;
+  highlight_b: number;
+}
+
+export interface ColorPopAdjustment {
+  amount: number;
+  hue_center: number;
+  hue_width: number;
+  boost: number;
+}
+
+export interface LightLeakAdjustment {
+  amount: number;
+  angle_deg: number;
+  softness: number;
+  color_r: number;
+  color_g: number;
+  color_b: number;
+}
+
+export interface CreativeAdjustments {
+  color_match: ColorMatchAdjustment;
+  depth_haze: DepthHazeAdjustment;
+  subject_focus: SubjectFocusAdjustment;
+  tilt_shift: TiltShiftAdjustment;
+  god_rays: GodRaysAdjustment;
+  orton: OrtonAdjustment;
+  film_lab: FilmLabAdjustment;
+  gradient_map: GradientMapAdjustment;
+  color_pop: ColorPopAdjustment;
+  light_leak: LightLeakAdjustment;
+}
+
+/** Neutralwerte — identisch zu den `NEUTRAL`-Konstanten der Rust-Seite. */
+export const NEUTRAL_CREATIVE: CreativeAdjustments = {
+  color_match: {
+    amount: 0,
+    target_l_mean: 0,
+    target_l_std: 0,
+    target_a_mean: 0,
+    target_a_std: 0,
+    target_b_mean: 0,
+    target_b_std: 0,
+    has_target: false,
+  },
+  depth_haze: { amount: 0, start: 0.35, end: 1, color_r: 214, color_g: 226, color_b: 239, depth_map: null },
+  subject_focus: { blur: 0, darken: 0, desaturate: 0, mask: null },
+  tilt_shift: { amount: 0, center: 0.5, width: 0.3, angle_deg: 0, saturation: 0 },
+  god_rays: { amount: 0, sun_x: 0.5, sun_y: 0.25, threshold: 0.72, decay: 0.92, color_r: 255, color_g: 236, color_b: 196 },
+  orton: { amount: 0, radius: 2.5, threshold: 0.35 },
+  film_lab: { amount: 0, process: "BleachBypass" },
+  gradient_map: {
+    amount: 0,
+    shadow_r: 22,
+    shadow_g: 28,
+    shadow_b: 56,
+    mid_r: 168,
+    mid_g: 94,
+    mid_b: 92,
+    highlight_r: 250,
+    highlight_g: 226,
+    highlight_b: 176,
+  },
+  color_pop: { amount: 0, hue_center: 10, hue_width: 30, boost: 0 },
+  light_leak: { amount: 0, angle_deg: 215, softness: 0.55, color_r: 255, color_g: 138, color_b: 76 },
+};
+
 export interface EdlPayload {
   basic: BasicAdjustments;
   curves: CurvesAdjustment;
@@ -1498,6 +1656,7 @@ export interface EdlPayload {
   sky_replace: SkyReplacePatch | null;
   lut_filter: LutFilterAdjustment;
   liquify_strokes: LiquifyStroke[];
+  creative: CreativeAdjustments;
 }
 
 export function neutralEdlPayload(): EdlPayload {
@@ -1525,6 +1684,7 @@ export function neutralEdlPayload(): EdlPayload {
     sky_replace: null,
     lut_filter: NEUTRAL_LUT_FILTER,
     liquify_strokes: [],
+    creative: structuredClone(NEUTRAL_CREATIVE),
   };
 }
 
@@ -1806,3 +1966,115 @@ export const NEUTRAL_LUT_FILTER: LutFilterAdjustment = {
   lut: null,
   strokes: [],
 };
+
+// ---- Regler der Kreativ-Werkzeuge (Phase 27) -------------------------------
+
+/** Ein Kreativ-Werkzeug, wie es im Panel erscheint: Titel, kurze
+ * Wirkungsbeschreibung (bewusst EIN Halbsatz, kein Erklärabsatz) und
+ * seine Regler. */
+export interface CreativeToolSpec {
+  group: keyof CreativeAdjustments;
+  title: string;
+  /** Ein Halbsatz — was der Effekt mit dem Bild macht. */
+  hint: string;
+  sliders: readonly SliderSpec[];
+}
+
+/** Die zehn Werkzeuge in derselben Reihenfolge, in der die Pipeline sie
+ * anwendet (`stages/creative.rs`) — wer das Panel von oben nach unten
+ * liest, sieht die tatsächliche Verarbeitungskette. */
+export const CREATIVE_TOOL_SPECS: readonly CreativeToolSpec[] = [
+  {
+    group: "color_match",
+    title: "Farbabgleich",
+    hint: "Übernimmt die Farbstimmung eines Referenzfotos",
+    sliders: [{ key: "amount", label: "Stärke", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0 }],
+  },
+  {
+    group: "depth_haze",
+    title: "Tiefennebel",
+    hint: "Legt Dunst über entfernte Bildteile, nahe bleiben klar",
+    sliders: [
+      { key: "amount", label: "Stärke", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0 },
+      { key: "start", label: "Beginnt ab", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0.35 },
+      { key: "end", label: "Voll ab", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 1 },
+    ],
+  },
+  {
+    group: "subject_focus",
+    title: "Motiv freistellen",
+    hint: "Behandelt den Hintergrund getrennt vom Motiv",
+    sliders: [
+      { key: "blur", label: "Unschärfe", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0 },
+      { key: "darken", label: "Abdunkeln", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0 },
+      { key: "desaturate", label: "Entsättigen", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0 },
+    ],
+  },
+  {
+    group: "tilt_shift",
+    title: "Tilt-Shift",
+    hint: "Scharfes Band, unscharfer Rest — der Miniatur-Effekt",
+    sliders: [
+      { key: "amount", label: "Stärke", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0 },
+      { key: "center", label: "Bandmitte", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0.5 },
+      { key: "width", label: "Bandbreite", min: 0.02, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0.3 },
+      { key: "angle_deg", label: "Neigung", min: -90, max: 90, fineStep: 1, coarseStep: 10, neutral: 0 },
+      { key: "saturation", label: "Sättigung", min: 0, max: 2, fineStep: 0.05, coarseStep: 0.25, neutral: 0 },
+    ],
+  },
+  {
+    group: "god_rays",
+    title: "Sonnenstrahlen",
+    hint: "Zieht Lichtschleppen aus den hellsten Partien",
+    sliders: [
+      { key: "amount", label: "Stärke", min: 0, max: 2, fineStep: 0.05, coarseStep: 0.25, neutral: 0 },
+      { key: "sun_x", label: "Sonne ←→", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0.5 },
+      { key: "sun_y", label: "Sonne ↑↓", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0.25 },
+      { key: "threshold", label: "Schwelle", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0.72 },
+      { key: "decay", label: "Reichweite", min: 0.5, max: 0.999, fineStep: 0.005, coarseStep: 0.05, neutral: 0.92 },
+    ],
+  },
+  {
+    group: "orton",
+    title: "Orton-Glanz",
+    hint: "Weicher Leuchtschleier über den Lichtern",
+    sliders: [
+      { key: "amount", label: "Stärke", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0 },
+      { key: "radius", label: "Radius", min: 0.2, max: 20, fineStep: 0.1, coarseStep: 1, neutral: 2.5 },
+      { key: "threshold", label: "Schwelle", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0.35 },
+    ],
+  },
+  {
+    group: "film_lab",
+    title: "Filmlabor",
+    hint: "Bleach Bypass oder Cross-Processing",
+    sliders: [{ key: "amount", label: "Stärke", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0 }],
+  },
+  {
+    group: "gradient_map",
+    title: "Verlaufsabbildung",
+    hint: "Ersetzt Farben nach Helligkeit durch einen Verlauf",
+    sliders: [{ key: "amount", label: "Stärke", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0 }],
+  },
+  {
+    group: "color_pop",
+    title: "Farbisolierung",
+    hint: "Eine Farbe bleibt, der Rest wird grau",
+    sliders: [
+      { key: "amount", label: "Stärke", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0 },
+      { key: "hue_center", label: "Farbton", min: 0, max: 359, fineStep: 1, coarseStep: 15, neutral: 10 },
+      { key: "hue_width", label: "Bereich", min: 1, max: 180, fineStep: 1, coarseStep: 10, neutral: 30 },
+      { key: "boost", label: "Verstärken", min: 0, max: 2, fineStep: 0.05, coarseStep: 0.25, neutral: 0 },
+    ],
+  },
+  {
+    group: "light_leak",
+    title: "Lichtleck",
+    hint: "Farbiger Lichteinfall am Bildrand",
+    sliders: [
+      { key: "amount", label: "Stärke", min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0 },
+      { key: "angle_deg", label: "Richtung", min: 0, max: 359, fineStep: 1, coarseStep: 15, neutral: 215 },
+      { key: "softness", label: "Weichheit", min: 0.05, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral: 0.55 },
+    ],
+  },
+];

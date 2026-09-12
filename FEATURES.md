@@ -387,3 +387,33 @@ Direkt anwendbare Foto-Filter/-Effekte (punktuell mit Pinseln, auf viele Fotos a
 - [x] Viewer mit Zoom/Pan (Canvas 2D, provisorisch) — Phase 1 — Status: Fertig
 - [x] Testabdeckung (Rust-Unit-/Integrationstests, Vitest, Playwright-E2E) — Phase 1 — Status: Fertig (abweichend, siehe DECISIONS.md ADR-0010 — Playwright läuft gegen den Produktions-Build im Browser mit simulierter Tauri-Brücke, nicht gegen die kompilierte native App; echtes natives E2E bräuchte `tauri-driver` + WebdriverIO)
 - [x] CI (Windows/macOS/Linux, fmt/clippy/test/build) — Phase 1 — Status: Fertig (`.github/workflows/ci.yml`; volles `tauri build` mit Installer/Signierung als eigener `release`-Job seit Phase 10 Schritt 11, siehe oben)
+
+## Kreativ-Werkzeuge mit großem Bildeffekt (Phase 27)
+
+Zehn Werkzeuge in der Entwickeln-Registerkarte „Kreativ", ganz oben.
+Alle laufen in einer gemeinsamen Pipeline-Stufe (`stages::creative`),
+nach dem Filter/LUT, in der unten genannten Reihenfolge.
+
+| Werkzeug | Wirkung | Vorbereitung |
+|---|---|---|
+| Farbabgleich | Übernimmt die Farbstimmung eines Referenzfotos | Knopf „Referenzfoto übernehmen" (zweites Foto der Mehrfachauswahl) |
+| Tiefennebel | Dunst nach Entfernung gestaffelt | Knopf „Tiefenkarte berechnen" (MiDaS, teilt sich die Karte mit der Virtuellen Blende) |
+| Motiv freistellen | Hintergrund getrennt weichzeichnen/abdunkeln/entsättigen | Knopf „Motiv freistellen" (klassische Saliency, **kein Modell-Download**) |
+| Tilt-Shift | Scharfes Band, unscharfer Rest, Sättigungsanhebung | — |
+| Sonnenstrahlen | Radiale Lichtschleppen aus den hellsten Partien | — |
+| Orton-Glanz | Weicher Leuchtschleier über den Lichtern | — |
+| Filmlabor | Bleach Bypass oder Cross-Processing | — |
+| Verlaufsabbildung | Helligkeit auf Drei-Farb-Verlauf abbilden | — |
+| Farbisolierung | Ein Farbtonbereich bleibt, der Rest wird grau | — |
+| Lichtleck | Farbiger Lichteinfall am Bildrand | — |
+
+**Neuer Filter „Retro Fuji Thailand"** — in der Filter-Bibliothek als
+elfter eingebauter Look und zusätzlich als echte `.cube`-Datei unter
+`assets/luts/retro-fuji-thailand.cube` (33er Raster, frei verwendbar,
+original erstellt). Charakter: angehobener Schwarzpunkt mit Grünstich,
+gedämpfte gelb-orange Lichter, kräftige Türkistöne in Wasser und
+Himmel, flachere Mitten.
+
+**Bewusste Grenze:** die Kreativ-Werkzeuge sind keine Preset-Sektion —
+zwei von ihnen tragen fotospezifische Karten (Tiefe, Motiv), die auf
+einem anderen Foto falsch wären. Siehe `DECISIONS.md` ADR-0057.

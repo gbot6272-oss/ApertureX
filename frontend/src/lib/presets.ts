@@ -60,6 +60,17 @@ export type PresetSectionKey = Exclude<
   | "sky_replace"
   | "liquify_strokes"
   | "skin_smoothing"
+  // Kreativ-Werkzeuge (Phase 27) bewusst ausgeschlossen, aus demselben
+  // Grund wie `sky_replace`/`skin_smoothing`/`style_transfer` daneben:
+  // zwei der zehn tragen FOTOSPEZIFISCH berechnete Daten (die
+  // MiDaS-Tiefenkarte des Tiefennebels, die Motivmaske der
+  // Freistellung). Die in ein Preset zu uebernehmen wuerde die Tiefe
+  // bzw. das Motiv EINES Fotos auf ein voellig anderes anwenden — ein
+  // stiller, schwer zu findender Fehler. Die uebrigen acht Werkzeuge
+  // waeren fuer sich preset-faehig; sie erst dann aufzunehmen, wenn die
+  // beiden Karten beim Speichern gezielt herausgeschnitten werden, ist
+  // der saubere Weg (offener Nachtrag, siehe ADR-0057).
+  | "creative"
 >;
 
 export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [

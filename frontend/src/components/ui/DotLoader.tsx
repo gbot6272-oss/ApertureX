@@ -97,3 +97,34 @@ export const DotLoader = ({
     </div>
   );
 };
+
+/**
+ * Ein kleines "wanderndes Punktpaar", das im 3×3-Ausschnitt (Zeilen/
+ * Spalten 2–4) des 7×7-Rasters einmal rundherum läuft — die einzige
+ * Bild-Sequenz, die diese App bisher braucht (kompakter Kreislauf statt
+ * des Spielfeld-Musters aus dem Vorbild), daher hier zentral exportiert
+ * statt an jeder Verwendungsstelle neu berechnet (`GlobalBusyIndicator.tsx`,
+ * `InlineSpinner` unten).
+ */
+const SPINNER_RING = [2, 3, 4, 11, 18, 17, 16, 9];
+export const RING_SPINNER_FRAMES: number[][] = SPINNER_RING.map((_, i) => [SPINNER_RING[i]!, SPINNER_RING[(i + 1) % SPINNER_RING.length]!]);
+
+/**
+ * Winziger Inline-Spinner für einen Knopf-/Link-Text während einer
+ * laufenden Operation (Phase 23 Nachtrag, siehe DECISIONS.md
+ * ADR-0051-Nachtrag) — z. B. `{loading ? <><InlineSpinner /> Berechnet…</> : "Anwenden"}`.
+ * Rendert reine `<div>`-Elemente ohne Textinhalt, verändert daher den
+ * per Text berechneten zugänglichen Namen des umschließenden Knopfs
+ * nicht (wichtig für die bestehenden Playwright-`getByRole`-Selektoren).
+ */
+export function InlineSpinner({ className }: { className?: string }) {
+  return (
+    <DotLoader
+      aria-hidden="true"
+      frames={RING_SPINNER_FRAMES}
+      duration={90}
+      className={cn("inline-grid align-middle", className)}
+      dotClassName="bg-current/20 [&.active]:bg-current size-0.5"
+    />
+  );
+}

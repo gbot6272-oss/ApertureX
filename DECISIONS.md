@@ -5539,3 +5539,74 @@ Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
 Playwright-Suite (142/142 — insbesondere `masks-flow.spec.ts`,
 Symbol-Austausch, und `export-flow.spec.ts`, `SuccessSpark`, beide
 vollständig grün, da `title`/`aria-label` unverändert blieben).
+
+## ADR-0051-Nachtrag: "noch nicht gut genug" — mehr Hover, Animation
+bei KI-Bearbeitung, sieben weitere gezielte Ergänzungen
+
+Nutzerwunsch (verbatim): "noch nicht gut genug - mach mehr
+Animationen, hover, animation bei ki bearbeitung und 5 weitere".
+
+**Real geprüfter Ist-Zustand vor dieser Ergänzung:**
+
+- `GridView.tsx`/`Filmstrip.tsx`: Foto-Kacheln hatten `grep`-bestätigt
+  **keine** `hover:scale`/`hover:shadow`/`hover:-translate`-Regel,
+  nur einen Rahmenfarbwechsel — die mit Abstand meistgenutzten
+  Flächen der App reagierten optisch kaum auf Hover.
+  `PresetsPanel.tsx`s Preset-Zeilen und `Sidebar.tsx`s Ordner-/
+  Sammlungszeilen: Hintergrundfarbwechsel ohne `transition`, also ein
+  harter Sprung statt einer Bewegung.
+- `ui/Tabs.tsx` (`DevelopPanel`/`MasksPanel`-Registerkarten):
+  reiner Textfarbwechsel beim Tab-Wechsel, kein gleitender
+  Auswahl-Hintergrund.
+- **KI-Bearbeitung:** jede der ~8 am häufigsten ausgelösten
+  KI-/Verarbeitungsstellen in `DevelopPanel.tsx`/
+  `CanvasExtendDialog.tsx`/`ContentAwareScaleDialog.tsx` tauschte
+  ausschließlich Text ("Anwenden"→"Berechnet…", "Sensorflecken
+  suchen"→"Suche…" usw.) — der in Phase 23 bereits gebaute
+  `GlobalBusyIndicator` sitzt unten rechts in der Ecke, spürbar
+  entkoppelt vom eigentlichen Auslöser-Knopf/Bild.
+
+**Entscheidungen:**
+
+1. **Echte Hover-Bewegung** auf den Foto-Kacheln:
+   `GridView.tsx` (`hover:scale-[1.04] hover:shadow-lg hover:z-10`)
+   und `Filmstrip.tsx` (`hover:scale-[1.05]`, Skalierung so gewählt,
+   dass sie innerhalb des vorhandenen 4-px-Rands bleibt, `overflow-
+   y-hidden` schneidet nichts ab); `PresetsPanel.tsx`-Zeilen und
+   `Sidebar.tsx`-Zeilen bekommen `transition-colors`/`-shadow` statt
+   eines harten Sprungs.
+2. **Gleitender Auswahl-Hintergrund in `ui/Tabs.tsx`** — ein per GSAP
+   auf Basis der echten `getBoundingClientRect()` des aktiven
+   Tab-Knopfs positioniertes Hintergrund-Rechteck (funktioniert auch
+   bei `flex-wrap`, da Position *und* Größe gemessen statt fest
+   verdrahtet werden) statt des reinen Textfarbwechsels. **Bewusst
+   nicht** auf `Header.tsx`s Ansicht-Umschalter übertragen: dort sind
+   `centerView`, `metadataPanelOpen` und `developPanelOpen`
+   unabhängige Zustände, mehrere Knöpfe können gleichzeitig aktiv
+   sein — ein einzelnes gleitendes Rechteck würde bei zwei aktiven
+   Knöpfen sichtbar falsch aussehen.
+3. **`InlineSpinner`** (`ui/DotLoader.tsx`, neu exportiert neben dem
+   bereits vorhandenen `RING_SPINNER_FRAMES`, das `GlobalBusyIndicator`
+   jetzt mitbenutzt statt einer eigenen Kopie) — ein winziger
+   Punkt-Spinner direkt im Knopftext während KI-Bearbeitung,
+   eingesetzt an den acht sichtbarsten Auslösestellen (KI-Ausfüllen
+   anwenden, Sensorflecken suchen, Content-Aware Move, Entrauschen,
+   2×hochskalieren, DNG-Konvertierung, Bildranderweiterung, Content-
+   Aware Scale). Rendert nur `<div>`-Elemente ohne Text, verändert
+   daher den textbasiert berechneten zugänglichen Namen der Knöpfe
+   nicht — risikofrei gegenüber den bestehenden `getByRole`-Selektoren.
+4. **Schimmer-Überzug direkt auf dem bearbeiteten Foto** —
+   `Viewer.tsx` blendet bei `selectCurrentPhotoAiProcessing` (neue,
+   auf die aktuell angezeigte Fotobearbeitung eingeschränkte
+   Teilmenge von `selectAnyBackgroundTaskRunning`) eine wandernde
+   Glanzfläche (`apx-ai-shimmer`, reines CSS `@keyframes`) über dem
+   Bild ein — die unübersehbarste mögliche Antwort auf "Animation bei
+   KI-Bearbeitung", ergänzt (nicht ersetzt) den kleinen Eck-Indikator.
+
+Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
+Playwright-Suite (142/142 — insbesondere `masks-flow.spec.ts`
+[gleitender Tab-Hintergrund], `enhance-flow.spec.ts`/
+`ai-flow.spec.ts` [`InlineSpinner`-Knöpfe], `presets-flow.spec.ts`
+["Hover über einen Preset..."], `viewer-flow.spec.ts`/
+`Filmstreifen-Virtualisierung` — alle vollständig grün, da keine
+`title`/`aria-label`/Text-Selektoren verändert wurden).

@@ -69,6 +69,7 @@ import { SkinSmoothingPanel } from "./SkinSmoothingPanel";
 import { SkyReplacePanel } from "./SkyReplacePanel";
 import { StyleTransferPanel } from "./StyleTransferPanel";
 import { TabBar, type TabItem } from "./ui/Tabs";
+import { InlineSpinner } from "./ui/DotLoader";
 import { VirtualAperturePanel } from "./VirtualAperturePanel";
 
 // ---- Reparatur (Klonen/Reparieren) — Phase 4 Schritt 12 --------------------
@@ -1592,7 +1593,12 @@ export function DevelopPanel() {
                     {contentAwareMoveRect
                       ? "Auswahl an die Zielposition ziehen und loslassen."
                       : "Rechteck um das zu verschiebende Objekt aufziehen."}
-                    {contentAwareMoveLoading && " Berechnet…"}
+                    {contentAwareMoveLoading && (
+                      <>
+                        {" "}
+                        <InlineSpinner className="mr-1 inline-grid" /> Berechnet…
+                      </>
+                    )}
                   </p>
                 )}
 
@@ -1732,7 +1738,13 @@ export function DevelopPanel() {
                               onClick={() => void runAiInpaintForStroke(index)}
                               className="text-accent underline disabled:cursor-not-allowed disabled:opacity-40"
                             >
-                              {aiInpaintLoadingIndex === index ? "Berechnet…" : "Anwenden"}
+                              {aiInpaintLoadingIndex === index ? (
+                                <>
+                                  <InlineSpinner className="mr-1" /> Berechnet…
+                                </>
+                              ) : (
+                                "Anwenden"
+                              )}
                             </button>
                           )}
                           <button type="button" onClick={() => removeRepairStroke(index)} className="text-danger underline">
@@ -1755,7 +1767,13 @@ export function DevelopPanel() {
                     onClick={() => void detectSensorSpotsForCurrentPhoto(0.5)}
                     className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {sensorSpotsLoading ? "Suche…" : "Sensorflecken suchen"}
+                    {sensorSpotsLoading ? (
+                      <>
+                        <InlineSpinner className="mr-1" /> Suche…
+                      </>
+                    ) : (
+                      "Sensorflecken suchen"
+                    )}
                   </button>
                   {sensorSpotCandidates.length > 0 && (
                     <button type="button" onClick={clearSensorSpots} className="text-xs text-text-muted hover:text-danger">
@@ -2027,7 +2045,13 @@ export function DevelopPanel() {
                     onClick={() => selectedPhotoId && void runDenoise(selectedPhotoId)}
                     className="flex-1 basis-[45%] rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {enhanceRunning === "denoise" ? "Entrauscht…" : "Entrauschen"}
+                    {enhanceRunning === "denoise" ? (
+                      <>
+                        <InlineSpinner className="mr-1" /> Entrauscht…
+                      </>
+                    ) : (
+                      "Entrauschen"
+                    )}
                   </button>
                   <button
                     type="button"
@@ -2035,7 +2059,13 @@ export function DevelopPanel() {
                     onClick={() => selectedPhotoId && void runUpscale(selectedPhotoId)}
                     className="flex-1 basis-[45%] rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {enhanceRunning === "upscale" ? "Skaliert…" : "2× hochskalieren"}
+                    {enhanceRunning === "upscale" ? (
+                      <>
+                        <InlineSpinner className="mr-1" /> Skaliert…
+                      </>
+                    ) : (
+                      "2× hochskalieren"
+                    )}
                   </button>
                 </div>
                 {enhanceStatus && <p className="text-xs text-text-muted">{enhanceStatus}</p>}
@@ -2054,7 +2084,13 @@ export function DevelopPanel() {
                   onClick={() => selectedPhotoId && void runConvertToDng(selectedPhotoId)}
                   className="rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {enhanceRunning === "dng" ? "Konvertiert…" : "Als DNG konvertieren"}
+                  {enhanceRunning === "dng" ? (
+                    <>
+                      <InlineSpinner className="mr-1" /> Konvertiert…
+                    </>
+                  ) : (
+                    "Als DNG konvertieren"
+                  )}
                 </button>
               </details>
             </>

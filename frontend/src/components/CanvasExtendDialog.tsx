@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { useAppStore } from "../store";
 import { Dialog } from "./ui/Dialog";
+import { InlineSpinner } from "./ui/DotLoader";
 
 interface MarginState {
   left: number;
@@ -121,7 +122,13 @@ export function CanvasExtendDialog() {
             disabled={!selectedPhotoId || !hasAnyMargin || aiOutpaintLoading}
             className="rounded border border-accent bg-accent/10 px-3 py-1.5 text-xs text-accent disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {aiOutpaintLoading ? "Berechne…" : "Anwenden"}
+            {aiOutpaintLoading ? (
+              <>
+                <InlineSpinner className="mr-1" /> Berechne…
+              </>
+            ) : (
+              "Anwenden"
+            )}
           </button>
         </div>
       </div>

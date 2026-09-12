@@ -35,7 +35,7 @@ function FolderNode({ folder, depth, childrenOf }: FolderNodeProps) {
         onClick={() => selectFolder(folder.id)}
         title={folder.path}
         style={{ paddingLeft: `${0.5 + depth * 1}rem` }}
-        className={`flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-bg-panel ${
+        className={`flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition-colors duration-[var(--duration-fast)] hover:bg-bg-panel ${
           folder.id === selectedFolderId ? "bg-bg-panel text-text-primary" : "text-text-secondary"
         }`}
       >
@@ -144,7 +144,7 @@ function CollectionsSection() {
             <button
               type="button"
               onClick={() => selectCollection(collection.id)}
-              className={`flex min-w-0 flex-1 items-center rounded px-2 py-1.5 text-left text-sm hover:bg-bg-panel ${
+              className={`flex min-w-0 flex-1 items-center rounded px-2 py-1.5 text-left text-sm transition-colors duration-[var(--duration-fast)] hover:bg-bg-panel ${
                 collection.id === selectedCollectionId ? "bg-bg-panel text-text-primary" : "text-text-secondary"
               }`}
             >
@@ -156,7 +156,7 @@ function CollectionsSection() {
                 onClick={() => void addSelectionToCollection(collection.id)}
                 aria-label="Auswahl zu dieser Sammlung hinzufügen"
                 title="Auswahl zu dieser Sammlung hinzufügen"
-                className="shrink-0 px-1.5 text-xs text-text-muted opacity-0 hover:text-accent group-hover:opacity-100"
+                className="shrink-0 px-1.5 text-xs text-text-muted opacity-0 transition-opacity duration-[var(--duration-fast)] hover:text-accent group-hover:opacity-100"
               >
                 +
               </button>

@@ -369,6 +369,34 @@ button:not(:disabled):active {
   animation: apx-grid-cell-in var(--duration-base) cubic-bezier(0, 0, 0.2, 1);
 }
 
+/* Schimmer-Überzug während KI-Bearbeitung am aktuell im Viewer gezeigten
+   Foto (Phase 23 Nachtrag, siehe DECISIONS.md ADR-0051-Nachtrag) —
+   `Viewer.tsx` blendet dieses `<div>` über dem Bild ein, solange
+   `selectCurrentPhotoAiProcessing` (store/index.ts) `true` liefert. Eine
+   reine CSS-Animation (kein GSAP) genügt hier, weil nur eine einzige
+   Instanz gleichzeitig existiert; reduzierte Bewegung kappt
+   `animation-duration` bereits oben global auf ~0 (der Überzug bleibt
+   dann als stehende, halbtransparente Fläche sichtbar statt zu
+   "wandern" — weiterhin ein klares Signal, nur ohne Bewegung). */
+@keyframes apx-ai-shimmer-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.apx-ai-shimmer {
+  background: linear-gradient(
+    100deg,
+    transparent 35%,
+    color-mix(in srgb, var(--color-accent) 30%, transparent) 50%,
+    transparent 65%
+  );
+  animation: apx-ai-shimmer-sweep 1.6s ease-in-out infinite;
+}
+
 /* Einklappbare Regler-Abschnitte (Phase 18-Nachtrag "UI übersichtlicher/
    weniger Scrollen", siehe DECISIONS.md) — `DevelopPanel.tsx`/
    `MasksPanel.tsx` ersetzen ihre `<fieldset>`/`<legend>`-Abschnitte durch

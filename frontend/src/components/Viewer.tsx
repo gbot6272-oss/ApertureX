@@ -16,7 +16,7 @@ import { applyFrequencyView } from "../lib/frequencySeparation";
 import { applyPaperWhite, type SoftProofSettings } from "../lib/softProof";
 import { clampZoom, computeBaseScale, imageOrigin, nextZoomStep, panForZoomAtCursor } from "../lib/viewerMath";
 import { QuadRenderer } from "../lib/webgl";
-import { useAppStore } from "../store";
+import { useAppStore, selectCurrentPhotoAiProcessing } from "../store";
 import { BeforeAfterView } from "./BeforeAfterView";
 import { ContentAwareMoveOverlay } from "./ContentAwareMoveOverlay";
 import { CropOverlay } from "./CropOverlay";
@@ -52,6 +52,7 @@ export function Viewer() {
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
   const photos = useAppStore((s) => (selectedFolderId ? s.photosByFolder[selectedFolderId] : undefined));
   const photo = photos?.find((p) => p.id === selectedPhotoId);
+  const aiProcessing = useAppStore(selectCurrentPhotoAiProcessing);
 
   const zoom = useAppStore((s) => s.zoom);
   const fitMode = useAppStore((s) => s.fitMode);
@@ -701,6 +702,13 @@ export function Viewer() {
       {!photo && <p className="pointer-events-none text-sm text-text-muted">Kein Foto ausgewählt.</p>}
 
       <canvas ref={canvasRef} className="pointer-events-none absolute inset-0" />
+
+      {/* Schimmer-Überzug während KI-Bearbeitung (Phase 23 Nachtrag,
+          siehe DECISIONS.md ADR-0051-Nachtrag) — die sichtbarste
+          Antwort auf "Animation bei KI-Bearbeitung": statt nur eines
+          kleinen Punkt-Indikators in der Ecke (`GlobalBusyIndicator.tsx`)
+          zieht ein Glanzstreifen direkt über das bearbeitete Bild. */}
+      {photo && aiProcessing && <div className="apx-ai-shimmer pointer-events-none absolute inset-0" aria-hidden="true" />}
 
       {/* Offline-Kennzeichnung (Phase 11 Schritt 4, siehe `DECISIONS.md`
           ADR-0038): `photo.missing` kommt von der bestehenden Abgleich-

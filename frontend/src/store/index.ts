@@ -262,6 +262,30 @@ export function selectAnyBackgroundTaskRunning(state: AppStore): boolean {
   );
 }
 
+/**
+ * Schmalere Teilmenge von {@link selectAnyBackgroundTaskRunning}
+ * (Phase 23 Nachtrag, siehe DECISIONS.md ADR-0051-Nachtrag) — nur die
+ * Operationen, die konkret das aktuell im Viewer angezeigte Foto
+ * bearbeiten (nicht z. B. `importRunning`/`exportRunning`/
+ * `peopleLoading`, die auf beliebige andere Fotos oder die ganze
+ * Bibliothek zielen). Treibt den Schimmer-Effekt in `Viewer.tsx`
+ * direkt auf dem bearbeiteten Bild — die sichtbarste mögliche Antwort
+ * auf "Animation bei KI-Bearbeitung".
+ */
+export function selectCurrentPhotoAiProcessing(state: AppStore): boolean {
+  return (
+    state.aiInpaintLoadingIndex !== null ||
+    state.sensorSpotsLoading ||
+    state.contentAwareMoveLoading ||
+    state.aiOutpaintLoading ||
+    state.contentAwareScaleLoading ||
+    state.enhanceRunning !== null ||
+    state.compositeLayerLoading ||
+    state.colorPaletteLoading ||
+    state.repairSourceSuggestionLoading
+  );
+}
+
 /** Video als Katalog-Asset (Phase 16 Schritt 5, siehe `DECISIONS.md`
  * ADR-0043) — `true`, wenn `photoId` in der aktuell aktiven Fotoliste als
  * Video geführt wird. Genutzt, um das Laden des EDL-gestützten

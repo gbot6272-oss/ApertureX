@@ -1196,6 +1196,25 @@ siehe `DECISIONS.md` ADR-0051.
 - [x] 5. Dokumentation, volle Verifikation (tsc, vitest, volle
       Playwright-Suite), Commit+Push
 
+### Nachtrag: "noch nicht gut genug" — Hover, KI-Bearbeitung-Animation, 5 weitere
+
+Nutzerwunsch: mehr Animationen, Hover-Bewegung, echte Animation
+während KI-Bearbeitung, fünf weitere Ergänzungen. Details/
+Entscheidungen: siehe `DECISIONS.md` ADR-0051-Nachtrag.
+
+- [x] 1. Echte Hover-Bewegung: `GridView.tsx`/`Filmstrip.tsx`-Kacheln
+      (Skalierung+Schatten), `PresetsPanel.tsx`/`Sidebar.tsx`-Zeilen
+      (sanfter Übergang statt hartem Sprung)
+- [x] 2. Gleitender Auswahl-Hintergrund in `ui/Tabs.tsx` (GSAP,
+      echte `getBoundingClientRect()`-Messung, funktioniert bei
+      `flex-wrap`)
+- [x] 3. `InlineSpinner` (`ui/DotLoader.tsx`) an acht sichtbaren
+      KI-Auslösestellen (KI-Ausfüllen, Sensorflecken, Content-Aware
+      Move/Scale, Entrauschen, Hochskalieren, DNG, Bildranderweiterung)
+- [x] 4. Schimmer-Überzug direkt auf dem bearbeiteten Foto im Viewer
+      (`selectCurrentPhotoAiProcessing`, `apx-ai-shimmer`)
+- [x] 5. Dokumentation, volle Verifikation, Commit+Push
+
 ## Aktuelle Phase: Phase 22 — Editor-Politur: ESC-Schnellmenü, Regler, Farbprofile
 
 Nutzerwunsch nach dem Liquid-Glass-Merge: ein Menü beim Drücken von

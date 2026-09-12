@@ -92,7 +92,7 @@ export function Filmstrip() {
                 width: CELL_WIDTH,
                 height: "calc(100% - 8px)",
               }}
-              className={`relative overflow-hidden rounded border-2 ${
+              className={`relative overflow-hidden rounded border-2 transition-transform duration-[var(--duration-fast)] hover:z-10 hover:scale-[1.05] hover:shadow-lg ${
                 photo.id === selectedPhotoId ? "border-accent" : multiSelectedIds.includes(photo.id) ? "border-accent/50" : "border-transparent hover:border-border"
               } ${photo.missing ? "opacity-40" : ""}`}
             >

@@ -112,7 +112,7 @@ function PresetRow({ preset, folders, onOpenVersions }: PresetRowProps) {
 
   return (
     <li
-      className="flex flex-col gap-1 rounded border border-border px-2 py-1.5 text-sm"
+      className="flex flex-col gap-1 rounded border border-border px-2 py-1.5 text-sm transition-[background-color,border-color,box-shadow] duration-[var(--duration-fast)] hover:border-accent/40 hover:bg-bg-panel hover:shadow-sm"
       onMouseEnter={() => selectedPhotoId && void previewPresetHover(preset.id)}
       onMouseLeave={clearPresetHoverPreview}
     >

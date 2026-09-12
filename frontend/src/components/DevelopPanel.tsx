@@ -490,7 +490,7 @@ export function DevelopPanel() {
 
   return (
     <>
-    <PaletteFrame id="develop" side="right" defaultWidth={288} label="Entwickeln" className="gap-4 border-l border-border bg-bg-raised p-3">
+    <PaletteFrame id="develop" side="right" defaultWidth={288} label="Entwickeln" className="gap-4 border-l border-[var(--glass-border)] p-3">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-text-primary">Entwickeln</h2>
         <div className="flex gap-1">

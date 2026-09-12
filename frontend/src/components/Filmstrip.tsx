@@ -52,14 +52,14 @@ export function Filmstrip() {
 
   if (photos.length === 0) {
     return (
-      <footer className="flex h-24 shrink-0 items-center justify-center border-t border-border bg-bg-raised text-sm text-text-muted">
+      <footer data-tour="filmstrip" className="flex h-24 shrink-0 items-center justify-center border-t border-border bg-bg-raised text-sm text-text-muted">
         {hasActiveContext ? "Keine Fotos zum Anzeigen." : "Wähle links einen Ordner."}
       </footer>
     );
   }
 
   return (
-    <footer ref={scrollRef} className="h-24 shrink-0 overflow-x-auto overflow-y-hidden border-t border-border bg-bg-raised">
+    <footer ref={scrollRef} data-tour="filmstrip" className="h-24 shrink-0 overflow-x-auto overflow-y-hidden border-t border-border bg-bg-raised">
       <div style={{ width: virtualizer.getTotalSize(), height: "100%", position: "relative" }}>
         {virtualizer.getVirtualItems().map((item) => {
           const photo = photos[item.index];

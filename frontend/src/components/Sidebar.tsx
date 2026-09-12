@@ -174,7 +174,7 @@ export function Sidebar() {
   const { roots, childrenOf } = useMemo(() => buildChildrenByParent(folders), [folders]);
 
   return (
-    <PaletteFrame id="sidebar" side="left" defaultWidth={256} label={t("sidebar.heading")} className="border-r border-border bg-bg-raised p-2">
+    <PaletteFrame id="sidebar" side="left" defaultWidth={256} label={t("sidebar.heading")} className="border-r border-[var(--glass-border)] p-2">
       <h2 className="px-2 pb-2 text-xs font-semibold tracking-wide text-text-secondary uppercase">{t("sidebar.heading")}</h2>
 
       {folders.length === 0 && <p className="px-2 text-sm text-text-muted">{t("sidebar.empty")}</p>}

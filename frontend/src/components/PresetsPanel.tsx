@@ -547,7 +547,7 @@ export function PresetsPanel() {
   }
 
   return (
-    <PaletteFrame id="presets" side="left" defaultWidth={256} label={t("presets.heading")} className="gap-3 border-r border-border bg-bg-raised p-3">
+    <PaletteFrame id="presets" side="left" defaultWidth={256} label={t("presets.heading")} className="gap-3 border-r border-[var(--glass-border)] p-3">
       <h2 className="text-sm font-semibold text-text-primary">{t("presets.heading")}</h2>
 
       <ul className="space-y-0.5">

@@ -183,11 +183,12 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
     // Einstellungen. Kein Knopf wurde entfernt oder hinter mehr als
     // einer zusätzlichen Ebene versteckt — nur die dauerhaft sichtbare
     // Knopfzahl sinkt drastisch.
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-bg-raised px-4">
+    <header className="apx-glass flex h-12 shrink-0 items-center gap-3 border-b border-[var(--glass-border)] px-4">
       <span className="shrink-0 font-semibold tracking-wide">Aperture X</span>
 
       <button
         type="button"
+        data-tour="import"
         onClick={() => void handleImportClick()}
         disabled={importRunning}
         className="shrink-0 rounded border border-border bg-bg-panel px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
@@ -199,6 +200,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
 
       <button
         type="button"
+        data-tour="search"
         onClick={onOpenPalette}
         title={t("header.paletteHint")}
         className="flex shrink-0 items-center gap-2 rounded border border-border bg-bg-panel px-3 py-1 text-sm text-text-secondary transition-colors duration-[var(--duration-fast)] hover:border-accent hover:text-text-primary"
@@ -234,7 +236,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
         </span>
       )}
 
-      <nav aria-label="Ansicht" className="ml-auto flex shrink-0 items-center gap-0.5 rounded border border-border bg-bg-panel p-0.5">
+      <nav aria-label="Ansicht" data-tour="views" className="ml-auto flex shrink-0 items-center gap-0.5 rounded border border-border bg-bg-panel p-0.5">
         <button
           type="button"
           onClick={toggleCenterView}
@@ -293,6 +295,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
 
         <button
           type="button"
+          data-tour="develop"
           onClick={toggleDevelopPanel}
           disabled={!selectedPhotoId && !developPanelOpen}
           aria-pressed={developPanelOpen}

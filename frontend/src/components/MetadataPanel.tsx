@@ -45,7 +45,7 @@ export function MetadataPanel() {
   }
 
   return (
-    <PaletteFrame id="metadata" side="right" defaultWidth={288} label={t("metadata.heading")} className="gap-4 border-l border-border bg-bg-raised p-3">
+    <PaletteFrame id="metadata" side="right" defaultWidth={288} label={t("metadata.heading")} className="gap-4 border-l border-[var(--glass-border)] p-3">
       <h2 className="text-sm font-semibold text-text-primary">{t("metadata.heading")}</h2>
 
       {!photo && <p className="text-xs text-text-muted">{t("metadata.noPhoto")}</p>}

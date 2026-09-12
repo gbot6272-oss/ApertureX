@@ -72,7 +72,7 @@ export function Menu({ label, trigger, sections, align = "end" }: { label: strin
         <div
           role="menu"
           aria-label={label}
-          className={`absolute top-full z-40 mt-2 max-h-[70vh] w-72 overflow-y-auto rounded-lg border border-border bg-bg-raised p-1 shadow-lg transition-[opacity,transform] ${
+          className={`apx-glass-strong absolute top-full z-40 mt-2 max-h-[70vh] w-72 overflow-y-auto rounded-lg border border-[var(--glass-border)] p-1 shadow-lg transition-[opacity,transform] ${
             align === "end" ? "right-0" : "left-0"
           }`}
           style={{ transitionDuration: reducedMotion ? "0ms" : `${DURATION_FAST_MS}ms` }}

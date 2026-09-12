@@ -5246,3 +5246,110 @@ Umgebungsproblems in dieser Sitzung: die erste Verifikationsrunde
 schlug mit 142/142 Fehlschlägen fehl, weil `PLAYWRIGHT_CHROMIUM_PATH`
 nicht gesetzt war — kein Code-Regression, nach Setzen des Pfads lief
 die Suite grün).
+
+## ADR-0049: Phase 21 — Liquid-Glass-Überarbeitung, Spotlight-
+Einführungstour, überladene Hilfetexte gekürzt
+
+Nutzerwunsch (verbatim, sinngemäß): die gesamte Oberfläche im "Liquid
+Glass"-Materialstil, weniger überladene ("dumme KI-")Hilfetexte,
+einfacher zu navigieren, ein Einführungstutorial am Anfang mit
+Beispielfotos und Fokus auf echte Bedienelemente — insgesamt
+"hochwertiger und nutzerfreundlicher".
+
+**Recherche (`ui-ux-pro-max`-Skill):** "Liquid Glass" (Apple-
+Materialstil) ist als eigener Stil-Eintrag hinterlegt, primär für
+SwiftUI/UIKit/AppKit spezifiziert (`translucency, lensing, refraction,
+fluid morphing`), mit expliziten CSS-Näherungsstichworten
+("adaptive translucency, lensing, refraction, reduced transparency,
+reduced motion") für Nicht-Apple-Plattformen — diese App ist Tauri/
+React/CSS, keine native Apple-Oberfläche, daher eine **CSS-Näherung**
+statt einer 1:1-Umsetzung: `backdrop-filter: blur() saturate()` +
+ein diagonaler Glanz-Verlauf statt echter optischer Linsenverzerrung
+(die es in CSS nicht gibt). Die Onboarding-UX-Recherche ergab eine
+harte Anforderung: Tutorials müssen jederzeit überspring-/
+zurücknavigierbar sein, nie eine erzwungene lineare Tour.
+
+**Entscheidungen:**
+
+1. **Liquid-Glass-Token-Fundament** (`index.css`, `--glass-*`) —
+   bewusst als zusätzliche Ebene neben den bestehenden `--color-bg-*`-
+   Tönen, nicht als deren Ersatz: `.apx-glass`/`.apx-glass-strong`
+   sind neue Utility-Klassen (translucente Grundfarbe +
+   `backdrop-filter` + ein `background-image`-Glanz-Verlauf als zweite
+   Ebene derselben `background`-Eigenschaft — bewusst **kein**
+   separates `::before`-Pseudo-Element, das hätte mit dem
+   `position: relative` der Aufrufer um die Stapelreihenfolge
+   konkurrieren können). Light-/Dark-Theme-Kaskade wie gehabt;
+   Kontrastmodus setzt `--glass-blur: 0px` und volldeckende Farben
+   (dieselbe Begründung wie das bestehende `--color-bg-overlay`: im
+   Kontrastmodus geht es um maximale Lesbarkeit, Transluzenz
+   widerspricht dem — das ist zugleich die "reduzierte Transparenz"-
+   Rückfallebene, die die Stil-Recherche explizit verlangt).
+2. **Angewendet auf die gemeinsamen Chrome-Flächen statt jede
+   Komponente einzeln neu zu entwerfen** — dieselbe Hebel-Strategie
+   wie in Phase 20 (Dialog/Sheet): `ui/Dialog.tsx`, `ui/Sheet.tsx`,
+   `ui/Menu.tsx`s Überlauf-Menü und `PaletteFrame.tsx` (zentral, deckt
+   dadurch automatisch alle sechs Aufrufer ab: Sidebar/Presets/
+   Metadaten/Entwickeln/Masken-Panel sowie den eingeklappten Zustand)
+   sowie die Kopfleiste (`Header.tsx`) bekommen die neue Materialklasse
+   statt einzelner `bg-bg-raised`-Flächen. **Ehrlich begrenzt:** ein
+   `backdrop-filter` blur zeigt nur etwas, wenn tatsächlich Inhalt
+   *hinter* dem Element liegt (echte Überlappung, z. B. ein Dialog über
+   der App oder das Überlauf-Menü über dem Inhalt) — Header/PaletteFrame
+   sind normale Flex-Geschwister ohne Überlappung mit dem Zentralinhalt,
+   der spürbare "man sieht Unschärfe durch das Glas"-Effekt kommt daher
+   vor allem bei Dialog/Sheet/Menü/Tutorial zur Geltung; bei Header/
+   Paletten liefert die Änderung eine konsistente transluzente/
+   glänzende Materialoptik, aber ohne sichtbaren Unschärfe-Durchblick,
+   da nichts dahinterliegt. Bewusst **nicht** auf einzelne
+   Rasterkacheln angewendet (`GridView.tsx`) — `backdrop-filter` auf
+   potenziell Dutzenden gleichzeitig sichtbaren Elementen wäre ein
+   echtes Performance-Risiko, der Nutzen (kurzlebige, kleine Kacheln)
+   stünde in keinem Verhältnis dazu.
+3. **`OnboardingTour.tsx` ersetzt `OnboardingDialog.tsx`** — die
+   vorherige Fassung zeigte alle fünf Erklärabschnitte auf einmal als
+   reine Textliste in einem Dialog; die neue Tour hebt sie einzeln,
+   nacheinander an echten, gerade sichtbaren Bedienelementen hervor
+   (`data-tour="import"/"views"/"develop"/"filmstrip"`-Attribute neu in
+   `Header.tsx`/`Filmstrip.tsx`; die Seitenleiste wird stattdessen über
+   ihr bestehendes, bereits lokalisiertes `aria-label` gefunden, ohne
+   `PaletteFrame.tsx`s Props zu erweitern). Aussparung über vier
+   Abdunkel-/Weichzeichner-Rechtecke (oben/unten/links/rechts um das
+   Ziel) statt eines einzelnen Overlays mit CSS-`mask`-Ausschnitt —
+   robuster browserübergreifend, kein Masken-/Kompositions-Fallstrick;
+   ohne Zielelement (Begrüßung/Abschluss) kollabiert dieselbe Formel
+   auf einen Phantompunkt mit Breite/Höhe 0 in Bildschirmmitte, wodurch
+   die vier Rechtecke lückenlos den ganzen Schirm abdecken, ohne einen
+   Sonderfall im Rendering zu brauchen. Ein neues, reines Inline-SVG
+   (`SampleTourPhoto`, Berg-Silhouette + Sonne vor Himmelsverlauf)
+   dient als "Beispielfoto" auf der Begrüßungskarte — echte externe
+   Bildquellen bleiben durch die Netzwerk-Policy dieser Umgebung
+   blockiert (siehe ADR-0047), und vor dem ersten Import liegt ohnehin
+   kein echtes Nutzerfoto vor. Zurück-/Überspringen-Knöpfe immer
+   vorhanden (UX-Pflicht, s. o.); `uiSettings.onboarding_seen`-
+   Verdrahtung in `App.tsx` unverändert (`OnboardingTour` erhält
+   dieselben `open`/`onClose`-Props wie zuvor `OnboardingDialog`).
+   Bislang unbenutzte, weil nur von der alten Komponente gelesene
+   `onboarding.layout.*`/`onboarding.import.*` (Titel/Textform, nicht
+   die neuen `onboarding.tour.*`-Schlüssel)/`onboarding.develop.*`/
+   `onboarding.palette.*`/`onboarding.shortcuts.*`/`onboarding.start`-
+   Lokalisierungsschlüssel aus `de.ts`/`en.ts` entfernt statt als toter
+   Code liegen zu lassen.
+4. **Gezielter Kürzungs-Durchgang statt Vollaudit:** ein vollständiger
+   Text-Audit über alle ~150 Komponenten wäre in dieser Phase nicht
+   seriös leistbar — stattdessen zwei konkrete, real überladene
+   Einstellungen-Hinweistexte (`settings.watchedFolderHint`,
+   `settings.mapApiKeyHint`, je zuvor zwei bis drei Sätze mit
+   redundanten Nebeninformationen) auf je einen knappen, selbstbewusst
+   formulierten Satz gekürzt.
+
+**Bewusst außerhalb dieses Umfangs belassen:** eine echte, physikalisch
+korrekte Linsenverzerrung/Lichtbrechung (in CSS nicht abbildbar, siehe
+Recherche oben); eine vollständige Restrukturierung der Navigation
+(Phase 18 hat die Kopfleiste/das Kommando-Register bereits grundlegend
+vereinfacht — diese Phase ergänzt Bewegung/Optik/Tutorial, keinen
+zweiten Navigations-Umbau); ein vollständiger Text-Audit aller
+UI-Hilfetexte (siehe Entscheidung 4).
+
+Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
+Playwright-Suite (142/142, `PLAYWRIGHT_CHROMIUM_PATH` gesetzt).

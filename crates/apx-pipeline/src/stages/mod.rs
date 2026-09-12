@@ -16,6 +16,7 @@ pub mod color_grading;
 mod color_math;
 pub mod composite;
 pub mod contrast;
+pub mod creative;
 pub mod curves;
 pub mod details;
 pub mod effects;

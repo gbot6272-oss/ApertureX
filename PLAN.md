@@ -1502,3 +1502,66 @@ Suite inkl. visueller Verifikation gebündelt in Schritt 7.
 - [x] Nachtrag: drei reale Nutzungsfehler nach dem Merge behoben (Nutzer-Screenshots aus der echten App) — Foto stand in der Entwickeln-Großansicht auf dem Kopf (`lib/webgl.ts`s `uploadRgba8` brauchte, anders als `uploadImageBitmap`, `UNPACK_FLIP_Y_WEBGL = false` statt `true`, empirisch per isoliertem WebGL-Vergleichstest bewiesen — die EXIF-Orientierung selbst in `apx-raw` war die ganze Zeit korrekt, per neuem, echtem JPEG+EXIF-Testfall bestätigt), `MasksPanel.tsx`s Zwei-Spalten-Knopfraster brach deutsche Beschriftungen auf zwei Zeilen um (jetzt einspaltig), `DevelopAnalysisPanel.tsx` ließ sich weder verschieben noch einklappen und clippte zwei Knöpfe (jetzt ziehbare Kopfzeile + Einklapp-Knopf + `flex-wrap`) — siehe DECISIONS.md ADR-0046-Nachtrag; dabei aufgedeckte echte Test-Regression (neue Kopfzeile überlappte die TAT-Werkzeugleiste) sofort gefixt, volle Playwright-Suite wieder 142/142 grün. Auf `main` gemergt.
 - [x] Nachtrag II: gezielter Rundgang durch die restliche Oberfläche nach demselben Muster (schmale `PaletteFrame`-Paletten auf zu lange Knopfbeschriftungen in Mehrspalten-/`flex-1`-Reihen geprüft) — drei weitere echte Fälle behoben (`MasksPanel.tsx`s "+ Komponente hinzufügen"-Raster, `PresetsPanel.tsx`s KI-Preset-Generator-Knopfpaar, je einspaltig; `DevelopPanel.tsx`s Verflüssigen-Modus- und Entrauschen/Hochskalieren-Knopfreihen, per `flex-wrap` statt Umstrukturierung, da echte Segment-Umschalter) — siehe DECISIONS.md ADR-0046-Nachtrag II; alle anderen `grid-cols-*`-Stellen und schwebenden Overlays geprüft, ohne weiteren Fund; `tsc -b`/`vitest run` (251)/volle Playwright-Suite (142/142) grün
 - [x] Nachtrag III: die vier Entwickeln-Registerkarten (Licht/Farbe/Details/Kreativ) real durchgeklickt — ein echter Fehler gefunden und behoben (Kreativ-Registerkarte zeigte dauerhaft einen roten "Test-Stub: unbekannter invoke-Befehl 'list_builtin_lut_filters'"-Banner, weil `e2e/tauri-mock.ts` für diesen echten, seit Phase 16 Schritt 2 bestehenden Rust-Befehl nie einen Mock-Fall bekommen hatte) sowie das strukturelle "zu viel Scrollen"-Problem eine Ebene tiefer als in ADR-0046 behoben: alle 30 `<fieldset>`/`<legend>`-Abschnitte in `DevelopPanel.tsx` und 6 in `MasksPanel.tsx` sind jetzt einzeln einklappbare native `<details open>`/`<summary>` (neue `.apx-collapsible`-Klasse in `index.css`, ▸/▾-Pfeil mit Übergangsanimation, respektiert `prefers-reduced-motion`) — bleiben beim ersten Betrachten unverändert vollständig sichtbar, lassen sich aber ab jetzt einzeln zuklappen, reduziert den Scrollweg v. a. in "Kreativ" (acht Unterabschnitte) und "Licht" (fünf); der Node-Editor-"Öffnen"-Sprung klappt ein zuvor zugeklapptes Ziel automatisch wieder auf. Dabei eine echte Testfalle empirisch nachgewiesen und umschifft (`<details>`+`<summary>` bekommt anders als `<fieldset>`+`<legend>` keinen automatischen zugänglichen Namen — zwei versuchsweise gesetzte `aria-label`s kollidierten mit gleichnamigen `aria-label`s echter Komponenten und wurden wieder entfernt) — siehe DECISIONS.md ADR-0046-Nachtrag III; `tsc -b`/`vitest run` (251)/volle Playwright-Suite (142/142) grün, reale Bildschirm-Kontrolle aller fünf Registerkarten plus Zu-/Aufklappen-Verhalten
+
+## Aktuelle Phase: Phase 27 — Zehn Bearbeitungs-Funktionen mit großem Bildeffekt + Retro-Fuji-Thailand-Filter
+
+Nutzerwunsch wörtlich: zehn weitere Funktionen, die "wirklich bei der
+Bearbeitung von Fotos helfen, anspruchsvoll, teilweise mit KI, wirklich
+sichtbare Erfolge erzielend", dazu ein neues `.cube`-Template im
+"retro Fujifilm Thailand"-Look, und die UI der neuen Funktionen direkt
+im Liquid-Glass-Stil (Hover, wenig Subtext, einfach zu navigieren).
+Untersuchung/Entscheidungen: siehe `DECISIONS.md` ADR-0057.
+
+**Architektur (einmal festgelegt, gilt für alle zehn):** ein neues
+EDL-Feld `creative: CreativeAdjustments` mit zehn Unterstrukturen, EINE
+neue Pipeline-Stufe `stages/creative.rs`, EIN `StageEnabled.creative`.
+Zehn einzelne Stufen wären dieselbe Mathematik mit zehnfachem
+Gerüst-Aufwand und zehn zusätzlichen Pipeline-Zweigen in `develop.rs`.
+Position in der Pipeline: nach `lut_filter`, vor `liquify` — der
+LUT-Look ist die Grundgradation, die Kreativ-Stufe legt sich darüber.
+Feste, dokumentierte Reihenfolge innerhalb der Stufe: Korrektur →
+Atmosphäre → Optik → Licht → Gradation → Auflage.
+
+- [ ] 1. **Farbabgleich zu Referenzfoto** (Reinhard-Statistiktransfer im
+  Lab-Raum): übernimmt Mittelwert und Streuung der Farbverteilung eines
+  Referenzfotos. Macht eine ganze Serie in einem Klick einheitlich —
+  der praktischste der zehn Punkte.
+- [ ] 2. **Atmosphärischer Tiefennebel (KI)**: nutzt die bereits
+  vorhandene MiDaS-Tiefenkarte (`estimate_photo_depth`, bisher nur für
+  die Virtuelle Blende) und legt entfernungsabhängigen Dunst/Nebel in
+  wählbarer Farbe über das Bild. Erzeugt echte Tiefenstaffelung statt
+  eines flachen Verlaufs.
+- [ ] 3. **KI-Motiv-Freistellung + Hintergrundbehandlung**: klassische
+  Segmentierung (`apx_ai::segmentation::subject_alpha`, kein
+  Modell-Download nötig) trennt Motiv und Hintergrund; der Hintergrund
+  lässt sich separat weichzeichnen, abdunkeln und entsättigen.
+  Porträt-Arbeitspferd.
+- [ ] 4. **Tilt-Shift / Miniatur**: gerichtetes Schärfeband mit
+  weichem Abfall nach oben und unten plus Sättigungsanhebung.
+- [ ] 5. **Sonnenstrahlen (God Rays)**: radiale Lichtschleppen aus einem
+  frei setzbaren Sonnenpunkt, gespeist aus den hellsten Bildpartien.
+- [ ] 6. **Orton-Glanz**: weichgezeichnete, aufgehellte Kopie im
+  Negativ-Multiplikation-Modus — der Traumglanz-Klassiker.
+- [ ] 7. **Filmlabor-Prozesse**: Bleach Bypass (Silber nicht
+  ausgebleicht: hoher Kontrast, entsättigt) und Cross-Processing
+  (Kanalkurven gegeneinander verschoben).
+- [ ] 8. **Verlaufsabbildung (Gradient Map / Duotone)**: bildet die
+  Helligkeit auf einen Drei-Farb-Verlauf ab (Tiefen/Mitten/Lichter).
+- [ ] 9. **Farbisolierung (Color Pop)**: ein wählbarer Farbtonbereich
+  bleibt farbig, der Rest wird stufenlos entsättigt.
+- [ ] 10. **Lichtlecks (Analog-Lichtstimmung)**: gerichtete, farbige
+  Lichteinfälle am Bildrand nach dem Vorbild undichter Filmkameras.
+- [ ] 11. **Neues `.cube`-Template "Retro Fuji Thailand"**: als echte
+  `.cube`-Datei im Projekt UND als eingebauter Filter (elfter
+  `BuiltinLut`), damit er sofort in der Filter-Bibliothek steht.
+  Charakter: warme, leicht ausgewaschene Schatten mit Grünstich,
+  gedämpfte Lichter mit Gelb-Orange-Kippung, angehobener Schwarzpunkt
+  (Retro-Negativ), kräftige, aber nicht neonartige Türkistöne im
+  Wasser/Himmel.
+- [ ] 12. **UI im Liquid-Glass-Stil**: eigenes Kreativ-Panel mit
+  Glasflächen, Hover-Zuständen, kurzen Beschriftungen ohne
+  Erklärabsätze, klare Gruppierung; zwei Ein-Klick-KI-Knöpfe
+  ("Tiefenkarte berechnen", "Motiv freistellen").
+- [ ] 13. Verifikation: Rust-Unit-Tests je Funktion, neuer e2e-Test,
+  `cargo fmt`/`clippy`/`test`, `tsc -b`, `vitest run`, volle
+  Playwright-Suite mit real geprüftem Exit-Code, dann Push.

@@ -38,10 +38,11 @@ pub enum BuiltinLut {
     GoldenHour,
     Noir,
     Pastel,
+    RetroFujiThailand,
 }
 
 impl BuiltinLut {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Warm,
         Self::Cool,
         Self::HighContrastBw,
@@ -52,6 +53,7 @@ impl BuiltinLut {
         Self::GoldenHour,
         Self::Noir,
         Self::Pastel,
+        Self::RetroFujiThailand,
     ];
 
     pub fn id(self) -> &'static str {
@@ -66,6 +68,7 @@ impl BuiltinLut {
             Self::GoldenHour => "golden_hour",
             Self::Noir => "noir",
             Self::Pastel => "pastel",
+            Self::RetroFujiThailand => "retro_fuji_thailand",
         }
     }
 
@@ -81,6 +84,7 @@ impl BuiltinLut {
             Self::GoldenHour => "Goldene Stunde",
             Self::Noir => "Film Noir",
             Self::Pastel => "Pastell",
+            Self::RetroFujiThailand => "Retro Fuji Thailand",
         }
     }
 
@@ -156,6 +160,43 @@ impl BuiltinLut {
                     b * 0.7 + l * 0.3 + 0.06,
                 ]
             }
+            // Retro-Fujifilm-Thailand-Look (Phase 27, siehe
+            // `DECISIONS.md` ADR-0057): der Charakter, den gescannte
+            // Fuji-Negative aus tropischen Reisemotiven haben — vier
+            // Merkmale, jedes als eigener Term:
+            //
+            // 1. Angehobener Schwarzpunkt mit Grünstich: ein Negativ hat
+            //    keinen echten Schwarzwert, die Schatten kippen bei Fuji
+            //    charakteristisch ins Grüne statt ins Blaue.
+            // 2. Gedämpfte, nach Gelb-Orange gekippte Lichter — die
+            //    typische "Sonne durch Dunst"-Anmutung, kein kühles
+            //    Digital-Weiß.
+            // 3. Kräftige, aber nicht neonartige Türkistöne: Blau wird
+            //    nur dort angehoben, wo Blau ohnehin dominiert (Wasser,
+            //    Himmel), nicht pauschal im ganzen Bild.
+            // 4. Insgesamt leicht reduzierter Kontrast in den Mitten
+            //    (Negativfilm-Kennlinie statt harter S-Kurve).
+            Self::RetroFujiThailand => {
+                let l = luminance(r, g, b);
+                let shadow = (1.0 - l).powf(1.6);
+                let highlight = l.powf(1.4);
+                // Wie stark dominiert Blau diesen Bildpunkt? Nur dann
+                // greift die Türkis-Anhebung (Merkmal 3).
+                let blue_dominance = (b - 0.5 * (r + g)).max(0.0);
+                // Merkmal 4: Mitten leicht flacher (Faktor < 1 um 0.5).
+                let soften = |v: f32| 0.5 + (v - 0.5) * 0.92;
+                [
+                    // Rot: in den Lichtern warm, in den Schatten
+                    // zurückgenommen (Grünstich unten, Merkmal 1).
+                    soften(r) + 0.055 * highlight - 0.028 * shadow,
+                    // Grün: der Träger des Schattenstichs plus ein
+                    // kleiner Anteil an der Türkis-Anhebung.
+                    soften(g) + 0.042 * shadow + 0.030 * highlight + 0.045 * blue_dominance,
+                    // Blau: Schwarzpunkt an, Lichter gedämpft (Gelb-
+                    // Kippung, Merkmal 2), Türkis gezielt verstärkt.
+                    soften(b) + 0.050 * shadow - 0.075 * highlight + 0.085 * blue_dominance,
+                ]
+            }
         }
     }
 }
@@ -202,6 +243,30 @@ mod tests {
             assert_eq!(lut.size, 9);
             assert_eq!(lut.table.len(), 9 * 9 * 9 * 3);
             assert!(lut.table.iter().all(|v| (0.0..=1.0).contains(v)));
+        }
+    }
+
+    /// Die mitgelieferte `.cube`-Datei und der eingebaute Filter
+    /// gleichen Namens muessen dieselbe Farbformel tragen — sonst haette
+    /// der Nutzer zwei Filter mit identischem Namen und
+    /// unterschiedlicher Wirkung. Prueft das real gegeneinander, statt
+    /// es nur im Kommentar zu behaupten.
+    #[test]
+    fn builtin_lut_matches_shipped_cube_file() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/luts/retro-fuji-thailand.cube"
+        );
+        let bytes = std::fs::read(path).expect("mitgelieferte .cube-Datei fehlt");
+        let parsed = crate::lut_cube::parse_cube_bytes(&bytes).expect(".cube-Datei ist ungueltig");
+        let builtin = generate(BuiltinLut::RetroFujiThailand, parsed.size);
+        assert_eq!(parsed.size, builtin.size);
+        assert_eq!(parsed.table.len(), builtin.table.len());
+        for (i, (file, code)) in parsed.table.iter().zip(builtin.table.iter()).enumerate() {
+            assert!(
+                (file - code).abs() < 1e-5,
+                "Rasterpunkt {i} weicht ab: Datei {file}, eingebaut {code}"
+            );
         }
     }
 

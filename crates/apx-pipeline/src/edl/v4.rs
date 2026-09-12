@@ -93,6 +93,13 @@ pub struct StageEnabled {
     /// wie `sky_replace` oben.
     #[serde(default = "default_true")]
     pub liquify: bool,
+    /// Kreativ-Werkzeuge (Phase 27) — laeuft nach `lut_filter`, vor
+    /// `liquify`, im fertig entwickelten sRGB-RGBA8-Bild (siehe
+    /// `stages::creative`s Moduldoku). Dieselbe `default_true`-
+    /// Begruendung wie `liquify` oben: ein gespeichertes EDL ohne
+    /// dieses Feld soll die Stufe aktiv lesen, nicht deaktiviert.
+    #[serde(default = "default_true")]
+    pub creative: bool,
     pub geometry: bool,
 }
 
@@ -123,6 +130,7 @@ impl StageEnabled {
         sky_replace: true,
         lut_filter: true,
         liquify: true,
+        creative: true,
         geometry: true,
     };
 }
@@ -492,6 +500,395 @@ pub struct LiquifyStroke {
 
 // ---- Der vollständige EDL v4 -----------------------------------------------
 
+// ---- Kreativ-Werkzeuge (Phase 27) -----------------------------------------
+
+/// Einmalig vorab berechnete Motiv-Alphamaske (`255` = Motiv, `0` =
+/// Hintergrund) — dasselbe „einmal berechnen, bei jedem Rendern nur noch
+/// skalieren"-Muster wie [`DepthMapPatch`]. EIN Byte je Pixel.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SubjectMaskPatch {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    pub alpha: Vec<u8>,
+}
+
+/// Farbabgleich zu einem Referenzfoto (Phase 27 Punkt 1): überträgt
+/// Mittelwert und Streuung der Farbverteilung des Referenzfotos auf das
+/// aktuelle Bild (Reinhard-Statistiktransfer, hier im Lab-ähnlichen
+/// Gegenfarbenraum). Die sechs Zielwerte werden einmalig aus dem
+/// Referenzfoto berechnet und hier abgelegt — beim Rendern ist kein
+/// zweites Bild nötig. `amount` blendet zwischen Original (`0.0`) und
+/// vollem Abgleich (`1.0`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ColorMatchAdjustment {
+    pub amount: f32,
+    pub target_l_mean: f32,
+    pub target_l_std: f32,
+    pub target_a_mean: f32,
+    pub target_a_std: f32,
+    pub target_b_mean: f32,
+    pub target_b_std: f32,
+    /// `false`, solange kein Referenzfoto gewählt wurde — dann No-Op,
+    /// unabhängig von `amount` (die Zielwerte wären sonst Nullen und
+    /// würden das Bild grau waschen).
+    pub has_target: bool,
+}
+
+impl ColorMatchAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        target_l_mean: 0.0,
+        target_l_std: 0.0,
+        target_a_mean: 0.0,
+        target_a_std: 0.0,
+        target_b_mean: 0.0,
+        target_b_std: 0.0,
+        has_target: false,
+    };
+}
+
+impl Default for ColorMatchAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Atmosphärischer Tiefennebel (Phase 27 Punkt 2): legt
+/// entfernungsabhängigen Dunst über das Bild — nahe Bildteile bleiben
+/// klar, ferne verschwinden im Nebel. Nutzt dieselbe MiDaS-Tiefenkarte
+/// wie [`VirtualApertureAdjustment`] (`255` = am nächsten). `start`/`end`
+/// (`0.0..=1.0`, jeweils als Entfernung, also `1.0 - depth`) legen fest,
+/// ab wo der Nebel einsetzt und wo er voll deckt. Ohne `depth_map`
+/// No-Op.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DepthHazeAdjustment {
+    pub amount: f32,
+    pub start: f32,
+    pub end: f32,
+    /// Nebelfarbe als sRGB `0..=255`.
+    pub color_r: u8,
+    pub color_g: u8,
+    pub color_b: u8,
+    #[serde(default)]
+    pub depth_map: Option<DepthMapPatch>,
+}
+
+impl DepthHazeAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        start: 0.35,
+        end: 1.0,
+        color_r: 214,
+        color_g: 226,
+        color_b: 239,
+        depth_map: None,
+    };
+}
+
+impl Default for DepthHazeAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// KI-Motiv-Freistellung mit getrennter Hintergrundbehandlung (Phase 27
+/// Punkt 3): der Hintergrund lässt sich unabhängig vom Motiv
+/// weichzeichnen (`blur`), abdunkeln (`darken`) und entsättigen
+/// (`desaturate`). Ohne `mask` No-Op.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SubjectFocusAdjustment {
+    pub blur: f32,
+    pub darken: f32,
+    pub desaturate: f32,
+    #[serde(default)]
+    pub mask: Option<SubjectMaskPatch>,
+}
+
+impl SubjectFocusAdjustment {
+    pub const NEUTRAL: Self = Self {
+        blur: 0.0,
+        darken: 0.0,
+        desaturate: 0.0,
+        mask: None,
+    };
+}
+
+impl Default for SubjectFocusAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Tilt-Shift / Miniatur-Effekt (Phase 27 Punkt 4): ein scharfes Band
+/// quer über das Bild, darüber und darunter zunehmende Unschärfe.
+/// `center` ist die normierte Bandmitte (`0.0` oben, `1.0` unten),
+/// `width` die normierte Bandhöhe, `angle_deg` die Neigung des Bandes,
+/// `saturation` hebt zusätzlich die Sättigung an (der typische
+/// Spielzeug-Look).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TiltShiftAdjustment {
+    pub amount: f32,
+    pub center: f32,
+    pub width: f32,
+    pub angle_deg: f32,
+    pub saturation: f32,
+}
+
+impl TiltShiftAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        center: 0.5,
+        width: 0.3,
+        angle_deg: 0.0,
+        saturation: 0.0,
+    };
+}
+
+impl Default for TiltShiftAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Sonnenstrahlen / God Rays (Phase 27 Punkt 5): radiale Lichtschleppen
+/// aus einem frei setzbaren Sonnenpunkt (`sun_x`/`sun_y`, normiert),
+/// gespeist aus den Bildpartien oberhalb von `threshold`. `decay` legt
+/// fest, wie schnell die Strahlen nach außen abklingen.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GodRaysAdjustment {
+    pub amount: f32,
+    pub sun_x: f32,
+    pub sun_y: f32,
+    pub threshold: f32,
+    pub decay: f32,
+    pub color_r: u8,
+    pub color_g: u8,
+    pub color_b: u8,
+}
+
+impl GodRaysAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        sun_x: 0.5,
+        sun_y: 0.25,
+        threshold: 0.72,
+        decay: 0.92,
+        color_r: 255,
+        color_g: 236,
+        color_b: 196,
+    };
+}
+
+impl Default for GodRaysAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Orton-Glanz (Phase 27 Punkt 6): eine weichgezeichnete, aufgehellte
+/// Kopie wird im Negativ-Multiplikation-Modus (Screen) über das Bild
+/// gelegt — der Traumglanz-Klassiker aus der Landschaftsfotografie.
+/// `radius` ist der Weichzeichnungsradius in Bildprozent, `threshold`
+/// begrenzt den Glanz auf hellere Partien.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct OrtonAdjustment {
+    pub amount: f32,
+    pub radius: f32,
+    pub threshold: f32,
+}
+
+impl OrtonAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        radius: 2.5,
+        threshold: 0.35,
+    };
+}
+
+impl Default for OrtonAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Filmlabor-Prozess (Phase 27 Punkt 7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FilmLabProcess {
+    /// Bleach Bypass: das Silber bleibt im Negativ — hoher Kontrast,
+    /// stark entsättigt, harte Lichter.
+    BleachBypass,
+    /// Cross-Processing: Entwicklung im falschen Chemieprozess —
+    /// gegeneinander verschobene Kanalkurven, grünliche Schatten,
+    /// gelbe Lichter.
+    CrossProcess,
+}
+
+/// Filmlabor-Prozesse (Phase 27 Punkt 7). `amount` blendet zwischen
+/// Original und vollem Prozess.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct FilmLabAdjustment {
+    pub amount: f32,
+    pub process: FilmLabProcess,
+}
+
+impl FilmLabAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        process: FilmLabProcess::BleachBypass,
+    };
+}
+
+impl Default for FilmLabAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Verlaufsabbildung / Gradient Map (Phase 27 Punkt 8): bildet die
+/// Helligkeit jedes Pixels auf einen Drei-Farb-Verlauf ab (Tiefen →
+/// Mitten → Lichter). Der Klassiker für Duotone-/Tritone-Looks.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GradientMapAdjustment {
+    pub amount: f32,
+    pub shadow_r: u8,
+    pub shadow_g: u8,
+    pub shadow_b: u8,
+    pub mid_r: u8,
+    pub mid_g: u8,
+    pub mid_b: u8,
+    pub highlight_r: u8,
+    pub highlight_g: u8,
+    pub highlight_b: u8,
+}
+
+impl GradientMapAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        shadow_r: 22,
+        shadow_g: 28,
+        shadow_b: 56,
+        mid_r: 168,
+        mid_g: 94,
+        mid_b: 92,
+        highlight_r: 250,
+        highlight_g: 226,
+        highlight_b: 176,
+    };
+}
+
+impl Default for GradientMapAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Farbisolierung / Color Pop (Phase 27 Punkt 9): ein Farbtonbereich um
+/// `hue_center` (Grad, `0..360`) mit der Halbbreite `hue_width` bleibt
+/// farbig, alles außerhalb wird um `amount` entsättigt.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ColorPopAdjustment {
+    pub amount: f32,
+    pub hue_center: f32,
+    pub hue_width: f32,
+    /// Zusätzliche Sättigungsanhebung des erhaltenen Bereichs.
+    pub boost: f32,
+}
+
+impl ColorPopAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        hue_center: 10.0,
+        hue_width: 30.0,
+        boost: 0.0,
+    };
+}
+
+impl Default for ColorPopAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Lichtlecks (Phase 27 Punkt 10): gerichtete, farbige Lichteinfälle am
+/// Bildrand nach dem Vorbild undichter Filmkameras. `angle_deg` legt die
+/// Einfallsrichtung fest, `softness` die Kantenweichheit.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct LightLeakAdjustment {
+    pub amount: f32,
+    pub angle_deg: f32,
+    pub softness: f32,
+    pub color_r: u8,
+    pub color_g: u8,
+    pub color_b: u8,
+}
+
+impl LightLeakAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        angle_deg: 215.0,
+        softness: 0.55,
+        color_r: 255,
+        color_g: 138,
+        color_b: 76,
+    };
+}
+
+impl Default for LightLeakAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Sammelfeld aller zehn Kreativ-Werkzeuge aus Phase 27 (siehe
+/// `DECISIONS.md` ADR-0057). Bewusst EIN EDL-Feld und EINE Pipeline-Stufe
+/// (`stages::creative`) statt zehn einzelner: dieselbe Mathematik, aber
+/// ein Zehntel Gerüst und ein einziger Pipeline-Zweig in `develop.rs`.
+/// Die Anwendungsreihenfolge innerhalb der Stufe ist fest und
+/// dokumentiert (Korrektur → Atmosphäre → Optik → Licht → Gradation →
+/// Auflage), siehe `stages::creative`s Moduldoku.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct CreativeAdjustments {
+    #[serde(default)]
+    pub color_match: ColorMatchAdjustment,
+    #[serde(default)]
+    pub depth_haze: DepthHazeAdjustment,
+    #[serde(default)]
+    pub subject_focus: SubjectFocusAdjustment,
+    #[serde(default)]
+    pub tilt_shift: TiltShiftAdjustment,
+    #[serde(default)]
+    pub god_rays: GodRaysAdjustment,
+    #[serde(default)]
+    pub orton: OrtonAdjustment,
+    #[serde(default)]
+    pub film_lab: FilmLabAdjustment,
+    #[serde(default)]
+    pub gradient_map: GradientMapAdjustment,
+    #[serde(default)]
+    pub color_pop: ColorPopAdjustment,
+    #[serde(default)]
+    pub light_leak: LightLeakAdjustment,
+}
+
+impl CreativeAdjustments {
+    /// `true`, wenn keine der zehn Funktionen etwas zu tun hat — die
+    /// Pipeline überspringt die Stufe dann vollständig (Regelfall).
+    pub fn is_neutral(&self) -> bool {
+        self.color_match.amount <= 0.0
+            && self.depth_haze.amount <= 0.0
+            && self.subject_focus.blur <= 0.0
+            && self.subject_focus.darken <= 0.0
+            && self.subject_focus.desaturate <= 0.0
+            && self.tilt_shift.amount <= 0.0
+            && self.god_rays.amount <= 0.0
+            && self.orton.amount <= 0.0
+            && self.film_lab.amount <= 0.0
+            && self.gradient_map.amount <= 0.0
+            && self.color_pop.amount <= 0.0
+            && self.light_leak.amount <= 0.0
+    }
+}
+
 /// Die konkrete EDL-Struktur für Schema-Version 4 — siehe
 /// [`crate::edl::EDL_SCHEMA_VERSION`] und [`crate::edl::migrate`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -553,6 +950,12 @@ pub struct EdlV4 {
     /// Strichliste (unverändertes bisheriges Verhalten).
     #[serde(default)]
     pub liquify_strokes: Vec<LiquifyStroke>,
+    /// Die zehn Kreativ-Werkzeuge aus Phase 27 — additiv,
+    /// `#[serde(default)]` liest ein gespeichertes `EdlV4` ohne dieses
+    /// Feld als `CreativeAdjustments::default()` (alle zehn neutral,
+    /// unverändertes bisheriges Verhalten).
+    #[serde(default)]
+    pub creative: CreativeAdjustments,
 }
 
 impl EdlV4 {
@@ -583,6 +986,7 @@ impl EdlV4 {
             sky_replace: None,
             lut_filter: LutFilterAdjustment::NEUTRAL,
             liquify_strokes: Vec::new(),
+            creative: CreativeAdjustments::default(),
         }
     }
 
@@ -616,6 +1020,7 @@ impl EdlV4 {
             sky_replace: None,
             lut_filter: LutFilterAdjustment::NEUTRAL,
             liquify_strokes: Vec::new(),
+            creative: CreativeAdjustments::default(),
         }
     }
 }

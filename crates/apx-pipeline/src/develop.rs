@@ -19,9 +19,9 @@ use crate::edl::{
 use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
-    basic_fused, bw_mixer, calibration, color_grading, composite, curves, details, effects,
-    geometry, hsl_color_mixer, lens_corrections, liquify, local_contrast, lut_filter, masks,
-    repair, skin_smoothing, sky_replace, style_transfer, virtual_aperture, white_balance,
+    basic_fused, bw_mixer, calibration, color_grading, composite, creative, curves, details,
+    effects, geometry, hsl_color_mixer, lens_corrections, liquify, local_contrast, lut_filter,
+    masks, repair, skin_smoothing, sky_replace, style_transfer, virtual_aperture, white_balance,
 };
 
 /// Das Ergebnis von [`render_rgba8`] — `width`/`height` beschreiben
@@ -427,10 +427,26 @@ pub fn render_rgba8(
     // Verflüssigen (Phase 15 Schritt 3) — läuft nach `sky_replace`, vor
     // `geometry`, im selben fertig entwickelten sRGB-RGBA8-Bild (siehe
     // `stages::liquify`s Moduldoku).
-    let liquified = if !stages.liquify || edl.liquify_strokes.is_empty() {
+    // Kreativ-Werkzeuge (Phase 27, zehn Funktionen in einer Stufe) —
+    // laufen nach `lut_filter`, vor `liquify`: der LUT-Look ist die
+    // Grundgradation, die Kreativ-Stufe legt sich darüber (siehe
+    // `stages::creative`s Moduldoku für die Reihenfolge innerhalb der
+    // Stufe).
+    let creatived = if !stages.creative || edl.creative.is_neutral() {
         filtered
     } else {
-        liquify::apply(&filtered, linear.width, linear.height, &edl.liquify_strokes)
+        creative::apply(&filtered, linear.width, linear.height, &edl.creative)
+    };
+
+    let liquified = if !stages.liquify || edl.liquify_strokes.is_empty() {
+        creatived
+    } else {
+        liquify::apply(
+            &creatived,
+            linear.width,
+            linear.height,
+            &edl.liquify_strokes,
+        )
     };
 
     let (width, height, pixels) = if !stages.geometry || edl.geometry == GeometryAdjustment::NEUTRAL
@@ -847,6 +863,7 @@ mod tests {
             skin_smoothing: crate::edl::v4::SkinSmoothingAdjustment::NEUTRAL,
             lut_filter: crate::edl::v4::LutFilterAdjustment::NEUTRAL,
             liquify_strokes: Vec::new(),
+            creative: crate::edl::v4::CreativeAdjustments::default(),
         };
 
         if let Some(ctx) = &ctx {

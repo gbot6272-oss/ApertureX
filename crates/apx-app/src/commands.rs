@@ -9384,3 +9384,105 @@ mod tests {
         assert!(err.contains("heif"));
     }
 }
+
+// ---- Kreativ-Werkzeuge (Phase 27, siehe `DECISIONS.md` ADR-0057) ----------
+
+/// Ergebnis von [`segment_photo_subject`] — dieselbe
+/// Übertragungskonvention wie [`AiMaskAlphaDto`] (Base64, ein Byte je
+/// Pixel), hier aber für die Kreativ-Stufe statt für eine Maske.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubjectMaskDto {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    /// Base64-kodierte `0..=255`-Alphamaske (`255` = Motiv).
+    pub alpha_base64: String,
+}
+
+/// Trennt einmalig Motiv und Hintergrund für `photo_id` (Phase 27
+/// Punkt 3) — Grundlage der getrennten Hintergrundbehandlung in
+/// `stages::creative`. Nutzt dieselbe klassische Center-Surround-
+/// Saliency wie die bestehende "Motiv"-KI-Maske
+/// (`apx_ai::segmentation::subject_alpha`), **kein Modell-Download
+/// nötig** — anders als Tiefenkarte/Stiltransfer läuft diese Funktion
+/// deshalb sofort.
+///
+/// Dasselbe „einmal berechnen, dann im EDL ablegen"-Muster wie
+/// [`estimate_photo_depth`]: Das Frontend ruft den Befehl auf
+/// ausdrücklichen Nutzerwunsch auf, nicht bei jedem Regler-Tick.
+#[tauri::command]
+pub fn segment_photo_subject(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<SubjectMaskDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let alpha = apx_ai::segmentation::subject_alpha(&linear.pixels, linear.width, linear.height)
+        .map_err(|err| err.to_string())?;
+
+    Ok(SubjectMaskDto {
+        bitmap_width: linear.width,
+        bitmap_height: linear.height,
+        alpha_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &alpha),
+    })
+}
+
+/// Die sechs Kennzahlen, die ein Referenzfoto für den Farbabgleich
+/// liefert (Phase 27 Punkt 1) — Mittelwert und Streuung der drei
+/// Gegenfarben-Achsen, siehe `stages::creative::opponent_stats`.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ColorStatsDto {
+    pub l_mean: f32,
+    pub l_std: f32,
+    pub a_mean: f32,
+    pub a_std: f32,
+    pub b_mean: f32,
+    pub b_std: f32,
+}
+
+/// Berechnet die Farbstatistik eines Referenzfotos für den Farbabgleich
+/// (Phase 27 Punkt 1). Bewusst nur die sechs Zahlen statt des ganzen
+/// Referenzbilds: das EDL bleibt klein, und beim Rendern ist kein
+/// zweites Foto nötig.
+///
+/// **Ehrliche Grenze:** die Statistik wird auf dem linearen
+/// Dekodierergebnis des Referenzfotos berechnet, ohne dessen eigene
+/// Entwicklungseinstellungen anzuwenden — der Abgleich übernimmt also
+/// die Farbigkeit der *Aufnahme*, nicht die einer bereits darauf
+/// angewandten Bearbeitung. Für den Zweck (eine Serie einheitlich
+/// machen) ist das die brauchbarere Bezugsgröße; für „übernimm genau
+/// diesen fertigen Look" gibt es Presets und den Stiltransfer.
+#[tauri::command]
+pub fn compute_reference_color_stats(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<ColorStatsDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let stats = apx_pipeline::stages::creative::opponent_stats(&linear.pixels);
+    Ok(ColorStatsDto {
+        l_mean: stats[0],
+        l_std: stats[1],
+        a_mean: stats[2],
+        a_std: stats[3],
+        b_mean: stats[4],
+        b_std: stats[5],
+    })
+}

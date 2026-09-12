@@ -441,6 +441,8 @@ fn main() {
             commands::analyze_style_consistency,
             commands::extract_color_palette,
             commands::generate_ai_mask,
+            commands::segment_photo_subject,
+            commands::compute_reference_color_stats,
             commands::suggest_repair_source,
             commands::detect_sensor_spots,
             commands::get_ai_settings,

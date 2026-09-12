@@ -1193,6 +1193,8 @@ siehe `DECISIONS.md` ADR-0048.
 - [x] 5. Hover/Fokus-Übergänge ausgeweitet (`index.css`: zusätzlich `role="button"`/`"checkbox"`/`"radio"`/`"switch"`/`"option"`, `[tabindex="0"]`, `label`, `summary`, Regler/Checkbox/Radio-Inputs, plus dezente Skalierungs-Rückmeldung für `role="button"`-Elemente) + `DevelopSlider.tsx` bekommt erstmals einen eigenen Sound (`uisfx`s `"release"`-Cue beim Loslassen, nicht pro Zieh-Tick); Standard-Lautstärke `sound_volume_percent` von 70 auf 85 angehoben
 - [x] 6. Dokumentation (`DECISIONS.md` ADR-0048), volle Verifikation
 
+- [x] Nachtrag: Nutzer-Rückmeldung, dass die Animations-/Sound-Kritik damit noch nicht ausreichend beantwortet war — realer Kernbefund: `gsap` wurde trotz Beschaffung in Phase 19 bis dahin nur in zwei Dateien (`StartupSplash.tsx`/`ShutdownOverlay.tsx`) tatsächlich verwendet, die gemeinsame `ui/Dialog.tsx`/`ui/Sheet.tsx`-Hülle (25+ Aufrufer) lief weiterhin über reine CSS-Transitions; echte `<button>`-Elemente hatten außer Farbwechsel keine physische Rückmeldung. Behoben: `Dialog`/`Sheet` auf echte GSAP-Tweens umgestellt (Herausskalieren mit Überschwingen bzw. Einschieben), app-weites `useButtonPressSounds()` (ein delegierter `pointerdown`-Listener spielt `uisfx`s `"press"`-Cue bei JEDEM Knopf) + Eindrücken-Skalierung jetzt auch für echte `<button>`-Elemente — siehe DECISIONS.md ADR-0048-Nachtrag; `tsc -b`/`vitest run` (251)/volle Playwright-Suite (142/142) grün
+
 ## Aktuelle Phase: Phase 19 — Animationen + UI-Sounds
 
 Nutzerwunsch: Animationen (Start/Beenden, Klick, Scroll, Bearbeitung-

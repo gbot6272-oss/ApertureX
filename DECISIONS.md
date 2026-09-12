@@ -5188,3 +5188,61 @@ Verifiziert: `cargo test -p apx-raw` (43/43, inkl. drei neuer
 `cargo test -p apx-pipeline -p apx-export` (251/251 — bestätigt, dass
 kein Downstream-Konsument von `decode_linear` durch die Linearisierung
 bricht), `tsc -b` sauber, `vitest run` (251/251).
+
+## ADR-0048-Nachtrag: Echte GSAP-Bewegung + app-weites Knopf-Feedback
+
+Nutzerwunsch (verbatim, sinngemäß): "Bugs war eine Sache aber was ist
+mit der Scheiß zu den fehlenden Animationen und Sounds und allem
+anderen was bemängelt wurde" — die erste Phase-20-Runde (Startup-
+Splash, Regler-Sound, Hover-CSS-Ausweitung) wurde zu Recht als nicht
+ausreichend empfunden.
+
+**Kernbefund:** `gsap` steht seit Phase 19 als Abhängigkeit bereit,
+wurde bis zu diesem Nachtrag aber real nur in **zwei** Dateien
+tatsächlich verwendet (`StartupSplash.tsx`, `ShutdownOverlay.tsx`).
+Die gemeinsame `ui/Dialog.tsx`/`ui/Sheet.tsx`-Hülle, die sich über 25
+Dialoge, `CommandPalette` und `KeybindingsCheatsheet` teilen, lief
+weiterhin über eine reine 8/32-px-CSS-Transition aus Phase 18 — direkt
+verantwortlich für den Eindruck "kein gar nix", trotz der als "echte
+Animationsbibliothek" beschafften `gsap`-Abhängigkeit. Zusätzlich
+hatten echte `<button>`-Elemente (die weit überwiegende Mehrheit aller
+Klickflächen der App) außer einem Farbwechsel **keine** physische
+Rückmeldung — nur `role="button"`-Elemente (Rasterkacheln u. Ä.)
+hatten seit dem ersten Phase-20-Durchgang eine Skalierungs-Animation.
+
+**Entscheidungen:**
+
+1. **`ui/Dialog.tsx`/`ui/Sheet.tsx` auf echte GSAP-Tweens umgestellt**
+   statt der bisherigen CSS-Transition — Dialog skaliert mit
+   spürbarem Überschwingen herein (`scale(0.94)→1`, `back.out(1.6)`),
+   Sheet schiebt sich mit demselben Überschwingen von der Kante ein.
+   Dieselbe Drei-Effekt-Struktur wie `StartupSplash.tsx` (Mount+Sound
+   / Eintritt-Tween ausgelöst von einem `entered`-Flag / Austritt-Tween
+   ausgelöst von `open === false`, `onComplete` entfernt das Panel erst
+   danach aus dem DOM) — vermeidet die Falle, dass ein einzelner
+   `useEffect` mit `open`/`reducedMotion` als einzige Abhängigkeiten
+   nicht erneut liefe, wenn nur `mounted`/`entered` intern kippen.
+   Betrifft strukturell jeden der 25+ Aufrufer, ohne einen einzigen
+   davon anzufassen.
+2. **App-weites Tastenanschlag-Feedback für JEDEN `<button>`**: neues
+   `useButtonPressSounds()` in `lib/sound.ts` — ein einzelner
+   delegierter `pointerdown`-Listener auf `document` (Capture-Phase,
+   dasselbe Muster wie `useAccordionSounds`) spielt `uisfx`s
+   dedizierten `"press"`-Cue (Kategorie "input", genau für diesen
+   Zweck) bei jedem nicht-deaktivierten `button`/`role="button"`
+   app-weit — läuft bewusst zusätzlich zu einem eventuellen
+   spezifischeren Sound der Komponente selbst (der feuert beim
+   `click`, also etwas später als `pointerdown`), dasselbe
+   Schichtungsprinzip wie ein physisches Anschlaggeräusch plus ein
+   Ergebnis-Ton danach. `index.css`: Eindrücken-Skalierung
+   (`scale(0.985)` bei `:active`) jetzt auch für echte `<button>`-
+   Elemente, nicht mehr nur `role="button"` — bewusst nur `:active`
+   (kein `:hover`), da viele Knöpfe dicht in Werkzeugleisten stehen und
+   ein Hover-Skalieren sie gegeneinander verschieben würde.
+
+Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
+Playwright-Suite (142/142 — inkl. Fund/Behebung eines
+Umgebungsproblems in dieser Sitzung: die erste Verifikationsrunde
+schlug mit 142/142 Fehlschlägen fehl, weil `PLAYWRIGHT_CHROMIUM_PATH`
+nicht gesetzt war — kein Code-Regression, nach Setzen des Pfads lief
+die Suite grün).

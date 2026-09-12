@@ -235,7 +235,15 @@ input[type="radio"],
 [role="button"]:hover {
   transform: scale(1.015);
 }
-[role="button"]:active {
+/* Zusätzlich (Phase 20, ADR-0048-Nachtrag): ein Eindrücken-Effekt beim
+   tatsächlichen Gedrückthalten für ALLE `<button>`-Elemente, nicht nur
+   `role="button"` — echte Knöpfe hatten bis dahin außer dem Farbwechsel
+   überhaupt keine physische Rückmeldung. Nur `:active` (kein `:hover`)
+   für echte Knöpfe: viele stehen dicht gedrängt in Werkzeugleisten, ein
+   Hover-Skalieren würde sie beim bloßen Drüberfahren gegeneinander
+   verschieben. */
+[role="button"]:active,
+button:not(:disabled):active {
   transform: scale(0.985);
 }
 

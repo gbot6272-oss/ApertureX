@@ -53,6 +53,15 @@
      pflegen lässt. */
   --color-bg-overlay: rgb(10 10 10 / 55%);
 
+  /* Glüh-Farbwasch hinter der App-Chrome (siehe `body`s Moduldoku
+     unten für den Grund) — drei gedämpfte, unterschiedliche Farbtöne
+     (Akzent/warm/kühl) statt eines einzelnen Farbtons, damit
+     `.apx-glass`s `saturate(165%)` etwas Farbvielfalt zum Verstärken
+     hat, nicht nur einen einzigen flachen Blauton überall. */
+  --glow-accent: rgb(91 155 213 / 28%);
+  --glow-secondary: rgb(224 122 95 / 16%);
+  --glow-tertiary: rgb(127 176 105 / 16%);
+
   --font-sans:
     "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
@@ -152,6 +161,18 @@
   );
   --glass-blur: 26px;
   --glass-saturate: 165%;
+  /* Phase 25 Nachtrag (siehe DECISIONS.md, aktuelles ADR + PROMPTS.md
+     Prompt 1): echte Glas-Verzerrung statt reinem Weichzeichner —
+     `GlassDistortionFilter.tsx`s einmalig im DOM gehaltene
+     `feTurbulence`+`feDisplacementMap`-SVG-Filterdefinition, per
+     `filter: var(--glass-distortion)` auf der Backdrop-Ebene
+     referenziert. `none` im Kontrastmodus (siehe unten) — Verzerrung
+     widerspricht maximaler Lesbarkeit. Die innere Kanten-Lichtkante
+     (`--glass-edge-shadow`, ebenfalls aus Prompt 1: "Licht fängt sich
+     an der Kante") sitzt als `inset`-`box-shadow` auf derselben
+     Tönungs-Ebene wie `--glass-sheen`. */
+  --glass-distortion: url(#apx-glass-distortion);
+  --glass-edge-shadow: inset 1px 1px 1px 0 rgb(255 255 255 / 14%), inset -1px -1px 1px 0 rgb(255 255 255 / 8%);
 }
 
 :root[data-theme="light"] {
@@ -165,6 +186,7 @@
     rgb(255 255 255 / 0%) 55%,
     rgb(35 32 25 / 4%) 100%
   );
+  --glass-edge-shadow: inset 1px 1px 1px 0 rgb(255 255 255 / 65%), inset -1px -1px 1px 0 rgb(35 32 25 / 6%);
 }
 
 /* Kontrastmodus (siehe `--color-bg-overlay`s identische Begründung
@@ -172,38 +194,135 @@
    und ein weicher Schleier widersprechen dem. `--glass-blur: 0px`
    deaktiviert den `backdrop-filter` faktisch (eine 0-px-Weichzeichnung
    verändert den Hintergrund nicht mehr sichtbar), `--glass-bg`/
-   `-bg-strong` werden voll deckend. */
+   `-bg-strong` werden voll deckend. `--glass-distortion: none`
+   schaltet zusätzlich die Verzerrung ab (Textschärfe hat hier
+   Vorrang). */
 :root[data-contrast="high"] {
   --glass-bg: var(--color-bg-raised);
   --glass-bg-strong: var(--color-bg-raised);
   --glass-border: var(--color-border);
   --glass-sheen: none;
   --glass-blur: 0px;
+  --glass-distortion: none;
+  --glass-edge-shadow: none;
 }
 
 /* Die eigentliche Materialoberfläche — ersetzt `bg-bg-raised`/
    `bg-bg-panel` an den wenigen App-Chrome-Stellen aus der Moduldoku
-   oben. Der Schleier (`--glass-sheen`) liegt als zweite
-   `background-image`-Ebene über der Grundfarbe — beide Ebenen derselben
-   Box-`background`, dadurch automatisch und ohne `z-index`-/Stapel-
-   kontext-Klimmzüge hinter jeglichem Inhalt (ein eigenes
-   `::before`-Pseudo-Element für den Schleier hätte hier unnötige
-   Stapelreihenfolge-Fallstricke mit dem `position: relative` der
-   Aufrufer riskiert). */
-.apx-glass {
-  position: relative;
-  background-color: var(--glass-bg);
-  background-image: var(--glass-sheen);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-}
-
+   oben. Zwei Pseudo-Elemente statt der bisherigen einzelnen
+   `background`-Ebene (Phase 25 Nachtrag, siehe DECISIONS.md, aktuelles
+   ADR, PROMPTS.md Prompt 1 für die Herleitung): `::before` trägt
+   AUSSCHLIESSLICH `backdrop-filter`+die SVG-Verzerrung (muss auf einer
+   eigenen, inhaltsleeren Ebene sitzen — `filter` würde sonst auch den
+   echten Inhalt/Text verzerren, nicht nur das, was durchscheint),
+   `::after` trägt die Tönung/den Schleier/die Kantenlicht-Kante. Beide
+   `z-index: -1`/`-2`, `.apx-glass` selbst bekommt `z-index: 0` — nötig,
+   damit die negativen `z-index`-Werte einen EIGENEN, lokalen
+   Stapelkontext bekommen (sonst könnten sie hinter noch weiter außen
+   liegende Geschwisterelemente rutschen statt nur hinter den eigenen
+   Inhalt). `border-radius: inherit` hält beide Ebenen deckungsgleich
+   mit abgerundeten Aufrufern (Dialog/Sheet/Menü), ohne dass jede
+   Aufrufstelle den Radius doppelt pflegen müsste. */
+.apx-glass,
 .apx-glass-strong {
   position: relative;
+  /* `isolation: isolate` statt eines hart gesetzten `z-index: 0` —
+     mehrere Aufrufstellen (u. a. `ui/Menu.tsx`s Dropdown) setzen ihr
+     eigenes `z-40`/`z-50` über eine Tailwind-Utility-Klasse auf
+     demselben Element; ein eigener `z-index`-Wert hier würde diesen
+     (durch Tailwind v4s `@layer utilities`, das gegenüber unlayered
+     CSS wie dieser Datei in der Kaskade grundsätzlich NACHRANGIG ist,
+     also niemals gewinnt) unabhängig von der Reihenfolge im
+     Quelltext überschreiben — real als Regression aufgetreten
+     (Überlauf-Menü verschwand hinter dem Hauptinhalt) und hierüber
+     behoben. `isolation: isolate` erzeugt denselben lokalen
+     Stapelkontext für die `::before`/`::after`-Ebenen, ohne den
+     `z-index`-Wert des Elements selbst zu berühren. */
+}
+
+.apx-glass::before,
+.apx-glass-strong::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  border-radius: inherit;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  filter: var(--glass-distortion);
+}
+/* `@supports`-Block statt einer zweiten, direkt danebenstehenden
+   `backdrop-filter`-Deklaration (siehe DECISIONS.md, aktuelles ADR,
+   für den real gefundenen Bug): Vite/Lightning CSS optimiert ein
+   "webkit-präfigiert + Standard, identischer Wert"-Deklarationspaar
+   je nach `build.target` gezielt auf nur eine der beiden Formen
+   herunter — bei `vite.config.ts`s `safari13`-Ziel (nicht-Windows-
+   Build) verschwand dabei die STANDARD-`backdrop-filter`-Eigenschaft
+   komplett aus dem gebauten CSS, obwohl der Quelltext sie enthielt
+   (per `vite build`+Chromium nachgewiesen: `getComputedStyle(...)
+   .backdropFilter` ergab `"none"`, weil im ausgelieferten CSS nur noch
+   `-webkit-backdrop-filter` stand). Ein `@supports`-umschlossener
+   Block wird von Lightning CSS nicht als simples "Duplikat" erkannt
+   und bleibt daher unabhängig vom Build-Ziel erhalten. */
+@supports (backdrop-filter: blur(1px)) {
+  .apx-glass::before,
+  .apx-glass-strong::before {
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  }
+}
+
+.apx-glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background-color: var(--glass-bg);
+  background-image: var(--glass-sheen);
+  box-shadow: var(--glass-edge-shadow);
+}
+
+.apx-glass-strong::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
   background-color: var(--glass-bg-strong);
   background-image: var(--glass-sheen);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: var(--glass-edge-shadow);
+}
+
+/* "Liquid"-Knopf-Mechanik (Phase 25 Nachtrag, siehe DECISIONS.md,
+   aktuelles ADR + PROMPTS.md Prompt 2s `LiquidButton`) — für die
+   Hauptmenü-Fläche (Kopfzeile: Ansicht-Segmentgruppe, Import-Knopf):
+   eine elastische, leicht überschwingende Hover-Skalierung
+   (`cubic-bezier(0.175, 0.885, 0.32, 2.2)`, dieselbe Kurve wie im
+   Referenz-Prompt) statt der linearen/gedämpften Standardkurve, die
+   der Rest der App für die "Subtil"-Hover-Stufe nutzt (siehe
+   `[role="button"]:hover` weiter unten) — bewusst NUR für diese
+   wenigen, immer sichtbaren Haupt-Navigationsknöpfe reserviert, nicht
+   flächendeckend (sonst verliert die Geste ihre Bedeutung als
+   "das hier ist der Hauptweg durch die App"). `.apx-btn-liquid-active`
+   ergänzt die bereits bestehende `bg-accent/10 text-accent`-Tönung um
+   dieselbe Kanten-Lichtkante wie die Glasflächen (`--glass-edge-
+   shadow`) — liest sich dadurch als eigene kleine "Glaspille", nicht
+   nur als eingefärbter Hintergrund. */
+.apx-btn-liquid {
+  transition:
+    transform var(--duration-base) cubic-bezier(0.175, 0.885, 0.32, 2.2),
+    box-shadow var(--duration-base) ease,
+    background-color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease,
+    color var(--duration-fast) ease;
+}
+.apx-btn-liquid:hover {
+  transform: scale(1.06);
+}
+.apx-btn-liquid:active {
+  transform: scale(0.94);
+}
+.apx-btn-liquid-active {
+  box-shadow: var(--glass-edge-shadow);
 }
 
 * {
@@ -219,7 +338,32 @@ body,
 }
 
 body {
-  background: var(--color-bg-base);
+  /* Phase 25 Nachtrag (siehe DECISIONS.md, aktuelles ADR): "Liquid
+     Glass"-Rückgrat, das bisher fehlte. `.apx-glass`s `backdrop-filter:
+     blur()+saturate()` verzerrt/sättigt, was hinter ihm liegt — bei
+     einer rein einfarbigen Fläche (wie es `--color-bg-base` bis hier
+     allein war) gibt es dahinter buchstäblich nichts zu verzerren, ein
+     Weichzeichner über einer flachen Fläche bleibt dieselbe flache
+     Fläche. Genau das erklärt, warum Kopfzeile/Paletten trotz aktivem
+     `.apx-glass` wie schlichte, deckende Flächen statt wie Glas
+     aussahen (sichtbar geprüft per Screenshot, nicht nur vermutet) —
+     unabhängig davon, wie stark `--glass-blur`/`-saturate` gesetzt
+     sind. Feste, sehr gedämpfte Akzent-/Sekundärfarb-Glühflächen
+     (`background-attachment: fixed`, bleiben beim Scrollen ortsfest
+     hinter der Kopfzeile) geben dem Weichzeichner etwas zum Greifen —
+     dasselbe Prinzip, das macOS/visionOS nutzen (dort: Verwischen des
+     Schreibtischhintergrunds; hier, da die App keinen eigenen
+     Hintergrund hat, ein bewusst eigener, sehr leiser Farbwasch statt
+     eines echten Hintergrundbilds). Bewusst gedämpft (`--glow-*`
+     unten) statt eines auffälligen Verlaufs — die App bleibt in erster
+     Linie ein neutraler Rahmen um Fotos, kein eigenes buntes Motiv. */
+  background-color: var(--color-bg-base);
+  background-image:
+    radial-gradient(ellipse 900px 500px at 8% -10%, var(--glow-accent), transparent 60%),
+    radial-gradient(ellipse 700px 480px at 96% 4%, var(--glow-secondary), transparent 60%),
+    radial-gradient(ellipse 800px 600px at 50% 108%, var(--glow-tertiary), transparent 65%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
   color: var(--color-text-primary);
   font-family: var(--font-sans);
 }
@@ -259,6 +403,13 @@ body {
   --color-success: #4f8a4f;
   --color-bg-overlay: rgb(40 36 28 / 40%);
 
+  /* Dieselbe Glüh-Idee wie im Dunkel-Theme, nur wärmer/heller
+     kalibriert (dunkle Glühflecken auf hellem Grund statt heller auf
+     dunklem) — sonst identische Begründung, siehe `body`s Moduldoku. */
+  --glow-accent: rgb(61 118 168 / 6%);
+  --glow-secondary: rgb(192 80 58 / 4%);
+  --glow-tertiary: rgb(79 138 79 / 4%);
+
   /* Dieselbe Begründung wie die dunklen Schatten-Overrides oben, nur
      umgekehrt: die verstärkten dunkelmodus-tauglichen Schattenwerte
      wären auf hellem Grund zu hart — hier näher an Tailwinds sanfteren
@@ -292,6 +443,15 @@ body {
      maximale Lesbarkeit, ein durchscheinender Dialog-Hintergrund
      würde dem entgegenlaufen. */
   --color-bg-overlay: #000000;
+  /* Der Glüh-Farbwasch (siehe `body`s Moduldoku) dient einzig dazu,
+     `.apx-glass`s Weichzeichner etwas zum Verzerren zu geben — im
+     Kontrastmodus ist `--glass-blur` bereits auf `0px` gesetzt (der
+     Weichzeichner wirkt also gar nicht mehr), ein sichtbarer Farbfleck
+     ohne Weichzeichner wäre dann nur noch ein unmotivierter Farbstich
+     auf einer sonst bewusst schwarz/weißen Fläche. */
+  --glow-accent: transparent;
+  --glow-secondary: transparent;
+  --glow-tertiary: transparent;
 }
 
 /* Reduzierte Bewegung: sowohl die Betriebssystem-Einstellung

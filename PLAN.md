@@ -1226,6 +1226,32 @@ Bild nicht wirklich.
   Statistik-Dashboard). Verifiziert: `tsc -b`, `vite build`, `vitest
   run` (251/251), volle Playwright-Suite (142/142).
 
+- [x] Nachtrag: echtes "Liquid Glass" (siehe `DECISIONS.md` ADR-0055,
+  `PROMPTS.md` für die beiden vom Nutzer bereitgestellten Referenz-
+  Prompts) — realer Bug gefunden, nicht nur zu subtile Werte:
+  `vite.config.ts`s `build.target: "safari13"` ließ Lightning CSS die
+  STANDARD-`backdrop-filter`-Eigenschaft aus dem Produktions-Build
+  entfernen (nur `-webkit-backdrop-filter` blieb übrig) — in jedem
+  Chromium-basierten Webview (u. a. Windows/WebView2) war der
+  Weichzeichner seit Phase 21 dadurch komplett wirkungslos, per
+  `getComputedStyle` nachgewiesen. Fix: `@supports`-Guard um die
+  Standard-Deklaration (Lightning CSS behält das, anders als ein
+  direktes Duplikat, unabhängig vom Build-Ziel). Dazu echte Glas-
+  Verzerrung (`GlassDistortionFilter.tsx`, eine einmalig gemountete
+  SVG-`feTurbulence`+`feDisplacementMap`-Filterdefinition, `none` im
+  Kontrastmodus) über zwei `::before`/`::after`-Pseudo-Elemente statt
+  der bisherigen einzelnen Hintergrund-Ebene (sonst hätte `filter` auch
+  den Text mitverzerrt), `--glass-edge-shadow`-Kantenlicht, sowie eine
+  neue `.apx-btn-liquid`/`-active`-Knopf-Mechanik (elastisches
+  Überschwingen) auf `Header.tsx`s sechs Ansicht-Segmentknöpfen + dem
+  Import-Knopf. Zwei reale Regressionen unterwegs gefunden und behoben
+  bzw. als Nicht-Regression widerlegt (siehe ADR-0055 für die genaue
+  Untersuchung — u. a. ein `git stash`-Vergleichslauf gegen den
+  unveränderten Stand). Verifiziert: `tsc -b`, `vite build` (direkt am
+  gebauten CSS geprüft), `vitest run` (251/251), volle Playwright-Suite
+  (142/142), Pixel-/`getComputedStyle`-Messung statt reinem
+  Screenshot-Eyeballing.
+
 ## Aktuelle Phase: Phase 24 — Transparenz, Karten-Bugfixes, zehn neue Animationen, mehr Übersicht
 
 Nutzerwunsch: UI transparenter, Kartenbugs (fehlerhafte Anzeige, keine

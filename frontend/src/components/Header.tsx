@@ -201,7 +201,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
         data-tour="import"
         onClick={() => void handleImportClick()}
         disabled={importRunning}
-        className="shrink-0 rounded border border-accent bg-accent/10 px-3 py-1 text-sm font-medium text-accent shadow-[var(--shadow-md)] transition-all duration-[var(--duration-fast)] hover:bg-accent/20 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
+        className="apx-btn-liquid apx-btn-liquid-active shrink-0 rounded border border-accent bg-accent/10 px-3 py-1 text-sm font-medium text-accent shadow-[var(--shadow-md)] transition-[background-color,box-shadow] duration-[var(--duration-fast)] hover:bg-accent/20 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
       >
         {t("header.importFolder")}
       </button>
@@ -251,8 +251,8 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           type="button"
           onClick={toggleCenterView}
           aria-pressed={centerView === "grid"}
-          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
-            centerView === "grid" ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          className={`apx-btn-liquid rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+            centerView === "grid" ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
           {t("header.viewGrid")}
@@ -262,8 +262,8 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           type="button"
           onClick={() => setCenterView(centerView === "overview" ? "viewer" : "overview")}
           aria-pressed={centerView === "overview"}
-          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
-            centerView === "overview" ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          className={`apx-btn-liquid rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+            centerView === "overview" ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
           {t("header.viewOverview")}
@@ -273,8 +273,8 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           type="button"
           onClick={() => setCenterView(centerView === "map" ? "viewer" : "map")}
           aria-pressed={centerView === "map"}
-          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
-            centerView === "map" ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          className={`apx-btn-liquid rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+            centerView === "map" ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
           {t("header.viewMap")}
@@ -284,8 +284,8 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           type="button"
           onClick={() => setCenterView(centerView === "people" ? "viewer" : "people")}
           aria-pressed={centerView === "people"}
-          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
-            centerView === "people" ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          className={`apx-btn-liquid rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+            centerView === "people" ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
           {t("header.viewPeople")}
@@ -296,8 +296,8 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           onClick={toggleMetadataPanel}
           disabled={!selectedPhotoId && !metadataPanelOpen}
           aria-pressed={metadataPanelOpen}
-          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-50 ${
-            metadataPanelOpen ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          className={`apx-btn-liquid rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-50 ${
+            metadataPanelOpen ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
           {t("header.viewInfo")}
@@ -309,8 +309,8 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           onClick={toggleDevelopPanel}
           disabled={!selectedPhotoId && !developPanelOpen}
           aria-pressed={developPanelOpen}
-          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-50 ${
-            developPanelOpen ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          className={`apx-btn-liquid rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-50 ${
+            developPanelOpen ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
           {t("header.viewDevelop")}

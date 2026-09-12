@@ -16,6 +16,7 @@ import { MasksPanel } from "./components/MasksPanel";
 import { MetadataPanel } from "./components/MetadataPanel";
 import { OnboardingTour } from "./components/OnboardingTour";
 import { GlobalBusyIndicator } from "./components/GlobalBusyIndicator";
+import { GlassDistortionFilter } from "./components/ui/GlassDistortionFilter";
 import { PeopleView } from "./components/PeopleView";
 import { PresetsPanel } from "./components/PresetsPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -338,6 +339,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col bg-bg-base text-text-primary">
+      <GlassDistortionFilter />
       <StartupSplash ready={appReady} />
       <ShutdownOverlay visible={shuttingDown} />
       <Header onOpenPalette={() => setPaletteOpen(true)} />

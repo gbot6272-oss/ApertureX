@@ -5887,3 +5887,112 @@ tatsächlich gebrauchten Subset-Dateien bündeln), `vitest run`
 (251/251), volle Playwright-Suite (142/142, insbesondere
 `library-views-flow.spec.ts` "Statistik-Dashboard zeigt die
 Foto-Gesamtzahl" weiterhin grün trotz der Kachel-Umstellung).
+
+## ADR-0055: Phase 25 Nachtrag — echtes "Liquid Glass" (Bugfix:
+`backdrop-filter` fehlte im Produktions-Build; Verzerrungsfilter,
+Kanten-Lichtkante, "Liquid"-Knopf-Mechanik)
+
+Nutzerurteil (verbatim, Ausschnitt): die Schritt-0-Screenshots seien
+"nicht wirklich das Liquid Glass" — dazu zwei vom Nutzer bereitgestellte
+21st.dev-Referenz-Prompts (siehe `PROMPTS.md`) mit der Anweisung, das
+dort gezeigte Design 1:1 zu erreichen und auf die ganze App,
+insbesondere Hauptmenü-Knöpfe/-Paletten, anzuwenden.
+
+**Real gefundener Bug, nicht nur "zu subtil" (siehe DECISIONS.md-
+Disziplin "real geprüft, nicht angenommen"):** `getComputedStyle(header,
+"::before").backdropFilter` ergab in einem frisch per `vite build`
+gebauten Produktions-Bundle `"none"` — der Weichzeichner war seit Phase
+21 nie tatsächlich aktiv, unabhängig von jeder Opazitäts-/Blur-Wert-
+Feinjustierung in den bisherigen Phasen. Ursache: `vite.config.ts`s
+`build.target` steht für nicht-Windows-Builds auf `"safari13"`; Lightning
+CSS (Tailwind v4s Build-Minifizierer) erkennt ein direkt
+nebeneinanderstehendes `-webkit-backdrop-filter`+`backdrop-filter`-Paar
+mit identischem Wert als "ein Duplikat für unterschiedliche Ziel-
+Browser" und behält bei diesem Ziel gezielt nur die für Safari 13
+nötige, präfigierte Form — die Standard-Eigenschaft verschwand komplett
+aus dem ausgelieferten CSS. In einem realen Chromium-basierten Webview
+(z. B. Windows/WebView2, aber auch jeder Chromium-basierte Test-/
+Vorschau-Browser) versteht der Browser aber nur die unpräfigierte Form
+— dort blieb `backdrop-filter` dadurch vollständig wirkungslos.
+
+**Fix:** die zweite (Standard-)Deklaration steht jetzt in einem
+`@supports (backdrop-filter: blur(1px)) { ... }`-Block statt direkt
+daneben — Lightning CSS erkennt einen `@supports`-umschlossenen Block
+nicht als simples Ziel-Browser-Duplikat und lässt ihn unabhängig vom
+`build.target` unangetastet (per gebautem CSS nachgeprüft: beide
+Eigenschaften bleiben jetzt erhalten, `@supports` bekommt zusätzlich
+automatisch eine Lightning-CSS-generierte `-webkit`-Alternativbedingung).
+Per `getComputedStyle` nach dem Fix bestätigt:
+`backdropFilter: "blur(26px) saturate(1.65)"`.
+
+**Echtes Glas statt reinem Weichzeichner** (adaptiert aus `PROMPTS.md`
+Prompt 1s `GlassFilter`, auf für dauerhaft sichtbare App-Chrome
+verträgliche, deutlich schwächere Werte reduziert): neue
+`GlassDistortionFilter.tsx` — eine einmalig in `App.tsx` gemountete,
+unsichtbare SVG-`<filter>`-Definition (`feTurbulence`+`feGaussianBlur`+
+`feDisplacementMap`), per `filter: var(--glass-distortion)` auf allen
+`.apx-glass`/`.apx-glass-strong`-Flächen referenziert — echte, wenn auch
+dezente Brechung statt eines rein flachen Weichzeichners. `none` im
+Kontrastmodus (Lesbarkeit hat dort Vorrang). Dazu `--glass-edge-shadow`
+(ebenfalls aus Prompt 1: "Licht fängt sich an der Kante") als `inset`-
+Lichtkante auf derselben Tönungs-Ebene.
+
+**Architektur-Umbau nötig, um Text nicht mitzuverzerren:** `filter`
+distorted die GESAMTE Box, in der es steht, inklusive Inhalt — auf der
+`.apx-glass`-Fläche selbst gesetzt, hätte es also auch den Text/die
+Knöpfe in der Kopfzeile selbst verzerrt. Löst das über zwei
+`::before`/`::after`-Pseudo-Elemente statt der bisherigen einzelnen
+`background`-Ebene: `::before` trägt ausschließlich `backdrop-filter`+
+die SVG-Verzerrung (eine leere Ebene, die nur das dahinterliegende Bild
+sampelt/verzerrt), `::after` die Tönung/den Schleier/die Kantenlicht-
+Kante, der echte Inhalt bleibt scharf im normalen Fluss darüber.
+
+**Zwei reale Regressionen dabei gefunden und behoben, bevor sie in den
+Commit gingen (nicht nur vermutet — je per `getComputedStyle`/
+`getBoundingClientRect()` nachgewiesen):**
+1. Ein zunächst gesetztes `z-index: 0` auf `.apx-glass`/`-strong` (um
+   den negativen Pseudo-Element-`z-index` einen eigenen Stapelkontext
+   zu geben) überschrieb an mehreren Aufrufstellen (u. a. `ui/Menu.tsx`s
+   Dropdown) deren eigenes `z-40`/`z-50` aus einer Tailwind-Utility-
+   Klasse auf demselben Element — das Überlauf-Menü verschwand hinter
+   dem Hauptinhalt. Durch `isolation: isolate` ersetzt (derselbe lokale
+   Stapelkontext, ohne den `z-index`-Wert des Elements selbst zu
+   berühren) — dann aber real geprüft, dass `isolation: isolate` für
+   diesen Zweck gar nicht nötig war (siehe Punkt 2).
+2. Beim Nachprüfen mit einem eigenen Debug-Test wurde `.apx-glass-
+   strong`s `position: relative` fälschlich als NEUE Regression
+   verdächtigt (Dropdown landete bei `top: -209px`, weit außerhalb des
+   Bildschirms) — durch einen Vergleichslauf gegen den unveränderten
+   Stand (`git stash`) widerlegt: **derselbe** Versatz trat bereits vor
+   jeder heutigen Änderung auf. Die tatsächliche Ursache war eine
+   Abweichung im eigenen Test-Skript (zusätzlicher Ordner-Auswahl-Klick
+   vor dem Öffnen des Überlauf-Menüs, den der echte, seit Phasen
+   zuverlässig grüne `library-views-flow.spec.ts`-Test nicht macht) —
+   eine bereits bestehende, fragile, aber in der echten Testabdeckung
+   nicht auftretende Eigenheit, keine neue Regression. Nicht "repariert"
+   (kein realer Befund, der das rechtfertigt), stattdessen dokumentiert.
+
+**"Liquid"-Knopf-Mechanik** (adaptiert aus `PROMPTS.md` Prompt 2s
+`LiquidButton`, ohne Radix/`class-variance-authority` — dieses Projekt
+nutzt bewusst keine davon, siehe `lib/utils.ts`s `cn()`-Begründung):
+neue `.apx-btn-liquid`/`.apx-btn-liquid-active`-Klassen (elastisches
+Überschwingen beim Hover, `cubic-bezier(0.175, 0.885, 0.32, 2.2)`,
+dieselbe Kurve wie im Referenz-Prompt; `.apx-btn-liquid-active` ergänzt
+die bestehende `bg-accent/10 text-accent`-Tönung um dieselbe Kanten-
+Lichtkante wie die Glasflächen) — angewendet auf `Header.tsx`s sechs
+Ansicht-Segmentknöpfe und den Import-Knopf: bewusst NUR auf diese
+wenigen, dauerhaft sichtbaren Hauptmenü-Knöpfe beschränkt (nicht
+flächendeckend, sonst verliert die Geste ihre Bedeutung als "das hier
+ist der Hauptweg durch die App") — der Rest der App bleibt auf der
+bereits bestehenden, gestuften "Subtil"/"Standard"-Hover-Mechanik aus
+ADR-0053/-0054.
+
+Verifiziert: `tsc -b`, `vite build` (direkt am gebauten CSS geprüft,
+dass `backdrop-filter` jetzt tatsächlich enthalten ist), `vitest run`
+(251/251), volle Playwright-Suite (142/142) — inklusive eines
+gezielten Vergleichslaufs gegen den unveränderten Stand zur
+Unterscheidung "echte Regression" vs. "bereits bestehende
+Eigenheit" (siehe oben). Reale visuelle Verifikation per Playwright-
+Screenshot (Kopfzeile, Statistik-Dialog mit sichtbarer Schatten-/
+Kantenwirkung) sowie direkte Pixel-/`getComputedStyle`-Messung statt
+reinem Screenshot-Eyeballing.

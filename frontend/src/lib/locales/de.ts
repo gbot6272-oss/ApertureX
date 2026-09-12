@@ -148,6 +148,9 @@ export const de = {
   "onboarding.tour.finish": "Fertig",
   "onboarding.tour.stepLabel": "Schritt {current} von {total}",
 
+  // GlobalBusyIndicator.tsx (Phase 23, ADR-0051)
+  "busyIndicator.label": "Wird verarbeitet…",
+
   // KeybindingsCheatsheet.tsx
   "cheatsheet.title": "Tastenkürzel",
   "cheatsheet.rebindPrompt": "Taste drücken…",

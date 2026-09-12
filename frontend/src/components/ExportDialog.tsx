@@ -5,6 +5,7 @@ import type { ExportFormat, ExportPhotoOptions, IccProfileChoice, WatermarkPosit
 import { pickFilePath, selectFolderDialog } from "../lib/tauri";
 import { useAppStore } from "../store";
 import { Sheet } from "./ui/Sheet";
+import { SuccessSpark } from "./ui/SuccessSpark";
 
 interface ExportDialogProps {
   open: boolean;
@@ -474,7 +475,10 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
       )}
       {exportError && <p className="mb-2 text-xs text-danger">{t("exportDialog.error", { message: exportError })}</p>}
       {!exportRunning && exportProgress && exportProgress.done > 0 && (
-        <p className="mb-2 text-xs text-text-secondary">{t("exportDialog.filesWritten", { count: exportProgress.done - exportProgress.failed })}</p>
+        <p className="relative mb-2 pl-2 text-xs text-text-secondary">
+          <SuccessSpark active={!exportRunning && exportProgress.done > 0} />
+          {t("exportDialog.filesWritten", { count: exportProgress.done - exportProgress.failed })}
+        </p>
       )}
 
       <div className="flex justify-end gap-2">

@@ -209,6 +209,59 @@ export function selectActivePhotos(state: AppStore): PhotoDto[] {
   return sortPhotos(rawActivePhotos(state), state.librarySortField ?? "filename", state.librarySortDirection ?? "asc");
 }
 
+/**
+ * Fasst jeden Lade-/Verarbeitungs-Zustand des Stores zu einem Boolean
+ * zusammen (Phase 23, siehe `DECISIONS.md` ADR-0051) — Grundlage für
+ * einen einzigen, zentralen `GlobalBusyIndicator` statt 35+
+ * Einzelstellen individuell mit einer Ladeanimation zu verdrahten.
+ * Bewusst nicht vollständig: rein komponenten-lokale Zustände (z. B.
+ * `CatalogDialog.tsx`s `integrityRunning`/`optimizeRunning`/
+ * `backupRunning`) sind hier nicht sichtbar und bleiben außen vor
+ * (siehe ADR-0051, "bewusst außerhalb dieses Umfangs").
+ */
+export function selectAnyBackgroundTaskRunning(state: AppStore): boolean {
+  return (
+    state.importRunning ||
+    state.contentAwareScaleLoading ||
+    state.uprightDetectLoading ||
+    state.contentAwareMoveLoading ||
+    state.aiOutpaintLoading ||
+    state.compositeLayerLoading ||
+    state.repairSourceSuggestionLoading ||
+    state.sensorSpotsLoading ||
+    state.inpaintingModelDownloading ||
+    state.presetGeneratorLoading ||
+    state.tagSuggestionsLoading ||
+    state.exportRunning ||
+    state.printRunning ||
+    state.videoExportRunning ||
+    state.bookExportRunning ||
+    state.webExportRunning ||
+    state.workflowRunning ||
+    state.perceptualDuplicatesRunning ||
+    state.styleConsistencyRunning ||
+    state.colorPaletteLoading ||
+    state.depthModelDownloading ||
+    state.batchPreviewLoading ||
+    state.peopleGroupsLoading ||
+    state.peopleLoading ||
+    state.facesLoading ||
+    state.peopleModelsDownloading ||
+    state.scriptRunning ||
+    state.pluginRunning ||
+    state.shareRunning ||
+    state.cameraFilesLoading ||
+    state.selfieSegmentationModelDownloading ||
+    state.similarVideosLoading ||
+    state.videoSceneChangesLoading ||
+    state.videoTimelineRunning ||
+    state.whisperModelDownloading ||
+    state.videoTranscribing ||
+    state.enhanceRunning !== null ||
+    state.aiInpaintLoadingIndex !== null
+  );
+}
+
 /** Video als Katalog-Asset (Phase 16 Schritt 5, siehe `DECISIONS.md`
  * ADR-0043) — `true`, wenn `photoId` in der aktuell aktiven Fotoliste als
  * Video geführt wird. Genutzt, um das Laden des EDL-gestützten

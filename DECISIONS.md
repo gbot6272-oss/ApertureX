@@ -5438,3 +5438,104 @@ Verifiziert: `cargo fmt --check`/`clippy -p apx-pipeline -p apx-core
 --all-targets` sauber, `cargo test -p apx-pipeline` (251/251, inkl.
 dreier weiterhin grüner `builtin_luts`-Tests mit den fünf neuen
 Einträgen), `tsc -b` sauber, `vitest run` (251/251).
+
+## ADR-0051: Phase 23 — echte Bewegung, Runde 2: drei externe
+Komponenten-Prompts analysiert statt blind kopiert
+
+Nutzerwunsch (verbatim): "merge it in main dann mach es besser ist
+noch zu schlecht echte animationen schau dir prompts.md an (Echte
+Prompts-verwende diese". Es folgten drei vollständige
+"shadcn/Next.js-Komponente integrieren"-Aufträge (`DotLoader`,
+`Toolbar`, `SparklesCore`) mit fertigem Code, gedacht für ein anderes
+Ziel-Ökosystem (Next.js + shadcn CLI + `framer-motion`/
+`@tsparticles/*`). Dieses ADR hält fest, warum sie nicht wörtlich
+kopiert wurden, sondern als Referenz für die gewünschte
+Bewegungsqualität dienten.
+
+**Ist-Zustand-Befund (real geprüft, nicht angenommen):**
+
+- Dieses Projekt ist **kein** shadcn-Projekt: keine `components.json`,
+  kein `@/`-Pfad-Alias in `tsconfig.json`/`vite.config.ts`, keine
+  `cn()`-Hilfsfunktion, kein `clsx`/`tailwind-merge` in
+  `package.json`. `frontend/src/components/ui/` existiert zwar bereits
+  (seit Phase 18/21: `Dialog.tsx`, `Sheet.tsx`, `Menu.tsx`, `Tabs.tsx`)
+  — aber als eigene, GSAP-basierte Konvention, nicht als
+  shadcn-CLI-Ausgabe.
+- **Keine Icon-Bibliothek im gesamten Projekt** — Knöpfe verwenden
+  rohe Unicode-Zeichen (`✎`/`↶`/`↷`/`👁`/`🚫`/`⧉`/`×`, siehe
+  `GridView.tsx`/`MasksPanel.tsx`) statt echter Symbole. Das ist ein
+  echter, eigenständiger Beitrag zum "wirkt billig"-Eindruck,
+  unabhängig von Bewegung.
+- `gsap` (seit Phase 19, ADR-0047) ist die bewusst gewählte, einzige
+  Bewegungslaufzeit dieses Projekts — `framer-motion` zusätzlich
+  einzuführen wäre eine zweite, überlappende Animationsbibliothek für
+  denselben Zweck, kein Neuzugang, der eine Lücke schließt.
+- `@tsparticles/*` (Kern + React-Bindung + „slim"-Preset) ist ein
+  vollständiger Partikel-Physik-Motor (mehrere hundert KB) — der
+  Playwright-Build dieser Sitzung markiert das Haupt-Bundle bereits
+  jetzt als über der 500-kB-Warnschwelle (`vite build`-Ausgabe beim
+  letzten vollen Testlauf). Ein Partikel-Hintergrund für eine
+  professionelle Desktop-Bildbearbeitung ist zudem stilistisch nicht
+  das, was "premium" für dieses Produkt bedeutet (kein Marketing-Hero,
+  kein Spiel).
+- **Konkreter, verifizierter Befund zur eigentlichen Beschwerde**
+  ("echte Animationen"): keine der ~35 `*Loading`/`*Running`/
+  `*Downloading`-Zustände im Store (`grep` bestätigt) hat irgendeine
+  visuelle Ladeanimation — jede KI-/Verarbeitungsstelle tauscht
+  lediglich einen Text gegen einen anderen aus (z. B.
+  `DevelopPanel.tsx`: `"Anwenden"` → `"Berechnet…"`, `"Sensorflecken
+  suchen"` → `"Suche…"`), ganz ohne Bewegung. Das ist der eigentliche,
+  systemische Kern der "immer noch zu schlecht"-Rückmeldung, nicht ein
+  Mangel an Spring-Physik in Dialogen (die seit Phase 20 Nachtrag
+  bereits echte GSAP-Tweens haben).
+
+**Entscheidungen:**
+
+1. **`DotLoader`-Komponente nahezu wörtlich portiert** — sie ist
+   dependency-frei (reines React + CSS, referenziert nur `cn()`), passt
+   ohne jede neue Laufzeitabhängigkeit. Neu:
+   `frontend/src/lib/utils.ts` (`cn()`, eine minimale
+   `clsx`-Alternative ohne neue Abhängigkeit) +
+   `frontend/src/components/ui/DotLoader.tsx`.
+2. **Ein einziger, zentraler `GlobalBusyIndicator`** statt 35
+   Einzelstellen manuell nachzuziehen — eine neue abgeleitete Auswahl
+   (`selectAnyBackgroundTaskRunning` in `store/index.ts`) fasst alle
+   Lade-/Verarbeitungs-Flags zu einem Boolean zusammen; eine neue,
+   dezente, unten rechts angedockte Anzeige (`DotLoader` + Label)
+   erscheint automatisch, sobald irgendeine dieser Operationen läuft —
+   höherer Hebel als 15+ Einzeltexte anzufassen (und risikofrei
+   gegenüber den bestehenden Playwright-Selektoren, die exakt auf
+   diese Texte/`title`/`aria-label`-Werte zielen — siehe
+   `masks-flow.spec.ts`s `getByTitle("Umbenennen")`).
+3. **`lucide-react` statt roher Unicode-Zeichen** — echte, minimale
+   Bereicherung (klein, baumschüttelbar), behebt den oben verifizierten
+   Icon-Befund. Eingesetzt zunächst in `MasksPanel.tsx`s Masken-Zeile
+   (Sichtbarkeit/Umbenennen/Duplizieren/Löschen) — `title`/`aria-label`
+   bleiben dabei exakt unverändert (nur das sichtbare Symbol im
+   Inneren wechselt), damit `masks-flow.spec.ts` unverändert grün
+   bleibt.
+4. **Federnder Erfolgs-Funke statt Partikel-Engine** — ein kleiner,
+   selbst gebauter GSAP-Funken-Ausbruch (wenige `<span>`-Punkte,
+   Ease-out-Bahnen) erscheint beim Abschluss eines Exports
+   (`ExportDialog.tsx`s bestehende `filesWritten`-Erfolgsmeldung) —
+   liefert denselben "beschwingten Abschluss-Moment" wie
+   `SparklesCore`, ohne eine 130+-kB-Partikel-Bibliothek für ein
+   einziges Sechs-Punkte-Funkeln zu laden.
+
+**Bewusst außerhalb dieses Umfangs belassen:** nicht alle 35+
+Lade-Stellen einzeln auf `DotLoader` umgestellt (der zentrale
+Indikator deckt den Bedarf ab, ohne jede Stelle einzeln anzufassen und
+damit 35 potenzielle Playwright-Regressionsflächen zu öffnen); die
+lokalen `integrityRunning`/`optimizeRunning`/`backupRunning`-Zustände
+in `CatalogDialog.tsx` (Komponenten-lokaler `useState`, nicht global
+im Store sichtbar, daher nicht Teil von
+`selectAnyBackgroundTaskRunning`); Toolbar-Tooltip-Neubau mit
+eigenem Overlay (die bestehenden `title`-Attribute liefern bereits
+Browser-native Tooltips und werden von Tests direkt angesprochen —
+ein Ersatz wäre ein eigenständiger, riskanter Umbau ohne klaren
+Mehrwert gegenüber Schritt 2's zentralem Indikator).
+
+Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
+Playwright-Suite (142/142 — insbesondere `masks-flow.spec.ts`,
+Symbol-Austausch, und `export-flow.spec.ts`, `SuccessSpark`, beide
+vollständig grün, da `title`/`aria-label` unverändert blieben).

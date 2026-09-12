@@ -133,6 +133,9 @@ export const en: Record<keyof typeof de, string> = {
   "onboarding.tour.finish": "Finish",
   "onboarding.tour.stepLabel": "Step {current} of {total}",
 
+  // GlobalBusyIndicator.tsx (Phase 23, ADR-0051)
+  "busyIndicator.label": "Processing…",
+
   "cheatsheet.title": "Keyboard shortcuts",
   "cheatsheet.rebindPrompt": "Press a key…",
   "cheatsheet.rebindTitle": "Rebind",

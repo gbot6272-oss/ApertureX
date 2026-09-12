@@ -1175,6 +1175,27 @@ Volle Suite gebündelt erst im letzten Schritt.
 - [ ] 10. Dokumentation, volle Verifikation, Abnahme
 - [x] `tsc -b`, volle `vitest run`-Suite (251 Tests, 28 neue), `map-flow.spec.ts` grün
 
+## Aktuelle Phase: Phase 23 — Echte Bewegung, Runde 2
+
+Nutzerwunsch: Animationen weiterhin unzureichend ("ist noch zu
+schlecht"), drei externe Komponenten-Prompts (DotLoader, Toolbar,
+Sparkles) als Referenz beigelegt. Analyse (keine wörtliche Übernahme
+— dieses Projekt ist kein shadcn/Next.js-Projekt) + Entscheidungen:
+siehe `DECISIONS.md` ADR-0051.
+
+- [x] 0. ADR-0051 + PLAN.md-Abschnitt — Prompt-Analyse, Ist-Zustand
+      (keine Icon-Bibliothek, GSAP statt framer-motion, 35 Lade-Stellen
+      ohne jede Animation)
+- [x] 1. `lib/utils.ts` (`cn()`) + `components/ui/DotLoader.tsx` portiert
+- [x] 2. `selectAnyBackgroundTaskRunning`-Auswahl (Store) +
+      `GlobalBusyIndicator`-Komponente — ein zentraler, dezenter
+      Indikator statt 35 Einzelstellen anzufassen
+- [x] 3. `lucide-react` + echte Symbole in `MasksPanel.tsx`s Masken-Zeile
+      statt roher Unicode-Zeichen (`title`/`aria-label` unverändert)
+- [x] 4. Federnder GSAP-Erfolgs-Funke beim Export-Abschluss
+- [x] 5. Dokumentation, volle Verifikation (tsc, vitest, volle
+      Playwright-Suite), Commit+Push
+
 ## Aktuelle Phase: Phase 22 — Editor-Politur: ESC-Schnellmenü, Regler, Farbprofile
 
 Nutzerwunsch nach dem Liquid-Glass-Merge: ein Menü beim Drücken von

@@ -200,6 +200,14 @@ nachgeholt statt eines weiteren stillschweigenden Nachtrags.
 | `gsap` (3.15) | Eigene "Standard No-Charge License" (seit April 2025, Webflow-Übernahme von GreenSock: 100 % kostenlos inkl. aller vormals kostenpflichtigen Plugins — ScrollTrigger, SplitText, Flip, MorphSVG usw. —, keine Attributionspflicht, kommerzielle Nutzung ausdrücklich erlaubt) | Animationen (Start-Ladeschirm, Beenden-Übergang, künftige Mikrointeraktionen) | Industriestandard; die 17 fertigen GSAP-Bewegungsrezepte des bereits integrierten `.claude/skills/ui-ux-pro-max`-Skills (siehe unten) sind ohne diese Laufzeitabhängigkeit ungenutzt geblieben |
 | `uisfx` (0.4) | MIT (Code) + **CC0-1.0** (generierte Audiodateien, gemeinfrei, keine Attributionspflicht) | UI-Sounds (78 semantische Cues × 12 Klangwelten, App-Standard: "glass") | Null Laufzeit-Abhängigkeiten, ~12 kB komprimierte Web-Audio-Runtime, vollständig offline (kein Nachladen von Audiodateien zur Laufzeit) — Quelle: `github.com/romainsimon/uisfx` |
 
+## Frontend — Phase 23 (siehe `DECISIONS.md` ADR-0051)
+
+| Paket | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `lucide-react` (1.45) | ISC (permissiv, keine Attributionspflicht) | Icon-Bibliothek (bisher keine im Projekt — Knöpfe verwendeten rohe Unicode-Zeichen) | Erste Icon-Bibliothek dieses Projekts, baumschüttelbar (nur importierte Symbole landen im Bundle); zunächst in `MasksPanel.tsx` eingesetzt, `title`/`aria-label` der betroffenen Knöpfe unverändert |
+
+**Bewusst NICHT hinzugefügt** (siehe ADR-0051 für die volle Begründung): `framer-motion` — wäre eine zweite, mit `gsap` überlappende Animationslaufzeit für denselben Zweck; `@tsparticles/*` (Kern + React-Bindung + „slim"-Preset) — vollständiger Partikel-Physik-Motor, mehrere hundert KB für einen einzelnen Funkel-Effekt, den ein sechs Punkte umfassendes, selbst gebautes GSAP-`SuccessSpark` (`ui/SuccessSpark.tsx`) ohne neue Abhängigkeit abdeckt.
+
 ## Testdaten (`testdata/`)
 
 Werden beim Beschaffen einzeln mit Quelle und Lizenz eingetragen, sobald sie in Phase 1 hinzukommen (Vorgabe: nur frei lizenzierte RAWs, z. B. von raw.pixls.us, CC0). Aktuell: **noch keine Testdateien vorhanden.**

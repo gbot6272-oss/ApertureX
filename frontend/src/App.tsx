@@ -15,6 +15,7 @@ import { MapView } from "./components/MapView";
 import { MasksPanel } from "./components/MasksPanel";
 import { MetadataPanel } from "./components/MetadataPanel";
 import { OnboardingTour } from "./components/OnboardingTour";
+import { GlobalBusyIndicator } from "./components/GlobalBusyIndicator";
 import { PeopleView } from "./components/PeopleView";
 import { PresetsPanel } from "./components/PresetsPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -387,6 +388,7 @@ export default function App() {
       <SettingsDialog open={settingsDialogOpen} onClose={() => setSettingsDialogOpen(false)} />
       <KeybindingsCheatsheet open={cheatsheetOpen} onClose={() => setCheatsheetOpen(false)} />
       <OnboardingTour open={onboardingOpen} onClose={closeOnboarding} />
+      <GlobalBusyIndicator />
     </div>
   );
 }

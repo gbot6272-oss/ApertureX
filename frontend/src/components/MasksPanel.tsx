@@ -1,3 +1,4 @@
+import { Copy, Eye, EyeOff, Pencil, X } from "lucide-react";
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
@@ -344,10 +345,10 @@ export function MasksPanel() {
                 onClick={() => setMaskVisible(mask.id, !mask.visible)}
                 aria-label={mask.visible ? `${mask.name} ausblenden` : `${mask.name} einblenden`}
                 aria-pressed={mask.visible}
-                className={`shrink-0 ${mask.visible ? "text-accent" : "text-text-muted"}`}
+                className={`shrink-0 transition-transform duration-[var(--duration-fast)] hover:scale-110 ${mask.visible ? "text-accent" : "text-text-muted"}`}
                 title="Sichtbarkeit"
               >
-                {mask.visible ? "👁" : "🚫"}
+                {mask.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
               </button>
               <button
                 type="button"
@@ -356,19 +357,30 @@ export function MasksPanel() {
               >
                 {mask.name}
               </button>
-              <span role="button" tabIndex={0} onClick={(event) => handleRename(mask.id, mask.name, event)} className="shrink-0 text-text-muted hover:text-accent" title="Umbenennen">
-                ✎
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(event) => handleRename(mask.id, mask.name, event)}
+                className="shrink-0 text-text-muted transition-transform duration-[var(--duration-fast)] hover:scale-110 hover:text-accent"
+                title="Umbenennen"
+              >
+                <Pencil className="size-3.5" />
               </span>
-              <button type="button" onClick={() => duplicateMask(mask.id)} className="shrink-0 text-text-muted hover:text-accent" title="Duplizieren">
-                ⧉
+              <button
+                type="button"
+                onClick={() => duplicateMask(mask.id)}
+                className="shrink-0 text-text-muted transition-transform duration-[var(--duration-fast)] hover:scale-110 hover:text-accent"
+                title="Duplizieren"
+              >
+                <Copy className="size-3.5" />
               </button>
               <button
                 type="button"
                 onClick={() => removeMask(mask.id)}
-                className="shrink-0 text-danger"
+                className="shrink-0 text-danger transition-transform duration-[var(--duration-fast)] hover:scale-110"
                 aria-label={`${mask.name} löschen`}
               >
-                ×
+                <X className="size-3.5" />
               </button>
             </div>
             {maskGroups.length > 0 && (
@@ -410,15 +422,20 @@ export function MasksPanel() {
                 onClick={() => setMaskGroupVisible(group.id, !group.visible)}
                 aria-label={group.visible ? `Gruppe ${group.name} ausblenden` : `Gruppe ${group.name} einblenden`}
                 aria-pressed={group.visible}
-                className={`shrink-0 ${group.visible ? "text-accent" : "text-text-muted"}`}
+                className={`shrink-0 transition-transform duration-[var(--duration-fast)] hover:scale-110 ${group.visible ? "text-accent" : "text-text-muted"}`}
               >
-                {group.visible ? "👁" : "🚫"}
+                {group.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
               </button>
               <button type="button" onClick={() => handleRenameGroup(group.id, group.name)} className="min-w-0 flex-1 truncate text-left text-text-primary hover:underline">
                 {group.name}
               </button>
-              <button type="button" onClick={() => removeMaskGroup(group.id)} className="shrink-0 text-danger" aria-label={`Gruppe ${group.name} entfernen`}>
-                ×
+              <button
+                type="button"
+                onClick={() => removeMaskGroup(group.id)}
+                className="shrink-0 text-danger transition-transform duration-[var(--duration-fast)] hover:scale-110"
+                aria-label={`Gruppe ${group.name} entfernen`}
+              >
+                <X className="size-3.5" />
               </button>
             </li>
           ))}

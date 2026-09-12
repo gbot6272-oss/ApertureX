@@ -289,8 +289,21 @@ export default function App() {
       } else if (matchesBinding(event, "cheatsheet")) {
         setCheatsheetOpen((open) => !open);
       } else if (matchesBinding(event, "close-overlay")) {
+        // Escape schließt zuerst jede offene Überlagerung (unverändert).
+        // Ist **nichts** überhaupt offen — auch keiner der ~25 lokal in
+        // `Header.tsx` gehaltenen Dialoge, die dieser Komponente nicht
+        // als State bekannt sind, deshalb die DOM-Abfrage statt eines
+        // weiteren Store-/Props-Felds —, öffnet Escape stattdessen die
+        // Befehlspalette als Schnellmenü (Phase 22, siehe `DECISIONS.md`
+        // ADR-0050: Nutzerwunsch "Menü, wenn man ESC drückt", Einstellungen
+        // sind dort bereits als Befehl gelistet, siehe `commandRegistry.ts`).
+        const anyOverlayOpen = cheatsheetOpen || paletteOpen || settingsDialogOpen || onboardingOpen || document.querySelector('[role="dialog"]') !== null;
         setCheatsheetOpen(false);
         setPaletteOpen(false);
+        if (!anyOverlayOpen) {
+          event.preventDefault();
+          setPaletteOpen(true);
+        }
       } else if (matchesBinding(event, "fullscreen")) {
         void toggleFullscreen();
       } else if (selectedPhotoId && /^[0-5]$/.test(event.key)) {
@@ -308,7 +321,19 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [stepSelection, selectedPhotoId, setPhotoRating, setPhotoFlag, developPanelOpen, undoLibraryAction, redoLibraryAction]);
+  }, [
+    stepSelection,
+    selectedPhotoId,
+    setPhotoRating,
+    setPhotoFlag,
+    developPanelOpen,
+    undoLibraryAction,
+    redoLibraryAction,
+    cheatsheetOpen,
+    paletteOpen,
+    settingsDialogOpen,
+    onboardingOpen,
+  ]);
 
   return (
     <div className="flex h-screen flex-col bg-bg-base text-text-primary">

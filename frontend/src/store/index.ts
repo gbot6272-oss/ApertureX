@@ -1568,7 +1568,7 @@ interface LibraryBacklogSlice {
    * `onCommit`, wie `setBasicField`). */
   setLutFilterStrength: (value: number) => void;
 
-  /** Die fünf eingebauten Filter-Looks (Phase 16 Schritt 2) — einmal pro
+  /** Die zehn eingebauten Filter-Looks (Phase 16 Schritt 2, auf zehn erweitert in Phase 22) — einmal pro
    * Sitzung geladen (`null` = noch nicht geladen, nicht "keine
    * vorhanden"), dann aus dem Zustand wiederverwendet statt bei jedem
    * Panel-Öffnen erneut abgefragt. */

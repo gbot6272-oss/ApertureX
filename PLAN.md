@@ -1175,6 +1175,20 @@ Volle Suite gebündelt erst im letzten Schritt.
 - [ ] 10. Dokumentation, volle Verifikation, Abnahme
 - [x] `tsc -b`, volle `vitest run`-Suite (251 Tests, 28 neue), `map-flow.spec.ts` grün
 
+## Aktuelle Phase: Phase 22 — Editor-Politur: ESC-Schnellmenü, Regler, Farbprofile
+
+Nutzerwunsch nach dem Liquid-Glass-Merge: ein Menü beim Drücken von
+Escape (Einstellungen darüber auffindbar), schnellere Bearbeitung,
+bessere Regler, mehr Farbprofile, alles soll sich smoother anfühlen.
+Ist-Zustand-Befund und Entscheidungen: siehe `DECISIONS.md` ADR-0050.
+
+- [x] 0. ADR-0050 + PLAN.md-Abschnitt
+- [x] 1. `Escape` öffnet die Befehlspalette, wenn kein Overlay offen ist (`App.tsx`: `document.querySelector('[role="dialog"]')` deckt auch die lokal in `Header.tsx` gehaltenen Dialoge ab) — Einstellungen sind damit per Escape erreichbar, ohne eine zweite Menü-Komponente
+- [x] 2. `developIsLiveDragging` (seit Phase 20 für `DevelopSlider.tsx`) auf `MaskOverlay.tsx`s Ziehgriffe/Pinsel ausgeweitet — reduzierte Live-Auflösung jetzt auch beim Masken-Ziehen
+- [x] 3. Echte Regler-Optik: eigener `input[type="range"]`-Stil in `index.css` (gefüllter Balken bis zum Wert via `--range-progress`, Neutralwert-Strichmarkierung, Hover-/Halte-Griffskalierung) statt des unbehandelten Browser-Standards
+- [x] 4. Fünf neue eingebaute Farbprofile (`builtin_luts.rs`: Vintage-Film, Kino-Blau, Goldene Stunde, Film Noir, Pastell) — zehn insgesamt, `e2e/tauri-mock.ts`-Mock aktualisiert
+- [x] 5. Dokumentation (`DECISIONS.md` ADR-0050), volle Verifikation: `cargo fmt/clippy/test -p apx-pipeline` (251/251), `tsc -b`, `vitest run` (251/251), volle Playwright-Suite
+
 ## Aktuelle Phase: Phase 21 — Liquid-Glass-Überarbeitung, Spotlight-Tutorial
 
 Nutzerwunsch: gesamte Oberfläche im "Liquid Glass"-Materialstil,

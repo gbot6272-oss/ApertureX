@@ -36,7 +36,7 @@ export const KEYBINDING_ACTIONS: KeyBindingAction[] = [
   { id: "next-photo", label: "Nächstes Foto", defaultKey: "arrowright" },
   { id: "toggle-palette", label: "Befehlspalette öffnen/schließen", defaultKey: "mod+k" },
   { id: "cheatsheet", label: "Tastenkürzel-Übersicht anzeigen", defaultKey: "?" },
-  { id: "close-overlay", label: "Palette/Overlay schließen", defaultKey: "escape" },
+  { id: "close-overlay", label: "Overlay schließen, sonst Befehlspalette öffnen (Einstellungen dort auffindbar)", defaultKey: "escape" },
   { id: "undo", label: "Rückgängig (Bibliotheks-Metadaten, oder Entwickeln bei geöffnetem Panel)", defaultKey: "mod+z" },
   { id: "redo", label: "Wiederholen (Bibliotheks-Metadaten, oder Entwickeln bei geöffnetem Panel)", defaultKey: "mod+shift+z" },
   { id: "fullscreen", label: "Vollbild umschalten", defaultKey: "f" },

@@ -916,14 +916,24 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return { path: "/tmp/apx-test/catalog.sqlite", file_size_bytes: 1_048_576 };
       case "list_recent_catalogs":
         return [];
-      // Die fünf eingebauten Filter-Looks (Phase 16 Schritt 2, siehe
-      // `apx_pipeline::builtin_luts`) — bislang im Mock gefehlt, siehe
-      // `DECISIONS.md`-Nachtrag: ein 2×2×2-Mini-Würfel reicht, das Panel
-      // zeigt nur Namen/Vorschau-Farbwerte an, keine echte LUT-Anwendung
-      // im Test.
+      // Die zehn eingebauten Filter-Looks (Phase 16 Schritt 2, auf zehn
+      // erweitert in Phase 22, siehe `apx_pipeline::builtin_luts`) — ein
+      // 2×2×2-Mini-Würfel reicht, das Panel zeigt nur Namen/Vorschau-
+      // Farbwerte an, keine echte LUT-Anwendung im Test.
       case "list_builtin_lut_filters": {
         const identityCube = [0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1];
-        return ["Warm", "Kühl", "Kontrastreich S/W", "Verblasst", "Kino Teal-Orange"].map((name) => ({
+        return [
+          "Warm",
+          "Kühl",
+          "Kontrastreich S/W",
+          "Verblasst",
+          "Kino Teal-Orange",
+          "Vintage-Film",
+          "Kino-Blau",
+          "Goldene Stunde",
+          "Film Noir",
+          "Pastell",
+        ].map((name) => ({
           name,
           size: 2,
           table: identityCube,

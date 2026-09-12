@@ -118,7 +118,7 @@ export function VideoPlayer() {
     if (aiSettings === null) void loadAiSettings();
   }, [aiSettings, loadAiSettings]);
 
-  // Die fünf eingebauten Filter-Looks (dieselben wie im Foto-
+  // Die zehn eingebauten Filter-Looks (dieselben wie im Foto-
   // Entwickeln-Panel, `LutFilterPanel.tsx`) werden lazy beim ersten
   // Öffnen einer Video-Ansicht geladen, danach für die ganze Sitzung
   // wiederverwendet (siehe `loadBuiltinLutFilters`s Moduldoku).
@@ -497,7 +497,7 @@ export function VideoPlayer() {
         ) : null}
 
         {/* Filter/LUT auf Video anwenden (Phase 16 Schritt 9): dieselben
-            fünf eingebauten Filter-Looks wie im Foto-Entwickeln-Panel
+            zehn eingebauten Filter-Looks wie im Foto-Entwickeln-Panel
             (`LutFilterPanel.tsx`) plus freier `.cube`-Import — bewusst
             global (keine Pinselstriche wie bei Fotos, siehe
             `apply_lut_filter_to_video`s Moduldoku). */}

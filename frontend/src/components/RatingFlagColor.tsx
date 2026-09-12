@@ -7,6 +7,7 @@
  * passiert außerhalb, siehe `store/index.ts`s `setPhotoRating`/
  * `setPhotoFlag`/`setPhotoColorLabel`.
  */
+import { useEffect, useRef, useState } from "react";
 
 /** Muss mit `ALLOWED_COLOR_LABELS` in
  * `crates/apx-catalog/src/repository/photos.rs` übereinstimmen. */
@@ -28,6 +29,20 @@ interface RatingStarsProps {
 }
 
 export function RatingStars({ rating, onChange, compact = false }: RatingStarsProps) {
+  // Kurzer "Pop"-Ausschlag beim tatsächlichen Bewertungswechsel (Phase
+  // 24, siehe DECISIONS.md ADR-0052) — mehr als das app-weite, generische
+  // Tastendruck-Feedback (jeder Knopf, jeder Druck): bestätigt gezielt
+  // *diese* Werteänderung, nicht jeden Klick gleichermaßen.
+  const [pulsing, setPulsing] = useState(false);
+  const prevRating = useRef(rating);
+  useEffect(() => {
+    if (prevRating.current === rating) return;
+    prevRating.current = rating;
+    setPulsing(true);
+    const timeout = setTimeout(() => setPulsing(false), 280);
+    return () => clearTimeout(timeout);
+  }, [rating]);
+
   return (
     <div className={`flex ${compact ? "gap-0" : "gap-0.5"}`} role="group" aria-label="Bewertung">
       {[1, 2, 3, 4, 5].map((value) => (
@@ -42,7 +57,7 @@ export function RatingStars({ rating, onChange, compact = false }: RatingStarsPr
           }}
           aria-label={`${value} Sterne`}
           aria-pressed={rating >= value}
-          className={`leading-none ${compact ? "text-[10px]" : "text-sm"} ${rating >= value ? "text-accent" : "text-text-muted hover:text-text-secondary"}`}
+          className={`leading-none ${compact ? "text-[10px]" : "text-sm"} ${rating >= value ? "text-accent" : "text-text-muted hover:text-text-secondary"} ${pulsing && rating >= value ? "apx-star-pop" : ""}`}
         >
           ★
         </button>

@@ -28,6 +28,7 @@ function readThemeColors(el: HTMLElement) {
     border: read("--color-border", "#333333"),
     accent: read("--color-accent", "#5b9bd5"),
     danger: read("--color-danger", "#e07a5f"),
+    success: read("--color-success", "#7fb069"),
     textMuted: read("--color-text-muted", "#6a6a6a"),
   };
 }
@@ -108,9 +109,15 @@ export function GlobeView({ photos, onEnterMap }: GlobeViewProps) {
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(container);
 
-    function draw() {
+    function draw(time: number) {
       if (!ctx || !canvas) return;
       const colors = readThemeColors(canvas);
+      // Heatmap-"Atmen" (Phase 24, siehe DECISIONS.md ADR-0052) — echter,
+      // im Zeichen-Code berechneter Puls statt einer CSS-`filter`-
+      // Animation auf dem ganzen Canvas (das würde Kugel/Glüh-Rand
+      // mitpulsieren lassen, siehe `index.css`s Moduldoku zu
+      // `.apx-photo-heat-layer`). `reducedMotion` friert ihn auf 1 ein.
+      const heatPulse = reducedMotion ? 1 : 0.88 + 0.12 * Math.sin(time / 1600);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
 
@@ -225,10 +232,12 @@ export function GlobeView({ photos, onEnterMap }: GlobeViewProps) {
       }
 
       // Foto-Dichte-Heatmap: additive Glow-Blobs, Farbe von kühl
-      // (wenig Fotos) über die Akzentfarbe bis zur Warnfarbe (viele
+      // (wenig Fotos) über die Erfolgsfarbe bis zur Warnfarbe (viele
       // Fotos an einem Ort) — siehe `lib/photoHeatmap.ts`s Moduldoku
       // für die bewusste Ableitung aus den Theme-Farben statt einer
-      // generischen Regenbogen-Skala.
+      // generischen Regenbogen-Skala. Bugfix (Phase 24, ADR-0052):
+      // `mid` war vorher identisch mit `cool` (beide Akzentfarbe) —
+      // keine Abstufung in der unteren (häufigsten) Intensitätshälfte.
       const cells = heatCells();
       const maxCount = cells.reduce((max, c) => Math.max(max, c.count), 0);
       ctx.globalCompositeOperation = "lighter";
@@ -238,9 +247,9 @@ export function GlobeView({ photos, onEnterMap }: GlobeViewProps) {
         if (darkening <= 0) continue;
         const p = projectLatLon(cell.lat, cell.lon, rotation, radius);
         const intensity = normalizeHeatIntensity(cell.count, maxCount);
-        const blobRadius = radius * (0.05 + intensity * 0.08);
-        const color = heatScaleColor(intensity, colors.accent, colors.accent, colors.danger);
-        const alpha = (0.15 + intensity * 0.55) * darkening;
+        const blobRadius = radius * (0.05 + intensity * 0.08) * heatPulse;
+        const color = heatScaleColor(intensity, colors.accent, colors.success, colors.danger);
+        const alpha = (0.15 + intensity * 0.55) * darkening * heatPulse;
         const blobGradient = ctx.createRadialGradient(cx + p.x, cy + p.y, 0, cx + p.x, cy + p.y, blobRadius);
         blobGradient.addColorStop(0, rgbaCss(color, alpha));
         blobGradient.addColorStop(1, rgbaCss(color, 0));
@@ -260,7 +269,7 @@ export function GlobeView({ photos, onEnterMap }: GlobeViewProps) {
         rotationRef.current = { ...rotationRef.current, yaw: rotationRef.current.yaw + AUTO_ROTATE_DEG_PER_SEC * dt };
       }
       lastFrameTime = time;
-      draw();
+      draw(time);
       raf = requestAnimationFrame(tick);
     }
     raf = requestAnimationFrame(tick);
@@ -297,7 +306,7 @@ export function GlobeView({ photos, onEnterMap }: GlobeViewProps) {
   const geotaggedCount = photos.filter((p) => p.gps_lat !== null && p.gps_lon !== null).length;
 
   return (
-    <div ref={containerRef} className="relative flex-1 overflow-hidden bg-bg-base">
+    <div ref={containerRef} className="apx-map-mode-in relative flex-1 overflow-hidden bg-bg-base">
       <canvas
         ref={canvasRef}
         className="h-full w-full cursor-grab touch-none active:cursor-grabbing"

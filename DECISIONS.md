@@ -5610,3 +5610,97 @@ Playwright-Suite (142/142 — insbesondere `masks-flow.spec.ts`
 ["Hover über einen Preset..."], `viewer-flow.spec.ts`/
 `Filmstreifen-Virtualisierung` — alle vollständig grün, da keine
 `title`/`aria-label`/Text-Selektoren verändert wurden).
+
+## ADR-0052: Phase 24 — Mehr Transparenz, echte Karten-Bugfixes, zehn
+weitere neue Animationen, mehr Übersicht
+
+Nutzerwunsch (verbatim): "noch nicht gut genug-ui muss transparenter
+werden, kartenbugs (z.b. fehlerhafte anzeige, keine gute heatmap)
+alles fixen, mehr animationen, mindestens 10 neue, mehr übersicht
+einfacher zu bedienen".
+
+**Karten-Untersuchung (real geprüft, nicht angenommen):**
+
+- **Bestätigter Bug — Heatmap-Farbskala liefert keine Abstufung.**
+  `MapView.tsx`s `readHeatColors()` und `GlobeView.tsx`s Aufruf von
+  `heatScaleColor(...)` übergaben für `cool` **und** `mid` denselben
+  Wert (`--color-accent`) — `heatScaleColor` interpoliert Kühl→Mittel
+  in der unteren Intensitätshälfte, Mittel→Warm in der oberen (siehe
+  `lib/photoHeatmap.ts`). Mit `cool === mid` zeigt die gesamte untere
+  Hälfte (die meisten Rasterzellen — wenige Fotos je Ort sind der
+  Regelfall) **keinerlei** Farbunterschied, nur einen flachen
+  Akzentton; erst die wenigen dichtesten Orte wandern Richtung
+  `--color-danger`. Erklärt sowohl "keine gute Heatmap" als auch
+  "fehlerhafte Anzeige" plausibel (eine Heatmap ohne Abstufung wirkt
+  wie eine kaputte/nicht reagierende Anzeige). Betrifft **beide**
+  Heatmap-Implementierungen (Globus + flache Karte), da beide dieselbe
+  `heatScaleColor`-Funktion mit demselben Farbfehler aufrufen.
+- **Tiefer untersucht und bewusst NICHT geändert:** ein Verdacht, dass
+  `leafletHeatmap.ts`s `redraw()` mit `map.latLngToContainerPoint(...)`
+  statt `map.latLngToLayerPoint(...)` zeichnet und dadurch nach einem
+  Kartenschwenk versetzt wäre — anhand von Leaflets eigenem Quellcode
+  (`node_modules/leaflet/dist/leaflet-src.js`) nachgerechnet:
+  `latLngToContainerPoint(P) = latLngToLayerPoint(P) + _getMapPanePos()`,
+  und `_getMapPanePos()` wird von Leaflets eigenem `_resetView()`
+  (welches bei jedem `moveend`/`zoomend` — genau die Ereignisse, an die
+  `reset()` gebunden ist — vor der Neupositionierung aufgerufen wird)
+  auf `(0, 0)` zurückgesetzt. Zum Zeitpunkt, an dem `redraw()` läuft,
+  sind beide Ausdrücke daher rechnerisch identisch — kein tatsächlicher
+  Versatz-Bug, nur eine unnötig verwirrende Wahl der API (`containerPoint`
+  statt `layerPoint`, wie Leaflets eigene Layer es intern tun). Nicht
+  angefasst, um nicht ohne echten Befund ein funktionierendes
+  Koordinatensystem zu "reparieren".
+
+**Entscheidungen:**
+
+1. **Heatmap-Farbskala repariert** — `mid` liest jetzt `--color-success`
+   (Grün) statt `--color-accent`, ein echter Blau→Grün→Rot-Dreiklang
+   statt zwei identischer Werte. `GlobeView.tsx`s `readThemeColors()`
+   bekommt dafür ein neues `success`-Feld.
+2. **UI transparenter** (`index.css`): `--glass-bg`/`--glass-bg-strong`
+   von 62 %/78 % (dunkel) bzw. 62 %/80 % (hell) auf 44 %/60 % bzw.
+   44 %/62 % gesenkt, `--glass-blur` von 20px auf 26px angehoben (mehr
+   Weichzeichnung kompensiert die geringere Deckkraft, damit Text trotz
+   mehr Durchsicht lesbar bleibt). Kontrastmodus (voll deckend) bleibt
+   unverändert — Barrierefreiheit hat dort weiterhin Vorrang.
+3. **Zehn neue, echte Animationen** (nicht nur Politur bestehender
+   Hover-Zustände, siehe ADR-0051/-Nachtrag für die vorherige Runde):
+   - Bewertungssterne: kurzer "Pop"-Ausschlag beim tatsächlichen
+     Wertwechsel (`RatingFlagColor.tsx`, `apx-star-pop`)
+   - Heatmap-"Atmen" auf der flachen Karte (CSS-`filter`-Puls auf dem
+     dedizierten `apx-photo-heat-layer`-Canvas) **und** auf dem Globus
+     (echter, im rAF-Zeichen-Code berechneter `heatPulse`-Faktor, da
+     dort Kugel/Glüh-Rand/Blobs ein gemeinsames Canvas teilen)
+   - Karten-Infobox: Eintritts-Animation beim Wechsel zur flachen Karte
+   - GPS-Platzierungshinweis: pulsierender Text, solange auf einen
+     Kartenklick gewartet wird
+   - Globus ↔ Karte: sanfter Überblend-Wechsel statt hartem
+     Komponentenaustausch
+   - Befehlspalette: Ergebniszeilen fliegen gestaffelt herein (gedeckelt
+     auf die ersten 12 Zeilen)
+   - Export-Fortschrittsbalken: neuer, echter Balken (vorher nur reiner
+     Text) mit animierter Breite bei jedem Fortschritts-Tick
+   - Einstellungen-Dialog: Reiterinhalt blendet beim Wechsel sanft ein
+   - Kopfzeile: Import-Abschluss-Hinweis blendet ein statt abrupt
+     aufzutauchen
+   - Filmstreifen: scrollt jetzt tatsächlich sanft zur ausgewählten
+     Kachel (`@tanstack/react-virtual`s `scrollToIndex(..., {behavior:
+     "smooth"})`) — vorher scrollte der Streifen bei Auswahl einer
+     außerhalb sichtbaren Kachel überhaupt nicht mit
+   Alle zehn respektieren `prefers-reduced-motion` über den
+   bestehenden globalen Mechanismus bzw. (Bewertungssterne, Globus-Puls,
+   Filmstreifen) über `usePrefersReducedMotion()`/eine explizite
+   Prüfung.
+4. **Mehr Übersicht, einfacher zu bedienen** — der neue Export-
+   Fortschrittsbalken (Punkt 3) macht den Bearbeitungsstand auf einen
+   Blick erfassbar statt nur als Zahlentext; die reparierte Heatmap-
+   Farbskala macht die Kartenübersicht überhaupt erst wieder informativ
+   (Punkt 1); die erhöhte Transparenz (Punkt 2) lässt die App-Chrome
+   weniger blickdicht/schwer wirken.
+
+Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
+Playwright-Suite (142/142 — insbesondere `map-flow.spec.ts`
+[Heatmap-Farbfix], `settings-flow.spec.ts` [Reiterwechsel-Neumontage],
+`presets-flow.spec.ts`/`library-flow.spec.ts`, `viewer-flow.spec.ts`/
+`Filmstreifen-Virtualisierung` [Sanftscroll] — alle vollständig grün,
+da keine `title`/`aria-label`/Text-Selektoren verändert wurden).

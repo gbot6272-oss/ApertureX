@@ -61,12 +61,22 @@ function popupHtmlFor(photo: PhotoDto, locationName?: string, countryCode?: stri
   return `<strong>${escapeHtml(photo.filename)}</strong><br/>${escapeHtml(location)}`;
 }
 
+/**
+ * Bugfix (Phase 24, siehe DECISIONS.md ADR-0052 — Nutzer-Rückmeldung
+ * "keine gute Heatmap"): `mid` war vorher identisch mit `cool` (beide
+ * `--color-accent`), wodurch `heatScaleColor` in der unteren Hälfte
+ * des Intensitätsbereichs (die meisten Zellen — wenige Fotos je Ort
+ * sind der Regelfall) überhaupt keine Farbabstufung zeigte, nur einen
+ * einzigen flachen Akzentton. `--color-success` (Grün) als echter
+ * dritter Farbpunkt liefert jetzt eine tatsächliche Kühl→Mittel→Warm-
+ * Abstufung (Blau→Grün→Rot).
+ */
 function readHeatColors() {
   const style = getComputedStyle(document.documentElement);
   const read = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
   return {
     cool: read("--color-accent", "#5b9bd5"),
-    mid: read("--color-accent", "#5b9bd5"),
+    mid: read("--color-success", "#7fb069"),
     hot: read("--color-danger", "#e07a5f"),
   };
 }
@@ -282,9 +292,9 @@ export function MapView() {
   }
 
   return (
-    <div className="relative flex-1 overflow-hidden">
+    <div className="apx-map-mode-in relative flex-1 overflow-hidden">
       <div ref={containerRef} className="h-full w-full" />
-      <div className="absolute right-3 top-3 z-[1000] flex flex-col gap-2 rounded border border-border bg-bg-raised p-2 text-xs shadow">
+      <div className="apx-map-panel-in absolute right-3 top-3 z-[1000] flex flex-col gap-2 rounded border border-border bg-bg-raised p-2 text-xs shadow">
         <div className="flex items-center justify-between gap-3">
           <span className="text-text-secondary">{geotaggedPhotos.length} Foto{geotaggedPhotos.length === 1 ? "" : "s"} mit GPS</span>
           <button type="button" onClick={() => setMapMode("globe")} className="rounded border border-border px-2 py-0.5 hover:border-accent">
@@ -307,7 +317,7 @@ export function MapView() {
         )}
         {placingGpsForPhotoId && (
           <div className="flex flex-col gap-1">
-            <span className="text-accent">Klick auf die Karte setzt den Standort</span>
+            <span className="apx-gps-hint-pulse text-accent">Klick auf die Karte setzt den Standort</span>
             <button type="button" onClick={cancelPlacingGps} className="rounded border border-border px-2 py-1 hover:border-accent">
               Abbrechen
             </button>

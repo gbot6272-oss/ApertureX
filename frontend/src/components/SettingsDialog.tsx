@@ -102,7 +102,11 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4">
+      {/* `key={tab}` erzwingt eine Neumontage bei jedem Reiterwechsel —
+          spielt die Einblend-Animation (`apx-tab-panel-in`, Phase 24,
+          siehe DECISIONS.md ADR-0052) jedes Mal frisch ab, statt nur
+          beim ersten Mount. */}
+      <div key={tab} className="apx-tab-panel-in flex-1 overflow-y-auto p-4">
         {!uiSettings ? (
           <p className="text-xs text-text-muted">{t("settings.loading")}</p>
         ) : tab === "anzeige" ? (

@@ -1,7 +1,8 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 
+import { usePrefersReducedMotion } from "../lib/motion";
 import { previewUrl } from "../lib/media";
 import { resolveSelectionMode, selectActivePhotos, useAppStore } from "../store";
 
@@ -49,6 +50,19 @@ export function Filmstrip() {
     estimateSize: () => CELL_WIDTH + CELL_GAP,
     overscan: 8,
   });
+
+  // Sanft zur ausgewählten Kachel scrollen statt eines Sprungs (Phase
+  // 24, siehe DECISIONS.md ADR-0052) — bisher scrollte der Filmstreifen
+  // beim Auswählen eines Fotos außerhalb der sichtbaren Fläche
+  // überhaupt nicht mit; `align: "auto"` bewegt nur, wenn die Kachel
+  // tatsächlich außerhalb liegt, statt bei jeder Auswahl zu zentrieren.
+  const reducedMotion = usePrefersReducedMotion();
+  useEffect(() => {
+    const index = photos.findIndex((p) => p.id === selectedPhotoId);
+    if (index === -1) return;
+    virtualizer.scrollToIndex(index, { align: "auto", behavior: reducedMotion ? "auto" : "smooth" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPhotoId]);
 
   if (photos.length === 0) {
     return (

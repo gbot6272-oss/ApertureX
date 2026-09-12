@@ -1175,6 +1175,31 @@ Volle Suite gebündelt erst im letzten Schritt.
 - [ ] 10. Dokumentation, volle Verifikation, Abnahme
 - [x] `tsc -b`, volle `vitest run`-Suite (251 Tests, 28 neue), `map-flow.spec.ts` grün
 
+## Aktuelle Phase: Phase 24 — Transparenz, Karten-Bugfixes, zehn neue Animationen, mehr Übersicht
+
+Nutzerwunsch: UI transparenter, Kartenbugs (fehlerhafte Anzeige, keine
+gute Heatmap) fixen, mindestens 10 neue Animationen, mehr Übersicht/
+einfacher zu bedienen. Untersuchung, Entscheidungen: siehe
+`DECISIONS.md` ADR-0052.
+
+- [x] 0. ADR-0052 + PLAN.md-Abschnitt — Karten-Code real untersucht
+      (Heatmap-Farbskala-Bug bestätigt, Koordinaten-Versatz-Verdacht
+      anhand des Leaflet-Quellcodes widerlegt)
+- [x] 1. Heatmap-Farbskala repariert (`mid` war identisch mit `cool`)
+      in `MapView.tsx` + `GlobeView.tsx`
+- [x] 2. `index.css`: `--glass-bg`/`-bg-strong` deutlich transparenter,
+      `--glass-blur` angehoben (Lesbarkeits-Ausgleich)
+- [x] 3. Zehn neue Animationen: Bewertungssterne-Pop, Heatmap-Atmen
+      (Karte + Globus), Karten-Infobox-Eintritt, GPS-Hinweis-Puls,
+      Globus↔Karte-Überblendung, Befehlspalette-Gestaffelt,
+      Export-Fortschrittsbalken (neu + animiert), Einstellungen-
+      Reiterwechsel-Einblendung, Kopfzeilen-Import-Hinweis-Einblendung,
+      Filmstreifen-Sanftscroll zur Auswahl
+- [x] 4. Mehr Übersicht: echter Export-Fortschrittsbalken statt
+      reinem Text
+- [x] 5. Dokumentation, volle Verifikation (tsc, vitest, volle
+      Playwright-Suite), Commit+Push
+
 ## Aktuelle Phase: Phase 23 — Echte Bewegung, Runde 2
 
 Nutzerwunsch: Animationen weiterhin unzureichend ("ist noch zu

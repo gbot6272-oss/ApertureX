@@ -108,7 +108,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       />
       <ul className="max-h-80 overflow-y-auto p-1">
         {filtered.length === 0 && <li className="px-3 py-2 text-sm text-text-muted">Keine Treffer.</li>}
-        {filtered.slice(0, 50).map((entry) => (
+        {filtered.slice(0, 50).map((entry, index) => (
           <li key={entry.id}>
             <button
               type="button"
@@ -116,7 +116,12 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                 entry.run();
                 onClose();
               }}
-              className="flex w-full items-center justify-between gap-2 rounded px-3 py-1.5 text-left text-sm hover:bg-bg-panel"
+              // Gestaffeltes Hereinfliegen statt gleichzeitigem
+              // Erscheinen (Phase 24, siehe DECISIONS.md ADR-0052) —
+              // gedeckelt auf die ersten 12 Zeilen, damit eine lange
+              // Trefferliste nicht spürbar "nachtropft".
+              style={{ animationDelay: `${Math.min(index, 12) * 18}ms` }}
+              className="apx-stagger-in flex w-full items-center justify-between gap-2 rounded px-3 py-1.5 text-left text-sm hover:bg-bg-panel"
             >
               <span className="truncate">{entry.label}</span>
               {entry.hint && <span className="shrink-0 text-xs text-text-muted">{entry.hint}</span>}

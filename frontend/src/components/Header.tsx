@@ -228,7 +228,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
       )}
 
       {!importRunning && importResult && (
-        <span className="hidden shrink-0 truncate text-xs text-text-secondary lg:inline">
+        <span className="apx-notice-in hidden shrink-0 truncate text-xs text-text-secondary lg:inline">
           {importResult.cancelled ? "Import abgebrochen: " : "Import abgeschlossen: "}
           {importResult.imported} importiert · {importResult.skipped} übersprungen
           {importResult.errorCount > 0 ? ` · ${importResult.errorCount} Fehler` : ""}

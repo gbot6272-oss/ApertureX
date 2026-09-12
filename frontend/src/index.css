@@ -83,8 +83,13 @@
    angedockte Paletten via `PaletteFrame.tsx`, Dialog/Sheet/Menü),
    nicht auf einzelne Rasterkacheln o. Ä. */
 :root {
-  --glass-bg: rgb(32 32 32 / 62%);
-  --glass-bg-strong: rgb(28 28 28 / 78%);
+  /* Deutlich transparenter als die erste Liquid-Glass-Fassung (Phase
+     24, Nutzer-Rückmeldung "UI muss transparenter werden"): Deckkraft
+     von 62%/78% auf 44%/60% gesenkt, Weichzeichnung von 20px auf 26px
+     angehoben, damit Text trotz mehr Durchsicht lesbar bleibt (mehr
+     Blur kompensiert weniger deckende Grundfarbe). */
+  --glass-bg: rgb(32 32 32 / 44%);
+  --glass-bg-strong: rgb(28 28 28 / 60%);
   --glass-border: rgb(255 255 255 / 12%);
   --glass-sheen: linear-gradient(
     135deg,
@@ -93,13 +98,13 @@
     rgb(255 255 255 / 0%) 55%,
     rgb(255 255 255 / 6%) 100%
   );
-  --glass-blur: 20px;
+  --glass-blur: 26px;
   --glass-saturate: 165%;
 }
 
 :root[data-theme="light"] {
-  --glass-bg: rgb(255 255 255 / 62%);
-  --glass-bg-strong: rgb(255 255 255 / 80%);
+  --glass-bg: rgb(255 255 255 / 44%);
+  --glass-bg-strong: rgb(255 255 255 / 62%);
   --glass-border: rgb(35 32 25 / 10%);
   --glass-sheen: linear-gradient(
     135deg,
@@ -396,6 +401,166 @@ button:not(:disabled):active {
   );
   animation: apx-ai-shimmer-sweep 1.6s ease-in-out infinite;
 }
+
+/* Phase 24 — "mindestens 10 neue Animationen" (siehe DECISIONS.md
+   ADR-0052). Reine CSS-`@keyframes` statt GSAP für alle hier, weil
+   jede einzelne entweder (a) an eine `key`-Neumontage oder Klassen-
+   Umschaltung gebunden ist (braucht keine JS-Timeline) oder (b) — wie
+   der Heatmap-Puls — dauerhaft im Hintergrund läuft, ohne dass ein
+   Interaktions-Ereignis sie auslösen müsste. Reduzierte Bewegung kappt
+   `animation-duration` weiterhin global auf ~0 (siehe oben). */
+
+/* 1) Bewertungssterne: kurzer "Pop"-Ausschlag beim tatsächlichen
+   Wertwechsel (RatingFlagColor.tsx). */
+@keyframes apx-star-pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.45);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.apx-star-pop {
+  animation: apx-star-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 2) Heatmap-"Atmen" auf der flachen Karte: sehr sanfte, dauerhafte
+   Puls-Filterung direkt auf dem von `leafletHeatmap.ts` erzeugten
+   Canvas (eigene, dedizierte `apx-photo-heat-layer`-Klasse dort) —
+   vermittelt "lebendige Daten" statt einer toten, statischen Fläche
+   (Nutzer-Rückmeldung "keine gute Heatmap"). Bewusst NICHT über diese
+   CSS-Route auf dem Globus (`GlobeView.tsx`): dort zeichnen Kugel,
+   Glüh-Rand UND Heatmap-Blobs auf ein-und-dasselbe Canvas-Element — ein
+   `filter` hier würde die ganze Kugel mitpulsieren lassen, nicht nur
+   die Blobs. Der Globus bekommt stattdessen einen echten, im
+   Zeichen-Code selbst berechneten Puls (siehe dortiger `heatPulse`). */
+@keyframes apx-heat-breathe {
+  0%,
+  100% {
+    filter: brightness(1) saturate(1);
+  }
+  50% {
+    filter: brightness(1.08) saturate(1.15);
+  }
+}
+.apx-photo-heat-layer {
+  animation: apx-heat-breathe 3.2s ease-in-out infinite;
+}
+
+/* 3) Karten-Infobox (`MapView.tsx`): Eintritts-Animation statt
+   sofortigem Erscheinen beim Wechsel von Globus zu Karte. */
+@keyframes apx-map-panel-in {
+  from {
+    opacity: 0;
+    transform: translate(12px, -8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+}
+.apx-map-panel-in {
+  animation: apx-map-panel-in var(--duration-base) cubic-bezier(0, 0, 0.2, 1);
+}
+
+/* 4) GPS-Platzierungshinweis (`MapView.tsx`): pulsierender Akzent-Text
+   statt statischer Anzeige, solange auf einen Kartenklick gewartet
+   wird — dieselbe "wartet auf Eingabe"-Sprache wie ein blinkender
+   Cursor. */
+@keyframes apx-gps-hint-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+.apx-gps-hint-pulse {
+  animation: apx-gps-hint-pulse 1.4s ease-in-out infinite;
+}
+
+/* 5) Globus → Karte: sanfter Überblend-Wechsel statt hartem
+   Komponentenaustausch (`MapView.tsx`). */
+@keyframes apx-map-mode-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.apx-map-mode-in {
+  animation: apx-map-mode-in var(--duration-slow) ease-out;
+}
+
+/* 6) Befehlspalette (`CommandPalette.tsx`): Ergebniszeilen fliegen
+   nacheinander leicht herein statt aller gleichzeitig zu erscheinen —
+   `animation-delay` je Zeile über eine Inline-`style`-Eigenschaft
+   gesetzt (siehe Aufrufer), gedeckelt auf die ersten Zeilen, damit eine
+   lange Trefferliste nicht spürbar "nachtropft". */
+@keyframes apx-stagger-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.apx-stagger-in {
+  animation: apx-stagger-in var(--duration-fast) cubic-bezier(0, 0, 0.2, 1) both;
+}
+
+/* 7) Export-/Stapelverarbeitung-Fortschrittsbalken: animiert die
+   Breitenänderung, statt bei jedem Fortschritts-Tick hart zu
+   springen (`ExportDialog.tsx`/`BatchConsoleDialog.tsx`). */
+.apx-progress-fill {
+  transition: width var(--duration-base) cubic-bezier(0, 0, 0.2, 1);
+}
+
+/* 8) Einstellungen-Dialog: Reiterinhalt blendet beim Wechsel sanft ein
+   statt hart zu springen (`SettingsDialog.tsx`). */
+@keyframes apx-tab-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.apx-tab-panel-in {
+  animation: apx-tab-panel-in var(--duration-fast) ease-out;
+}
+
+/* 9) Automatischer Import (beobachteter Ordner): kurze Hervorhebung
+   der Kopfzeilen-Statuszeile, sobald ein Hintergrund-Import beginnt,
+   statt eines stillen Texterscheinens (`Header.tsx`). */
+@keyframes apx-notice-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.apx-notice-in {
+  animation: apx-notice-in var(--duration-base) cubic-bezier(0, 0, 0.2, 1);
+}
+
+/* 10) Filmstreifen: sanftes Scrollen zur ausgewählten Kachel statt
+   eines Sprungs — über `@tanstack/react-virtual`s eigene
+   `scrollToIndex(index, { behavior: "smooth" })`-API in `Filmstrip.tsx`
+   umgesetzt (kein CSS `scroll-behavior` möglich, der Virtualizer setzt
+   die Scroll-Position programmatisch, nicht per Sprunglink/Anker). */
 
 /* Einklappbare Regler-Abschnitte (Phase 18-Nachtrag "UI übersichtlicher/
    weniger Scrollen", siehe DECISIONS.md) — `DevelopPanel.tsx`/

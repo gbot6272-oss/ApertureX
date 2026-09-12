@@ -208,6 +208,12 @@ nachgeholt statt eines weiteren stillschweigenden Nachtrags.
 
 **Bewusst NICHT hinzugefügt** (siehe ADR-0051 für die volle Begründung): `framer-motion` — wäre eine zweite, mit `gsap` überlappende Animationslaufzeit für denselben Zweck; `@tsparticles/*` (Kern + React-Bindung + „slim"-Preset) — vollständiger Partikel-Physik-Motor, mehrere hundert KB für einen einzelnen Funkel-Effekt, den ein sechs Punkte umfassendes, selbst gebautes GSAP-`SuccessSpark` (`ui/SuccessSpark.tsx`) ohne neue Abhängigkeit abdeckt.
 
+## Frontend — Phase 25 (siehe `DECISIONS.md`, aktuelles ADR)
+
+| Paket | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `@fontsource/inter` (5.3) | OFL-1.1 (SIL Open Font License, permissiv, keine Attributionspflicht, kommerzielle Nutzung ausdrücklich erlaubt) | Eigene Schrift statt `system-ui` (Premium-UI-Plan Schritt 1) | Selbst gehostete `.woff2`-Dateien im Bundle statt eines `fonts.googleapis.com`-Laufzeit-Downloads — die App muss auch offline funktionieren (Desktop-Anwendung). Nur `latin`/`latin-ext`-Unicode-Bereiche × vier Schnitte (400/500/600/700) eingebunden, nicht der volle Sieben-Bereiche-Satz (kyrillisch/griechisch/vietnamesisch ungenutzt, `lib/i18n.ts` kennt nur `de`/`en`) — reduziert das gebündelte Schriftmaterial von ~500 KB auf ~100 KB. |
+
 ## Testdaten (`testdata/`)
 
 Werden beim Beschaffen einzeln mit Quelle und Lizenz eingetragen, sobald sie in Phase 1 hinzukommen (Vorgabe: nur frei lizenzierte RAWs, z. B. von raw.pixls.us, CC0). Aktuell: **noch keine Testdateien vorhanden.**

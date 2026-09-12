@@ -1,14 +1,44 @@
 @import "tailwindcss";
 
+/* Phase 25 Schritt 1 (siehe DECISIONS.md, aktuelles ADR): eigene
+   Schrift statt `system-ui` — selbst gehostet über `@fontsource/inter`
+   (npm-Paket, echte `.woff2`-Dateien im Bundle), bewusst NICHT per
+   `fonts.googleapis.com`-Laufzeit-Download, da die App auch offline
+   funktionieren muss (SPEC.md, Desktop-Anwendung ohne
+   Internetzwang). Nur die vier tatsächlich genutzten Schnitte
+   (400/500/600/700) UND nur die `latin`/`latin-ext`-Unicode-Bereiche
+   (`lib/i18n.ts` kennt ausschließlich `de`/`en`, beide vollständig
+   darin abgedeckt inkl. deutscher Umlaute/ß) statt der vollen
+   Sieben-Bereiche-Aufteilung (kyrillisch/griechisch/vietnamesisch
+   ungenutzt) — reduziert die gebündelten Schriftdateien von ~500 KB
+   auf ~100 KB. */
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-ext-400.css";
+@import "@fontsource/inter/latin-500.css";
+@import "@fontsource/inter/latin-ext-500.css";
+@import "@fontsource/inter/latin-600.css";
+@import "@fontsource/inter/latin-ext-600.css";
+@import "@fontsource/inter/latin-700.css";
+@import "@fontsource/inter/latin-ext-700.css";
+
 /* Design-Tokens — Dark-First (siehe SPEC.md Abschnitt 4). Ein
    vollständiges helles Theme kommt in Phase 10; die Tokens sind hier
    bereits so benannt (semantisch, nicht "gray-800"), dass ein zweites
    Theme später nur die Werte austauschen muss, nicht die Klassennamen. */
 @theme {
-  --color-bg-base: #1a1a1a;
-  --color-bg-raised: #202020;
-  --color-bg-panel: #242424;
-  --color-border: #333333;
+  /* Phase 25 Schritt 1 (siehe DECISIONS.md, aktuelles ADR): echte
+     Tiefe statt der bisherigen drei Werte innerhalb von 16 RGB-Stufen
+     (`#1a1a1a`/`#202020`/`#242424` — praktisch ununterscheidbares
+     Grau-auf-Grau). Näher an Schwarz, deutlich unterscheidbare
+     Stufen — an einer realen, für genau dieses Produktgenre
+     (professionelles Foto-Werkzeug, dunkel) recherchierten Referenz-
+     Palette orientiert. `--color-border` dazu von reinem Grau auf
+     einen minimal wärmeren Ton, passend zum Bildschirm-/Foto-Kontext
+     statt eines technisch-kalten Blaugraus. */
+  --color-bg-base: #050505;
+  --color-bg-raised: #0e0e0e;
+  --color-bg-panel: #17171a;
+  --color-border: #3a3733;
   --color-text-primary: #e8e4dc;
   --color-text-secondary: #9a9a9a;
   --color-text-muted: #6a6a6a;
@@ -24,7 +54,19 @@
   --color-bg-overlay: rgb(10 10 10 / 55%);
 
   --font-sans:
-    system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* Typografie-Feinschliff (Phase 25 Schritt 1) — überschreibt
+     Tailwinds Standard-Zeilenhöhe/-Laufweite für die drei größten
+     Textstufen an derselben Stelle wie die Radius-/Schatten-Skala
+     (Phase 18): jede bestehende `text-lg`/`text-xl`/`text-2xl`-
+     Verwendung (Dialog-/Panel-Überschriften, Header-Titel) bekommt
+     ohne Einzeländerung eine engere, bewusst gesetzte Laufweite statt
+     der Browser-Vorgabe — genau das an Inters eigener, präziser
+     Optical-Sizing-Systematik orientiert. */
+  --text-lg--letter-spacing: -0.011em;
+  --text-xl--letter-spacing: -0.014em;
+  --text-2xl--letter-spacing: -0.017em;
 
   /* Radius-Skala (Phase 18, ADR-0046) — überschreibt Tailwinds
      Standardwerte (0.125rem–2rem) an derselben Stelle, damit jede
@@ -41,13 +83,23 @@
   /* Schatten-/Elevation-Skala (Phase 18, ADR-0046) — Tailwinds
      Standardschatten sind für helle Oberflächen kalibriert (niedrige
      Deckkraft auf reinem Schwarz) und auf dem dunklen Grundton dieser
-     App (`--color-bg-base: #1a1a1a`) kaum sichtbar. Dieselben
-     Tailwind-Variablennamen, verstärkte Werte für sichtbare Tiefe auf
-     dunklem Grund — das helle Theme unten (`[data-theme="light"]`)
-     bekommt eine eigene, sanftere Überschreibung. */
+     App (`--color-bg-base`, seit Phase 25 Schritt 1 nahezu Schwarz)
+     kaum sichtbar. Dieselben Tailwind-Variablennamen, verstärkte Werte
+     für sichtbare Tiefe auf dunklem Grund — das helle Theme unten
+     (`[data-theme="light"]`) bekommt eine eigene, sanftere
+     Überschreibung. */
   --shadow-md: 0 6px 16px -4px rgb(0 0 0 / 45%), 0 2px 6px -2px rgb(0 0 0 / 35%);
   --shadow-lg: 0 12px 28px -6px rgb(0 0 0 / 50%), 0 4px 10px -4px rgb(0 0 0 / 35%);
   --shadow-xl: 0 24px 48px -10px rgb(0 0 0 / 55%), 0 8px 16px -6px rgb(0 0 0 / 40%);
+  /* Neue, oberste Stufe (Phase 25 Schritt 3, siehe DECISIONS.md,
+     aktuelles ADR) — bislang endete die Skala bei `-xl`, das reichte
+     für normale Paletten/Dialoge, aber nicht für Elemente, die sich
+     bewusst spürbar VOR allem anderen befinden sollen (ein gerade
+     gezogenes Element, der fokussierte/aktive Dialog über einem
+     bereits geöffneten Bereich) — spatial-UI-Prinzip "Tiefe über
+     echten Z-Versatz, nicht nur Deckkraft" statt einer weiteren, kaum
+     unterscheidbaren `-xl`-Wiederholung. */
+  --shadow-2xl: 0 32px 64px -12px rgb(0 0 0 / 60%), 0 12px 24px -8px rgb(0 0 0 / 45%);
 }
 
 /* Bewegungs-Tokens (Phase 18, ADR-0046) — bewusst außerhalb von
@@ -215,6 +267,7 @@ body {
   --shadow-md: 0 4px 10px -3px rgb(35 32 25 / 18%), 0 2px 4px -2px rgb(35 32 25 / 12%);
   --shadow-lg: 0 10px 22px -6px rgb(35 32 25 / 20%), 0 4px 8px -4px rgb(35 32 25 / 14%);
   --shadow-xl: 0 20px 38px -10px rgb(35 32 25 / 22%), 0 8px 14px -6px rgb(35 32 25 / 15%);
+  --shadow-2xl: 0 28px 52px -10px rgb(35 32 25 / 26%), 0 12px 22px -8px rgb(35 32 25 / 18%);
 }
 
 /* Barrierefreiheit (Phase 10 Schritt 6, siehe FEATURES.md UI-Anforderungen)

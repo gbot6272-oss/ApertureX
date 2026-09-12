@@ -186,12 +186,22 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
     <header className="apx-glass flex h-12 shrink-0 items-center gap-3 border-b border-[var(--glass-border)] px-4">
       <span className="shrink-0 font-semibold tracking-wide">Aperture X</span>
 
+      {/* Phase 25 Schritt 4 (siehe DECISIONS.md, aktuelles ADR):
+          einzige bewusst hervorgehobene Geste der Kopfzeile — Import
+          ist die häufigste Einstiegsaktion, sah aber bisher optisch
+          identisch zum daneben liegenden Such-Knopf aus (beide nur
+          `border-border bg-bg-panel`). Nutzt dieselbe Akzent-Tönung
+          wie "aktiv/ausgewählt"-Zustände anderswo in der App (z. B.
+          `ColorHarmonyWheel.tsx`s `border-accent bg-accent/10
+          text-accent`), statt eines neu erfundenen Vollton-Knopf-Stils
+          — konsistent mit der bestehenden Bildsprache, aber deutlich
+          von den umgebenden neutralen Knöpfen abgesetzt. */}
       <button
         type="button"
         data-tour="import"
         onClick={() => void handleImportClick()}
         disabled={importRunning}
-        className="shrink-0 rounded border border-border bg-bg-panel px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+        className="shrink-0 rounded border border-accent bg-accent/10 px-3 py-1 text-sm font-medium text-accent shadow-[var(--shadow-md)] transition-all duration-[var(--duration-fast)] hover:bg-accent/20 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
       >
         {t("header.importFolder")}
       </button>

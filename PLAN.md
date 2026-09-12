@@ -1208,8 +1208,23 @@ Bild nicht wirklich.
   (neue `LutTableCache`-Tests + Rundlauf-Test mit absichtlich leerer
   Tabelle), `cargo fmt`/`clippy -D warnings` sauber, `tsc -b`,
   `vitest run` (251/251), volle Playwright-Suite (142/142).
-- [ ] 0. 5-Schritt-Premium-UI-Plan ausarbeiten, präsentieren, direkt
-  ausführen (noch offen)
+- [x] 0. 5-Schritt-Premium-UI-Plan ausgearbeitet (real recherchiert über
+  `.claude/skills/ui-ux-pro-max` + eigene `index.css`-Befunde, siehe
+  `DECISIONS.md` ADR-0054), präsentiert und direkt ausgeführt (kein
+  Rückfrage-Stopp, Nutzerwunsch): 1. eigene Schrift (`@fontsource/inter`
+  statt `system-ui`) + Laufweiten-Feinschliff für Überschriften, 2.
+  echte Farbtiefe (`--color-bg-*` von `#1a1a1a`-Bereich auf
+  `#050505`-Bereich, vorher "Grau-auf-Grau" innerhalb von 16 RGB-Werten),
+  3. neue `--shadow-2xl`-Stufe auf `Dialog`/`Sheet` (alle 25+ darauf
+  aufbauenden Dialoge/Sheets in einem Schritt), 4. Import-Knopf in
+  `Header.tsx` bekommt dieselbe Akzent-Tönung, die anderswo schon für
+  "aktiv" steht (vorher optisch identisch zum Such-Knopf daneben), 5.
+  `StatsCacheDialog.tsx`-Statistik-Dashboard als Bento-Kachelraster
+  statt flacher `<p>`-Liste (bewusst NICHT am virtualisierten
+  Foto-Raster, siehe ADR-0054 für die Risikoabwägung). Reale
+  Playwright-Screenshot-Verifikation (Kopfzeile, Import-Hover,
+  Statistik-Dashboard). Verifiziert: `tsc -b`, `vite build`, `vitest
+  run` (251/251), volle Playwright-Suite (142/142).
 
 ## Aktuelle Phase: Phase 24 — Transparenz, Karten-Bugfixes, zehn neue Animationen, mehr Übersicht
 

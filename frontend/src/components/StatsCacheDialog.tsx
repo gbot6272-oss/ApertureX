@@ -39,21 +39,32 @@ export function StatsCacheDialog({ open, onClose }: StatsCacheDialogProps) {
         <h2 className="mb-3 text-sm font-semibold text-text-primary">{t("statsCacheDialog.title")}</h2>
 
         {stats && (
-          <div className="mb-4 flex flex-col gap-2 text-xs">
-            <p>
-              <span className="text-text-secondary">{t("statsCacheDialog.totalPhotos")}</span> {stats.total_photos.toLocaleString(intlLocale)}
-            </p>
-            <p>
-              <span className="text-text-secondary">{t("statsCacheDialog.totalSize")}</span> {formatBytes(stats.total_file_size)}
-            </p>
+          // Phase 25 Schritt 5 (siehe DECISIONS.md, aktuelles ADR):
+          // Bento-artiges Kachelraster statt einer flachen `<p>`-Liste
+          // — unterschiedlich große Karten (Gesamtzahl als große
+          // "Hero"-Kachel, Kamera-/Bewertungslisten breiter, Größe/
+          // Zeitraum schmal), statt einer gleichförmigen Textspalte.
+          // Textinhalt je Kachel unverändert (`name: count` etc.) —
+          // reine Neuanordnung, keine Bedeutungsänderung.
+          <div className="mb-4 grid grid-cols-2 gap-3 text-xs">
+            <div className="col-span-2 rounded-xl border border-border bg-bg-panel p-4">
+              <p className="text-text-secondary">{t("statsCacheDialog.totalPhotos")}</p>
+              <p className="mt-1 text-2xl font-semibold tracking-tight text-text-primary">{stats.total_photos.toLocaleString(intlLocale)}</p>
+            </div>
+            <div className="rounded-xl border border-border bg-bg-panel p-3">
+              <p className="text-text-secondary">{t("statsCacheDialog.totalSize")}</p>
+              <p className="mt-1 font-medium text-text-primary">{formatBytes(stats.total_file_size)}</p>
+            </div>
             {stats.earliest_captured_at && stats.latest_captured_at && (
-              <p>
-                <span className="text-text-secondary">{t("statsCacheDialog.dateRange")}</span> {new Date(stats.earliest_captured_at).toLocaleDateString(intlLocale)} –{" "}
-                {new Date(stats.latest_captured_at).toLocaleDateString(intlLocale)}
-              </p>
+              <div className="rounded-xl border border-border bg-bg-panel p-3">
+                <p className="text-text-secondary">{t("statsCacheDialog.dateRange")}</p>
+                <p className="mt-1 font-medium text-text-primary">
+                  {new Date(stats.earliest_captured_at).toLocaleDateString(intlLocale)} – {new Date(stats.latest_captured_at).toLocaleDateString(intlLocale)}
+                </p>
+              </div>
             )}
             {stats.top_camera_models.length > 0 && (
-              <div>
+              <div className="col-span-2 rounded-xl border border-border bg-bg-panel p-3">
                 <p className="mb-1 font-semibold text-text-secondary">{t("statsCacheDialog.cameraModels")}</p>
                 <ul>
                   {stats.top_camera_models.map(([name, count]) => (
@@ -65,7 +76,7 @@ export function StatsCacheDialog({ open, onClose }: StatsCacheDialogProps) {
               </div>
             )}
             {stats.rating_distribution.some(([, count]) => count > 0) && (
-              <div>
+              <div className="col-span-2 rounded-xl border border-border bg-bg-panel p-3">
                 <p className="mb-1 font-semibold text-text-secondary">{t("statsCacheDialog.ratingDistribution")}</p>
                 <ul>
                   {stats.rating_distribution.map(([rating, count]) => (

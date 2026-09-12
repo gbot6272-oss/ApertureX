@@ -110,7 +110,7 @@ export function Sheet({
         aria-modal="true"
         aria-label={label}
         onClick={(event) => event.stopPropagation()}
-        className={`apx-glass-strong h-full w-full overflow-y-auto border-l border-[var(--glass-border)] shadow-xl ${className}`}
+        className={`apx-glass-strong h-full w-full overflow-y-auto border-l border-[var(--glass-border)] shadow-2xl ${className}`}
         style={reducedMotion ? undefined : { transform: entered ? undefined : "translateX(2rem)" }}
       >
         {children}

@@ -5799,3 +5799,91 @@ rendert einmal mit voller Tabelle, einmal mit absichtlich leerer
 Tabelle + `id`, beide Ergebnisse müssen byte-identisch sein),
 `cargo fmt`/`cargo clippy -D warnings` sauber für `apx-pipeline`/
 `apx-app`, `tsc -b` sauber.
+
+## ADR-0054: Phase 25 — 5-Schritt-Premium-UI-Plan (Typografie,
+Farbtiefe, Z-Tiefe, Hover-Tiers, Bento-Übersicht)
+
+Nutzerwunsch (verbatim, Ausschnitt): "ui sieht immer noch nicht
+premium genug aus arbeite einen 5 schritt plan […] aus, um die ganze
+ui noch durchdachter und premiummäßiger zu machen. präsentiere ihn mir
+und fang direkt mit der Ausführung an".
+
+**Recherche (real, nicht geraten):** über das bereits integrierte
+`.claude/skills/ui-ux-pro-max`-Skill echte, für genau dieses
+Produktgenre (dunkles professionelles Foto-/Kreativ-Werkzeug)
+recherchierte Referenzen gezogen (`--design-system`-Suche + gezielte
+`--domain`-Suchen zu `typography`/`style`/`color`/`gsap`), **kombiniert
+mit** einem echten Befund im eigenen `index.css`: `--font-sans` war
+bislang nur `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`
+(keine eigene Schrift — die App zeigt einfach, was das jeweilige
+Betriebssystem mitbringt) und `--color-bg-base/-raised/-panel` lagen
+alle innerhalb von 16 RGB-Werten (`#1a1a1a`/`#202020`/`#242424`) —
+genau die "Grau-auf-Grau"-Falle, vor der die Skill-Referenztabelle
+warnt. Eine gezogene, für "Photography Studio" recherchierte
+Referenzpalette (`#000000`/`#0C0C0C`/`#18181B`/`#27272A`) und die
+Schriftempfehlung "Modern Dark Cinema (Inter System)" (Inter,
+gewichts-/laufweitenpräzise, explizit für "dark, cinematic, technical,
+precision, premium, developer/high-end utility") passen beide direkt
+auf dieses Produkt.
+
+**Fünf Schritte, jeder gezielt auf einen real verifizierten Befund
+statt einer generischen Politur-Liste:**
+
+1. **Eigene Typografie statt `system-ui`.** `@fontsource/inter`
+   (selbst gehostet, siehe `THIRD_PARTY.md` — bewusst kein
+   `fonts.googleapis.com`-Laufzeit-Download, die App muss offline
+   funktionieren), nur `latin`/`latin-ext` × 400/500/600/700 (~100 KB
+   statt ~500 KB). `--font-sans` zeigt jetzt zuerst `"Inter"`.
+   Zusätzlich `--text-lg/-xl/-2xl--letter-spacing` (Tailwind-v4-
+   Theme-Overrides derselben Art wie die Radius-/Schatten-Skala aus
+   Phase 18) für engere, bewusst gesetzte Laufweite auf Überschriften
+   — ohne eine einzige Klassennamen-Änderung im gesamten Frontend.
+2. **Echte Farbtiefe statt Grau-auf-Grau.** `--color-bg-base/-raised/
+   -panel` von `#1a1a1a`/`#202020`/`#242424` auf `#050505`/`#0e0e0e`/
+   `#17171a` — deutlich näher an Schwarz, deutlich unterscheidbare
+   Stufen. `--color-border` von reinem Grau (`#333333`) auf einen
+   minimal wärmeren Ton (`#3a3733`). Hell-Theme/Kontrastmodus/
+   `--glass-*` unverändert (eigene, unabhängige Kaskaden-Ebenen).
+3. **Z-Tiefe konsequent statt dekorativ.** Neue oberste Schatten-Stufe
+   `--shadow-2xl` (dunkel UND hell) für Elemente, die sich bewusst vor
+   allem anderen befinden sollen — angewendet auf `components/ui/
+   Dialog.tsx`/`Sheet.tsx` (vorher `shadow-xl` wie jede normale Karte,
+   jetzt eine eigene, stärkere Stufe für alle 25+ darauf aufbauenden
+   Dialoge/Sheets in einem Schritt).
+4. **Hover-Bewegung nach Bedeutung, nicht mehr uniform.** Die
+   bestehende globale `[role="button"]:hover`-Regel (Phase 20) und die
+   Karten-Hover-Behandlung in `GridView.tsx`/`Filmstrip.tsx` (Phase
+   23) waren bereits gestuft vorhanden — der real verbliebene
+   Blindfleck war der Import-Knopf in `Header.tsx`: optisch identisch
+   zum direkt danebenliegenden Such-Knopf (`border-border bg-bg-panel`
+   für beide), obwohl Import die häufigste Einstiegsaktion ist.
+   Bekommt jetzt dieselbe Akzent-Tönung, die anderswo in der App schon
+   für "aktiv/ausgewählt" steht (`border-accent bg-accent/10
+   text-accent`, z. B. `ColorHarmonyWheel.tsx`) statt eines neu
+   erfundenen Vollton-Stils — konsistent mit der bestehenden
+   Bildsprache, aber deutlich von den umgebenden neutralen Knöpfen
+   abgesetzt.
+5. **Bento-artige Kacheln statt gleichförmiger Liste.** Bewusst NICHT
+   am virtualisierten Foto-Raster (`GridView.tsx`) angesetzt — echte
+   Asymmetrie in einem `@tanstack/react-virtual`-Raster mit fester
+   Zellgröße wäre ein eigenständiges, riskantes Vorhaben gegen die
+   dokumentierte 50.000-Foto-Performance-Garantie (`PHASE1_PROMPT.md`
+   Abschnitt 9), ohne dass ein Nutzerwunsch danach verlangt hätte.
+   Stattdessen am `StatsCacheDialog.tsx`-Statistik-Dashboard, bisher
+   eine flache `<p>`-Textliste: jetzt ein Kachelraster mit
+   unterschiedlichen Spannweiten (Foto-Gesamtzahl als große
+   "Hero"-Kachel mit großer Zahl, Größe/Zeitraum schmaler, Kamera-/
+   Bewertungslisten wieder breiter), `rounded-xl`, echte Karten statt
+   reinem Text — Textinhalt je Zeile unverändert (`name: count` etc.),
+   reine Neuanordnung.
+
+Reale visuelle Verifikation per Playwright-Screenshot (Kopfzeile,
+Import-Knopf-Hover, Statistik-Dashboard) — nicht nur Kompilieren,
+siehe dieselbe Disziplin wie ADR-0044.
+
+Verifiziert: `tsc -b`, `vite build` (bestätigt, dass die
+`@fontsource/inter`-CSS-`@import`s über Vite auflösen und nur die
+tatsächlich gebrauchten Subset-Dateien bündeln), `vitest run`
+(251/251), volle Playwright-Suite (142/142, insbesondere
+`library-views-flow.spec.ts` "Statistik-Dashboard zeigt die
+Foto-Gesamtzahl" weiterhin grün trotz der Kachel-Umstellung).

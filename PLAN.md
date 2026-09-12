@@ -1252,6 +1252,46 @@ Bild nicht wirklich.
   (142/142), Pixel-/`getComputedStyle`-Messung statt reinem
   Screenshot-Eyeballing.
 
+- [x] Nachtrag II: Liquid-Glass-Werte auf echte Nutzerkritik hin (mit
+  iOS-Control-Center-Referenzfoto) deutlich verstärkt — hellere,
+  durchsichtigere Tönung, `--glass-saturate` von 165 % auf 220 %,
+  `--glass-blur` von 26px auf 18px — UND die dahinterliegende
+  strukturelle Grenze real nachgewiesen statt nur vermutet: die
+  Kopfzeile lag im damaligen Layout NEBEN dem Fotobereich statt
+  darüber, konnte also unabhängig vom CSS-Wertetuning nie Farbe
+  durchscheinen lassen (siehe DECISIONS.md ADR-0055-Nachtrag für den
+  Vergleichstest). Verifiziert per eigens gebautem Vergleichs-
+  Screenshot (Dialog über knallbuntem Testverlauf), `tsc -b`, `vitest
+  run` (251/251), volle Playwright-Suite (142/142).
+
+- [x] Nachtrag III: die in Nachtrag II nur beschriebene strukturelle
+  Grenze tatsächlich aufgehoben, auf explizite Nutzerentscheidung
+  ("Ja, Kopfzeile als Overlay über den Fotos") — `Header.tsx` ist
+  jetzt `position: fixed` statt einer normalen Flex-Zeile, schwebt
+  also echt über dem Inhalt wie iOS Control Center über dem
+  Homescreen. Bewusst selektiv: der zentrale Inhaltsbereich
+  (Viewer/Karte/Personen/Video) reicht jetzt bis zum oberen Rand und
+  zeigt dadurch echte Fotofarbe durch die Kopfzeile; Raster/Übersicht
+  (mit `FilterBar`) bleiben unverändert — die Leiste hätte als
+  schwebendes Overlay eine variable Höhe (`flex-wrap`) bekommen, eine
+  verlässliche Kompensation für Sidebar/Presets/Metadaten-Panel wäre
+  damit nicht mehr statisch berechenbar gewesen. Dieselbe Tailwind-
+  v4-Kaskaden-Falle wie beim `z-index`-Fund in ADR-0055 traf hier
+  erneut zu (`.apx-glass`s unlayered `position: relative` schlug die
+  `fixed`-Utility-Klasse) — diesmal per spezifischerer Gegenregel
+  `header.apx-glass { position: fixed; }` gelöst statt per
+  `isolation`, weil der Wert selbst wirklich `fixed` sein musste.
+  Volle Playwright-Suite fing dabei real eine Regression
+  (`tat-flow.spec.ts`: Kopfzeile blockierte die jetzt unter ihr
+  liegende TAT-Werkzeugleiste) — behoben, indem alle betroffenen
+  Overlay-Kontrollen (`Viewer.tsx`, `MapView.tsx`, `GlobeView.tsx`,
+  `PeopleView.tsx`) um die neue Kopfzeilenhöhe nach unten versetzt
+  wurden. Siehe DECISIONS.md ADR-0055-Nachtrag III. Verifiziert:
+  `tsc -b`, `vitest run` (251/251), volle Playwright-Suite (142/142),
+  reale Playwright-Screenshots mit einem Testfarbverlauf hinter dem
+  Fotobereich (Beweis für echten Farbdurchschein) UND ohne (zeigt die
+  Rasteransicht bewusst unverändert).
+
 ## Aktuelle Phase: Phase 24 — Transparenz, Karten-Bugfixes, zehn neue Animationen, mehr Übersicht
 
 Nutzerwunsch: UI transparenter, Kartenbugs (fehlerhafte Anzeige, keine

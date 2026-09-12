@@ -42,7 +42,16 @@ export function FilterBar() {
   const hasActiveFilter = libraryResults !== null;
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-bg-raised px-3 py-2">
+    // Phase 25 Nachtrag III: eigenes `pt-12` statt der vorherigen
+    // symmetrischen `py-2` — dieselbe Begründung wie `ErrorBanner.tsx`s
+    // aktueller Moduldoku: die jetzt schwebende Kopfzeile (`Header.tsx`)
+    // nimmt keinen Platz im Dokumentfluss mehr ein, diese Leiste ist
+    // dadurch potenziell das oberste Flusselement und muss die 48px
+    // selbst zurückgewinnen. `PaletteFrame.tsx` lässt seine eigene
+    // Kopfzeilen-Kompensation genau in den Ansichten weg, in denen
+    // diese Leiste erscheint (Raster/Übersicht) — sie übernimmt die
+    // Kompensation hier stellvertretend für die ganze Zeile darunter.
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-bg-raised px-3 pt-12 pb-2">
       <input
         type="search"
         value={libraryQuery}

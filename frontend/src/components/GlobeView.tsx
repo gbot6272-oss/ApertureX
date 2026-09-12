@@ -317,7 +317,10 @@ export function GlobeView({ photos, onEnterMap }: GlobeViewProps) {
         role="img"
         aria-label={`Foto-Globus mit ${geotaggedCount} geotaggten Fotos — ziehen zum Drehen`}
       />
-      <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
+      {/* Phase 25 Nachtrag III: `top-16` statt `top-3` — dieselbe
+          Kopfzeilen-Überlagerung wie in `Viewer.tsx`s aktuellem
+          Kommentar, der Globus reicht jetzt bis an den oberen Rand. */}
+      <div className="pointer-events-none absolute inset-x-0 top-16 flex justify-center">
         <span className="rounded border border-border bg-bg-raised/80 px-3 py-1 text-xs text-text-secondary backdrop-blur-sm">
           {geotaggedCount} Foto{geotaggedCount === 1 ? "" : "s"} mit GPS · ziehen zum Drehen
         </span>

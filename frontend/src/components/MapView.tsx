@@ -294,7 +294,10 @@ export function MapView() {
   return (
     <div className="apx-map-mode-in relative flex-1 overflow-hidden">
       <div ref={containerRef} className="h-full w-full" />
-      <div className="apx-map-panel-in absolute right-3 top-3 z-[1000] flex flex-col gap-2 rounded border border-border bg-bg-raised p-2 text-xs shadow">
+      {/* Phase 25 Nachtrag III: `top-16` statt `top-3` — dieselbe
+          Kopfzeilen-Überlagerung wie in `Viewer.tsx`s aktuellem
+          Kommentar, die Karte reicht jetzt bis an den oberen Rand. */}
+      <div className="apx-map-panel-in absolute right-3 top-16 z-[1000] flex flex-col gap-2 rounded border border-border bg-bg-raised p-2 text-xs shadow">
         <div className="flex items-center justify-between gap-3">
           <span className="text-text-secondary">{geotaggedPhotos.length} Foto{geotaggedPhotos.length === 1 ? "" : "s"} mit GPS</span>
           <button type="button" onClick={() => setMapMode("globe")} className="rounded border border-border px-2 py-0.5 hover:border-accent">

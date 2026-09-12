@@ -183,7 +183,23 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
     // Einstellungen. Kein Knopf wurde entfernt oder hinter mehr als
     // einer zusätzlichen Ebene versteckt — nur die dauerhaft sichtbare
     // Knopfzahl sinkt drastisch.
-    <header className="apx-glass flex h-12 shrink-0 items-center gap-3 border-b border-[var(--glass-border)] px-4">
+    //
+    // Phase 25 Nachtrag III (siehe DECISIONS.md, aktuelles ADR): auf
+    // ausdrücklichen Nutzerwunsch ("Kopfzeile als Overlay über den
+    // Fotos") kein normales Flex-Zeilen-Element mehr, sondern eine
+    // schwebende, aus dem Dokumentfluss gelöste Überlagerung
+    // (`fixed inset-x-0 top-0`) — genau wie beim iOS Control Center
+    // liegt sie jetzt wirklich ÜBER dem Inhalt statt daneben, wodurch
+    // `backdrop-filter` echte Fotofarbe durchscheinen lassen kann statt
+    // nur der eigenen App-Hintergrundfarbe. `z-30` bewusst unter dem
+    // Overflow-Menü (`z-40`, siehe `ui/Menu.tsx`) und den
+    // Dialogen/Sheets (`z-50`), damit beide weiterhin über der
+    // Kopfzeile selbst erscheinen. Die Feinabstimmung, welche
+    // Geschwisterelemente diese neue 48px-Lücke kompensieren müssen
+    // (und welche bewusst NICHT, damit dort echte Fotofarbe
+    // durchscheint), sitzt in `App.tsx`, `FilterBar.tsx`,
+    // `ErrorBanner.tsx` und `PaletteFrame.tsx`.
+    <header className="apx-glass fixed inset-x-0 top-0 z-30 flex h-12 items-center gap-3 border-b border-[var(--glass-border)] px-4">
       <span className="shrink-0 font-semibold tracking-wide">Aperture X</span>
 
       {/* Phase 25 Schritt 4 (siehe DECISIONS.md, aktuelles ADR):

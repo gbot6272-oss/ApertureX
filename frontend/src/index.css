@@ -292,6 +292,25 @@
   box-shadow: var(--glass-edge-shadow);
 }
 
+/* Phase 25 Nachtrag III: dieselbe Kaskaden-Falle wie beim `z-index`-Fund
+   oben (Kommentar bei `.apx-glass`) — `Header.tsx` setzt `fixed` über
+   eine Tailwind-Utility-Klasse (`@layer utilities`, in Tailwind v4
+   gegenüber unlayered CSS wie dieser Datei grundsätzlich NACHRANGIG),
+   das gemeinsame `.apx-glass` oben setzt aber `position: relative`
+   unlayered — ohne diese gezielte Gegenregel würde die Kopfzeile
+   trotz `fixed inset-x-0 top-0` weiterhin `position: relative`
+   bleiben (real gemessen: `getComputedStyle(header).position` ergab
+   `"relative"` statt `"fixed"`, die Überlagerung über den Fotos
+   funktionierte dadurch überhaupt nicht). `header.apx-glass` hat
+   höhere Selektor-Spezifität (Element+Klasse) als `.apx-glass` allein
+   und gewinnt deshalb unabhängig von der Ebenen-/Reihenfolge-Frage —
+   dieselbe Lösung wie `isolation: isolate` dort, nur diesmal über
+   Spezifität statt eine Eigenschaft zu vermeiden, weil hier (anders
+   als bei `z-index`) der Wert selbst wirklich `fixed` sein MUSS. */
+header.apx-glass {
+  position: fixed;
+}
+
 /* "Liquid"-Knopf-Mechanik (Phase 25 Nachtrag, siehe DECISIONS.md,
    aktuelles ADR + PROMPTS.md Prompt 2s `LiquidButton`) — für die
    Hauptmenü-Fläche (Kopfzeile: Ansicht-Segmentgruppe, Import-Knopf):

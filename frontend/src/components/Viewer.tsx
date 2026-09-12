@@ -732,8 +732,17 @@ export function Viewer() {
           nicht leer), kann das nur das Smart-Preview-Fallback in
           `resolve_source_path` gewesen sein. Kein eigenes Backend-Signal
           nötig, siehe dessen Moduldoku. */}
+      {/* Phase 25 Nachtrag III: `top-16` statt `top-3` bei beiden
+          Overlays unten — die schwebende Kopfzeile (`Header.tsx`) nimmt
+          keinen Platz im Dokumentfluss mehr ein, dieser Viewer-Container
+          reicht deshalb jetzt bis an den oberen Bildschirmrand (Absicht:
+          echte Fotofarbe soll durch die Kopfzeile scheinen). Ohne diesen
+          Ausgleich lägen beide Overlays UNTER der Kopfzeile und wären
+          durch deren Klickfläche blockiert (real als Testregression
+          gefunden: `tat-flow.spec.ts` konnte den TAT-Knopf nicht mehr
+          klicken, `header intercepts pointer events`). */}
       {photo?.missing && drawSource && (
-        <div className="pointer-events-none absolute left-3 top-3 rounded bg-bg-raised/90 px-2 py-1 text-xs font-medium text-accent backdrop-blur">
+        <div className="pointer-events-none absolute left-3 top-16 rounded bg-bg-raised/90 px-2 py-1 text-xs font-medium text-accent backdrop-blur">
           Offline (Smart Preview)
         </div>
       )}
@@ -745,7 +754,7 @@ export function Viewer() {
         <div
           role="group"
           aria-label="Zielgerichtetes Anpassungswerkzeug"
-          className="absolute right-3 top-3 flex items-center gap-1 rounded bg-bg-raised/90 p-1 text-xs backdrop-blur"
+          className="absolute right-3 top-16 flex items-center gap-1 rounded bg-bg-raised/90 p-1 text-xs backdrop-blur"
           onClick={(event) => event.stopPropagation()}
           onMouseDown={(event) => event.stopPropagation()}
         >

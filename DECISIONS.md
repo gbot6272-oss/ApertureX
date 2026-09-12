@@ -6041,3 +6041,88 @@ hinter `<main>`, Dialog geöffnet) — deutlich sichtbarer Sättigungs-/
 Farbdurchschein-Sprung gegenüber dem Vorher-Screenshot, per Playwright-
 Screenshot bestätigt. `tsc -b`, `vite build`, `vitest run` (251/251),
 volle Playwright-Suite (142/142) weiterhin grün.
+
+### ADR-0055-Nachtrag III: Kopfzeile als echtes Overlay über den Fotos
+
+Auf explizite Nutzerentscheidung (`AskUserQuestion`: "Ja, Kopfzeile als
+Overlay über den Fotos") die oben unter Nachtrag II dokumentierte
+strukturelle Grenze tatsächlich aufgehoben — nicht nur beschrieben.
+Kern: `Header.tsx` ist keine normale Flex-Zeile im Dokumentfluss mehr,
+sondern `position: fixed; inset-x-0; top-0; z-30` — dieselbe
+Technik wie iOS Control Center, das über dem Homescreen-Hintergrund
+schwebt statt eine eigene Zeile daneben zu sein.
+
+**Kaskaden-Falle (zweites Mal in dieser Phase, gleiche Ursache wie
+`z-index` bei Nachtrag/ADR-0055):** `.apx-glass` setzt unlayered
+`position: relative` (für die `::before`/`::after`-Ebenen nötig) —
+das schlägt die `fixed`-Tailwind-Utility-Klasse auf demselben Element
+IMMER, unabhängig von der Reihenfolge im Quelltext (Tailwind v4s
+`@layer utilities` ist gegenüber unlayered CSS strukturell
+nachrangig). Real gemessen: `getComputedStyle(header).position` ergab
+trotz der `fixed`-Klasse weiterhin `"relative"`. Diesmal nicht über
+`isolation` umgangen (der Wert MUSS wirklich `fixed` sein), sondern
+über eine gezielte, spezifischere Gegenregel `header.apx-glass {
+position: fixed; }` in `index.css` — Element+Klasse-Selektor schlägt
+die reine Klasse `.apx-glass` unabhängig von der Ebenenfrage.
+
+**Wer die freiwerdende 48px-Lücke zurückgewinnt und wer nicht (bewusst
+selektiv, nicht pauschal):**
+- `ErrorBanner.tsx`/`FilterBar.tsx`: eigenes `pt-12`/`pt-16` direkt am
+  jeweils selbst gerenderten Element (beide rendern bedingt — kein
+  Geisterabstand, wenn inaktiv).
+- `PaletteFrame.tsx` (gemeinsame Basis von Sidebar/Presets/Metadaten/
+  Entwickeln/Masken-Panel): `pt-12` an der Wurzel, aber NUR wenn
+  `centerView` NICHT `grid`/`overview` ist — in diesen zwei Ansichten
+  hat `FilterBar.tsx` die Lücke bereits durch ihre eigene Position vor
+  der Zeile zurückgewonnen; ein zusätzliches `pt-12` an den Paletten
+  wäre eine doppelte, zu große Lücke gewesen (Ursache/Wirkung real per
+  Screenshot verglichen, bevor die Bedingung eingebaut wurde).
+- Der zentrale Inhaltsbereich (`App.tsx`s `key={centerView}`-Wrapper um
+  GridView/Viewer/MapView/PeopleView/VideoPlayer) bekommt **bewusst
+  keine** Kompensation — er reicht jetzt bis `y=0`, das ist der ganze
+  Sinn der Änderung: echte Fotofarbe soll durch die Kopfzeile
+  scheinen. Für `grid`/`overview` bleibt der sichtbare Effekt dadurch
+  unverändert null (FilterBar blockiert strukturell weiterhin den
+  Weg dorthin — akzeptierter, bewusster Kompromiss, s. u.), für
+  `viewer`/`map`/`people`/`video` (keine FilterBar) ist der Effekt ab
+  sofort real vorhanden.
+
+**Gefundene und behobene Regression (volle Playwright-Suite, nicht nur
+Kompilieren, hat sie real gefangen):** `tat-flow.spec.ts` schlug fehl
+— "header intercepts pointer events" beim Klick auf den TAT-Knopf.
+Ursache: mehrere absolut positionierte Overlay-Kontrollen in
+`Viewer.tsx` (Offline-Badge, Zielgerichtetes-Anpassungswerkzeug-
+Leiste), `MapView.tsx` (Kartensteuerung) und `GlobeView.tsx`
+(Fotoanzahl-Hinweis) waren mit `top-3` relativ zum jeweiligen
+Container positioniert — dieser Container reicht jetzt bis `y=0`,
+die Overlays lagen dadurch buchstäblich unter der neuen, schwebenden
+Kopfzeile und wurden von deren Klickfläche blockiert. Auf `top-16`
+angehoben (48px Kopfzeile + Luft). `PeopleView.tsx`s eigenes
+`<main>` (in-Fluss-Inhalt, kein absolutes Overlay) bekam statt `p-4`
+ein asymmetrisches `pt-16`/`px-4`/`pb-4` — die zusätzliche Innenhöhe
+gehört zum scrollbaren Bereich, verschwindet beim Herunterscrollen
+also wieder (dasselbe Prinzip wie bei `FilterBar.tsx`).
+
+**Bewusst nicht angetastet:** Raster-/Übersichtsansicht (`FilterBar`
+bleibt eine normale, nicht schwebende Zeile) — ein Umbau auch dieser
+Leiste zu einem schwebenden Overlay hätte ihre Höhe variabel gemacht
+(`flex-wrap`, bricht bei schmalem Fenster auf mehrere Zeilen um), eine
+verlässliche Kompensationshöhe für die Paletten darunter wäre damit
+nicht mehr statisch berechenbar gewesen — außerhalb des vom Nutzer
+konkret verlangten Umfangs ("Kopfzeile als Overlay über den Fotos"),
+deshalb hier bewusst begrenzt statt spekulativ mit ausgebaut.
+
+**Reale visuelle Verifikation** (nicht nur Kompilieren/Tests, siehe
+ADR-0044-Disziplin): eigens gebauter Playwright-Test mit echten
+Katalog-Fixtures (Ordner+Foto über `installTauriMock`), `boundingBox`/
+`getComputedStyle` bestätigen `position: fixed`; Screenshot mit einem
+knallbunten Testverlauf hinter `<main>` in der Einzelbild-Ansicht
+(keine `FilterBar`) zeigt deutlich sichtbare, durch die Kopfzeile
+gebrochene Farbe — Screenshot derselben Aktion in der Rasteransicht
+(mit `FilterBar`) zeigt bewusst KEINE Veränderung gegenüber vorher
+(Sidebar/FilterBar/Raster exakt an ihrer alten Position). Beide
+Screenshots dem Nutzer geschickt.
+
+`tsc -b`: sauber. `vitest run`: 251/251. Volle Playwright-Suite:
+142/142 (inklusive der zunächst gefundenen und behobenen
+`tat-flow.spec.ts`-Regression).

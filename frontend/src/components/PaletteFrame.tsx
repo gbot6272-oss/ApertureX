@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { DURATION_BASE_MS, EASE_OUT, usePrefersReducedMotion } from "../lib/motion";
 import { playCue } from "../lib/sound";
+import { useAppStore } from "../store";
 import { useWorkspacePanel } from "../lib/workspaceLayout";
 
 interface PaletteFrameProps {
@@ -37,9 +38,23 @@ const COLLAPSED_WIDTH = 36;
  * neue Glas-Optik dadurch automatisch, ohne selbst `bg-bg-raised` zu
  * setzen; sie liefern nur noch Rand-/Abstands-/Lückenklassen über
  * `className`.
+ *
+ * Trägt seit Phase 25 Nachtrag III zusätzlich zentral die
+ * Kopfzeilen-Ausgleichslücke: `Header.tsx` schwebt inzwischen als
+ * `fixed`-Überlagerung außerhalb des Dokumentflusses (Nutzerwunsch
+ * "Kopfzeile als Overlay über den Fotos"), nimmt also keinen Platz
+ * mehr in der Zeile ein, in der diese Paletten stehen — ohne
+ * Ausgleich würden Sidebar/Presets/Metadaten/Entwickeln/Masken-Panel
+ * an ihrem oberen Rand unter der schwebenden Kopfzeile verschwinden.
+ * In den Ansichten mit `FilterBar` (Raster/Übersicht) übernimmt
+ * bereits `FilterBar.tsx` selbst diesen Ausgleich für die ganze Zeile
+ * darunter — hier `pt-12` deshalb NUR, wenn keine `FilterBar`
+ * angezeigt wird, sonst gäbe es eine doppelte, zu große Lücke.
  */
 export function PaletteFrame({ id, side, defaultWidth, label, className = "", children }: PaletteFrameProps) {
   const { width, collapsed, toggleCollapsed, setWidth } = useWorkspacePanel(id, defaultWidth);
+  const centerView = useAppStore((s) => s.centerView);
+  const filterBarCompensatesHeader = centerView === "grid" || centerView === "overview";
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
   const reducedMotion = usePrefersReducedMotion();
   // Während eines aktiven Zieh-Vorgangs darf keine CSS-`width`-Transition
@@ -79,7 +94,7 @@ export function PaletteFrame({ id, side, defaultWidth, label, className = "", ch
 
   return (
     <div
-      className={`relative flex shrink-0 overflow-hidden ${side === "right" ? "flex-row-reverse" : ""}`}
+      className={`relative flex shrink-0 overflow-hidden ${side === "right" ? "flex-row-reverse" : ""} ${filterBarCompensatesHeader ? "" : "pt-12"}`}
       style={{ width: collapsed ? COLLAPSED_WIDTH : width, transition }}
     >
       {collapsed ? (

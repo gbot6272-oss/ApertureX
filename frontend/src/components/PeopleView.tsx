@@ -75,7 +75,16 @@ export function PeopleView() {
   }
 
   return (
-    <main className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
+    // Phase 25 Nachtrag III: `pt-16` statt des ursprünglichen `p-4` oben
+    // — die schwebende Kopfzeile (`Header.tsx`) nimmt keinen Platz im
+    // Dokumentfluss mehr ein, dieser (`overflow-y-auto`) Container reicht
+    // jetzt bis an den oberen Bildschirmrand. Anders als bei `Viewer.tsx`s
+    // absolut positionierten Overlays sitzt die erste Überschrift hier
+    // normal im Textfluss — ohne echten `pt-16` läge sie dauerhaft unter
+    // der Kopfzeile, nicht nur beim Scrollen (die zusätzliche Innenhöhe
+    // gehört zum scrollbaren Bereich, verschwindet also beim Runterscrollen
+    // wieder, genau wie bei `FilterBar.tsx`/`ErrorBanner.tsx`).
+    <main className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 pt-16 pb-4">
       <section aria-label="Echte Personen-Wiedererkennung" className="rounded border border-border p-3">
         <h3 className="mb-2 text-sm font-semibold text-text-primary">Echte Personen-Wiedererkennung</h3>
 

@@ -6,10 +6,18 @@ import {
   base64ToByteArray,
   NEUTRAL_CREATIVE,
   NEUTRAL_LIGHT_OPTICS,
+  NEUTRAL_INTERACTIVE,
+  DEFAULT_POINT_LIGHT,
+  DEFAULT_DODGE_BURN_POINT,
+  DEFAULT_GRADIENT_STOPS,
   type CreativeAdjustments,
   type FilmLabProcess,
   type LightOpticsAdjustments,
   type MotionBlurKind,
+  type InteractiveAdjustments,
+  type PointLight,
+  type DodgeBurnPoint,
+  type GradientStop,
   BASIC_SLIDER_SPECS,
   buildEdlEnvelopeJson,
   clampSliderValue,
@@ -132,6 +140,19 @@ export function edlFromHistoryPosition(position: HistoryPositionDto): EdlPayload
 /** In welcher Reihenfolge Foto-ID `photoId` in der aktuell angezeigten
  * Liste gemeint ist, wenn ein Bereich per Umschalt-Klick markiert wird —
  * siehe [`selectActivePhotos`]. */
+/** Welches Bild-Werkzeug der Viewer gerade bedient (Phase 30, siehe
+ * `DECISIONS.md` ADR-0060). EIN Modus statt sieben Flags: zwei
+ * gleichzeitig aktive Bild-Werkzeuge waeren nicht bedienbar, weil beide
+ * dieselbe Bildflaeche brauchen. */
+export type ImageToolMode =
+  | "off"
+  | "lights"
+  | "spotlight"
+  | "dodgeBurn"
+  | "splitLight"
+  | "colorReplacePick"
+  | "horizon";
+
 export type SelectionMode = "replace" | "toggle" | "range";
 
 /** Liest aus einem Klick-Event, welcher Auswahlmodus gemeint ist (Strg/Cmd
@@ -1712,6 +1733,60 @@ interface LibraryBacklogSlice {
   /** Liest die Tonwertverteilung eines Referenzfotos und legt sie als
    * Ziel des Tonwert-Angleichs ab. */
   setToneMatchReference: (referencePhotoId: string) => Promise<void>;
+
+  // ---- Direkt am Bild (Phase 30, siehe DECISIONS.md ADR-0060) ------------
+  /** Welches Bild-Werkzeug gerade im Viewer bedient wird. `"off"` heisst:
+   * das Overlay ist unsichtbar und faengt keine Klicks ab. EIN Modus
+   * statt sieben Flags — zwei gleichzeitig aktive Bild-Werkzeuge waeren
+   * nicht bedienbar, weil beide dieselbe Bildflaeche brauchen. */
+  imageToolMode: ImageToolMode;
+  setImageToolMode: (mode: ImageToolMode) => void;
+  /** Index des gerade ausgewaehlten Eintrags der Listen-Werkzeuge
+   * (Lichter, Abwedel-Punkte, Verlaufs-Stuetzstellen). */
+  selectedLightIndex: number;
+  selectedDodgeBurnIndex: number;
+  selectedGradientStopIndex: number;
+  selectLightIndex: (index: number) => void;
+  selectDodgeBurnIndex: (index: number) => void;
+  selectGradientStopIndex: (index: number) => void;
+
+  /** Setzt einen beliebigen Zahlenregler der sieben Bild-Werkzeuge —
+   * dieselbe "EIN generischer Setter"-Begruendung wie bei
+   * `setCreativeField`/`setLightOpticsField`. */
+  setInteractiveField: (group: keyof InteractiveAdjustments, field: string, value: number) => void;
+  /** Setzt ein Wahrheitswert-Feld (z. B. `flipped`, `preserve_luma`). */
+  setInteractiveFlag: (group: keyof InteractiveAdjustments, field: string, value: boolean) => void;
+  /** Setzt eine Farbe (drei Werte `0..1`). */
+  setInteractiveColor: (group: keyof InteractiveAdjustments, field: string, rgb: number[]) => void;
+
+  addPointLight: (x?: number, y?: number) => void;
+  updatePointLight: (index: number, patch: Partial<PointLight>) => void;
+  removePointLight: (index: number) => void;
+
+  addDodgeBurnPoint: (x?: number, y?: number, amount?: number) => void;
+  updateDodgeBurnPoint: (index: number, patch: Partial<DodgeBurnPoint>) => void;
+  removeDodgeBurnPoint: (index: number) => void;
+
+  addGradientStop: (position?: number) => void;
+  updateGradientStop: (index: number, patch: Partial<GradientStop>) => void;
+  removeGradientStop: (index: number) => void;
+
+  /** Verschiebt den Mittelpunkt des Lichtkegels/der Split-Lighting-Punkte
+   * bzw. die Enden der Horizontlinie — das, was das Overlay beim Ziehen
+   * aufruft. `handle` benennt den angefassten Griff. */
+  moveImageHandle: (handle: string, x: number, y: number) => void;
+  /** Uebernimmt eine mit der Bild-Pipette gegriffene Quellfarbe fuer
+   * "Farbe ersetzen" (Werte `0..255`). */
+  setColorReplaceSourceAt: (r: number, g: number, b: number) => void;
+  /** Setzt alle sieben Werkzeuge auf neutral zurueck. */
+  resetInteractive: () => void;
+  /** Zonen-Falschfarben ueber dem Foto (Phase 30 Punkt 10) — macht
+   * sichtbar, welcher der zehn Zonenregler welchen Bildteil trifft. */
+  zoneOverlayEnabled: boolean;
+  toggleZoneOverlay: () => void;
+  /** Genau eine Zone hervorheben (`null` = alle zehn einfaerben). */
+  zoneOverlayHighlight: number | null;
+  setZoneOverlayHighlight: (zone: number | null) => void;
 
   /** Filter-/LUT-Bibliothek (Phase 16 Schritt 1, siehe `DECISIONS.md`
    * ADR-0043) — öffnet einen Datei-Dialog für eine `.cube`-Datei, legt
@@ -6324,6 +6399,263 @@ export const useAppStore = create<AppStore>()(
           state.toneMatchLoading = false;
         });
       }
+    },
+
+    imageToolMode: "off",
+
+    setImageToolMode: (mode) => {
+      set((state) => {
+        state.imageToolMode = mode;
+      });
+    },
+
+    selectedLightIndex: 0,
+    selectedDodgeBurnIndex: 0,
+    selectedGradientStopIndex: 0,
+
+    selectLightIndex: (index) => {
+      set((state) => {
+        state.selectedLightIndex = index;
+      });
+    },
+    selectDodgeBurnIndex: (index) => {
+      set((state) => {
+        state.selectedDodgeBurnIndex = index;
+      });
+    },
+    selectGradientStopIndex: (index) => {
+      set((state) => {
+        state.selectedGradientStopIndex = index;
+      });
+    },
+
+    setInteractiveField: (group, field, value) => {
+      set((state) => {
+        const target = state.developEdl.interactive[group] as unknown as Record<string, number>;
+        target[field] = value;
+      });
+    },
+
+    setInteractiveFlag: (group, field, value) => {
+      set((state) => {
+        const target = state.developEdl.interactive[group] as unknown as Record<string, boolean>;
+        target[field] = value;
+      });
+      void get().commitDevelopEdit("Bild-Werkzeug geändert");
+    },
+
+    setInteractiveColor: (group, field, rgb) => {
+      set((state) => {
+        const target = state.developEdl.interactive[group] as unknown as Record<string, number[]>;
+        target[field] = [...rgb];
+      });
+    },
+
+    addPointLight: (x, y) => {
+      set((state) => {
+        const lights = state.developEdl.interactive.point_lights;
+        lights.lights.push({ ...DEFAULT_POINT_LIGHT, x: x ?? 0.5, y: y ?? 0.5 });
+        state.selectedLightIndex = lights.lights.length - 1;
+        // Ohne Gesamtstaerke bliebe das neue Licht unsichtbar — der
+        // Nutzer haette geklickt und nichts gesehen.
+        if (lights.amount === 0) lights.amount = 1;
+      });
+      void get().commitDevelopEdit("Licht gesetzt");
+    },
+
+    updatePointLight: (index, patch) => {
+      set((state) => {
+        const light = state.developEdl.interactive.point_lights.lights[index];
+        if (light) Object.assign(light, patch);
+      });
+    },
+
+    removePointLight: (index) => {
+      set((state) => {
+        state.developEdl.interactive.point_lights.lights.splice(index, 1);
+        state.selectedLightIndex = Math.max(0, index - 1);
+      });
+      void get().commitDevelopEdit("Licht entfernt");
+    },
+
+    addDodgeBurnPoint: (x, y, amount) => {
+      set((state) => {
+        const tool = state.developEdl.interactive.dodge_burn;
+        tool.points.push({
+          ...DEFAULT_DODGE_BURN_POINT,
+          x: x ?? 0.5,
+          y: y ?? 0.5,
+          amount: amount ?? DEFAULT_DODGE_BURN_POINT.amount,
+        });
+        state.selectedDodgeBurnIndex = tool.points.length - 1;
+        if (tool.amount === 0) tool.amount = 1;
+      });
+      void get().commitDevelopEdit("Punkt gesetzt");
+    },
+
+    updateDodgeBurnPoint: (index, patch) => {
+      set((state) => {
+        const point = state.developEdl.interactive.dodge_burn.points[index];
+        if (point) Object.assign(point, patch);
+      });
+    },
+
+    removeDodgeBurnPoint: (index) => {
+      set((state) => {
+        state.developEdl.interactive.dodge_burn.points.splice(index, 1);
+        state.selectedDodgeBurnIndex = Math.max(0, index - 1);
+      });
+      void get().commitDevelopEdit("Punkt entfernt");
+    },
+
+    addGradientStop: (position) => {
+      set((state) => {
+        const ramp = state.developEdl.interactive.gradient_ramp;
+        if (ramp.stops.length === 0) {
+          // Erster Griff ans Verlaufsband: mit einem brauchbaren Verlauf
+          // starten statt mit einer einzelnen Farbe, aus der sich nichts
+          // ergibt.
+          ramp.stops = structuredClone(DEFAULT_GRADIENT_STOPS);
+          ramp.amount = ramp.amount || 1;
+          state.selectedGradientStopIndex = 0;
+          return;
+        }
+        const pos = position ?? 0.5;
+        // Startfarbe ist die Farbe, die der Verlauf an dieser Stelle
+        // ohnehin schon hat — die neue Stuetzstelle veraendert das Bild
+        // dadurch zunaechst nicht, sie macht es nur bearbeitbar.
+        const sorted = [...ramp.stops].sort((a, b) => a.position - b.position);
+        const first = sorted[0];
+        const last = sorted[sorted.length - 1];
+        if (!first || !last) return;
+        const after = sorted.find((stop) => stop.position >= pos) ?? last;
+        const before = [...sorted].reverse().find((stop) => stop.position <= pos) ?? first;
+        const span = Math.max(1e-6, after.position - before.position);
+        const k = Math.min(1, Math.max(0, (pos - before.position) / span));
+        ramp.stops.push({
+          position: pos,
+          color_rgb: before.color_rgb.map((c, i) => c + ((after.color_rgb[i] ?? c) - c) * k),
+        });
+        state.selectedGradientStopIndex = ramp.stops.length - 1;
+        if (ramp.amount === 0) ramp.amount = 1;
+      });
+      void get().commitDevelopEdit("Stützstelle hinzugefügt");
+    },
+
+    updateGradientStop: (index, patch) => {
+      set((state) => {
+        const stop = state.developEdl.interactive.gradient_ramp.stops[index];
+        if (stop) Object.assign(stop, patch);
+      });
+    },
+
+    removeGradientStop: (index) => {
+      set((state) => {
+        const ramp = state.developEdl.interactive.gradient_ramp;
+        // Unter zwei Stuetzstellen gibt es keinen Verlauf mehr — dann
+        // lieber das ganze Werkzeug abschalten als einen stillen No-Op
+        // stehen lassen.
+        ramp.stops.splice(index, 1);
+        if (ramp.stops.length < 2) ramp.amount = 0;
+        state.selectedGradientStopIndex = Math.max(0, index - 1);
+      });
+      void get().commitDevelopEdit("Stützstelle entfernt");
+    },
+
+    moveImageHandle: (handle, x, y) => {
+      set((state) => {
+        const tools = state.developEdl.interactive;
+        switch (handle) {
+          case "spotlight":
+            tools.spotlight.cx = x;
+            tools.spotlight.cy = y;
+            break;
+          case "splitA":
+            tools.split_light.ax = x;
+            tools.split_light.ay = y;
+            break;
+          case "splitB":
+            tools.split_light.bx = x;
+            tools.split_light.by = y;
+            break;
+          case "horizon1":
+            tools.horizon_grad.x1 = x;
+            tools.horizon_grad.y1 = y;
+            break;
+          case "horizon2":
+            tools.horizon_grad.x2 = x;
+            tools.horizon_grad.y2 = y;
+            break;
+          default: {
+            // `light:3` / `dodge:1` — Listeneintraege tragen ihren Index
+            // im Griffnamen, damit das Overlay keine zweite Zuordnung
+            // fuehren muss.
+            const [kind, raw] = handle.split(":");
+            const index = Number(raw);
+            if (!Number.isFinite(index)) break;
+            if (kind === "light") {
+              const light = tools.point_lights.lights[index];
+              if (light) {
+                light.x = x;
+                light.y = y;
+              }
+            } else if (kind === "dodge") {
+              const point = tools.dodge_burn.points[index];
+              if (point) {
+                point.x = x;
+                point.y = y;
+              }
+            }
+          }
+        }
+      });
+    },
+
+    setColorReplaceSourceAt: (r, g, b) => {
+      set((state) => {
+        const tool = state.developEdl.interactive.color_replace;
+        tool.from_rgb = [r / 255, g / 255, b / 255];
+        tool.has_source = true;
+        if (tool.amount === 0) tool.amount = 1;
+        // Zielfarbe erstmalig auf die Quellfarbe setzen: der Nutzer
+        // sieht dann zunaechst KEINE Aenderung und dreht selbst am
+        // Farbwaehler — besser als ein willkuerlicher Farbsprung.
+        if (!state.developEdl.interactive.color_replace.to_rgb.some((c, i) => c !== tool.from_rgb[i])) {
+          tool.to_rgb = [...tool.from_rgb];
+        }
+        state.imageToolMode = "off";
+      });
+      void get().commitDevelopEdit("Quellfarbe gegriffen");
+    },
+
+    zoneOverlayEnabled: false,
+
+    toggleZoneOverlay: () => {
+      set((state) => {
+        state.zoneOverlayEnabled = !state.zoneOverlayEnabled;
+      });
+    },
+
+    zoneOverlayHighlight: null,
+
+    setZoneOverlayHighlight: (zone) => {
+      set((state) => {
+        state.zoneOverlayHighlight = zone;
+        // Eine Zone auszuwaehlen, ohne die Ueberlagerung zu sehen, waere
+        // folgenlos — der Klick schaltet sie deshalb gleich mit ein.
+        if (zone !== null) state.zoneOverlayEnabled = true;
+      });
+    },
+
+    resetInteractive: () => {
+      set((state) => {
+        state.developEdl.interactive = structuredClone(NEUTRAL_INTERACTIVE);
+        state.imageToolMode = "off";
+        state.selectedLightIndex = 0;
+        state.selectedDodgeBurnIndex = 0;
+        state.selectedGradientStopIndex = 0;
+      });
+      void get().commitDevelopEdit("Bild-Werkzeuge zurückgesetzt");
     },
 
     setVirtualApertureAmount: (value) => {

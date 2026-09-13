@@ -6701,3 +6701,35 @@ Bild-Werkzeug, braucht aber einen Homographie-Eingriff in die
 Geometriestufe (die die Bildgröße ändert) statt einer Farbrechnung auf
 fester Größe — ein eigener, deutlich riskanterer Umbau. Lieber
 ausgelassen als halb gebaut.
+
+### Der Fehler, den die eigene Abstraktion trotzdem nicht verhindert hat
+
+Das gemeinsame Overlay sollte genau verhindern, dass dieselbe
+Umrechnung mehrfach leicht unterschiedlich falsch gemacht wird. Beim
+ersten e2e-Lauf landete ein Klick in die untere Bildhälfte trotzdem bei
+`y = 0`.
+
+Ursache: `screenToNormalized` erwartet **Container**-Koordinaten und
+zieht den Bildursprung selbst ab — das Overlay reichte ihm aber bereits
+**bild**-relative Koordinaten aus seinem eigenen
+`getBoundingClientRect()`. Der Ursprung wurde also zweimal abgezogen.
+In x fiel das gar nicht auf, weil das Testbild seitlich anliegt und
+`origin.x` dort schlicht 0 ist; nur die vertikale Letterbox machte den
+Fehler sichtbar.
+
+Zwei Lehren, beide festgehalten: eine Umrechnung an einer Stelle zu
+bündeln hilft nur, wenn auch ihr **Bezugssystem** dokumentiert ist —
+das steht jetzt im Kommentar an der Aufrufstelle. Und eine
+Koordinatenrechnung braucht einen Test mit einem Bild, das **nicht**
+bündig anliegt: bei `origin = (0, 0)` sind erstaunlich viele falsche
+Formeln zufällig richtig.
+
+Verifiziert: 10 neue Rust-Unit-Tests in `stages::interactive` (darunter
+einer, der dieselbe Lichtsetzung in 32 und 128 Pixeln rendert und
+vergleicht, und einer, der die byte-genaue Unversehrtheit des nicht
+getroffenen Bildteils bei „Farbe ersetzen" prüft), 12 neue Vitest-Fälle
+für Overlay-Mathematik und Zoneneinteilung, ein neuer e2e-Test mit sechs
+Fällen. `cargo fmt`/`clippy --workspace --all-targets` ohne Warnung,
+`cargo test --workspace` grün (apx-pipeline 300/300), `tsc -b`,
+`vitest run` 269/269, volle Playwright-Suite **155/155** mit real
+geprüftem Exit-Code (`PLAYWRIGHT_EXIT=0`).

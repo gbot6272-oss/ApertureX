@@ -88,6 +88,13 @@ export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [
   // und `mergeEdlSubset` unten, Begruendung in ADR-0059.
   "creative",
   "light_optics",
+  // Phase 30: ohne jede Sonderbehandlung preset-faehig — anders als
+  // `creative`/`light_optics` traegt keines der sieben Werkzeuge eine
+  // fuer ein Foto berechnete Karte. Ihre Geometrie ist in normierten
+  // Bildkoordinaten angegeben, ein Licht bei (0,3 | 0,7) sitzt auf
+  // jedem Foto der Serie an derselben relativen Stelle. Deshalb steht
+  // "interactive" auch NICHT in `PHOTO_SPECIFIC_MAP_FIELDS`.
+  "interactive",
 ];
 
 /** Die Felder, die eine fuer GENAU EIN Foto berechnete Karte tragen —
@@ -184,6 +191,7 @@ export const PRESET_SECTION_LABELS: Record<PresetSectionKey, string> = {
   // werden (siehe `PHOTO_SPECIFIC_MAP_FIELDS` oben, ADR-0059).
   creative: "Kreativ-Werkzeuge",
   light_optics: "Licht & Optik",
+  interactive: "Am Bild",
 };
 
 /** Die eigentliche gespeicherte EDL-Teilmenge — für `apx-catalog`/

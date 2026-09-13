@@ -18,6 +18,7 @@ import {
 } from "../lib/edl";
 import { formatShutter } from "../lib/format";
 import { buildClippingOverlay } from "../lib/histogram";
+import { buildZoneOverlay } from "../lib/zoneOverlay";
 import { computeMaskPinPosition } from "../lib/maskPins";
 import { matchesBinding } from "../lib/keybindings";
 import { imageUrl, previewUrl } from "../lib/media";
@@ -35,6 +36,12 @@ import { QuadRenderer } from "../lib/webgl";
 import { useAppStore, selectCurrentPhotoAiProcessing } from "../store";
 import { BeforeAfterView } from "./BeforeAfterView";
 import { ContentAwareMoveOverlay } from "./ContentAwareMoveOverlay";
+import {
+  ImageToolOverlay,
+  type OverlayEllipse,
+  type OverlayHandle,
+  type OverlayLine,
+} from "./ImageToolOverlay";
 import { CropOverlay } from "./CropOverlay";
 import { DevelopAnalysisPanel } from "./DevelopAnalysisPanel";
 import { LiquifyOverlay } from "./LiquifyOverlay";
@@ -121,6 +128,20 @@ export function Viewer() {
   const setVirtualApertureFocusPoint = useAppStore(
     (s) => s.setVirtualApertureFocusPoint,
   );
+  // ---- Direkt am Bild (Phase 30, siehe DECISIONS.md ADR-0060) ----------
+  const imageToolMode = useAppStore((s) => s.imageToolMode);
+  const interactive = useAppStore((s) => s.developEdl.interactive);
+  const selectedLightIndex = useAppStore((s) => s.selectedLightIndex);
+  const selectedDodgeBurnIndex = useAppStore((s) => s.selectedDodgeBurnIndex);
+  const moveImageHandle = useAppStore((s) => s.moveImageHandle);
+  const addPointLight = useAppStore((s) => s.addPointLight);
+  const addDodgeBurnPoint = useAppStore((s) => s.addDodgeBurnPoint);
+  const selectLightIndex = useAppStore((s) => s.selectLightIndex);
+  const selectDodgeBurnIndex = useAppStore((s) => s.selectDodgeBurnIndex);
+  const setColorReplaceSourceAt = useAppStore((s) => s.setColorReplaceSourceAt);
+  const zoneOverlayEnabled = useAppStore((s) => s.zoneOverlayEnabled);
+  const zoneOverlayHighlight = useAppStore((s) => s.zoneOverlayHighlight);
+
   const tatMode = useAppStore((s) => s.tatMode);
   const tatCurveChannel = useAppStore((s) => s.tatCurveChannel);
   const setTatMode = useAppStore((s) => s.setTatMode);
@@ -135,7 +156,12 @@ export function Viewer() {
     maskColorRangePickerActive ||
     maskColorMixerPickerActive ||
     aiMaskClickPickerActive ||
-    virtualApertureFocusPickerActive;
+    virtualApertureFocusPickerActive ||
+    // Die Quellfarben-Pipette von "Farbe ersetzen" (Phase 30) braucht
+    // genau dasselbe wie die uebrigen Pipetten: die Farbe unter dem
+    // Klick. Sie haengt sich deshalb an die bestehende Kette statt
+    // einen zweiten Abtastweg aufzumachen.
+    imageToolMode === "colorReplacePick";
   const geometryCropActive = useAppStore((s) => s.geometryCropActive);
   const setGeometryCrop = useAppStore((s) => s.setGeometryCrop);
   const contentAwareMoveActive = useAppStore((s) => s.contentAwareMoveActive);
@@ -839,6 +865,8 @@ export function Viewer() {
         // übrigen Bild-Klick-Werkzeuge oben keine Farbe, sondern nur die
         // normierte Klickposition als Startpunkt fürs Region-Growing.
         void addAiMask("ClickRegion", { x: imageX / imgW, y: imageY / imgH });
+      } else if (imageToolMode === "colorReplacePick") {
+        setColorReplaceSourceAt(r, g, b);
       } else if (virtualApertureFocusPickerActive) {
         // Fokuspunkt der "Virtuellen Blende" (Phase 14 Schritt 8) —
         // genau wie bei `ClickRegion` oben nur die normierte
@@ -856,6 +884,8 @@ export function Viewer() {
       addAiMask,
       virtualApertureFocusPickerActive,
       setVirtualApertureFocusPoint,
+      imageToolMode,
+      setColorReplaceSourceAt,
       selectedMask,
       developFrame,
       imgW,
@@ -909,6 +939,122 @@ export function Viewer() {
       0,
     );
   }, [clippingOverlayEnabled, developFrame]);
+
+  // ---- Bild-Werkzeuge: Griffe, Linien und Ellipsen (Phase 30) ---------
+  // Aus dem EDL abgeleitet, nicht doppelt gehalten: das Overlay ist eine
+  // reine Darstellung des Zustands, kein zweiter Speicherort.
+  const imageToolView = useMemo(
+    () => ({
+      origin: imageOrigin(containerSize.width, containerSize.height, imgW, imgH, effectiveScale, {
+        x: panX,
+        y: panY,
+      }),
+      scale: effectiveScale,
+      imgW,
+      imgH,
+    }),
+    [containerSize.width, containerSize.height, imgW, imgH, effectiveScale, panX, panY],
+  );
+
+  const imageToolGeometry = useMemo(() => {
+    const handles: OverlayHandle[] = [];
+    const lines: OverlayLine[] = [];
+    const ellipses: OverlayEllipse[] = [];
+    const css = (rgb: number[]) =>
+      `rgb(${rgb.map((c) => Math.round(Math.min(1, Math.max(0, c)) * 255)).join(" ")})`;
+
+    if (imageToolMode === "lights") {
+      interactive.point_lights.lights.forEach((light, index) => {
+        handles.push({
+          id: `light:${index}`,
+          x: light.x,
+          y: light.y,
+          radius: light.radius,
+          label: `Licht ${index + 1}`,
+          color: css(light.color_rgb),
+          selected: index === selectedLightIndex,
+        });
+      });
+    } else if (imageToolMode === "spotlight") {
+      const spot = interactive.spotlight;
+      ellipses.push({
+        id: "spotlight",
+        cx: spot.cx,
+        cy: spot.cy,
+        rx: spot.rx,
+        ry: spot.ry,
+        angleDeg: spot.angle_deg,
+      });
+      handles.push({
+        id: "spotlight",
+        x: spot.cx,
+        y: spot.cy,
+        label: "Lichtkegel verschieben",
+        color: css(spot.color_rgb),
+        selected: true,
+      });
+    } else if (imageToolMode === "dodgeBurn") {
+      interactive.dodge_burn.points.forEach((point, index) => {
+        handles.push({
+          id: `dodge:${index}`,
+          x: point.x,
+          y: point.y,
+          radius: point.radius,
+          label: `${point.amount >= 0 ? "Aufhellen" : "Abdunkeln"} ${index + 1}`,
+          // Weiß für Aufhellen, Schwarz für Abdunkeln — man sieht auf
+          // einen Blick, was ein Punkt tut.
+          color: point.amount >= 0 ? "rgb(255 255 255)" : "rgb(20 20 20)",
+          selected: index === selectedDodgeBurnIndex,
+        });
+      });
+    } else if (imageToolMode === "splitLight") {
+      const split = interactive.split_light;
+      lines.push({ id: "split", x1: split.ax, y1: split.ay, x2: split.bx, y2: split.by });
+      handles.push(
+        { id: "splitA", x: split.ax, y: split.ay, label: "Lichtfarbe A", color: css(split.color_a), selected: true },
+        { id: "splitB", x: split.bx, y: split.by, label: "Lichtfarbe B", color: css(split.color_b), selected: true },
+      );
+    } else if (imageToolMode === "horizon") {
+      const grad = interactive.horizon_grad;
+      lines.push({ id: "horizon", x1: grad.x1, y1: grad.y1, x2: grad.x2, y2: grad.y2, dashed: true });
+      handles.push(
+        { id: "horizon1", x: grad.x1, y: grad.y1, label: "Horizont links", selected: true },
+        { id: "horizon2", x: grad.x2, y: grad.y2, label: "Horizont rechts", selected: true },
+      );
+    }
+    return { handles, lines, ellipses };
+  }, [imageToolMode, interactive, selectedLightIndex, selectedDodgeBurnIndex]);
+
+  // Zonen-Falschfarben (Phase 30 Punkt 10) — dasselbe Muster wie das
+  // Clipping-Overlay darüber: aus `developFrame` einmal eine RGBA-Karte
+  // bauen und als eigenes Canvas über das Bild legen.
+  const zoneCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    const canvas = zoneCanvasRef.current;
+    if (!canvas || !zoneOverlayEnabled || !developFrame) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    canvas.width = developFrame.width;
+    canvas.height = developFrame.height;
+    const overlay = buildZoneOverlay(
+      developFrame.pixels,
+      developFrame.width,
+      developFrame.height,
+      zoneOverlayHighlight,
+    );
+    // Derselbe Cast und dieselbe Begründung wie beim Clipping-Overlay
+    // oben: `buildZoneOverlay` legt immer ein eigenes
+    // `Uint8ClampedArray` an, nie auf einem `SharedArrayBuffer`.
+    ctx.putImageData(
+      new ImageData(
+        overlay as Uint8ClampedArray<ArrayBuffer>,
+        developFrame.width,
+        developFrame.height,
+      ),
+      0,
+      0,
+    );
+  }, [zoneOverlayEnabled, zoneOverlayHighlight, developFrame]);
 
   const clipOverlayOrigin = imageOrigin(
     containerSize.width,
@@ -1216,6 +1362,58 @@ export function Viewer() {
             TAT: HSL
           </button>
         </div>
+      )}
+
+      {/* Bild-Werkzeuge (Phase 30, siehe DECISIONS.md ADR-0060) — EIN
+          Overlay fuer alle sieben; was ein Griff bedeutet, steckt in
+          seiner `id` und entscheidet der Store, nicht das Overlay. */}
+      {imageToolMode !== "off" && imageToolMode !== "colorReplacePick" && imgW > 0 && imgH > 0 && (
+        <ImageToolOverlay
+          view={imageToolView}
+          handles={imageToolGeometry.handles}
+          lines={imageToolGeometry.lines}
+          ellipses={imageToolGeometry.ellipses}
+          onMove={moveImageHandle}
+          onMoveEnd={() => void commitDevelopEdit("Bild-Werkzeug verschoben")}
+          onSelect={(id) => {
+            const [kind, raw] = id.split(":");
+            const index = Number(raw);
+            if (kind === "light" && Number.isFinite(index)) selectLightIndex(index);
+            if (kind === "dodge" && Number.isFinite(index)) selectDodgeBurnIndex(index);
+          }}
+          // Nur die beiden Listen-Werkzeuge legen per Klick etwas Neues
+          // an — bei den uebrigen waere ein Klick ins Bild folgenlos und
+          // das Overlay wuerde nur Zoom und Verschieben blockieren.
+          onAddAt={
+            imageToolMode === "lights"
+              ? (x, y) => addPointLight(x, y)
+              : imageToolMode === "dodgeBurn"
+                ? (x, y) => addDodgeBurnPoint(x, y)
+                : undefined
+          }
+          hint={
+            imageToolMode === "lights"
+              ? "Klicken setzt ein Licht, Griffe ziehen"
+              : imageToolMode === "dodgeBurn"
+                ? "Klicken setzt einen Punkt, Griffe ziehen"
+                : "Griffe ziehen"
+          }
+        />
+      )}
+
+      {zoneOverlayEnabled && developFrame && imgW > 0 && imgH > 0 && (
+        <canvas
+          ref={zoneCanvasRef}
+          data-testid="zone-overlay-canvas"
+          className="pointer-events-none absolute"
+          style={{
+            left: clipOverlayOrigin.x,
+            top: clipOverlayOrigin.y,
+            width: imgW * effectiveScale,
+            height: imgH * effectiveScale,
+            imageRendering: effectiveScale > 1 ? "pixelated" : "auto",
+          }}
+        />
       )}
 
       {clippingOverlayEnabled && developFrame && imgW > 0 && imgH > 0 && (

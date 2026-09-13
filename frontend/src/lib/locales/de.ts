@@ -10,6 +10,7 @@ export const de = {
   "developPanel.tab.details": "Details",
   "developPanel.tab.creative": "Kreativ",
   "developPanel.tab.lightOptics": "Licht & Optik",
+  "developPanel.tab.imageTools": "Am Bild",
   "developPanel.tab.history": "Verlauf & Werkzeuge",
   "developPanel.tabs.label": "Entwickeln-Bereiche",
   "masksPanel.tabs.label": "Masken-Bereiche",

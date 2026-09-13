@@ -1683,29 +1683,29 @@ nach `light_optics`, vor `lut_filter`. Alle Bild-Bedienelemente laufen
 über EINE neue Viewer-Komponente `ImageToolOverlay` (Punkt, Linie,
 Ellipse), die die Umrechnung Bild ↔ Bildschirm genau einmal kennt.
 
-- [ ] 1. **Lichtquellen**: beliebig viele Punktlichter, Pins im Bild
+- [x] 1. **Lichtquellen**: beliebig viele Punktlichter, Pins im Bild
   ziehbar, Liste zum Hinzufügen/Auswählen/Löschen.
-- [ ] 2. **Lichtkegel**: frei aufziehbare, drehbare Ellipse mit weichem
+- [x] 2. **Lichtkegel**: frei aufziehbare, drehbare Ellipse mit weichem
   Rand — innen aufhellen, außen abdunkeln.
-- [ ] 3. **Abwedeln/Nachbelichten**: frei gesetzte Punkte mit Radius und
+- [x] 3. **Abwedeln/Nachbelichten**: frei gesetzte Punkte mit Radius und
   Vorzeichen.
-- [ ] 4. **Split-Lighting**: zwei Bildpunkte mit je einer Lichtfarbe,
+- [x] 4. **Split-Lighting**: zwei Bildpunkte mit je einer Lichtfarbe,
   Einfärbung entlang der Achse dazwischen.
-- [ ] 5. **Farbe ersetzen**: Quellfarbe per Bild-Pipette, Zielfarbe aus
+- [x] 5. **Farbe ersetzen**: Quellfarbe per Bild-Pipette, Zielfarbe aus
   dem Farbwähler, Toleranz und Weichheit im Gegenfarbenraum gemessen.
-- [ ] 6. **Verlaufsband**: Luminanz auf einen Verlauf mit beliebig
+- [x] 6. **Verlaufsband**: Luminanz auf einen Verlauf mit beliebig
   vielen, frei verschiebbaren Stützstellen abbilden.
-- [ ] 7. **Horizont-Verlaufsfilter**: Grauverlaufsfilter, dessen Kante
+- [x] 7. **Horizont-Verlaufsfilter**: Grauverlaufsfilter, dessen Kante
   einer frei gezogenen Linie folgt.
-- [ ] 8. **3×3-Kanalmatrix-Gitter**: macht die Phase-28-Matrix erstmals
+- [x] 8. **3×3-Kanalmatrix-Gitter**: macht die Phase-28-Matrix erstmals
   erreichbar (bisher nur vier Ein-Klick-Vorgaben), mit Farbstreifen als
   Vorschau.
-- [ ] 9. **Blendenform-Vorschau**: Canvas, das den tatsächlichen
+- [x] 9. **Blendenform-Vorschau**: Canvas, das den tatsächlichen
   Bokeh-Kern zeichnet — die Phase-28-Regler waren ohne Rückmeldung
   Blindflug.
-- [ ] 10. **Zonen-Überlagerung**: die zehn Luminanzzonen als
+- [x] 10. **Zonen-Überlagerung**: die zehn Luminanzzonen als
   Falschfarben über dem Foto, Zonenstreifen klickbar.
-- [ ] 11. Verifikation: Rust-Unit-Tests je Werkzeug, Vitest für die
+- [x] 11. Verifikation: Rust-Unit-Tests je Werkzeug, Vitest für die
   Overlay-Mathematik, neuer e2e-Test, `cargo fmt`/`clippy`/`test
   --workspace`, `tsc -b`, `vitest run`, volle Playwright-Suite mit real
   geprüftem Exit-Code, dann Push.

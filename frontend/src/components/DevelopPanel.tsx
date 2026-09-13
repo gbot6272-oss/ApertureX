@@ -59,6 +59,7 @@ import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
 import { CreativePanel } from "./CreativePanel";
 import { LightOpticsPanel } from "./LightOpticsPanel";
+import { ImageToolsPanel } from "./ImageToolsPanel";
 import { DevelopSlider } from "./DevelopSlider";
 import { LensCalibrationDialog } from "./LensCalibrationDialog";
 import { CanvasExtendDialog } from "./CanvasExtendDialog";
@@ -217,7 +218,14 @@ const WHITE_BALANCE_KEYS = new Set(["temp_shift_kelvin", "tint_shift"]);
  * geteilt. `"light"` ist der Standard, damit die
  * Grundeinstellungen-Regler wie bisher ohne Klick sichtbar sind.
  */
-type DevelopTabId = "light" | "color" | "details" | "creative" | "lightOptics" | "history";
+type DevelopTabId =
+  | "light"
+  | "color"
+  | "details"
+  | "creative"
+  | "lightOptics"
+  | "imageTools"
+  | "history";
 
 /** Die vier numerischen Objektivkorrektur-Regler (Phase 4 Schritt 9,
  * ohne `manual_transform`, `profile_id`, `auto_ca`, `upright_mode`,
@@ -486,6 +494,7 @@ export function DevelopPanel() {
     { id: "details", label: t("developPanel.tab.details") },
     { id: "creative", label: t("developPanel.tab.creative") },
     { id: "lightOptics", label: t("developPanel.tab.lightOptics") },
+    { id: "imageTools", label: t("developPanel.tab.imageTools") },
     { id: "history", label: t("developPanel.tab.history") },
   ];
 
@@ -2043,6 +2052,10 @@ export function DevelopPanel() {
               eigene Registerkarte statt Anbau an "Licht": die zwoelf
               haetten die bestehende Karte verdoppelt. */}
           {activeTab === "lightOptics" && <LightOpticsPanel />}
+
+          {/* Am Bild (Phase 30, siehe DECISIONS.md ADR-0060) — die
+              Kachel ist hier nur der Schalter, bedient wird im Foto. */}
+          {activeTab === "imageTools" && <ImageToolsPanel />}
 
           {activeTab === "history" && (
             <>

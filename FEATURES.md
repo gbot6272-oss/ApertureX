@@ -459,3 +459,39 @@ die fotospezifischen Karten (Tiefe, Himmel, Motiv) beim Speichern
 herausgeschnitten. Ist ein Werkzeug aufgedreht, aber seine Karte fehlt,
 sagt die Kachel das („Ohne Tiefenkarte wirkungslos"), statt still nichts
 zu tun. Siehe `DECISIONS.md` ADR-0058 und ADR-0059.
+
+
+## Direkt am Bild (Phase 30)
+
+Eigene Entwickeln-Registerkarte „Am Bild". Sieben Werkzeuge werden **im
+Foto selbst** bedient — Griffe ziehen, Punkte setzen, Linien legen —,
+drei weitere Kacheln geben bestehenden Funktionen erstmals ein
+Bedienelement.
+
+| Werkzeug | Wirkung | Bedienung |
+|---|---|---|
+| Lichtquellen | Beliebig viele Punktlichter, additiv mit einstellbarem Abfall | Klick ins Bild setzt ein Licht, Griffe ziehen; Farbe je Licht |
+| Lichtkegel | Innen aufhellen, außen abdunkeln | Drehbare Ellipse im Bild, Mittelpunkt ziehen |
+| Abwedeln & Nachbelichten | Örtlich aufhellen oder abdunkeln | Punkte im Bild setzen und ziehen; weiß = aufhellen, schwarz = abdunkeln |
+| Split-Lighting | Zwei Lichtfarben entlang einer Achse | Beide Endpunkte im Bild ziehen |
+| Farbe ersetzen | Eine Farbe im Bild gegen eine andere tauschen | Pipette ins Bild, Zielfarbe aus dem Farbwähler, Toleranz und Weichheit |
+| Verlaufsband | Helligkeit auf einen selbst gebauten Verlauf abbilden | Verlaufsband mit frei verschiebbaren Stützstellen, Doppelklick legt eine neue an |
+| Horizont-Verlaufsfilter | Grauverlauf entlang einer freien Linie statt am Bildrand | Beide Linienenden im Bild ziehen |
+
+**Drei Bedienelemente für bestehende Funktionen:**
+
+- **Kanalmatrix-Gitter** — die neun Zahlen der Matrix aus Phase 28 sind
+  erstmals erreichbar, mit Zeilen- und Spaltenköpfen („Rot aus Grün")
+  und einem Streifen aus sechs Testfarben als Vorschau.
+- **Blendenform-Vorschau** — ein Canvas zeichnet den tatsächlichen
+  Bokeh-Kern der Virtuellen Blende (Lamellen, Drehung, anamorphe
+  Streckung, Wirbel); die Phase-28-Regler waren ohne Rückmeldung
+  Blindflug.
+- **Zonen-Überlagerung** — die zehn Luminanzzonen als Falschfarben über
+  dem Foto, Zonenstreifen klickbar; die gewählte Zone bringt ihren
+  Regler gleich mit.
+
+Alle Ortsangaben sind normierte Bildkoordinaten, die Bearbeitung sieht
+in der Vorschau also aus wie im Export. Die Sektion ist ohne
+Sonderbehandlung preset-fähig — anders als Kreativ und Licht & Optik
+trägt keines der Werkzeuge eine fotospezifisch berechnete Karte.

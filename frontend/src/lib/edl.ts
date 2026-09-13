@@ -1966,6 +1966,184 @@ export const MOTION_BLUR_KINDS: readonly { id: MotionBlurKind; label: string }[]
   { id: "Zoom", label: "Zoom" },
 ];
 
+// ---- Direkt am Bild (Phase 30, siehe `DECISIONS.md` ADR-0060) -------------
+// Spiegel von `crates/apx-pipeline/src/edl/v4.rs`. Alle Ortsangaben sind
+// normierte Bildkoordinaten (`0..1`) — dieselbe Bearbeitung sieht damit
+// in der Vorschau und im Export gleich aus.
+
+export interface PointLight {
+  x: number;
+  y: number;
+  radius: number;
+  /** Negativ verdunkelt (ein „Negativlicht"). */
+  intensity: number;
+  color_rgb: number[];
+  falloff: number;
+}
+
+export interface PointLightsAdjustment {
+  amount: number;
+  lights: PointLight[];
+}
+
+export interface SpotlightAdjustment {
+  amount: number;
+  cx: number;
+  cy: number;
+  rx: number;
+  ry: number;
+  angle_deg: number;
+  feather: number;
+  inner_gain: number;
+  outer_gain: number;
+  color_rgb: number[];
+}
+
+export interface DodgeBurnPoint {
+  x: number;
+  y: number;
+  radius: number;
+  /** Positiv hellt auf, negativ dunkelt ab. */
+  amount: number;
+}
+
+export interface DodgeBurnAdjustment {
+  amount: number;
+  points: DodgeBurnPoint[];
+}
+
+export interface SplitLightAdjustment {
+  amount: number;
+  ax: number;
+  ay: number;
+  color_a: number[];
+  bx: number;
+  by: number;
+  color_b: number[];
+  luma_bias: number;
+}
+
+export interface ColorReplaceAdjustment {
+  amount: number;
+  from_rgb: number[];
+  to_rgb: number[];
+  tolerance: number;
+  softness: number;
+  preserve_luma: boolean;
+  has_source: boolean;
+}
+
+export interface GradientStop {
+  position: number;
+  color_rgb: number[];
+}
+
+export interface GradientRampAdjustment {
+  amount: number;
+  stops: GradientStop[];
+  preserve_luma: boolean;
+}
+
+export interface HorizonGradAdjustment {
+  amount: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  softness: number;
+  density: number;
+  color_rgb: number[];
+  tint: number;
+  flipped: boolean;
+}
+
+export interface InteractiveAdjustments {
+  point_lights: PointLightsAdjustment;
+  spotlight: SpotlightAdjustment;
+  dodge_burn: DodgeBurnAdjustment;
+  split_light: SplitLightAdjustment;
+  color_replace: ColorReplaceAdjustment;
+  gradient_ramp: GradientRampAdjustment;
+  horizon_grad: HorizonGradAdjustment;
+}
+
+/** Neutralwerte — identisch zu den `NEUTRAL`/`DEFAULT`-Konstanten der
+ * Rust-Seite. */
+export const NEUTRAL_INTERACTIVE: InteractiveAdjustments = {
+  point_lights: { amount: 0, lights: [] },
+  spotlight: {
+    amount: 0,
+    cx: 0.5,
+    cy: 0.5,
+    rx: 0.3,
+    ry: 0.22,
+    angle_deg: 0,
+    feather: 0.6,
+    inner_gain: 0.45,
+    outer_gain: 0.5,
+    color_rgb: [1, 0.97, 0.92],
+  },
+  dodge_burn: { amount: 0, points: [] },
+  split_light: {
+    amount: 0,
+    ax: 0.15,
+    ay: 0.3,
+    color_a: [1, 0.72, 0.42],
+    bx: 0.85,
+    by: 0.7,
+    color_b: [0.45, 0.66, 1],
+    luma_bias: 0.35,
+  },
+  color_replace: {
+    amount: 0,
+    from_rgb: [0.5, 0.5, 0.5],
+    to_rgb: [0.5, 0.5, 0.5],
+    tolerance: 0.25,
+    softness: 0.15,
+    preserve_luma: true,
+    has_source: false,
+  },
+  gradient_ramp: { amount: 0, stops: [], preserve_luma: false },
+  horizon_grad: {
+    amount: 0,
+    x1: 0,
+    y1: 0.38,
+    x2: 1,
+    y2: 0.32,
+    softness: 0.25,
+    density: 0.55,
+    color_rgb: [0.55, 0.68, 0.9],
+    tint: 0.25,
+    flipped: false,
+  },
+};
+
+/** Vorgabe für ein neu angelegtes Licht (Rust: `PointLight::DEFAULT`). */
+export const DEFAULT_POINT_LIGHT: PointLight = {
+  x: 0.5,
+  y: 0.5,
+  radius: 0.3,
+  intensity: 0.5,
+  color_rgb: [1, 0.93, 0.8],
+  falloff: 2,
+};
+
+/** Vorgabe für einen neu gesetzten Abwedel-Punkt. */
+export const DEFAULT_DODGE_BURN_POINT: DodgeBurnPoint = {
+  x: 0.5,
+  y: 0.5,
+  radius: 0.15,
+  amount: 0.4,
+};
+
+/** Startverlauf, sobald der Nutzer das Verlaufsband erstmals aufdreht —
+ * zwei Stützstellen, weil ein Verlauf mit weniger keiner ist. */
+export const DEFAULT_GRADIENT_STOPS: GradientStop[] = [
+  { position: 0, color_rgb: [0.09, 0.11, 0.28] },
+  { position: 0.5, color_rgb: [0.66, 0.37, 0.36] },
+  { position: 1, color_rgb: [0.98, 0.89, 0.69] },
+];
+
 export interface EdlPayload {
   basic: BasicAdjustments;
   curves: CurvesAdjustment;
@@ -1992,6 +2170,7 @@ export interface EdlPayload {
   liquify_strokes: LiquifyStroke[];
   creative: CreativeAdjustments;
   light_optics: LightOpticsAdjustments;
+  interactive: InteractiveAdjustments;
 }
 
 export function neutralEdlPayload(): EdlPayload {
@@ -2021,6 +2200,7 @@ export function neutralEdlPayload(): EdlPayload {
     liquify_strokes: [],
     creative: structuredClone(NEUTRAL_CREATIVE),
     light_optics: structuredClone(NEUTRAL_LIGHT_OPTICS),
+    interactive: structuredClone(NEUTRAL_INTERACTIVE),
   };
 }
 

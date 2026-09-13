@@ -190,7 +190,7 @@ export const PRESET_SECTION_LABELS: Record<PresetSectionKey, string> = {
   // fotospezifischen Karten beim Speichern gezielt herausgeschnitten
   // werden (siehe `PHOTO_SPECIFIC_MAP_FIELDS` oben, ADR-0059).
   creative: "Kreativ-Werkzeuge",
-  light_optics: "Licht & Optik",
+  light_optics: "Optik",
   interactive: "Am Bild",
 };
 

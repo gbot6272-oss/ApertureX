@@ -20,7 +20,7 @@ const PHOTO = {
  * "Nur aktive" richtig, und kommen die vorbereiteten Karten im
  * Format an, das Rust wirklich liest.
  */
-test.describe("Licht & Optik (Phase 28)", () => {
+test.describe("Optik (Phase 28)", () => {
   async function openPanel(page: import("@playwright/test").Page) {
     await installTauriMock(page, {
       folders: [{ id: FOLDER_ID, path: "/home/user/Fotos/Urlaub", photo_count: 1, parent_id: null, missing: false }],
@@ -30,7 +30,7 @@ test.describe("Licht & Optik (Phase 28)", () => {
     await page.getByRole("button", { name: /Urlaub/ }).click();
     await page.getByRole("img", { name: PHOTO.filename }).click();
     await page.getByRole("button", { name: "Entwickeln" }).click();
-    await page.getByRole("tab", { name: "Licht & Optik" }).click();
+    await page.getByRole("tab", { name: "Optik" }).click();
     return page.getByTestId("light-optics-panel");
   }
 

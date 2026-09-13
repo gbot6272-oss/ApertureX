@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-// Hinweis zu `exact: true` bei der Registerkarte "Licht": seit Phase 28
-// gibt es zusaetzlich die Karte "Licht & Optik", und Playwrights
-// Standard-Namensvergleich ist ein Teilstring-Treffer — ohne `exact`
-// waere der Locator mehrdeutig.
+// Hinweis zu `exact: true` bei der Registerkarte "Licht": der urspruengliche
+// Grund (die Karte hiess "Licht & Optik" und kollidierte per Teilstring)
+// ist mit der Umbenennung auf "Optik" entfallen. `exact` bleibt trotzdem
+// stehen — Playwrights Standard-Namensvergleich ist ein Teilstring-Treffer,
+// und eine kuenftige Karte mit "Licht" im Namen wuerde den Locator sonst
+// wieder stillschweigend mehrdeutig machen.
 
 import { getMockInvokeLog, installTauriMock } from "./tauri-mock";
 

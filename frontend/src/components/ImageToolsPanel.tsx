@@ -525,7 +525,7 @@ export function ImageToolsPanel() {
 
       <ToolTile
         title="Kanalmatrix"
-        hint="Die neun Zahlen der Matrix aus Licht & Optik"
+        hint="Die neun Zahlen der Matrix aus Optik"
         active={lightOptics.channel_matrix.amount > 0}
         onReset={() => {
           setLightOpticsField("channel_matrix", "amount", 0);

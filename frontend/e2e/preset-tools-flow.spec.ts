@@ -45,7 +45,7 @@ test.describe("Werkzeug-Presets (Phase 29)", () => {
     // --- Foto A: Himmel erkennen + einen zweiten Regler verstellen ------
     await page.getByRole("img", { name: PHOTO_A.filename }).click();
     await page.getByRole("button", { name: "Entwickeln", exact: true }).click();
-    await page.getByRole("tab", { name: "Licht & Optik" }).click();
+    await page.getByRole("tab", { name: "Optik" }).click();
     const panel = page.getByTestId("light-optics-panel");
 
     await panel.getByRole("region", { name: "Himmel dramatisieren" }).getByRole("button", { name: "Himmel erkennen" }).click();
@@ -57,7 +57,7 @@ test.describe("Werkzeug-Presets (Phase 29)", () => {
     await starAmount.blur();
     await expect.poll(async () => (await lastCommit(page)).payload.light_optics.star_filter.amount).toBeCloseTo(0.6, 5);
 
-    // --- Preset speichern, nur die Licht-&-Optik-Sektion ----------------
+    // --- Preset speichern, nur die Optik-Sektion ------------------------
     await page.getByRole("button", { name: "Preset speichern" }).click();
     const dialog = page.getByRole("dialog", { name: "Preset speichern" });
     await dialog.getByLabel("Name").fill("Serienlook");
@@ -99,7 +99,7 @@ test.describe("Werkzeug-Presets (Phase 29)", () => {
     expect(applied.payload.light_optics.sky_drama.mask).toBeNull();
 
     // Und die Oberflaeche sagt es auch, statt still nichts zu tun.
-    await page.getByRole("tab", { name: "Licht & Optik" }).click();
+    await page.getByRole("tab", { name: "Optik" }).click();
     await expect(
       page.getByTestId("light-optics-panel").getByText("Ohne Himmelsmaske wirkungslos"),
     ).toBeVisible();

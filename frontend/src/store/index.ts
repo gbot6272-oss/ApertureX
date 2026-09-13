@@ -6300,7 +6300,7 @@ export const useAppStore = create<AppStore>()(
       set((state) => {
         state.developEdl.light_optics = structuredClone(NEUTRAL_LIGHT_OPTICS);
       });
-      void get().commitDevelopEdit("Licht & Optik zurückgesetzt");
+      void get().commitDevelopEdit("Optik zurückgesetzt");
     },
 
     skySegmenting: false,

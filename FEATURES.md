@@ -420,7 +420,7 @@ Zielfoto übernommen. Siehe `DECISIONS.md` ADR-0057 und ADR-0059.
 
 ## Licht & Optik (Phase 28)
 
-Zwölf Werkzeuge in der eigenen Entwickeln-Registerkarte „Licht & Optik".
+Zwölf Werkzeuge in der eigenen Entwickeln-Registerkarte „Optik".
 Alle laufen in einer gemeinsamen Pipeline-Stufe (`stages::light_optics`)
 **vor** dem Filter/LUT — Korrekturen und optische Phänomene gehen der
 Gradation voraus, die Phase-27-Looks liegen danach.

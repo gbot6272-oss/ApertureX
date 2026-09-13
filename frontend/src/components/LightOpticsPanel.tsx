@@ -143,7 +143,7 @@ export function LightOpticsPanel() {
   return (
     <div className="flex flex-col gap-3" data-testid="light-optics-panel">
       <ToolToolbar
-        title="Licht & Optik"
+        title="Optik"
         query={query}
         onQueryChange={setQuery}
         onlyActive={onlyActive}

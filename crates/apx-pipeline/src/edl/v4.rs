@@ -107,6 +107,13 @@ pub struct StageEnabled {
     /// Begruendung wie `creative` oben.
     #[serde(default = "default_true")]
     pub light_optics: bool,
+    /// Direkt am Bild (Phase 30) — laeuft nach `light_optics`, vor
+    /// `lut_filter`: gesetztes Licht und gesetzte Farbe gehoeren in
+    /// dieselbe Familie wie Licht & Optik und ebenfalls vor die
+    /// Gradation (siehe `stages::interactive`s Moduldoku). Dieselbe
+    /// `default_true`-Begruendung wie `light_optics` oben.
+    #[serde(default = "default_true")]
+    pub interactive: bool,
     pub geometry: bool,
 }
 
@@ -139,6 +146,7 @@ impl StageEnabled {
         liquify: true,
         creative: true,
         light_optics: true,
+        interactive: true,
         geometry: true,
     };
 }
@@ -1417,6 +1425,317 @@ impl LightOpticsAdjustments {
     }
 }
 
+// ---- Direkt am Bild (Phase 30, siehe `DECISIONS.md` ADR-0060) --------------
+
+/// Eine frei im Bild platzierte Lichtquelle (Phase 30 Punkt 1).
+/// `x`/`y` sind normierte Bildkoordinaten (`0.0..=1.0`), `radius` ist
+/// ein Anteil der kürzeren Bildkante.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PointLight {
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    /// Stärke; negativ verdunkelt (ein „Negativlicht", wie es
+    /// Lichtsetzer mit schwarzen Flaggen machen).
+    pub intensity: f32,
+    pub color_rgb: [f32; 3],
+    /// Abfall-Exponent: `1.0` linear, `2.0` quadratisch (physikalischer).
+    pub falloff: f32,
+}
+
+impl PointLight {
+    pub const DEFAULT: Self = Self {
+        x: 0.5,
+        y: 0.5,
+        radius: 0.3,
+        intensity: 0.5,
+        color_rgb: [1.0, 0.93, 0.8],
+        falloff: 2.0,
+    };
+}
+
+impl Default for PointLight {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// Frei gesetzte Lichtquellen (Phase 30 Punkt 1). `amount` blendet die
+/// Summe aller Lichter ein.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct PointLightsAdjustment {
+    #[serde(default)]
+    pub amount: f32,
+    #[serde(default)]
+    pub lights: Vec<PointLight>,
+}
+
+/// Lichtkegel (Phase 30 Punkt 2): eine frei aufziehbare, drehbare
+/// Ellipse mit weichem Rand — innen aufhellen, außen abdunkeln.
+///
+/// `cx`/`cy` normierte Bildkoordinaten, `rx`/`ry` Halbachsen als Anteil
+/// der kürzeren Bildkante, `angle_deg` die Drehung.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SpotlightAdjustment {
+    pub amount: f32,
+    pub cx: f32,
+    pub cy: f32,
+    pub rx: f32,
+    pub ry: f32,
+    pub angle_deg: f32,
+    /// Weiche Randbreite (`0.0` = harte Kante, `1.0` = sehr weich).
+    pub feather: f32,
+    /// Aufhellung innerhalb der Ellipse.
+    pub inner_gain: f32,
+    /// Abdunklung außerhalb.
+    pub outer_gain: f32,
+    pub color_rgb: [f32; 3],
+}
+
+impl SpotlightAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        cx: 0.5,
+        cy: 0.5,
+        rx: 0.3,
+        ry: 0.22,
+        angle_deg: 0.0,
+        feather: 0.6,
+        inner_gain: 0.45,
+        outer_gain: 0.5,
+        color_rgb: [1.0, 0.97, 0.92],
+    };
+}
+
+impl Default for SpotlightAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Ein Abwedel-/Nachbelichtungspunkt (Phase 30 Punkt 3).
+/// `amount` positiv hellt auf, negativ dunkelt ab.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct DodgeBurnPoint {
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    pub amount: f32,
+}
+
+impl DodgeBurnPoint {
+    pub const DEFAULT: Self = Self {
+        x: 0.5,
+        y: 0.5,
+        radius: 0.15,
+        amount: 0.4,
+    };
+}
+
+impl Default for DodgeBurnPoint {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// Abwedeln und Nachbelichten (Phase 30 Punkt 3) — die
+/// Dunkelkammer-Technik, direkt am Bild statt über Masken.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct DodgeBurnAdjustment {
+    #[serde(default)]
+    pub amount: f32,
+    #[serde(default)]
+    pub points: Vec<DodgeBurnPoint>,
+}
+
+/// Split-Lighting (Phase 30 Punkt 4): zwei Bildpunkte mit je einer
+/// Lichtfarbe, das Bild wird entlang der Achse dazwischen eingefärbt.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SplitLightAdjustment {
+    pub amount: f32,
+    pub ax: f32,
+    pub ay: f32,
+    pub color_a: [f32; 3],
+    pub bx: f32,
+    pub by: f32,
+    pub color_b: [f32; 3],
+    /// Wie stark die Einfärbung von der Helligkeit abhängt (`0.0` =
+    /// überall gleich, `1.0` = nur in den Lichtern).
+    pub luma_bias: f32,
+}
+
+impl SplitLightAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        ax: 0.15,
+        ay: 0.3,
+        color_a: [1.0, 0.72, 0.42],
+        bx: 0.85,
+        by: 0.7,
+        color_b: [0.45, 0.66, 1.0],
+        luma_bias: 0.35,
+    };
+}
+
+impl Default for SplitLightAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Farbe ersetzen (Phase 30 Punkt 5): Quellfarbe per Pipette aus dem
+/// Bild, Zielfarbe aus dem Farbwähler.
+///
+/// Der Abstand wird im **Gegenfarbenraum** gemessen
+/// (`stages::creative::opponent`), nicht in RGB: ein RGB-Abstand hält
+/// Helligkeit und Farbton nicht auseinander und greift deshalb
+/// entweder zu viel oder zu wenig.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ColorReplaceAdjustment {
+    pub amount: f32,
+    pub from_rgb: [f32; 3],
+    pub to_rgb: [f32; 3],
+    /// Wie weit eine Farbe von der Quellfarbe abweichen darf.
+    pub tolerance: f32,
+    /// Breite des weichen Übergangs jenseits der Toleranz.
+    pub softness: f32,
+    /// `true` hält die ursprüngliche Helligkeit fest und tauscht nur
+    /// die Farbigkeit — meist das, was gemeint ist.
+    pub preserve_luma: bool,
+    /// `false`, solange keine Quellfarbe gegriffen wurde.
+    pub has_source: bool,
+}
+
+impl ColorReplaceAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        from_rgb: [0.5, 0.5, 0.5],
+        to_rgb: [0.5, 0.5, 0.5],
+        tolerance: 0.25,
+        softness: 0.15,
+        preserve_luma: true,
+        has_source: false,
+    };
+}
+
+impl Default for ColorReplaceAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Eine Stützstelle des Verlaufsbands (Phase 30 Punkt 6).
+/// `position` ist die Luminanz (`0.0..=1.0`), an der diese Farbe steht.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GradientStop {
+    pub position: f32,
+    pub color_rgb: [f32; 3],
+}
+
+/// Verlaufsband (Phase 30 Punkt 6): bildet die Luminanz auf einen
+/// Verlauf mit **beliebig vielen** Stützstellen ab.
+///
+/// Die Verlaufsabbildung aus Phase 27 kann genau drei (Tiefen, Mitten,
+/// Lichter); hier legt der Nutzer sie selbst fest, verschiebt und
+/// löscht sie. Weniger als zwei Stützstellen ergeben keinen Verlauf —
+/// die Stufe ist dann ein No-Op.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct GradientRampAdjustment {
+    #[serde(default)]
+    pub amount: f32,
+    #[serde(default)]
+    pub stops: Vec<GradientStop>,
+    /// `true` hält die ursprüngliche Helligkeit fest und übernimmt nur
+    /// die Farbigkeit des Verlaufs.
+    #[serde(default)]
+    pub preserve_luma: bool,
+}
+
+/// Horizont-Verlaufsfilter (Phase 30 Punkt 7): ein Grauverlaufsfilter,
+/// dessen Kante einer frei gezogenen Linie folgt statt dem Bildrand.
+///
+/// Die Linie geht durch `(x1,y1)` und `(x2,y2)`; der Filter wirkt auf
+/// der Seite, in die die Normale zeigt, und blendet über `softness`
+/// (als Anteil der kürzeren Bildkante) aus.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct HorizonGradAdjustment {
+    pub amount: f32,
+    pub x1: f32,
+    pub y1: f32,
+    pub x2: f32,
+    pub y2: f32,
+    pub softness: f32,
+    /// Abdunklung auf der wirksamen Seite.
+    pub density: f32,
+    /// Einfärbung auf der wirksamen Seite.
+    pub color_rgb: [f32; 3],
+    pub tint: f32,
+    /// Kehrt um, welche Seite der Linie betroffen ist.
+    pub flipped: bool,
+}
+
+impl HorizonGradAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        x1: 0.0,
+        y1: 0.38,
+        x2: 1.0,
+        y2: 0.32,
+        softness: 0.25,
+        density: 0.55,
+        color_rgb: [0.55, 0.68, 0.9],
+        tint: 0.25,
+        flipped: false,
+    };
+}
+
+impl Default for HorizonGradAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Die sieben am Bild bedienten Werkzeuge in EINER Struktur (Phase 30,
+/// siehe `DECISIONS.md` ADR-0060) — dieselbe Bauform wie
+/// [`CreativeAdjustments`] und [`LightOpticsAdjustments`]. Feste
+/// Reihenfolge innerhalb der Stufe: Licht → Farbe → Verlauf → Auflage,
+/// siehe `stages::interactive`s Moduldoku.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct InteractiveAdjustments {
+    #[serde(default)]
+    pub point_lights: PointLightsAdjustment,
+    #[serde(default)]
+    pub spotlight: SpotlightAdjustment,
+    #[serde(default)]
+    pub dodge_burn: DodgeBurnAdjustment,
+    #[serde(default)]
+    pub split_light: SplitLightAdjustment,
+    #[serde(default)]
+    pub color_replace: ColorReplaceAdjustment,
+    #[serde(default)]
+    pub gradient_ramp: GradientRampAdjustment,
+    #[serde(default)]
+    pub horizon_grad: HorizonGradAdjustment,
+}
+
+impl InteractiveAdjustments {
+    /// `true`, wenn keines der sieben Werkzeuge etwas zu tun hat — die
+    /// Pipeline überspringt die Stufe dann vollständig (Regelfall).
+    ///
+    /// Die drei Listen-Werkzeuge prüfen zusätzlich, ob überhaupt ein
+    /// Eintrag existiert: ein aufgedrehter `amount` ohne ein einziges
+    /// Licht ist genauso ein No-Op wie `amount == 0`.
+    pub fn is_neutral(&self) -> bool {
+        (self.point_lights.amount <= 0.0 || self.point_lights.lights.is_empty())
+            && self.spotlight.amount <= 0.0
+            && (self.dodge_burn.amount <= 0.0 || self.dodge_burn.points.is_empty())
+            && self.split_light.amount <= 0.0
+            && (self.color_replace.amount <= 0.0 || !self.color_replace.has_source)
+            && (self.gradient_ramp.amount <= 0.0 || self.gradient_ramp.stops.len() < 2)
+            && self.horizon_grad.amount <= 0.0
+    }
+}
+
 /// Die konkrete EDL-Struktur für Schema-Version 4 — siehe
 /// [`crate::edl::EDL_SCHEMA_VERSION`] und [`crate::edl::migrate`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1488,6 +1807,10 @@ pub struct EdlV4 {
     /// dieselbe `#[serde(default)]`-Begründung wie bei `creative` oben.
     #[serde(default)]
     pub light_optics: LightOpticsAdjustments,
+    /// Die sieben am Bild bedienten Werkzeuge aus Phase 30 — additiv,
+    /// dieselbe `#[serde(default)]`-Begründung wie bei `creative`.
+    #[serde(default)]
+    pub interactive: InteractiveAdjustments,
 }
 
 impl EdlV4 {
@@ -1520,6 +1843,7 @@ impl EdlV4 {
             liquify_strokes: Vec::new(),
             creative: CreativeAdjustments::default(),
             light_optics: LightOpticsAdjustments::default(),
+            interactive: InteractiveAdjustments::default(),
         }
     }
 
@@ -1555,6 +1879,7 @@ impl EdlV4 {
             liquify_strokes: Vec::new(),
             creative: CreativeAdjustments::default(),
             light_optics: LightOpticsAdjustments::default(),
+            interactive: InteractiveAdjustments::default(),
         }
     }
 }

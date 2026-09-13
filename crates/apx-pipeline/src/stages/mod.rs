@@ -25,6 +25,7 @@ pub mod frequency_separation;
 pub mod geometry;
 pub mod highlights_shadows;
 pub mod hsl_color_mixer;
+pub mod interactive;
 pub mod lens_corrections;
 pub mod light_optics;
 pub mod liquify;

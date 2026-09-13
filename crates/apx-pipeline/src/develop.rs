@@ -20,9 +20,9 @@ use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
     basic_fused, bw_mixer, calibration, color_grading, composite, creative, curves, details,
-    effects, geometry, hsl_color_mixer, lens_corrections, light_optics, liquify, local_contrast,
-    lut_filter, masks, repair, skin_smoothing, sky_replace, style_transfer, virtual_aperture,
-    white_balance,
+    effects, geometry, hsl_color_mixer, interactive, lens_corrections, light_optics, liquify,
+    local_contrast, lut_filter, masks, repair, skin_smoothing, sky_replace, style_transfer,
+    virtual_aperture, white_balance,
 };
 
 /// Das Ergebnis von [`render_rgba8`] — `width`/`height` beschreiben
@@ -427,14 +427,25 @@ pub fn render_rgba8(
         light_optics::apply(&skied, linear.width, linear.height, &edl.light_optics)
     };
 
+    // Direkt am Bild (Phase 30, sieben Werkzeuge in einer Stufe) —
+    // laufen nach `light_optics`, vor `lut_filter`: gesetztes Licht und
+    // gesetzte Farbe gehören in dieselbe Familie wie Licht & Optik und
+    // ebenfalls vor die Gradation (siehe `stages::interactive`s
+    // Moduldoku).
+    let placed = if !stages.interactive || edl.interactive.is_neutral() {
+        lit
+    } else {
+        interactive::apply(&lit, linear.width, linear.height, &edl.interactive)
+    };
+
     // Filter-/LUT-Bibliothek (Phase 16 Schritt 1) — läuft nach
-    // `light_optics`, vor `creative`, im selben fertig entwickelten
+    // `interactive`, vor `creative`, im selben fertig entwickelten
     // sRGB-RGBA8-Bild (siehe `stages::lut_filter`s Moduldoku für die
     // Begründung dieser Position).
     let filtered = if !stages.lut_filter || edl.lut_filter.lut.is_none() {
-        lit
+        placed
     } else {
-        lut_filter::apply(&lit, linear.width, linear.height, &edl.lut_filter)
+        lut_filter::apply(&placed, linear.width, linear.height, &edl.lut_filter)
     };
 
     // Verflüssigen (Phase 15 Schritt 3) — läuft nach `sky_replace`, vor
@@ -878,6 +889,7 @@ mod tests {
             liquify_strokes: Vec::new(),
             creative: crate::edl::v4::CreativeAdjustments::default(),
             light_optics: Default::default(),
+            interactive: Default::default(),
         };
 
         if let Some(ctx) = &ctx {

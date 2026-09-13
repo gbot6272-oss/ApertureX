@@ -6609,3 +6609,95 @@ prüfen dass die Regler ankommen und die Maske ausdrücklich nicht.
 `tsc -b`, `vitest run` 257/257, `clippy --workspace --all-targets`
 sauber, volle Playwright-Suite **149/149** mit real geprüftem Exit-Code
 (`PLAYWRIGHT_EXIT=0`).
+
+## ADR-0060: Phase 30 — „Direkt am Bild": zehn Werkzeuge mit eigenen Bedienelementen
+
+Nutzerwunsch: zehn weitere Funktionen, „die wirklich visuell sichtbare
+Änderungen am Foto produzieren **und neue UI-Elemente beinhalten**",
+ausdrücklich aufwändig.
+
+Das ist die entscheidende Abgrenzung zu Phase 27 und 28: die lieferten
+zweiundzwanzig Werkzeuge, aber alle mit derselben Bedienung — eine
+Glaskachel mit Reglern. Diese Phase dreht das um. Sieben der zehn
+Werkzeuge werden **im Bild selbst** bedient (Lichter ziehen, eine
+Horizontlinie legen, einen Lichtkegel aufziehen, Punkte setzen, Farben
+mit der Pipette greifen), die übrigen drei bekommen Bedienelemente, die
+es im Projekt bisher nicht gab (ein Verlaufsband mit frei
+verschiebbaren Stützstellen, ein 3×3-Matrix-Gitter, eine
+Falschfarben-Überlagerung mit klickbarem Zonenstreifen).
+
+### Eine neue Stufe, dieselbe bewährte Bauform
+
+`stages/interactive.rs`, ein EDL-Feld `interactive`, ein
+`StageEnabled`-Flag, ein `develop.rs`-Zweig — wie in Phase 27/28.
+Position: nach `light_optics`, vor `lut_filter`. Alles hier ist
+gesetztes Licht und gesetzte Farbe, gehört also in dieselbe Familie wie
+Licht & Optik und ebenfalls vor die Gradation.
+
+Reihenfolge innerhalb der Stufe (Licht → Farbe → Verlauf → Auflage):
+Lichtquellen → Lichtkegel → Abwedeln/Nachbelichten → Split-Lighting →
+Farbe ersetzen → Verlaufsband → Horizont-Verlaufsfilter.
+
+### Die sieben mit eigener Bildmathematik
+
+1. **Lichtquellen** — beliebig viele Punktlichter, je mit Ort, Radius,
+   Farbe, Stärke und Abfall. Additiv mit quadratischem Abfall.
+   Bedienung: Pins im Bild, die man zieht; eine Liste daneben zum
+   Hinzufügen, Auswählen und Löschen.
+2. **Lichtkegel** — eine frei aufziehbare, drehbare Ellipse mit
+   weichem Rand, die innen aufhellt und außen abdunkelt. Das
+   Bühnenlicht-Werkzeug, das eine Radialmaske nur umständlich
+   nachbaut.
+3. **Abwedeln/Nachbelichten** — frei gesetzte Punkte, je mit Radius und
+   Vorzeichen (aufhellen/abdunkeln). Die Dunkelkammer-Technik, direkt
+   am Bild statt über Masken.
+4. **Split-Lighting** — zwei Bildpunkte mit je einer Lichtfarbe; das
+   Bild wird entlang der Achse dazwischen eingefärbt. Erzeugt die
+   zweifarbige Lichtstimmung, für die man sonst zwei Verlaufsmasken
+   bräuchte.
+5. **Farbe ersetzen** — Quellfarbe per Pipette aus dem Bild, Zielfarbe
+   aus dem Farbwähler, dazu Toleranz und Weichheit. Der Abstand wird im
+   Gegenfarbenraum gemessen, nicht in RGB: ein RGB-Abstand hält
+   Helligkeit und Farbton nicht auseinander und greift deshalb
+   entweder zu viel oder zu wenig.
+6. **Verlaufsband** — bildet die Luminanz auf einen Verlauf mit
+   **beliebig vielen** Stützstellen ab. Die Verlaufsabbildung aus
+   Phase 27 kann genau drei; hier legt der Nutzer sie selbst fest.
+7. **Horizont-Verlaufsfilter** — ein Grauverlaufsfilter, dessen Kante
+   einer frei gezogenen Linie folgt statt dem Bildrand. Genau das
+   unterscheidet ihn von einer Verlaufsmaske mit fester Achse.
+
+### Die drei, die bestehende Funktionen erst bedienbar machen
+
+8. **3×3-Kanalmatrix-Gitter** — Phase 28 hat die Matrix eingeführt,
+   aber nur vier Ein-Klick-Vorgaben dafür gebaut; die neun Zahlen waren
+   überhaupt nicht erreichbar. Jetzt ein beschriftetes Gitter mit
+   Zeilen- und Spaltenköpfen und einem Farbstreifen, der die Wirkung
+   sofort zeigt.
+9. **Blendenform-Vorschau** — ein kleines Canvas, das den tatsächlich
+   verwendeten Bokeh-Kern zeichnet (Lamellenzahl, Drehung, anamorphe
+   Streckung). Die Phase-28-Regler waren ohne diese Rückmeldung
+   Blindflug.
+10. **Zonen-Überlagerung** — legt die zehn Luminanzzonen als
+    Falschfarben über das Foto und macht den Zonenstreifen klickbar.
+    Erst damit ist zu sehen, welcher Regler welchen Bildteil trifft.
+
+### Ein gemeinsames Bild-Overlay statt sieben Einzellösungen
+
+Alle Bild-Bedienelemente laufen über **eine** neue Komponente
+`ImageToolOverlay`. Sie kennt die Umrechnung Bild ↔ Bildschirm
+(Zoom, Pan, Ausrichtung) genau einmal und bietet drei Formen an: Punkt,
+Linie, Ellipse. Sieben eigene Overlays mit je eigener Koordinatenlogik
+wären sieben Gelegenheiten, dieselbe Umrechnung leicht unterschiedlich
+falsch zu machen — und beim Zoomen fällt so etwas sofort auf.
+
+Die Komponente liegt bewusst **im Viewer**, nicht im Panel: nur dort
+sind Zoom, Pan und die tatsächliche Bildfläche bekannt.
+
+### Bewusst nicht gemacht
+
+Keine Perspektiv-/Fluchtpunktkorrektur. Sie wäre das naheliegende achte
+Bild-Werkzeug, braucht aber einen Homographie-Eingriff in die
+Geometriestufe (die die Bildgröße ändert) statt einer Farbrechnung auf
+fester Größe — ein eigener, deutlich riskanterer Umbau. Lieber
+ausgelassen als halb gebaut.

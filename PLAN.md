@@ -1595,49 +1595,49 @@ Phase-27-Looks bleiben danach):
 `… → sky_replace → light_optics → lut_filter → creative → liquify`.
 Feste Reihenfolge in der Stufe: Korrektur → Tiefe → Licht → Optik → Stil.
 
-- [ ] 1. **Tonwert-Angleich an Referenzfoto**: neun Luminanz-Dezile des
+- [x] 1. **Tonwert-Angleich an Referenzfoto**: neun Luminanz-Dezile des
   Referenzfotos als monotone, stückweise lineare Abbildung. Ergänzt den
   Farbabgleich aus Phase 27 zum vollständigen Serien-Angleich. Neuer
   Befehl `compute_reference_tone_stats`.
-- [ ] 2. **Zonensystem (10 Zonen, kantenbewusst)**: je Zone ±1 EV, die
+- [x] 2. **Zonensystem (10 Zonen, kantenbewusst)**: je Zone ±1 EV, die
   Verstärkungskarte wird durch einen echten **Guided Filter** geglättet
   statt durch einen Weichzeichner — genau das verhindert die
   Lichtsäume, für die Zonenwerkzeuge berüchtigt sind.
-- [ ] 3. **Detail-Pyramide**: drei Frequenzbänder (fein/mittel/grob) aus
+- [x] 3. **Detail-Pyramide**: drei Frequenzbänder (fein/mittel/grob) aus
   gestaffelten Tiefpässen, je einzeln verstärkbar.
-- [ ] 4. **Tiefenselektive Dunstentfernung**: Kontrast- und
+- [x] 4. **Tiefenselektive Dunstentfernung**: Kontrast- und
   Sättigungsrückgewinnung nur in der Ferne, gewichtet über die
   MiDaS-Tiefenkarte. Die Umkehrung des Phase-27-Tiefennebels.
-- [ ] 5. **Tiefenselektive Schärfe**: Unschärfemaske, deren Wirkung mit
+- [x] 5. **Tiefenselektive Schärfe**: Unschärfemaske, deren Wirkung mit
   dem Abstand von einer wählbaren Fokusebene abfällt.
-- [ ] 6. **KI-Neubeleuchtung**: Normalenkarte aus dem Tiefengradienten,
+- [x] 6. **KI-Neubeleuchtung**: Normalenkarte aus dem Tiefengradienten,
   darauf Lambert-Diffus + Blinn-Phong-Glanzlicht mit frei setzbarer
   Lichtrichtung, -farbe und Umgebungshelligkeit.
-- [ ] 7. **Himmel dramatisieren**: Kontrast/Sättigung/Abdunklung/Wärme
+- [x] 7. **Himmel dramatisieren**: Kontrast/Sättigung/Abdunklung/Wärme
   nur in der Himmelsmaske (`segment_photo_sky`, kein Modell-Download),
   bewusst ohne Austausch.
-- [ ] 8. **Bewegungsunschärfe**: gerichtet, radial und Zoom; optional
+- [x] 8. **Bewegungsunschärfe**: gerichtet, radial und Zoom; optional
   schützt die Motivmaske das Motiv („Mitzieher").
-- [ ] 9. **Blendenstern**: Lichtschleppen auf Spitzlichtern, n Strahlen,
+- [x] 9. **Blendenstern**: Lichtschleppen auf Spitzlichtern, n Strahlen,
   Winkel, Länge, Schwelle, optionaler Regenbogen-Anteil.
-- [ ] 10. **Diffusionsfilter („Pro Mist")**: Weichzeichnung nur aus den
+- [x] 10. **Diffusionsfilter („Pro Mist")**: Weichzeichnung nur aus den
   Lichtern, mit Schwarzwert-Erhalt — das unterscheidet ihn vom
   Orton-Glanz.
-- [ ] 11. **Kanalmatrix / Infrarot**: freie 3×3-Matrix plus vier
+- [x] 11. **Kanalmatrix / Infrarot**: freie 3×3-Matrix plus vier
   Ein-Klick-Vorgaben.
-- [ ] 12. **Poster-/Comic-Look**: Quantisierung plus Konturzeichnung aus
+- [x] 12. **Poster-/Comic-Look**: Quantisierung plus Konturzeichnung aus
   dem Sobel-Betrag.
-- [ ] 13. **Bokeh-Formen für die bestehende Virtuelle Blende**:
+- [x] 13. **Bokeh-Formen für die bestehende Virtuelle Blende**:
   polygonale Blende, anamorphe Streckung, Wirbel,
   Spitzlicht-Anhebung — als Erweiterung von `stages::virtual_aperture`
   statt als dreizehntes Werkzeug (sonst doppelte Weichzeichnung). Ohne
   gesetzte Werte bleibt der bisherige Kern unverändert, ein Test hält
   das fest.
-- [ ] 14. **Drei neue .cube-Vorlagen + eingebaute Filter**: „Nordic
+- [x] 14. **Drei neue .cube-Vorlagen + eingebaute Filter**: „Nordic
   Winter", „Tokyo Neon Night", „Sahara Gold", je mit Datei-gegen-Formel-Test.
-- [ ] 15. **UI**: neue sechste Registerkarte „Licht & Optik"; beide
+- [x] 15. **UI**: neue sechste Registerkarte „Licht & Optik"; beide
   Kachel-Panels bekommen Suchfeld, „Nur aktive"-Schalter und je Kachel
   einen Zurücksetzen-Knopf bei Hover/Fokus.
-- [ ] 16. Verifikation: Rust-Unit-Tests je Werkzeug, neuer e2e-Test,
+- [x] 16. Verifikation: Rust-Unit-Tests je Werkzeug, neuer e2e-Test,
   `cargo fmt`/`clippy`/`test --workspace`, `tsc -b`, `vitest run`, volle
   Playwright-Suite mit real geprüftem Exit-Code, dann Push.

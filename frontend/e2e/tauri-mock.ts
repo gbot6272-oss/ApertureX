@@ -1467,6 +1467,20 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "compute_reference_color_stats":
         return { lMean: 0.52, lStd: 0.21, aMean: 0.04, aStd: 0.09, bMean: -0.03, bStd: 0.08 };
 
+      // ---- Licht & Optik (Phase 28) — dieselbe Aufteilung: die
+      // Bildmathematik deckt `stages::light_optics`s Rust-Unit-Tests ab,
+      // hier nur die beiden Vorbereitungs-Befehle. ---------------------
+      case "segment_photo_sky":
+        return {
+          bitmapWidth: 4,
+          bitmapHeight: 4,
+          // 16 Byte: obere Haelfte Himmel (255), untere Boden (0).
+          alphaBase64: btoa(String.fromCharCode(...Array.from({ length: 16 }, (_, i) => (i < 8 ? 255 : 0)))),
+        };
+
+      case "compute_reference_tone_stats":
+        return { deciles: [0.05, 0.11, 0.18, 0.26, 0.37, 0.49, 0.63, 0.78, 0.92] };
+
       // ---- KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — die
       // echte fast_neural_style-Inferenz ist bereits in
       // `apx-ai::style_transfer`s Rust-Unit-Tests abgedeckt. ---------------

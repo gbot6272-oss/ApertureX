@@ -72,7 +72,10 @@ test.describe("Kreativ-Werkzeuge (Phase 27)", () => {
     expect((await readCreative()).orton.amount).toBeCloseTo(0.8, 2);
 
     // --- Motiv freistellen: Maske landet im EDL ---
-    await panel.getByRole("button", { name: "Motiv freistellen" }).click();
+    // `exact: true` seit Phase 28: jede Kachel hat jetzt zusaetzlich
+    // einen Zuruecksetzen-Knopf namens "<Werkzeug> zuruecksetzen", und
+    // Playwrights Standard-Namensvergleich ist ein Teilstring-Treffer.
+    await panel.getByRole("button", { name: "Motiv freistellen", exact: true }).click();
     await expect
       .poll(async () => (await readCreative()).subject_focus.mask?.alpha?.length ?? 0)
       .toBe(16);

@@ -1386,6 +1386,20 @@ export interface VirtualApertureAdjustment {
   focus_y: number;
   amount: number;
   depth_map: DepthMapPatch | null;
+  /** Blendenlamellen (Phase 28): `0` = runde Blende wie bisher, sonst
+   * `3..=11`. Bestimmt, ob Spitzlichter als Kreis oder als Polygon
+   * ausbrennen. */
+  blades: number;
+  /** Drehung der Blendenöffnung in Grad. */
+  rotation: number;
+  /** Anamorphe Streckung (`0` = rund, `1` = doppelt so hoch wie breit). */
+  anamorphic: number;
+  /** Petzval-Wirbel zum Bildrand hin (`0..=1`). */
+  swirl: number;
+  /** Anhebung der Spitzlichter VOR der Weichzeichnung (`0..=1`). */
+  highlight_boost: number;
+  /** Ab welcher Luminanz `highlight_boost` greift. */
+  highlight_threshold: number;
 }
 
 export const NEUTRAL_VIRTUAL_APERTURE: VirtualApertureAdjustment = {
@@ -1393,6 +1407,12 @@ export const NEUTRAL_VIRTUAL_APERTURE: VirtualApertureAdjustment = {
   focus_y: 0.5,
   amount: 0.0,
   depth_map: null,
+  blades: 0,
+  rotation: 0,
+  anamorphic: 0,
+  swirl: 0,
+  highlight_boost: 0,
+  highlight_threshold: 0.75,
 };
 
 /** Einmalig berechnetes Stiltransfer-Ergebnis (Phase 14 Schritt 9) —
@@ -1632,6 +1652,320 @@ export const NEUTRAL_CREATIVE: CreativeAdjustments = {
   light_leak: { amount: 0, angle_deg: 215, softness: 0.55, color_r: 255, color_g: 138, color_b: 76 },
 };
 
+// ---- Licht & Optik (Phase 28, siehe `DECISIONS.md` ADR-0058) --------------
+// Spiegel der Rust-Strukturen in `crates/apx-pipeline/src/edl/v4.rs`.
+// Die Feldnamen müssen exakt übereinstimmen: das EDL geht als rohes JSON
+// über die Tauri-Grenze und wird direkt in `EdlV4` deserialisiert.
+
+export interface ToneMatchAdjustment {
+  amount: number;
+  /** Die neun Luminanz-Dezile des Referenzfotos. */
+  targets: number[];
+  has_target: boolean;
+}
+
+export interface ZoneSystemAdjustment {
+  amount: number;
+  /** Zehn Zonen von dunkel nach hell, je ±1 EV. */
+  zones: number[];
+  edge_radius: number;
+}
+
+export interface DetailPyramidAdjustment {
+  amount: number;
+  fine: number;
+  medium: number;
+  coarse: number;
+}
+
+export interface DepthDehazeAdjustment {
+  amount: number;
+  start: number;
+  end: number;
+  depth_map: DepthMapPatch | null;
+}
+
+export interface DepthSharpenAdjustment {
+  amount: number;
+  focus_depth: number;
+  range: number;
+  radius: number;
+  depth_map: DepthMapPatch | null;
+}
+
+export interface RelightAdjustment {
+  amount: number;
+  light_x: number;
+  light_y: number;
+  light_z: number;
+  color_rgb: number[];
+  ambient: number;
+  specular: number;
+  depth_map: DepthMapPatch | null;
+}
+
+export interface SkyDramaAdjustment {
+  amount: number;
+  contrast: number;
+  saturation: number;
+  darken: number;
+  warmth: number;
+  /** Himmelsmaske (`255` = Himmel) — dieselbe Hülle wie die Motivmaske. */
+  mask: SubjectMaskPatch | null;
+}
+
+export type MotionBlurKind = "Directional" | "Radial" | "Zoom";
+
+export interface MotionBlurAdjustment {
+  amount: number;
+  kind: MotionBlurKind;
+  angle: number;
+  length: number;
+  center_x: number;
+  center_y: number;
+  /** `255` = Motiv, bleibt scharf (Mitzieher). */
+  mask: SubjectMaskPatch | null;
+}
+
+export interface StarFilterAdjustment {
+  amount: number;
+  points: number;
+  angle: number;
+  length: number;
+  threshold: number;
+  chroma: number;
+}
+
+export interface DiffusionAdjustment {
+  amount: number;
+  radius: number;
+  threshold: number;
+  black_retention: number;
+  warmth: number;
+}
+
+export interface ChannelMatrixAdjustment {
+  amount: number;
+  /** 3×3 in Zeilenfolge: `[rr, rg, rb, gr, gg, gb, br, bg, bb]`. */
+  matrix: number[];
+}
+
+export interface PosterizeAdjustment {
+  amount: number;
+  levels: number;
+  edge_amount: number;
+  edge_thickness: number;
+}
+
+export interface LightOpticsAdjustments {
+  tone_match: ToneMatchAdjustment;
+  zone_system: ZoneSystemAdjustment;
+  detail_pyramid: DetailPyramidAdjustment;
+  depth_dehaze: DepthDehazeAdjustment;
+  depth_sharpen: DepthSharpenAdjustment;
+  relight: RelightAdjustment;
+  sky_drama: SkyDramaAdjustment;
+  motion_blur: MotionBlurAdjustment;
+  star_filter: StarFilterAdjustment;
+  diffusion: DiffusionAdjustment;
+  channel_matrix: ChannelMatrixAdjustment;
+  posterize: PosterizeAdjustment;
+}
+
+/** Neutralwerte — identisch zu den `NEUTRAL`-Konstanten der Rust-Seite. */
+export const NEUTRAL_LIGHT_OPTICS: LightOpticsAdjustments = {
+  tone_match: { amount: 0, targets: [0, 0, 0, 0, 0, 0, 0, 0, 0], has_target: false },
+  zone_system: { amount: 0, zones: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], edge_radius: 16 },
+  detail_pyramid: { amount: 0, fine: 0, medium: 0, coarse: 0 },
+  depth_dehaze: { amount: 0, start: 0.3, end: 1, depth_map: null },
+  depth_sharpen: { amount: 0, focus_depth: 0.8, range: 0.35, radius: 2, depth_map: null },
+  relight: {
+    amount: 0,
+    light_x: 0.3,
+    light_y: 0.25,
+    light_z: 0.7,
+    color_rgb: [1, 0.94, 0.82],
+    ambient: 0.55,
+    specular: 0.15,
+    depth_map: null,
+  },
+  sky_drama: { amount: 0, contrast: 0.5, saturation: 0.4, darken: 0.3, warmth: 0, mask: null },
+  motion_blur: {
+    amount: 0,
+    kind: "Directional",
+    angle: 0,
+    length: 0.05,
+    center_x: 0.5,
+    center_y: 0.5,
+    mask: null,
+  },
+  star_filter: { amount: 0, points: 4, angle: 0, length: 0.08, threshold: 0.85, chroma: 0.25 },
+  diffusion: { amount: 0, radius: 14, threshold: 0.6, black_retention: 0.7, warmth: 0.15 },
+  channel_matrix: { amount: 0, matrix: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
+  posterize: { amount: 0, levels: 6, edge_amount: 0.6, edge_thickness: 1 },
+};
+
+/** Kurzschreibweise für die vielen `0..=1`-Regler der Phase-28-Werkzeuge
+ * — dieselben Schrittweiten überall, statt sie zwölfmal abzutippen. */
+function unit(key: string, label: string, neutral = 0): SliderSpec {
+  return { key, label, min: 0, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral };
+}
+
+/** Dasselbe für die zweiseitigen Regler (`-1..=1`). */
+function bipolar(key: string, label: string, neutral = 0): SliderSpec {
+  return { key, label, min: -1, max: 1, fineStep: 0.01, coarseStep: 0.1, neutral };
+}
+export interface LightOpticsToolSpec {
+  group: keyof LightOpticsAdjustments;
+  title: string;
+  /** Ein Halbsatz — was der Effekt mit dem Bild macht. */
+  hint: string;
+  sliders: readonly SliderSpec[];
+}
+
+/** Die zwölf Werkzeuge in derselben Reihenfolge, in der die Pipeline sie
+ * anwendet (`stages/light_optics.rs`) — wer das Panel von oben nach
+ * unten liest, sieht die tatsächliche Verarbeitungskette. Felder, die
+ * keine einfachen Regler sind (die zehn Zonen, die Bewegungsart, die
+ * Kanalmatrix), rendert `LightOpticsPanel` gesondert. */
+export const LIGHT_OPTICS_TOOL_SPECS: readonly LightOpticsToolSpec[] = [
+  {
+    group: "tone_match",
+    title: "Tonwert-Angleich",
+    hint: "Übernimmt die Tonwertverteilung eines Referenzfotos",
+    sliders: [unit("amount", "Stärke")],
+  },
+  {
+    group: "zone_system",
+    title: "Zonensystem",
+    hint: "Zehn Helligkeitszonen einzeln heller oder dunkler",
+    sliders: [unit("amount", "Stärke"), { key: "edge_radius", label: "Kantenradius", min: 1, max: 64, fineStep: 1, coarseStep: 8, neutral: 16 }],
+  },
+  {
+    group: "detail_pyramid",
+    title: "Detail-Pyramide",
+    hint: "Feine, mittlere und grobe Struktur getrennt regeln",
+    sliders: [unit("amount", "Stärke"), bipolar("fine", "Fein"), bipolar("medium", "Mittel"), bipolar("coarse", "Grob")],
+  },
+  {
+    group: "depth_dehaze",
+    title: "Dunst entfernen",
+    hint: "Holt Kontrast und Farbe nur in der Ferne zurück",
+    sliders: [unit("amount", "Stärke"), unit("start", "Beginnt ab", 0.3), unit("end", "Voll ab", 1)],
+  },
+  {
+    group: "depth_sharpen",
+    title: "Tiefenschärfe",
+    hint: "Schärft nur die gewählte Entfernungsebene",
+    sliders: [
+      unit("amount", "Stärke"),
+      unit("focus_depth", "Ebene", 0.8),
+      unit("range", "Bereich", 0.35),
+      { key: "radius", label: "Radius", min: 0.5, max: 16, fineStep: 0.5, coarseStep: 2, neutral: 2 },
+    ],
+  },
+  {
+    group: "relight",
+    title: "Neu beleuchten",
+    hint: "Setzt eine virtuelle Lichtquelle über die Tiefenkarte",
+    sliders: [
+      unit("amount", "Stärke"),
+      unit("light_x", "Licht ←→", 0.3),
+      unit("light_y", "Licht ↑↓", 0.25),
+      unit("light_z", "Höhe", 0.7),
+      unit("ambient", "Grundlicht", 0.55),
+      unit("specular", "Glanz", 0.15),
+    ],
+  },
+  {
+    group: "sky_drama",
+    title: "Himmel dramatisieren",
+    hint: "Zeichnet nur den Himmel, ohne ihn auszutauschen",
+    sliders: [
+      unit("amount", "Stärke"),
+      unit("contrast", "Kontrast", 0.5),
+      bipolar("saturation", "Sättigung", 0.4),
+      unit("darken", "Abdunkeln", 0.3),
+      bipolar("warmth", "Wärme"),
+    ],
+  },
+  {
+    group: "motion_blur",
+    title: "Bewegungsunschärfe",
+    hint: "Verwischt den Hintergrund, das Motiv bleibt scharf",
+    sliders: [
+      unit("amount", "Stärke"),
+      unit("length", "Länge", 0.05),
+      { key: "angle", label: "Winkel", min: 0, max: 360, fineStep: 1, coarseStep: 15, neutral: 0 },
+      unit("center_x", "Mitte ←→", 0.5),
+      unit("center_y", "Mitte ↑↓", 0.5),
+    ],
+  },
+  {
+    group: "star_filter",
+    title: "Blendenstern",
+    hint: "Lichtschleppen auf den hellsten Punkten",
+    sliders: [
+      unit("amount", "Stärke"),
+      { key: "points", label: "Strahlen", min: 2, max: 12, fineStep: 1, coarseStep: 2, neutral: 4 },
+      { key: "angle", label: "Winkel", min: 0, max: 360, fineStep: 1, coarseStep: 15, neutral: 0 },
+      unit("length", "Länge", 0.08),
+      unit("threshold", "Schwelle", 0.85),
+      unit("chroma", "Regenbogen", 0.25),
+    ],
+  },
+  {
+    group: "diffusion",
+    title: "Diffusionsfilter",
+    hint: "Weicher Schein aus den Lichtern, Schwarz bleibt schwarz",
+    sliders: [
+      unit("amount", "Stärke"),
+      { key: "radius", label: "Radius", min: 1, max: 64, fineStep: 1, coarseStep: 8, neutral: 14 },
+      unit("threshold", "Schwelle", 0.6),
+      unit("black_retention", "Schwarz halten", 0.7),
+      bipolar("warmth", "Wärme", 0.15),
+    ],
+  },
+  {
+    group: "channel_matrix",
+    title: "Kanalmatrix",
+    hint: "Mischt die Farbkanäle neu — bis hin zu Infrarot",
+    sliders: [unit("amount", "Stärke")],
+  },
+  {
+    group: "posterize",
+    title: "Poster-Look",
+    hint: "Grobe Farbstufen plus gezeichnete Konturen",
+    sliders: [
+      unit("amount", "Stärke"),
+      { key: "levels", label: "Stufen", min: 2, max: 16, fineStep: 1, coarseStep: 2, neutral: 6 },
+      unit("edge_amount", "Kontur", 0.6),
+      { key: "edge_thickness", label: "Konturstärke", min: 0.2, max: 5, fineStep: 0.1, coarseStep: 0.5, neutral: 1 },
+    ],
+  },
+];
+
+/** Vier Ein-Klick-Vorgaben der Kanalmatrix. Bewusst nur die neun Zahlen
+ * statt eines Modus-Enums: nach dem Klick bleibt jede Vorgabe frei
+ * weiter veränderbar, statt in einen festen Modus zu springen. */
+export const CHANNEL_MATRIX_PRESETS: readonly { id: string; label: string; matrix: number[] }[] = [
+  { id: "identity", label: "Neutral", matrix: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
+  // Falschfarben-Infrarot: Grün wandert nach Rot, Rot nach Blau —
+  // Laub wird magenta, Himmel tiefblau.
+  { id: "infrared", label: "Infrarot", matrix: [0.1, 1.1, -0.2, 0.2, 0.1, 0.7, 0.9, -0.1, 0.2] },
+  { id: "swap_rb", label: "Rot/Blau", matrix: [0, 0, 1, 0, 1, 0, 1, 0, 0] },
+  // Cyanotypie: alles auf Luminanz, dann nach Blau gekippt.
+  { id: "cyanotype", label: "Cyanotypie", matrix: [0.18, 0.35, 0.07, 0.24, 0.47, 0.09, 0.42, 0.82, 0.15] },
+];
+
+/** Die drei Bewegungsarten mit einer Beschriftung, die sagt, was sie
+ * tun — nicht nur, wie sie heißen. */
+export const MOTION_BLUR_KINDS: readonly { id: MotionBlurKind; label: string }[] = [
+  { id: "Directional", label: "Mitzieher" },
+  { id: "Radial", label: "Drehung" },
+  { id: "Zoom", label: "Zoom" },
+];
+
 export interface EdlPayload {
   basic: BasicAdjustments;
   curves: CurvesAdjustment;
@@ -1657,6 +1991,7 @@ export interface EdlPayload {
   lut_filter: LutFilterAdjustment;
   liquify_strokes: LiquifyStroke[];
   creative: CreativeAdjustments;
+  light_optics: LightOpticsAdjustments;
 }
 
 export function neutralEdlPayload(): EdlPayload {
@@ -1685,6 +2020,7 @@ export function neutralEdlPayload(): EdlPayload {
     lut_filter: NEUTRAL_LUT_FILTER,
     liquify_strokes: [],
     creative: structuredClone(NEUTRAL_CREATIVE),
+    light_optics: structuredClone(NEUTRAL_LIGHT_OPTICS),
   };
 }
 

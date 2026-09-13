@@ -8,6 +8,7 @@ export const en: Record<keyof typeof de, string> = {
   "developPanel.tab.color": "Color",
   "developPanel.tab.details": "Details",
   "developPanel.tab.creative": "Creative",
+  "developPanel.tab.lightOptics": "Light & Optics",
   "developPanel.tab.history": "History & Tools",
   "developPanel.tabs.label": "Develop sections",
   "masksPanel.tabs.label": "Mask sections",

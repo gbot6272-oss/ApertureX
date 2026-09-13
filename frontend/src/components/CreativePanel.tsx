@@ -1,6 +1,14 @@
-import { CREATIVE_TOOL_SPECS, type CreativeAdjustments, type FilmLabProcess } from "../lib/edl";
+import { useState } from "react";
+
+import {
+  CREATIVE_TOOL_SPECS,
+  NEUTRAL_CREATIVE,
+  type CreativeAdjustments,
+  type FilmLabProcess,
+} from "../lib/edl";
 import { useAppStore } from "../store";
 import { DevelopSlider } from "./DevelopSlider";
+import { ToolTile, ToolToolbar, matchesToolQuery } from "./ToolTiles";
 
 /**
  * Die zehn Kreativ-Werkzeuge aus Phase 27 (siehe `DECISIONS.md`
@@ -17,6 +25,11 @@ import { DevelopSlider } from "./DevelopSlider";
  * Die beiden Ein-Klick-Vorbereitungen (Motiv freistellen, Tiefenkarte)
  * stehen direkt in der Kachel, zu der sie gehören — nicht in einem
  * separaten KI-Bereich, den man erst suchen müsste.
+ *
+ * **Phase 28:** Kopf (Suche, „Nur aktive") und Kachel kommen jetzt aus
+ * `ToolTiles`, gemeinsam mit dem Licht-&-Optik-Panel — mit 22 Kacheln in
+ * zwei Panels braucht es beides, und zwei Fassungen desselben Kopfes
+ * würden auseinanderlaufen.
  */
 export function CreativePanel() {
   const creative = useAppStore((s) => s.developEdl.creative);
@@ -33,6 +46,9 @@ export function CreativePanel() {
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
   const multiSelectedIds = useAppStore((s) => s.multiSelectedIds);
 
+  const [query, setQuery] = useState("");
+  const [onlyActive, setOnlyActive] = useState(false);
+
   function readField(group: keyof CreativeAdjustments, field: string): number {
     return (creative[group] as unknown as Record<string, number>)[field] ?? 0;
   }
@@ -43,35 +59,49 @@ export function CreativePanel() {
    * drücken" ist der kürzeste Weg zum Ziel. */
   const referenceId = multiSelectedIds.find((id) => id !== selectedPhotoId) ?? selectedPhotoId;
 
+  function isActive(tool: (typeof CREATIVE_TOOL_SPECS)[number]): boolean {
+    return tool.sliders.some((spec) => readField(tool.group, spec.key) !== spec.neutral);
+  }
+
+  function resetTool(group: keyof CreativeAdjustments, title: string) {
+    const neutral = NEUTRAL_CREATIVE[group] as unknown as Record<string, unknown>;
+    for (const [field, value] of Object.entries(neutral)) {
+      if (typeof value === "number") setCreativeField(group, field, value);
+    }
+    void commitDevelopEdit(`${title} zurückgesetzt`);
+  }
+
+  const visible = CREATIVE_TOOL_SPECS.filter(
+    (tool) => matchesToolQuery(tool.title, tool.hint, query) && (!onlyActive || isActive(tool)),
+  );
+
   return (
     <div className="flex flex-col gap-3" data-testid="creative-panel">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-text-primary">Kreativ-Werkzeuge</h3>
-        <button
-          type="button"
-          onClick={resetCreative}
-          className="rounded px-2 py-1 text-xs text-text-muted transition-colors duration-[var(--duration-fast)] hover:text-accent"
-        >
-          Alles zurücksetzen
-        </button>
-      </div>
+      <ToolToolbar
+        title="Kreativ-Werkzeuge"
+        query={query}
+        onQueryChange={setQuery}
+        onlyActive={onlyActive}
+        onOnlyActiveChange={setOnlyActive}
+        onReset={resetCreative}
+        visibleCount={visible.length}
+        totalCount={CREATIVE_TOOL_SPECS.length}
+        idPrefix="creative"
+      />
 
-      {CREATIVE_TOOL_SPECS.map((tool) => {
-        const active = tool.sliders.some((spec) => readField(tool.group, spec.key) !== spec.neutral);
+      {visible.length === 0 && (
+        <p className="text-xs text-text-muted">Kein Werkzeug passt zur Suche.</p>
+      )}
+
+      {visible.map((tool) => {
         return (
-          <section
+          <ToolTile
             key={tool.group}
-            aria-label={tool.title}
-            data-active={active ? "true" : "false"}
-            className={`apx-glass flex flex-col gap-2 rounded-lg border p-3 transition-[border-color,box-shadow] duration-[var(--duration-base)] hover:border-accent/50 hover:shadow-[var(--shadow-md)] ${
-              active ? "border-accent/60" : "border-[var(--glass-border)]"
-            }`}
+            title={tool.title}
+            hint={tool.hint}
+            active={isActive(tool)}
+            onReset={() => resetTool(tool.group, tool.title)}
           >
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-sm font-medium text-text-primary">{tool.title}</span>
-              {active && <span className="shrink-0 text-[10px] font-medium tracking-wide text-accent uppercase">aktiv</span>}
-            </div>
-            <p className="text-xs text-text-muted">{tool.hint}</p>
 
             {tool.group === "color_match" && (
               <button
@@ -143,7 +173,7 @@ export function CreativePanel() {
                 onCommit={() => void commitDevelopEdit(`${tool.title}: ${spec.label}`)}
               />
             ))}
-          </section>
+          </ToolTile>
         );
       })}
     </div>

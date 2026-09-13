@@ -417,3 +417,43 @@ Himmel, flachere Mitten.
 **Bewusste Grenze:** die Kreativ-Werkzeuge sind keine Preset-Sektion —
 zwei von ihnen tragen fotospezifische Karten (Tiefe, Motiv), die auf
 einem anderen Foto falsch wären. Siehe `DECISIONS.md` ADR-0057.
+
+## Licht & Optik (Phase 28)
+
+Zwölf Werkzeuge in der eigenen Entwickeln-Registerkarte „Licht & Optik".
+Alle laufen in einer gemeinsamen Pipeline-Stufe (`stages::light_optics`)
+**vor** dem Filter/LUT — Korrekturen und optische Phänomene gehen der
+Gradation voraus, die Phase-27-Looks liegen danach.
+
+| Werkzeug | Wirkung | Vorbereitung |
+|---|---|---|
+| Tonwert-Angleich | Übernimmt die Tonwertverteilung eines Referenzfotos | Knopf „Tonwerte übernehmen" (zweites Foto der Mehrfachauswahl) |
+| Zonensystem | Zehn Helligkeitszonen einzeln ±1 EV, kantenbewusst (Guided Filter) | — |
+| Detail-Pyramide | Feine, mittlere und grobe Struktur getrennt regeln | — |
+| Dunst entfernen | Kontrast und Farbe zurück, aber nur in der Ferne | Knopf „Tiefenkarte berechnen" (teilt sich die Karte mit der Virtuellen Blende) |
+| Tiefenschärfe | Schärft nur die gewählte Entfernungsebene | Knopf „Tiefenkarte berechnen" |
+| Neu beleuchten | Virtuelle Lichtquelle über die Normalen aus der Tiefenkarte | Knopf „Tiefenkarte berechnen" |
+| Himmel dramatisieren | Kontrast/Sättigung/Abdunklung nur im Himmel, ohne Austausch | Knopf „Himmel erkennen" (**kein Modell-Download**) |
+| Bewegungsunschärfe | Mitzieher, Drehung oder Zoom | Knopf „Motiv schützen" (teilt sich die Maske mit der Freistellung) |
+| Blendenstern | Lichtschleppen auf den hellsten Punkten, 2–12 Strahlen | — |
+| Diffusionsfilter | Weicher Schein aus den Lichtern, Schwarz bleibt schwarz | — |
+| Kanalmatrix | Freie 3×3-Matrix, vier Ein-Klick-Vorgaben (u. a. Infrarot) | — |
+| Poster-Look | Grobe Farbstufen plus gezeichnete Konturen | — |
+
+**Bokeh-Formen für die Virtuelle Blende** — polygonale Blende (3–11
+Lamellen mit Drehung), anamorphe Streckung, Petzval-Wirbel und
+Spitzlicht-Anhebung. Ohne gesetzte Form bleibt das bisherige Ergebnis
+bit-für-bit unverändert.
+
+**Drei neue Filter** — „Nordic Winter", „Tokyo Neon Night" und
+„Sahara Gold", je in der Filter-Bibliothek und als `.cube`-Datei unter
+`assets/luts/` (33er Raster, original erstellt, frei verwendbar).
+
+**Panel-Navigation:** beide Werkzeug-Panels (Kreativ und Licht & Optik)
+haben jetzt ein Suchfeld über Titel und Wirkung, einen
+„Nur aktive"-Schalter und je Kachel einen Zurücksetzen-Knopf, der bei
+Hover oder Tastaturfokus erscheint.
+
+**Bewusste Grenze:** wie die Kreativ-Werkzeuge ist auch Licht & Optik
+keine Preset-Sektion — vier der zwölf tragen fotospezifische Karten
+(Tiefe, Himmel, Motiv). Siehe `DECISIONS.md` ADR-0058.

@@ -2272,3 +2272,22 @@ export interface ColorStatsDto {
 export function computeReferenceColorStats(photoId: string): Promise<ColorStatsDto> {
   return invoke<ColorStatsDto>("compute_reference_color_stats", { photoId });
 }
+
+// ---- Licht & Optik (Phase 28, siehe `DECISIONS.md` ADR-0058) --------------
+
+/** Trennt Himmel und Boden für „Himmel dramatisieren". Dieselbe Hülle
+ * wie `segmentPhotoSubject` und ebenfalls **ohne** Modell-Download. */
+export function segmentPhotoSky(photoId: string): Promise<SubjectMaskDto> {
+  return invoke<SubjectMaskDto>("segment_photo_sky", { photoId });
+}
+
+export interface ToneStatsDto {
+  /** 10 %, 20 %, …, 90 % der Luminanzverteilung. */
+  deciles: number[];
+}
+
+/** Liest die Tonwertverteilung eines Referenzfotos für den
+ * Tonwert-Angleich — neun Zahlen, kein zweites Bild im EDL. */
+export function computeReferenceToneStats(photoId: string): Promise<ToneStatsDto> {
+  return invoke<ToneStatsDto>("compute_reference_tone_stats", { photoId });
+}

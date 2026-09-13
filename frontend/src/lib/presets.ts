@@ -71,6 +71,12 @@ export type PresetSectionKey = Exclude<
   // beiden Karten beim Speichern gezielt herausgeschnitten werden, ist
   // der saubere Weg (offener Nachtrag, siehe ADR-0057).
   | "creative"
+  // Licht & Optik (Phase 28) aus demselben Grund ausgeschlossen: VIER
+  // der zwoelf tragen fotospezifisch berechnete Karten (Tiefenkarte bei
+  // Dunstentfernung/Schaerfe/Neubeleuchtung, Himmelsmaske beim
+  // Dramatisieren, Motivmaske bei der Bewegungsunschaerfe). Derselbe
+  // offene Nachtrag wie bei `creative` (siehe ADR-0058).
+  | "light_optics"
 >;
 
 export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [

@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
 
+// Hinweis zu `exact: true` bei der Registerkarte "Licht": seit Phase 28
+// gibt es zusaetzlich die Karte "Licht & Optik", und Playwrights
+// Standard-Namensvergleich ist ein Teilstring-Treffer — ohne `exact`
+// waere der Locator mehrdeutig.
+
 import { getMockInvokeLog, installTauriMock } from "./tauri-mock";
 
 /**
@@ -70,7 +75,7 @@ test.describe("Workflow: Schnappschüsse + Vorher/Nachher", () => {
     await expect(page.getByRole("button", { name: "Erste Version", exact: true })).toBeVisible();
 
     // Weiter bearbeiten, dann den Schnappschuss wiederherstellen.
-    await page.getByRole("tab", { name: "Licht" }).click();
+    await page.getByRole("tab", { name: "Licht", exact: true }).click();
     await exposureInput.fill("-1.2");
     await exposureInput.blur();
     await expect.poll(async () => lastCommittedExposure(page)).toBeCloseTo(-1.2, 2);
@@ -78,7 +83,7 @@ test.describe("Workflow: Schnappschüsse + Vorher/Nachher", () => {
     await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await page.getByRole("button", { name: "Erste Version", exact: true }).click();
     await expect.poll(async () => lastCommittedExposure(page)).toBeCloseTo(0.8, 2);
-    await page.getByRole("tab", { name: "Licht" }).click();
+    await page.getByRole("tab", { name: "Licht", exact: true }).click();
     await expect(exposureInput).toHaveValue("0.8");
 
     await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
@@ -146,7 +151,7 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
     await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await page.getByRole("button", { name: "Kopieren" }).click();
 
-    await page.getByRole("tab", { name: "Licht" }).click();
+    await page.getByRole("tab", { name: "Licht", exact: true }).click();
     await exposureInput.fill("-1.2");
     await exposureInput.blur();
     await expect.poll(async () => lastCommittedExposure(page)).toBeCloseTo(-1.2, 2);
@@ -154,7 +159,7 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
     await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await page.getByRole("button", { name: "Einfügen" }).click();
     await expect.poll(async () => lastCommittedExposure(page)).toBeCloseTo(0.8, 2);
-    await page.getByRole("tab", { name: "Licht" }).click();
+    await page.getByRole("tab", { name: "Licht", exact: true }).click();
     await expect(exposureInput).toHaveValue("0.8");
   });
 
@@ -167,7 +172,7 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
     await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await expect(applyPreviousButton).toBeDisabled();
 
-    await page.getByRole("tab", { name: "Licht" }).click();
+    await page.getByRole("tab", { name: "Licht", exact: true }).click();
     const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" }).first();
     await exposureInput.fill("0.6");
     await exposureInput.blur();
@@ -182,7 +187,7 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
 
     await applyPreviousButton.click();
     await expect.poll(async () => lastExposureFor(page, PHOTO_2.id)).toBeCloseTo(0.6, 2);
-    await page.getByRole("tab", { name: "Licht" }).click();
+    await page.getByRole("tab", { name: "Licht", exact: true }).click();
     await expect(exposureInput).toHaveValue("0.6");
   });
 
@@ -198,7 +203,7 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
     await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await expect(syncButton).toBeEnabled();
 
-    await page.getByRole("tab", { name: "Licht" }).click();
+    await page.getByRole("tab", { name: "Licht", exact: true }).click();
     const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" }).first();
     await exposureInput.fill("0.5");
     await exposureInput.blur();
@@ -216,7 +221,7 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
     await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await page.getByRole("checkbox", { name: /Auto-Sync/ }).check();
 
-    await page.getByRole("tab", { name: "Licht" }).click();
+    await page.getByRole("tab", { name: "Licht", exact: true }).click();
     const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" }).first();
     await exposureInput.fill("-0.3");
     await exposureInput.blur();

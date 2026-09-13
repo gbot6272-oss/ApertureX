@@ -5,8 +5,11 @@ import {
   AI_MASK_KIND_LABELS,
   base64ToByteArray,
   NEUTRAL_CREATIVE,
+  NEUTRAL_LIGHT_OPTICS,
   type CreativeAdjustments,
   type FilmLabProcess,
+  type LightOpticsAdjustments,
+  type MotionBlurKind,
   BASIC_SLIDER_SPECS,
   buildEdlEnvelopeJson,
   clampSliderValue,
@@ -1675,6 +1678,40 @@ interface LibraryBacklogSlice {
   /** Liest die Farbstatistik eines Referenzfotos und legt sie als Ziel
    * des Farbabgleichs ab. */
   setColorMatchReference: (referencePhotoId: string) => Promise<void>;
+
+  // ---- Licht & Optik (Phase 28, siehe DECISIONS.md ADR-0058) -------------
+  /** Setzt einen beliebigen Zahlenregler der zwoelf Licht-&-Optik-
+   * Werkzeuge — dieselbe „EIN generischer Setter"-Begruendung wie bei
+   * `setCreativeField`. */
+  setLightOpticsField: (group: keyof LightOpticsAdjustments, field: string, value: number) => void;
+  /** Setzt den Belichtungsversatz EINER der zehn Zonen. */
+  setZoneValue: (index: number, value: number) => void;
+  /** Setzt die Bewegungsart (einziges nicht-numerisches Feld). */
+  setMotionBlurKind: (kind: MotionBlurKind) => void;
+  /** Uebernimmt eine der vier Kanalmatrix-Vorgaben; die neun Zahlen
+   * bleiben danach frei weiter veraenderbar. */
+  applyChannelMatrixPreset: (matrix: number[]) => void;
+  /** Setzt ein Feld der Virtuellen Blende (Bokeh-Formen aus Phase 28). */
+  setVirtualApertureField: (field: string, value: number) => void;
+  /** Setzt alle zwoelf Werkzeuge auf neutral zurueck. */
+  resetLightOptics: () => void;
+  skySegmenting: boolean;
+  /** Trennt Himmel und Boden fuer das aktuelle Foto und legt die Maske
+   * in `developEdl.light_optics.sky_drama.mask` ab. Braucht kein
+   * Modell. */
+  segmentSkyForCurrentPhoto: () => Promise<void>;
+  /** Uebernimmt die Motivmaske fuer die Bewegungsunschaerfe — berechnet
+   * sie, falls noch keine vorliegt. */
+  useSubjectMaskForMotionBlur: () => Promise<void>;
+  /** Uebernimmt die Tiefenkarte fuer eines der drei tiefenbasierten
+   * Werkzeuge — oder berechnet sie, falls noch keine vorliegt. */
+  useDepthMapForLightOptics: (
+    target: "depth_dehaze" | "depth_sharpen" | "relight",
+  ) => Promise<void>;
+  toneMatchLoading: boolean;
+  /** Liest die Tonwertverteilung eines Referenzfotos und legt sie als
+   * Ziel des Tonwert-Angleichs ab. */
+  setToneMatchReference: (referencePhotoId: string) => Promise<void>;
 
   /** Filter-/LUT-Bibliothek (Phase 16 Schritt 1, siehe `DECISIONS.md`
    * ADR-0043) — öffnet einen Datei-Dialog für eine `.cube`-Datei, legt
@@ -6128,6 +6165,154 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.colorMatchLoading = false;
+        });
+      }
+    },
+
+    setLightOpticsField: (group, field, value) => {
+      set((state) => {
+        const target = state.developEdl.light_optics[group] as unknown as Record<string, number>;
+        target[field] = value;
+      });
+    },
+
+    setZoneValue: (index, value) => {
+      set((state) => {
+        const zones = state.developEdl.light_optics.zone_system.zones;
+        if (index < 0 || index >= zones.length) return;
+        zones[index] = value;
+        // Ohne Gesamtstaerke bliebe jede Zonenaenderung folgenlos — der
+        // Nutzer zieht sonst zehn Regler und sieht nichts.
+        if (state.developEdl.light_optics.zone_system.amount === 0) {
+          state.developEdl.light_optics.zone_system.amount = 1;
+        }
+      });
+    },
+
+    setMotionBlurKind: (kind) => {
+      set((state) => {
+        state.developEdl.light_optics.motion_blur.kind = kind;
+      });
+      void get().commitDevelopEdit("Bewegungsart geändert");
+    },
+
+    applyChannelMatrixPreset: (matrix) => {
+      set((state) => {
+        state.developEdl.light_optics.channel_matrix.matrix = [...matrix];
+        if (state.developEdl.light_optics.channel_matrix.amount === 0) {
+          state.developEdl.light_optics.channel_matrix.amount = 1;
+        }
+      });
+      void get().commitDevelopEdit("Kanalmatrix übernommen");
+    },
+
+    setVirtualApertureField: (field, value) => {
+      set((state) => {
+        (state.developEdl.virtual_aperture as unknown as Record<string, number>)[field] = value;
+      });
+    },
+
+    resetLightOptics: () => {
+      set((state) => {
+        state.developEdl.light_optics = structuredClone(NEUTRAL_LIGHT_OPTICS);
+      });
+      void get().commitDevelopEdit("Licht & Optik zurückgesetzt");
+    },
+
+    skySegmenting: false,
+
+    segmentSkyForCurrentPhoto: async () => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.skySegmenting = true;
+      });
+      playCue("processing");
+      try {
+        const dto = await api.segmentPhotoSky(developPhotoId);
+        set((state) => {
+          state.developEdl.light_optics.sky_drama.mask = {
+            bitmap_width: dto.bitmapWidth,
+            bitmap_height: dto.bitmapHeight,
+            alpha: base64ToByteArray(dto.alphaBase64),
+          };
+          if (state.developEdl.light_optics.sky_drama.amount === 0) {
+            state.developEdl.light_optics.sky_drama.amount = 0.7;
+          }
+        });
+        playCue("success");
+        void get().commitDevelopEdit("Himmel erkannt");
+      } catch (err) {
+        playCue("error");
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.skySegmenting = false;
+        });
+      }
+    },
+
+    useSubjectMaskForMotionBlur: async () => {
+      const existing = get().developEdl.creative.subject_focus.mask;
+      if (!existing) {
+        // Dieselbe Motivmaske wie die Freistellung aus Phase 27 —
+        // einmal berechnen reicht fuer beide Werkzeuge.
+        await get().segmentSubjectForCurrentPhoto();
+      }
+      const mask = get().developEdl.creative.subject_focus.mask;
+      if (!mask) return;
+      set((state) => {
+        state.developEdl.light_optics.motion_blur.mask = structuredClone(mask);
+        if (state.developEdl.light_optics.motion_blur.amount === 0) {
+          state.developEdl.light_optics.motion_blur.amount = 0.8;
+          state.developEdl.light_optics.motion_blur.length = 0.12;
+        }
+      });
+      void get().commitDevelopEdit("Motiv vor Bewegungsunschärfe geschützt");
+    },
+
+    useDepthMapForLightOptics: async (target) => {
+      const existing = get().developEdl.virtual_aperture.depth_map;
+      if (!existing) {
+        await get().estimateDepthForCurrentPhoto();
+      }
+      const depth = get().developEdl.virtual_aperture.depth_map;
+      if (!depth) return;
+      set((state) => {
+        const tool = state.developEdl.light_optics[target];
+        tool.depth_map = structuredClone(depth);
+        if (tool.amount === 0) tool.amount = 0.7;
+      });
+      void get().commitDevelopEdit("Tiefenkarte übernommen");
+    },
+
+    toneMatchLoading: false,
+
+    setToneMatchReference: async (referencePhotoId) => {
+      set((state) => {
+        state.toneMatchLoading = true;
+      });
+      playCue("processing");
+      try {
+        const stats = await api.computeReferenceToneStats(referencePhotoId);
+        set((state) => {
+          const tm = state.developEdl.light_optics.tone_match;
+          tm.targets = [...stats.deciles];
+          tm.has_target = true;
+          if (tm.amount === 0) tm.amount = 0.75;
+        });
+        playCue("success");
+        void get().commitDevelopEdit("Tonwerte übernommen");
+      } catch (err) {
+        playCue("error");
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.toneMatchLoading = false;
         });
       }
     },

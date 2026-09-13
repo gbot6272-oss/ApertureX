@@ -6498,3 +6498,33 @@ der zwölf tragen fotospezifisch berechnete Karten (Tiefe, Himmel,
 Motiv). Derselbe offene Nachtrag wie in ADR-0057 — erst wenn beim
 Speichern eines Presets die Karten gezielt herausgeschnitten werden,
 können die übrigen acht preset-fähig werden.
+
+### Zwei selbstverschuldete Namenskollisionen (real gemessen)
+
+Der erste volle Playwright-Lauf nach der UI-Arbeit meldete sechs
+Fehlschläge, beide Ursachen aus dieser Phase:
+
+1. `getByRole("tab", { name: "Licht" })` traf plötzlich zwei Karten —
+   Playwrights Standard-Namensvergleich ist ein **Teilstring**-Treffer,
+   und „Licht" steckt in „Licht & Optik".
+2. `getByRole("button", { name: "Motiv freistellen" })` traf zwei
+   Knöpfe — den Aktionsknopf und den neuen Zurücksetzen-Knopf der
+   Kachel, dessen zugänglicher Name „Motiv freistellen zurücksetzen"
+   lautet.
+
+Beide sind in den **Tests** korrigiert (`exact: true`), nicht in der
+Oberfläche: „Licht & Optik" ist der richtige Kartenname, und
+„<Werkzeug> zurücksetzen" ist für Screenreader-Nutzer die richtige
+Beschriftung. Den Namen zu verstümmeln, um einen ungenauen Locator zu
+retten, wäre die falsche Richtung.
+
+Verifiziert: 16 neue Rust-Unit-Tests in `stages::light_optics` (darunter
+einer, der für jedes der zwölf Werkzeuge einzeln nachweist, dass es das
+Bild real verändert, und einer, der den Guided Filter gegen das
+Kastenmittel an einer harten Kante misst), 4 neue Bokeh-Tests (darunter
+der Bit-für-Bit-Vergleich gegen das Verfahren vor dieser Phase), der
+`.cube`-gegen-Formel-Test über alle vier Dateien, ein neuer e2e-Test mit
+vier Fällen. `cargo fmt`/`clippy --workspace --all-targets` sauber,
+`cargo test --workspace` komplett grün (apx-pipeline 290/290), `tsc -b`,
+`vitest run` 251/251, volle Playwright-Suite **148/148** mit real
+geprüftem Exit-Code (`PLAYWRIGHT_EXIT=0`).

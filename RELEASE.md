@@ -132,27 +132,46 @@ Build) und ist deshalb **nicht** gemacht.
 
 ---
 
-## Offene Punkte, die eine Entscheidung brauchen
+## Lizenzierung — entschieden (siehe `DECISIONS.md` ADR-0063)
 
-Beides sind keine Programmierfragen, sondern Festlegungen, die nicht
-einseitig getroffen werden sollten:
+Beide Punkte, die hier bis Phase 17 offen standen, sind geklärt.
 
-1. **Es gibt keine `LICENSE`-Datei**, obwohl `README.md` das Projekt als
-   „fully open sourced" bezeichnet. Ohne Lizenzdatei gilt
-   urheberrechtlich „alle Rechte vorbehalten" — der Satz im README
-   allein erlaubt niemandem, den Code weiterzugeben oder zu ändern.
-   `bundle.license`/`licenseFile` bleiben deshalb leer: eine dort
-   eingetragene Lizenz ohne Entscheidung dahinter wäre eine Behauptung.
-   Die Lizenz zu wählen ist die einzige offene Aufgabe, die aus
-   „open source gemeint" auch „open source wirksam" macht.
+**1. Aperture X steht unter Apache-2.0.** `LICENSE` enthält den
+vollständigen Lizenztext, `NOTICE` die nach §4(d) verlangten Hinweise.
+`bundle.license`/`bundle.licenseFile` sind gesetzt, und beide Dateien
+gehen als Ressourcen mit ins Paket — Apache-2.0 §4(a) verlangt sie bei
+**jeder** Weitergabe, ein Installer ist eine.
 
-2. **LGPL und `rawler` (ADR-0002 Punkt 2).** Die RAW-Dekodierung hängt
-   an `rawler` (LGPL-2.1), derzeit statisch gelinkt. Für eine
-   **quelloffene** Weitergabe — also das, was der README ankündigt —
-   ist das unproblematisch. Nur für eine **geschlossene** verlangt
-   LGPL §6, dass Nutzer die Komponente austauschen können; dafür müsste
-   `apx-raw` als dynamisch nachladbare Bibliothek gebaut werden. Dieser
-   Punkt erledigt sich also mit Entscheidung 1, sobald eine
-   Open-Source-Lizenz gewählt ist.
+Warum Apache-2.0 und nicht MIT: die ausdrückliche Patentlizenz in §3.
+Eine Bildverarbeitungsanwendung ist genau die Art Software, bei der
+Patentfragen auftauchen können; MIT schweigt dazu.
 
-Bis beides geklärt ist, ist ein Release als **Entwurf** genau richtig.
+Warum nicht GPL-2.0: **unmöglich**, nicht nur unerwünscht. `lensfun`
+steht unter LGPL-3.0-or-later, und die ist mit GPL-2.0-only
+unvereinbar. Das war vor der maschinellen Prüfung nicht bekannt.
+
+**2. Die LGPL-Frage aus ADR-0002 Punkt 2 ist damit erledigt.** Weil
+Aperture X quelloffen mit vollständigem Quelltext weitergegeben wird,
+ist die Austauschbarkeit, die LGPL-2.1 §6 bzw. LGPL-3.0 §4 verlangt,
+schon durch diese Quelltextweitergabe gegeben: wer will, ersetzt
+`rawler`, `lensfun` oder `gphoto2` und baut neu. `apx-raw` muss dafür
+**nicht** als dynamisch nachladbare Bibliothek gebaut werden. Genau
+diesen Ausgang hatte ADR-0002 vorgezeichnet.
+
+Für eine **geschlossene** Weitergabe gälte das nicht. Sollte das je
+aufkommen, ist ADR-0002 Punkt 2 wieder offen.
+
+## Was weiterhin offen ist
+
+**GSAP ist nicht quelloffen.** Die Animationsbibliothek steht unter
+GreenSocks eigener „no charge"-Lizenz: kostenlos nutzbar und
+weitergebbar, aber nicht OSI-anerkannt und nicht unter Apache-2.0
+unterlizenzierbar. Sie landet im gebauten Bündel. Bewusste Entscheidung
+(ADR-0063): behalten und ausdrücklich ausweisen, statt sie
+stillschweigend unter der eigenen Lizenz mitlaufen zu lassen. Ein
+späterer Austausch beträfe acht Dateien und ist in `THIRD_PARTY.md`
+umrissen.
+
+Für ein Release heißt das: der Entwurfs-Status bleibt sinnvoll, bis die
+Signierung einmal mit einem echten Zertifikat gelaufen ist (siehe oben)
+— nicht mehr wegen der Lizenz.

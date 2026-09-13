@@ -24,10 +24,18 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "appimage", "app", "dmg", "nsis"],
+    "targets": [
+      "deb",
+      "appimage",
+      "app",
+      "dmg",
+      "nsis"
+    ],
     "publisher": "Aperture X",
     "homepage": "https://github.com/gbot6272-oss/room-of-flash",
-    "copyright": "© Aperture X",
+    "copyright": "© 2026 Aperture X contributors",
+    "license": "Apache-2.0",
+    "licenseFile": "../../LICENSE",
     "category": "Photography",
     "shortDescription": "RAW-Fotoeditor mit nicht-destruktiver Bearbeitung",
     "longDescription": "Aperture X ist ein nicht-destruktiver RAW-Foto- und Videoeditor: Katalog, Entwickeln-Modul mit Masken und KI-Werkzeugen, Filter-/LUT-Bibliothek, Export und Druck.",
@@ -39,7 +47,9 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../../THIRD_PARTY.md": "THIRD_PARTY.md"
+      "../../THIRD_PARTY.md": "THIRD_PARTY.md",
+      "../../LICENSE": "LICENSE",
+      "../../NOTICE": "NOTICE"
     },
     "linux": {
       "deb": {
@@ -64,7 +74,10 @@
       "timestampUrl": "http://timestamp.digicert.com",
       "nsis": {
         "installMode": "perMachine",
-        "languages": ["German", "English"],
+        "languages": [
+          "German",
+          "English"
+        ],
         "displayLanguageSelector": true
       }
     }

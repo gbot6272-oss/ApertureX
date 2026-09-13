@@ -197,7 +197,7 @@ nachgeholt statt eines weiteren stillschweigenden Nachtrags.
 
 | Paket | Lizenz | Zweck | Hinweis |
 |---|---|---|---|
-| `gsap` (3.15) | Eigene "Standard No-Charge License" (seit April 2025, Webflow-Übernahme von GreenSock: 100 % kostenlos inkl. aller vormals kostenpflichtigen Plugins — ScrollTrigger, SplitText, Flip, MorphSVG usw. —, keine Attributionspflicht, kommerzielle Nutzung ausdrücklich erlaubt) | Animationen (Start-Ladeschirm, Beenden-Übergang, künftige Mikrointeraktionen) | Industriestandard; die 17 fertigen GSAP-Bewegungsrezepte des bereits integrierten `.claude/skills/ui-ux-pro-max`-Skills (siehe unten) sind ohne diese Laufzeitabhängigkeit ungenutzt geblieben |
+| `gsap` (3.15) | **GreenSock Standard "no charge" License** — `https://gsap.com/standard-license`, "Copyright (c) 2008-2026, GreenSock. All rights reserved." **KEINE Open-Source-Lizenz** (nicht OSI-anerkannt, siehe unten) | Animationen (Start-Ladeschirm, Beenden-Übergang, Dialoge/Sheets, Mikrointeraktionen) | **Einzige Komponente im Projekt, die nicht quelloffen ist — siehe ADR-0063.** Seit der Webflow-Übernahme (April 2025) vollständig kostenlos inkl. aller vormals kostenpflichtigen Plugins, ohne Attributionspflicht, kommerzielle Nutzung ausdrücklich erlaubt. Das ändert aber nichts daran, dass GSAP **nicht unter Apache-2.0 unterlizenziert werden kann**: ein Fork von Aperture X ist für diese eine Komponente an GreenSocks Bedingungen gebunden, nicht an die Apache-2.0-Erteilung, die alles andere abdeckt. GSAP landet im gebauten Anwendungsbündel, ist also Teil jeder Weitergabe. In `NOTICE` ausdrücklich benannt. Betroffen sind acht Dateien (`ui/Dialog`, `ui/Sheet`, `ui/Tabs`, `ui/SuccessSpark`, `OnboardingTour`, `ShutdownOverlay`, `GlobalBusyIndicator`, `StartupSplash`) — das ist zugleich der Umfang eines möglichen späteren Austauschs |
 | `uisfx` (0.4) | MIT (Code) + **CC0-1.0** (generierte Audiodateien, gemeinfrei, keine Attributionspflicht) | UI-Sounds (78 semantische Cues × 12 Klangwelten, App-Standard: "glass") | Null Laufzeit-Abhängigkeiten, ~12 kB komprimierte Web-Audio-Runtime, vollständig offline (kein Nachladen von Audiodateien zur Laufzeit) — Quelle: `github.com/romainsimon/uisfx` |
 
 ## Frontend — Phase 23 (siehe `DECISIONS.md` ADR-0051)
@@ -233,3 +233,38 @@ Reine Claude-Code-Skills/-Nachschlagewerke für die Entwicklung dieses Projekts 
 ---
 
 *Einträge für Phase 2 und später kommen hinzu, sobald die jeweilige Phase startet.*
+
+
+---
+
+## Maschinelle Lizenzprüfung (Phase 10 Nachtrag, siehe `DECISIONS.md` ADR-0063)
+
+Diese Datei wird von Hand gepflegt und kann deshalb unvollständig sein —
+und war es auch: `gsap`s Eintrag beschrieb die Lizenz als „kostenlos",
+ohne zu sagen, dass sie keine Open-Source-Lizenz ist. Genau solche
+Lücken fallen erst auf, wenn jemand tatsächlich weitergibt.
+
+Seit ADR-0063 gibt es deshalb zusätzlich eine **maschinell erzeugte**
+Momentaufnahme aller Abhängigkeiten mit ihren Lizenzen:
+
+- `licenses/rust.tsv` — 952 Einträge, aus den `Cargo.toml`-Manifesten
+  der entpackten Registry gelesen (inkl. der nur für Windows/macOS/WASI
+  aufgelösten, die dafür eigens nachgeladen wurden).
+- `licenses/npm.tsv` — 170 Einträge, aus den `package.json` im
+  pnpm-Speicher gelesen.
+
+Erzeugt von `tools/license-audit.py`. Zwei Tests in
+`crates/apx-app/tests/bundle_config.rs` halten das ehrlich:
+
+1. `the_license_snapshot_covers_every_locked_crate` — jede Zeile aus
+   `Cargo.lock` muss in der Momentaufnahme stehen. Eine neue oder
+   aktualisierte Abhängigkeit macht den Test rot, bis jemand das Skript
+   laufen lässt; dabei landet ihre Lizenz sichtbar im Diff.
+2. `every_dependency_license_is_recorded_and_acceptable` — jede erfasste
+   Lizenz muss entweder unbedenklich sein oder als benannte Ausnahme
+   geführt werden. `A OR B` genügt, wenn ein Zweig unbedenklich ist;
+   `A AND B` verlangt beide.
+
+**Ergebnis des ersten Laufs:** außer den vier LGPL-Crates und `gsap`
+nichts mit Auflagen über die Namensnennung hinaus. Kein GPL (ohne „L")
+irgendwo im Baum, weder als Pflicht noch als Wahlmöglichkeit.

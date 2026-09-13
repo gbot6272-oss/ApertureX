@@ -39,6 +39,8 @@ Ich habe die Lizenzlage der realistischen Alternativen geprüft:
 3. Vollständiger Lizenztext und Quellverweis in `THIRD_PARTY.md`.
 **Konsequenzen:** Falls das Gesamtprodukt closed-source vertrieben werden soll, ist Punkt 2 nicht optional, sondern Voraussetzung für Rechtssicherheit. Falls Aperture X ohnehin quelloffen wird, entfällt die Dringlichkeit weitgehend. **Diese Weichenstellung (closed-source vs. quelloffen) betrifft den Gesamtumfang des Projekts und wird hier nicht einseitig entschieden.**
 
+**Nachtrag (ADR-0063): Punkt 2 ist erledigt.** Die Weichenstellung ist gefallen — Aperture X steht unter Apache-2.0 und wird quelloffen weitergegeben. Damit ist die von LGPL-2.1 §6 verlangte Austauschbarkeit schon durch die Quelltextweitergabe gegeben; `apx-raw` muss **nicht** als dynamisch nachladbare Bibliothek gebaut werden. Käme je eine geschlossene Weitergabe auf, wäre Punkt 2 wieder offen. Die dortige Lizenztabelle ist außerdem unvollständig: `lensfun` (LGPL-3.0-or-later, seit Phase 12) kam später dazu und ist strenger als alles hier Aufgeführte.
+
 ---
 
 ## ADR-0003: Bildübertragung Backend→Frontend über Custom-Protokoll-Handler
@@ -6950,3 +6952,118 @@ wirkungslosem Zuschnitt. Die Stabilisierung selbst braucht `ffmpeg` und
 läuft komplett in Rust; sie ist dort geprüft, nicht im Browser. Das ist
 dieselbe Grenze, die ADR-0010 für alle Playwright-Tests dieses Projekts
 festhält.
+
+---
+
+## ADR-0063: Aperture X steht unter Apache-2.0 — und eine Abhängigkeit steht es nicht
+
+**Status:** angenommen (Nutzerentscheidung, auf Vorlage von drei
+maschinell geprüften Befunden)
+
+### Kontext
+
+`README.md` nannte das Projekt seit Phase 1 „fully open sourced", es gab
+aber keine `LICENSE`-Datei. Urheberrechtlich heißt das: alle Rechte
+vorbehalten. Der Satz im README erlaubte niemandem, den Code
+weiterzugeben oder zu ändern. RELEASE.md führte das seit ADR-0061 als
+den einen offenen Punkt, der aus „open source gemeint" auch „open
+source wirksam" macht.
+
+### Was die Prüfung ergab — und warum sie nötig war
+
+Statt eine Lizenz zu wählen und die Abhängigkeiten für unkritisch zu
+halten, sind beide Bäume einmal wirklich gelesen worden (`Cargo.lock`
+gegen die Manifeste der entpackten Registry, `pnpm`-Speicher gegen die
+`package.json`). Drei Befunde, von denen keiner aus der handgepflegten
+`THIRD_PARTY.md` hervorging:
+
+**1. `Cargo.toml` behauptete seit jeher `license = "MIT"`.** Eine
+Angabe ohne Datei dahinter — sie erschien in jedem
+`cargo metadata`-Aufruf und in jedem daraus erzeugten
+Abhängigkeitsbericht, ohne dass sich jemand darauf hätte berufen
+können. Sie ist jetzt korrigiert, nicht gelöscht.
+
+**2. `lensfun` steht unter LGPL-3.0-or-later, nicht LGPL-2.1.** Das
+schließt **GPL-2.0-only als Projektlizenz aus** — die beiden sind
+unvereinbar. Die Wahl war also von Anfang an enger, als sie aussah.
+`lensfun` ist zudem keine optionale Abhängigkeit wie `gphoto2`, sondern
+fest in `apx-pipeline`.
+
+**3. GSAP ist nicht quelloffen.** Die Animationsbibliothek (seit Phase
+19, acht Dateien) steht unter GreenSocks eigener Standard-„no
+charge"-Lizenz: „Copyright (c) 2008-2026, GreenSock. All rights
+reserved." Kostenlos nutzbar und weitergebbar, auch kommerziell — aber
+keine OSI-anerkannte Open-Source-Lizenz, und nicht unter Apache-2.0
+unterlizenzierbar. GSAP wird ins Anwendungsbündel kompiliert, ist also
+Teil jeder Weitergabe. `THIRD_PARTY.md`s bisheriger Eintrag beschrieb
+die Lizenz als „100 % kostenlos … kommerzielle Nutzung ausdrücklich
+erlaubt" — alles zutreffend, aber die entscheidende Eigenschaft fehlte.
+
+### Entscheidungen
+
+**1. Apache-2.0 für Aperture X' eigenen Code.** Gegenüber MIT die
+ausdrückliche Patentlizenz (§3) — eine Bildverarbeitungsanwendung ist
+die Art Software, bei der Patentfragen auftauchen können, und MIT
+schweigt dazu. Verträglich mit allen vier LGPL-Abhängigkeiten. Der
+Lizenztext ist nicht abgetippt, sondern aus drei unabhängigen lokalen
+Kopien übernommen, die bis auf den SHA-256 übereinstimmen.
+
+**2. GSAP bleibt und wird ausdrücklich ausgewiesen.** Die Alternative
+wäre gewesen, es gegen eine quelloffene Bibliothek zu tauschen — ein
+eigener Arbeitsblock über acht Dateien plus erneute visuelle Prüfung
+der Phase-19/20-Animationen. Dagegen sprach nichts Rechtliches: GSAPs
+Lizenz erlaubt genau diese Weitergabe. Dafür sprach, dass ein
+stillschweigendes Mitlaufen unter der eigenen Lizenz die schlechtere
+Variante gewesen wäre. Also: `NOTICE`, `THIRD_PARTY.md` und `README.md`
+benennen es, und der README-Satz „fully open sourced" ist entsprechend
+präzisiert — ein Fork muss wissen, dass er für diese eine Komponente an
+GreenSocks Bedingungen gebunden ist.
+
+**3. ADR-0002 Punkt 2 erledigt sich.** Weil Aperture X quelloffen mit
+vollständigem Quelltext weitergegeben wird, ist die Austauschbarkeit,
+die LGPL-2.1 §6 bzw. LGPL-3.0 §4 verlangt, durch diese Weitergabe schon
+gegeben. `apx-raw` muss **nicht** als dynamisch nachladbare Bibliothek
+gebaut werden. Für eine geschlossene Weitergabe wäre der Punkt wieder
+offen.
+
+**4. Rechteinhaber: „Aperture X contributors".** Kein Klarname im
+Repository, und neue Beitragende sind ohne weitere Änderung abgedeckt.
+
+### Was diese Entscheidung dauerhaft hält
+
+Eine handgepflegte `THIRD_PARTY.md` hat genau den Fehler erzeugt, der
+oben unter Punkt 3 steht. Deshalb zusätzlich:
+
+- `tools/license-audit.py` liest die echten Manifeste und schreibt
+  `licenses/rust.tsv` (952 Einträge) und `licenses/npm.tsv` (170).
+  Plattformgebundene Crates, die auf Linux nie geholt werden
+  (`winreg`, `system-configuration`, `wasi`), sind dafür eigens über
+  `cargo fetch --target …` nachgeladen worden — sonst hätte die
+  Momentaufnahme vier ungeprüfte Löcher gehabt und der Test hätte in
+  falscher Sicherheit gewiegt.
+- Zwei Tests in `crates/apx-app/tests/bundle_config.rs`: einer verlangt
+  vollständige Abdeckung von `Cargo.lock` durch die Momentaufnahme, der
+  andere prüft jede erfasste Lizenz gegen eine Liste unbedenklicher plus
+  die fünf benannten Ausnahmen.
+
+**Zwei eigene Fehler, die diese Tests beim ersten Lauf gefunden haben**
+— beide festgehalten, weil sie die Art Fehler sind, die sonst als
+grüner Test durchgehen:
+
+- Der erste Entwurf des Wächters verglich Crate-**Namen** gegen eine
+  Sperrliste (`"libgphoto2" | "gtk" | …`). Das sah aus wie eine Prüfung,
+  war aber keine: ein Crate-Name sagt nichts über seine Lizenz, und die
+  Liste hätte auf crates.io praktisch nie angeschlagen. Ersetzt durch
+  den Weg über die Momentaufnahme.
+- Die SPDX-Auswertung behandelte `AND` wie `OR`. Das ist genau in die
+  falsche Richtung falsch: `Unbedenklich AND GPL` hätte bestanden.
+  Aufgefallen an `brotli` (`BSD-3-Clause AND MIT`), das der Test
+  zurecht bemängelte, und danach richtig implementiert — `OR` braucht
+  einen unbedenklichen Zweig, `AND` alle.
+
+### Ergebnis der Prüfung
+
+Außer den vier LGPL-Crates (`rawler`, `lensfun`, `gphoto2`,
+`libgphoto2_sys`) und `gsap` trägt keine der 1.122 Abhängigkeiten eine
+Auflage, die über Namensnennung hinausgeht. Kein GPL ohne „L"
+irgendwo im Baum — weder als Pflicht noch als Wahlmöglichkeit.

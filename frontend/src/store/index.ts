@@ -2103,6 +2103,14 @@ interface VideoSlice {
   videoBackgroundError: string | null;
   removeBackgroundFromCurrentVideo: (backgroundRgb: [number, number, number]) => Promise<void>;
 
+  /** Video-Stabilisierung (Phase 17 Schritt 9, siehe `DECISIONS.md`
+   * ADR-0062) — Ein-Clip-Command wie die beiden darüber, aber ohne
+   * Modell-Download: die Kamerabahn wird gemessen und geglättet, nicht
+   * geschätzt. */
+  videoStabilizeBusy: boolean;
+  videoStabilizeError: string | null;
+  stabilizeCurrentVideo: (smoothingRadius: number, cropZoom: number) => Promise<void>;
+
   /** Ähnliche Videos finden (Phase 16 Schritt 10, siehe `DECISIONS.md`
    * ADR-0043) — arbeitet wie der bestehende Perceptual-Hash-Duplikat-
    * Assistent (Phase 9 Schritt 1), auf Videos beschränkt. Läuft über
@@ -8108,6 +8116,36 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.videoBackgroundBusy = false;
+        });
+      }
+    },
+
+    videoStabilizeBusy: false,
+    videoStabilizeError: null,
+
+    stabilizeCurrentVideo: async (smoothingRadius, cropZoom) => {
+      const { selectedPhotoId, selectedFolderId } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.videoStabilizeBusy = true;
+        state.videoStabilizeError = null;
+      });
+      playCue("processing");
+      try {
+        const result = await api.stabilizeVideo(selectedPhotoId, smoothingRadius, cropZoom);
+        if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
+        set((state) => {
+          state.selectedPhotoId = result.id;
+        });
+        playCue("success");
+      } catch (err) {
+        playCue("error");
+        set((state) => {
+          state.videoStabilizeError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoStabilizeBusy = false;
         });
       }
     },

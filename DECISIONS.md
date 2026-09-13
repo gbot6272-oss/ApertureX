@@ -6856,3 +6856,97 @@ nur geprüfte Ziele, gültiger Bezeichner, und die CI baut die Installer
 tatsächlich noch). `cargo fmt`/`clippy --workspace --all-targets` ohne
 Warnung, `cargo test --workspace` grün. Die YAML ist geparst und die
 beiden neuen Shell-Schritte mit `bash -n` geprüft.
+
+## ADR-0062: Phase 17 Schritt 9 — Video-Stabilisierung
+
+**Status:** angenommen (Phase 17 Schritt 9)
+
+### Kontext
+
+Der letzte offene Funktionspunkt von Phase 17. Der Plan von damals sah
+ausdrücklich „Wiederverwendung `apx-stacking`-Homografie" vor: die
+merkmalsbasierte Bild-zu-Bild-Messung, die seit Phase 13 Schritt 5 das
+Panorama-Stitching trägt (`apx_stacking::homography_stitch`, AKAZE +
+eigener RANSAC-Loop), misst genau das, was eine Stabilisierung braucht —
+wie sich die Kamera zwischen zwei Aufnahmen bewegt hat. Der Punkt war
+auf ausdrücklichen Nutzerwunsch pausiert und ist jetzt freigegeben
+worden.
+
+### Entscheidungen
+
+**1. Zwei Durchgänge, nicht einer.** Eine Kamerabahn lässt sich nicht
+glätten, solange man ihre Zukunft nicht kennt. Ein einzelner Durchlauf
+könnte Bewegung nur *dämpfen* — und würde damit auch jeden gewollten
+Schwenk verschleppen. Also: erst das ganze Video messen, dann die Bahn
+glätten, dann in einem zweiten Durchlauf korrigieren. Der Preis ist,
+dass das Video zweimal dekodiert wird; abgefedert wird er dadurch, dass
+der Messdurchgang auf 480 px längste Kante herunterskaliert läuft (siehe
+Punkt 3).
+
+**2. Vier Freiheitsgrade statt acht.** Die Messung liefert eine volle
+8-Freiheitsgrad-Homografie. Die direkt auf eine wackelige
+Freihandaufnahme anzuwenden erzeugt den berüchtigten „Wackelpudding":
+perspektivische Anteile, die aus Rauschen in den Merkmalspaaren stammen,
+lassen Bildkanten schwabbeln. `Similarity::from_homography` projiziert
+deshalb auf Verschiebung, Drehung und Maßstab — dieselbe Beschränkung,
+die übliche Stabilisierer vornehmen. Maßstab und Winkel kommen aus dem
+linken oberen 2×2-Block, gemittelt über beide Diagonalen statt aus einem
+herausgegriffenen Eintrag, weil eine verrauschte Messung dort nur
+näherungsweise die Form `s·[[cos, −sin], [sin, cos]]` hat.
+
+**3. Gemessen wird verkleinert, korrigiert in voller Auflösung.** Das
+Wackeln einer Freihandaufnahme steckt in groben Bildstrukturen, nicht im
+Pixelrauschen; in voller Auflösung zu messen kostet ein Vielfaches, ohne
+die Bahn genauer zu machen. Der Rückrechnungsfaktor kommt aus der
+*tatsächlich* entstandenen Messbreite, nicht aus dem ungerundeten
+Wunschfaktor — `ffmpeg`s `scale` rundet auf gerade Kanten, und ein
+Bruchteil Abweichung je Bild summiert sich über die Bahn auf. Genau das
+prüft `the_scale_back_factor_comes_from_the_rounded_width`.
+
+**4. Korrekturen werden auf den Zuschnitt-Rand begrenzt, nicht
+gehofft.** Jede Korrektur schiebt das Bild und legt am Rand leere Fläche
+frei; dagegen hilft nur Hineinzoomen. Statt darauf zu vertrauen, dass
+der gewählte Zoom reicht, *klemmt* `stabilize_path` jede Korrektur auf
+das, was der Rand hergibt. Lieber eine leicht verbleibende Restbewegung
+als ein schwarzer Rand, der im fertigen Video nicht mehr zu reparieren
+ist. Die Konsequenz ist bewusst und im UI benannt: bei `crop_zoom = 1.0`
+gibt es keinen Rand, also auch keine Korrektur — der Video-Modus sagt
+das als Hinweis, statt den Nutzer einen wirkungslosen Lauf starten zu
+lassen.
+
+**5. Eine nicht messbare Stelle heißt „keine Bewegung", nicht
+„geschätzte Bewegung".** Findet die Merkmalssuche zwischen zwei Bildern
+nichts Verlässliches (zu wenig Struktur, zu starke Bewegungsunschärfe),
+liefert sie `None`. Daraus einen Sprung zu raten wäre im fertigen Video
+als Ruck sichtbar und damit schlimmer als das ausgelassene Bild.
+
+**6. Die Mathematik liegt in `apx-stacking`, nicht in `apx-app`.** Die
+gesamte Stabilisierung ist in `crates/apx-stacking/src/stabilize.rs`
+gekapselt: Zahlen rein, Zahlen raus, ohne `ffmpeg` und ohne Videodatei —
+sonst wäre sie nur über einen echten Videolauf prüfbar gewesen.
+`apx-app`s `stabilize_video` macht ausschließlich das Drumherum
+(dekodieren, messen, neu kodieren), nach genau demselben
+zwei-`ffmpeg`-Prozesse-Muster wie `apply_lut_filter_to_video` und
+`remove_video_background`, inklusive `-map 1:a?` für die unverändert
+durchgereichte Tonspur.
+
+### Verifikation
+
+Sechzehn Unit-Tests in `apx_stacking::stabilize` — darunter, dass ein
+gleichmäßiger Schwenk unangetastet bleibt, dass Zittern *auf* einem
+Schwenk verschwindet während der Schwenk überlebt, dass ohne
+Zuschnitt-Rand nichts korrigiert wird, und dass ein wackeliges Bild nach
+der Stabilisierung dort landet, wo die ruhigen Bilder landen (verglichen
+gegen ein ruhiges Bild durch dieselbe Kette, nicht gegen einen fest
+eingetippten Zielwert). Vier weitere in `apx-app` für die
+Messauflösungs-Rechnung. Dazu der erste e2e-Test überhaupt, der das
+Video-Modul betritt (`video-stabilize-flow.spec.ts`).
+
+### Bekannte Grenze
+
+Der e2e-Test prüft die Kette *vor* der Stabilisierung — Reglerwerte,
+Command-Argumente, Umschalten auf das Ergebnis, der Hinweis bei
+wirkungslosem Zuschnitt. Die Stabilisierung selbst braucht `ffmpeg` und
+läuft komplett in Rust; sie ist dort geprüft, nicht im Browser. Das ist
+dieselbe Grenze, die ADR-0010 für alle Playwright-Tests dieses Projekts
+festhält.

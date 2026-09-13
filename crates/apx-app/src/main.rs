@@ -329,6 +329,7 @@ fn main() {
             commands::download_selfie_segmentation_model,
             commands::clear_selfie_segmentation_model_path,
             commands::remove_video_background,
+            commands::stabilize_video,
             commands::render_video_timeline,
             commands::download_whisper_model,
             commands::clear_whisper_model_path,

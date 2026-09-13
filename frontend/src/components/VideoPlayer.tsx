@@ -92,6 +92,10 @@ export function VideoPlayer() {
     (s) => s.removeBackgroundFromCurrentVideo,
   );
 
+  const videoStabilizeBusy = useAppStore((s) => s.videoStabilizeBusy);
+  const videoStabilizeError = useAppStore((s) => s.videoStabilizeError);
+  const stabilizeCurrentVideo = useAppStore((s) => s.stabilizeCurrentVideo);
+
   const similarVideoGroups = useAppStore((s) => s.similarVideoGroups);
   const similarVideosLoading = useAppStore((s) => s.similarVideosLoading);
   const similarVideosError = useAppStore((s) => s.similarVideosError);
@@ -113,6 +117,10 @@ export function VideoPlayer() {
   const [selectedLutKey, setSelectedLutKey] = useState<string>("");
   const [lutStrength, setLutStrength] = useState(1);
   const [backgroundColor, setBackgroundColor] = useState("#00ff00");
+  // Vorgaben wie in `StabilizeParams::default()` drüben in Rust: 12
+  // Einzelbilder Glättungsradius, 10 % Hineinzoom.
+  const [smoothingRadius, setSmoothingRadius] = useState(12);
+  const [cropZoom, setCropZoom] = useState(1.1);
 
   useEffect(() => {
     if (aiSettings === null) void loadAiSettings();
@@ -615,6 +623,66 @@ export function VideoPlayer() {
         </div>
         {videoBackgroundError ? (
           <p className="text-xs text-red-500">{videoBackgroundError}</p>
+        ) : null}
+
+        {/* Video-Stabilisierung (Phase 17 Schritt 9, siehe
+            `DECISIONS.md` ADR-0062) — Ein-Clip-Command wie die beiden
+            darüber, aber ohne Modell-Download: die Kamerabahn wird
+            gemessen (dieselbe Merkmalssuche wie beim Panorama-
+            Stitching), geglättet und je Einzelbild zurückgerechnet.
+            Die beiden Regler hängen zusammen: der Zuschnitt bestimmt,
+            wie weit eine Korrektur überhaupt gehen darf. */}
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-xs">
+          <span className="text-text-secondary">Stabilisieren:</span>
+          <label className="flex items-center gap-1 text-text-secondary">
+            Glättung
+            <input
+              type="range"
+              aria-label="Glättung"
+              min={1}
+              max={60}
+              step={1}
+              value={smoothingRadius}
+              onChange={(e) => setSmoothingRadius(Number(e.target.value))}
+              className="w-20"
+            />
+            <span className="w-12 text-right text-text-muted">
+              {smoothingRadius} Bilder
+            </span>
+          </label>
+          <label className="flex items-center gap-1 text-text-secondary">
+            Zuschnitt
+            <input
+              type="range"
+              aria-label="Zuschnitt"
+              min={1}
+              max={1.3}
+              step={0.01}
+              value={cropZoom}
+              onChange={(e) => setCropZoom(Number(e.target.value))}
+              className="w-20"
+            />
+            <span className="w-10 text-right text-text-muted">
+              {Math.round((cropZoom - 1) * 100)}%
+            </span>
+          </label>
+          <button
+            type="button"
+            onClick={() => void stabilizeCurrentVideo(smoothingRadius, cropZoom)}
+            disabled={videoStabilizeBusy}
+            className="ml-auto rounded border border-accent bg-accent/10 px-3 py-0.5 font-medium text-accent hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {videoStabilizeBusy ? "Stabilisiere…" : "Stabilisieren"}
+          </button>
+        </div>
+        {cropZoom <= 1.001 ? (
+          <p className="text-xs text-text-muted">
+            Ohne Zuschnitt bleibt kein Rand zum Verdecken — die
+            Stabilisierung kann dann nichts korrigieren.
+          </p>
+        ) : null}
+        {videoStabilizeError ? (
+          <p className="text-xs text-red-500">{videoStabilizeError}</p>
         ) : null}
 
         {/* Ähnliche Videos finden (Phase 16 Schritt 10): läuft über den

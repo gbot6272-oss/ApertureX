@@ -22,6 +22,11 @@
 //! - [`astro`]: Sigma-geclipptes Mittel über viele Kurzbelichtungen,
 //!   registriert mit derselben Phasenkorrelation wie `panorama`.
 //!
+//! Dazu seit Phase 17 Schritt 9 [`stabilize`]: die Mathematik der
+//! Video-Stabilisierung, die die Bild-zu-Bild-Messung aus
+//! [`homography_stitch`] ein zweites Mal verwertet — geglättete
+//! Kamerabahn statt Panorama.
+//!
 //! `apx-stacking` hängt nur von `apx-core` ab (dieselbe Crate-Ebene wie
 //! `apx-ai`/`apx-export`) — `apx-app` orchestriert (lädt Quellbilder,
 //! ruft hier auf, schreibt/importiert das Ergebnis), siehe
@@ -34,5 +39,6 @@ pub mod hdr;
 pub mod homography_stitch;
 mod luma;
 pub mod panorama;
+pub mod stabilize;
 
 pub use error::{Result, StackingError};

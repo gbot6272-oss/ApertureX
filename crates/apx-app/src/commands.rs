@@ -1979,6 +1979,316 @@ fn composite_with_background(rgb: &[u8], mask: &[u8], background_rgb: [u8; 3]) -
     out
 }
 
+// --- Video-Stabilisierung (Phase 17 Schritt 9, siehe DECISIONS.md
+// ADR-0062) — Ein-Clip-Command wie `apply_lut_filter_to_video` und
+// `remove_video_background` oben. Die Mathematik liegt vollständig in
+// `apx_stacking::stabilize`; hier steht nur das Drumherum: dekodieren,
+// messen, neu kodieren.
+
+/// Längste Kante, auf die für die **Messung** herunterskaliert wird.
+///
+/// Das Wackeln einer Freihandaufnahme steckt in groben Bildstrukturen,
+/// nicht im Pixelrauschen — in voller Auflösung zu messen kostet ein
+/// Vielfaches, ohne die Bahn genauer zu machen. Die gemessene
+/// Verschiebung wird danach über
+/// [`apx_stacking::stabilize::Similarity::scaled_translation`] wieder
+/// auf volle Pixel hochgerechnet.
+const STABILIZE_ANALYSIS_LONG_EDGE: u32 = 480;
+
+/// Stabilisiert ein Video und legt das Ergebnis als neues Katalog-Video
+/// daneben — nicht-destruktiv wie jeder andere Video-Command dieser
+/// Datei, das Original bleibt unangetastet.
+///
+/// `smoothing_radius` ist die halbe Fensterbreite der Glättung in
+/// Einzelbildern (größer = ruhiger, gewollte Schwenks setzen träger
+/// ein), `crop_zoom` der Hineinzoom, der die von der Korrektur
+/// freigelegten Ränder verdeckt. Beide begrenzen einander: aus
+/// `crop_zoom` folgt, wie weit eine Korrektur überhaupt gehen darf
+/// (siehe `StabilizeParams::max_shift`).
+#[tauri::command]
+pub fn stabilize_video(
+    state: State<'_, AppState>,
+    photo_id: String,
+    smoothing_radius: u32,
+    crop_zoom: f64,
+) -> Result<PhotoDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    if photo.media_kind != "video" {
+        return Err("Stabilisierung funktioniert nur bei Videos".to_string());
+    }
+    let (Some(width), Some(height)) = (photo.width, photo.height) else {
+        return Err("Video-Auflösung unbekannt (fehlende Metadaten)".to_string());
+    };
+    let fps = photo.frame_rate.unwrap_or(30.0).max(1.0);
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    let params = apx_stacking::stabilize::StabilizeParams {
+        smoothing_radius: smoothing_radius.clamp(1, 120) as usize,
+        crop_zoom: crop_zoom.clamp(1.0, 1.5),
+        width: width as f64,
+        height: height as f64,
+    };
+
+    // Durchgang 1: Kamerabahn messen (verkleinert, siehe
+    // STABILIZE_ANALYSIS_LONG_EDGE). Ohne die Zukunft der Bahn lässt
+    // sie sich nicht glätten — deshalb überhaupt zwei Durchgänge.
+    let measured = measure_camera_path(&source_path, width, height)?;
+    if measured.len() < 2 {
+        return Err(
+            "Video zu kurz oder nicht dekodierbar — Stabilisierung braucht mindestens zwei Bilder."
+                .to_string(),
+        );
+    }
+    let corrections = apx_stacking::stabilize::stabilize_path(&measured, &params);
+
+    // Durchgang 2: in voller Auflösung verzerren und neu kodieren.
+    let dest_path = unique_sibling_video_path(&folder.path, &source_path, "stabilisiert");
+    run_ffmpeg_stabilize(
+        &source_path,
+        &dest_path,
+        width,
+        height,
+        fps,
+        &corrections,
+        &params,
+    )?;
+
+    register_video_result_as_new_photo(&state, photo.folder_id, &dest_path)
+}
+
+/// Die Auflösung, in der gemessen wird: längste Kante auf
+/// [`STABILIZE_ANALYSIS_LONG_EDGE`], Seitenverhältnis erhalten, beide
+/// Kanten gerade (`ffmpeg`s `scale` mag ungerade Kanten bei manchen
+/// Pixelformaten nicht) und mindestens 2 px.
+fn stabilize_analysis_size(width: u32, height: u32) -> (u32, u32, f64) {
+    let long_edge = width.max(height).max(1);
+    let factor = (STABILIZE_ANALYSIS_LONG_EDGE as f64 / long_edge as f64).min(1.0);
+    let even = |value: u32| (((value as f64 * factor).round() as u32) & !1).max(2);
+    let (analysis_width, analysis_height) = (even(width), even(height));
+    // Der Rückrechnungsfaktor kommt aus der TATSÄCHLICH entstandenen
+    // Breite, nicht aus `factor` — das Runden auf gerade Kanten
+    // verschiebt ihn sonst um bis zu ein Pixel je Bild, und das
+    // summiert sich über die Bahn auf.
+    let scale_back = width as f64 / analysis_width as f64;
+    (analysis_width, analysis_height, scale_back)
+}
+
+/// Misst die Bewegung jedes Einzelbilds zu seinem Vorgänger.
+///
+/// Dieselbe merkmalsbasierte Messung, die das Panorama-Stitching trägt
+/// (`apx_stacking::homography_stitch`), nur paarweise entlang der Zeit
+/// statt sternförmig auf ein Referenzbild. Das Ergebnis ist auf vier
+/// Freiheitsgrade projiziert — siehe `apx_stacking::stabilize`s
+/// Moduldoku dazu, warum die volle Homografie hier schadet.
+///
+/// `None` an einer Stelle heißt „nicht messbar" (zu wenig Struktur, zu
+/// starke Bewegungsunschärfe); die Glättung behandelt das als
+/// „keine Bewegung" statt zu raten.
+fn measure_camera_path(
+    source: &Path,
+    width: u32,
+    height: u32,
+) -> Result<Vec<Option<apx_stacking::stabilize::Similarity>>, String> {
+    use std::io::Read;
+
+    let (analysis_width, analysis_height, scale_back) = stabilize_analysis_size(width, height);
+    let mut decode = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(source)
+        .args([
+            "-vf",
+            &format!("scale={analysis_width}:{analysis_height}"),
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "-",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("ffmpeg (Messen) nicht startbar: {err}"))?;
+    let mut decode_stdout = decode
+        .stdout
+        .take()
+        .ok_or_else(|| "ffmpeg-Messausgabe nicht verfügbar".to_string())?;
+
+    let frame_bytes = (analysis_width as usize) * (analysis_height as usize) * 4;
+    let mut frame = vec![0u8; frame_bytes];
+    let mut previous: Option<Vec<u8>> = None;
+    let mut path = Vec::new();
+
+    let read_result: Result<(), String> = (|| {
+        loop {
+            match decode_stdout.read_exact(&mut frame) {
+                Ok(()) => {
+                    let step = match previous.as_ref() {
+                        // Das erste Bild hat keinen Vorgänger: es ist
+                        // per Definition der Ausgangspunkt der Bahn.
+                        None => Some(apx_stacking::stabilize::Similarity::IDENTITY),
+                        Some(prev) => {
+                            apx_stacking::homography_stitch::estimate_pairwise_homographies_rgba8(
+                                prev,
+                                &[&frame],
+                                analysis_width,
+                                analysis_height,
+                            )
+                            .into_iter()
+                            .next()
+                            .flatten()
+                            .map(|homography| {
+                                apx_stacking::stabilize::Similarity::from_homography(&homography)
+                                    .scaled_translation(scale_back)
+                            })
+                        }
+                    };
+                    path.push(step);
+                    previous = Some(frame.clone());
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(err) => return Err(format!("Lesen von ffmpeg fehlgeschlagen: {err}")),
+            }
+        }
+        Ok(())
+    })();
+
+    // Die Pipe muss geleert sein, bevor auf den Prozess gewartet wird —
+    // sonst blockiert ffmpeg beim Schreiben und `wait` kehrt nie zurück.
+    drop(decode_stdout);
+    let status = decode
+        .wait()
+        .map_err(|err| format!("Warten auf ffmpeg (Messen) fehlgeschlagen: {err}"))?;
+    read_result?;
+    if !status.success() {
+        return Err("ffmpeg (Messen) fehlgeschlagen".to_string());
+    }
+    Ok(path)
+}
+
+/// Zweiter Durchgang: jedes Einzelbild um seine Korrektur verzerren,
+/// hineinzoomen und neu kodieren — dasselbe zwei-Prozesse-Pipe-Muster
+/// wie [`run_ffmpeg_remove_background`], inklusive `-map 1:a?` für die
+/// unveränderte Original-Tonspur.
+///
+/// Läuft die Bildfolge des Encoders aus den Korrekturen heraus (der
+/// Dekodierer liefert ein Bild mehr als der Messdurchgang gesehen hat,
+/// etwa durch unterschiedliche Rundung der Bildrate), wird die letzte
+/// bekannte Korrektur weiterverwendet statt abzubrechen: ein Bild mit
+/// leicht veralteter Korrektur fällt nicht auf, ein fehlendes schon.
+#[allow(clippy::too_many_arguments)]
+fn run_ffmpeg_stabilize(
+    source: &Path,
+    dest: &Path,
+    width: u32,
+    height: u32,
+    fps: f32,
+    corrections: &[apx_stacking::stabilize::Similarity],
+    params: &apx_stacking::stabilize::StabilizeParams,
+) -> Result<(), String> {
+    use std::io::{Read, Write};
+
+    let mut decode = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(source)
+        .args(["-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("ffmpeg (Dekodieren) nicht startbar: {err}"))?;
+    let mut decode_stdout = decode
+        .stdout
+        .take()
+        .ok_or_else(|| "ffmpeg-Dekodier-Ausgabe nicht verfügbar".to_string())?;
+
+    let mut encode = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24"])
+        .args([
+            "-s",
+            &format!("{width}x{height}"),
+            "-r",
+            &format!("{fps}"),
+            "-i",
+            "-",
+        ])
+        .arg("-i")
+        .arg(source)
+        .args([
+            "-map", "0:v", "-map", "1:a?", "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+            "-c:a", "copy",
+        ])
+        .arg(dest)
+        .stdin(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("ffmpeg (Kodieren) nicht startbar: {err}"))?;
+    let mut encode_stdin = encode
+        .stdin
+        .take()
+        .ok_or_else(|| "ffmpeg-Kodier-Eingabe nicht verfügbar".to_string())?;
+
+    let frame_bytes = (width as usize) * (height as usize) * 3;
+    let mut frame = vec![0u8; frame_bytes];
+    let mut index = 0usize;
+    let pump_result: Result<(), String> = (|| {
+        loop {
+            match decode_stdout.read_exact(&mut frame) {
+                Ok(()) => {
+                    let correction = corrections
+                        .get(index)
+                        .or_else(|| corrections.last())
+                        .copied()
+                        .unwrap_or(apx_stacking::stabilize::Similarity::IDENTITY);
+                    let transform = apx_stacking::stabilize::frame_transform(&correction, params);
+                    let warped =
+                        apx_stacking::stabilize::warp_rgb8(&frame, width, height, &transform);
+                    encode_stdin
+                        .write_all(&warped)
+                        .map_err(|err| format!("Schreiben an ffmpeg fehlgeschlagen: {err}"))?;
+                    index += 1;
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(err) => return Err(format!("Lesen von ffmpeg fehlgeschlagen: {err}")),
+            }
+        }
+        Ok(())
+    })();
+    drop(encode_stdin); // EOF für ffmpeg (Kodieren)
+
+    let decode_status = decode
+        .wait()
+        .map_err(|err| format!("Warten auf ffmpeg (Dekodieren) fehlgeschlagen: {err}"))?;
+    let encode_output = {
+        let status = encode
+            .wait()
+            .map_err(|err| format!("Warten auf ffmpeg (Kodieren) fehlgeschlagen: {err}"))?;
+        let mut stderr = String::new();
+        if let Some(mut pipe) = encode.stderr.take() {
+            let _ = pipe.read_to_string(&mut stderr);
+        }
+        (status, stderr)
+    };
+
+    pump_result?;
+    if !decode_status.success() {
+        let _ = std::fs::remove_file(dest);
+        return Err("ffmpeg (Dekodieren) fehlgeschlagen".to_string());
+    }
+    if !encode_output.0.success() {
+        let _ = std::fs::remove_file(dest);
+        return Err(format!(
+            "ffmpeg (Kodieren) fehlgeschlagen: {}",
+            encode_output.1
+        ));
+    }
+    Ok(())
+}
+
 /// Ein einzelner Zeitachsen-Eintrag (Phase 17 Schritt 1, siehe
 /// `DECISIONS.md` ADR-0045) — `photo_id` referenziert entweder ein
 /// Video (dann sind `in_ms`/`out_ms` Pflicht) oder ein Foto (dann ist
@@ -9382,6 +9692,54 @@ mod tests {
     fn export_format_rejects_unknown_string() {
         let err = parse_export_format("heif").expect_err("sollte fehlschlagen");
         assert!(err.contains("heif"));
+    }
+
+    // --- Video-Stabilisierung (Phase 17 Schritt 9) -----------------
+    //
+    // Die eigentliche Mathematik liegt in `apx_stacking::stabilize` und
+    // ist dort getestet. Hier wird nur die Größenrechnung geprüft, die
+    // diese Datei selbst beisteuert — sie entscheidet, mit welchem
+    // Faktor die Messung zurückgerechnet wird, und ein Fehler darin
+    // verschiebt jede Korrektur systematisch.
+
+    #[test]
+    fn the_analysis_resolution_keeps_the_aspect_ratio_and_stays_even() {
+        let (width, height, _) = stabilize_analysis_size(1920, 1080);
+        assert!(width <= STABILIZE_ANALYSIS_LONG_EDGE);
+        assert_eq!(width % 2, 0, "Breite {width} ist ungerade");
+        assert_eq!(height % 2, 0, "Höhe {height} ist ungerade");
+        let ratio = width as f64 / height as f64;
+        assert!(
+            (ratio - 1920.0 / 1080.0).abs() < 0.02,
+            "Seitenverhältnis {ratio} weicht ab"
+        );
+    }
+
+    #[test]
+    fn a_portrait_video_is_measured_against_its_longer_edge() {
+        let (width, height, _) = stabilize_analysis_size(1080, 1920);
+        assert!(height <= STABILIZE_ANALYSIS_LONG_EDGE);
+        assert!(width < height, "{width}x{height} ist nicht hochkant");
+    }
+
+    #[test]
+    fn the_scale_back_factor_comes_from_the_rounded_width() {
+        // Entscheidend: der Faktor muss zur TATSÄCHLICHEN Messbreite
+        // passen, nicht zum ungerundeten Wunsch — sonst wandert jede
+        // gemessene Verschiebung um einen Bruchteil daneben, und über
+        // die Bahn summiert sich das auf.
+        let (analysis_width, _, scale_back) = stabilize_analysis_size(1913, 1077);
+        assert!(
+            (scale_back - 1913.0 / analysis_width as f64).abs() < 1e-12,
+            "Faktor {scale_back} passt nicht zu {analysis_width}"
+        );
+    }
+
+    #[test]
+    fn a_video_smaller_than_the_analysis_edge_is_not_enlarged() {
+        let (width, height, scale_back) = stabilize_analysis_size(320, 240);
+        assert_eq!((width, height), (320, 240));
+        assert!((scale_back - 1.0).abs() < 1e-12);
     }
 }
 

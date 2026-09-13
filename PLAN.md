@@ -1171,7 +1171,7 @@ Volle Suite gebündelt erst im letzten Schritt.
 - [x] 6. Social-Media-Export-Presets (9:16/1:1/16:9) — reine Frontend-Erweiterung, Backend skaliert bereits "cover" auf beliebiges Seitenverhältnis
 - [x] 7. Bild-in-Bild / Split-Screen — `TimelinePipOverlay` (Quelle = normaler `TimelineItem`), Split-Screen als zwei gegenüberliegende 50%-Overlays statt eigenem Mechanismus
 - [x] 8. Greenscreen/Hintergrund entfernen (MediaPipe Selfie Segmentation) — Ein-Clip-Command wie die LUT-Anwendung, ehrliche URL-/Hash-Lücke wie beim LaMa-Modell (huggingface.co blockiert)
-- [ ] 9. Video-Stabilisierung (Wiederverwendung `apx-stacking`-Homografie) — **pausiert auf ausdrücklichen Nutzerwunsch, nicht autonom fortsetzen**
+- [x] 9. Video-Stabilisierung (Wiederverwendung `apx-stacking`-Homografie) — die Pause ist vom Nutzer aufgehoben worden. Neues Modul `apx_stacking::stabilize` (nur Mathematik: Bahn glätten, Korrektur je Bild, Verzerren), neuer `stabilize_video`-Command mit demselben zwei-`ffmpeg`-Prozesse-Muster wie `apply_lut_filter_to_video`/`remove_video_background`, Regler „Glättung"/„Zuschnitt" im Video-Modul. Zwei Durchgänge (messen, dann korrigieren), 4 statt 8 Freiheitsgrade gegen den „Wackelpudding", Korrekturen auf den Zuschnitt-Rand geklemmt statt gehofft — siehe `DECISIONS.md` ADR-0062.
 - [ ] 10. Dokumentation, volle Verifikation, Abnahme
 - [x] `tsc -b`, volle `vitest run`-Suite (251 Tests, 28 neue), `map-flow.spec.ts` grün
 

@@ -377,6 +377,26 @@ Direkt anwendbare Foto-Filter/-Effekte (punktuell mit Pinseln, auf viele Fotos a
 - [x] Filter/LUT auf Video anwenden — Phase 16 Schritt 9 — Status: Fertig — dieselbe LUT-Engine framegenau auf Video, global (keine Pinselstriche wie bei Fotos); Performance auf langen/hochauflösenden Videos ungemessen (reine CPU-Pipeline, kein Testclip in dieser Sandbox verfügbar)
 - [x] Ähnliche Videos finden — Phase 16 Schritt 10 — Status: Fertig — derselbe Perceptual-Hash-Duplikat-Assistent wie bei Fotos, auf Videos beschränkt
 
+## Video-Editor-Erweiterung (Phase 17)
+
+Über den Basis-Videoschnitt aus Phase 16 hinaus: eine Zeitachse, die
+mehrere Clips und Fotos zu einem Video verkettet, Overlays, Untertitel
+und zwei weitere Ein-Clip-Werkzeuge. Siehe `DECISIONS.md` ADR-0045 für
+die Architektur-/Lizenzrecherche, ADR-0062 für die Stabilisierung.
+Kernentscheidung: ein Zeitachsen-**Dialog**, der in einem Rutsch
+rendert, statt eines persistenten Projekt-Katalogobjekts.
+
+- [x] Mehrspur-Zeitachse (Segment-Rendering + Verkettung) — Phase 17 Schritt 1 — Status: Fertig — `apx_export::timeline` rendert je Eintrag ein Segment und verkettet sie per `xfade`-Filterkette (derselbe Mechanismus für harten Schnitt *und* Überblendung); Reihenfolge/Trim/Haltedauer/Übergang/Auflösung/Musik im neuen `VideoTimelineDialog.tsx`
+- [x] Geschwindigkeit je Clip (Zeitlupe/Zeitraffer) — Phase 17 Schritt 2 — Status: Fertig — `setpts`-Filter, Tempo-Auswahl je Video-Eintrag
+- [x] Übergänge — Phase 17 Schritt 3 — Status: Fertig — acht Wisch-/Blende-Varianten über `xfade`, je Lücke einzeln wählbar
+- [x] Text-/Titel-Overlays — Phase 17 Schritt 4 — Status: Fertig — Zeitspanne und Position frei; Text wird in Rust rasterisiert und per `overlay`-Filter eingeblendet (nicht `drawtext`, das eine Schriftdatei auf dem Zielsystem voraussetzen würde)
+- [x] Automatische Untertitel — Phase 17 Schritt 5 — Status: Fertig (Opt-in) — Whisper (`ggml-base.en.bin`) hinter dem Cargo-Feature `subtitles`, Modell-Download auf ausdrücklichen Wunsch; Transkript wird zu Text-Overlay-Einträgen
+- [x] Social-Media-Export-Vorgaben — Phase 17 Schritt 6 — Status: Fertig — 9:16/1:1/16:9; das Backend skalierte bereits „cover" auf beliebiges Seitenverhältnis, dies ist die Bedienoberfläche dazu
+- [x] Bild-in-Bild / Split-Screen — Phase 17 Schritt 7 — Status: Fertig — ein Overlay, dessen Quelle ein ganz normaler Zeitachsen-Eintrag ist; Split-Screen sind zwei gegenüberliegende 50-%-Overlays, kein eigener Mechanismus
+- [x] Greenscreen/Hintergrund entfernen — Phase 17 Schritt 8 — Status: Fertig (eingeschränkt) — echte Segmentierung (MediaPipe Selfie Segmentation, Apache-2.0, lokal) framegenau, Opt-in-Download; **keine Prüfsumme** für das Modell, weil `huggingface.co` aus dieser Sandbox blockiert ist und eine erfundene Prüfsumme schlimmer wäre als eine benannte Lücke (dieselbe ehrliche Lücke wie beim LaMa-Modell)
+- [x] Video-Stabilisierung — Phase 17 Schritt 9 — Status: Fertig — misst die Kamerabahn mit derselben merkmalsbasierten Suche wie das Panorama-Stitching, glättet sie und rechnet je Einzelbild zurück; zwei Durchgänge (ohne die Zukunft der Bahn lässt sie sich nicht glätten), vier statt acht Freiheitsgrade gegen den „Wackelpudding", Korrekturen auf den Zuschnitt-Rand geklemmt statt gehofft. Regler „Glättung" und „Zuschnitt" im Video-Modul. Braucht **kein** KI-Modell. Performance auf langen/hochauflösenden Videos ungemessen (kein Testclip in dieser Sandbox verfügbar, dieselbe Grenze wie bei Schritt 8)
+
+
 ## Technische Grundlage (Phase 1, keine Endnutzer-Features)
 
 - [x] Rust-Workspace mit Crate-Grenzen (`apx-core`, `apx-raw`, `apx-catalog`, `apx-app`) — Phase 1 — Status: Fertig

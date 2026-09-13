@@ -534,6 +534,24 @@ export function removeVideoBackground(photoId: string, backgroundRgb: [number, n
   return invoke<PhotoDto>("remove_video_background", { photoId, backgroundRgb });
 }
 
+/** Stabilisiert ein Video (Phase 17 Schritt 9, siehe `DECISIONS.md`
+ * ADR-0062) und legt das Ergebnis als neues Katalog-Video daneben —
+ * nicht-destruktiv wie jeder andere Video-Bearbeitungs-Command.
+ *
+ * `smoothingRadius` ist die halbe Fensterbreite der Glättung in
+ * Einzelbildern (größer = ruhiger, gewollte Schwenks setzen träger ein),
+ * `cropZoom` der Hineinzoom, der die von der Korrektur freigelegten
+ * Ränder verdeckt. Braucht KEIN KI-Modell (anders als
+ * `removeVideoBackground`), kann aber spürbar dauern: das Video wird
+ * zweimal durchlaufen — einmal zum Messen, einmal zum Verzerren. */
+export function stabilizeVideo(
+  photoId: string,
+  smoothingRadius: number,
+  cropZoom: number,
+): Promise<PhotoDto> {
+  return invoke<PhotoDto>("stabilize_video", { photoId, smoothingRadius, cropZoom });
+}
+
 /** Ein Video innerhalb einer `listSimilarVideoGroups`-Gruppe —
  * `folder_id` steht hier separat (nicht auf `PhotoDto` selbst, siehe
  * dessen Rust-Gegenstück `SimilarVideoDto`s Moduldoku), weil nur diese

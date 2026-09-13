@@ -1820,6 +1820,31 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         // Befehl-Fehlers, falls doch einmal geklickt wird.
         return null;
 
+      // Video-Stabilisierung (Phase 17 Schritt 9, siehe `DECISIONS.md`
+      // ADR-0062). Das echte Gegenstück lässt `ffmpeg` das Video zweimal
+      // durchlaufen; hier entsteht nur das Katalog-Ergebnis — ein neues
+      // Video im selben Ordner, wie es `register_video_result_as_new_photo`
+      // drüben anlegt. Damit prüft der Test genau das, was im Browser
+      // überhaupt prüfbar ist: dass die Regler die richtigen Argumente
+      // schicken und dass die Oberfläche auf das neue Video umschaltet.
+      case "stabilize_video": {
+        const source = findPhoto(args.photoId as string);
+        if (!source) throw new Error(`Test-Stub: Video '${args.photoId}' nicht gefunden`);
+        const result: MockPhoto = {
+          ...source,
+          id: `${source.id}-stabilisiert`,
+          filename: source.filename.replace(/(\.[^.]+)$/, "_stabilisiert$1"),
+        };
+        const fixtures = w.__mockFixtures as { photosByFolder: Record<string, MockPhoto[]> };
+        for (const folderId of Object.keys(fixtures.photosByFolder)) {
+          if (fixtures.photosByFolder[folderId].some((p) => p.id === source.id)) {
+            fixtures.photosByFolder[folderId] = [...fixtures.photosByFolder[folderId], result];
+            break;
+          }
+        }
+        return clonePhoto(result);
+      }
+
       default:
         throw new Error(`Test-Stub: unbekannter invoke-Befehl "${cmd}"`);
     }

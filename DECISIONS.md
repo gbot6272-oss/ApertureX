@@ -6528,3 +6528,84 @@ vier Fällen. `cargo fmt`/`clippy --workspace --all-targets` sauber,
 `cargo test --workspace` komplett grün (apx-pipeline 290/290), `tsc -b`,
 `vitest run` 251/251, volle Playwright-Suite **148/148** mit real
 geprüftem Exit-Code (`PLAYWRIGHT_EXIT=0`).
+
+## ADR-0059: Phase 29 — Kreativ- und Licht-&-Optik-Werkzeuge preset-fähig machen
+
+ADR-0057 und ADR-0058 haben beide dieselbe Einschränkung offengelassen:
+die zweiundzwanzig Werkzeuge der Phasen 27 und 28 sind **keine**
+Preset-Sektionen, weil sechs von ihnen fotospezifisch berechnete Karten
+tragen (MiDaS-Tiefenkarte bei Tiefennebel, Dunstentfernung,
+Tiefenschärfe und Neubeleuchtung; Motivmaske bei Freistellung und
+Bewegungsunschärfe; Himmelsmaske beim Dramatisieren). Die Tiefe EINES
+Fotos auf ein anderes anzuwenden wäre ein stiller, schwer zu findender
+Fehler. Dieser Nachtrag löst das.
+
+### Trennen statt ausschließen
+
+Eine Sektion ist nicht deshalb unübertragbar, weil sie *irgendetwas*
+Fotospezifisches enthält — sondern nur, soweit sie es enthält. Die
+Regler („60 % Nebel ab Entfernung 0,3", „Himmel kontrastreicher und
+dunkler") sind ein Look wie jeder andere; allein die Bytekarten sind es
+nicht. Eine einzige Liste `PHOTO_SPECIFIC_MAP_FIELDS` (Sektion →
+`werkzeug.feld`) benennt die sechs Stellen, und zwei kleine Funktionen
+tun den Rest:
+
+- `stripPhotoSpecificMaps` setzt sie beim **Speichern** auf `null` —
+  auf einer Kopie, damit das Speichern eines Presets dem Nutzer nicht
+  die gerade berechnete Karte aus der laufenden Bearbeitung löscht. Ein
+  Test hält genau das fest.
+- `restorePhotoSpecificMaps` setzt beim **Anwenden** die Karten des
+  ZIELFOTOS wieder ein. Ohne diesen zweiten Schritt wäre die Sache
+  schlimmer als vorher: jedes angewendete Preset würde eine bereits
+  berechnete Tiefenkarte mit `null` überschreiben.
+
+### Der ehrliche Rest: „aktiv, aber wirkungslos"
+
+Ein Preset bringt `sky_drama.amount = 0.7` mit, aber keine Maske. Das
+Werkzeug stünde dann auf „aktiv" und täte still nichts — genau die
+Sorte Fehler, die zu vermeiden der ganze Zweck der Übung ist, nur an
+eine andere Stelle verschoben. Beide Panels sagen es deshalb jetzt in
+der Kachel: „Ohne Himmelsmaske wirkungslos", „Ohne Tiefenkarte
+wirkungslos", „Ohne Referenzfoto wirkungslos". Ein Halbsatz, dieselbe
+Zeile wie der Ein-Klick-Knopf, der ihn auflöst.
+
+Die Bewegungsunschärfe ist bewusst **nicht** dabei: sie arbeitet auch
+ohne Maske, nur eben aufs ganze Bild. Ein Hinweis wäre dort schlicht
+falsch.
+
+### Was mit den Referenzwerten passiert
+
+Farbabgleich (sechs Farbkennzahlen) und Tonwert-Angleich (neun Dezile)
+bleiben **im** Preset. Sie sind zwar aus einem Referenzfoto gewonnen,
+aber genau das ist ihr Zweck: „mach diese Serie so wie jenes Foto" ist
+der Anwendungsfall, und ein Preset ist der richtige Transportweg dafür.
+Anders als eine Tiefenkarte beziehen sie sich nicht auf den Bildinhalt
+des bearbeiteten Fotos.
+
+### Ein Fehler, den erst der e2e-Test fand
+
+Die erste Fassung von `stripPhotoSpecificMaps` hat mit
+`structuredClone` kopiert. Alle sechs Vitest-Fälle liefen grün — sie
+arbeiten mit gewöhnlichen Objekten. In der App wird die Funktion aber
+auch aus einem Zustand/Immer-Erzeuger heraus aufgerufen, und
+`structuredClone` scheitert an einem Immer-Draft (das ist ein Proxy)
+mit `DataCloneError`: „Kopieren" im Entwickeln-Panel warf, der
+„Einfügen"-Knopf blieb deaktiviert. Der volle Playwright-Lauf hat das
+gefunden, nicht die Einheitentests.
+
+Zwei Konsequenzen, beide umgesetzt: die Helfer kopieren jetzt per
+Spread statt per `structuredClone` (zwei Ebenen reichen, tiefer greifen
+sie ohnehin nicht), und die drei Aufrufe, die bisher *innerhalb* eines
+Erzeugers rechneten, rechnen jetzt davor auf dem fertigen Zustand aus
+`get()` und weisen drinnen nur noch zu. Das ist auch unabhängig vom
+Fehler die klarere Aufteilung.
+
+Verifiziert: sechs neue Vitest-Fälle in `presets.test.ts` (Schneiden,
+Nicht-Anfassen der laufenden Bearbeitung, Zielfoto-Karten beim
+Zusammenführen, fehlende Karten als `null`, Stärke-Skalierung, keine
+Fremdsektion mitgenommen) und ein neuer e2e-Test, der den ganzen Weg
+geht: Maske auf Foto A berechnen, Preset speichern, auf Foto B anwenden,
+prüfen dass die Regler ankommen und die Maske ausdrücklich nicht.
+`tsc -b`, `vitest run` 257/257, `clippy --workspace --all-targets`
+sauber, volle Playwright-Suite **149/149** mit real geprüftem Exit-Code
+(`PLAYWRIGHT_EXIT=0`).

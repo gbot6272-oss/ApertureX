@@ -63,6 +63,29 @@ export function CreativePanel() {
     return tool.sliders.some((spec) => readField(tool.group, spec.key) !== spec.neutral);
   }
 
+  /** Dieselbe Ehrlichkeits-Regel wie im Licht-&-Optik-Panel (Phase 29):
+   * ein Werkzeug, dem seine fotospezifische Voraussetzung fehlt, sagt
+   * das, statt still nichts zu tun. */
+  function missingInput(group: keyof CreativeAdjustments): string | null {
+    if (group === "color_match") {
+      return creative.color_match.amount > 0 && !creative.color_match.has_target
+        ? "Ohne Referenzfoto wirkungslos"
+        : null;
+    }
+    if (group === "depth_haze") {
+      return creative.depth_haze.amount > 0 && !creative.depth_haze.depth_map
+        ? "Ohne Tiefenkarte wirkungslos"
+        : null;
+    }
+    if (group === "subject_focus") {
+      const { blur, darken, desaturate, mask } = creative.subject_focus;
+      return (blur > 0 || darken > 0 || desaturate > 0) && !mask
+        ? "Ohne freigestelltes Motiv wirkungslos"
+        : null;
+    }
+    return null;
+  }
+
   function resetTool(group: keyof CreativeAdjustments, title: string) {
     const neutral = NEUTRAL_CREATIVE[group] as unknown as Record<string, unknown>;
     for (const [field, value] of Object.entries(neutral)) {
@@ -101,6 +124,7 @@ export function CreativePanel() {
             hint={tool.hint}
             active={isActive(tool)}
             onReset={() => resetTool(tool.group, tool.title)}
+            warning={missingInput(tool.group)}
           >
 
             {tool.group === "color_match" && (

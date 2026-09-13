@@ -414,9 +414,9 @@ original erstellt). Charakter: angehobener Schwarzpunkt mit Grünstich,
 gedämpfte gelb-orange Lichter, kräftige Türkistöne in Wasser und
 Himmel, flachere Mitten.
 
-**Bewusste Grenze:** die Kreativ-Werkzeuge sind keine Preset-Sektion —
-zwei von ihnen tragen fotospezifische Karten (Tiefe, Motiv), die auf
-einem anderen Foto falsch wären. Siehe `DECISIONS.md` ADR-0057.
+**Preset-fähig seit Phase 29** — die fotospezifischen Karten (Tiefe,
+Motiv) werden beim Speichern herausgeschnitten und beim Anwenden aus dem
+Zielfoto übernommen. Siehe `DECISIONS.md` ADR-0057 und ADR-0059.
 
 ## Licht & Optik (Phase 28)
 
@@ -454,6 +454,8 @@ haben jetzt ein Suchfeld über Titel und Wirkung, einen
 „Nur aktive"-Schalter und je Kachel einen Zurücksetzen-Knopf, der bei
 Hover oder Tastaturfokus erscheint.
 
-**Bewusste Grenze:** wie die Kreativ-Werkzeuge ist auch Licht & Optik
-keine Preset-Sektion — vier der zwölf tragen fotospezifische Karten
-(Tiefe, Himmel, Motiv). Siehe `DECISIONS.md` ADR-0058.
+**Preset-fähig seit Phase 29** — wie bei den Kreativ-Werkzeugen werden
+die fotospezifischen Karten (Tiefe, Himmel, Motiv) beim Speichern
+herausgeschnitten. Ist ein Werkzeug aufgedreht, aber seine Karte fehlt,
+sagt die Kachel das („Ohne Tiefenkarte wirkungslos"), statt still nichts
+zu tun. Siehe `DECISIONS.md` ADR-0058 und ADR-0059.

@@ -101,6 +101,27 @@ export function LightOpticsPanel() {
     return target !== null && lightOptics[target].depth_map !== null;
   }
 
+  /** Halbsatz, wenn das Werkzeug aufgedreht ist, ihm aber seine
+   * Voraussetzung fehlt. Seit Phase 29 nötig: ein angewendetes Preset
+   * bringt die Regler mit, die fotospezifische Karte aber nicht — ohne
+   * diesen Hinweis stünde das Werkzeug auf „aktiv" und täte still
+   * nichts. Die Bewegungsunschärfe fehlt hier bewusst: sie arbeitet
+   * auch ohne Maske, nur eben aufs ganze Bild. */
+  function missingInput(group: keyof LightOpticsAdjustments): string | null {
+    const tool = lightOptics[group] as unknown as Record<string, unknown>;
+    if ((tool.amount as number) <= 0) return null;
+    if (group === "tone_match") {
+      return lightOptics.tone_match.has_target ? null : "Ohne Referenzfoto wirkungslos";
+    }
+    if (depthTool(group)) {
+      return depthMapPresent(group) ? null : "Ohne Tiefenkarte wirkungslos";
+    }
+    if (group === "sky_drama") {
+      return lightOptics.sky_drama.mask ? null : "Ohne Himmelsmaske wirkungslos";
+    }
+    return null;
+  }
+
   function resetTool(group: keyof LightOpticsAdjustments, title: string) {
     const neutral = NEUTRAL_LIGHT_OPTICS[group] as unknown as Record<string, unknown>;
     for (const [field, value] of Object.entries(neutral)) {
@@ -144,6 +165,7 @@ export function LightOpticsPanel() {
           hint={tool.hint}
           active={activeByGroup.get(tool.group) === true}
           onReset={() => resetTool(tool.group, tool.title)}
+          warning={missingInput(tool.group)}
         >
           {tool.group === "tone_match" && (
             <button

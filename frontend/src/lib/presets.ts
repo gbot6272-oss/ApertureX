@@ -60,23 +60,6 @@ export type PresetSectionKey = Exclude<
   | "sky_replace"
   | "liquify_strokes"
   | "skin_smoothing"
-  // Kreativ-Werkzeuge (Phase 27) bewusst ausgeschlossen, aus demselben
-  // Grund wie `sky_replace`/`skin_smoothing`/`style_transfer` daneben:
-  // zwei der zehn tragen FOTOSPEZIFISCH berechnete Daten (die
-  // MiDaS-Tiefenkarte des Tiefennebels, die Motivmaske der
-  // Freistellung). Die in ein Preset zu uebernehmen wuerde die Tiefe
-  // bzw. das Motiv EINES Fotos auf ein voellig anderes anwenden — ein
-  // stiller, schwer zu findender Fehler. Die uebrigen acht Werkzeuge
-  // waeren fuer sich preset-faehig; sie erst dann aufzunehmen, wenn die
-  // beiden Karten beim Speichern gezielt herausgeschnitten werden, ist
-  // der saubere Weg (offener Nachtrag, siehe ADR-0057).
-  | "creative"
-  // Licht & Optik (Phase 28) aus demselben Grund ausgeschlossen: VIER
-  // der zwoelf tragen fotospezifisch berechnete Karten (Tiefenkarte bei
-  // Dunstentfernung/Schaerfe/Neubeleuchtung, Himmelsmaske beim
-  // Dramatisieren, Motivmaske bei der Bewegungsunschaerfe). Derselbe
-  // offene Nachtrag wie bei `creative` (siehe ADR-0058).
-  | "light_optics"
 >;
 
 export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [
@@ -98,7 +81,82 @@ export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [
   // hier (siehe `PRESET_SECTION_LABELS`s Kommentar zur Begründung, warum
   // `lut_filter` überhaupt preset-fähig ist).
   "lut_filter",
+  // Phase 29: jetzt waehlbar. Die fotospezifisch berechneten Karten
+  // (Tiefenkarte, Motiv- und Himmelsmaske) werden beim Speichern
+  // gezielt herausgeschnitten und beim Anwenden aus dem ZIELFOTO
+  // uebernommen statt aus dem Preset — siehe `stripPhotoSpecificMaps`
+  // und `mergeEdlSubset` unten, Begruendung in ADR-0059.
+  "creative",
+  "light_optics",
 ];
+
+/** Die Felder, die eine fuer GENAU EIN Foto berechnete Karte tragen —
+ * je Sektion der Pfad `werkzeug.feld`.
+ *
+ * Das ist der Kern von Phase 29: ohne diese Liste waeren die beiden
+ * Werkzeug-Sektionen nicht preset-faehig, weil die Tiefe bzw. das Motiv
+ * EINES Fotos auf einem anderen schlicht falsch ist. Mit ihr trennt sich
+ * der uebertragbare Teil (alle Regler) sauber vom nicht uebertragbaren
+ * (die Karten). */
+const PHOTO_SPECIFIC_MAP_FIELDS: Readonly<Record<string, readonly [string, string][]>> = {
+  creative: [
+    ["depth_haze", "depth_map"],
+    ["subject_focus", "mask"],
+  ],
+  light_optics: [
+    ["depth_dehaze", "depth_map"],
+    ["depth_sharpen", "depth_map"],
+    ["relight", "depth_map"],
+    ["sky_drama", "mask"],
+    ["motion_blur", "mask"],
+  ],
+};
+
+/** Kopiert eine Sektion und setzt jede fotospezifische Karte auf `null`.
+ * Bewusst eine Kopie: das lebende `developEdl` darf dabei nicht
+ * verlieren, was der Nutzer gerade berechnet hat.
+ *
+ * **Kopiert wird per Spread, nicht per `structuredClone`:** dieses Modul
+ * wird auch aus Zustand/Immer-Erzeugern heraus aufgerufen, und
+ * `structuredClone` scheitert an einem Immer-Draft (das ist ein Proxy)
+ * mit einem `DataCloneError`. Zwei Ebenen Spread reichen hier ohnehin —
+ * tiefer als `werkzeug.feld` greift die Funktion nicht. */
+function stripPhotoSpecificMaps(section: string, value: unknown): unknown {
+  const fields = PHOTO_SPECIFIC_MAP_FIELDS[section];
+  if (!fields || !value || typeof value !== "object") return value;
+  const source = value as Record<string, unknown>;
+  const copy: Record<string, unknown> = { ...source };
+  for (const [tool, field] of fields) {
+    const toolValue = source[tool];
+    if (toolValue && typeof toolValue === "object") {
+      copy[tool] = { ...(toolValue as Record<string, unknown>), [field]: null };
+    }
+  }
+  return copy;
+}
+
+/** Setzt die Karten des ZIELFOTOS in eine gerade angewendete
+ * Preset-Sektion zurueck. Ohne diesen Schritt wuerde ein Preset eine
+ * bereits berechnete Tiefenkarte oder Maske mit `null` ueberschreiben —
+ * das Werkzeug staende dann auf „aktiv", haette aber nichts zu
+ * arbeiten. */
+function restorePhotoSpecificMaps(section: string, incoming: unknown, base: unknown): unknown {
+  const fields = PHOTO_SPECIFIC_MAP_FIELDS[section];
+  if (!fields || !incoming || typeof incoming !== "object") return incoming;
+  const source = incoming as Record<string, unknown>;
+  const copy: Record<string, unknown> = { ...source };
+  const from = base as Record<string, Record<string, unknown>> | null;
+  for (const [tool, field] of fields) {
+    const toolValue = source[tool];
+    if (toolValue && typeof toolValue === "object") {
+      copy[tool] = {
+        ...(toolValue as Record<string, unknown>),
+        [field]: from?.[tool]?.[field] ?? null,
+      };
+    }
+  }
+  return copy;
+}
 
 export const PRESET_SECTION_LABELS: Record<PresetSectionKey, string> = {
   basic: "Grundeinstellungen",
@@ -120,6 +178,12 @@ export const PRESET_SECTION_LABELS: Record<PresetSectionKey, string> = {
   // Batch-Anwendung auf viele Fotos (Phase 16 Schritt 3, siehe
   // `DECISIONS.md` ADR-0043).
   lut_filter: "Filter",
+  // `creative`/`light_optics` (Phase 27/28) sind seit Phase 29
+  // preset-faehig — moeglich wurde das erst dadurch, dass die
+  // fotospezifischen Karten beim Speichern gezielt herausgeschnitten
+  // werden (siehe `PHOTO_SPECIFIC_MAP_FIELDS` oben, ADR-0059).
+  creative: "Kreativ-Werkzeuge",
+  light_optics: "Licht & Optik",
 };
 
 /** Die eigentliche gespeicherte EDL-Teilmenge — für `apx-catalog`/
@@ -145,7 +209,7 @@ export function buildPresetEdlSubset(edl: EdlPayload, sections: readonly PresetS
       subset[key] = { strength: edl.lut_filter.strength, lut: edl.lut_filter.lut, strokes: [] };
       continue;
     }
-    subset[key] = edl[key];
+    subset[key] = stripPhotoSpecificMaps(key, edl[key]);
   }
   return subset as PresetEdlSubset;
 }
@@ -209,9 +273,25 @@ export function scalePresetEdlSubset(subset: PresetEdlSubset, strengthPercent: n
 
 /** Ersetzt in `base` genau die in `subset` enthaltenen Sektionen — jede
  * ausgewählte Sektion wird als Ganzes übernommen (siehe
- * `buildPresetEdlSubset`), nicht feldweise gemischt. */
+ * `buildPresetEdlSubset`), nicht feldweise gemischt.
+ *
+ * **Eine Ausnahme (Phase 29):** die fotospezifischen Karten der beiden
+ * Werkzeug-Sektionen bleiben die des ZIELFOTOS. Ein Preset trägt dort
+ * ohnehin nur `null` (siehe `stripPhotoSpecificMaps`) — würde man das
+ * mitübernehmen, löschte jedes angewendete Preset eine gerade erst
+ * berechnete Tiefenkarte oder Maske. */
 export function mergeEdlSubset(base: EdlPayload, subset: PresetEdlSubset): EdlPayload {
-  return { ...base, ...subset };
+  const merged: Record<string, unknown> = { ...base, ...subset };
+  for (const key of Object.keys(subset)) {
+    if (key in PHOTO_SPECIFIC_MAP_FIELDS) {
+      merged[key] = restorePhotoSpecificMaps(
+        key,
+        (subset as Record<string, unknown>)[key],
+        (base as unknown as Record<string, unknown>)[key],
+      );
+    }
+  }
+  return merged as unknown as EdlPayload;
 }
 
 // ---- Bedingte Presets (vereinfacht, siehe DECISIONS.md ADR-0031 Punkt 4) ---

@@ -1579,7 +1579,7 @@ Atmosphäre → Optik → Licht → Gradation → Auflage.
   Rust wirklich deserialisiert. Siehe ADR-0057.
 
 
-## Aktuelle Phase: Phase 28 — „Licht & Optik": zwölf Werkzeuge, echtes Bokeh, drei neue .cube-Filter
+## Phase 28 — „Licht & Optik": zwölf Werkzeuge, echtes Bokeh, drei neue .cube-Filter
 
 Nutzerwunsch wörtlich: „Noch nicht gut genug mach noch mehr Funktionen
 mehr alles". Phase 27 lieferte Looks; hier kommen die Werkzeuge, die
@@ -1641,3 +1641,27 @@ Feste Reihenfolge in der Stufe: Korrektur → Tiefe → Licht → Optik → Stil
 - [x] 16. Verifikation: Rust-Unit-Tests je Werkzeug, neuer e2e-Test,
   `cargo fmt`/`clippy`/`test --workspace`, `tsc -b`, `vitest run`, volle
   Playwright-Suite mit real geprüftem Exit-Code, dann Push.
+
+
+## Aktuelle Phase: Phase 29 — Werkzeug-Sektionen preset-fähig (Nachtrag zu ADR-0057/0058)
+
+Der in beiden vorherigen ADRs offen gelassene Punkt: die zweiundzwanzig
+Werkzeuge aus Phase 27/28 waren keine Preset-Sektionen, weil sechs von
+ihnen fotospezifisch berechnete Karten tragen.
+Untersuchung/Entscheidungen: siehe `DECISIONS.md` ADR-0059.
+
+- [x] 1. Eine Liste `PHOTO_SPECIFIC_MAP_FIELDS` benennt die sechs
+  Stellen (Sektion → `werkzeug.feld`).
+- [x] 2. `stripPhotoSpecificMaps` schneidet sie beim Speichern heraus —
+  auf einer Kopie, damit die laufende Bearbeitung unangetastet bleibt.
+- [x] 3. `restorePhotoSpecificMaps` setzt beim Anwenden die Karten des
+  ZIELFOTOS ein, statt sie mit den `null`-Werten des Presets zu
+  überschreiben.
+- [x] 4. `creative` und `light_optics` in `PRESET_SECTION_KEYS` und
+  `PRESET_SECTION_LABELS` aufgenommen.
+- [x] 5. Beide Panels sagen in der Kachel, wenn ein Werkzeug aufgedreht
+  ist, ihm aber seine Voraussetzung fehlt („Ohne Tiefenkarte
+  wirkungslos"). Die Bewegungsunschärfe bewusst ausgenommen — sie
+  arbeitet auch ohne Maske.
+- [x] 6. Verifikation: sechs neue Vitest-Fälle, ein neuer e2e-Test über
+  zwei Fotos, volle Suite mit real geprüftem Exit-Code, dann Push.

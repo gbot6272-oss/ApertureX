@@ -2490,16 +2490,24 @@ export const useAppStore = create<AppStore>()(
     copiedEdlSubset: null,
 
     copyDevelopSettings: (sections) => {
+      // Bewusst VOR `set` und auf dem fertigen Zustand aus `get()`:
+      // `buildPresetEdlSubset` kopiert die Sektionen, und eine Kopie
+      // eines Immer-Drafts waere ein Geflecht aus Proxys, das nach dem
+      // Ende des Erzeugers nicht mehr lesbar ist.
+      const subset = buildPresetEdlSubset(get().developEdl, sections);
       set((state) => {
-        state.copiedEdlSubset = buildPresetEdlSubset(state.developEdl, sections);
+        state.copiedEdlSubset = subset;
       });
     },
 
     pasteDevelopSettings: () => {
       const subset = get().copiedEdlSubset;
       if (!subset) return;
+      // Dieselbe Begruendung wie bei `copyDevelopSettings`: ausserhalb
+      // des Erzeugers rechnen, drinnen nur zuweisen.
+      const merged = mergeEdlSubset(get().developEdl, subset);
       set((state) => {
-        state.developEdl = mergeEdlSubset(state.developEdl, subset);
+        state.developEdl = merged;
       });
       void get().commitDevelopEdit("Einstellungen eingefügt");
     },
@@ -5355,8 +5363,9 @@ export const useAppStore = create<AppStore>()(
       const { presetGeneratorPreview, presetGeneratorSelectedIndex } = get();
       const subset = presetGeneratorPreview[presetGeneratorSelectedIndex];
       if (!subset) return;
+      const merged = mergeEdlSubset(get().developEdl, subset);
       set((state) => {
-        state.developEdl = mergeEdlSubset(state.developEdl, subset);
+        state.developEdl = merged;
       });
       void get().commitDevelopEdit("KI-Preset angewendet");
     },

@@ -98,10 +98,18 @@ export interface ToolTileProps {
   active: boolean;
   /** Setzt NUR dieses Werkzeug zurück. */
   onReset: () => void;
+  /** Halbsatz, wenn das Werkzeug zwar aufgedreht ist, ihm aber eine
+   * Voraussetzung fehlt (Tiefenkarte, Maske, Referenzfoto) und es
+   * deshalb nichts tut.
+   *
+   * Das ist seit Phase 29 nötig: ein angewendetes Preset bringt die
+   * Regler mit, aber keine Karte — ohne diesen Hinweis stünde das
+   * Werkzeug auf „aktiv" und täte still nichts. */
+  warning?: string | null;
   children: ReactNode;
 }
 
-export function ToolTile({ title, hint, active, onReset, children }: ToolTileProps) {
+export function ToolTile({ title, hint, active, onReset, warning, children }: ToolTileProps) {
   return (
     <section
       aria-label={title}
@@ -130,6 +138,11 @@ export function ToolTile({ title, hint, active, onReset, children }: ToolTilePro
         </span>
       </div>
       <p className="text-xs text-text-muted">{hint}</p>
+      {warning && (
+        <p role="status" className="text-xs text-[var(--color-danger)]">
+          {warning}
+        </p>
+      )}
       {children}
     </section>
   );

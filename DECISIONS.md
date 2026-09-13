@@ -6733,3 +6733,126 @@ Fällen. `cargo fmt`/`clippy --workspace --all-targets` ohne Warnung,
 `cargo test --workspace` grün (apx-pipeline 300/300), `tsc -b`,
 `vitest run` 269/269, volle Playwright-Suite **155/155** mit real
 geprüftem Exit-Code (`PLAYWRIGHT_EXIT=0`).
+
+## ADR-0061: Installer und Signierung fertiggestellt — und die zwei Punkte, die eine Entscheidung brauchen
+
+`PLAN.md` Phase 10 Schritt 11 („Installer + Signierung, alle drei
+Plattformen, strukturell + konditional") war als einziger Punkt der
+Phase 10 nie abgehakt. Bei der Durchsicht zeigte sich: der
+CI-Release-Job aus ADR-0037 existierte bereits samt konditionaler
+Signierungsschritte — was fehlte, waren die Teile davor und danach.
+
+### Was tatsächlich gefehlt hat
+
+1. **Paketmetadaten.** `tauri.conf.json` enthielt nur `active`,
+   `targets` und Icons. Hersteller, Copyright, Kategorie, Kurz- und
+   Langbeschreibung, Startseite: alles leer. Ein so gebautes Paket
+   zeigt in der Windows-Dateiinfo und in Linux-Paketverwaltungen leere
+   Felder — das sieht nach unfertiger Software aus, unabhängig davon,
+   wie fertig sie ist.
+2. **`ffmpeg` war nirgends als Abhängigkeit deklariert.** Die
+   Video-Funktionen rufen es über `std::process::Command::new("ffmpeg")`
+   als externes Programm auf (fünf Stellen in `commands.rs`). Auf einem
+   frischen System hätte die Anwendung sauber gestartet und beim ersten
+   Videoexport versagt. Jetzt als `recommends` im deb-Paket, bewusst
+   nicht als `depends`: die Foto-Seite arbeitet vollständig ohne, und
+   ein reiner Foto-Nutzer soll nicht zur ffmpeg-Installation gezwungen
+   werden. Es mitzuliefern (`bundle.externalBin`) wäre robuster, wirft
+   aber je nach ffmpeg-Build eine eigene GPL-Frage auf — deshalb nicht
+   gemacht, sondern in `RELEASE.md` benannt.
+3. **Eine stille Versions-Divergenz.** `tauri.conf.json` stand fest auf
+   `"version": "0.1.0"`, die Crate auf `version.workspace`. Beim
+   nächsten Versionssprung hätte der Installer weiter 0.1.0 gemeldet.
+   Das Feld ist jetzt entfernt — Tauri nimmt dann die Version aus
+   `Cargo.toml` — und ein Test verhindert, dass es zurückkommt.
+4. **`targets: "all"` statt einer geprüften Liste.** „all" schließt
+   `rpm` und `msi` ein, deren Werkzeugbedarf auf den CI-Runnern hier
+   nicht nachweisbar war. Jetzt eine ausdrückliche Liste
+   (`deb`, `appimage`, `app`, `dmg`, `nsis`), die je Plattform
+   mindestens ein Ziel übrig lässt; ein Test hält das fest.
+5. **Der Release-Job konnte lautlos nichts liefern.**
+   `if-no-files-found: warn` ließ ihn grün durchlaufen, auch wenn
+   `tauri build` kein einziges Paket erzeugt hatte. Jetzt bricht ein
+   eigener Prüfschritt mit `::error::` ab, bevor irgendetwas
+   hochgeladen wird.
+6. **Es gab keine Veröffentlichung.** Die Pakete landeten nur in den
+   Workflow-Artefakten — 14 Tage Aufbewahrung, für Nutzer ohne
+   Actions-Zugriff überhaupt nicht erreichbar. Damit war die
+   „Distribution" aus Phase 10 faktisch nicht vorhanden. Jetzt hängt
+   ein Tag-Push die Pakete samt SHA-256-Summen an eine
+   **Entwurfs**-Release.
+
+### Prüfsummen sind hier keine Zierde
+
+Bei unsignierten Paketen — und das ist ohne hinterlegte Zertifikate der
+Normalfall — sind die `SHA256SUMS-*.txt` die **einzige** verfügbare
+Integritätsaussage. Deshalb entstehen sie im selben Job, aus denselben
+Dateien, die hochgeladen werden.
+
+### Zwei Shell-Fallen, vorher gefunden statt beim Tag-Push
+
+`mapfile` gibt es erst ab Bash 4; die macOS-Runner haben die
+vorinstallierte Bash 3.2, der Prüfschritt wäre dort mit „command not
+found" abgebrochen. Und `sha256sum` existiert auf Linux und in der
+Git-Bash der Windows-Runner, auf macOS aber nicht (dort `shasum`).
+Beides ist ersetzt; die Skripte sind mit `bash -n` syntaktisch geprüft.
+
+### Was NICHT nachgewiesen ist
+
+Unverändert gegenüber ADR-0037 Entscheidung 3: die Signierungsschritte
+sind **nie mit einem echten Zertifikat ausgeführt** worden — weder ein
+Apple-Developer-Konto noch ein Windows-Codesigning-Zertifikat war
+beschaffbar. Sie lesen die dokumentierten Umgebungsvariablen und
+überspringen sich selbst, wenn die Secrets fehlen. Ob sie mit einem
+echten Zertifikat durchlaufen, bleibt offen. `RELEASE.md` sagt das in
+der ersten Tabelle, nicht im Kleingedruckten, und empfiehlt einen
+Testtag vor dem ersten echten Release.
+
+Neu dazugekommen ist eine Einschränkung, die ADR-0037 noch nicht kannte:
+seit Juni 2023 verlangen alle Zertifizierungsstellen Hardware-
+Schlüsselspeicher für Windows-Codesigning. Der vorhandene
+PFX-Import-Schritt funktioniert deshalb nur mit älteren oder intern
+ausgestellten Zertifikaten; für ein HSM-gebundenes Zertifikat wäre
+`bundle.windows.signCommand` der Weg — nicht eingerichtet, weil sich
+ohne konkretes Zertifikat nicht sagen lässt, wie der Aufruf aussieht.
+
+### Zwei Punkte, die bewusst offen bleiben
+
+Beides sind keine Programmierfragen:
+
+1. **Es gibt keine Lizenzdatei.** `bundle.license`/`licenseFile` sind
+   deshalb nicht gesetzt — eine eingetragene Lizenz ohne Entscheidung
+   dahinter wäre eine Behauptung. `THIRD_PARTY.md` wird trotzdem
+   mitgeliefert (`bundle.resources`): die Drittanbieter-Hinweise
+   müssen beim Nutzer ankommen, unabhängig davon, wie das Gesamtwerk
+   lizenziert wird.
+**Nachtrag beim Schreiben dieses ADRs gefunden:** `README.md` bezeichnet
+Aperture X bereits als „fully open sourced". Das ist eine Aussage des
+Projektinhabers und verschiebt die Lage deutlich — LGPL §6 verlangt die
+Austauschbarkeit der Komponente nur bei **geschlossener** Weitergabe.
+Punkt 2 unten wäre damit weitgehend erledigt. Was fehlt, ist der
+formale Teil: **es gibt keine `LICENSE`-Datei.** Ohne sie gilt
+urheberrechtlich „alle Rechte vorbehalten", egal was im README steht —
+niemand darf den Code rechtssicher weitergeben oder ändern. Eine
+Lizenz auszusuchen ist eine Eigentümerentscheidung und wird hier nicht
+getroffen; sie zu benennen ist der eine offene Schritt, der aus
+„open source gemeint" auch „open source wirksam" macht.
+
+2. **ADR-0002 Punkt 2 ist weiterhin offen.** Dort steht, dass `apx-raw`
+   „ab Phase 10 / Installer" als dynamisch nachladbare Komponente
+   gebaut werden soll, damit die LGPL-2.1-Komponente `rawler` gemäß
+   LGPL §6 austauschbar bleibt. Das ist nur für eine **geschlossene**
+   Weitergabe zwingend und hängt vollständig an Punkt 1 — ADR-0002 hält
+   ausdrücklich fest, dass diese Weichenstellung nicht einseitig
+   getroffen wird. Ein spürbarer architektonischer Umbau auf Verdacht
+   wäre hier die falsche Reihenfolge.
+
+Verifiziert: neun neue Integrationstests in
+`crates/apx-app/tests/bundle_config.rs`, die die Konfiguration gegen die
+echten Dateien prüfen (jedes referenzierte Icon existiert, je Plattform
+ein passendes Format, die Ressourcendatei existiert und nennt die
+LGPL-Komponente, keine gepinnte Version, alle Anzeige-Metadaten gesetzt,
+nur geprüfte Ziele, gültiger Bezeichner, und die CI baut die Installer
+tatsächlich noch). `cargo fmt`/`clippy --workspace --all-targets` ohne
+Warnung, `cargo test --workspace` grün. Die YAML ist geparst und die
+beiden neuen Shell-Schritte mit `bash -n` geprüft.

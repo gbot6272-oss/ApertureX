@@ -100,6 +100,13 @@ pub struct StageEnabled {
     /// dieses Feld soll die Stufe aktiv lesen, nicht deaktiviert.
     #[serde(default = "default_true")]
     pub creative: bool,
+    /// Licht & Optik (Phase 28) — laeuft nach `sky_replace`, VOR
+    /// `lut_filter`: Korrekturen und optische Phaenomene gehen der
+    /// Gradation voraus, die Phase-27-Looks liegen danach (siehe
+    /// `stages::light_optics`s Moduldoku). Dieselbe `default_true`-
+    /// Begruendung wie `creative` oben.
+    #[serde(default = "default_true")]
+    pub light_optics: bool,
     pub geometry: bool,
 }
 
@@ -131,6 +138,7 @@ impl StageEnabled {
         lut_filter: true,
         liquify: true,
         creative: true,
+        light_optics: true,
         geometry: true,
     };
 }
@@ -228,6 +236,13 @@ pub struct DepthMapPatch {
 /// Fokuspunkt auf. Ohne `depth_map` (Tiefenkarte noch nicht berechnet)
 /// bleibt die Stufe ein No-Op — dieselbe „noch nicht berechnet"-
 /// Konvention wie `v2::RepairStroke::ai_fill`.
+///
+/// **Phase 28 Punkt 13** hat die Stufe um echte Bokeh-Formen erweitert
+/// (`blades`/`rotation`/`anamorphic`/`swirl`/`highlight_boost`/
+/// `highlight_threshold`). Alle sechs sind `#[serde(default)]` und in
+/// der Vorgabe so gesetzt, dass die Stufe exakt den bisherigen
+/// Kreis-Kern erzeugt — bestehende Bearbeitungen ändern sich dadurch
+/// nicht (ein Test in `stages::virtual_aperture` hält das fest).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VirtualApertureAdjustment {
     pub focus_x: f32,
@@ -235,6 +250,37 @@ pub struct VirtualApertureAdjustment {
     pub amount: f32,
     #[serde(default)]
     pub depth_map: Option<DepthMapPatch>,
+    /// Zahl der Blendenlamellen (`0` = runde Blende wie bisher, sonst
+    /// `3..=11`): bestimmt, ob Spitzlichter als Kreis oder als Polygon
+    /// ausbrennen — das auffälligste Merkmal eines Objektiv-Bokehs.
+    #[serde(default)]
+    pub blades: u32,
+    /// Drehung der Blendenöffnung in Grad (`0.0..=360.0`).
+    #[serde(default)]
+    pub rotation: f32,
+    /// Anamorphe Streckung (`0.0` = rund, `1.0` = doppelt so hoch wie
+    /// breit) — der ovale Kern anamorpher Kinooptiken.
+    #[serde(default)]
+    pub anamorphic: f32,
+    /// Wirbel zum Bildrand hin (`0.0..=1.0`), wie ihn Petzval-Objektive
+    /// erzeugen: der Unschärfekern wird zum Rand hin tangential gekippt.
+    #[serde(default)]
+    pub swirl: f32,
+    /// Anhebung der Spitzlichter VOR der Weichzeichnung (`0.0..=1.0`) —
+    /// ohne sie mittelt eine Weichzeichnung helle Punkte einfach weg,
+    /// statt die typischen „Bokeh-Bälle" stehen zu lassen.
+    #[serde(default)]
+    pub highlight_boost: f32,
+    /// Ab welcher Luminanz `highlight_boost` greift (`0.0..=1.0`).
+    #[serde(default = "default_highlight_threshold")]
+    pub highlight_threshold: f32,
+}
+
+/// Serde-Vorgabe für [`VirtualApertureAdjustment::highlight_threshold`] —
+/// als Funktion nötig, weil `#[serde(default)]` für `f32` sonst `0.0`
+/// einsetzen würde und damit das *ganze* Bild als Spitzlicht gälte.
+fn default_highlight_threshold() -> f32 {
+    0.75
 }
 
 impl VirtualApertureAdjustment {
@@ -243,6 +289,12 @@ impl VirtualApertureAdjustment {
         focus_y: 0.5,
         amount: 0.0,
         depth_map: None,
+        blades: 0,
+        rotation: 0.0,
+        anamorphic: 0.0,
+        swirl: 0.0,
+        highlight_boost: 0.0,
+        highlight_threshold: 0.75,
     };
 }
 
@@ -889,6 +941,482 @@ impl CreativeAdjustments {
     }
 }
 
+// ---- Licht & Optik (Phase 28, siehe `DECISIONS.md` ADR-0058) ---------------
+
+/// Tonwert-Angleich an ein Referenzfoto (Phase 28 Punkt 1): überträgt
+/// die *Tonwertverteilung* des Referenzfotos, nicht dessen Farbigkeit —
+/// die macht bereits [`ColorMatchAdjustment`] aus Phase 27. Beides
+/// zusammen ergibt einen vollständigen Serien-Angleich, ohne dass eines
+/// das andere doppelt.
+///
+/// `targets` sind die neun Luminanz-Dezile (10 %, 20 %, …, 90 %) des
+/// Referenzfotos. Daraus entsteht eine monoton steigende, stückweise
+/// lineare Abbildung: das eigene 10 %-Dezil wird auf `targets[0]`
+/// gezogen, das 20 %-Dezil auf `targets[1]` und so fort.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ToneMatchAdjustment {
+    pub amount: f32,
+    pub targets: [f32; 9],
+    /// `false`, solange kein Referenzfoto gewählt wurde — dann No-Op
+    /// unabhängig von `amount` (die Zielwerte wären sonst Nullen und
+    /// würden das Bild schwarz ziehen). Dieselbe Absicherung wie bei
+    /// [`ColorMatchAdjustment::has_target`].
+    pub has_target: bool,
+}
+
+impl ToneMatchAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        targets: [0.0; 9],
+        has_target: false,
+    };
+}
+
+impl Default for ToneMatchAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Zonensystem (Phase 28 Punkt 2): zehn Luminanzzonen nach Ansel Adams,
+/// je mit eigenem Belichtungsversatz in EV (`-1.0..=1.0`). `zones[0]`
+/// ist die dunkelste Zone, `zones[9]` die hellste.
+///
+/// `edge_radius` (in Pixeln) steuert den Guided Filter, der die aus den
+/// Zonen entstehende Verstärkungskarte glättet. Das ist der eigentliche
+/// Kern des Werkzeugs: ein gewöhnlicher Weichzeichner erzeugt an harten
+/// Hell-Dunkel-Kanten die Lichtsäume, für die Zonenwerkzeuge berüchtigt
+/// sind; der Guided Filter folgt den Kanten des Führungsbilds.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ZoneSystemAdjustment {
+    pub amount: f32,
+    pub zones: [f32; 10],
+    pub edge_radius: f32,
+}
+
+impl ZoneSystemAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        zones: [0.0; 10],
+        edge_radius: 16.0,
+    };
+}
+
+impl Default for ZoneSystemAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Detail-Pyramide (Phase 28 Punkt 3): drei Frequenzbänder aus
+/// gestaffelten Tiefpässen, je einzeln verstärk- oder abschwächbar
+/// (`-1.0..=1.0`). Anders als „Klarheit" (ein einziges Band) trennt das
+/// feine Struktur (Haut, Laub) von mittlerer Zeichnung und grobem
+/// Volumen.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct DetailPyramidAdjustment {
+    pub amount: f32,
+    pub fine: f32,
+    pub medium: f32,
+    pub coarse: f32,
+}
+
+impl DetailPyramidAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        fine: 0.0,
+        medium: 0.0,
+        coarse: 0.0,
+    };
+}
+
+impl Default for DetailPyramidAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Tiefenselektive Dunstentfernung (Phase 28 Punkt 4): die Umkehrung
+/// des Phase-27-Tiefennebels. Gewinnt Kontrast und Sättigung zurück,
+/// aber **nur in der Ferne** — gewichtet über dieselbe MiDaS-Tiefenkarte
+/// (`255` = am nächsten). Der globale „Dunst"-Regler der
+/// Grundeinstellungen kann das nicht: er trifft Vordergrund und
+/// Hintergrund gleichermaßen und lässt nahe Motive hart und übersättigt
+/// aussehen.
+///
+/// `start`/`end` sind Entfernungen (`0.0..=1.0`, also `1.0 - depth`):
+/// vor `start` passiert nichts, ab `end` wirkt der volle Betrag.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DepthDehazeAdjustment {
+    pub amount: f32,
+    pub start: f32,
+    pub end: f32,
+    #[serde(default)]
+    pub depth_map: Option<DepthMapPatch>,
+}
+
+impl DepthDehazeAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        start: 0.3,
+        end: 1.0,
+        depth_map: None,
+    };
+}
+
+impl Default for DepthDehazeAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Tiefenselektive Schärfe (Phase 28 Punkt 5): eine Unschärfemaske,
+/// deren Wirkung mit dem Abstand von einer wählbaren Fokusebene
+/// abfällt. Schärft das Motiv, ohne das Rauschen im unscharfen
+/// Hintergrund mitzuschärfen — der Grund, warum globales Nachschärfen
+/// bei offener Blende so oft schlechter aussieht als gar keins.
+///
+/// `focus_depth` ist die Zielebene (`0.0` = fern, `1.0` = nah), `range`
+/// die Breite des scharf gezogenen Bandes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DepthSharpenAdjustment {
+    pub amount: f32,
+    pub focus_depth: f32,
+    pub range: f32,
+    pub radius: f32,
+    #[serde(default)]
+    pub depth_map: Option<DepthMapPatch>,
+}
+
+impl DepthSharpenAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        focus_depth: 0.8,
+        range: 0.35,
+        radius: 2.0,
+        depth_map: None,
+    };
+}
+
+impl Default for DepthSharpenAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// KI-Neubeleuchtung (Phase 28 Punkt 6): aus dem Gradienten der
+/// Tiefenkarte wird eine Normalenkarte gewonnen, darauf laufen
+/// Lambert-Diffus und ein Blinn-Phong-Glanzlicht mit frei setzbarer
+/// Lichtrichtung, -farbe und Umgebungshelligkeit.
+///
+/// **Ehrliche Grenze:** eine aus einer *relativen* Tiefenkarte
+/// gewonnene Normale ist keine gemessene Oberflächennormale. Das
+/// Ergebnis ist plausible Lichtführung, keine physikalisch korrekte
+/// Neubeleuchtung — deshalb ist `specular` bewusst klein vorbelegt.
+///
+/// `light_x`/`light_y` sind normierte Bildkoordinaten (`0.0..=1.0`),
+/// `light_z` die Höhe über der Bildebene.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RelightAdjustment {
+    pub amount: f32,
+    pub light_x: f32,
+    pub light_y: f32,
+    pub light_z: f32,
+    pub color_rgb: [f32; 3],
+    pub ambient: f32,
+    pub specular: f32,
+    #[serde(default)]
+    pub depth_map: Option<DepthMapPatch>,
+}
+
+impl RelightAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        light_x: 0.3,
+        light_y: 0.25,
+        light_z: 0.7,
+        color_rgb: [1.0, 0.94, 0.82],
+        ambient: 0.55,
+        specular: 0.15,
+        depth_map: None,
+    };
+}
+
+impl Default for RelightAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Himmel dramatisieren (Phase 28 Punkt 7): Kontrast, Sättigung,
+/// Abdunklung und Wärme **nur innerhalb der Himmelsmaske**. Bewusst
+/// kein Austausch — der bestehende Himmelsaustausch (Phase 14) bleibt
+/// für den Fall, dass der Himmel wirklich weg soll.
+///
+/// `mask` ist dieselbe Byte-Alphakarte wie bei der Motiv-Freistellung
+/// (`255` = Himmel); [`SubjectMaskPatch`] wird hier bewusst
+/// wiederverwendet statt eines zweiten, feldgleichen Typs — die
+/// Struktur ist eine reine Bitmap-plus-Alpha-Hülle ohne
+/// Motiv-Semantik.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkyDramaAdjustment {
+    pub amount: f32,
+    pub contrast: f32,
+    pub saturation: f32,
+    pub darken: f32,
+    pub warmth: f32,
+    #[serde(default)]
+    pub mask: Option<SubjectMaskPatch>,
+}
+
+impl SkyDramaAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        contrast: 0.5,
+        saturation: 0.4,
+        darken: 0.3,
+        warmth: 0.0,
+        mask: None,
+    };
+}
+
+impl Default for SkyDramaAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Art der Bewegungsunschärfe (Phase 28 Punkt 8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MotionBlurKind {
+    /// Gerichtet: alle Pixel verwischen entlang derselben Geraden —
+    /// der klassische Mitzieher.
+    Directional,
+    /// Radial: Verwischung entlang Kreisbögen um einen Mittelpunkt —
+    /// wirkt wie eine Drehung.
+    Radial,
+    /// Zoom: Verwischung entlang der Strahlen vom Mittelpunkt nach
+    /// außen — wirkt wie ein Zoom während der Belichtung.
+    Zoom,
+}
+
+/// Bewegungsunschärfe (Phase 28 Punkt 8). Optional schützt eine
+/// Motivmaske das Motiv, sodass ein echter Mitzieher entsteht (scharfes
+/// Motiv, verwischter Hintergrund) statt eines rundum verwischten
+/// Bildes.
+///
+/// `length` ist die Bahnlänge als Anteil der kürzeren Bildkante,
+/// `angle` der Winkel in Grad (nur bei [`MotionBlurKind::Directional`]),
+/// `center_x`/`center_y` der Mittelpunkt (nur bei `Radial`/`Zoom`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MotionBlurAdjustment {
+    pub amount: f32,
+    pub kind: MotionBlurKind,
+    pub angle: f32,
+    pub length: f32,
+    pub center_x: f32,
+    pub center_y: f32,
+    /// `255` = Motiv (bleibt scharf). Ohne Maske verwischt das ganze
+    /// Bild.
+    #[serde(default)]
+    pub mask: Option<SubjectMaskPatch>,
+}
+
+impl MotionBlurAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        kind: MotionBlurKind::Directional,
+        angle: 0.0,
+        length: 0.05,
+        center_x: 0.5,
+        center_y: 0.5,
+        mask: None,
+    };
+}
+
+impl Default for MotionBlurAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Blendenstern (Phase 28 Punkt 9): Lichtschleppen auf Spitzlichtern,
+/// wie sie ein Sternfilter vor dem Objektiv oder eine stark
+/// geschlossene Blende erzeugt.
+///
+/// `points` ist die Zahl der Strahlen (`2..=12`), `angle` ihre Drehung
+/// in Grad, `length` die Strahllänge als Anteil der kürzeren Bildkante,
+/// `threshold` die Luminanz, ab der ein Pixel als Spitzlicht gilt, und
+/// `chroma` der Regenbogen-Anteil entlang der Strahllänge (Beugung an
+/// den Blendenlamellen).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct StarFilterAdjustment {
+    pub amount: f32,
+    pub points: u32,
+    pub angle: f32,
+    pub length: f32,
+    pub threshold: f32,
+    pub chroma: f32,
+}
+
+impl StarFilterAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        points: 4,
+        angle: 0.0,
+        length: 0.08,
+        threshold: 0.85,
+        chroma: 0.25,
+    };
+}
+
+impl Default for StarFilterAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Diffusionsfilter (Phase 28 Punkt 10) — der „Pro Mist"-Effekt:
+/// Weichzeichnung, die **nur aus den Lichtern** gespeist wird.
+///
+/// `black_retention` (`0.0..=1.0`) verhindert, dass die Schwarzwerte
+/// milchig werden: der Glanz wird dort zurückgenommen, wo das
+/// Originalbild dunkel ist. Genau dieser zweite Teil unterscheidet den
+/// Filter vom Orton-Glanz aus Phase 27, der global aufhellt.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct DiffusionAdjustment {
+    pub amount: f32,
+    pub radius: f32,
+    pub threshold: f32,
+    pub black_retention: f32,
+    pub warmth: f32,
+}
+
+impl DiffusionAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        radius: 14.0,
+        threshold: 0.6,
+        black_retention: 0.7,
+        warmth: 0.15,
+    };
+}
+
+impl Default for DiffusionAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Kanalmatrix (Phase 28 Punkt 11): freie 3×3-Matrix in Zeilenfolge
+/// (`[rr, rg, rb, gr, gg, gb, br, bg, bb]`), zwischen Original und
+/// Ergebnis über `amount` geblendet.
+///
+/// Die Ein-Klick-Vorgaben (Falschfarben-Infrarot, Rot/Blau-Tausch,
+/// Cyanotypie) sind bewusst **kein** Enum hier, sondern setzen im
+/// Frontend einfach die neun Zahlen: so bleibt jede Vorgabe danach frei
+/// weiter veränderbar, statt in einen festen Modus zu springen.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ChannelMatrixAdjustment {
+    pub amount: f32,
+    pub matrix: [f32; 9],
+}
+
+impl ChannelMatrixAdjustment {
+    /// Einheitsmatrix — die Vorgabe, damit ein versehentlich
+    /// hochgezogener `amount` nichts kaputt macht.
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        matrix: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+    };
+}
+
+impl Default for ChannelMatrixAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Poster-/Comic-Look (Phase 28 Punkt 12): Quantisierung auf `levels`
+/// Stufen je Kanal plus eine Konturzeichnung aus dem Sobel-Betrag.
+/// Läuft als letztes Werkzeug der Stufe, weil die Quantisierung alles
+/// davor auf grobe Stufen zusammenzieht.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PosterizeAdjustment {
+    pub amount: f32,
+    pub levels: u32,
+    pub edge_amount: f32,
+    pub edge_thickness: f32,
+}
+
+impl PosterizeAdjustment {
+    pub const NEUTRAL: Self = Self {
+        amount: 0.0,
+        levels: 6,
+        edge_amount: 0.6,
+        edge_thickness: 1.0,
+    };
+}
+
+impl Default for PosterizeAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
+/// Die zwölf „Licht & Optik"-Werkzeuge in EINER Struktur (Phase 28,
+/// siehe `DECISIONS.md` ADR-0058) — dieselbe Gerüst-Entscheidung wie bei
+/// [`CreativeAdjustments`]: ein Feld, ein Modul, ein Flag, ein
+/// Pipeline-Zweig. Die Anwendungsreihenfolge innerhalb der Stufe ist
+/// fest und dokumentiert (Korrektur → Tiefe → Licht → Optik → Stil),
+/// siehe `stages::light_optics`s Moduldoku.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct LightOpticsAdjustments {
+    #[serde(default)]
+    pub tone_match: ToneMatchAdjustment,
+    #[serde(default)]
+    pub zone_system: ZoneSystemAdjustment,
+    #[serde(default)]
+    pub detail_pyramid: DetailPyramidAdjustment,
+    #[serde(default)]
+    pub depth_dehaze: DepthDehazeAdjustment,
+    #[serde(default)]
+    pub depth_sharpen: DepthSharpenAdjustment,
+    #[serde(default)]
+    pub relight: RelightAdjustment,
+    #[serde(default)]
+    pub sky_drama: SkyDramaAdjustment,
+    #[serde(default)]
+    pub motion_blur: MotionBlurAdjustment,
+    #[serde(default)]
+    pub star_filter: StarFilterAdjustment,
+    #[serde(default)]
+    pub diffusion: DiffusionAdjustment,
+    #[serde(default)]
+    pub channel_matrix: ChannelMatrixAdjustment,
+    #[serde(default)]
+    pub posterize: PosterizeAdjustment,
+}
+
+impl LightOpticsAdjustments {
+    /// `true`, wenn keines der zwölf Werkzeuge etwas zu tun hat — die
+    /// Pipeline überspringt die Stufe dann vollständig (Regelfall).
+    pub fn is_neutral(&self) -> bool {
+        self.tone_match.amount <= 0.0
+            && self.zone_system.amount <= 0.0
+            && self.detail_pyramid.amount <= 0.0
+            && self.depth_dehaze.amount <= 0.0
+            && self.depth_sharpen.amount <= 0.0
+            && self.relight.amount <= 0.0
+            && self.sky_drama.amount <= 0.0
+            && self.motion_blur.amount <= 0.0
+            && self.star_filter.amount <= 0.0
+            && self.diffusion.amount <= 0.0
+            && self.channel_matrix.amount <= 0.0
+            && self.posterize.amount <= 0.0
+    }
+}
+
 /// Die konkrete EDL-Struktur für Schema-Version 4 — siehe
 /// [`crate::edl::EDL_SCHEMA_VERSION`] und [`crate::edl::migrate`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -956,6 +1484,10 @@ pub struct EdlV4 {
     /// unverändertes bisheriges Verhalten).
     #[serde(default)]
     pub creative: CreativeAdjustments,
+    /// Die zwölf „Licht & Optik"-Werkzeuge aus Phase 28 — additiv,
+    /// dieselbe `#[serde(default)]`-Begründung wie bei `creative` oben.
+    #[serde(default)]
+    pub light_optics: LightOpticsAdjustments,
 }
 
 impl EdlV4 {
@@ -987,6 +1519,7 @@ impl EdlV4 {
             lut_filter: LutFilterAdjustment::NEUTRAL,
             liquify_strokes: Vec::new(),
             creative: CreativeAdjustments::default(),
+            light_optics: LightOpticsAdjustments::default(),
         }
     }
 
@@ -1021,6 +1554,7 @@ impl EdlV4 {
             lut_filter: LutFilterAdjustment::NEUTRAL,
             liquify_strokes: Vec::new(),
             creative: CreativeAdjustments::default(),
+            light_optics: LightOpticsAdjustments::default(),
         }
     }
 }

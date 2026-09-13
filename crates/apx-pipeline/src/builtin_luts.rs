@@ -39,10 +39,13 @@ pub enum BuiltinLut {
     Noir,
     Pastel,
     RetroFujiThailand,
+    NordicWinter,
+    TokyoNeonNight,
+    SaharaGold,
 }
 
 impl BuiltinLut {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 14] = [
         Self::Warm,
         Self::Cool,
         Self::HighContrastBw,
@@ -54,6 +57,9 @@ impl BuiltinLut {
         Self::Noir,
         Self::Pastel,
         Self::RetroFujiThailand,
+        Self::NordicWinter,
+        Self::TokyoNeonNight,
+        Self::SaharaGold,
     ];
 
     pub fn id(self) -> &'static str {
@@ -69,6 +75,9 @@ impl BuiltinLut {
             Self::Noir => "noir",
             Self::Pastel => "pastel",
             Self::RetroFujiThailand => "retro_fuji_thailand",
+            Self::NordicWinter => "nordic_winter",
+            Self::TokyoNeonNight => "tokyo_neon_night",
+            Self::SaharaGold => "sahara_gold",
         }
     }
 
@@ -85,6 +94,9 @@ impl BuiltinLut {
             Self::Noir => "Film Noir",
             Self::Pastel => "Pastell",
             Self::RetroFujiThailand => "Retro Fuji Thailand",
+            Self::NordicWinter => "Nordic Winter",
+            Self::TokyoNeonNight => "Tokyo Neon Night",
+            Self::SaharaGold => "Sahara Gold",
         }
     }
 
@@ -197,6 +209,80 @@ impl BuiltinLut {
                     soften(b) + 0.050 * shadow - 0.075 * highlight + 0.085 * blue_dominance,
                 ]
             }
+            // „Nordic Winter" (Phase 28, siehe ADR-0058): das klare,
+            // kalte Licht kurzer nordischer Wintertage. Drei Merkmale:
+            //
+            // 1. Kühle, leicht angehobene Schatten (Schnee im Schatten
+            //    ist blau, nicht schwarz — der Blauanteil steigt dort,
+            //    wo das Bild dunkel ist).
+            // 2. Fast neutrale, nur minimal kühle Lichter: Schnee darf
+            //    nicht blau ausbrennen, sonst wirkt das Bild
+            //    farbstichig statt kalt.
+            // 3. Gedämpfte Rot- und Gelbtöne (Haut, Holz, Laub bleiben
+            //    erkennbar, treten aber zurück) bei erhaltener
+            //    Blau-Cyan-Sättigung.
+            Self::NordicWinter => {
+                let l = luminance(r, g, b);
+                let shadow = (1.0 - l).powf(1.8);
+                let highlight = l.powf(2.0);
+                // Wie „warm" ist dieser Bildpunkt? Nur warme Töne werden
+                // gedämpft (Merkmal 3), kalte bleiben unangetastet.
+                let warmth = (r - 0.5 * (g + b)).max(0.0);
+                [
+                    r - 0.070 * shadow - 0.120 * warmth + 0.010 * highlight,
+                    g - 0.020 * shadow - 0.045 * warmth + 0.015 * highlight,
+                    b + 0.085 * shadow + 0.020 * highlight,
+                ]
+            }
+            // „Tokyo Neon Night" (Phase 28): Nachtstadt mit Leuchtreklame.
+            // Drei Merkmale:
+            //
+            // 1. Tiefes, leicht ins Blaugrüne gezogenes Schwarz — der
+            //    Gegenentwurf zum angehobenen Negativ-Schwarz von
+            //    „Retro Fuji Thailand".
+            // 2. Magenta-Cyan-Teilung: Schatten nach Cyan, Lichter nach
+            //    Magenta — der klassische Neon-Split.
+            // 3. Gesättigte Spitzlichter: dort, wo eine Farbe ohnehin
+            //    dominiert, wird sie zusätzlich verstärkt, damit
+            //    Leuchtreklame leuchtet statt auszubleichen.
+            Self::TokyoNeonNight => {
+                let l = luminance(r, g, b);
+                let shadow = (1.0 - l).powf(2.2);
+                let highlight = l.powf(1.6);
+                let mean = (r + g + b) / 3.0;
+                // Abstand vom Grau = Farbigkeit dieses Bildpunkts.
+                let chroma = ((r - mean).abs() + (g - mean).abs() + (b - mean).abs()) / 3.0;
+                // Merkmal 1: Schwarzpunkt nach unten ziehen statt anheben.
+                let crush = |v: f32| (v - 0.045 * shadow).max(0.0);
+                [
+                    crush(r) + 0.075 * highlight + 0.9 * chroma * (r - mean),
+                    crush(g) - 0.030 * highlight + 0.9 * chroma * (g - mean),
+                    crush(b) + 0.060 * shadow + 0.055 * highlight + 0.9 * chroma * (b - mean),
+                ]
+            }
+            // „Sahara Gold" (Phase 28): Wüstenlicht der späten
+            // Nachmittagsstunde. Drei Merkmale:
+            //
+            // 1. Warme, sandfarbene Lichter mit deutlich gedämpftem
+            //    Blau — die Luft über heißem Sand streut kurzwelliges
+            //    Licht weg.
+            // 2. Schatten mit leichtem Violettstich (der Himmel ist die
+            //    einzige Lichtquelle im Schatten).
+            // 3. Angehobener Mittenkontrast statt flacher Kurve — das
+            //    Gegenteil der Negativfilm-Kennlinie, Wüstenmotive
+            //    leben von harter Zeichnung.
+            Self::SaharaGold => {
+                let l = luminance(r, g, b);
+                let shadow = (1.0 - l).powf(1.5);
+                let highlight = l.powf(1.3);
+                // Merkmal 3: S-Kurve um 0.5 (Faktor > 1).
+                let punch = |v: f32| (0.5 + (v - 0.5) * 1.12).clamp(0.0, 1.0);
+                [
+                    punch(r) + 0.085 * highlight + 0.020 * shadow,
+                    punch(g) + 0.040 * highlight - 0.010 * shadow,
+                    punch(b) - 0.095 * highlight + 0.045 * shadow,
+                ]
+            }
         }
     }
 }
@@ -246,27 +332,37 @@ mod tests {
         }
     }
 
-    /// Die mitgelieferte `.cube`-Datei und der eingebaute Filter
+    /// Die mitgelieferten `.cube`-Dateien und die eingebauten Filter
     /// gleichen Namens muessen dieselbe Farbformel tragen — sonst haette
     /// der Nutzer zwei Filter mit identischem Namen und
     /// unterschiedlicher Wirkung. Prueft das real gegeneinander, statt
     /// es nur im Kommentar zu behaupten.
     #[test]
-    fn builtin_lut_matches_shipped_cube_file() {
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/luts/retro-fuji-thailand.cube"
-        );
-        let bytes = std::fs::read(path).expect("mitgelieferte .cube-Datei fehlt");
-        let parsed = crate::lut_cube::parse_cube_bytes(&bytes).expect(".cube-Datei ist ungueltig");
-        let builtin = generate(BuiltinLut::RetroFujiThailand, parsed.size);
-        assert_eq!(parsed.size, builtin.size);
-        assert_eq!(parsed.table.len(), builtin.table.len());
-        for (i, (file, code)) in parsed.table.iter().zip(builtin.table.iter()).enumerate() {
-            assert!(
-                (file - code).abs() < 1e-5,
-                "Rasterpunkt {i} weicht ab: Datei {file}, eingebaut {code}"
+    fn builtin_lut_matches_shipped_cube_files() {
+        let cases = [
+            ("retro-fuji-thailand.cube", BuiltinLut::RetroFujiThailand),
+            ("nordic-winter.cube", BuiltinLut::NordicWinter),
+            ("tokyo-neon-night.cube", BuiltinLut::TokyoNeonNight),
+            ("sahara-gold.cube", BuiltinLut::SaharaGold),
+        ];
+        for (filename, kind) in cases {
+            let path = format!(
+                "{}/../../assets/luts/{filename}",
+                env!("CARGO_MANIFEST_DIR")
             );
+            let bytes = std::fs::read(&path)
+                .unwrap_or_else(|_| panic!("mitgelieferte .cube-Datei fehlt: {filename}"));
+            let parsed = crate::lut_cube::parse_cube_bytes(&bytes)
+                .unwrap_or_else(|_| panic!(".cube-Datei ist ungueltig: {filename}"));
+            let builtin = generate(kind, parsed.size);
+            assert_eq!(parsed.size, builtin.size, "{filename}");
+            assert_eq!(parsed.table.len(), builtin.table.len(), "{filename}");
+            for (i, (file, code)) in parsed.table.iter().zip(builtin.table.iter()).enumerate() {
+                assert!(
+                    (file - code).abs() < 1e-5,
+                    "{filename}: Rasterpunkt {i} weicht ab: Datei {file}, eingebaut {code}"
+                );
+            }
         }
     }
 

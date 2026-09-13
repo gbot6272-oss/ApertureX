@@ -9486,3 +9486,101 @@ pub fn compute_reference_color_stats(
         b_std: stats[5],
     })
 }
+
+// ---- Licht & Optik (Phase 28, siehe `DECISIONS.md` ADR-0058) --------------
+
+/// Trennt einmalig Himmel und Boden für `photo_id` (Phase 28 Punkt 7).
+/// Dieselbe Übertragungskonvention und dasselbe „einmal berechnen, dann
+/// im EDL ablegen"-Muster wie [`segment_photo_subject`], nur mit
+/// `apx_ai::segmentation::sky_alpha` statt der Motiv-Saliency —
+/// ebenfalls **ohne Modell-Download**.
+///
+/// Bewusst ein eigener Befehl statt eines Parameters an
+/// [`segment_photo_subject`]: die beiden liefern semantisch
+/// verschiedene Masken, und ein Aufrufer, der sich vertippt, bekäme
+/// sonst stillschweigend die falsche.
+#[tauri::command]
+pub fn segment_photo_sky(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<SubjectMaskDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let alpha = apx_ai::segmentation::sky_alpha(&linear.pixels, linear.width, linear.height)
+        .map_err(|err| err.to_string())?;
+
+    Ok(SubjectMaskDto {
+        bitmap_width: linear.width,
+        bitmap_height: linear.height,
+        alpha_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &alpha),
+    })
+}
+
+/// Die neun Luminanz-Dezile, die ein Referenzfoto für den
+/// Tonwert-Angleich liefert (Phase 28 Punkt 1).
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToneStatsDto {
+    /// 10 %, 20 %, …, 90 % der Luminanzverteilung, jeweils `0.0..=1.0`.
+    pub deciles: [f32; 9],
+}
+
+/// Berechnet die Tonwertverteilung eines Referenzfotos (Phase 28
+/// Punkt 1). Wie bei [`compute_reference_color_stats`] wandern nur
+/// wenige Zahlen ins EDL, kein zweites Bild — und es gilt dieselbe
+/// ehrliche Grenze: gemessen wird das lineare Dekodierergebnis des
+/// Referenzfotos ohne dessen eigene Entwicklungseinstellungen.
+#[tauri::command]
+pub fn compute_reference_tone_stats(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<ToneStatsDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    // Dieselbe Luminanz-Gewichtung wie die Pipeline (siehe
+    // `stages::pixel_util::luminance`) — eine abweichende Gewichtung
+    // hier würde die Zielwerte systematisch verschieben.
+    let mut histogram = [0u32; 256];
+    for px in linear.pixels.chunks_exact(3) {
+        let l = (0.3 * px[0] + 0.59 * px[1] + 0.11 * px[2]).clamp(0.0, 1.0);
+        histogram[(l * 255.0).round() as usize] += 1;
+    }
+    let total: u32 = histogram.iter().sum();
+    if total == 0 {
+        return Err("Referenzfoto enthält keine Bildpunkte".to_string());
+    }
+    let mut deciles = [0.0f32; 9];
+    let mut cumulative = 0u32;
+    let mut next = 0usize;
+    for (bin, count) in histogram.iter().enumerate() {
+        cumulative += count;
+        while next < 9 && cumulative as f32 / total as f32 >= (next + 1) as f32 * 0.1 {
+            deciles[next] = bin as f32 / 255.0;
+            next += 1;
+        }
+        if next >= 9 {
+            break;
+        }
+    }
+    for slot in deciles.iter_mut().skip(next) {
+        *slot = 1.0;
+    }
+
+    Ok(ToneStatsDto { deciles })
+}

@@ -1503,7 +1503,7 @@ Suite inkl. visueller Verifikation gebündelt in Schritt 7.
 - [x] Nachtrag II: gezielter Rundgang durch die restliche Oberfläche nach demselben Muster (schmale `PaletteFrame`-Paletten auf zu lange Knopfbeschriftungen in Mehrspalten-/`flex-1`-Reihen geprüft) — drei weitere echte Fälle behoben (`MasksPanel.tsx`s "+ Komponente hinzufügen"-Raster, `PresetsPanel.tsx`s KI-Preset-Generator-Knopfpaar, je einspaltig; `DevelopPanel.tsx`s Verflüssigen-Modus- und Entrauschen/Hochskalieren-Knopfreihen, per `flex-wrap` statt Umstrukturierung, da echte Segment-Umschalter) — siehe DECISIONS.md ADR-0046-Nachtrag II; alle anderen `grid-cols-*`-Stellen und schwebenden Overlays geprüft, ohne weiteren Fund; `tsc -b`/`vitest run` (251)/volle Playwright-Suite (142/142) grün
 - [x] Nachtrag III: die vier Entwickeln-Registerkarten (Licht/Farbe/Details/Kreativ) real durchgeklickt — ein echter Fehler gefunden und behoben (Kreativ-Registerkarte zeigte dauerhaft einen roten "Test-Stub: unbekannter invoke-Befehl 'list_builtin_lut_filters'"-Banner, weil `e2e/tauri-mock.ts` für diesen echten, seit Phase 16 Schritt 2 bestehenden Rust-Befehl nie einen Mock-Fall bekommen hatte) sowie das strukturelle "zu viel Scrollen"-Problem eine Ebene tiefer als in ADR-0046 behoben: alle 30 `<fieldset>`/`<legend>`-Abschnitte in `DevelopPanel.tsx` und 6 in `MasksPanel.tsx` sind jetzt einzeln einklappbare native `<details open>`/`<summary>` (neue `.apx-collapsible`-Klasse in `index.css`, ▸/▾-Pfeil mit Übergangsanimation, respektiert `prefers-reduced-motion`) — bleiben beim ersten Betrachten unverändert vollständig sichtbar, lassen sich aber ab jetzt einzeln zuklappen, reduziert den Scrollweg v. a. in "Kreativ" (acht Unterabschnitte) und "Licht" (fünf); der Node-Editor-"Öffnen"-Sprung klappt ein zuvor zugeklapptes Ziel automatisch wieder auf. Dabei eine echte Testfalle empirisch nachgewiesen und umschifft (`<details>`+`<summary>` bekommt anders als `<fieldset>`+`<legend>` keinen automatischen zugänglichen Namen — zwei versuchsweise gesetzte `aria-label`s kollidierten mit gleichnamigen `aria-label`s echter Komponenten und wurden wieder entfernt) — siehe DECISIONS.md ADR-0046-Nachtrag III; `tsc -b`/`vitest run` (251)/volle Playwright-Suite (142/142) grün, reale Bildschirm-Kontrolle aller fünf Registerkarten plus Zu-/Aufklappen-Verhalten
 
-## Aktuelle Phase: Phase 27 — Zehn Bearbeitungs-Funktionen mit großem Bildeffekt + Retro-Fuji-Thailand-Filter
+## Phase 27 — Zehn Bearbeitungs-Funktionen mit großem Bildeffekt + Retro-Fuji-Thailand-Filter
 
 Nutzerwunsch wörtlich: zehn weitere Funktionen, die "wirklich bei der
 Bearbeitung von Fotos helfen, anspruchsvoll, teilweise mit KI, wirklich
@@ -1577,3 +1577,67 @@ Atmosphäre → Optik → Licht → Gradation → Auflage.
   base64-Vertrag ausdrücklich festgeschrieben (`toBe("gICA…")`) — die
   Zusicherung prüft jetzt die 16 dekodierten Bytes, also das Format, das
   Rust wirklich deserialisiert. Siehe ADR-0057.
+
+
+## Aktuelle Phase: Phase 28 — „Licht & Optik": zwölf Werkzeuge, echtes Bokeh, drei neue .cube-Filter
+
+Nutzerwunsch wörtlich: „Noch nicht gut genug mach noch mehr Funktionen
+mehr alles". Phase 27 lieferte Looks; hier kommen die Werkzeuge, die
+Licht, Tiefe und Optik eines Fotos wirklich umbauen.
+Untersuchung/Entscheidungen: siehe `DECISIONS.md` ADR-0058.
+
+**Architektur:** ein EDL-Feld `light_optics: LightOpticsAdjustments` mit
+zwölf Unterstrukturen, EIN Modul `stages/light_optics.rs`, EIN
+`StageEnabled.light_optics`, EIN `develop.rs`-Zweig — dieselbe in
+Phase 27 bewährte Entscheidung. Pipeline-Position bewusst **vor**
+`lut_filter` (Korrektur und Optik gehen der Gradation voraus, die
+Phase-27-Looks bleiben danach):
+`… → sky_replace → light_optics → lut_filter → creative → liquify`.
+Feste Reihenfolge in der Stufe: Korrektur → Tiefe → Licht → Optik → Stil.
+
+- [ ] 1. **Tonwert-Angleich an Referenzfoto**: neun Luminanz-Dezile des
+  Referenzfotos als monotone, stückweise lineare Abbildung. Ergänzt den
+  Farbabgleich aus Phase 27 zum vollständigen Serien-Angleich. Neuer
+  Befehl `compute_reference_tone_stats`.
+- [ ] 2. **Zonensystem (10 Zonen, kantenbewusst)**: je Zone ±1 EV, die
+  Verstärkungskarte wird durch einen echten **Guided Filter** geglättet
+  statt durch einen Weichzeichner — genau das verhindert die
+  Lichtsäume, für die Zonenwerkzeuge berüchtigt sind.
+- [ ] 3. **Detail-Pyramide**: drei Frequenzbänder (fein/mittel/grob) aus
+  gestaffelten Tiefpässen, je einzeln verstärkbar.
+- [ ] 4. **Tiefenselektive Dunstentfernung**: Kontrast- und
+  Sättigungsrückgewinnung nur in der Ferne, gewichtet über die
+  MiDaS-Tiefenkarte. Die Umkehrung des Phase-27-Tiefennebels.
+- [ ] 5. **Tiefenselektive Schärfe**: Unschärfemaske, deren Wirkung mit
+  dem Abstand von einer wählbaren Fokusebene abfällt.
+- [ ] 6. **KI-Neubeleuchtung**: Normalenkarte aus dem Tiefengradienten,
+  darauf Lambert-Diffus + Blinn-Phong-Glanzlicht mit frei setzbarer
+  Lichtrichtung, -farbe und Umgebungshelligkeit.
+- [ ] 7. **Himmel dramatisieren**: Kontrast/Sättigung/Abdunklung/Wärme
+  nur in der Himmelsmaske (`segment_photo_sky`, kein Modell-Download),
+  bewusst ohne Austausch.
+- [ ] 8. **Bewegungsunschärfe**: gerichtet, radial und Zoom; optional
+  schützt die Motivmaske das Motiv („Mitzieher").
+- [ ] 9. **Blendenstern**: Lichtschleppen auf Spitzlichtern, n Strahlen,
+  Winkel, Länge, Schwelle, optionaler Regenbogen-Anteil.
+- [ ] 10. **Diffusionsfilter („Pro Mist")**: Weichzeichnung nur aus den
+  Lichtern, mit Schwarzwert-Erhalt — das unterscheidet ihn vom
+  Orton-Glanz.
+- [ ] 11. **Kanalmatrix / Infrarot**: freie 3×3-Matrix plus vier
+  Ein-Klick-Vorgaben.
+- [ ] 12. **Poster-/Comic-Look**: Quantisierung plus Konturzeichnung aus
+  dem Sobel-Betrag.
+- [ ] 13. **Bokeh-Formen für die bestehende Virtuelle Blende**:
+  polygonale Blende, anamorphe Streckung, Wirbel,
+  Spitzlicht-Anhebung — als Erweiterung von `stages::virtual_aperture`
+  statt als dreizehntes Werkzeug (sonst doppelte Weichzeichnung). Ohne
+  gesetzte Werte bleibt der bisherige Kern unverändert, ein Test hält
+  das fest.
+- [ ] 14. **Drei neue .cube-Vorlagen + eingebaute Filter**: „Nordic
+  Winter", „Tokyo Neon Night", „Sahara Gold", je mit Datei-gegen-Formel-Test.
+- [ ] 15. **UI**: neue sechste Registerkarte „Licht & Optik"; beide
+  Kachel-Panels bekommen Suchfeld, „Nur aktive"-Schalter und je Kachel
+  einen Zurücksetzen-Knopf bei Hover/Fokus.
+- [ ] 16. Verifikation: Rust-Unit-Tests je Werkzeug, neuer e2e-Test,
+  `cargo fmt`/`clippy`/`test --workspace`, `tsc -b`, `vitest run`, volle
+  Playwright-Suite mit real geprüftem Exit-Code, dann Push.

@@ -443,6 +443,8 @@ fn main() {
             commands::generate_ai_mask,
             commands::segment_photo_subject,
             commands::compute_reference_color_stats,
+            commands::segment_photo_sky,
+            commands::compute_reference_tone_stats,
             commands::suggest_repair_source,
             commands::detect_sensor_spots,
             commands::get_ai_settings,

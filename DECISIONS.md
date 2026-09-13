@@ -6362,3 +6362,139 @@ e2e-Test für Panel/Regler/Ein-Klick-Knöpfe. `cargo fmt`/`clippy
 `vitest run` 251/251, volle Playwright-Suite 144/144 mit real geprüftem
 Exit-Code (`PLAYWRIGHT_EXIT=0`, in eine Logdatei umgeleitet statt durch
 `tail` gepipet — siehe ADR-0056).
+
+## ADR-0058: Phase 28 — „Licht & Optik": zwölf Werkzeuge, echtes Bokeh, drei neue .cube-Filter
+
+Nutzerwunsch nach Phase 27: „Noch nicht gut genug mach noch mehr
+Funktionen mehr alles". Phase 27 hat *Looks* geliefert (Filmlabor,
+Verlaufsabbildung, Lichtlecks) — was fehlt, sind die Werkzeuge, mit
+denen man **Licht, Tiefe und Optik** eines Fotos wirklich umbaut. Genau
+das ist der Gegenstand dieser Phase.
+
+### Wieder eine Stufe, aber an anderer Pipeline-Stelle
+
+Dieselbe Gerüst-Entscheidung wie in ADR-0057 (ein EDL-Feld, ein Modul,
+ein Flag, ein `develop.rs`-Zweig) — aber bewusst **vor** `lut_filter`
+statt danach: Korrekturen (Tonwert, Zonen, Detail) und optische
+Phänomene (Bokeh, Blendenstern, Diffusion, Bewegungsunschärfe) sind
+Dinge, die an der *Kamera* passieren und deshalb der Gradation
+vorausgehen. Die Phase-27-Looks liegen weiterhin danach, wie im Labor.
+Die vollständige Kette lautet damit:
+
+    … → sky_replace → light_optics (neu) → lut_filter → creative → liquify
+
+### Feste Reihenfolge innerhalb der Stufe
+
+Korrektur → Tiefe → Licht → Optik → Stil:
+
+1. Tonwert-Angleich an ein Referenzfoto (globale Tonwertkorrektur)
+2. Zonensystem (lokale Tonwertkorrektur)
+3. Detail-Pyramide (Detailkorrektur auf drei Größenordnungen)
+4. Tiefenselektive Dunstentfernung
+5. Tiefenselektive Schärfe
+6. KI-Neubeleuchtung
+7. Himmel dramatisieren
+8. Bewegungsunschärfe
+9. Blendenstern
+10. Diffusionsfilter („Pro Mist")
+11. Kanalmatrix / Infrarot
+12. Poster-/Comic-Look (quantisiert alles davor, muss deshalb zuletzt)
+
+### Die zwölf im Einzelnen
+
+1. **Tonwert-Angleich** — neun Luminanz-Dezile des Referenzfotos werden
+   zu einer monoton steigenden, stückweise linearen Abbildung
+   verrechnet. Bewusst nur die Luminanz: die Farbigkeit macht bereits
+   der Farbabgleich aus Phase 27, beides zusammen ergibt einen
+   vollständigen Serien-Angleich, ohne dass eines das andere doppelt.
+   Neuer Befehl `compute_reference_tone_stats` liefert die neun Zahlen —
+   kein zweites Bild im EDL, dasselbe Muster wie bei den Farbkennzahlen.
+2. **Zonensystem** — zehn Luminanzzonen nach Ansel Adams, je ±1 EV.
+   Der entscheidende Punkt ist nicht die Zoneneinteilung, sondern dass
+   die daraus entstehende Verstärkungskarte durch einen **echten
+   Guided Filter** (Box-Mittel von Führungsbild und Karte, Kovarianz →
+   `a`/`b`) geglättet wird. Ein simpler Weichzeichner erzeugt an harten
+   Kanten genau die Lichtsäume, für die Zonenwerkzeuge berüchtigt sind;
+   der Guided Filter folgt den Kanten des Führungsbilds und vermeidet
+   sie. Das ist der anspruchsvollste Teil dieser Phase und der Grund,
+   warum das Werkzeug überhaupt brauchbar ist.
+3. **Detail-Pyramide** — drei Frequenzbänder (fein/mittel/grob) aus
+   gestaffelten Tiefpässen, je einzeln verstärkbar. Anders als
+   „Klarheit" (ein Band) trennt das Struktur von Volumen.
+4. **Tiefenselektive Dunstentfernung** — die Umkehrung des
+   Phase-27-Tiefennebels: Kontrast- und Sättigungsrückgewinnung, aber
+   **nur in der Ferne**, gewichtet über dieselbe MiDaS-Tiefenkarte.
+   Der globale „Dunst"-Regler der Grundeinstellungen kann das nicht:
+   er trifft Vordergrund und Hintergrund gleichermaßen.
+5. **Tiefenselektive Schärfe** — Unschärfemaske, deren Wirkung mit dem
+   Abstand von einer wählbaren Fokusebene abfällt. Schärft das Motiv,
+   ohne Hintergrundrauschen mitzuschärfen.
+6. **KI-Neubeleuchtung** — aus der Tiefenkarte wird per Gradient eine
+   Normalenkarte gewonnen, darauf laufen Lambert-Diffus und
+   Blinn-Phong-Glanzlicht mit frei setzbarer Lichtrichtung, -farbe und
+   Umgebungshelligkeit. Der sichtbarste Effekt der ganzen Phase.
+   **Ehrliche Grenze:** eine aus einer *relativen* Tiefenkarte
+   gewonnene Normale ist keine gemessene Oberflächennormale — das
+   Ergebnis ist plausible Lichtführung, keine physikalisch korrekte
+   Neubeleuchtung. Deshalb ist der Glanzlicht-Anteil standardmäßig
+   klein.
+7. **Himmel dramatisieren** — nutzt `apx_ai::segmentation::sky_alpha`
+   (neuer Befehl `segment_photo_sky`, kein Modell-Download).
+   Bewusst **kein** Austausch: Kontrast, Sättigung, Abdunklung und
+   Wärme nur innerhalb der Himmelsmaske. Der bestehende
+   Himmelsaustausch bleibt für den Fall, dass der Himmel wirklich weg
+   soll.
+8. **Bewegungsunschärfe** — gerichtet, radial (Drehung) und Zoom, je
+   als echte Liniensammlung entlang der jeweiligen Bahn. Optional
+   schützt die Motivmaske das Motiv, sodass ein „Mitzieher" entsteht,
+   statt das ganze Bild zu verwischen.
+9. **Blendenstern** — Lichtschleppen auf Spitzlichtern, `n` Strahlen,
+   Winkel, Länge, Schwelle, plus optionaler Regenbogen-Anteil über die
+   Strahllänge (Beugung an den Blendenlamellen).
+10. **Diffusionsfilter** — der „Pro Mist"-Effekt: Weichzeichnung, die
+    **nur aus den Lichtern** gespeist wird und über
+    `black_retention` verhindert, dass die Schwarzwerte milchig
+    werden. Genau dieser zweite Teil unterscheidet ihn vom
+    Orton-Glanz aus Phase 27, der global aufhellt.
+11. **Kanalmatrix** — freie 3×3-Matrix mit vier Ein-Klick-Vorgaben
+    (neutral, Falschfarben-Infrarot, Rot/Blau-Tausch, Cyanotypie).
+12. **Poster-/Comic-Look** — Quantisierung auf `n` Stufen plus
+    Konturzeichnung aus dem Sobel-Betrag.
+
+### Bokeh-Formen statt eines dreizehnten Werkzeugs
+
+Ein eigenes „Bokeh"-Werkzeug hätte ein zweites Mal weichgezeichnet, was
+die Virtuelle Blende schon weichzeichnet — doppelte Rechenzeit für ein
+schlechteres Ergebnis. Stattdessen ist die **bestehende** Stufe
+`stages::virtual_aperture` erweitert worden: polygonale Blendenöffnung
+(`blades`, `rotation`), anamorphe Streckung, Wirbel (`swirl`) und
+Spitzlicht-Anhebung (`highlight_boost`/`highlight_threshold`). Ohne
+gesetzte Werte bleibt der bisherige Kreis-Kern Bit-für-Bit erhalten —
+ein Test hält das fest, damit bestehende Bearbeitungen sich nicht
+stillschweigend ändern.
+
+### Drei neue .cube-Vorlagen
+
+„Nordic Winter", „Tokyo Neon Night" und „Sahara Gold" — dasselbe
+Verfahren wie bei Retro Fuji Thailand (33er Raster, aus derselben Formel
+erzeugt wie der eingebaute Filter, ein Test vergleicht Datei und Formel
+Rasterpunkt für Rasterpunkt). Eigene Namen statt Filmmarken, eigene
+Formeln, kein fremdes Werk enthalten.
+
+### UI: Suchen statt Scrollen
+
+Mit Phase 28 stehen 22 Kachel-Werkzeuge in zwei Panels. Ohne Hilfe wäre
+das genau die Scroll-Wüste, die Phase 18 abgeschafft hat. Deshalb
+bekommen **beide** Panels (Kreativ und Licht & Optik) denselben Kopf:
+ein Suchfeld über Titel und Wirkung, ein „Nur aktive"-Schalter und je
+Kachel einen Zurücksetzen-Knopf, der erst bei Hover/Fokus erscheint.
+Neue sechste Registerkarte „Licht & Optik" im Entwickeln-Panel — die
+zwölf in die bestehende „Licht"-Karte zu stopfen hätte sie verdoppelt.
+
+### Bewusst nicht gemacht
+
+Wie `creative` ist auch `light_optics` **keine** Preset-Sektion: vier
+der zwölf tragen fotospezifisch berechnete Karten (Tiefe, Himmel,
+Motiv). Derselbe offene Nachtrag wie in ADR-0057 — erst wenn beim
+Speichern eines Presets die Karten gezielt herausgeschnitten werden,
+können die übrigen acht preset-fähig werden.

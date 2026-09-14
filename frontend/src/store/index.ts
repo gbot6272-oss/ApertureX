@@ -1959,6 +1959,13 @@ interface LibraryViewsSlice {
   compareViewPhotoIds: string[];
   openCompareView: (photoIds: string[]) => void;
   closeCompareView: () => void;
+  /** Nimmt ein Foto aus dem laufenden Vergleich (Phase 31 Schritt 8).
+   *
+   * Aussortieren heisst nicht loeschen: das Foto bleibt im Katalog und
+   * behaelt seine Bewertung/Markierung, es verschwindet nur aus DIESEM
+   * Vergleich. Genau so arbeitet man sich auf den einen Behalter
+   * herunter. */
+  dropFromCompareView: (photoId: string) => void;
   /** Ein einziger gemeinsamer Zoom-Faktor für alle Kacheln der
    * Vergleichsansicht (Phase 9 Schritt 7, „synchronisierter Zoom" —
    * siehe `CompareGridView.tsx`s Moduldoku für die bewusste
@@ -7479,6 +7486,12 @@ export const useAppStore = create<AppStore>()(
     openCompareView: (photoIds) => {
       set((state) => {
         state.compareViewPhotoIds = photoIds.slice(0, 9);
+      });
+    },
+
+    dropFromCompareView: (photoId) => {
+      set((state) => {
+        state.compareViewPhotoIds = state.compareViewPhotoIds.filter((id) => id !== photoId);
       });
     },
 

@@ -148,8 +148,7 @@ fn process_pixel(
     let midtone_weight = 4.0 * luminance * (1.0 - luminance);
     let bias = (params.grain_midtone_bias / 100.0).clamp(0.0, 1.0);
     let grain_weight = 1.0 + bias * (midtone_weight - 1.0);
-    let grain_delta =
-        shaped_noise * (params.grain_amount / 100.0) * GRAIN_STRENGTH * grain_weight;
+    let grain_delta = shaped_noise * (params.grain_amount / 100.0) * GRAIN_STRENGTH * grain_weight;
 
     let total_delta = vignette_delta + grain_delta;
     (
@@ -774,7 +773,10 @@ mod tests {
         let midtone = grain_strength_at(0.5, 100.0);
         let highlight = grain_strength_at(0.98, 100.0);
 
-        assert!(midtone > shadow * 5.0, "Mittelton {midtone}, Schatten {shadow}");
+        assert!(
+            midtone > shadow * 5.0,
+            "Mittelton {midtone}, Schatten {shadow}"
+        );
         assert!(
             midtone > highlight * 5.0,
             "Mittelton {midtone}, Lichter {highlight}"

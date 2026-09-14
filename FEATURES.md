@@ -397,6 +397,22 @@ rendert, statt eines persistenten Projekt-Katalogobjekts.
 - [x] Video-Stabilisierung — Phase 17 Schritt 9 — Status: Fertig — misst die Kamerabahn mit derselben merkmalsbasierten Suche wie das Panorama-Stitching, glättet sie und rechnet je Einzelbild zurück; zwei Durchgänge (ohne die Zukunft der Bahn lässt sie sich nicht glätten), vier statt acht Freiheitsgrade gegen den „Wackelpudding", Korrekturen auf den Zuschnitt-Rand geklemmt statt gehofft. Regler „Glättung" und „Zuschnitt" im Video-Modul. Braucht **kein** KI-Modell. Performance auf langen/hochauflösenden Videos ungemessen (kein Testclip in dieser Sandbox verfügbar, dieselbe Grenze wie bei Schritt 8)
 
 
+## Werkstatt-Politur und neue Werkzeuge (Phase 31)
+
+Grundlage ist ein realer Screenshot des Entwickeln-Modus, nicht eine
+Vermutung — siehe `DECISIONS.md` ADR-0064.
+
+- [x] Analyse dockt neben dem Foto an — Phase 31 Schritt 1 — Status: Fertig — vorher lag sie beim Öffnen immer ÜBER dem Bild; jetzt eine eigene Palette mit Breite-Ziehen/Einklappen, „Lösen" stellt die schwebende Fassung wieder her. Ab 1500 px Fensterbreite, darunter schwebend (sonst drückt die Spalte den Viewer auf null Breite)
+- [x] Ein Regler, eine Zeile — Phase 31 Schritt 2 — Status: Fertig — 42 px → 22 px je Regler, über alle ~40 auf einmal; dazu Mausrad-Bedienung (Umschalt = Grobschritt), die es vorher gar nicht gab
+- [x] Symbole statt reiner Textknöpfe — Phase 31 Schritt 3 — Status: Fertig — Kopfzeile, Masken-Panel, Zoom-Steuerung; „100 %" bleibt Text, weil es ein Wert und kein Vorgang ist
+- [x] Fokus-Peaking — Phase 31 Schritt 4 — Status: Fertig — markiert farbig, welche Kanten wirklich scharf sind, mit Abdeckungsanzeige in Prozent; Sobel statt Laplace (rauschfester, wie in Kamera-/Videomonitoren). Sichthilfe, keine Bildveränderung — landet bewusst NICHT im EDL
+- [x] Farbpalette aus dem Foto — Phase 31 Schritt 5 — Status: Fertig — dominante Farben per k-Means im Gegenfarbenraum, ein Klick setzt den Weißabgleich. Hilft dort, wo die Pipette versagt: bei einer Fläche, die zu klein zum Treffen ist
+- [x] Vorher/Nachher-Kante ziehbar — Phase 31 Schritt 6 — Status: Fertig — der geteilte Modus existierte seit Phase 9, die Kante saß aber fest bei 50 %; jetzt ziehbar und per Tastatur bedienbar, auf 2…98 % geklemmt
+- [x] Horizont ausrichten mit einem Klick — Phase 31 Schritt 7 — Status: Fertig (vorhandene Funktion erreichbar gemacht) — die Erkennung (Canny + Hough) gibt es seit Phase 13 Schritt 4; sie lag als Klapplisten-Eintrag tief in den Objektivkorrekturen. Jetzt ein Befehl unter dem Namen, unter dem man sucht
+- [x] Vergleichsansicht per Tastatur sichten — Phase 31 Schritt 8 — Status: Fertig — die Ansicht gibt es seit Phase 9, sie konnte aber nichts mit der Tastatur. Pfeiltasten wählen, P behält, X lehnt ab, 0–5 bewerten, Entf nimmt das Foto aus dem Vergleich (kein Löschen)
+- [x] Filmkorn folgt den Mitteltönen — Phase 31 Schritt 9 — Status: Fertig — das Korn war gleichmäßig über den ganzen Tonwertumfang und sah dadurch nach digitalem Rauschen aus; neues Feld `grain_midtone_bias` gewichtet nach der Filmdichtekurve. Neutralwert 0 ist bit-genau das bisherige Verhalten
+
+
 ## Technische Grundlage (Phase 1, keine Endnutzer-Features)
 
 - [x] Rust-Workspace mit Crate-Grenzen (`apx-core`, `apx-raw`, `apx-catalog`, `apx-app`) — Phase 1 — Status: Fertig

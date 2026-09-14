@@ -7067,3 +7067,113 @@ Außer den vier LGPL-Crates (`rawler`, `lensfun`, `gphoto2`,
 `libgphoto2_sys`) und `gsap` trägt keine der 1.122 Abhängigkeiten eine
 Auflage, die über Namensnennung hinausgeht. Kein GPL ohne „L"
 irgendwo im Baum — weder als Pflicht noch als Wahlmöglichkeit.
+
+---
+
+## ADR-0064: Phase 31 — Layout, Regler, und wie oft „fehlt" in Wahrheit „findet niemand"
+
+**Status:** angenommen (Phase 31)
+
+### Kontext
+
+Nutzerurteil: „besseres Design, mehr Funktionen". Statt zu raten, wurde
+die App zuerst wirklich angesehen — Playwright-Screenshot des
+Entwickeln-Modus bei 1680×1000.
+
+### Was der Blick zeigte
+
+1. **Fünf Spalten, und das Foto ist die schmalste.** Ordner, Presets,
+   Bild, Entwickeln, Masken teilen sich die Breite; auf das Foto
+   entfielen rund 370 px.
+2. **Das Analyse-Panel lag ÜBER dem Foto.** Verschieben und Einklappen
+   gab es seit Phase 18 — aber der Zustand beim Öffnen war „Panel
+   verdeckt das Bild".
+3. **Der KI-Preset-Generator füllte die Preset-Palette** mit acht
+   Bedienelementen, direkt unter dem Satz „Keine Presets in diesem
+   Ordner". Das Seltene nahm den Platz, das Wichtige stand als
+   Leermeldung darüber.
+4. **Regler brauchten zwei Zeilen à 42 px.** Bei rund vierzig Reglern
+   ist das der Grund, warum man schon für die Grundeinstellungen
+   scrollen muss.
+
+### Entscheidungen
+
+**1. Die Analyse dockt an, statt zu schweben** — als `PaletteFrame`, mit
+Breite-Ziehen, Einklappen und Persistenz wie jede andere Palette. Der
+Viewer misst sich an seinem eigenen `<main>`, deshalb steht die Analyse
+als Geschwister daneben: die Restbreite ist dann automatisch die, mit
+der das Bild rechnet, ohne eine Zeile Einpass-Mathematik anzufassen.
+
+**2. Ein Regler, eine Zeile.** Beschriftung | Regler | Zahl
+nebeneinander, rund 22 px. Am Screenshot nachgemessen: die dreizehn
+Regler von Weißabgleich und Grundeinstellungen brauchen 312 px statt
+546 px — der Kurven-Editor ist dadurch ohne Scrollen sichtbar. Die
+Beschriftung wird abgeschnitten statt umzubrechen; ein Umbruch machte
+die Zeile wieder hoch und die Änderung damit zunichte.
+
+**3. Sichthilfen gehören nicht ins EDL.** Fokus-Peaking und Farbpalette
+rechnen im Frontend auf dem fertig entwickelten Vorschaubild, nach dem
+Muster des Clipping-Overlays. Im EDL würden sie exportiert und in
+Presets weitergereicht — beides will niemand.
+
+**4. Erweiterungen am Bild sind rückwärtskompatibel zu BELEGEN, nicht zu
+behaupten.** Das mitteltonbetonte Korn kam als neues Feld mit
+Neutralwert 0 dazu, und ein Test vergleicht das Ergebnis bit-genau gegen
+die von Hand nachgebaute alte Formel — dieselbe Disziplin wie bei der
+Bokeh-Erweiterung in Phase 28.
+
+### Der Befund, der die Phase am meisten geprägt hat
+
+**Zweimal von zehn Schritten war die geplante Funktion bereits da.**
+
+- *Auto-Horizont*: `apx_ai::upright` macht seit Phase 13 Schritt 4 genau
+  das (Canny + Hough), samt Tauri-Command und Tests. Es lag als Eintrag
+  „Level" in einer Klappliste „Perspektive/Upright" im
+  Objektivkorrekturen-Feldsatz unter der Registerkarte „Details", plus
+  ein zweiter Klick auf „Automatisch erkennen".
+- *Vergleichsmodus*: existiert seit Phase 9 mit neun Fotos und
+  gemeinsamem Zoom. Was fehlte, war der Sichtungs-Ablauf — die Ansicht
+  konnte gar nichts mit der Tastatur.
+
+In beiden Fällen wurde **nicht neu gebaut**, sondern das Vorhandene
+erreichbar gemacht: ein Kommando-Register-Eintrag unter dem
+gebräuchlichen Namen, bzw. Tastaturbedienung und „aus dem Vergleich
+nehmen". Das ist die eigentliche Lehre dieser Phase: bei einer App
+dieser Größe ist „fehlt" oft „findet niemand", und der Unterschied
+zeigt sich nur, wenn man vor dem Bauen nachsieht.
+
+### Drei eigene Fehler, die nur durch reales Hinsehen auffielen
+
+**1. Wechselnder Wurzelknoten.** Der erste Entwurf der Andockung gab
+`viewerMain` direkt zurück, solange keine Analyse gebraucht wurde — und
+wechselte damit den Wurzelknoten zwischen `<main>` und `<div>`, sobald
+das Entwickeln-Bild eintraf. React reconciliert nach Position UND
+Elementtyp: der ganze Viewer samt Canvas wurde neu eingehängt, der
+ResizeObserver begann wieder bei 0×0, „Einpassen" fiel auf 100 % statt
+10 % — **das Bild war weg**. Kompiliert hat das einwandfrei.
+
+**2. Die neue Spalte drückte den Viewer auf null Breite.** In einem
+1280-px-Fenster sind alle Paletten `shrink-0`, der Viewer ist das
+einzige Element, das nachgibt. Deshalb jetzt eine Mindestbreite und eine
+Untergrenze fürs Andocken (ab 1500 px Fensterbreite).
+
+**3. Ein Listener, der sich selbst abhängte.** Die Tastaturbedienung der
+Vergleichsansicht hatte `[photos, cursor, …]` in der
+Abhängigkeitsliste; `photos` ist bei jedem Rendern ein neues Array. Bei
+den **Pfeiltasten** ändert der App-weite Handler die Auswahl, React
+rendert synchron neu — und der Listener wurde mitten in der laufenden
+Ereignis-Auslieferung entfernt und neu gehängt. Das DOM ruft einen so
+entfernten Listener nicht mehr auf. Ergebnis: Pfeiltasten taten nichts,
+`Entf` (löst kein Neurendern aus) funktionierte einwandfrei. Diese
+Teil-Funktion ist das Tückische — ein Test mit `Entf` allein wäre grün
+gewesen. Gefunden durch gezieltes Messen im Browser (welche Taste
+erreicht den Handler überhaupt?), nicht durch Raten.
+
+### Bekannte Grenze
+
+Auch nach Schritt 1 bleiben es fünf Spalten. Die strukturell richtige
+Antwort wäre, im Entwickeln-Modus Ordner- und Preset-Palette zu EINER
+linken Spalte zusammenzulegen, wie Lightroom es tut. Das ist ein eigener
+Umbau und wurde hier bewusst nicht nebenbei mitgemacht; die Paletten
+sind einzeln einklappbar, und der Fokus-Modus (Phase 26) blendet sie
+gesammelt aus.

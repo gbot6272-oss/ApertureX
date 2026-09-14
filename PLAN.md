@@ -1709,3 +1709,37 @@ Ellipse), die die Umrechnung Bild ↔ Bildschirm genau einmal kennt.
   Overlay-Mathematik, neuer e2e-Test, `cargo fmt`/`clippy`/`test
   --workspace`, `tsc -b`, `vitest run`, volle Playwright-Suite mit real
   geprüftem Exit-Code, dann Push.
+
+
+## Aktuelle Phase: Phase 31 — „Dem Foto gehört der Platz" + neue Werkzeuge
+
+Nutzerwunsch: besseres Design, mehr Funktionen, zehn Schritte. Grundlage
+ist KEINE Vermutung, sondern ein realer Playwright-Screenshot des
+Entwickeln-Modus — Befunde und Entscheidungen in `DECISIONS.md`
+ADR-0064.
+
+- [x] 1. **Layout**: Die Analyse dockt als eigene Palette neben dem Foto
+  an, statt darüber zu schweben; der KI-Preset-Generator liegt hinter
+  einer Klappe; der Viewer bekommt eine Mindestbreite.
+- [x] 2. **Ein Regler, eine Zeile** (42 px → 22 px über alle ~40 Regler)
+  plus Mausrad-Bedienung, die es vorher gar nicht gab.
+- [x] 3. **Symbole** in Kopfzeile, Masken-Panel und Zoom-Steuerung;
+  Maskengruppe bekommt eine Überschrift statt eines „+" je Knopf, und
+  die Hinzufügen-Knöpfe ein eindeutiges `aria-label`.
+- [x] 4. **Fokus-Peaking** — Sobel statt Laplace (rauschfester), mit
+  Rückmeldung, wie viel gerade markiert ist. Keine Pipeline-Stufe: es
+  verändert das Foto nicht.
+- [x] 5. **Farbpalette aus dem Foto** — k-Means im Opponent-Raum mit
+  festen Startpunkten, ein Klick setzt den Weißabgleich.
+- [x] 6. **Vorher/Nachher-Kante ziehbar** — sie saß fest bei 50 % und
+  trug `pointer-events-none`.
+- [x] 7. **Auto-Horizont**: war schon da (Phase 13 Schritt 4) und nur
+  unauffindbar. Kein zweiter Erkenner, sondern ein Ein-Klick-Befehl
+  unter dem gebräuchlichen Namen.
+- [x] 8. **Vergleichsansicht sichten**: war schon da (Phase 9), konnte
+  aber nichts mit der Tastatur. Jetzt Pfeiltasten/P/X/0-5 und „aus dem
+  Vergleich nehmen" (kein Löschen).
+- [x] 9. **Korn folgt den Mitteltönen** — neues Feld, Neutralwert 0,
+  bit-genau als rückwärtskompatibel belegt; CPU und WGSL gleichgezogen.
+- [x] 10. Dokumentation (ADR-0064, FEATURES.md), volle Verifikation,
+  Abnahme.

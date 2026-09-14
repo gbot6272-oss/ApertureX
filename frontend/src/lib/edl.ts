@@ -522,6 +522,9 @@ export interface EffectsAdjustment {
   grain_amount: number;
   grain_size: number;
   grain_roughness: number;
+  /** Wie stark das Korn den Mitteltönen folgt (Phase 31 Schritt 9).
+   * `0` = gleichmäßig wie bisher, `100` = volle Filmkurve. */
+  grain_midtone_bias: number;
   /** Echte Halation-/Bloom-Simulation (Phase 14 Schritt 4, siehe
    * `DECISIONS.md` ADR-0041) — Lightroom Classic "cannot create true
    * film halation, only a soft bloom approximation". `0..=100`. */
@@ -543,6 +546,7 @@ export const NEUTRAL_EFFECTS: EffectsAdjustment = {
   grain_amount: 0,
   grain_size: 25,
   grain_roughness: 50,
+  grain_midtone_bias: 0,
   halation_amount: 0,
   halation_radius: 30,
   halation_hue: 15,
@@ -560,6 +564,7 @@ export const GRAIN_SLIDER_SPECS: readonly SliderSpec[] = [
   { key: "grain_amount", label: "Körnung: Betrag", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
   { key: "grain_size", label: "Körnung: Größe", min: 1, max: 100, fineStep: 1, coarseStep: 10, neutral: 25 },
   { key: "grain_roughness", label: "Körnung: Unregelmäßigkeit", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 50 },
+  { key: "grain_midtone_bias", label: "Körnung: Mitteltöne", min: 0, max: 100, fineStep: 1, coarseStep: 10, neutral: 0 },
 ];
 
 /** Lightroom Classic "cannot create true film halation, only a soft

@@ -77,6 +77,47 @@ test.describe("Entwickeln-Analysewerkzeuge (Phase 9 Schritt 4)", () => {
   });
 
   /**
+   * Phase 32 F2: Ziehen im Histogramm. Die Zonenaufteilung selbst ist
+   * in `lib/histogramZones.test.ts` abgedeckt (zehn Fälle); hier läuft
+   * die ganze Kette — Zeigerbewegung, Zone treffen, Regler ändern, und
+   * beim Loslassen im gespeicherten EDL landen.
+   *
+   * Gezogen wird in der Bildmitte, also in der Belichtungs-Zone.
+   */
+  test("Ziehen im Histogramm ändert die Belichtung und speichert sie", async ({ page }) => {
+    await installTauriMock(page, { folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }], photosByFolder: { [FOLDER_ID]: [PHOTO] } });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Urlaub/ }).click();
+    await page.getByRole("img", { name: PHOTO.filename }).click();
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    const zones = page.getByTestId("histogram-zones");
+    await expect(zones).toBeVisible();
+
+    // Überfahren zeigt, welche Zone unter dem Zeiger liegt.
+    const box = await zones.boundingBox();
+    if (!box) throw new Error("Histogramm nicht gefunden");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await expect(page.getByTestId("histogram-zone-label")).toContainText("Belichtung");
+
+    // Nach rechts ziehen hellt auf — dieselbe Richtung wie bei jedem
+    // Regler der App.
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2, { steps: 5 });
+    await page.mouse.up();
+
+    await expect
+      .poll(async () => {
+        const log = await getMockInvokeLog(page);
+        const commits = log.filter((entry) => entry.cmd === "apply_develop_edit");
+        if (commits.length === 0) return 0;
+        const args = commits[commits.length - 1]!.args as { edlJson: string };
+        return (JSON.parse(args.edlJson).payload as { basic?: { exposure_ev?: number } }).basic?.exposure_ev ?? 0;
+      })
+      .toBeGreaterThan(0);
+  });
+
+  /**
    * Phase 31 Schritt 4: Fokus-Peaking. Die Kantenmathematik selbst ist
    * in `lib/focusPeaking.test.ts` abgedeckt (acht Fälle); hier läuft die
    * Kette davor — erscheint die Bedienung, entsteht die Überlagerung

@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { extractPalette } from "../lib/colorPalette";
+import {
+  dragDelta,
+  HISTOGRAM_ZONES,
+  zoneAt,
+  type HistogramZone,
+  type HistogramZoneField,
+} from "../lib/histogramZones";
 import { PEAKING_COLORS, type PeakingColor } from "../lib/focusPeaking";
 
 import type { DevelopFrame } from "../hooks/useDevelopRender";
@@ -20,6 +27,14 @@ interface Viewport {
  * im Viewer — dort entsteht auch die Überlagerung; dieses Panel ist nur
  * die Bedienfläche dafür, wie schon beim Clipping-Overlay. */
 /** Die aus dem Foto gezogene Farbpalette (Phase 31 Schritt 5). */
+/** Ziehen im Histogramm (Phase 32 F2). */
+export interface HistogramDragControls {
+  /** Zwischenstand beim Ziehen — noch nicht gespeichert. */
+  onAdjust: (field: HistogramZoneField, delta: number) => void;
+  /** Loslassen: jetzt dauerhaft speichern. */
+  onCommit: () => void;
+}
+
 export interface PaletteControls {
   /** Ein Klick auf ein Feld setzt den Weissabgleich auf diese Farbe —
    * dieselbe Wirkung wie die Pipette, nur ohne im Bild zielen zu
@@ -42,6 +57,7 @@ export interface PeakingControls {
 interface DevelopAnalysisPanelProps {
   peaking?: PeakingControls;
   palette?: PaletteControls;
+  histogramDrag?: HistogramDragControls;
   /** Angedockt (eigene Spalte neben dem Foto) statt schwebend darüber.
    *
    * Phase 31 Schritt 1: schwebend war die Vorgabe und damit der
@@ -93,8 +109,52 @@ function useCanvasDprWidth(canvasRef: React.RefObject<HTMLCanvasElement | null>)
   return state;
 }
 
-function HistogramCanvas({ histogram }: { histogram: Histogram }) {
+function HistogramCanvas({
+  histogram,
+  drag,
+}: {
+  histogram: Histogram;
+  drag?: HistogramDragControls;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Phase 32 F2: Das Histogramm war reine Anzeige. Im Ziehen liegt aber
+  // der schnellste Weg zu einer Tonwertkorrektur — man sieht, wo die
+  // Werte kleben, und schiebt genau dort, statt erst zu lesen und dann
+  // in der Reglerliste den passenden Namen zu suchen.
+  const [hoverZone, setHoverZone] = useState<HistogramZone | null>(null);
+  const dragState = useRef<{ zone: HistogramZone; lastX: number; width: number } | null>(null);
+
+  const fractionFromEvent = (event: React.PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return { fraction: (event.clientX - rect.left) / rect.width, width: rect.width };
+  };
+
+  useEffect(() => {
+    if (!drag) return;
+    function onMove(event: PointerEvent) {
+      const state = dragState.current;
+      if (!state) return;
+      event.preventDefault();
+      drag!.onAdjust(state.zone.field, dragDelta(state.zone, event.clientX - state.lastX, state.width));
+      state.lastX = event.clientX;
+    }
+    function onUp() {
+      if (!dragState.current) return;
+      dragState.current = null;
+      drag!.onCommit();
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    // Der Listener haengt genau einmal; `drag` ist je Panel-Instanz
+    // stabil. (Phase 31 F8 hat gezeigt, was passiert, wenn ein
+    // keydown-/pointer-Listener sich mitten in der Auslieferung selbst
+    // abhaengt — deshalb hier bewusst keine wechselnde Abhaengigkeit.)
+  }, [drag]);
+
   const { cssWidth, dpr } = useCanvasDprWidth(canvasRef);
   const cssHeight = 80;
 
@@ -133,7 +193,53 @@ function HistogramCanvas({ histogram }: { histogram: Histogram }) {
     ctx.globalCompositeOperation = "source-over";
   }, [histogram, cssWidth, dpr]);
 
-  return <canvas ref={canvasRef} className="w-full rounded" style={{ height: cssHeight }} aria-label="Histogramm" />;
+  if (!drag) {
+    return <canvas ref={canvasRef} className="w-full rounded" style={{ height: cssHeight }} aria-label="Histogramm" />;
+  }
+
+  return (
+    <div
+      className="pointer-events-auto relative cursor-ew-resize select-none"
+      data-testid="histogram-zones"
+      onPointerMove={(event) => {
+        if (dragState.current) return;
+        setHoverZone(zoneAt(fractionFromEvent(event).fraction));
+      }}
+      onPointerLeave={() => setHoverZone(null)}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        const { fraction, width } = fractionFromEvent(event);
+        const zone = zoneAt(fraction);
+        setHoverZone(zone);
+        dragState.current = { zone, lastX: event.clientX, width };
+      }}
+    >
+      <canvas ref={canvasRef} className="w-full rounded" style={{ height: cssHeight }} aria-label="Histogramm" />
+      {/* Die Zonen liegen ueber der Canvas statt darin: so bleibt die
+          Histogramm-Zeichnung unveraendert (und ihr dpr-Aufbau
+          unangetastet), und die Hervorhebung ist ein reines
+          CSS-Rechteck. */}
+      <div className="pointer-events-none absolute inset-0 flex">
+        {HISTOGRAM_ZONES.map((zone) => (
+          <div
+            key={zone.field}
+            style={{ width: `${(zone.end - zone.start) * 100}%` }}
+            className={`h-full border-r border-white/10 last:border-r-0 ${
+              hoverZone?.field === zone.field ? "bg-accent/20" : ""
+            }`}
+          />
+        ))}
+      </div>
+      {hoverZone ? (
+        <span
+          data-testid="histogram-zone-label"
+          className="pointer-events-none absolute left-1 top-1 rounded bg-bg-raised/90 px-1 text-[10px] text-text-secondary"
+        >
+          {hoverZone.label} — ziehen
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 /** Vektorskop-Canvas (Phase 14 Schritt 6, siehe `lib/vectorscope.ts`s
@@ -297,7 +403,7 @@ const ANALYSIS_TAB_LABELS: Record<AnalysisTab, string> = {
   waveform: "Wellenform",
 };
 
-export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnabled, onToggleClippingOverlay, viewport, thumbnailUrl, onAutoTone, docked = false, onToggleDocked, peaking, palette }: DevelopAnalysisPanelProps) {
+export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnabled, onToggleClippingOverlay, viewport, thumbnailUrl, onAutoTone, docked = false, onToggleDocked, peaking, palette, histogramDrag }: DevelopAnalysisPanelProps) {
   // Vor dem `if (!frame) return null;` unten, sonst verletzt der Hook die
   // Rules of Hooks (unterschiedliche Hook-Zahl je nach `frame`).
   const [analysisTab, setAnalysisTab] = useState<AnalysisTab>("histogram");
@@ -472,7 +578,7 @@ export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnab
                 </button>
               </div>
             </div>
-            {analysisTab === "histogram" && <HistogramCanvas histogram={histogram} />}
+            {analysisTab === "histogram" && <HistogramCanvas histogram={histogram} drag={histogramDrag} />}
             {analysisTab === "vectorscope" && vectorscope && <VectorscopeCanvas vectorscope={vectorscope} />}
             {analysisTab === "waveform" && waveform && <WaveformCanvas waveform={waveform} />}
             {analysisTab === "histogram" && (

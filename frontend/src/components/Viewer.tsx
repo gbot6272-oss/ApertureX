@@ -216,6 +216,7 @@ export function Viewer() {
   const removeMaskBrushStroke = useAppStore((s) => s.removeMaskBrushStroke);
   const removeRepairStroke = useAppStore((s) => s.removeRepairStroke);
   const commitDevelopEdit = useAppStore((s) => s.commitDevelopEdit);
+  const setBasicField = useAppStore((s) => s.setBasicField);
   const ensureLutFilterTableRegistered = useAppStore(
     (s) => s.ensureLutFilterTableRegistered,
   );
@@ -1287,6 +1288,17 @@ export function Viewer() {
         clippingOverlayEnabled={clippingOverlayEnabled}
         onToggleClippingOverlay={() => setClippingOverlayEnabled((v) => !v)}
         palette={{ onPick: pickWhiteBalanceAt }}
+        histogramDrag={{
+          // Der Zwischenstand geht direkt an denselben Regler-Setter,
+          // den auch das Entwickeln-Panel benutzt — das Histogramm ist
+          // also ein zweiter Eingabeweg auf dieselben Felder, kein
+          // zweiter Speicherort. Geklemmt wird in `setBasicField`.
+          onAdjust: (field, delta) => {
+            const current = (developEdl.basic as unknown as Record<string, number>)[field] ?? 0;
+            setBasicField(field, current + delta);
+          },
+          onCommit: () => void commitDevelopEdit(),
+        }}
         peaking={{
           enabled: peakingEnabled,
           threshold: peakingThreshold,

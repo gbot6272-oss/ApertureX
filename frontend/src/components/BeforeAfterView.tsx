@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { buildEdlEnvelopeJson, neutralEdlPayload } from "../lib/edl";
 import { useDevelopPreviewThumbnail, type DevelopFrame } from "../hooks/useDevelopRender";
@@ -85,26 +85,120 @@ export function BeforeAfterView({ photoId, afterEdlJson, maxEdge }: BeforeAfterV
     );
   }
 
-  // "splitVertical"/"splitHorizontal": eine gemeinsame Fläche, je zur
-  // Hälfte per clip-path sichtbar.
-  const isVerticalSplit = mode === "splitVertical";
+  // "splitVertical"/"splitHorizontal": eine gemeinsame Fläche, per
+  // clip-path geteilt — die Kante ist seit Phase 31 Schritt 6 ZIEHBAR.
+  //
+  // Vorher sass sie fest bei 50 % und trug sogar `pointer-events-none`.
+  // Das machte den Modus für den häufigsten Fall unbrauchbar: man will
+  // die Kante über die Stelle schieben, an der man gerade etwas geändert
+  // hat, und die liegt selten genau in der Bildmitte.
+  return (
+    <SplitCompare beforeFrame={beforeFrame} afterFrame={afterFrame} vertical={mode === "splitVertical"} />
+  );
+}
+
+/** Die ziehbare Vorher/Nachher-Kante. */
+function SplitCompare({
+  beforeFrame,
+  afterFrame,
+  vertical,
+}: {
+  // Wie bei den übrigen Zweigen dieser Datei dürfen beide Rahmen noch
+  // fehlen (Vorschau lädt); `FrameCanvas` zeichnet dann nichts.
+  beforeFrame: DevelopFrame | null;
+  afterFrame: DevelopFrame | null;
+  vertical: boolean;
+}) {
+  const [position, setPosition] = useState(50);
+  const areaRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+
+  const moveTo = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = areaRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0 || rect.height === 0) return;
+      const raw = vertical
+        ? ((clientX - rect.left) / rect.width) * 100
+        : ((clientY - rect.top) / rect.height) * 100;
+      // Auf 2…98 statt 0…100 geklemmt: eine Kante ganz am Rand sieht aus
+      // wie ein Fehler ("eine Hälfte fehlt") und lässt sich zudem kaum
+      // wieder zurückgreifen.
+      setPosition(Math.max(2, Math.min(98, raw)));
+    },
+    [vertical],
+  );
+
+  useEffect(() => {
+    function onMove(event: MouseEvent) {
+      if (!draggingRef.current) return;
+      event.preventDefault();
+      moveTo(event.clientX, event.clientY);
+    }
+    function onUp() {
+      draggingRef.current = false;
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [moveTo]);
+
+  function onKeyDown(event: React.KeyboardEvent) {
+    const back = vertical ? "ArrowLeft" : "ArrowUp";
+    const forward = vertical ? "ArrowRight" : "ArrowDown";
+    if (event.key !== back && event.key !== forward) return;
+    event.preventDefault();
+    const step = event.shiftKey ? 10 : 2;
+    setPosition((previous) =>
+      Math.max(2, Math.min(98, previous + (event.key === forward ? step : -step))),
+    );
+  }
+
   return (
     <div className="absolute inset-0 flex items-center justify-center overflow-hidden bg-bg-base" aria-label="Vorher/Nachher">
-      <div className="relative h-full w-full">
+      <div ref={areaRef} className="relative h-full w-full">
         <FrameCanvas
           frame={beforeFrame}
           className={`absolute inset-0 ${CANVAS_CLASS}`}
-          style={{ clipPath: isVerticalSplit ? "inset(0 50% 0 0)" : "inset(0 0 50% 0)" }}
+          style={{ clipPath: vertical ? `inset(0 ${100 - position}% 0 0)` : `inset(0 0 ${100 - position}% 0)` }}
         />
         <FrameCanvas
           frame={afterFrame}
           className={`absolute inset-0 ${CANVAS_CLASS}`}
-          style={{ clipPath: isVerticalSplit ? "inset(0 0 0 50%)" : "inset(50% 0 0 0)" }}
+          style={{ clipPath: vertical ? `inset(0 0 0 ${position}%)` : `inset(${position}% 0 0 0)` }}
         />
+        {/* Der Griff ist bewusst breiter als die sichtbare Linie: eine
+            1px-Trefferfläche wäre mit der Maus kaum zu fassen. Die Linie
+            selbst bleibt 1px, damit sie das Bild nicht zerschneidet. */}
         <div
-          className="pointer-events-none absolute bg-accent"
-          style={isVerticalSplit ? { left: "50%", top: 0, bottom: 0, width: 1 } : { top: "50%", left: 0, right: 0, height: 1 }}
-        />
+          role="slider"
+          tabIndex={0}
+          // Bewusst NICHT mit "Vorher/Nachher" beginnend: `getByLabel` sucht
+          // per Teilzeichenkette, und die umgebende Fläche trägt genau
+          // dieses Label — ein Präfix hier machte jede Suche nach der Fläche
+          // mehrdeutig (real im Testlauf aufgeschlagen).
+          aria-label={vertical ? "Trennkante waagerecht verschieben" : "Trennkante senkrecht verschieben"}
+          aria-orientation={vertical ? "horizontal" : "vertical"}
+          aria-valuemin={2}
+          aria-valuemax={98}
+          aria-valuenow={Math.round(position)}
+          data-testid="before-after-handle"
+          onMouseDown={(event) => {
+            if (event.button !== 0) return;
+            draggingRef.current = true;
+            moveTo(event.clientX, event.clientY);
+          }}
+          onKeyDown={onKeyDown}
+          className={`absolute flex items-center justify-center ${
+            vertical ? "top-0 bottom-0 w-6 cursor-col-resize" : "left-0 right-0 h-6 cursor-row-resize"
+          }`}
+          style={vertical ? { left: `calc(${position}% - 0.75rem)` } : { top: `calc(${position}% - 0.75rem)` }}
+        >
+          <div className={`bg-accent ${vertical ? "h-full w-px" : "h-px w-full"}`} />
+          <div className="absolute size-4 rounded-full border border-accent bg-bg-raised" />
+        </div>
         <span className="pointer-events-none absolute left-2 top-2 rounded bg-bg-raised/80 px-1.5 py-0.5 text-xs text-text-secondary">Vorher</span>
         <span className="pointer-events-none absolute right-2 bottom-2 rounded bg-bg-raised/80 px-1.5 py-0.5 text-xs text-text-secondary">Nachher</span>
       </div>

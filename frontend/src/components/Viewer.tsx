@@ -1264,6 +1264,7 @@ export function Viewer() {
         pointerSample={pointerSample}
         clippingOverlayEnabled={clippingOverlayEnabled}
         onToggleClippingOverlay={() => setClippingOverlayEnabled((v) => !v)}
+        palette={{ onPick: pickWhiteBalanceAt }}
         peaking={{
           enabled: peakingEnabled,
           threshold: peakingThreshold,

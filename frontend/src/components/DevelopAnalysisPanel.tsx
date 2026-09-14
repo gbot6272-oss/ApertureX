@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { extractPalette } from "../lib/colorPalette";
 import { PEAKING_COLORS, type PeakingColor } from "../lib/focusPeaking";
 
 import type { DevelopFrame } from "../hooks/useDevelopRender";
@@ -18,6 +19,14 @@ interface Viewport {
 /** Bedienung des Fokus-Peakings (Phase 31 Schritt 4). Der Zustand liegt
  * im Viewer — dort entsteht auch die Überlagerung; dieses Panel ist nur
  * die Bedienfläche dafür, wie schon beim Clipping-Overlay. */
+/** Die aus dem Foto gezogene Farbpalette (Phase 31 Schritt 5). */
+export interface PaletteControls {
+  /** Ein Klick auf ein Feld setzt den Weissabgleich auf diese Farbe —
+   * dieselbe Wirkung wie die Pipette, nur ohne im Bild zielen zu
+   * müssen. */
+  onPick: (r: number, g: number, b: number) => void;
+}
+
 export interface PeakingControls {
   enabled: boolean;
   threshold: number;
@@ -32,6 +41,7 @@ export interface PeakingControls {
 
 interface DevelopAnalysisPanelProps {
   peaking?: PeakingControls;
+  palette?: PaletteControls;
   /** Angedockt (eigene Spalte neben dem Foto) statt schwebend darüber.
    *
    * Phase 31 Schritt 1: schwebend war die Vorgabe und damit der
@@ -287,7 +297,7 @@ const ANALYSIS_TAB_LABELS: Record<AnalysisTab, string> = {
   waveform: "Wellenform",
 };
 
-export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnabled, onToggleClippingOverlay, viewport, thumbnailUrl, onAutoTone, docked = false, onToggleDocked, peaking }: DevelopAnalysisPanelProps) {
+export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnabled, onToggleClippingOverlay, viewport, thumbnailUrl, onAutoTone, docked = false, onToggleDocked, peaking, palette }: DevelopAnalysisPanelProps) {
   // Vor dem `if (!frame) return null;` unten, sonst verletzt der Hook die
   // Rules of Hooks (unterschiedliche Hook-Zahl je nach `frame`).
   const [analysisTab, setAnalysisTab] = useState<AnalysisTab>("histogram");
@@ -345,6 +355,14 @@ export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnab
   // Bildschleife je Kanal statt nur ein 256er-Array-Update) — nur die
   // gerade sichtbare Analyse berechnen, nicht alle drei bei jedem Render.
   const vectorscope: Vectorscope | null = analysisTab === "vectorscope" ? computeVectorscope(frame.pixels, frame.width, frame.height) : null;
+  // Die Palette hängt nur am Bild, nicht an der Reiterwahl — `useMemo`
+  // verhindert, dass k-Means bei jedem Zeigerzucken neu läuft (der
+  // Punktfarbmesser löst sehr häufige Neurenderings aus).
+  const swatches = useMemo(
+    () => (palette && frame ? extractPalette(frame.pixels, frame.width, frame.height) : []),
+    [palette, frame],
+  );
+
   const waveform: Waveform | null = analysisTab === "waveform" ? computeWaveform(frame.pixels, frame.width, frame.height) : null;
 
   // `pointer-events-none` auf dem Container, `pointer-events-auto` nur auf
@@ -553,6 +571,29 @@ export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnab
               </div>
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {/* Farbpalette aus dem Foto (Phase 31 Schritt 5) — ein Klick setzt
+          den Weissabgleich auf diese Farbe, ohne dass man im Bild
+          zielen muss. Besonders nützlich für eine Fläche, die zu klein
+          zum Treffen ist. */}
+      {palette && swatches.length > 0 ? (
+        <div className="flex flex-col gap-1 border-t border-border pt-2">
+          <span className="font-semibold text-text-secondary">Farben im Bild</span>
+          <div className="pointer-events-auto flex gap-1" data-testid="photo-palette">
+            {swatches.map((swatch) => (
+              <button
+                key={swatch.hex}
+                type="button"
+                onClick={() => palette.onPick(swatch.r, swatch.g, swatch.b)}
+                title={`${swatch.hex} · ${(swatch.share * 100).toFixed(0)} % des Bildes — als Weissabgleich übernehmen`}
+                aria-label={`Farbe ${swatch.hex} als Weissabgleich übernehmen`}
+                className="h-6 min-w-0 flex-1 rounded border border-border transition-transform duration-[var(--duration-fast)] hover:scale-110 hover:border-accent"
+                style={{ backgroundColor: swatch.hex }}
+              />
+            ))}
+          </div>
         </div>
       ) : null}
     </div>

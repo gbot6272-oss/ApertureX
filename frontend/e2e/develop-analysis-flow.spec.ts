@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installTauriMock } from "./tauri-mock";
+import { getMockInvokeLog, installTauriMock } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -37,6 +37,43 @@ test.describe("Entwickeln-Analysewerkzeuge (Phase 9 Schritt 4)", () => {
     // Mock-Entwickeln-Route liefert immer denselben warm-orangen Farbwert
     // (180/140/100) — siehe `tauri-mock.ts`s Moduldoku dazu.
     await expect(page.getByText(/R 180 · G 140 · B 100/)).toBeVisible();
+  });
+
+  /**
+   * Phase 31 Schritt 5: Farbpalette aus dem Foto. Die Extraktion selbst
+   * ist in `lib/colorPalette.test.ts` abgedeckt (acht Fälle); hier läuft
+   * die Kette bis ins gespeicherte EDL — ein Klick auf ein Farbfeld muss
+   * denselben Weissabgleich setzen wie die Pipette im Bild.
+   *
+   * Die Mock-Entwickeln-Route liefert eine einheitlich warm-orange
+   * Fläche (180/140/100), also hat die Palette genau eine Farbe.
+   */
+  test("Ein Klick auf eine Bildfarbe setzt den Weissabgleich", async ({ page }) => {
+    await installTauriMock(page, { folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }], photosByFolder: { [FOLDER_ID]: [PHOTO] } });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Urlaub/ }).click();
+    await page.getByRole("img", { name: PHOTO.filename }).click();
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    const swatches = page.getByTestId("photo-palette").getByRole("button");
+    await expect(swatches.first()).toBeVisible();
+    await swatches.first().click();
+
+    // Ein warmes Orange muss zu einer KÜHLEREN Korrektur führen (negative
+    // Temperaturverschiebung) — das ist der Sinn eines Weissabgleichs:
+    // die gewählte Farbe wird neutral gemacht.
+    await expect
+      .poll(async () => {
+        const log = await getMockInvokeLog(page);
+        const commits = log.filter((entry) => entry.cmd === "apply_develop_edit");
+        if (commits.length === 0) return null;
+        const args = commits[commits.length - 1]!.args as { edlJson: string };
+        const payload = JSON.parse(args.edlJson).payload as {
+          basic?: { white_balance?: { temp_shift_kelvin?: number } };
+        };
+        return payload.basic?.white_balance?.temp_shift_kelvin ?? null;
+      })
+      .toBeLessThan(0);
   });
 
   /**

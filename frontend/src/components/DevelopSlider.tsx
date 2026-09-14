@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { ChangeEvent, CSSProperties, KeyboardEvent, PointerEvent } from "react";
 
 import { applyArrowStep, clampSliderValue, type SliderSpec } from "../lib/edl";
@@ -24,6 +25,16 @@ interface DevelopSliderProps {
  */
 export function DevelopSlider({ spec, value, onChange, onCommit }: DevelopSliderProps) {
   const setDevelopLiveDragging = useAppStore((s) => s.setDevelopLiveDragging);
+
+  // Der Wheel-Listener unten wird EINMAL gehängt (siehe dort). Damit er
+  // trotzdem immer den aktuellen Wert und die aktuellen Rückrufe sieht,
+  // laufen beide über Refs statt über die Abhängigkeitsliste.
+  const valueRef = useRef(value);
+  const onChangeRef = useRef(onChange);
+  const onCommitRef = useRef(onCommit);
+  valueRef.current = value;
+  onChangeRef.current = onChange;
+  onCommitRef.current = onCommit;
 
   function handleSliderChange(event: ChangeEvent<HTMLInputElement>) {
     onChange(Number(event.target.value));
@@ -73,6 +84,43 @@ export function DevelopSlider({ spec, value, onChange, onCommit }: DevelopSlider
     }
   }
 
+  // Mausrad über dem Regler ändert den Wert — die Bedienung, die jeder
+  // andere Foto-Editor anbietet und die hier fehlte. `onWheel` allein
+  // genügt nicht: React hängt Wheel-Listener passiv ein, `preventDefault`
+  // greift dort nicht, und die Palette würde unter dem Zeiger
+  // mitscrollen. Deshalb ein eigener, nicht-passiver Listener auf dem
+  // Element.
+  const sliderRef = useRef<HTMLInputElement>(null);
+  const wheelCommitTimer = useRef<number | null>(null);
+  useEffect(() => {
+    const element = sliderRef.current;
+    if (!element) return;
+
+    function handleWheel(event: WheelEvent) {
+      event.preventDefault();
+      const direction = event.deltaY < 0 ? 1 : -1;
+      // Umschalt = Grobschritt, wie schon bei den Pfeiltasten — eine
+      // Bedienkonvention, zwei Eingabewege.
+      onChangeRef.current(applyArrowStep(valueRef.current, direction, spec, event.shiftKey));
+
+      // Erst wenn das Rad zur Ruhe kommt, wird gespeichert. Sonst
+      // schriebe jede einzelne Rasterung einen eigenen Verlaufseintrag.
+      if (wheelCommitTimer.current !== null) window.clearTimeout(wheelCommitTimer.current);
+      wheelCommitTimer.current = window.setTimeout(() => {
+        wheelCommitTimer.current = null;
+        onCommitRef.current();
+      }, 220);
+    }
+
+    element.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      element.removeEventListener("wheel", handleWheel);
+      if (wheelCommitTimer.current !== null) window.clearTimeout(wheelCommitTimer.current);
+    };
+    // `spec` ist je Regler konstant; Wert und Rückrufe kommen über Refs
+    // herein, damit der Listener nicht bei jedem Tick neu gehängt wird.
+  }, [spec]);
+
   function handleNumberInput(event: ChangeEvent<HTMLInputElement>) {
     const parsed = Number(event.target.value);
     if (!Number.isNaN(parsed)) {
@@ -92,22 +140,22 @@ export function DevelopSlider({ spec, value, onChange, onCommit }: DevelopSlider
   const neutralPercent = spec.max === spec.min ? null : ((spec.neutral - spec.min) / (spec.max - spec.min)) * 100;
   const showNeutralTick = neutralPercent !== null && neutralPercent > 0.5 && neutralPercent < 99.5;
 
+  // Phase 31 Schritt 2: eine Zeile statt zwei. Vorher standen
+  // Beschriftung und Zahlenfeld in einer Zeile und der Regler in einer
+  // zweiten darunter — zusammen rund 42px je Regler. Bei etwa vierzig
+  // Reglern im Entwickeln-Panel ist das der Grund, warum man für die
+  // Grundeinstellungen scrollen muss. Jetzt Beschriftung | Regler | Zahl
+  // nebeneinander, rund 28px.
+  //
+  // Die Beschriftung wird abgeschnitten statt umzubrechen (ein Umbruch
+  // machte die Zeile wieder hoch und damit die ganze Änderung zunichte);
+  // `title` zeigt den vollen Text, und `aria-label` am Regler trägt ihn
+  // ohnehin vollständig für Screenreader.
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between text-xs text-text-secondary">
-        <span>{spec.label}</span>
-        <input
-          type="number"
-          aria-label={`${spec.label} (Zahlenwert)`}
-          className="w-16 rounded border border-border bg-bg-base px-1 py-0.5 text-right text-text-primary"
-          value={Math.round(value * 100) / 100}
-          min={spec.min}
-          max={spec.max}
-          step={spec.fineStep}
-          onChange={handleNumberInput}
-          onBlur={onCommit}
-        />
-      </div>
+    <div className="grid grid-cols-[minmax(0,5.5rem)_1fr_auto] items-center gap-2">
+      <span className="truncate text-xs text-text-secondary" title={spec.label}>
+        {spec.label}
+      </span>
       <div className="relative flex items-center">
         {/* Neutral-Markierung: zeigt, wohin ein Doppelklick zurücksetzt —
             nur wenn der Neutralwert nicht ohnehin an einem Rand liegt
@@ -134,8 +182,20 @@ export function DevelopSlider({ spec, value, onChange, onCommit }: DevelopSlider
           onKeyUp={handleKeyUp}
           onPointerDown={handlePointerDown}
           onPointerUp={handleCommit}
+          ref={sliderRef}
         />
       </div>
+      <input
+        type="number"
+        aria-label={`${spec.label} (Zahlenwert)`}
+        className="w-14 rounded border border-border bg-bg-base px-1 py-0.5 text-right text-xs text-text-primary"
+        value={Math.round(value * 100) / 100}
+        min={spec.min}
+        max={spec.max}
+        step={spec.fineStep}
+        onChange={handleNumberInput}
+        onBlur={onCommit}
+      />
     </div>
   );
 }

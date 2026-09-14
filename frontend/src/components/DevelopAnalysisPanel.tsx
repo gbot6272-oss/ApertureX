@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { PEAKING_COLORS, type PeakingColor } from "../lib/focusPeaking";
+
 import type { DevelopFrame } from "../hooks/useDevelopRender";
 import { computeHistogram, countClipping, type Histogram } from "../lib/histogram";
 import { computeVectorscope, type Vectorscope } from "../lib/vectorscope";
@@ -13,7 +15,23 @@ interface Viewport {
   height: number;
 }
 
+/** Bedienung des Fokus-Peakings (Phase 31 Schritt 4). Der Zustand liegt
+ * im Viewer — dort entsteht auch die Überlagerung; dieses Panel ist nur
+ * die Bedienfläche dafür, wie schon beim Clipping-Overlay. */
+export interface PeakingControls {
+  enabled: boolean;
+  threshold: number;
+  color: PeakingColor;
+  /** Anteil markierter Pixel (0…1) — ohne diese Rückmeldung wäre der
+   * Schwellwert Blindflug. */
+  coverage: number;
+  onToggle: () => void;
+  onThresholdChange: (value: number) => void;
+  onColorChange: (value: PeakingColor) => void;
+}
+
 interface DevelopAnalysisPanelProps {
+  peaking?: PeakingControls;
   /** Angedockt (eigene Spalte neben dem Foto) statt schwebend darüber.
    *
    * Phase 31 Schritt 1: schwebend war die Vorgabe und damit der
@@ -269,7 +287,7 @@ const ANALYSIS_TAB_LABELS: Record<AnalysisTab, string> = {
   waveform: "Wellenform",
 };
 
-export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnabled, onToggleClippingOverlay, viewport, thumbnailUrl, onAutoTone, docked = false, onToggleDocked }: DevelopAnalysisPanelProps) {
+export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnabled, onToggleClippingOverlay, viewport, thumbnailUrl, onAutoTone, docked = false, onToggleDocked, peaking }: DevelopAnalysisPanelProps) {
   // Vor dem `if (!frame) return null;` unten, sonst verletzt der Hook die
   // Rules of Hooks (unterschiedliche Hook-Zahl je nach `frame`).
   const [analysisTab, setAnalysisTab] = useState<AnalysisTab>("histogram");
@@ -481,6 +499,62 @@ export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnab
           </div>
         </>
       )}
+
+      {/* Fokus-Peaking (Phase 31 Schritt 4) — markiert farbig, welche
+          Kanten wirklich scharf sind. Steht hier bei den übrigen
+          Beurteilungswerkzeugen, nicht im Entwickeln-Panel: es verändert
+          das Foto nicht. */}
+      {peaking ? (
+        <div className="flex flex-col gap-1 border-t border-border pt-2">
+          <label className="pointer-events-auto flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={peaking.enabled}
+              onChange={peaking.onToggle}
+              className="accent-[var(--color-accent)]"
+            />
+            <span className="font-semibold text-text-secondary">Fokus-Peaking</span>
+            {peaking.enabled ? (
+              <span className="ml-auto tabular-nums text-text-muted">
+                {(peaking.coverage * 100).toFixed(1)} %
+              </span>
+            ) : null}
+          </label>
+          {peaking.enabled ? (
+            <div className="pointer-events-auto flex flex-col gap-1">
+              <label className="flex items-center gap-2 text-text-secondary">
+                Schwelle
+                <input
+                  type="range"
+                  aria-label="Peaking-Schwelle"
+                  min={0.02}
+                  max={0.6}
+                  step={0.01}
+                  value={peaking.threshold}
+                  onChange={(event) => peaking.onThresholdChange(Number(event.target.value))}
+                  className="apx-range min-w-0 flex-1"
+                />
+              </label>
+              <div className="flex items-center gap-2 text-text-secondary">
+                Farbe
+                {(["red", "green", "blue"] as const).map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    aria-label={`Peaking-Farbe ${name}`}
+                    aria-pressed={peaking.color === name}
+                    onClick={() => peaking.onColorChange(name)}
+                    className={`size-4 rounded-full border ${
+                      peaking.color === name ? "border-text-primary" : "border-border"
+                    }`}
+                    style={{ backgroundColor: `rgb(${PEAKING_COLORS[name].join(" ")})` }}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

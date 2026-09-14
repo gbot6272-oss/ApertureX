@@ -46,6 +46,8 @@ import { CropOverlay } from "./CropOverlay";
 import { DevelopAnalysisPanel } from "./DevelopAnalysisPanel";
 import { Maximize, ZoomIn, ZoomOut } from "lucide-react";
 
+import { buildPeakingOverlay, type PeakingColor } from "../lib/focusPeaking";
+
 import { PaletteFrame } from "./PaletteFrame";
 
 /** Ab dieser Fensterbreite darf die Analyse eine eigene Spalte bekommen
@@ -529,6 +531,15 @@ export function Viewer() {
   }, []);
 
   const [clippingOverlayEnabled, setClippingOverlayEnabled] = useState(false);
+
+  // Fokus-Peaking (Phase 31 Schritt 4): eine Sichthilfe, keine
+  // Bildänderung — deshalb lokaler Viewer-Zustand statt eines EDL-Felds
+  // (im EDL würde es exportiert und in Presets weitergereicht).
+  const [peakingEnabled, setPeakingEnabled] = useState(false);
+  const [peakingThreshold, setPeakingThreshold] = useState(0.18);
+  const [peakingColor, setPeakingColor] = useState<PeakingColor>("red");
+  const [peakingCoverage, setPeakingCoverage] = useState(0);
+  const peakCanvasRef = useRef<HTMLCanvasElement>(null);
   const clipCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const handleWheel = useCallback(
@@ -992,6 +1003,42 @@ export function Viewer() {
     );
   }, [clippingOverlayEnabled, developFrame]);
 
+  // ---- Fokus-Peaking (Phase 31 Schritt 4) ------------------------------
+  // Dasselbe Zweit-Canvas-Muster wie das Clipping-Overlay darüber: die
+  // Markierung ist grösstenteils durchsichtig, ein `putImageData` plus
+  // CSS-Skalierung reicht, ohne den WebGL-Pfad anzufassen.
+  useEffect(() => {
+    const canvas = peakCanvasRef.current;
+    if (!canvas) return;
+    if (!peakingEnabled || !developFrame) {
+      canvas.width = 0;
+      canvas.height = 0;
+      setPeakingCoverage(0);
+      return;
+    }
+    canvas.width = developFrame.width;
+    canvas.height = developFrame.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const overlay = buildPeakingOverlay(
+      developFrame.pixels,
+      developFrame.width,
+      developFrame.height,
+      peakingThreshold,
+      peakingColor,
+    );
+    setPeakingCoverage(overlay.coverage);
+    ctx.putImageData(
+      new ImageData(
+        overlay.pixels as Uint8ClampedArray<ArrayBuffer>,
+        developFrame.width,
+        developFrame.height,
+      ),
+      0,
+      0,
+    );
+  }, [peakingEnabled, developFrame, peakingThreshold, peakingColor]);
+
   // ---- Bild-Werkzeuge: Griffe, Linien und Ellipsen (Phase 30) ---------
   // Aus dem EDL abgeleitet, nicht doppelt gehalten: das Overlay ist eine
   // reine Darstellung des Zustands, kein zweiter Speicherort.
@@ -1217,6 +1264,15 @@ export function Viewer() {
         pointerSample={pointerSample}
         clippingOverlayEnabled={clippingOverlayEnabled}
         onToggleClippingOverlay={() => setClippingOverlayEnabled((v) => !v)}
+        peaking={{
+          enabled: peakingEnabled,
+          threshold: peakingThreshold,
+          color: peakingColor,
+          coverage: peakingCoverage,
+          onToggle: () => setPeakingEnabled((v) => !v),
+          onThresholdChange: setPeakingThreshold,
+          onColorChange: setPeakingColor,
+        }}
         viewport={navigatorViewport}
         thumbnailUrl={previewUrl(photo.id, 0)}
         onAutoTone={(histogram) => applyAutoTone(computeAutoTone(histogram))}
@@ -1480,6 +1536,21 @@ export function Viewer() {
           ref={zoneCanvasRef}
           data-testid="zone-overlay-canvas"
           className="pointer-events-none absolute"
+          style={{
+            left: clipOverlayOrigin.x,
+            top: clipOverlayOrigin.y,
+            width: imgW * effectiveScale,
+            height: imgH * effectiveScale,
+            imageRendering: effectiveScale > 1 ? "pixelated" : "auto",
+          }}
+        />
+      )}
+
+      {peakingEnabled && developFrame && imgW > 0 && imgH > 0 && (
+        <canvas
+          ref={peakCanvasRef}
+          className="pointer-events-none absolute"
+          data-testid="focus-peaking-overlay"
           style={{
             left: clipOverlayOrigin.x,
             top: clipOverlayOrigin.y,

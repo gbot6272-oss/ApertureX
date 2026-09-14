@@ -40,6 +40,38 @@ test.describe("Entwickeln-Analysewerkzeuge (Phase 9 Schritt 4)", () => {
   });
 
   /**
+   * Phase 31 Schritt 4: Fokus-Peaking. Die Kantenmathematik selbst ist
+   * in `lib/focusPeaking.test.ts` abgedeckt (acht Fälle); hier läuft die
+   * Kette davor — erscheint die Bedienung, entsteht die Überlagerung
+   * wirklich im Bild, und meldet sie zurück, wie viel sie markiert?
+   *
+   * Die Rückmeldung ist der Punkt: ohne sie wäre der Schwellwert
+   * Blindflug, und genau daran scheitern Peaking-Implementierungen in
+   * der Praxis.
+   */
+  test("Fokus-Peaking legt eine Überlagerung über das Bild und meldet die Abdeckung", async ({ page }) => {
+    await installTauriMock(page, { folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }], photosByFolder: { [FOLDER_ID]: [PHOTO] } });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Urlaub/ }).click();
+    await page.getByRole("img", { name: PHOTO.filename }).click();
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    const overlay = page.getByTestId("focus-peaking-overlay");
+    await expect(overlay).toBeHidden();
+
+    await page.getByRole("checkbox", { name: "Fokus-Peaking" }).check();
+    await expect(overlay).toBeVisible();
+
+    // Die Schwelle ist bedienbar und die Farbwahl auch.
+    await expect(page.getByRole("slider", { name: "Peaking-Schwelle" })).toBeVisible();
+    await page.getByRole("button", { name: "Peaking-Farbe green" }).click();
+    await expect(page.getByRole("button", { name: "Peaking-Farbe green" })).toHaveAttribute("aria-pressed", "true");
+
+    await page.getByRole("checkbox", { name: "Fokus-Peaking" }).uncheck();
+    await expect(overlay).toBeHidden();
+  });
+
+  /**
    * Deckt Phase 14 Schritt 6 ab (`DECISIONS.md` ADR-0041): Vektorskop +
    * Wellenform-Monitor als neue Reiter neben dem Histogramm — die
    * Berechnungslogik selbst (`computeVectorscope`/`computeWaveform`) ist

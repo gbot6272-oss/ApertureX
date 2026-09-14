@@ -44,8 +44,9 @@ import {
 } from "./ImageToolOverlay";
 import { CropOverlay } from "./CropOverlay";
 import { DevelopAnalysisPanel } from "./DevelopAnalysisPanel";
-import { Maximize, ZoomIn, ZoomOut } from "lucide-react";
+import { FlipHorizontal, Maximize, RotateCw, ZoomIn, ZoomOut } from "lucide-react";
 
+import { orientationLabel, type GridOrientation } from "../lib/compositionGrid";
 import { buildPeakingOverlay, type PeakingColor } from "../lib/focusPeaking";
 
 import { PaletteFrame } from "./PaletteFrame";
@@ -535,6 +536,27 @@ export function Viewer() {
   // Fokus-Peaking (Phase 31 Schritt 4): eine Sichthilfe, keine
   // Bildänderung — deshalb lokaler Viewer-Zustand statt eines EDL-Felds
   // (im EDL würde es exportiert und in Presets weitergereicht).
+  // Lage des Kompositionsrasters (Phase 32) — Ansichtssache, kein
+  // Bestandteil der Bearbeitung: sie gehört nicht ins EDL, würde dort
+  // exportiert und in Presets weitergereicht. Bleibt aber über einen
+  // Neustart erhalten, weil es eine Arbeitsvorliebe ist.
+  const [gridOrientation, setGridOrientation] = useState<GridOrientation>(() => {
+    try {
+      const stored = Number(window.localStorage.getItem("apx.gridOrientation"));
+      return (Number.isInteger(stored) && stored >= 0 && stored < 8 ? stored : 0) as GridOrientation;
+    } catch {
+      return 0;
+    }
+  });
+  const changeGridOrientation = useCallback((next: GridOrientation) => {
+    setGridOrientation(next);
+    try {
+      window.localStorage.setItem("apx.gridOrientation", String(next));
+    } catch {
+      // Privater Modus — die Vorliebe geht verloren, sonst nichts.
+    }
+  }, []);
+
   const [peakingEnabled, setPeakingEnabled] = useState(false);
   const [peakingThreshold, setPeakingThreshold] = useState(0.18);
   const [peakingColor, setPeakingColor] = useState<PeakingColor>("red");
@@ -1593,8 +1615,51 @@ export function Viewer() {
         )
       )}
 
+      {/* Lage-Steuerung des Kompositionsrasters (Phase 32) — erscheint
+          nur, wenn ein Raster gewählt ist, das sich drehen lässt.
+          Drittel und Goldener Schnitt sind punktsymmetrisch, dort wäre
+          der Knopf wirkungslos und damit irreführend. */}
+      {photo &&
+      geometryCropActive &&
+      developEdl.geometry.overlay !== "None" &&
+      developEdl.geometry.overlay !== "Thirds" &&
+      developEdl.geometry.overlay !== "GoldenRatio" ? (
+        <div
+          role="group"
+          aria-label="Rasterlage"
+          className="apx-glass absolute left-1/2 top-16 z-10 flex -translate-x-1/2 items-center gap-1 rounded border border-[var(--glass-border)] px-2 py-1 text-xs"
+        >
+          <span className="text-text-secondary">Raster</span>
+          <button
+            type="button"
+            aria-label="Raster drehen"
+            title="Raster um 90° drehen"
+            onClick={() => changeGridOrientation((((gridOrientation % 4) + 1) % 4 + (gridOrientation >= 4 ? 4 : 0)) as GridOrientation)}
+            className="rounded border border-border px-2 py-0.5 text-text-primary hover:border-accent"
+          >
+            <RotateCw aria-hidden="true" className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            aria-label="Raster spiegeln"
+            aria-pressed={gridOrientation >= 4}
+            title="Raster waagerecht spiegeln"
+            onClick={() => changeGridOrientation(((gridOrientation + 4) % 8) as GridOrientation)}
+            className={`rounded border px-2 py-0.5 ${
+              gridOrientation >= 4 ? "border-accent bg-accent/10 text-accent" : "border-border text-text-primary hover:border-accent"
+            }`}
+          >
+            <FlipHorizontal aria-hidden="true" className="size-3.5" />
+          </button>
+          <span data-testid="grid-orientation" className="w-24 text-right tabular-nums text-text-muted">
+            {orientationLabel(gridOrientation)}
+          </span>
+        </div>
+      ) : null}
+
       {photo && geometryCropActive && imgW > 0 && imgH > 0 && (
         <CropOverlay
+          orientation={gridOrientation}
           imageLeft={
             imageOrigin(
               containerSize.width,

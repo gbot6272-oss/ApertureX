@@ -701,6 +701,15 @@ interface DevelopSlice {
    * zu löschen. No-op für `Off`/`Guided` (dort gilt der bestehende
    * manuelle bzw. `guided_lines`-Mechanismus). */
   runUprightAutoDetect: () => Promise<void>;
+  /** Ein Klick: Horizont gerade ziehen (Phase 31 Schritt 7).
+   *
+   * Setzt `upright_mode` auf `Level` und startet die Erkennung. Die
+   * Kantenerkennung selbst (Canny + Hough) existiert seit Phase 13
+   * Schritt 4 vollständig — sie war nur als Eintrag einer Klappliste
+   * tief in den Objektivkorrekturen versteckt, wo sie niemand sucht.
+   * Diese Aktion baut nichts nach, sie macht das Vorhandene mit einem
+   * Klick erreichbar. */
+  levelHorizon: () => Promise<void>;
   uprightDetectLoading: boolean;
   /** Setzt ein Feld einer der zwei Guided-Hilfslinien (Phase 4 Schritt 9
    * — siehe `DECISIONS.md` ADR-0030: Zahlenfelder statt einer
@@ -3073,6 +3082,11 @@ export const useAppStore = create<AppStore>()(
     },
 
     uprightDetectLoading: false,
+
+    levelHorizon: async () => {
+      get().setLensCorrectionUprightMode("Level");
+      await get().runUprightAutoDetect();
+    },
 
     runUprightAutoDetect: async () => {
       const { selectedPhotoId } = get();

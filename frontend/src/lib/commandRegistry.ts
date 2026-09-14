@@ -54,6 +54,7 @@ export function useCommandRegistry(): CommandEntry[] {
 
   const requestCommand = useAppStore((s) => s.requestCommand);
   const toggleCenterView = useAppStore((s) => s.toggleCenterView);
+  const levelHorizon = useAppStore((s) => s.levelHorizon);
   const setCenterView = useAppStore((s) => s.setCenterView);
   const toggleMetadataPanel = useAppStore((s) => s.toggleMetadataPanel);
   const toggleDevelopPanel = useAppStore((s) => s.toggleDevelopPanel);
@@ -109,6 +110,23 @@ export function useCommandRegistry(): CommandEntry[] {
         label: lightsOut === "off" ? t("commands.lightsOut.on") : lightsOut === "dim" ? t("commands.lightsOut.darker") : t("commands.lightsOut.off"),
         category: "navigation",
         run: cycleLightsOut,
+      },
+
+      // Phase 31 Schritt 7: Der Auto-Horizont existiert seit Phase 13
+      // Schritt 4 vollständig (Canny + Hough), lag aber als Eintrag einer
+      // Klappliste tief in den Objektivkorrekturen — dort sucht ihn
+      // niemand. Hier taucht er unter seinem gebräuchlichen Namen auf und
+      // öffnet nebenbei das Entwickeln-Panel, damit das Ergebnis
+      // sichtbar ist.
+      {
+        id: "fn:level-horizon",
+        label: "Horizont ausrichten",
+        category: "advanced",
+        disabled: selectedPhotoId === null,
+        run: () => {
+          openDevelopPanel();
+          void levelHorizon();
+        },
       },
 
       // Ausgabe

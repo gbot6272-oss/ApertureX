@@ -1,5 +1,12 @@
 import { expect, test } from "@playwright/test";
 
+// Hinweis zu `exact: true` bei der Registerkarte "Licht": der urspruengliche
+// Grund (die Karte hiess "Licht & Optik" und kollidierte per Teilstring)
+// ist mit der Umbenennung auf "Optik" entfallen. `exact` bleibt trotzdem
+// stehen — Playwrights Standard-Namensvergleich ist ein Teilstring-Treffer,
+// und eine kuenftige Karte mit "Licht" im Namen wuerde den Locator sonst
+// wieder stillschweigend mehrdeutig machen.
+
 import { getMockInvokeLog, installTauriMock } from "./tauri-mock";
 
 /**
@@ -70,7 +77,7 @@ test.describe("Workflow: Schnappschüsse + Vorher/Nachher", () => {
     await expect(page.getByRole("button", { name: "Erste Version", exact: true })).toBeVisible();
 
     // Weiter bearbeiten, dann den Schnappschuss wiederherstellen.
-    await page.getByRole("tab", { name: "Licht" }).click();
+    await page.getByRole("tab", { name: "Licht", exact: true }).click();
     await exposureInput.fill("-1.2");
     await exposureInput.blur();
     await expect.poll(async () => lastCommittedExposure(page)).toBeCloseTo(-1.2, 2);
@@ -78,7 +85,7 @@ test.describe("Workflow: Schnappschüsse + Vorher/Nachher", () => {
     await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await page.getByRole("button", { name: "Erste Version", exact: true }).click();
     await expect.poll(async () => lastCommittedExposure(page)).toBeCloseTo(0.8, 2);
-    await page.getByRole("tab", { name: "Licht" }).click();
+    await page.getByRole("tab", { name: "Licht", exact: true }).click();
     await expect(exposureInput).toHaveValue("0.8");
 
     await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
@@ -89,6 +96,41 @@ test.describe("Workflow: Schnappschüsse + Vorher/Nachher", () => {
 
     await page.getByRole("button", { name: "Schnappschuss Referenz löschen" }).click();
     await expect(page.getByText("Noch keine Schnappschüsse.")).toBeVisible();
+  });
+
+  /**
+   * Phase 31 Schritt 6: die Vorher/Nachher-Kante ist ziehbar. Vorher
+   * sass sie fest bei 50 % und trug sogar `pointer-events-none` — für
+   * den häufigsten Fall unbrauchbar, weil die Stelle, die man gerade
+   * geändert hat, selten genau in der Bildmitte liegt.
+   */
+  test("Die Vorher/Nachher-Kante lässt sich ziehen und per Tastatur bewegen", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
+    await page.getByRole("button", { name: "Geteilt", exact: true }).click();
+
+    const handle = page.getByTestId("before-after-handle");
+    await expect(handle).toHaveAttribute("aria-valuenow", "50");
+
+    // Ziehen: von der Mitte deutlich nach links.
+    const box = await handle.boundingBox();
+    if (!box) throw new Error("Kante nicht gefunden");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x - 200, box.y + box.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await expect.poll(async () => Number(await handle.getAttribute("aria-valuenow"))).toBeLessThan(45);
+
+    // Tastatur: der Griff ist fokussierbar, Pfeiltasten bewegen ihn.
+    await handle.focus();
+    const beforeKey = Number(await handle.getAttribute("aria-valuenow"));
+    await handle.press("ArrowRight");
+    await expect.poll(async () => Number(await handle.getAttribute("aria-valuenow"))).toBeGreaterThan(beforeKey);
+
+    // Am Rand wird geklemmt — eine Kante ganz aussen sieht aus wie ein
+    // Fehler und liesse sich kaum zurückgreifen.
+    for (let i = 0; i < 80; i += 1) await handle.press("ArrowLeft");
+    await expect(handle).toHaveAttribute("aria-valuenow", "2");
   });
 
   test("Vorher/Nachher-Modi schalten die Ansicht um, jeweils nur ein Modus aktiv", async ({ page }) => {
@@ -146,7 +188,7 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
     await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await page.getByRole("button", { name: "Kopieren" }).click();
 
-    await page.getByRole("tab", { name: "Licht" }).click();
+    await page.getByRole("tab", { name: "Licht", exact: true }).click();
     await exposureInput.fill("-1.2");
     await exposureInput.blur();
     await expect.poll(async () => lastCommittedExposure(page)).toBeCloseTo(-1.2, 2);
@@ -154,7 +196,7 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
     await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await page.getByRole("button", { name: "Einfügen" }).click();
     await expect.poll(async () => lastCommittedExposure(page)).toBeCloseTo(0.8, 2);
-    await page.getByRole("tab", { name: "Licht" }).click();
+    await page.getByRole("tab", { name: "Licht", exact: true }).click();
     await expect(exposureInput).toHaveValue("0.8");
   });
 
@@ -167,7 +209,7 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
     await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await expect(applyPreviousButton).toBeDisabled();
 
-    await page.getByRole("tab", { name: "Licht" }).click();
+    await page.getByRole("tab", { name: "Licht", exact: true }).click();
     const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" }).first();
     await exposureInput.fill("0.6");
     await exposureInput.blur();
@@ -182,7 +224,7 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
 
     await applyPreviousButton.click();
     await expect.poll(async () => lastExposureFor(page, PHOTO_2.id)).toBeCloseTo(0.6, 2);
-    await page.getByRole("tab", { name: "Licht" }).click();
+    await page.getByRole("tab", { name: "Licht", exact: true }).click();
     await expect(exposureInput).toHaveValue("0.6");
   });
 
@@ -198,7 +240,7 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
     await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await expect(syncButton).toBeEnabled();
 
-    await page.getByRole("tab", { name: "Licht" }).click();
+    await page.getByRole("tab", { name: "Licht", exact: true }).click();
     const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" }).first();
     await exposureInput.fill("0.5");
     await exposureInput.blur();
@@ -216,7 +258,7 @@ test.describe("Workflow: Kopieren/Einfügen + Vorherige + Synchronisieren", () =
     await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await page.getByRole("checkbox", { name: /Auto-Sync/ }).check();
 
-    await page.getByRole("tab", { name: "Licht" }).click();
+    await page.getByRole("tab", { name: "Licht", exact: true }).click();
     const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" }).first();
     await exposureInput.fill("-0.3");
     await exposureInput.blur();

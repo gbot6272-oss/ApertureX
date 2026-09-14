@@ -1,0 +1,76 @@
+Aperture X
+Copyright 2026 Aperture X contributors
+
+This product is licensed under the Apache License, Version 2.0 (see
+LICENSE). That license covers Aperture X's own source code.
+
+It does NOT cover the third-party components listed below, which keep
+their own licenses. The full list of every dependency with its license
+is in THIRD_PARTY.md; only the components whose terms differ from the
+permissive norm are repeated here, because those are the ones a
+redistributor actually has to act on.
+
+--------------------------------------------------------------------
+1. LGPL components (Rust)
+--------------------------------------------------------------------
+
+  rawler 0.7.2                LGPL-2.1
+      RAW decoding and metadata. See DECISIONS.md ADR-0002.
+
+  lensfun 0.7.0               LGPL-3.0-or-later
+      Lens and camera correction database. See DECISIONS.md ADR-0039.
+
+  gphoto2 3.4.1               LGPL-2.1-only
+  libgphoto2_sys 1.2.3        LGPL-2.1-only
+      Tethered shooting. OPTIONAL: built only with the `tethering`
+      Cargo feature, which is off by default.
+
+These are used unmodified, as libraries. Because Aperture X itself is
+distributed as open source with its complete corresponding source code,
+the relinking requirement of LGPL-2.1 section 6 / LGPL-3.0 section 4 is
+satisfied by that source distribution: a user can replace any of these
+libraries and rebuild.
+
+A closed-source distribution of Aperture X would NOT be covered by that
+reasoning and would need a separate arrangement (see DECISIONS.md
+ADR-0002 point 2).
+
+--------------------------------------------------------------------
+2. GSAP — free of charge, but NOT an open-source license
+--------------------------------------------------------------------
+
+  gsap 3.15.0
+      Copyright (c) 2008-2026, GreenSock. All rights reserved.
+      GreenSock Standard "no charge" license:
+      https://gsap.com/standard-license
+
+GSAP powers Aperture X's interface animations and is compiled into the
+distributed application bundle. Its license permits that use and that
+redistribution free of charge, but it is not an OSI-approved open-source
+license and GSAP cannot be sublicensed under Apache-2.0. Anyone forking
+or redistributing Aperture X is bound by GreenSock's terms for this one
+component, separately from the Apache-2.0 grant covering everything
+else. See DECISIONS.md ADR-0063.
+
+--------------------------------------------------------------------
+3. Fonts and data
+--------------------------------------------------------------------
+
+  @fontsource/inter 5.3.0     OFL-1.1   (Inter typeface)
+  caniuse-lite                CC-BY-4.0 (build-time only)
+  mdn-data                    CC0-1.0   (build-time only)
+  lightningcss                MPL-2.0   (build-time only)
+  cssparser, selectors,
+  dtoa-short, option-ext,
+  smartstring                 MPL-2.0   (file-level copyleft, unmodified)
+
+--------------------------------------------------------------------
+4. External programs, not bundled
+--------------------------------------------------------------------
+
+  ffmpeg / ffprobe
+      Called as external programs for every video feature. NOT shipped
+      with Aperture X and not linked against — deliberately, because
+      bundling an ffmpeg build raises its own GPL question depending on
+      how that build was configured. Packaged as a *recommended*, not
+      required, dependency. See RELEASE.md.

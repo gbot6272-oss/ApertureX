@@ -31,6 +31,42 @@ async function setUpWithSelectedPhoto(page: import("@playwright/test").Page) {
 }
 
 test.describe("Entwickeln-Panel", () => {
+  /**
+   * Phase 31 Schritt 2: Mausrad über einem Regler ändert den Wert. Neu
+   * — bis dahin tat das Rad über einem Regler gar nichts (die Palette
+   * scrollte darunter weg). Geprüft wird die ganze Kette bis ins
+   * gespeicherte EDL, nicht nur die Anzeige: erst damit ist belegt, dass
+   * der Wert auch wirklich übernommen und nicht nur angezeigt wird.
+   */
+  test("Mausrad über einem Regler ändert den Wert und speichert ihn", async ({ page }) => {
+    await setUpWithSelectedPhoto(page);
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    const belichtung = page.getByRole("slider", { name: "Belichtung", exact: true });
+    await expect(belichtung).toHaveValue("0");
+
+    await belichtung.hover();
+    await page.mouse.wheel(0, -120);
+
+    await expect.poll(async () => Number(await belichtung.inputValue())).toBeGreaterThan(0);
+
+    // Der Wert muss auch dauerhaft ankommen — das Speichern hängt an
+    // einem Timer, der erst zuschlägt, wenn das Rad zur Ruhe kommt.
+    await expect
+      .poll(
+        async () => {
+          const log = await getMockInvokeLog(page);
+          const commits = log.filter((entry) => entry.cmd === "apply_develop_edit");
+          if (commits.length === 0) return 0;
+          const args = commits[commits.length - 1].args as { edlJson: string };
+          const payload = JSON.parse(args.edlJson).payload as { basic?: { exposure_ev?: number } };
+          return payload.basic?.exposure_ev ?? 0;
+        },
+        { timeout: 5000 },
+      )
+      .toBeGreaterThan(0);
+  });
+
   test("öffnet über den Kopfzeilen-Knopf und zeigt die zwölf Grundeinstellungs-Regler", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
 

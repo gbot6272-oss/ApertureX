@@ -199,6 +199,10 @@ jobs:
   release:
     name: Installer bauen (${{ matrix.os }})
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    # Nur dieser eine Job darf Releases schreiben; die uebrigen Jobs
+    # behalten die Standardrechte (nur Lesen).
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -326,6 +330,58 @@ jobs:
         working-directory: crates/apx-app
         run: npx --prefix ../../frontend tauri build --config "$env:TAURI_WINDOWS_CONFIG"
 
+      # Der Job galt bisher als erfolgreich, auch wenn `tauri build` gar
+      # kein Paket erzeugt hat (`if-no-files-found: warn`). Ein
+      # Release-Job, der lautlos nichts liefert, ist schlimmer als einer,
+      # der fehlschlägt — deshalb hier eine ausdrückliche Prüfung, bevor
+      # irgendetwas hochgeladen wird.
+      - name: Erzeugte Pakete auflisten und prüfen
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d target/release/bundle ]; then
+            echo "::error::tauri build hat kein bundle/-Verzeichnis erzeugt."
+            exit 1
+          fi
+          # Bewusst OHNE `mapfile`: das gibt es erst ab Bash 4, und die
+          # macOS-Runner laufen mit der vorinstallierten Bash 3.2 — der
+          # Schritt wuerde dort mit "command not found" abbrechen, obwohl
+          # der Build in Ordnung ist.
+          packages=$(find target/release/bundle -type f \
+            \( -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' \
+               -o -name '*.exe' -o -name '*.msi' \) | sort)
+          if [ -z "$packages" ]; then
+            echo "::error::Kein Installer-Paket in target/release/bundle gefunden."
+            find target/release/bundle -type f | head -50
+            exit 1
+          fi
+          echo "Gefundene Pakete:"
+          echo "$packages" | sed 's/^/  /'
+
+      # Prüfsummen gehören zum Paket, nicht in eine separate Anleitung:
+      # ohne sie kann niemand nachweisen, dass ein heruntergeladener
+      # Installer der ist, den diese CI gebaut hat. Das ist bei
+      # UNSIGNIERTEN Paketen die einzige verfügbare Integritätsaussage —
+      # und genau die ist hier der Normalfall (siehe RELEASE.md).
+      - name: SHA-256-Prüfsummen erzeugen
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd target/release/bundle
+          # `sha256sum` gibt es auf Linux und in der Git-Bash der
+          # Windows-Runner, auf macOS aber nicht — dort heisst das
+          # Werkzeug `shasum`. Einmal ermitteln statt je Plattform einen
+          # eigenen Schritt zu schreiben.
+          if command -v sha256sum >/dev/null 2>&1; then
+            hash_cmd="sha256sum"
+          else
+            hash_cmd="shasum -a 256"
+          fi
+          find . -type f \( -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' \
+                           -o -name '*.exe' -o -name '*.msi' \) \
+            -exec $hash_cmd {} + > SHA256SUMS-${{ matrix.os }}.txt
+          cat SHA256SUMS-${{ matrix.os }}.txt
+
       - name: Installer-Artefakte hochladen
         uses: actions/upload-artifact@v4
         with:
@@ -333,4 +389,32 @@ jobs:
           path: |
             target/release/bundle/**
           retention-days: 14
-          if-no-files-found: warn
+          if-no-files-found: error
+
+      # Nur bei einem Tag-Push: die Pakete an eine GitHub-Release hängen.
+      # Bisher landeten sie ausschließlich in den Workflow-Artefakten —
+      # die laufen nach 14 Tagen ab und sind für Nutzer ohne
+      # Actions-Zugriff überhaupt nicht erreichbar. Damit war die
+      # "Distribution" aus Phase 10 faktisch nicht vorhanden.
+      - name: An GitHub-Release anhängen (nur bei Tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            target/release/bundle/**/*.deb
+            target/release/bundle/**/*.AppImage
+            target/release/bundle/**/*.dmg
+            target/release/bundle/**/*.exe
+            target/release/bundle/**/*.msi
+            target/release/bundle/SHA256SUMS-*.txt
+          body: |
+            Automatisch aus `${{ github.ref_name }}` gebaut.
+
+            **Signierung:** siehe `RELEASE.md`. Sind keine Zertifikate als
+            Repository-Secrets hinterlegt, sind diese Pakete **unsigniert** —
+            macOS und Windows warnen dann beim Öffnen. Die
+            `SHA256SUMS-*.txt` sind in diesem Fall die einzige
+            Integritätsprüfung.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,14 +1,44 @@
 @import "tailwindcss";
 
+/* Phase 25 Schritt 1 (siehe DECISIONS.md, aktuelles ADR): eigene
+   Schrift statt `system-ui` — selbst gehostet über `@fontsource/inter`
+   (npm-Paket, echte `.woff2`-Dateien im Bundle), bewusst NICHT per
+   `fonts.googleapis.com`-Laufzeit-Download, da die App auch offline
+   funktionieren muss (SPEC.md, Desktop-Anwendung ohne
+   Internetzwang). Nur die vier tatsächlich genutzten Schnitte
+   (400/500/600/700) UND nur die `latin`/`latin-ext`-Unicode-Bereiche
+   (`lib/i18n.ts` kennt ausschließlich `de`/`en`, beide vollständig
+   darin abgedeckt inkl. deutscher Umlaute/ß) statt der vollen
+   Sieben-Bereiche-Aufteilung (kyrillisch/griechisch/vietnamesisch
+   ungenutzt) — reduziert die gebündelten Schriftdateien von ~500 KB
+   auf ~100 KB. */
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-ext-400.css";
+@import "@fontsource/inter/latin-500.css";
+@import "@fontsource/inter/latin-ext-500.css";
+@import "@fontsource/inter/latin-600.css";
+@import "@fontsource/inter/latin-ext-600.css";
+@import "@fontsource/inter/latin-700.css";
+@import "@fontsource/inter/latin-ext-700.css";
+
 /* Design-Tokens — Dark-First (siehe SPEC.md Abschnitt 4). Ein
    vollständiges helles Theme kommt in Phase 10; die Tokens sind hier
    bereits so benannt (semantisch, nicht "gray-800"), dass ein zweites
    Theme später nur die Werte austauschen muss, nicht die Klassennamen. */
 @theme {
-  --color-bg-base: #1a1a1a;
-  --color-bg-raised: #202020;
-  --color-bg-panel: #242424;
-  --color-border: #333333;
+  /* Phase 25 Schritt 1 (siehe DECISIONS.md, aktuelles ADR): echte
+     Tiefe statt der bisherigen drei Werte innerhalb von 16 RGB-Stufen
+     (`#1a1a1a`/`#202020`/`#242424` — praktisch ununterscheidbares
+     Grau-auf-Grau). Näher an Schwarz, deutlich unterscheidbare
+     Stufen — an einer realen, für genau dieses Produktgenre
+     (professionelles Foto-Werkzeug, dunkel) recherchierten Referenz-
+     Palette orientiert. `--color-border` dazu von reinem Grau auf
+     einen minimal wärmeren Ton, passend zum Bildschirm-/Foto-Kontext
+     statt eines technisch-kalten Blaugraus. */
+  --color-bg-base: #050505;
+  --color-bg-raised: #0e0e0e;
+  --color-bg-panel: #17171a;
+  --color-border: #3a3733;
   --color-text-primary: #e8e4dc;
   --color-text-secondary: #9a9a9a;
   --color-text-muted: #6a6a6a;
@@ -23,8 +53,29 @@
      pflegen lässt. */
   --color-bg-overlay: rgb(10 10 10 / 55%);
 
+  /* Glüh-Farbwasch hinter der App-Chrome (siehe `body`s Moduldoku
+     unten für den Grund) — drei gedämpfte, unterschiedliche Farbtöne
+     (Akzent/warm/kühl) statt eines einzelnen Farbtons, damit
+     `.apx-glass`s `saturate(165%)` etwas Farbvielfalt zum Verstärken
+     hat, nicht nur einen einzigen flachen Blauton überall. */
+  --glow-accent: rgb(91 155 213 / 28%);
+  --glow-secondary: rgb(224 122 95 / 16%);
+  --glow-tertiary: rgb(127 176 105 / 16%);
+
   --font-sans:
-    system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* Typografie-Feinschliff (Phase 25 Schritt 1) — überschreibt
+     Tailwinds Standard-Zeilenhöhe/-Laufweite für die drei größten
+     Textstufen an derselben Stelle wie die Radius-/Schatten-Skala
+     (Phase 18): jede bestehende `text-lg`/`text-xl`/`text-2xl`-
+     Verwendung (Dialog-/Panel-Überschriften, Header-Titel) bekommt
+     ohne Einzeländerung eine engere, bewusst gesetzte Laufweite statt
+     der Browser-Vorgabe — genau das an Inters eigener, präziser
+     Optical-Sizing-Systematik orientiert. */
+  --text-lg--letter-spacing: -0.011em;
+  --text-xl--letter-spacing: -0.014em;
+  --text-2xl--letter-spacing: -0.017em;
 
   /* Radius-Skala (Phase 18, ADR-0046) — überschreibt Tailwinds
      Standardwerte (0.125rem–2rem) an derselben Stelle, damit jede
@@ -41,13 +92,23 @@
   /* Schatten-/Elevation-Skala (Phase 18, ADR-0046) — Tailwinds
      Standardschatten sind für helle Oberflächen kalibriert (niedrige
      Deckkraft auf reinem Schwarz) und auf dem dunklen Grundton dieser
-     App (`--color-bg-base: #1a1a1a`) kaum sichtbar. Dieselben
-     Tailwind-Variablennamen, verstärkte Werte für sichtbare Tiefe auf
-     dunklem Grund — das helle Theme unten (`[data-theme="light"]`)
-     bekommt eine eigene, sanftere Überschreibung. */
+     App (`--color-bg-base`, seit Phase 25 Schritt 1 nahezu Schwarz)
+     kaum sichtbar. Dieselben Tailwind-Variablennamen, verstärkte Werte
+     für sichtbare Tiefe auf dunklem Grund — das helle Theme unten
+     (`[data-theme="light"]`) bekommt eine eigene, sanftere
+     Überschreibung. */
   --shadow-md: 0 6px 16px -4px rgb(0 0 0 / 45%), 0 2px 6px -2px rgb(0 0 0 / 35%);
   --shadow-lg: 0 12px 28px -6px rgb(0 0 0 / 50%), 0 4px 10px -4px rgb(0 0 0 / 35%);
   --shadow-xl: 0 24px 48px -10px rgb(0 0 0 / 55%), 0 8px 16px -6px rgb(0 0 0 / 40%);
+  /* Neue, oberste Stufe (Phase 25 Schritt 3, siehe DECISIONS.md,
+     aktuelles ADR) — bislang endete die Skala bei `-xl`, das reichte
+     für normale Paletten/Dialoge, aber nicht für Elemente, die sich
+     bewusst spürbar VOR allem anderen befinden sollen (ein gerade
+     gezogenes Element, der fokussierte/aktive Dialog über einem
+     bereits geöffneten Bereich) — spatial-UI-Prinzip "Tiefe über
+     echten Z-Versatz, nicht nur Deckkraft" statt einer weiteren, kaum
+     unterscheidbaren `-xl`-Wiederholung. */
+  --shadow-2xl: 0 32px 64px -12px rgb(0 0 0 / 60%), 0 12px 24px -8px rgb(0 0 0 / 45%);
 }
 
 /* Bewegungs-Tokens (Phase 18, ADR-0046) — bewusst außerhalb von
@@ -83,23 +144,48 @@
    angedockte Paletten via `PaletteFrame.tsx`, Dialog/Sheet/Menü),
    nicht auf einzelne Rasterkacheln o. Ä. */
 :root {
-  --glass-bg: rgb(32 32 32 / 62%);
-  --glass-bg-strong: rgb(28 28 28 / 78%);
-  --glass-border: rgb(255 255 255 / 12%);
+  /* Deutlich transparenter als die erste Liquid-Glass-Fassung (Phase
+     24, Nutzer-Rückmeldung "UI muss transparenter werden"): Deckkraft
+     von 62%/78% auf 44%/60% gesenkt, Weichzeichnung von 20px auf 26px
+     angehoben, damit Text trotz mehr Durchsicht lesbar bleibt (mehr
+     Blur kompensiert weniger deckende Grundfarbe). */
+  --glass-bg: rgb(70 70 78 / 30%);
+  --glass-bg-strong: rgb(60 60 70 / 40%);
+  --glass-border: rgb(255 255 255 / 18%);
   --glass-sheen: linear-gradient(
     135deg,
-    rgb(255 255 255 / 14%) 0%,
-    rgb(255 255 255 / 2%) 30%,
+    rgb(255 255 255 / 22%) 0%,
+    rgb(255 255 255 / 4%) 30%,
     rgb(255 255 255 / 0%) 55%,
-    rgb(255 255 255 / 6%) 100%
+    rgb(255 255 255 / 10%) 100%
   );
-  --glass-blur: 20px;
-  --glass-saturate: 165%;
+  --glass-blur: 18px;
+  --glass-saturate: 220%;
+  /* Phase 25 Nachtrag (siehe DECISIONS.md, aktuelles ADR + PROMPTS.md
+     Prompt 1): echte Glas-Verzerrung statt reinem Weichzeichner —
+     `GlassDistortionFilter.tsx`s einmalig im DOM gehaltene
+     `feTurbulence`+`feDisplacementMap`-SVG-Filterdefinition, per
+     `filter: var(--glass-distortion)` auf der Backdrop-Ebene
+     referenziert. `none` im Kontrastmodus (siehe unten) — Verzerrung
+     widerspricht maximaler Lesbarkeit. Die innere Kanten-Lichtkante
+     (`--glass-edge-shadow`, ebenfalls aus Prompt 1: "Licht fängt sich
+     an der Kante") sitzt als `inset`-`box-shadow` auf derselben
+     Tönungs-Ebene wie `--glass-sheen`. */
+  --glass-distortion: url(#apx-glass-distortion);
+  --glass-edge-shadow: inset 1px 1px 1px 0 rgb(255 255 255 / 14%), inset -1px -1px 1px 0 rgb(255 255 255 / 8%);
+  /* Lesbarkeitsschutz (Phase 26, siehe `DECISIONS.md` ADR-0056): seit
+     die Kopfzeile schwebt und Dialoge/Menus echte Fotofarbe
+     durchlassen, steht heller Text zeitweise vor einem HELLEN Foto
+     (real an einem eigenen Screenshot aufgefallen: der Platzhaltertext
+     der Befehlspalette vor einem Sonnenuntergang). Ein dezenter
+     Schlagschatten haelt den Kontrast, ohne die Glasoptik ueber
+     dunklem Grund zu veraendern. */
+  --glass-text-shadow: 0 1px 2px rgb(0 0 0 / 45%);
 }
 
 :root[data-theme="light"] {
-  --glass-bg: rgb(255 255 255 / 62%);
-  --glass-bg-strong: rgb(255 255 255 / 80%);
+  --glass-bg: rgb(255 255 255 / 44%);
+  --glass-bg-strong: rgb(255 255 255 / 62%);
   --glass-border: rgb(35 32 25 / 10%);
   --glass-sheen: linear-gradient(
     135deg,
@@ -108,6 +194,9 @@
     rgb(255 255 255 / 0%) 55%,
     rgb(35 32 25 / 4%) 100%
   );
+  --glass-edge-shadow: inset 1px 1px 1px 0 rgb(255 255 255 / 65%), inset -1px -1px 1px 0 rgb(35 32 25 / 6%);
+  /* Hell-Theme: dunkler Text, der Schutz muss deshalb hell sein. */
+  --glass-text-shadow: 0 1px 2px rgb(255 255 255 / 55%);
 }
 
 /* Kontrastmodus (siehe `--color-bg-overlay`s identische Begründung
@@ -115,38 +204,170 @@
    und ein weicher Schleier widersprechen dem. `--glass-blur: 0px`
    deaktiviert den `backdrop-filter` faktisch (eine 0-px-Weichzeichnung
    verändert den Hintergrund nicht mehr sichtbar), `--glass-bg`/
-   `-bg-strong` werden voll deckend. */
+   `-bg-strong` werden voll deckend. `--glass-distortion: none`
+   schaltet zusätzlich die Verzerrung ab (Textschärfe hat hier
+   Vorrang). */
 :root[data-contrast="high"] {
   --glass-bg: var(--color-bg-raised);
   --glass-bg-strong: var(--color-bg-raised);
   --glass-border: var(--color-border);
   --glass-sheen: none;
   --glass-blur: 0px;
+  --glass-distortion: none;
+  --glass-edge-shadow: none;
+  /* Deckende Flaechen brauchen keinen Schlagschatten - und im
+     Kontrastmodus hat maximale Zeichenschaerfe Vorrang. */
+  --glass-text-shadow: none;
 }
 
 /* Die eigentliche Materialoberfläche — ersetzt `bg-bg-raised`/
    `bg-bg-panel` an den wenigen App-Chrome-Stellen aus der Moduldoku
-   oben. Der Schleier (`--glass-sheen`) liegt als zweite
-   `background-image`-Ebene über der Grundfarbe — beide Ebenen derselben
-   Box-`background`, dadurch automatisch und ohne `z-index`-/Stapel-
-   kontext-Klimmzüge hinter jeglichem Inhalt (ein eigenes
-   `::before`-Pseudo-Element für den Schleier hätte hier unnötige
-   Stapelreihenfolge-Fallstricke mit dem `position: relative` der
-   Aufrufer riskiert). */
-.apx-glass {
-  position: relative;
-  background-color: var(--glass-bg);
-  background-image: var(--glass-sheen);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-}
-
+   oben. Zwei Pseudo-Elemente statt der bisherigen einzelnen
+   `background`-Ebene (Phase 25 Nachtrag, siehe DECISIONS.md, aktuelles
+   ADR, PROMPTS.md Prompt 1 für die Herleitung): `::before` trägt
+   AUSSCHLIESSLICH `backdrop-filter`+die SVG-Verzerrung (muss auf einer
+   eigenen, inhaltsleeren Ebene sitzen — `filter` würde sonst auch den
+   echten Inhalt/Text verzerren, nicht nur das, was durchscheint),
+   `::after` trägt die Tönung/den Schleier/die Kantenlicht-Kante. Beide
+   `z-index: -1`/`-2`, `.apx-glass` selbst bekommt `z-index: 0` — nötig,
+   damit die negativen `z-index`-Werte einen EIGENEN, lokalen
+   Stapelkontext bekommen (sonst könnten sie hinter noch weiter außen
+   liegende Geschwisterelemente rutschen statt nur hinter den eigenen
+   Inhalt). `border-radius: inherit` hält beide Ebenen deckungsgleich
+   mit abgerundeten Aufrufern (Dialog/Sheet/Menü), ohne dass jede
+   Aufrufstelle den Radius doppelt pflegen müsste. */
+/* ACHTUNG fuer Aufrufer: diese Klasse setzt `position: relative` (die
+   `::before`/`::after`-Ebenen unten brauchen einen positionierten
+   Vorfahren) — und unlayered CSS wie diese Datei schlaegt Tailwinds
+   `@layer utilities` in der Kaskade grundsaetzlich. Eine Positionierungs-
+   Utility (`absolute`/`fixed`/`sticky`) direkt AUF demselben Element ist
+   deshalb wirkungslos; stattdessen einen aeusseren, ungestylten
+   Positionierungs-Rahmen um die Glasflaeche legen (so macht es
+   `Viewer.tsx`s Zoom-Steuerung). Diese Falle ist in dieser Sitzung
+   dreimal real zugeschlagen: `z-index` beim Ueberlauf-Menue (ADR-0055),
+   `fixed` bei der Kopfzeile (ADR-0055-Nachtrag III, dort gezielt per
+   `header.apx-glass` ueberschrieben) und `absolute` bei der
+   Zoom-Steuerung (ADR-0056). */
+.apx-glass,
 .apx-glass-strong {
   position: relative;
+  text-shadow: var(--glass-text-shadow);
+  /* `isolation: isolate` statt eines hart gesetzten `z-index: 0` —
+     mehrere Aufrufstellen (u. a. `ui/Menu.tsx`s Dropdown) setzen ihr
+     eigenes `z-40`/`z-50` über eine Tailwind-Utility-Klasse auf
+     demselben Element; ein eigener `z-index`-Wert hier würde diesen
+     (durch Tailwind v4s `@layer utilities`, das gegenüber unlayered
+     CSS wie dieser Datei in der Kaskade grundsätzlich NACHRANGIG ist,
+     also niemals gewinnt) unabhängig von der Reihenfolge im
+     Quelltext überschreiben — real als Regression aufgetreten
+     (Überlauf-Menü verschwand hinter dem Hauptinhalt) und hierüber
+     behoben. `isolation: isolate` erzeugt denselben lokalen
+     Stapelkontext für die `::before`/`::after`-Ebenen, ohne den
+     `z-index`-Wert des Elements selbst zu berühren. */
+}
+
+.apx-glass::before,
+.apx-glass-strong::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  border-radius: inherit;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  filter: var(--glass-distortion);
+}
+/* `@supports`-Block statt einer zweiten, direkt danebenstehenden
+   `backdrop-filter`-Deklaration (siehe DECISIONS.md, aktuelles ADR,
+   für den real gefundenen Bug): Vite/Lightning CSS optimiert ein
+   "webkit-präfigiert + Standard, identischer Wert"-Deklarationspaar
+   je nach `build.target` gezielt auf nur eine der beiden Formen
+   herunter — bei `vite.config.ts`s `safari13`-Ziel (nicht-Windows-
+   Build) verschwand dabei die STANDARD-`backdrop-filter`-Eigenschaft
+   komplett aus dem gebauten CSS, obwohl der Quelltext sie enthielt
+   (per `vite build`+Chromium nachgewiesen: `getComputedStyle(...)
+   .backdropFilter` ergab `"none"`, weil im ausgelieferten CSS nur noch
+   `-webkit-backdrop-filter` stand). Ein `@supports`-umschlossener
+   Block wird von Lightning CSS nicht als simples "Duplikat" erkannt
+   und bleibt daher unabhängig vom Build-Ziel erhalten. */
+@supports (backdrop-filter: blur(1px)) {
+  .apx-glass::before,
+  .apx-glass-strong::before {
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  }
+}
+
+.apx-glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background-color: var(--glass-bg);
+  background-image: var(--glass-sheen);
+  box-shadow: var(--glass-edge-shadow);
+}
+
+.apx-glass-strong::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
   background-color: var(--glass-bg-strong);
   background-image: var(--glass-sheen);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: var(--glass-edge-shadow);
+}
+
+/* Phase 25 Nachtrag III: dieselbe Kaskaden-Falle wie beim `z-index`-Fund
+   oben (Kommentar bei `.apx-glass`) — `Header.tsx` setzt `fixed` über
+   eine Tailwind-Utility-Klasse (`@layer utilities`, in Tailwind v4
+   gegenüber unlayered CSS wie dieser Datei grundsätzlich NACHRANGIG),
+   das gemeinsame `.apx-glass` oben setzt aber `position: relative`
+   unlayered — ohne diese gezielte Gegenregel würde die Kopfzeile
+   trotz `fixed inset-x-0 top-0` weiterhin `position: relative`
+   bleiben (real gemessen: `getComputedStyle(header).position` ergab
+   `"relative"` statt `"fixed"`, die Überlagerung über den Fotos
+   funktionierte dadurch überhaupt nicht). `header.apx-glass` hat
+   höhere Selektor-Spezifität (Element+Klasse) als `.apx-glass` allein
+   und gewinnt deshalb unabhängig von der Ebenen-/Reihenfolge-Frage —
+   dieselbe Lösung wie `isolation: isolate` dort, nur diesmal über
+   Spezifität statt eine Eigenschaft zu vermeiden, weil hier (anders
+   als bei `z-index`) der Wert selbst wirklich `fixed` sein MUSS. */
+header.apx-glass {
+  position: fixed;
+}
+
+/* "Liquid"-Knopf-Mechanik (Phase 25 Nachtrag, siehe DECISIONS.md,
+   aktuelles ADR + PROMPTS.md Prompt 2s `LiquidButton`) — für die
+   Hauptmenü-Fläche (Kopfzeile: Ansicht-Segmentgruppe, Import-Knopf):
+   eine elastische, leicht überschwingende Hover-Skalierung
+   (`cubic-bezier(0.175, 0.885, 0.32, 2.2)`, dieselbe Kurve wie im
+   Referenz-Prompt) statt der linearen/gedämpften Standardkurve, die
+   der Rest der App für die "Subtil"-Hover-Stufe nutzt (siehe
+   `[role="button"]:hover` weiter unten) — bewusst NUR für diese
+   wenigen, immer sichtbaren Haupt-Navigationsknöpfe reserviert, nicht
+   flächendeckend (sonst verliert die Geste ihre Bedeutung als
+   "das hier ist der Hauptweg durch die App"). `.apx-btn-liquid-active`
+   ergänzt die bereits bestehende `bg-accent/10 text-accent`-Tönung um
+   dieselbe Kanten-Lichtkante wie die Glasflächen (`--glass-edge-
+   shadow`) — liest sich dadurch als eigene kleine "Glaspille", nicht
+   nur als eingefärbter Hintergrund. */
+.apx-btn-liquid {
+  transition:
+    transform var(--duration-base) cubic-bezier(0.175, 0.885, 0.32, 2.2),
+    box-shadow var(--duration-base) ease,
+    background-color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease,
+    color var(--duration-fast) ease;
+}
+.apx-btn-liquid:hover {
+  transform: scale(1.06);
+}
+.apx-btn-liquid:active {
+  transform: scale(0.94);
+}
+.apx-btn-liquid-active {
+  box-shadow: var(--glass-edge-shadow);
 }
 
 * {
@@ -162,7 +383,32 @@ body,
 }
 
 body {
-  background: var(--color-bg-base);
+  /* Phase 25 Nachtrag (siehe DECISIONS.md, aktuelles ADR): "Liquid
+     Glass"-Rückgrat, das bisher fehlte. `.apx-glass`s `backdrop-filter:
+     blur()+saturate()` verzerrt/sättigt, was hinter ihm liegt — bei
+     einer rein einfarbigen Fläche (wie es `--color-bg-base` bis hier
+     allein war) gibt es dahinter buchstäblich nichts zu verzerren, ein
+     Weichzeichner über einer flachen Fläche bleibt dieselbe flache
+     Fläche. Genau das erklärt, warum Kopfzeile/Paletten trotz aktivem
+     `.apx-glass` wie schlichte, deckende Flächen statt wie Glas
+     aussahen (sichtbar geprüft per Screenshot, nicht nur vermutet) —
+     unabhängig davon, wie stark `--glass-blur`/`-saturate` gesetzt
+     sind. Feste, sehr gedämpfte Akzent-/Sekundärfarb-Glühflächen
+     (`background-attachment: fixed`, bleiben beim Scrollen ortsfest
+     hinter der Kopfzeile) geben dem Weichzeichner etwas zum Greifen —
+     dasselbe Prinzip, das macOS/visionOS nutzen (dort: Verwischen des
+     Schreibtischhintergrunds; hier, da die App keinen eigenen
+     Hintergrund hat, ein bewusst eigener, sehr leiser Farbwasch statt
+     eines echten Hintergrundbilds). Bewusst gedämpft (`--glow-*`
+     unten) statt eines auffälligen Verlaufs — die App bleibt in erster
+     Linie ein neutraler Rahmen um Fotos, kein eigenes buntes Motiv. */
+  background-color: var(--color-bg-base);
+  background-image:
+    radial-gradient(ellipse 900px 500px at 8% -10%, var(--glow-accent), transparent 60%),
+    radial-gradient(ellipse 700px 480px at 96% 4%, var(--glow-secondary), transparent 60%),
+    radial-gradient(ellipse 800px 600px at 50% 108%, var(--glow-tertiary), transparent 65%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
   color: var(--color-text-primary);
   font-family: var(--font-sans);
 }
@@ -202,6 +448,13 @@ body {
   --color-success: #4f8a4f;
   --color-bg-overlay: rgb(40 36 28 / 40%);
 
+  /* Dieselbe Glüh-Idee wie im Dunkel-Theme, nur wärmer/heller
+     kalibriert (dunkle Glühflecken auf hellem Grund statt heller auf
+     dunklem) — sonst identische Begründung, siehe `body`s Moduldoku. */
+  --glow-accent: rgb(61 118 168 / 6%);
+  --glow-secondary: rgb(192 80 58 / 4%);
+  --glow-tertiary: rgb(79 138 79 / 4%);
+
   /* Dieselbe Begründung wie die dunklen Schatten-Overrides oben, nur
      umgekehrt: die verstärkten dunkelmodus-tauglichen Schattenwerte
      wären auf hellem Grund zu hart — hier näher an Tailwinds sanfteren
@@ -210,6 +463,7 @@ body {
   --shadow-md: 0 4px 10px -3px rgb(35 32 25 / 18%), 0 2px 4px -2px rgb(35 32 25 / 12%);
   --shadow-lg: 0 10px 22px -6px rgb(35 32 25 / 20%), 0 4px 8px -4px rgb(35 32 25 / 14%);
   --shadow-xl: 0 20px 38px -10px rgb(35 32 25 / 22%), 0 8px 14px -6px rgb(35 32 25 / 15%);
+  --shadow-2xl: 0 28px 52px -10px rgb(35 32 25 / 26%), 0 12px 22px -8px rgb(35 32 25 / 18%);
 }
 
 /* Barrierefreiheit (Phase 10 Schritt 6, siehe FEATURES.md UI-Anforderungen)
@@ -234,6 +488,15 @@ body {
      maximale Lesbarkeit, ein durchscheinender Dialog-Hintergrund
      würde dem entgegenlaufen. */
   --color-bg-overlay: #000000;
+  /* Der Glüh-Farbwasch (siehe `body`s Moduldoku) dient einzig dazu,
+     `.apx-glass`s Weichzeichner etwas zum Verzerren zu geben — im
+     Kontrastmodus ist `--glass-blur` bereits auf `0px` gesetzt (der
+     Weichzeichner wirkt also gar nicht mehr), ein sichtbarer Farbfleck
+     ohne Weichzeichner wäre dann nur noch ein unmotivierter Farbstich
+     auf einer sonst bewusst schwarz/weißen Fläche. */
+  --glow-accent: transparent;
+  --glow-secondary: transparent;
+  --glow-tertiary: transparent;
 }
 
 /* Reduzierte Bewegung: sowohl die Betriebssystem-Einstellung
@@ -368,6 +631,194 @@ button:not(:disabled):active {
 .apx-grid-cell-in {
   animation: apx-grid-cell-in var(--duration-base) cubic-bezier(0, 0, 0.2, 1);
 }
+
+/* Schimmer-Überzug während KI-Bearbeitung am aktuell im Viewer gezeigten
+   Foto (Phase 23 Nachtrag, siehe DECISIONS.md ADR-0051-Nachtrag) —
+   `Viewer.tsx` blendet dieses `<div>` über dem Bild ein, solange
+   `selectCurrentPhotoAiProcessing` (store/index.ts) `true` liefert. Eine
+   reine CSS-Animation (kein GSAP) genügt hier, weil nur eine einzige
+   Instanz gleichzeitig existiert; reduzierte Bewegung kappt
+   `animation-duration` bereits oben global auf ~0 (der Überzug bleibt
+   dann als stehende, halbtransparente Fläche sichtbar statt zu
+   "wandern" — weiterhin ein klares Signal, nur ohne Bewegung). */
+@keyframes apx-ai-shimmer-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.apx-ai-shimmer {
+  background: linear-gradient(
+    100deg,
+    transparent 35%,
+    color-mix(in srgb, var(--color-accent) 30%, transparent) 50%,
+    transparent 65%
+  );
+  animation: apx-ai-shimmer-sweep 1.6s ease-in-out infinite;
+}
+
+/* Phase 24 — "mindestens 10 neue Animationen" (siehe DECISIONS.md
+   ADR-0052). Reine CSS-`@keyframes` statt GSAP für alle hier, weil
+   jede einzelne entweder (a) an eine `key`-Neumontage oder Klassen-
+   Umschaltung gebunden ist (braucht keine JS-Timeline) oder (b) — wie
+   der Heatmap-Puls — dauerhaft im Hintergrund läuft, ohne dass ein
+   Interaktions-Ereignis sie auslösen müsste. Reduzierte Bewegung kappt
+   `animation-duration` weiterhin global auf ~0 (siehe oben). */
+
+/* 1) Bewertungssterne: kurzer "Pop"-Ausschlag beim tatsächlichen
+   Wertwechsel (RatingFlagColor.tsx). */
+@keyframes apx-star-pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.45);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.apx-star-pop {
+  animation: apx-star-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 2) Heatmap-"Atmen" auf der flachen Karte: sehr sanfte, dauerhafte
+   Puls-Filterung direkt auf dem von `leafletHeatmap.ts` erzeugten
+   Canvas (eigene, dedizierte `apx-photo-heat-layer`-Klasse dort) —
+   vermittelt "lebendige Daten" statt einer toten, statischen Fläche
+   (Nutzer-Rückmeldung "keine gute Heatmap"). Bewusst NICHT über diese
+   CSS-Route auf dem Globus (`GlobeView.tsx`): dort zeichnen Kugel,
+   Glüh-Rand UND Heatmap-Blobs auf ein-und-dasselbe Canvas-Element — ein
+   `filter` hier würde die ganze Kugel mitpulsieren lassen, nicht nur
+   die Blobs. Der Globus bekommt stattdessen einen echten, im
+   Zeichen-Code selbst berechneten Puls (siehe dortiger `heatPulse`). */
+@keyframes apx-heat-breathe {
+  0%,
+  100% {
+    filter: brightness(1) saturate(1);
+  }
+  50% {
+    filter: brightness(1.08) saturate(1.15);
+  }
+}
+.apx-photo-heat-layer {
+  animation: apx-heat-breathe 3.2s ease-in-out infinite;
+}
+
+/* 3) Karten-Infobox (`MapView.tsx`): Eintritts-Animation statt
+   sofortigem Erscheinen beim Wechsel von Globus zu Karte. */
+@keyframes apx-map-panel-in {
+  from {
+    opacity: 0;
+    transform: translate(12px, -8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+}
+.apx-map-panel-in {
+  animation: apx-map-panel-in var(--duration-base) cubic-bezier(0, 0, 0.2, 1);
+}
+
+/* 4) GPS-Platzierungshinweis (`MapView.tsx`): pulsierender Akzent-Text
+   statt statischer Anzeige, solange auf einen Kartenklick gewartet
+   wird — dieselbe "wartet auf Eingabe"-Sprache wie ein blinkender
+   Cursor. */
+@keyframes apx-gps-hint-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+.apx-gps-hint-pulse {
+  animation: apx-gps-hint-pulse 1.4s ease-in-out infinite;
+}
+
+/* 5) Globus → Karte: sanfter Überblend-Wechsel statt hartem
+   Komponentenaustausch (`MapView.tsx`). */
+@keyframes apx-map-mode-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.apx-map-mode-in {
+  animation: apx-map-mode-in var(--duration-slow) ease-out;
+}
+
+/* 6) Befehlspalette (`CommandPalette.tsx`): Ergebniszeilen fliegen
+   nacheinander leicht herein statt aller gleichzeitig zu erscheinen —
+   `animation-delay` je Zeile über eine Inline-`style`-Eigenschaft
+   gesetzt (siehe Aufrufer), gedeckelt auf die ersten Zeilen, damit eine
+   lange Trefferliste nicht spürbar "nachtropft". */
+@keyframes apx-stagger-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.apx-stagger-in {
+  animation: apx-stagger-in var(--duration-fast) cubic-bezier(0, 0, 0.2, 1) both;
+}
+
+/* 7) Export-/Stapelverarbeitung-Fortschrittsbalken: animiert die
+   Breitenänderung, statt bei jedem Fortschritts-Tick hart zu
+   springen (`ExportDialog.tsx`/`BatchConsoleDialog.tsx`). */
+.apx-progress-fill {
+  transition: width var(--duration-base) cubic-bezier(0, 0, 0.2, 1);
+}
+
+/* 8) Einstellungen-Dialog: Reiterinhalt blendet beim Wechsel sanft ein
+   statt hart zu springen (`SettingsDialog.tsx`). */
+@keyframes apx-tab-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.apx-tab-panel-in {
+  animation: apx-tab-panel-in var(--duration-fast) ease-out;
+}
+
+/* 9) Automatischer Import (beobachteter Ordner): kurze Hervorhebung
+   der Kopfzeilen-Statuszeile, sobald ein Hintergrund-Import beginnt,
+   statt eines stillen Texterscheinens (`Header.tsx`). */
+@keyframes apx-notice-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.apx-notice-in {
+  animation: apx-notice-in var(--duration-base) cubic-bezier(0, 0, 0.2, 1);
+}
+
+/* 10) Filmstreifen: sanftes Scrollen zur ausgewählten Kachel statt
+   eines Sprungs — über `@tanstack/react-virtual`s eigene
+   `scrollToIndex(index, { behavior: "smooth" })`-API in `Filmstrip.tsx`
+   umgesetzt (kein CSS `scroll-behavior` möglich, der Virtualizer setzt
+   die Scroll-Position programmatisch, nicht per Sprunglink/Anker). */
 
 /* Einklappbare Regler-Abschnitte (Phase 18-Nachtrag "UI übersichtlicher/
    weniger Scrollen", siehe DECISIONS.md) — `DevelopPanel.tsx`/

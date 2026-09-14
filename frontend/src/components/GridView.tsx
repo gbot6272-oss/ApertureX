@@ -191,7 +191,7 @@ export function GridView({ variant = "grid" }: GridViewProps) {
                       onMouseLeave={() => isOverview && setHoveredPhotoId((current) => (current === photo.id ? null : current))}
                       title={photo.missing ? `${photo.filename} (Datei fehlt)` : photo.filename}
                       style={{ width: cellSize, height: cellSize }}
-                      className={`apx-grid-cell-in relative shrink-0 cursor-pointer overflow-hidden rounded border-2 text-left ${
+                      className={`apx-grid-cell-in relative shrink-0 cursor-pointer overflow-hidden rounded border-2 text-left transition-transform duration-[var(--duration-fast)] hover:z-10 hover:scale-[1.04] hover:shadow-lg ${
                         isFocused ? "border-accent" : isSelected ? "border-accent/50" : "border-transparent hover:border-border"
                       } ${photo.missing ? "opacity-40" : ""}`}
                     >

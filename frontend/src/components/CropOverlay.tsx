@@ -1,3 +1,13 @@
+import {
+  diagonalMethodLines,
+  goldenRatioLines,
+  goldenSpiralPath,
+  orientLine,
+  thirdsLines,
+  triangleLines,
+  type GridOrientation,
+  type Line,
+} from "../lib/compositionGrid";
 import { useCallback, useRef, useState } from "react";
 
 import type { CropRect, GridOverlay } from "../lib/edl";
@@ -12,6 +22,8 @@ interface CropOverlayProps {
   imageHeight: number;
   crop: CropRect;
   overlay: GridOverlay;
+  /** Drehung/Spiegelung des Rasters (Phase 32). */
+  orientation: GridOrientation;
   /** `null` = freie Seitenverhältniswahl. */
   aspectRatio: number | null;
   onChange: (next: CropRect) => void;
@@ -76,6 +88,7 @@ export function CropOverlay({
   imageHeight,
   crop,
   overlay,
+  orientation,
   aspectRatio,
   onChange,
   onCommit,
@@ -176,7 +189,7 @@ export function CropOverlay({
         className="pointer-events-auto cursor-move border-2 border-white/90 outline-none focus:border-accent"
         style={rectStyle}
       >
-        <GridOverlayLines overlay={overlay} />
+        <GridOverlayLines overlay={overlay} orientation={orientation} />
         {(["nw", "ne", "sw", "se"] as const).map((corner) => (
           <div
             key={corner}
@@ -201,51 +214,53 @@ export function CropOverlay({
   );
 }
 
-function GridOverlayLines({ overlay }: { overlay: GridOverlay }) {
+function GridOverlayLines({
+  overlay,
+  orientation,
+}: {
+  overlay: GridOverlay;
+  orientation: GridOrientation;
+}) {
   if (overlay === "None") return null;
 
-  const lines: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
-  if (overlay === "Thirds") {
-    lines.push({ x1: 33.33, y1: 0, x2: 33.33, y2: 100 }, { x1: 66.67, y1: 0, x2: 66.67, y2: 100 });
-    lines.push({ x1: 0, y1: 33.33, x2: 100, y2: 33.33 }, { x1: 0, y1: 66.67, x2: 100, y2: 66.67 });
-  } else if (overlay === "GoldenRatio") {
-    const a = 38.2;
-    const b = 61.8;
-    lines.push({ x1: a, y1: 0, x2: a, y2: 100 }, { x1: b, y1: 0, x2: b, y2: 100 });
-    lines.push({ x1: 0, y1: a, x2: 100, y2: a }, { x1: 0, y1: b, x2: 100, y2: b });
-  } else if (overlay === "Diagonals") {
-    // Vereinfacht auf zwei Ecke-zu-Ecke-Linien statt der vollständigen
-    // Vier-Linien-Diagonalmethode (siehe Moduldoku).
-    lines.push({ x1: 0, y1: 0, x2: 100, y2: 100 }, { x1: 100, y1: 0, x2: 0, y2: 100 });
-  } else if (overlay === "Triangles") {
-    lines.push(
-      { x1: 0, y1: 0, x2: 100, y2: 100 },
-      { x1: 0, y1: 100, x2: 55, y2: 45 },
-      { x1: 100, y1: 0, x2: 45, y2: 55 },
-    );
-  } else if (overlay === "Spiral") {
-    // Vereinfachte Annäherung: verschachtelte, nach dem Goldenen
-    // Schnitt abnehmende Rechtecke statt einer echten logarithmischen
-    // Spiralkurve (siehe Moduldoku).
-    let x1 = 0;
-    let y1 = 0;
-    let x2 = 100;
-    let y2 = 100;
-    for (let i = 0; i < 4; i += 1) {
-      lines.push({ x1, y1, x2, y2: y1 }, { x1: x2, y1, x2, y2 }, { x1: x2, y1: y2, x2: x1, y2 }, { x1, y1: y2, x2: x1, y2: y1 });
-      const w = x2 - x1;
-      const h = y2 - y1;
-      if (i % 2 === 0) {
-        x1 += w * 0.618;
-      } else {
-        y1 += h * 0.618;
-      }
-    }
-  }
+  // Phase 32: Die Geometrie liegt jetzt in `lib/compositionGrid.ts` und
+  // ist dort getestet. Drei Dinge sind dabei echt besser geworden und
+  // nicht nur verschoben:
+  //
+  // - Die Spirale ist eine Kurve statt eines Kästchengerüsts. Man legt
+  //   sie an, um zu sehen, ob das Auge dem Schwung zum Motiv folgt —
+  //   dafür braucht es die Kurve.
+  // - Die Diagonalmethode zieht sechs Linien statt zwei; erst deren
+  //   Schnittpunkte sind die Platzierungspunkte, um die es geht.
+  // - Alle Raster lassen sich drehen und spiegeln. Ohne das sitzt die
+  //   Spirale fest in einer Ecke und ist in der Hälfte der Fälle
+  //   unbrauchbar.
+  const lines: Line[] =
+    overlay === "Thirds"
+      ? thirdsLines()
+      : overlay === "GoldenRatio"
+        ? goldenRatioLines()
+        : overlay === "Diagonals"
+          ? diagonalMethodLines()
+          : overlay === "Triangles"
+            ? triangleLines()
+            : [];
+
+  // Drittel und Goldener Schnitt sind punktsymmetrisch — sie zu drehen
+  // ändert nichts, also bleibt die Lage dort ungenutzt.
+  const oriented =
+    overlay === "Thirds" || overlay === "GoldenRatio"
+      ? lines
+      : lines.map((line) => orientLine(line, orientation));
 
   return (
-    <svg className="pointer-events-none absolute inset-0 h-full w-full" preserveAspectRatio="none" viewBox="0 0 100 100">
-      {lines.map((line, index) => (
+    <svg
+      className="pointer-events-none absolute inset-0 h-full w-full"
+      preserveAspectRatio="none"
+      viewBox="0 0 100 100"
+      data-testid="composition-grid"
+    >
+      {oriented.map((line, index) => (
         <line
           key={index}
           x1={line.x1}
@@ -258,6 +273,16 @@ function GridOverlayLines({ overlay }: { overlay: GridOverlay }) {
           vectorEffect="non-scaling-stroke"
         />
       ))}
+      {overlay === "Spiral" ? (
+        <path
+          d={goldenSpiralPath(orientation)}
+          fill="none"
+          stroke="white"
+          strokeOpacity={0.85}
+          strokeWidth={0.4}
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
     </svg>
   );
 }

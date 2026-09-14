@@ -8,6 +8,8 @@ export const en: Record<keyof typeof de, string> = {
   "developPanel.tab.color": "Color",
   "developPanel.tab.details": "Details",
   "developPanel.tab.creative": "Creative",
+  "developPanel.tab.lightOptics": "Optics",
+  "developPanel.tab.imageTools": "On Image",
   "developPanel.tab.history": "History & Tools",
   "developPanel.tabs.label": "Develop sections",
   "masksPanel.tabs.label": "Mask sections",
@@ -57,6 +59,11 @@ export const en: Record<keyof typeof de, string> = {
   "header.overflowMenu": "More functions",
 
   "commands.category.ai": "AI features",
+  "commands.focusMode.on": "Focus mode: hide panels",
+  "commands.focusMode.off": "Exit focus mode: show panels",
+  "commands.lightsOut.on": "Lights out: dim surroundings",
+  "commands.lightsOut.darker": "Lights out: go fully dark",
+  "commands.lightsOut.off": "Lights on: restore surroundings",
   "commands.onboarding": "Show onboarding",
   "commands.cheatsheet": "Show keyboard shortcuts",
   "commands.ai.inpaint": "AI fill",
@@ -132,6 +139,9 @@ export const en: Record<keyof typeof de, string> = {
   "onboarding.tour.next": "Next",
   "onboarding.tour.finish": "Finish",
   "onboarding.tour.stepLabel": "Step {current} of {total}",
+
+  // GlobalBusyIndicator.tsx (Phase 23, ADR-0051)
+  "busyIndicator.label": "Processing…",
 
   "cheatsheet.title": "Keyboard shortcuts",
   "cheatsheet.rebindPrompt": "Press a key…",

@@ -58,6 +58,7 @@ pub struct EffectsParams {
     grain_amount: f32,
     grain_size: f32,
     grain_roughness: f32,
+    grain_midtone_bias: f32,
     _pad: [f32; 2],
 }
 
@@ -74,6 +75,7 @@ impl EffectsParams {
             grain_amount: adjustment.grain_amount,
             grain_size: adjustment.grain_size,
             grain_roughness: adjustment.grain_roughness,
+            grain_midtone_bias: adjustment.grain_midtone_bias,
             _pad: [0.0; 2],
         }
     }
@@ -137,7 +139,16 @@ fn process_pixel(
     let raw_noise = noise_at(bx, by);
     let exponent = (1.0 - (params.grain_roughness - 50.0) / 50.0 * ROUGHNESS_RANGE).max(0.05);
     let shaped_noise = raw_noise.signum() * raw_noise.abs().powf(exponent);
-    let grain_delta = shaped_noise * (params.grain_amount / 100.0) * GRAIN_STRENGTH;
+    // Mitteltongewichtung (Phase 31 Schritt 9): `4·L·(1−L)` hat sein
+    // Maximum 1 genau bei mittlerem Grau und fällt zu Schwarz und Weiß
+    // hin auf 0 — die einfachste Kurve mit genau der Form, die die
+    // Dichtekurve eines Films beschreibt. `bias = 0` mischt sie
+    // vollständig heraus und ergibt exakt das bisherige, gleichmäßige
+    // Korn (bit-genau, siehe Test).
+    let midtone_weight = 4.0 * luminance * (1.0 - luminance);
+    let bias = (params.grain_midtone_bias / 100.0).clamp(0.0, 1.0);
+    let grain_weight = 1.0 + bias * (midtone_weight - 1.0);
+    let grain_delta = shaped_noise * (params.grain_amount / 100.0) * GRAIN_STRENGTH * grain_weight;
 
     let total_delta = vignette_delta + grain_delta;
     (
@@ -675,6 +686,11 @@ mod tests {
             halation_amount: 0.0,
             halation_radius: 30.0,
             halation_hue: 15.0,
+            // Bewusst NICHT neutral: mit 0.0 liefe die neue
+            // Mitteltongewichtung im Shader hier gar nicht mit, und der
+            // GPU/CPU-Gleichlauf waere fuer genau die neue Zeile
+            // ungeprueft.
+            grain_midtone_bias: 60.0,
         };
         let pixels = crate::test_support::gray_gradient(20 * 15);
         let cpu = apply_cpu(&pixels, 20, 15, &adjustment);
@@ -683,5 +699,114 @@ mod tests {
         for (c, g) in cpu.iter().zip(gpu.iter()) {
             assert!((c - g).abs() < 1e-3, "CPU={c} GPU={g}");
         }
+    }
+
+    // --- Mitteltonbetontes Korn (Phase 31 Schritt 9) -------------------
+
+    /// Einfarbiges Bild mit gegebener Helligkeit.
+    fn flat(width: u32, height: u32, value: f32) -> Vec<f32> {
+        vec![value; (width * height * 3) as usize]
+    }
+
+    /// Mittlere Abweichung vom Ausgangswert — ein Maß dafür, wie stark
+    /// das Korn an dieser Helligkeit zuschlägt.
+    fn grain_strength_at(luminance: f32, bias: f32) -> f32 {
+        let (w, h) = (24, 24);
+        let input = flat(w, h, luminance);
+        let adjustment = EffectsAdjustment {
+            grain_amount: 100.0,
+            grain_midtone_bias: bias,
+            ..EffectsAdjustment::NEUTRAL
+        };
+        let output = apply_cpu(&input, w, h, &adjustment);
+        let sum: f32 = output
+            .iter()
+            .zip(input.iter())
+            .map(|(out, inp)| (out - inp).abs())
+            .sum();
+        sum / output.len() as f32
+    }
+
+    /// **Rückwärtskompatibilität, bit-genau.** Der Neutralwert `0.0`
+    /// muss exakt dasselbe Ergebnis liefern wie vor der Erweiterung —
+    /// sonst sähe jedes Foto, das bisher Korn benutzt, plötzlich anders
+    /// aus. Geprüft gegen die Formel ohne Gewichtung, nicht gegen ein
+    /// ungefähres Auge.
+    #[test]
+    fn a_bias_of_zero_reproduces_the_previous_uniform_grain_bit_for_bit() {
+        let (w, h) = (16, 16);
+        let input: Vec<f32> = (0..(w * h * 3)).map(|i| (i % 97) as f32 / 97.0).collect();
+        let adjustment = EffectsAdjustment {
+            grain_amount: 80.0,
+            grain_size: 30.0,
+            grain_roughness: 40.0,
+            grain_midtone_bias: 0.0,
+            ..EffectsAdjustment::NEUTRAL
+        };
+        let with_field = apply_cpu(&input, w, h, &adjustment);
+
+        // Die alte Formel: Gewicht fest auf 1, hier von Hand nachgebaut.
+        let params = EffectsParams::new(w, h, &adjustment);
+        let mut legacy = Vec::with_capacity(input.len());
+        for index in 0..(w * h) as usize {
+            let px = (index % w as usize) as u32;
+            let py = (index / w as usize) as u32;
+            let base = index * 3;
+            let block = ((params.grain_size / 10.0).round().max(1.0)) as i32;
+            let raw_noise = noise_at((px as i32) / block, (py as i32) / block);
+            let exponent =
+                (1.0 - (params.grain_roughness - 50.0) / 50.0 * ROUGHNESS_RANGE).max(0.05);
+            let shaped = raw_noise.signum() * raw_noise.abs().powf(exponent);
+            let delta = shaped * (params.grain_amount / 100.0) * GRAIN_STRENGTH;
+            for channel in 0..3 {
+                legacy.push((input[base + channel] + delta).clamp(0.0, 1.0));
+            }
+        }
+        assert_eq!(with_field, legacy);
+    }
+
+    /// Der Kern der Sache: mit Gewichtung trifft das Korn die
+    /// Mitteltöne deutlich stärker als tiefes Schwarz oder Weiß.
+    #[test]
+    fn weighted_grain_hits_the_midtones_hardest() {
+        let shadow = grain_strength_at(0.02, 100.0);
+        let midtone = grain_strength_at(0.5, 100.0);
+        let highlight = grain_strength_at(0.98, 100.0);
+
+        assert!(
+            midtone > shadow * 5.0,
+            "Mittelton {midtone}, Schatten {shadow}"
+        );
+        assert!(
+            midtone > highlight * 5.0,
+            "Mittelton {midtone}, Lichter {highlight}"
+        );
+    }
+
+    /// Ohne Gewichtung ist das Korn über den Tonwertumfang gleich stark
+    /// — genau das Verhalten, das nach digitalem Rauschen aussieht, und
+    /// genau der Vergleichsmaßstab für den Test darüber.
+    #[test]
+    fn unweighted_grain_is_the_same_everywhere() {
+        let shadow = grain_strength_at(0.35, 0.0);
+        let midtone = grain_strength_at(0.5, 0.0);
+        assert!(
+            (midtone - shadow).abs() < 1e-6,
+            "Mittelton {midtone}, Schatten {shadow}"
+        );
+    }
+
+    /// Ein aus einer älteren Fassung gelesenes EDL hat das Feld nicht —
+    /// es muss als 0.0 ankommen, nicht als Fehler.
+    #[test]
+    fn an_edl_without_the_field_reads_as_uniform_grain() {
+        let json = r#"{
+            "post_vignette_amount": 0.0, "post_vignette_midpoint": 50.0,
+            "post_vignette_roundness": 0.0, "post_vignette_feather": 50.0,
+            "post_vignette_highlights": 0.0, "grain_amount": 40.0,
+            "grain_size": 25.0, "grain_roughness": 50.0
+        }"#;
+        let parsed: EffectsAdjustment = serde_json::from_str(json).expect("lesbar");
+        assert_eq!(parsed.grain_midtone_bias, 0.0);
     }
 }

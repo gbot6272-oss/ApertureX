@@ -933,14 +933,24 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           "Goldene Stunde",
           "Film Noir",
           "Pastell",
-        ].map((name) => ({
+        ].map((name, index) => ({
           name,
           size: 2,
           table: identityCube,
           domain_min: [0, 0, 0],
           domain_max: [1, 1, 1],
+          // Phase 25: fester, eindeutiger Test-Platzhalter statt des
+          // echten Inhalts-Hashs (`compute_lut_id`) — reicht hier, da
+          // der Test-Stub `register_lut_filter_table` unten ohnehin
+          // keinen echten Cache führt.
+          id: `test-builtin-lut-${index}`,
         }));
       }
+      // Phase 25 (siehe DECISIONS.md ADR-0053): wärmt im echten Backend
+      // `AppState::lut_table_cache` vor — im Test-Stub gibt es keinen
+      // Server-Cache, also reicht ein reines No-op.
+      case "register_lut_filter_table":
+        return null;
       case "create_new_catalog":
       case "switch_active_catalog":
       case "run_catalog_optimize":
@@ -1443,6 +1453,34 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "estimate_photo_depth":
         return fixtures.depthMapResult;
 
+      // ---- Kreativ-Werkzeuge (Phase 27) — die eigentliche Bildmathematik
+      // ist in `stages::creative`s 15 Rust-Unit-Tests abgedeckt; hier nur
+      // die beiden Vorbereitungs-Befehle. -------------------------------
+      case "segment_photo_subject":
+        return {
+          bitmapWidth: 4,
+          bitmapHeight: 4,
+          // 16 Byte: obere Haelfte Motiv (255), untere Hintergrund (0).
+          alphaBase64: btoa(String.fromCharCode(...Array.from({ length: 16 }, (_, i) => (i < 8 ? 255 : 0)))),
+        };
+
+      case "compute_reference_color_stats":
+        return { lMean: 0.52, lStd: 0.21, aMean: 0.04, aStd: 0.09, bMean: -0.03, bStd: 0.08 };
+
+      // ---- Licht & Optik (Phase 28) — dieselbe Aufteilung: die
+      // Bildmathematik deckt `stages::light_optics`s Rust-Unit-Tests ab,
+      // hier nur die beiden Vorbereitungs-Befehle. ---------------------
+      case "segment_photo_sky":
+        return {
+          bitmapWidth: 4,
+          bitmapHeight: 4,
+          // 16 Byte: obere Haelfte Himmel (255), untere Boden (0).
+          alphaBase64: btoa(String.fromCharCode(...Array.from({ length: 16 }, (_, i) => (i < 8 ? 255 : 0)))),
+        };
+
+      case "compute_reference_tone_stats":
+        return { deciles: [0.05, 0.11, 0.18, 0.26, 0.37, 0.49, 0.63, 0.78, 0.92] };
+
       // ---- KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — die
       // echte fast_neural_style-Inferenz ist bereits in
       // `apx-ai::style_transfer`s Rust-Unit-Tests abgedeckt. ---------------
@@ -1781,6 +1819,31 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         // liefert konsistent "abgebrochen" statt eines unbekannten-
         // Befehl-Fehlers, falls doch einmal geklickt wird.
         return null;
+
+      // Video-Stabilisierung (Phase 17 Schritt 9, siehe `DECISIONS.md`
+      // ADR-0062). Das echte Gegenstück lässt `ffmpeg` das Video zweimal
+      // durchlaufen; hier entsteht nur das Katalog-Ergebnis — ein neues
+      // Video im selben Ordner, wie es `register_video_result_as_new_photo`
+      // drüben anlegt. Damit prüft der Test genau das, was im Browser
+      // überhaupt prüfbar ist: dass die Regler die richtigen Argumente
+      // schicken und dass die Oberfläche auf das neue Video umschaltet.
+      case "stabilize_video": {
+        const source = findPhoto(args.photoId as string);
+        if (!source) throw new Error(`Test-Stub: Video '${args.photoId}' nicht gefunden`);
+        const result: MockPhoto = {
+          ...source,
+          id: `${source.id}-stabilisiert`,
+          filename: source.filename.replace(/(\.[^.]+)$/, "_stabilisiert$1"),
+        };
+        const fixtures = w.__mockFixtures as { photosByFolder: Record<string, MockPhoto[]> };
+        for (const folderId of Object.keys(fixtures.photosByFolder)) {
+          if (fixtures.photosByFolder[folderId].some((p) => p.id === source.id)) {
+            fixtures.photosByFolder[folderId] = [...fixtures.photosByFolder[folderId], result];
+            break;
+          }
+        }
+        return clonePhoto(result);
+      }
 
       default:
         throw new Error(`Test-Stub: unbekannter invoke-Befehl "${cmd}"`);

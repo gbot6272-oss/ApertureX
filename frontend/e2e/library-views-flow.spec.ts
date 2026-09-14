@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installTauriMock, openOverflowMenu } from "./tauri-mock";
+import { getMockInvokeLog, installTauriMock, openOverflowMenu } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -66,5 +66,49 @@ test.describe("Bibliotheks-Ansichten (Phase 9 Schritt 3)", () => {
 
     await expect(page.getByLabel("Vergleichsansicht").getByText(PHOTO_A.filename)).toBeVisible();
     await expect(page.getByLabel("Vergleichsansicht").getByText(PHOTO_B.filename)).toBeVisible();
+  });
+
+  /**
+   * Phase 31 Schritt 8: Sichten per Tastatur. Die Vergleichsansicht gibt
+   * es seit Phase 9, sie konnte bis hierher aber gar nichts mit der
+   * Tastatur — bei neun Fotos hiess das neun Mal zielen und klicken.
+   *
+   * "Aus dem Vergleich nehmen" ist ausdruecklich KEIN Loeschen: das Foto
+   * bleibt im Katalog und behaelt seine Bewertung, es verschwindet nur
+   * aus diesem Vergleich. So arbeitet man sich auf den einen Behalter
+   * herunter.
+   */
+  test("Vergleichsansicht laesst sich per Tastatur sichten und aussortieren", async ({ page }) => {
+    await installTauriMock(page, { folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 2 }], photosByFolder: { [FOLDER_ID]: [PHOTO_A, PHOTO_B] } });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Urlaub/ }).click();
+    await page.getByRole("img", { name: PHOTO_A.filename }).click();
+    await page.getByRole("img", { name: PHOTO_B.filename }).click({ modifiers: ["Control"] });
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Vergleichen", exact: true }).click();
+
+    const view = page.getByLabel("Vergleichsansicht");
+    await expect(view).toBeVisible();
+
+    // Der Marker steht auf dem ersten Foto und wandert mit den Pfeiltasten.
+    const active = page.getByTestId("compare-tile-active");
+    await expect(active).toContainText(PHOTO_A.filename);
+    await page.keyboard.press("ArrowRight");
+    await expect(active).toContainText(PHOTO_B.filename);
+
+    // Bewerten per Zahlentaste landet im Katalog.
+    await page.keyboard.press("3");
+    await expect
+      .poll(async () => {
+        const log = await getMockInvokeLog(page);
+        return log.filter((entry) => entry.cmd === "set_photo_rating").length;
+      })
+      .toBeGreaterThan(0);
+
+    // Aussortieren nimmt genau dieses Foto aus dem Vergleich — das
+    // andere bleibt stehen.
+    await page.keyboard.press("Delete");
+    await expect(view.getByText(PHOTO_B.filename)).toHaveCount(0);
+    await expect(view.getByText(PHOTO_A.filename)).toBeVisible();
   });
 });

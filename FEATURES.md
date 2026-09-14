@@ -327,6 +327,8 @@ Vollständige Feature-Liste aus `SPEC.md`, ein Punkt pro Zeile mit Checkbox, Zie
 - [x] Animationen + UI-Sounds (Start-Ladeschirm, Beenden-Übergang, Mikrointeraktionen) — Phase 19 — Status: Fertig (Grundlage, siehe DECISIONS.md ADR-0047; Verdrahtung an jeder einzelnen KI-Verarbeitungsstelle/Drag&Drop-Geste bewusst offen für eine spätere Iteration) — `StartupSplash.tsx` (sich öffnender Iris-Ring statt grauer Fläche beim App-Start, GSAP) + `ShutdownOverlay.tsx` (fängt das Fenster-Schließen ab); `lib/sound.ts` (uisfx-Player-Singleton, 78 semantische Cues, Klangwelt "glass" als Standard, in den Einstellungen an/aus + Lautstärke + Klangwelt umschaltbar) verdrahtet in `Dialog`/`Sheet`/`Menu`/`Tabs` (open/close/expand/collapse/select), Akkordeon-Abschnitte (ein einziger delegierter `toggle`-Listener statt 36 Einzelstellen), Rückgängig/Wiederholen, Foto-Auswahl im Raster, Export (processing/success/error); `GridView.tsx` bekommt eine CSS-Scroll-Reveal-Animation je virtualisierter Kachel. `gsap`/`uisfx` als erste neue Frontend-Laufzeitabhängigkeiten seit ADR-0046 (beide vollständig kostenlos/lizenzfrei, siehe THIRD_PARTY.md) — Netzwerk-Policy dieser Session blockierte jeden getesteten externen Asset-Marktplatz, nur GitHub/npm erreichbar (Phase 20, siehe DECISIONS.md ADR-0048: nach Nutzer-Rückmeldung, dass Phase 19 in der echten App kaum wahrnehmbar wirkte, deutlich verstärkt — Start-Ladeschirm mit 900-ms-Mindestanzeigedauer + doppeltem, größerem Iris-Ring; Hover-/Fokus-Übergänge zusätzlich auf `role="button"`/Formularsteuerelemente/`[tabindex]` statt nur `button`/`a`/`select`/Tab/Menü; `DevelopSlider.tsx` — die mit Abstand meistgenutzten Bedienelemente der App — bekommt erstmals einen eigenen Sound (`"release"`-Cue beim Loslassen); Standard-Lautstärke von 70 % auf 85 % angehoben)
 - [x] Liquid-Glass-Materialoptik + Spotlight-Einführungstour — Phase 21 — Status: Fertig (siehe DECISIONS.md ADR-0049) — neue `--glass-*`-Tokens/`.apx-glass`/`.apx-glass-strong`-Klassen (`index.css`: translucente Fläche + `backdrop-filter` + Glanz-Verlauf, Kontrastmodus deaktiviert Transluzenz vollständig) angewendet auf `Dialog`/`Sheet`/`Menu`/`PaletteFrame` (deckt zentral Sidebar/Presets/Metadaten/Entwickeln/Masken-Panel ab)/`Header.tsx`; `OnboardingTour.tsx` ersetzt die vorherige reine Textlisten-`OnboardingDialog.tsx` durch eine echte Spotlight-Tour (vier Abdunkel-/Weichzeichner-Rechtecke sparen das jeweils per `data-tour="..."` markierte Bedienelement aus, Inline-SVG-Beispielfoto auf der Begrüßungskarte, immer verfügbare Zurück-/Überspringen-Knöpfe); zwei überladene Einstellungen-Hinweistexte gekürzt
 - [x] Editor-Politur: ESC-Schnellmenü, schnelleres Masken-Ziehen, echte Regler-Optik, zehn Farbprofile — Phase 22 — Status: Fertig (siehe DECISIONS.md ADR-0050) — `Escape` öffnet die Befehlspalette (Einstellungen darüber erreichbar), sobald kein Dialog/Overlay offen ist; `developIsLiveDragging` (Phase 20) jetzt auch für `MaskOverlay.tsx`s Ziehgriffe/Pinsel aktiv; eigener `input[type="range"]`-Stil (gefüllter Balken bis zum Wert, Neutralwert-Markierung, Hover-/Halte-Griffskalierung) statt Browser-Standard; fünf neue eingebaute Farbprofile (`builtin_luts.rs`: Vintage-Film, Kino-Blau, Goldene Stunde, Film Noir, Pastell) — zehn insgesamt
+- [x] Echte Bewegung, Runde 2: zentraler Verarbeitungs-Indikator, echte Symbole, Erfolgs-Funke — Phase 23 — Status: Fertig (siehe DECISIONS.md ADR-0051; drei vom Nutzer beigelegte Komponenten-Prompts analysiert, nicht wörtlich kopiert — dieses Projekt ist kein shadcn/Next.js-Projekt, `framer-motion`/`@tsparticles/*` wären redundante/übergroße Zweitabhängigkeiten neben dem bereits etablierten `gsap`) — neue `components/ui/DotLoader.tsx` (dependency-freier Punktraster-Loader, nahezu wörtlich portiert) treibt einen neuen `GlobalBusyIndicator.tsx`: eine neue Store-Auswahl `selectAnyBackgroundTaskRunning` fasst alle 35+ Lade-/Verarbeitungs-Zustände zu einem Boolean zusammen, ein dezenter, unten rechts angedockter Indikator erscheint automatisch, sobald irgendeine KI-/Verarbeitungsoperation läuft (ersetzt keinen bestehenden Text, rein additiv); `lucide-react` (erste Icon-Bibliothek dieses Projekts) ersetzt rohe Unicode-Zeichen (`👁`/`🚫`/`✎`/`⧉`/`×`) in `MasksPanel.tsx`s Masken-/Gruppen-Zeilen, `title`/`aria-label` dabei unverändert; neue `ui/SuccessSpark.tsx` (sechs GSAP-animierte Punkte statt einer vollen Partikel-Engine) beim Export-Abschluss in `ExportDialog.tsx`. **Nachtrag** (siehe DECISIONS.md ADR-0051-Nachtrag): echte Hover-Skalierung/-Schatten auf `GridView`/`Filmstrip`-Kacheln, sanfte Übergänge auf `PresetsPanel`/`Sidebar`-Zeilen; gleitender GSAP-Auswahl-Hintergrund in `ui/Tabs.tsx`; neuer `InlineSpinner` an acht sichtbaren KI-Auslösestellen (KI-Ausfüllen, Sensorflecken, Content-Aware Move/Scale, Entrauschen, Hochskalieren, DNG, Bildranderweiterung); neuer Schimmer-Überzug direkt auf dem im Viewer bearbeiteten Foto (`selectCurrentPhotoAiProcessing`, `apx-ai-shimmer`).
+- [x] Transparenz, Karten-Bugfixes, zehn neue Animationen, mehr Übersicht — Phase 24 — Status: Fertig (siehe DECISIONS.md ADR-0052) — **echter Heatmap-Farbskala-Bug behoben**: `mid` war in `MapView.tsx`/`GlobeView.tsx` identisch mit `cool` (beide `--color-accent`), wodurch die untere (häufigste) Intensitätshälfte keinerlei Farbabstufung zeigte — jetzt echter Blau→Grün→Rot-Dreiklang über `--color-success` als Mittelpunkt (betrifft Globus **und** flache Karte, dieselbe `heatScaleColor`-Funktion); ein vermuteter Koordinaten-Versatz-Bug in `leafletHeatmap.ts` wurde anhand des Leaflet-Quellcodes nachgerechnet und als **kein** tatsächlicher Bug verifiziert (dokumentiert statt stillschweigend "gefixt"); `--glass-bg`/`-bg-strong` in `index.css` deutlich transparenter (62–80 % → 44–62 % Deckkraft), `--glass-blur` angehoben für Lesbarkeit; zehn neue Animationen (Bewertungssterne-Pop, Heatmap-"Atmen" auf Karte+Globus, Karten-Infobox-Eintritt, GPS-Hinweis-Puls, Globus↔Karte-Überblendung, Befehlspalette-Gestaffelt, neuer animierter Export-Fortschrittsbalken, Einstellungen-Reiterwechsel-Einblendung, Kopfzeilen-Import-Hinweis-Einblendung, Filmstreifen-Sanftscroll zur Auswahl über `@tanstack/react-virtual`s `scrollToIndex`).
 
 ## 5. Phase 10 — Politur (SPEC.md §5, bisher nur als Prosa-Satz, nicht als eigene Zeilen erfasst — analog zur bei der Phase-9-Abnahme gefundenen Stapelverarbeitungs-Konsole-Lücke, ADR-0036, hier bei der Phase-10-Abnahme nachgetragen)
 
@@ -375,6 +377,42 @@ Direkt anwendbare Foto-Filter/-Effekte (punktuell mit Pinseln, auf viele Fotos a
 - [x] Filter/LUT auf Video anwenden — Phase 16 Schritt 9 — Status: Fertig — dieselbe LUT-Engine framegenau auf Video, global (keine Pinselstriche wie bei Fotos); Performance auf langen/hochauflösenden Videos ungemessen (reine CPU-Pipeline, kein Testclip in dieser Sandbox verfügbar)
 - [x] Ähnliche Videos finden — Phase 16 Schritt 10 — Status: Fertig — derselbe Perceptual-Hash-Duplikat-Assistent wie bei Fotos, auf Videos beschränkt
 
+## Video-Editor-Erweiterung (Phase 17)
+
+Über den Basis-Videoschnitt aus Phase 16 hinaus: eine Zeitachse, die
+mehrere Clips und Fotos zu einem Video verkettet, Overlays, Untertitel
+und zwei weitere Ein-Clip-Werkzeuge. Siehe `DECISIONS.md` ADR-0045 für
+die Architektur-/Lizenzrecherche, ADR-0062 für die Stabilisierung.
+Kernentscheidung: ein Zeitachsen-**Dialog**, der in einem Rutsch
+rendert, statt eines persistenten Projekt-Katalogobjekts.
+
+- [x] Mehrspur-Zeitachse (Segment-Rendering + Verkettung) — Phase 17 Schritt 1 — Status: Fertig — `apx_export::timeline` rendert je Eintrag ein Segment und verkettet sie per `xfade`-Filterkette (derselbe Mechanismus für harten Schnitt *und* Überblendung); Reihenfolge/Trim/Haltedauer/Übergang/Auflösung/Musik im neuen `VideoTimelineDialog.tsx`
+- [x] Geschwindigkeit je Clip (Zeitlupe/Zeitraffer) — Phase 17 Schritt 2 — Status: Fertig — `setpts`-Filter, Tempo-Auswahl je Video-Eintrag
+- [x] Übergänge — Phase 17 Schritt 3 — Status: Fertig — acht Wisch-/Blende-Varianten über `xfade`, je Lücke einzeln wählbar
+- [x] Text-/Titel-Overlays — Phase 17 Schritt 4 — Status: Fertig — Zeitspanne und Position frei; Text wird in Rust rasterisiert und per `overlay`-Filter eingeblendet (nicht `drawtext`, das eine Schriftdatei auf dem Zielsystem voraussetzen würde)
+- [x] Automatische Untertitel — Phase 17 Schritt 5 — Status: Fertig (Opt-in) — Whisper (`ggml-base.en.bin`) hinter dem Cargo-Feature `subtitles`, Modell-Download auf ausdrücklichen Wunsch; Transkript wird zu Text-Overlay-Einträgen
+- [x] Social-Media-Export-Vorgaben — Phase 17 Schritt 6 — Status: Fertig — 9:16/1:1/16:9; das Backend skalierte bereits „cover" auf beliebiges Seitenverhältnis, dies ist die Bedienoberfläche dazu
+- [x] Bild-in-Bild / Split-Screen — Phase 17 Schritt 7 — Status: Fertig — ein Overlay, dessen Quelle ein ganz normaler Zeitachsen-Eintrag ist; Split-Screen sind zwei gegenüberliegende 50-%-Overlays, kein eigener Mechanismus
+- [x] Greenscreen/Hintergrund entfernen — Phase 17 Schritt 8 — Status: Fertig (eingeschränkt) — echte Segmentierung (MediaPipe Selfie Segmentation, Apache-2.0, lokal) framegenau, Opt-in-Download; **keine Prüfsumme** für das Modell, weil `huggingface.co` aus dieser Sandbox blockiert ist und eine erfundene Prüfsumme schlimmer wäre als eine benannte Lücke (dieselbe ehrliche Lücke wie beim LaMa-Modell)
+- [x] Video-Stabilisierung — Phase 17 Schritt 9 — Status: Fertig — misst die Kamerabahn mit derselben merkmalsbasierten Suche wie das Panorama-Stitching, glättet sie und rechnet je Einzelbild zurück; zwei Durchgänge (ohne die Zukunft der Bahn lässt sie sich nicht glätten), vier statt acht Freiheitsgrade gegen den „Wackelpudding", Korrekturen auf den Zuschnitt-Rand geklemmt statt gehofft. Regler „Glättung" und „Zuschnitt" im Video-Modul. Braucht **kein** KI-Modell. Performance auf langen/hochauflösenden Videos ungemessen (kein Testclip in dieser Sandbox verfügbar, dieselbe Grenze wie bei Schritt 8)
+
+
+## Werkstatt-Politur und neue Werkzeuge (Phase 31)
+
+Grundlage ist ein realer Screenshot des Entwickeln-Modus, nicht eine
+Vermutung — siehe `DECISIONS.md` ADR-0064.
+
+- [x] Analyse dockt neben dem Foto an — Phase 31 Schritt 1 — Status: Fertig — vorher lag sie beim Öffnen immer ÜBER dem Bild; jetzt eine eigene Palette mit Breite-Ziehen/Einklappen, „Lösen" stellt die schwebende Fassung wieder her. Ab 1500 px Fensterbreite, darunter schwebend (sonst drückt die Spalte den Viewer auf null Breite)
+- [x] Ein Regler, eine Zeile — Phase 31 Schritt 2 — Status: Fertig — 42 px → 22 px je Regler, über alle ~40 auf einmal; dazu Mausrad-Bedienung (Umschalt = Grobschritt), die es vorher gar nicht gab
+- [x] Symbole statt reiner Textknöpfe — Phase 31 Schritt 3 — Status: Fertig — Kopfzeile, Masken-Panel, Zoom-Steuerung; „100 %" bleibt Text, weil es ein Wert und kein Vorgang ist
+- [x] Fokus-Peaking — Phase 31 Schritt 4 — Status: Fertig — markiert farbig, welche Kanten wirklich scharf sind, mit Abdeckungsanzeige in Prozent; Sobel statt Laplace (rauschfester, wie in Kamera-/Videomonitoren). Sichthilfe, keine Bildveränderung — landet bewusst NICHT im EDL
+- [x] Farbpalette aus dem Foto — Phase 31 Schritt 5 — Status: Fertig — dominante Farben per k-Means im Gegenfarbenraum, ein Klick setzt den Weißabgleich. Hilft dort, wo die Pipette versagt: bei einer Fläche, die zu klein zum Treffen ist
+- [x] Vorher/Nachher-Kante ziehbar — Phase 31 Schritt 6 — Status: Fertig — der geteilte Modus existierte seit Phase 9, die Kante saß aber fest bei 50 %; jetzt ziehbar und per Tastatur bedienbar, auf 2…98 % geklemmt
+- [x] Horizont ausrichten mit einem Klick — Phase 31 Schritt 7 — Status: Fertig (vorhandene Funktion erreichbar gemacht) — die Erkennung (Canny + Hough) gibt es seit Phase 13 Schritt 4; sie lag als Klapplisten-Eintrag tief in den Objektivkorrekturen. Jetzt ein Befehl unter dem Namen, unter dem man sucht
+- [x] Vergleichsansicht per Tastatur sichten — Phase 31 Schritt 8 — Status: Fertig — die Ansicht gibt es seit Phase 9, sie konnte aber nichts mit der Tastatur. Pfeiltasten wählen, P behält, X lehnt ab, 0–5 bewerten, Entf nimmt das Foto aus dem Vergleich (kein Löschen)
+- [x] Filmkorn folgt den Mitteltönen — Phase 31 Schritt 9 — Status: Fertig — das Korn war gleichmäßig über den ganzen Tonwertumfang und sah dadurch nach digitalem Rauschen aus; neues Feld `grain_midtone_bias` gewichtet nach der Filmdichtekurve. Neutralwert 0 ist bit-genau das bisherige Verhalten
+
+
 ## Technische Grundlage (Phase 1, keine Endnutzer-Features)
 
 - [x] Rust-Workspace mit Crate-Grenzen (`apx-core`, `apx-raw`, `apx-catalog`, `apx-app`) — Phase 1 — Status: Fertig
@@ -385,3 +423,111 @@ Direkt anwendbare Foto-Filter/-Effekte (punktuell mit Pinseln, auf viele Fotos a
 - [x] Viewer mit Zoom/Pan (Canvas 2D, provisorisch) — Phase 1 — Status: Fertig
 - [x] Testabdeckung (Rust-Unit-/Integrationstests, Vitest, Playwright-E2E) — Phase 1 — Status: Fertig (abweichend, siehe DECISIONS.md ADR-0010 — Playwright läuft gegen den Produktions-Build im Browser mit simulierter Tauri-Brücke, nicht gegen die kompilierte native App; echtes natives E2E bräuchte `tauri-driver` + WebdriverIO)
 - [x] CI (Windows/macOS/Linux, fmt/clippy/test/build) — Phase 1 — Status: Fertig (`.github/workflows/ci.yml`; volles `tauri build` mit Installer/Signierung als eigener `release`-Job seit Phase 10 Schritt 11, siehe oben)
+
+## Kreativ-Werkzeuge mit großem Bildeffekt (Phase 27)
+
+Zehn Werkzeuge in der Entwickeln-Registerkarte „Kreativ", ganz oben.
+Alle laufen in einer gemeinsamen Pipeline-Stufe (`stages::creative`),
+nach dem Filter/LUT, in der unten genannten Reihenfolge.
+
+| Werkzeug | Wirkung | Vorbereitung |
+|---|---|---|
+| Farbabgleich | Übernimmt die Farbstimmung eines Referenzfotos | Knopf „Referenzfoto übernehmen" (zweites Foto der Mehrfachauswahl) |
+| Tiefennebel | Dunst nach Entfernung gestaffelt | Knopf „Tiefenkarte berechnen" (MiDaS, teilt sich die Karte mit der Virtuellen Blende) |
+| Motiv freistellen | Hintergrund getrennt weichzeichnen/abdunkeln/entsättigen | Knopf „Motiv freistellen" (klassische Saliency, **kein Modell-Download**) |
+| Tilt-Shift | Scharfes Band, unscharfer Rest, Sättigungsanhebung | — |
+| Sonnenstrahlen | Radiale Lichtschleppen aus den hellsten Partien | — |
+| Orton-Glanz | Weicher Leuchtschleier über den Lichtern | — |
+| Filmlabor | Bleach Bypass oder Cross-Processing | — |
+| Verlaufsabbildung | Helligkeit auf Drei-Farb-Verlauf abbilden | — |
+| Farbisolierung | Ein Farbtonbereich bleibt, der Rest wird grau | — |
+| Lichtleck | Farbiger Lichteinfall am Bildrand | — |
+
+**Neuer Filter „Retro Fuji Thailand"** — in der Filter-Bibliothek als
+elfter eingebauter Look und zusätzlich als echte `.cube`-Datei unter
+`assets/luts/retro-fuji-thailand.cube` (33er Raster, frei verwendbar,
+original erstellt). Charakter: angehobener Schwarzpunkt mit Grünstich,
+gedämpfte gelb-orange Lichter, kräftige Türkistöne in Wasser und
+Himmel, flachere Mitten.
+
+**Preset-fähig seit Phase 29** — die fotospezifischen Karten (Tiefe,
+Motiv) werden beim Speichern herausgeschnitten und beim Anwenden aus dem
+Zielfoto übernommen. Siehe `DECISIONS.md` ADR-0057 und ADR-0059.
+
+## Licht & Optik (Phase 28)
+
+Zwölf Werkzeuge in der eigenen Entwickeln-Registerkarte „Optik".
+Alle laufen in einer gemeinsamen Pipeline-Stufe (`stages::light_optics`)
+**vor** dem Filter/LUT — Korrekturen und optische Phänomene gehen der
+Gradation voraus, die Phase-27-Looks liegen danach.
+
+| Werkzeug | Wirkung | Vorbereitung |
+|---|---|---|
+| Tonwert-Angleich | Übernimmt die Tonwertverteilung eines Referenzfotos | Knopf „Tonwerte übernehmen" (zweites Foto der Mehrfachauswahl) |
+| Zonensystem | Zehn Helligkeitszonen einzeln ±1 EV, kantenbewusst (Guided Filter) | — |
+| Detail-Pyramide | Feine, mittlere und grobe Struktur getrennt regeln | — |
+| Dunst entfernen | Kontrast und Farbe zurück, aber nur in der Ferne | Knopf „Tiefenkarte berechnen" (teilt sich die Karte mit der Virtuellen Blende) |
+| Tiefenschärfe | Schärft nur die gewählte Entfernungsebene | Knopf „Tiefenkarte berechnen" |
+| Neu beleuchten | Virtuelle Lichtquelle über die Normalen aus der Tiefenkarte | Knopf „Tiefenkarte berechnen" |
+| Himmel dramatisieren | Kontrast/Sättigung/Abdunklung nur im Himmel, ohne Austausch | Knopf „Himmel erkennen" (**kein Modell-Download**) |
+| Bewegungsunschärfe | Mitzieher, Drehung oder Zoom | Knopf „Motiv schützen" (teilt sich die Maske mit der Freistellung) |
+| Blendenstern | Lichtschleppen auf den hellsten Punkten, 2–12 Strahlen | — |
+| Diffusionsfilter | Weicher Schein aus den Lichtern, Schwarz bleibt schwarz | — |
+| Kanalmatrix | Freie 3×3-Matrix, vier Ein-Klick-Vorgaben (u. a. Infrarot) | — |
+| Poster-Look | Grobe Farbstufen plus gezeichnete Konturen | — |
+
+**Bokeh-Formen für die Virtuelle Blende** — polygonale Blende (3–11
+Lamellen mit Drehung), anamorphe Streckung, Petzval-Wirbel und
+Spitzlicht-Anhebung. Ohne gesetzte Form bleibt das bisherige Ergebnis
+bit-für-bit unverändert.
+
+**Drei neue Filter** — „Nordic Winter", „Tokyo Neon Night" und
+„Sahara Gold", je in der Filter-Bibliothek und als `.cube`-Datei unter
+`assets/luts/` (33er Raster, original erstellt, frei verwendbar).
+
+**Panel-Navigation:** beide Werkzeug-Panels (Kreativ und Licht & Optik)
+haben jetzt ein Suchfeld über Titel und Wirkung, einen
+„Nur aktive"-Schalter und je Kachel einen Zurücksetzen-Knopf, der bei
+Hover oder Tastaturfokus erscheint.
+
+**Preset-fähig seit Phase 29** — wie bei den Kreativ-Werkzeugen werden
+die fotospezifischen Karten (Tiefe, Himmel, Motiv) beim Speichern
+herausgeschnitten. Ist ein Werkzeug aufgedreht, aber seine Karte fehlt,
+sagt die Kachel das („Ohne Tiefenkarte wirkungslos"), statt still nichts
+zu tun. Siehe `DECISIONS.md` ADR-0058 und ADR-0059.
+
+
+## Direkt am Bild (Phase 30)
+
+Eigene Entwickeln-Registerkarte „Am Bild". Sieben Werkzeuge werden **im
+Foto selbst** bedient — Griffe ziehen, Punkte setzen, Linien legen —,
+drei weitere Kacheln geben bestehenden Funktionen erstmals ein
+Bedienelement.
+
+| Werkzeug | Wirkung | Bedienung |
+|---|---|---|
+| Lichtquellen | Beliebig viele Punktlichter, additiv mit einstellbarem Abfall | Klick ins Bild setzt ein Licht, Griffe ziehen; Farbe je Licht |
+| Lichtkegel | Innen aufhellen, außen abdunkeln | Drehbare Ellipse im Bild, Mittelpunkt ziehen |
+| Abwedeln & Nachbelichten | Örtlich aufhellen oder abdunkeln | Punkte im Bild setzen und ziehen; weiß = aufhellen, schwarz = abdunkeln |
+| Split-Lighting | Zwei Lichtfarben entlang einer Achse | Beide Endpunkte im Bild ziehen |
+| Farbe ersetzen | Eine Farbe im Bild gegen eine andere tauschen | Pipette ins Bild, Zielfarbe aus dem Farbwähler, Toleranz und Weichheit |
+| Verlaufsband | Helligkeit auf einen selbst gebauten Verlauf abbilden | Verlaufsband mit frei verschiebbaren Stützstellen, Doppelklick legt eine neue an |
+| Horizont-Verlaufsfilter | Grauverlauf entlang einer freien Linie statt am Bildrand | Beide Linienenden im Bild ziehen |
+
+**Drei Bedienelemente für bestehende Funktionen:**
+
+- **Kanalmatrix-Gitter** — die neun Zahlen der Matrix aus Phase 28 sind
+  erstmals erreichbar, mit Zeilen- und Spaltenköpfen („Rot aus Grün")
+  und einem Streifen aus sechs Testfarben als Vorschau.
+- **Blendenform-Vorschau** — ein Canvas zeichnet den tatsächlichen
+  Bokeh-Kern der Virtuellen Blende (Lamellen, Drehung, anamorphe
+  Streckung, Wirbel); die Phase-28-Regler waren ohne Rückmeldung
+  Blindflug.
+- **Zonen-Überlagerung** — die zehn Luminanzzonen als Falschfarben über
+  dem Foto, Zonenstreifen klickbar; die gewählte Zone bringt ihren
+  Regler gleich mit.
+
+Alle Ortsangaben sind normierte Bildkoordinaten, die Bearbeitung sieht
+in der Vorschau also aus wie im Export. Die Sektion ist ohne
+Sonderbehandlung preset-fähig — anders als Kreativ und Licht & Optik
+trägt keines der Werkzeuge eine fotospezifisch berechnete Karte.

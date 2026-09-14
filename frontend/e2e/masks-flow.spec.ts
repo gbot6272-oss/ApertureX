@@ -58,8 +58,12 @@ test.describe("Masken-Panel", () => {
     await expect(page.getByRole("complementary", { name: "Masken" })).toBeVisible();
     await expect(page.getByText("Keine Masken vorhanden.")).toBeVisible();
 
-    await page.getByRole("button", { name: "+ Linearer Verlauf" }).click();
+    await page.getByRole("button", { name: "Linearer Verlauf hinzufügen" }).click();
 
+    // Der ENTSTANDENE Listeneintrag, nicht der Hinzufügen-Knopf: seit
+    // Phase 31 Schritt 3 heißt letzterer "… hinzufügen", weil beide
+    // sonst denselben zugänglichen Namen trügen (und ein Screenreader
+    // sie nicht auseinanderhalten könnte).
     await expect(page.getByRole("button", { name: "Linearer Verlauf", exact: true })).toBeVisible();
     const masks = await lastMasks(page);
     expect(masks).toHaveLength(1);
@@ -69,7 +73,7 @@ test.describe("Masken-Panel", () => {
 
   test("Ziehgriff des Linearen Verlaufs verschiebt den Startpunkt per Pfeiltaste und committet", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
-    await page.getByRole("button", { name: "+ Linearer Verlauf" }).click();
+    await page.getByRole("button", { name: "Linearer Verlauf hinzufügen" }).click();
 
     const startHandle = page.getByRole("slider", { name: "Linearer Verlauf: Startpunkt" });
     await expect(startHandle).toBeVisible();
@@ -94,7 +98,7 @@ test.describe("Masken-Panel", () => {
 
   test("Radialer-Verlauf-Ziehgriff vergrößert den Radius per Pfeiltaste und committet", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
-    await page.getByRole("button", { name: "+ Radialer Verlauf" }).click();
+    await page.getByRole("button", { name: "Radialer Verlauf hinzufügen" }).click();
 
     const radiusHandle = page.getByRole("slider", { name: "Radialer Verlauf: Radius X-Achse" });
     await expect(radiusHandle).toBeVisible();
@@ -111,7 +115,7 @@ test.describe("Masken-Panel", () => {
 
   test("Sichtbarkeit umschalten, umbenennen und löschen committen jeweils sofort", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
-    await page.getByRole("button", { name: "+ Linearer Verlauf" }).click();
+    await page.getByRole("button", { name: "Linearer Verlauf hinzufügen" }).click();
 
     const visibilityButton = page.getByRole("button", { name: "Linearer Verlauf ausblenden" });
     await visibilityButton.click();
@@ -130,7 +134,7 @@ test.describe("Masken-Panel", () => {
 
   test("Maskeneigener Belichtung-Regler ändert nur die Anpassungen der ausgewählten Maske", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
-    await page.getByRole("button", { name: "+ Linearer Verlauf" }).click();
+    await page.getByRole("button", { name: "Linearer Verlauf hinzufügen" }).click();
 
     const maskExposure = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" }).nth(1);
     await maskExposure.fill("0.8");
@@ -150,7 +154,7 @@ test.describe("Masken-Panel", () => {
 
   test("Pinselmaske: ein Ziehvorgang im Bild malt einen Strich, Entfernen committet erneut", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
-    await page.getByRole("button", { name: "+ Pinsel" }).click();
+    await page.getByRole("button", { name: "Pinsel hinzufügen" }).click();
 
     await expect(page.getByText("Ins Bild klicken und ziehen, um zu malen.")).toBeVisible();
 
@@ -190,7 +194,7 @@ test.describe("Masken-Panel", () => {
 
   test("Farbbereich-Maske: ein Bildklick nimmt die Zielfarbe auf, die Toleranz committet zusätzlich", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
-    await page.getByRole("button", { name: "+ Farbbereich" }).click();
+    await page.getByRole("button", { name: "Farbbereich hinzufügen" }).click();
 
     const pickButton = page.getByRole("button", { name: "Farbe aufnehmen" });
     await expect(pickButton).toHaveAttribute("aria-pressed", "false");
@@ -232,7 +236,7 @@ test.describe("Masken-Panel", () => {
 
   test("Luminanzbereich-Maske: die Reglerwerte committen", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
-    await page.getByRole("button", { name: "+ Luminanzbereich" }).click();
+    await page.getByRole("button", { name: "Luminanzbereich hinzufügen" }).click();
 
     const rangeMinInput = page.getByRole("spinbutton", { name: "Untere Grenze (%) (Zahlenwert)" });
     await rangeMinInput.fill("20");
@@ -252,7 +256,7 @@ test.describe("Masken-Panel", () => {
 
   test("Maskenkombination: eine zweite Komponente mit Subtrahieren+Invertieren committet, Mischmodus committet zusätzlich", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
-    await page.getByRole("button", { name: "+ Linearer Verlauf" }).click();
+    await page.getByRole("button", { name: "Linearer Verlauf hinzufügen" }).click();
 
     await page.getByRole("button", { name: "+ Komponente: Farbbereich" }).click();
 
@@ -297,7 +301,7 @@ test.describe("Masken-Panel", () => {
 
   test("Sechs-Sektionen-Regler: HSL-Band, Details-Schärfung und Color-Grading-Balance wirken nur auf die ausgewählte Maske", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
-    await page.getByRole("button", { name: "+ Linearer Verlauf" }).click();
+    await page.getByRole("button", { name: "Linearer Verlauf hinzufügen" }).click();
 
     type MaskAdjustments = { hsl: { red: { hue: number } }; details: { sharpen_amount: number }; color_grading: { balance: number } };
 
@@ -350,7 +354,7 @@ test.describe("Masken-Panel", () => {
 
   test("Farbmischer: ein Bildklick legt eine Region an der Maske an, nicht an den globalen Einstellungen", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
-    await page.getByRole("button", { name: "+ Linearer Verlauf" }).click();
+    await page.getByRole("button", { name: "Linearer Verlauf hinzufügen" }).click();
 
     const addRegionButton = page.getByRole("button", { name: "Region hinzufügen" }).nth(1);
     await addRegionButton.click();
@@ -372,7 +376,7 @@ test.describe("Masken-Panel", () => {
 
   test("Maskengruppen: Anlegen, Zuordnen, Ausblenden und Entfernen committen jeweils", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
-    await page.getByRole("button", { name: "+ Linearer Verlauf" }).click();
+    await page.getByRole("button", { name: "Linearer Verlauf hinzufügen" }).click();
 
     page.once("dialog", (dialog) => void dialog.accept("Vordergrund"));
     await page.getByRole("button", { name: "+ Neue Gruppe" }).click();
@@ -403,7 +407,7 @@ test.describe("Masken-Panel", () => {
 
   test("Maske duplizieren legt eine Kopie mit eigener ID an und committet sofort", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
-    await page.getByRole("button", { name: "+ Linearer Verlauf" }).click();
+    await page.getByRole("button", { name: "Linearer Verlauf hinzufügen" }).click();
 
     await page.getByTitle("Duplizieren").click();
 
@@ -415,7 +419,7 @@ test.describe("Masken-Panel", () => {
 
   test("Baustein speichern und anwenden legt eine neue Maske mit derselben Geometrie an", async ({ page }) => {
     await setUpWithSelectedPhoto(page);
-    await page.getByRole("button", { name: "+ Radialer Verlauf" }).click();
+    await page.getByRole("button", { name: "Radialer Verlauf hinzufügen" }).click();
 
     page.once("dialog", (dialog) => void dialog.accept("Mein Vignette-Baustein"));
     await page.getByRole("button", { name: "Aktuelle Maske als Baustein speichern" }).click();
@@ -435,7 +439,7 @@ test.describe("Masken-Panel", () => {
 
   test("Auf anderes Foto übertragen kopiert die Maske ins EDL des Zielfotos", async ({ page }) => {
     await setUpWithSelectedPhoto(page, [PHOTO_2]);
-    await page.getByRole("button", { name: "+ Linearer Verlauf" }).click();
+    await page.getByRole("button", { name: "Linearer Verlauf hinzufügen" }).click();
 
     await page.getByRole("combobox", { name: "Zielfoto für Maskenübertragung" }).selectOption(PHOTO_2.id);
     await page.getByRole("button", { name: "Übertragen" }).click();

@@ -28,6 +28,7 @@ pub mod error;
 pub mod gpu;
 pub mod lens_profiles;
 pub mod lut_cube;
+pub mod lut_table_cache;
 pub mod stages;
 #[cfg(test)]
 mod test_support;

@@ -20,6 +20,33 @@
 
 use crate::edl::v4::{LutFilterAdjustment, LutFilterStroke};
 
+/// Inhalts-Hash für [`crate::edl::LutFilterData::id`] — identifiziert eine
+/// Rastertabelle eindeutig genug, um sie im `LutTableCache`
+/// (`crate::lut_table_cache`) unter einem stabilen Schlüssel statt der
+/// vollen Daten selbst durch die Live-Vorschau-Route zu reichen (siehe
+/// `LutFilterData`s Moduldoku für den Bug, den das behebt). Bewusst kein
+/// kryptografischer Hash — reiner Cache-Schlüssel, keine
+/// Sicherheitseigenschaft nötig, FNV-1a genügt und braucht keine
+/// zusätzliche Abhängigkeit. `size` fließt mit ein, damit zwei Tabellen
+/// mit zufällig gleichem Bytemuster, aber unterschiedlicher Rastergröße
+/// (die `table`s Länge bestimmt) nicht kollidieren können.
+pub fn compute_lut_id(size: u32, table: &[f32]) -> String {
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+    let mut hash = FNV_OFFSET;
+    for &byte in size.to_le_bytes().iter() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    for value in table {
+        for &byte in value.to_le_bytes().iter() {
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+    }
+    format!("{hash:016x}")
+}
+
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     if edge1 <= edge0 {
         return if x < edge0 { 0.0 } else { 1.0 };
@@ -216,6 +243,7 @@ mod tests {
         LutFilterData {
             name: "Identity".to_string(),
             size: 2,
+            id: compute_lut_id(2, &table),
             table,
             domain_min: [0.0, 0.0, 0.0],
             domain_max: [1.0, 1.0, 1.0],
@@ -237,6 +265,7 @@ mod tests {
         LutFilterData {
             name: "Invert".to_string(),
             size: 2,
+            id: compute_lut_id(2, &table),
             table,
             domain_min: [0.0, 0.0, 0.0],
             domain_max: [1.0, 1.0, 1.0],

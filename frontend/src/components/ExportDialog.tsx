@@ -5,6 +5,7 @@ import type { ExportFormat, ExportPhotoOptions, IccProfileChoice, WatermarkPosit
 import { pickFilePath, selectFolderDialog } from "../lib/tauri";
 import { useAppStore } from "../store";
 import { Sheet } from "./ui/Sheet";
+import { SuccessSpark } from "./ui/SuccessSpark";
 
 interface ExportDialogProps {
   open: boolean;
@@ -460,21 +461,36 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
       )}
 
       {exportProgress && (
-        <div className="mb-2 flex items-center gap-2 text-xs text-text-secondary">
-          <span>
-            {t("exportDialog.progress", { done: exportProgress.done, total: exportProgress.total })}
-            {exportProgress.failed > 0 ? ` (${t("exportDialog.failedCount", { count: exportProgress.failed })})` : ""}
-          </span>
-          {exportRunning && (
-            <button type="button" onClick={() => void toggleExportQueuePause()} className="rounded border border-border px-2 py-0.5 text-xs hover:border-accent">
-              {exportQueuePaused ? t("exportDialog.resume") : t("exportDialog.pause")}
-            </button>
-          )}
+        <div className="mb-2 flex flex-col gap-1">
+          {/* Echter Fortschrittsbalken statt nur der Textzahl (Phase 24,
+              siehe DECISIONS.md ADR-0052 — Nutzerwunsch "mehr Übersicht")
+              — animierte Breite (`apx-progress-fill`) statt hartem Sprung
+              bei jedem Fortschritts-Tick. */}
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-panel" role="progressbar" aria-valuemin={0} aria-valuemax={exportProgress.total} aria-valuenow={exportProgress.done}>
+            <div
+              className="apx-progress-fill h-full rounded-full bg-accent"
+              style={{ width: `${exportProgress.total > 0 ? (exportProgress.done / exportProgress.total) * 100 : 0}%` }}
+            />
+          </div>
+          <div className="flex items-center gap-2 text-xs text-text-secondary">
+            <span>
+              {t("exportDialog.progress", { done: exportProgress.done, total: exportProgress.total })}
+              {exportProgress.failed > 0 ? ` (${t("exportDialog.failedCount", { count: exportProgress.failed })})` : ""}
+            </span>
+            {exportRunning && (
+              <button type="button" onClick={() => void toggleExportQueuePause()} className="rounded border border-border px-2 py-0.5 text-xs hover:border-accent">
+                {exportQueuePaused ? t("exportDialog.resume") : t("exportDialog.pause")}
+              </button>
+            )}
+          </div>
         </div>
       )}
       {exportError && <p className="mb-2 text-xs text-danger">{t("exportDialog.error", { message: exportError })}</p>}
       {!exportRunning && exportProgress && exportProgress.done > 0 && (
-        <p className="mb-2 text-xs text-text-secondary">{t("exportDialog.filesWritten", { count: exportProgress.done - exportProgress.failed })}</p>
+        <p className="relative mb-2 pl-2 text-xs text-text-secondary">
+          <SuccessSpark active={!exportRunning && exportProgress.done > 0} />
+          {t("exportDialog.filesWritten", { count: exportProgress.done - exportProgress.failed })}
+        </p>
       )}
 
       <div className="flex justify-end gap-2">

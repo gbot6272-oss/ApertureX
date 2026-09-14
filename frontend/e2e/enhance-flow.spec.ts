@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installTauriMock } from "./tauri-mock";
+import { getMockInvokeLog, installTauriMock } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -13,6 +13,36 @@ const PHOTO = { id: "01977f4a-0000-7000-8000-000000000101", filename: "IMG_0001.
  * Rust-Unit-Tests abgedeckt — hier bewusst nur ein Frontend-Flow: beide
  * Knöpfe lösen den jeweiligen Aufruf aus und zeigen den Ziel-Pfad an.
  */
+/**
+ * Phase 31 Schritt 7: "Horizont ausrichten" in der Befehlspalette. Die
+ * Kantenerkennung selbst (Canny + Hough) ist seit Phase 13 Schritt 4 in
+ * `apx_ai::upright` samt Rust-Tests abgedeckt — sie lag nur als Eintrag
+ * einer Klappliste tief in den Objektivkorrekturen, wo sie niemand
+ * sucht. Geprüft wird deshalb genau das, was neu ist: dass der Befehl
+ * unter seinem gebräuchlichen Namen auffindbar ist und den vorhandenen
+ * Erkennungs-Command auslöst.
+ */
+test("Horizont ausrichten ist über die Befehlspalette erreichbar", async ({ page }) => {
+  await installTauriMock(page, {
+    folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }],
+    photosByFolder: { [FOLDER_ID]: [PHOTO] },
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: /Urlaub/ }).click();
+  await page.getByRole("img", { name: PHOTO.filename }).click();
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByRole("textbox").first().fill("Horizont");
+  await page.getByText("Horizont ausrichten").first().click();
+
+  await expect
+    .poll(async () => {
+      const log = await getMockInvokeLog(page);
+      return log.filter((entry) => entry.cmd === "detect_upright_correction").length;
+    })
+    .toBeGreaterThan(0);
+});
+
 test.describe("Entrauschung & Hochskalierung (Phase 9 Schritt 6)", () => {
   test("Entrauschen und Hochskalieren zeigen jeweils den Ziel-Pfad an", async ({ page }) => {
     await installTauriMock(page, {

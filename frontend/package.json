@@ -2,6 +2,7 @@
   "name": "apx-frontend",
   "private": true,
   "version": "0.1.0",
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,11 +13,13 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.3.0",
     "@tanstack/react-virtual": "^3.14.10",
     "@tauri-apps/api": "^2.1.1",
     "gsap": "^3.15.0",
     "immer": "^11.1.18",
     "leaflet": "^1.9.4",
+    "lucide-react": "^1.45.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "uisfx": "^0.4.0",

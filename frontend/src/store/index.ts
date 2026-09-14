@@ -4,6 +4,20 @@ import { immer } from "zustand/middleware/immer";
 import {
   AI_MASK_KIND_LABELS,
   base64ToByteArray,
+  NEUTRAL_CREATIVE,
+  NEUTRAL_LIGHT_OPTICS,
+  NEUTRAL_INTERACTIVE,
+  DEFAULT_POINT_LIGHT,
+  DEFAULT_DODGE_BURN_POINT,
+  DEFAULT_GRADIENT_STOPS,
+  type CreativeAdjustments,
+  type FilmLabProcess,
+  type LightOpticsAdjustments,
+  type MotionBlurKind,
+  type InteractiveAdjustments,
+  type PointLight,
+  type DodgeBurnPoint,
+  type GradientStop,
   BASIC_SLIDER_SPECS,
   buildEdlEnvelopeJson,
   clampSliderValue,
@@ -126,6 +140,19 @@ export function edlFromHistoryPosition(position: HistoryPositionDto): EdlPayload
 /** In welcher Reihenfolge Foto-ID `photoId` in der aktuell angezeigten
  * Liste gemeint ist, wenn ein Bereich per Umschalt-Klick markiert wird —
  * siehe [`selectActivePhotos`]. */
+/** Welches Bild-Werkzeug der Viewer gerade bedient (Phase 30, siehe
+ * `DECISIONS.md` ADR-0060). EIN Modus statt sieben Flags: zwei
+ * gleichzeitig aktive Bild-Werkzeuge waeren nicht bedienbar, weil beide
+ * dieselbe Bildflaeche brauchen. */
+export type ImageToolMode =
+  | "off"
+  | "lights"
+  | "spotlight"
+  | "dodgeBurn"
+  | "splitLight"
+  | "colorReplacePick"
+  | "horizon";
+
 export type SelectionMode = "replace" | "toggle" | "range";
 
 /** Liest aus einem Klick-Event, welcher Auswahlmodus gemeint ist (Strg/Cmd
@@ -207,6 +234,83 @@ export function selectActivePhotos(state: AppStore): PhotoDto[] {
   // `store/index.test.ts`s `makeState`) ohne die Sortierfelder — Default
   // entspricht dem bisherigen impliziten Verhalten (siehe `lib/sortPhotos.ts`).
   return sortPhotos(rawActivePhotos(state), state.librarySortField ?? "filename", state.librarySortDirection ?? "asc");
+}
+
+/**
+ * Fasst jeden Lade-/Verarbeitungs-Zustand des Stores zu einem Boolean
+ * zusammen (Phase 23, siehe `DECISIONS.md` ADR-0051) — Grundlage für
+ * einen einzigen, zentralen `GlobalBusyIndicator` statt 35+
+ * Einzelstellen individuell mit einer Ladeanimation zu verdrahten.
+ * Bewusst nicht vollständig: rein komponenten-lokale Zustände (z. B.
+ * `CatalogDialog.tsx`s `integrityRunning`/`optimizeRunning`/
+ * `backupRunning`) sind hier nicht sichtbar und bleiben außen vor
+ * (siehe ADR-0051, "bewusst außerhalb dieses Umfangs").
+ */
+export function selectAnyBackgroundTaskRunning(state: AppStore): boolean {
+  return (
+    state.importRunning ||
+    state.contentAwareScaleLoading ||
+    state.uprightDetectLoading ||
+    state.contentAwareMoveLoading ||
+    state.aiOutpaintLoading ||
+    state.compositeLayerLoading ||
+    state.repairSourceSuggestionLoading ||
+    state.sensorSpotsLoading ||
+    state.inpaintingModelDownloading ||
+    state.presetGeneratorLoading ||
+    state.tagSuggestionsLoading ||
+    state.exportRunning ||
+    state.printRunning ||
+    state.videoExportRunning ||
+    state.bookExportRunning ||
+    state.webExportRunning ||
+    state.workflowRunning ||
+    state.perceptualDuplicatesRunning ||
+    state.styleConsistencyRunning ||
+    state.colorPaletteLoading ||
+    state.depthModelDownloading ||
+    state.batchPreviewLoading ||
+    state.peopleGroupsLoading ||
+    state.peopleLoading ||
+    state.facesLoading ||
+    state.peopleModelsDownloading ||
+    state.scriptRunning ||
+    state.pluginRunning ||
+    state.shareRunning ||
+    state.cameraFilesLoading ||
+    state.selfieSegmentationModelDownloading ||
+    state.similarVideosLoading ||
+    state.videoSceneChangesLoading ||
+    state.videoTimelineRunning ||
+    state.whisperModelDownloading ||
+    state.videoTranscribing ||
+    state.enhanceRunning !== null ||
+    state.aiInpaintLoadingIndex !== null
+  );
+}
+
+/**
+ * Schmalere Teilmenge von {@link selectAnyBackgroundTaskRunning}
+ * (Phase 23 Nachtrag, siehe DECISIONS.md ADR-0051-Nachtrag) — nur die
+ * Operationen, die konkret das aktuell im Viewer angezeigte Foto
+ * bearbeiten (nicht z. B. `importRunning`/`exportRunning`/
+ * `peopleLoading`, die auf beliebige andere Fotos oder die ganze
+ * Bibliothek zielen). Treibt den Schimmer-Effekt in `Viewer.tsx`
+ * direkt auf dem bearbeiteten Bild — die sichtbarste mögliche Antwort
+ * auf "Animation bei KI-Bearbeitung".
+ */
+export function selectCurrentPhotoAiProcessing(state: AppStore): boolean {
+  return (
+    state.aiInpaintLoadingIndex !== null ||
+    state.sensorSpotsLoading ||
+    state.contentAwareMoveLoading ||
+    state.aiOutpaintLoading ||
+    state.contentAwareScaleLoading ||
+    state.enhanceRunning !== null ||
+    state.compositeLayerLoading ||
+    state.colorPaletteLoading ||
+    state.repairSourceSuggestionLoading
+  );
 }
 
 /** Video als Katalog-Asset (Phase 16 Schritt 5, siehe `DECISIONS.md`
@@ -597,6 +701,15 @@ interface DevelopSlice {
    * zu löschen. No-op für `Off`/`Guided` (dort gilt der bestehende
    * manuelle bzw. `guided_lines`-Mechanismus). */
   runUprightAutoDetect: () => Promise<void>;
+  /** Ein Klick: Horizont gerade ziehen (Phase 31 Schritt 7).
+   *
+   * Setzt `upright_mode` auf `Level` und startet die Erkennung. Die
+   * Kantenerkennung selbst (Canny + Hough) existiert seit Phase 13
+   * Schritt 4 vollständig — sie war nur als Eintrag einer Klappliste
+   * tief in den Objektivkorrekturen versteckt, wo sie niemand sucht.
+   * Diese Aktion baut nichts nach, sie macht das Vorhandene mit einem
+   * Klick erreichbar. */
+  levelHorizon: () => Promise<void>;
   uprightDetectLoading: boolean;
   /** Setzt ein Feld einer der zwei Guided-Hilfslinien (Phase 4 Schritt 9
    * — siehe `DECISIONS.md` ADR-0030: Zahlenfelder statt einer
@@ -815,6 +928,23 @@ interface LibrarySlice {
 
   metadataPanelOpen: boolean;
   toggleMetadataPanel: () => void;
+
+  /** Fokus-Modus (Phase 26, siehe `DECISIONS.md` ADR-0056): blendet ALLE
+   * angedockten Paletten und den Filmstreifen aus, sodass nur noch das
+   * Foto und die (seit Nachtrag III schwebende) Kopfzeile übrig bleiben.
+   * Bewusst kein Ersatz für das einzelne Ein-/Ausklappen je Palette
+   * (`PaletteFrame`/`useWorkspacePanel`) — der merkt sich weiterhin
+   * seinen eigenen Zustand, dieser Modus legt sich nur temporär darüber
+   * und gibt beim Verlassen exakt die vorherige Anordnung zurück. */
+  focusMode: boolean;
+  toggleFocusMode: () => void;
+
+  /** "Lichter aus" (Phase 26, Lightroom-Konvention): dimmt die gesamte
+   * Umgebung stufenweise ab, damit das Auge die Bildwirkung ohne den
+   * Einfluss heller Bedienflächen beurteilen kann. Drei Stufen im
+   * Ringtausch: `off` → `dim` → `black` → `off`. */
+  lightsOut: "off" | "dim" | "black";
+  cycleLightsOut: () => void;
 
   photoKeywords: Record<string, KeywordDto[]>;
   loadKeywordsForPhoto: (photoId: string) => Promise<void>;
@@ -1555,6 +1685,118 @@ interface LibraryBacklogSlice {
    * `onCommit`, wie `setBasicField`). */
   setSkinSmoothingAmount: (value: number) => void;
 
+  // ---- Kreativ-Werkzeuge (Phase 27, siehe DECISIONS.md ADR-0057) ----------
+  /** Setzt einen beliebigen Zahlenregler der zehn Kreativ-Werkzeuge.
+   * EIN generischer Setter statt ~35 einzelner: die Werkzeuge liegen
+   * auch in der Pipeline in EINER Stufe, und jeder Regler ist derselbe
+   * "Pfad + Zahl"-Fall. `group` ist der Name des Werkzeugs,
+   * `field` der Reglername darin. */
+  setCreativeField: (group: keyof CreativeAdjustments, field: string, value: number) => void;
+  /** Setzt den Filmlabor-Prozess (einziges nicht-numerische Feld). */
+  setFilmLabProcess: (process: FilmLabProcess) => void;
+  /** Setzt alle zehn Werkzeuge auf neutral zurueck. */
+  resetCreative: () => void;
+  subjectSegmenting: boolean;
+  /** Trennt Motiv und Hintergrund fuer das aktuelle Foto und legt die
+   * Maske in `developEdl.creative.subject_focus.mask` ab. Braucht kein
+   * Modell (klassische Saliency). */
+  segmentSubjectForCurrentPhoto: () => Promise<void>;
+  /** Uebernimmt die Tiefenkarte aus der Virtuellen Blende fuer den
+   * Tiefennebel — oder berechnet sie, falls noch keine vorliegt. */
+  useDepthMapForHaze: () => Promise<void>;
+  colorMatchLoading: boolean;
+  /** Liest die Farbstatistik eines Referenzfotos und legt sie als Ziel
+   * des Farbabgleichs ab. */
+  setColorMatchReference: (referencePhotoId: string) => Promise<void>;
+
+  // ---- Licht & Optik (Phase 28, siehe DECISIONS.md ADR-0058) -------------
+  /** Setzt einen beliebigen Zahlenregler der zwoelf Licht-&-Optik-
+   * Werkzeuge — dieselbe „EIN generischer Setter"-Begruendung wie bei
+   * `setCreativeField`. */
+  setLightOpticsField: (group: keyof LightOpticsAdjustments, field: string, value: number) => void;
+  /** Setzt den Belichtungsversatz EINER der zehn Zonen. */
+  setZoneValue: (index: number, value: number) => void;
+  /** Setzt die Bewegungsart (einziges nicht-numerisches Feld). */
+  setMotionBlurKind: (kind: MotionBlurKind) => void;
+  /** Uebernimmt eine der vier Kanalmatrix-Vorgaben; die neun Zahlen
+   * bleiben danach frei weiter veraenderbar. */
+  applyChannelMatrixPreset: (matrix: number[]) => void;
+  /** Setzt ein Feld der Virtuellen Blende (Bokeh-Formen aus Phase 28). */
+  setVirtualApertureField: (field: string, value: number) => void;
+  /** Setzt alle zwoelf Werkzeuge auf neutral zurueck. */
+  resetLightOptics: () => void;
+  skySegmenting: boolean;
+  /** Trennt Himmel und Boden fuer das aktuelle Foto und legt die Maske
+   * in `developEdl.light_optics.sky_drama.mask` ab. Braucht kein
+   * Modell. */
+  segmentSkyForCurrentPhoto: () => Promise<void>;
+  /** Uebernimmt die Motivmaske fuer die Bewegungsunschaerfe — berechnet
+   * sie, falls noch keine vorliegt. */
+  useSubjectMaskForMotionBlur: () => Promise<void>;
+  /** Uebernimmt die Tiefenkarte fuer eines der drei tiefenbasierten
+   * Werkzeuge — oder berechnet sie, falls noch keine vorliegt. */
+  useDepthMapForLightOptics: (
+    target: "depth_dehaze" | "depth_sharpen" | "relight",
+  ) => Promise<void>;
+  toneMatchLoading: boolean;
+  /** Liest die Tonwertverteilung eines Referenzfotos und legt sie als
+   * Ziel des Tonwert-Angleichs ab. */
+  setToneMatchReference: (referencePhotoId: string) => Promise<void>;
+
+  // ---- Direkt am Bild (Phase 30, siehe DECISIONS.md ADR-0060) ------------
+  /** Welches Bild-Werkzeug gerade im Viewer bedient wird. `"off"` heisst:
+   * das Overlay ist unsichtbar und faengt keine Klicks ab. EIN Modus
+   * statt sieben Flags — zwei gleichzeitig aktive Bild-Werkzeuge waeren
+   * nicht bedienbar, weil beide dieselbe Bildflaeche brauchen. */
+  imageToolMode: ImageToolMode;
+  setImageToolMode: (mode: ImageToolMode) => void;
+  /** Index des gerade ausgewaehlten Eintrags der Listen-Werkzeuge
+   * (Lichter, Abwedel-Punkte, Verlaufs-Stuetzstellen). */
+  selectedLightIndex: number;
+  selectedDodgeBurnIndex: number;
+  selectedGradientStopIndex: number;
+  selectLightIndex: (index: number) => void;
+  selectDodgeBurnIndex: (index: number) => void;
+  selectGradientStopIndex: (index: number) => void;
+
+  /** Setzt einen beliebigen Zahlenregler der sieben Bild-Werkzeuge —
+   * dieselbe "EIN generischer Setter"-Begruendung wie bei
+   * `setCreativeField`/`setLightOpticsField`. */
+  setInteractiveField: (group: keyof InteractiveAdjustments, field: string, value: number) => void;
+  /** Setzt ein Wahrheitswert-Feld (z. B. `flipped`, `preserve_luma`). */
+  setInteractiveFlag: (group: keyof InteractiveAdjustments, field: string, value: boolean) => void;
+  /** Setzt eine Farbe (drei Werte `0..1`). */
+  setInteractiveColor: (group: keyof InteractiveAdjustments, field: string, rgb: number[]) => void;
+
+  addPointLight: (x?: number, y?: number) => void;
+  updatePointLight: (index: number, patch: Partial<PointLight>) => void;
+  removePointLight: (index: number) => void;
+
+  addDodgeBurnPoint: (x?: number, y?: number, amount?: number) => void;
+  updateDodgeBurnPoint: (index: number, patch: Partial<DodgeBurnPoint>) => void;
+  removeDodgeBurnPoint: (index: number) => void;
+
+  addGradientStop: (position?: number) => void;
+  updateGradientStop: (index: number, patch: Partial<GradientStop>) => void;
+  removeGradientStop: (index: number) => void;
+
+  /** Verschiebt den Mittelpunkt des Lichtkegels/der Split-Lighting-Punkte
+   * bzw. die Enden der Horizontlinie — das, was das Overlay beim Ziehen
+   * aufruft. `handle` benennt den angefassten Griff. */
+  moveImageHandle: (handle: string, x: number, y: number) => void;
+  /** Uebernimmt eine mit der Bild-Pipette gegriffene Quellfarbe fuer
+   * "Farbe ersetzen" (Werte `0..255`). */
+  setColorReplaceSourceAt: (r: number, g: number, b: number) => void;
+  /** Setzt alle sieben Werkzeuge auf neutral zurueck. */
+  resetInteractive: () => void;
+  /** Zonen-Falschfarben ueber dem Foto (Phase 30 Punkt 10) — macht
+   * sichtbar, welcher der zehn Zonenregler welchen Bildteil trifft. */
+  zoneOverlayEnabled: boolean;
+  toggleZoneOverlay: () => void;
+  /** Genau eine Zone hervorheben (`null` = alle zehn einfaerben). */
+  zoneOverlayHighlight: number | null;
+  setZoneOverlayHighlight: (zone: number | null) => void;
+
   /** Filter-/LUT-Bibliothek (Phase 16 Schritt 1, siehe `DECISIONS.md`
    * ADR-0043) — öffnet einen Datei-Dialog für eine `.cube`-Datei, legt
    * das geparste Raster in `developEdl.lut_filter.lut` ab. Anders als
@@ -1578,6 +1820,20 @@ interface LibraryBacklogSlice {
    * in `developEdl.lut_filter.lut` und committet — dasselbe Muster wie
    * `importLutFilterForCurrentPhoto`, nur ohne Datei-Dialog. */
   applyBuiltinLutFilter: (index: number) => void;
+  /** Wärmt `api.registerLutFilterTable` für `developEdl.lut_filter.lut`
+   * vor, falls dessen `id` in dieser Sitzung noch nicht registriert
+   * wurde (Phase 25, siehe `DECISIONS.md`, aktuelles ADR) — muss laufen,
+   * bevor `lib/edl.ts`s `buildDevelopPreviewEdlJson` die `table` aus der
+   * Live-Vorschau-Anfrage herausschneidet, sonst fällt der Server auf
+   * "kein Filter" zurück. `applyBuiltinLutFilter`/
+   * `importLutFilterForCurrentPhoto` rufen dies direkt nach dem Setzen
+   * auf; `Viewer.tsx` zusätzlich beim Öffnen des Entwickeln-Panels bzw.
+   * Fotowechsel (deckt den Fall ab, dass ein bereits gespeicherter
+   * Filter geladen wird, ohne dass eine der beiden Aktionen lief — z. B.
+   * nach einem App-Neustart, wenn der Cache leer ist). Idempotent (kein
+   * Effekt, wenn `id` schon registriert wurde), daher gefahrlos mehrfach
+   * aufrufbar. */
+  ensureLutFilterTableRegistered: () => void;
 
   /** Pinsel-Modus für punktuelle Filter-Anwendung (Phase 16 Schritt 3,
    * siehe `DECISIONS.md` ADR-0043) — dasselbe „ein Ziehvorgang malt
@@ -1703,6 +1959,13 @@ interface LibraryViewsSlice {
   compareViewPhotoIds: string[];
   openCompareView: (photoIds: string[]) => void;
   closeCompareView: () => void;
+  /** Nimmt ein Foto aus dem laufenden Vergleich (Phase 31 Schritt 8).
+   *
+   * Aussortieren heisst nicht loeschen: das Foto bleibt im Katalog und
+   * behaelt seine Bewertung/Markierung, es verschwindet nur aus DIESEM
+   * Vergleich. Genau so arbeitet man sich auf den einen Behalter
+   * herunter. */
+  dropFromCompareView: (photoId: string) => void;
   /** Ein einziger gemeinsamer Zoom-Faktor für alle Kacheln der
    * Vergleichsansicht (Phase 9 Schritt 7, „synchronisierter Zoom" —
    * siehe `CompareGridView.tsx`s Moduldoku für die bewusste
@@ -1856,6 +2119,14 @@ interface VideoSlice {
   videoBackgroundError: string | null;
   removeBackgroundFromCurrentVideo: (backgroundRgb: [number, number, number]) => Promise<void>;
 
+  /** Video-Stabilisierung (Phase 17 Schritt 9, siehe `DECISIONS.md`
+   * ADR-0062) — Ein-Clip-Command wie die beiden darüber, aber ohne
+   * Modell-Download: die Kamerabahn wird gemessen und geglättet, nicht
+   * geschätzt. */
+  videoStabilizeBusy: boolean;
+  videoStabilizeError: string | null;
+  stabilizeCurrentVideo: (smoothingRadius: number, cropZoom: number) => Promise<void>;
+
   /** Ähnliche Videos finden (Phase 16 Schritt 10, siehe `DECISIONS.md`
    * ADR-0043) — arbeitet wie der bestehende Perceptual-Hash-Duplikat-
    * Assistent (Phase 9 Schritt 1), auf Videos beschränkt. Läuft über
@@ -1918,6 +2189,15 @@ export type AppStore = CatalogSlice &
   MetadataSlice &
   LibraryViewsSlice &
   VideoSlice;
+
+// Welche LUT-`id`s bereits per `registerLutFilterTable` an den Server
+// gemeldet wurden — reines Sitzungs-Gedächtnis (Phase 25, siehe
+// `DECISIONS.md`, aktuelles ADR), bewusst außerhalb des Zustands selbst:
+// es beeinflusst keine Anzeige, nur ob `ensureLutFilterTableRegistered`
+// den (billigen, aber unnötigen) IPC-Aufruf noch einmal auslöst. Ein
+// erneuter Aufruf nach einem verworfenen Fehlschlag ist explizit erlaubt
+// (siehe dort) — ein `Set` statt eines `Map`s mit Zeitstempeln reicht.
+const registeredLutFilterTableIds = new Set<string>();
 
 export const useAppStore = create<AppStore>()(
   immer((set, get) => {
@@ -2309,16 +2589,24 @@ export const useAppStore = create<AppStore>()(
     copiedEdlSubset: null,
 
     copyDevelopSettings: (sections) => {
+      // Bewusst VOR `set` und auf dem fertigen Zustand aus `get()`:
+      // `buildPresetEdlSubset` kopiert die Sektionen, und eine Kopie
+      // eines Immer-Drafts waere ein Geflecht aus Proxys, das nach dem
+      // Ende des Erzeugers nicht mehr lesbar ist.
+      const subset = buildPresetEdlSubset(get().developEdl, sections);
       set((state) => {
-        state.copiedEdlSubset = buildPresetEdlSubset(state.developEdl, sections);
+        state.copiedEdlSubset = subset;
       });
     },
 
     pasteDevelopSettings: () => {
       const subset = get().copiedEdlSubset;
       if (!subset) return;
+      // Dieselbe Begruendung wie bei `copyDevelopSettings`: ausserhalb
+      // des Erzeugers rechnen, drinnen nur zuweisen.
+      const merged = mergeEdlSubset(get().developEdl, subset);
       set((state) => {
-        state.developEdl = mergeEdlSubset(state.developEdl, subset);
+        state.developEdl = merged;
       });
       void get().commitDevelopEdit("Einstellungen eingefügt");
     },
@@ -2801,6 +3089,11 @@ export const useAppStore = create<AppStore>()(
     },
 
     uprightDetectLoading: false,
+
+    levelHorizon: async () => {
+      get().setLensCorrectionUprightMode("Level");
+      await get().runUprightAutoDetect();
+    },
 
     runUprightAutoDetect: async () => {
       const { selectedPhotoId } = get();
@@ -3636,6 +3929,22 @@ export const useAppStore = create<AppStore>()(
       if (willOpen && selectedPhotoId) {
         void get().loadKeywordsForPhoto(selectedPhotoId);
       }
+    },
+
+    focusMode: false,
+
+    toggleFocusMode: () => {
+      set((state) => {
+        state.focusMode = !state.focusMode;
+      });
+    },
+
+    lightsOut: "off",
+
+    cycleLightsOut: () => {
+      set((state) => {
+        state.lightsOut = state.lightsOut === "off" ? "dim" : state.lightsOut === "dim" ? "black" : "off";
+      });
     },
 
     photoKeywords: {},
@@ -5158,8 +5467,9 @@ export const useAppStore = create<AppStore>()(
       const { presetGeneratorPreview, presetGeneratorSelectedIndex } = get();
       const subset = presetGeneratorPreview[presetGeneratorSelectedIndex];
       if (!subset) return;
+      const merged = mergeEdlSubset(get().developEdl, subset);
       set((state) => {
-        state.developEdl = mergeEdlSubset(state.developEdl, subset);
+        state.developEdl = merged;
       });
       void get().commitDevelopEdit("KI-Preset angewendet");
     },
@@ -5858,6 +6168,525 @@ export const useAppStore = create<AppStore>()(
       void get().commitDevelopEdit("Fokuspunkt gesetzt");
     },
 
+    setCreativeField: (group, field, value) => {
+      set((state) => {
+        const target = state.developEdl.creative[group] as unknown as Record<string, number>;
+        target[field] = value;
+      });
+    },
+
+    setFilmLabProcess: (process) => {
+      set((state) => {
+        state.developEdl.creative.film_lab.process = process;
+      });
+    },
+
+    resetCreative: () => {
+      set((state) => {
+        state.developEdl.creative = structuredClone(NEUTRAL_CREATIVE);
+      });
+      void get().commitDevelopEdit("Kreativ-Werkzeuge zurückgesetzt");
+    },
+
+    subjectSegmenting: false,
+
+    segmentSubjectForCurrentPhoto: async () => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.subjectSegmenting = true;
+      });
+      playCue("processing");
+      try {
+        const dto = await api.segmentPhotoSubject(developPhotoId);
+        set((state) => {
+          state.developEdl.creative.subject_focus.mask = {
+            bitmap_width: dto.bitmapWidth,
+            bitmap_height: dto.bitmapHeight,
+            alpha: base64ToByteArray(dto.alphaBase64),
+          };
+          // Ohne sichtbare Wirkung waere der Knopf fuer den Nutzer
+          // folgenlos — ein brauchbarer Startwert macht das Ergebnis
+          // sofort sichtbar (Regler bleiben frei verstellbar).
+          if (
+            state.developEdl.creative.subject_focus.blur === 0 &&
+            state.developEdl.creative.subject_focus.darken === 0 &&
+            state.developEdl.creative.subject_focus.desaturate === 0
+          ) {
+            state.developEdl.creative.subject_focus.blur = 0.5;
+          }
+        });
+        playCue("success");
+        void get().commitDevelopEdit("Motiv freigestellt");
+      } catch (err) {
+        playCue("error");
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.subjectSegmenting = false;
+        });
+      }
+    },
+
+    useDepthMapForHaze: async () => {
+      const existing = get().developEdl.virtual_aperture.depth_map;
+      if (!existing) {
+        // Dieselbe Tiefenkarte wie die Virtuelle Blende — einmal
+        // berechnen reicht fuer beide Werkzeuge.
+        await get().estimateDepthForCurrentPhoto();
+      }
+      const depth = get().developEdl.virtual_aperture.depth_map;
+      if (!depth) return;
+      set((state) => {
+        state.developEdl.creative.depth_haze.depth_map = structuredClone(depth);
+        if (state.developEdl.creative.depth_haze.amount === 0) {
+          state.developEdl.creative.depth_haze.amount = 0.6;
+        }
+      });
+      void get().commitDevelopEdit("Tiefennebel aktiviert");
+    },
+
+    colorMatchLoading: false,
+
+    setColorMatchReference: async (referencePhotoId) => {
+      set((state) => {
+        state.colorMatchLoading = true;
+      });
+      playCue("processing");
+      try {
+        const stats = await api.computeReferenceColorStats(referencePhotoId);
+        set((state) => {
+          const cm = state.developEdl.creative.color_match;
+          cm.target_l_mean = stats.lMean;
+          cm.target_l_std = stats.lStd;
+          cm.target_a_mean = stats.aMean;
+          cm.target_a_std = stats.aStd;
+          cm.target_b_mean = stats.bMean;
+          cm.target_b_std = stats.bStd;
+          cm.has_target = true;
+          if (cm.amount === 0) cm.amount = 0.75;
+        });
+        playCue("success");
+        void get().commitDevelopEdit("Farbabgleich übernommen");
+      } catch (err) {
+        playCue("error");
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.colorMatchLoading = false;
+        });
+      }
+    },
+
+    setLightOpticsField: (group, field, value) => {
+      set((state) => {
+        const target = state.developEdl.light_optics[group] as unknown as Record<string, number>;
+        target[field] = value;
+      });
+    },
+
+    setZoneValue: (index, value) => {
+      set((state) => {
+        const zones = state.developEdl.light_optics.zone_system.zones;
+        if (index < 0 || index >= zones.length) return;
+        zones[index] = value;
+        // Ohne Gesamtstaerke bliebe jede Zonenaenderung folgenlos — der
+        // Nutzer zieht sonst zehn Regler und sieht nichts.
+        if (state.developEdl.light_optics.zone_system.amount === 0) {
+          state.developEdl.light_optics.zone_system.amount = 1;
+        }
+      });
+    },
+
+    setMotionBlurKind: (kind) => {
+      set((state) => {
+        state.developEdl.light_optics.motion_blur.kind = kind;
+      });
+      void get().commitDevelopEdit("Bewegungsart geändert");
+    },
+
+    applyChannelMatrixPreset: (matrix) => {
+      set((state) => {
+        state.developEdl.light_optics.channel_matrix.matrix = [...matrix];
+        if (state.developEdl.light_optics.channel_matrix.amount === 0) {
+          state.developEdl.light_optics.channel_matrix.amount = 1;
+        }
+      });
+      void get().commitDevelopEdit("Kanalmatrix übernommen");
+    },
+
+    setVirtualApertureField: (field, value) => {
+      set((state) => {
+        (state.developEdl.virtual_aperture as unknown as Record<string, number>)[field] = value;
+      });
+    },
+
+    resetLightOptics: () => {
+      set((state) => {
+        state.developEdl.light_optics = structuredClone(NEUTRAL_LIGHT_OPTICS);
+      });
+      void get().commitDevelopEdit("Optik zurückgesetzt");
+    },
+
+    skySegmenting: false,
+
+    segmentSkyForCurrentPhoto: async () => {
+      const { developPhotoId } = get();
+      if (!developPhotoId) return;
+      set((state) => {
+        state.skySegmenting = true;
+      });
+      playCue("processing");
+      try {
+        const dto = await api.segmentPhotoSky(developPhotoId);
+        set((state) => {
+          state.developEdl.light_optics.sky_drama.mask = {
+            bitmap_width: dto.bitmapWidth,
+            bitmap_height: dto.bitmapHeight,
+            alpha: base64ToByteArray(dto.alphaBase64),
+          };
+          if (state.developEdl.light_optics.sky_drama.amount === 0) {
+            state.developEdl.light_optics.sky_drama.amount = 0.7;
+          }
+        });
+        playCue("success");
+        void get().commitDevelopEdit("Himmel erkannt");
+      } catch (err) {
+        playCue("error");
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.skySegmenting = false;
+        });
+      }
+    },
+
+    useSubjectMaskForMotionBlur: async () => {
+      const existing = get().developEdl.creative.subject_focus.mask;
+      if (!existing) {
+        // Dieselbe Motivmaske wie die Freistellung aus Phase 27 —
+        // einmal berechnen reicht fuer beide Werkzeuge.
+        await get().segmentSubjectForCurrentPhoto();
+      }
+      const mask = get().developEdl.creative.subject_focus.mask;
+      if (!mask) return;
+      set((state) => {
+        state.developEdl.light_optics.motion_blur.mask = structuredClone(mask);
+        if (state.developEdl.light_optics.motion_blur.amount === 0) {
+          state.developEdl.light_optics.motion_blur.amount = 0.8;
+          state.developEdl.light_optics.motion_blur.length = 0.12;
+        }
+      });
+      void get().commitDevelopEdit("Motiv vor Bewegungsunschärfe geschützt");
+    },
+
+    useDepthMapForLightOptics: async (target) => {
+      const existing = get().developEdl.virtual_aperture.depth_map;
+      if (!existing) {
+        await get().estimateDepthForCurrentPhoto();
+      }
+      const depth = get().developEdl.virtual_aperture.depth_map;
+      if (!depth) return;
+      set((state) => {
+        const tool = state.developEdl.light_optics[target];
+        tool.depth_map = structuredClone(depth);
+        if (tool.amount === 0) tool.amount = 0.7;
+      });
+      void get().commitDevelopEdit("Tiefenkarte übernommen");
+    },
+
+    toneMatchLoading: false,
+
+    setToneMatchReference: async (referencePhotoId) => {
+      set((state) => {
+        state.toneMatchLoading = true;
+      });
+      playCue("processing");
+      try {
+        const stats = await api.computeReferenceToneStats(referencePhotoId);
+        set((state) => {
+          const tm = state.developEdl.light_optics.tone_match;
+          tm.targets = [...stats.deciles];
+          tm.has_target = true;
+          if (tm.amount === 0) tm.amount = 0.75;
+        });
+        playCue("success");
+        void get().commitDevelopEdit("Tonwerte übernommen");
+      } catch (err) {
+        playCue("error");
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.toneMatchLoading = false;
+        });
+      }
+    },
+
+    imageToolMode: "off",
+
+    setImageToolMode: (mode) => {
+      set((state) => {
+        state.imageToolMode = mode;
+      });
+    },
+
+    selectedLightIndex: 0,
+    selectedDodgeBurnIndex: 0,
+    selectedGradientStopIndex: 0,
+
+    selectLightIndex: (index) => {
+      set((state) => {
+        state.selectedLightIndex = index;
+      });
+    },
+    selectDodgeBurnIndex: (index) => {
+      set((state) => {
+        state.selectedDodgeBurnIndex = index;
+      });
+    },
+    selectGradientStopIndex: (index) => {
+      set((state) => {
+        state.selectedGradientStopIndex = index;
+      });
+    },
+
+    setInteractiveField: (group, field, value) => {
+      set((state) => {
+        const target = state.developEdl.interactive[group] as unknown as Record<string, number>;
+        target[field] = value;
+      });
+    },
+
+    setInteractiveFlag: (group, field, value) => {
+      set((state) => {
+        const target = state.developEdl.interactive[group] as unknown as Record<string, boolean>;
+        target[field] = value;
+      });
+      void get().commitDevelopEdit("Bild-Werkzeug geändert");
+    },
+
+    setInteractiveColor: (group, field, rgb) => {
+      set((state) => {
+        const target = state.developEdl.interactive[group] as unknown as Record<string, number[]>;
+        target[field] = [...rgb];
+      });
+    },
+
+    addPointLight: (x, y) => {
+      set((state) => {
+        const lights = state.developEdl.interactive.point_lights;
+        lights.lights.push({ ...DEFAULT_POINT_LIGHT, x: x ?? 0.5, y: y ?? 0.5 });
+        state.selectedLightIndex = lights.lights.length - 1;
+        // Ohne Gesamtstaerke bliebe das neue Licht unsichtbar — der
+        // Nutzer haette geklickt und nichts gesehen.
+        if (lights.amount === 0) lights.amount = 1;
+      });
+      void get().commitDevelopEdit("Licht gesetzt");
+    },
+
+    updatePointLight: (index, patch) => {
+      set((state) => {
+        const light = state.developEdl.interactive.point_lights.lights[index];
+        if (light) Object.assign(light, patch);
+      });
+    },
+
+    removePointLight: (index) => {
+      set((state) => {
+        state.developEdl.interactive.point_lights.lights.splice(index, 1);
+        state.selectedLightIndex = Math.max(0, index - 1);
+      });
+      void get().commitDevelopEdit("Licht entfernt");
+    },
+
+    addDodgeBurnPoint: (x, y, amount) => {
+      set((state) => {
+        const tool = state.developEdl.interactive.dodge_burn;
+        tool.points.push({
+          ...DEFAULT_DODGE_BURN_POINT,
+          x: x ?? 0.5,
+          y: y ?? 0.5,
+          amount: amount ?? DEFAULT_DODGE_BURN_POINT.amount,
+        });
+        state.selectedDodgeBurnIndex = tool.points.length - 1;
+        if (tool.amount === 0) tool.amount = 1;
+      });
+      void get().commitDevelopEdit("Punkt gesetzt");
+    },
+
+    updateDodgeBurnPoint: (index, patch) => {
+      set((state) => {
+        const point = state.developEdl.interactive.dodge_burn.points[index];
+        if (point) Object.assign(point, patch);
+      });
+    },
+
+    removeDodgeBurnPoint: (index) => {
+      set((state) => {
+        state.developEdl.interactive.dodge_burn.points.splice(index, 1);
+        state.selectedDodgeBurnIndex = Math.max(0, index - 1);
+      });
+      void get().commitDevelopEdit("Punkt entfernt");
+    },
+
+    addGradientStop: (position) => {
+      set((state) => {
+        const ramp = state.developEdl.interactive.gradient_ramp;
+        if (ramp.stops.length === 0) {
+          // Erster Griff ans Verlaufsband: mit einem brauchbaren Verlauf
+          // starten statt mit einer einzelnen Farbe, aus der sich nichts
+          // ergibt.
+          ramp.stops = structuredClone(DEFAULT_GRADIENT_STOPS);
+          ramp.amount = ramp.amount || 1;
+          state.selectedGradientStopIndex = 0;
+          return;
+        }
+        const pos = position ?? 0.5;
+        // Startfarbe ist die Farbe, die der Verlauf an dieser Stelle
+        // ohnehin schon hat — die neue Stuetzstelle veraendert das Bild
+        // dadurch zunaechst nicht, sie macht es nur bearbeitbar.
+        const sorted = [...ramp.stops].sort((a, b) => a.position - b.position);
+        const first = sorted[0];
+        const last = sorted[sorted.length - 1];
+        if (!first || !last) return;
+        const after = sorted.find((stop) => stop.position >= pos) ?? last;
+        const before = [...sorted].reverse().find((stop) => stop.position <= pos) ?? first;
+        const span = Math.max(1e-6, after.position - before.position);
+        const k = Math.min(1, Math.max(0, (pos - before.position) / span));
+        ramp.stops.push({
+          position: pos,
+          color_rgb: before.color_rgb.map((c, i) => c + ((after.color_rgb[i] ?? c) - c) * k),
+        });
+        state.selectedGradientStopIndex = ramp.stops.length - 1;
+        if (ramp.amount === 0) ramp.amount = 1;
+      });
+      void get().commitDevelopEdit("Stützstelle hinzugefügt");
+    },
+
+    updateGradientStop: (index, patch) => {
+      set((state) => {
+        const stop = state.developEdl.interactive.gradient_ramp.stops[index];
+        if (stop) Object.assign(stop, patch);
+      });
+    },
+
+    removeGradientStop: (index) => {
+      set((state) => {
+        const ramp = state.developEdl.interactive.gradient_ramp;
+        // Unter zwei Stuetzstellen gibt es keinen Verlauf mehr — dann
+        // lieber das ganze Werkzeug abschalten als einen stillen No-Op
+        // stehen lassen.
+        ramp.stops.splice(index, 1);
+        if (ramp.stops.length < 2) ramp.amount = 0;
+        state.selectedGradientStopIndex = Math.max(0, index - 1);
+      });
+      void get().commitDevelopEdit("Stützstelle entfernt");
+    },
+
+    moveImageHandle: (handle, x, y) => {
+      set((state) => {
+        const tools = state.developEdl.interactive;
+        switch (handle) {
+          case "spotlight":
+            tools.spotlight.cx = x;
+            tools.spotlight.cy = y;
+            break;
+          case "splitA":
+            tools.split_light.ax = x;
+            tools.split_light.ay = y;
+            break;
+          case "splitB":
+            tools.split_light.bx = x;
+            tools.split_light.by = y;
+            break;
+          case "horizon1":
+            tools.horizon_grad.x1 = x;
+            tools.horizon_grad.y1 = y;
+            break;
+          case "horizon2":
+            tools.horizon_grad.x2 = x;
+            tools.horizon_grad.y2 = y;
+            break;
+          default: {
+            // `light:3` / `dodge:1` — Listeneintraege tragen ihren Index
+            // im Griffnamen, damit das Overlay keine zweite Zuordnung
+            // fuehren muss.
+            const [kind, raw] = handle.split(":");
+            const index = Number(raw);
+            if (!Number.isFinite(index)) break;
+            if (kind === "light") {
+              const light = tools.point_lights.lights[index];
+              if (light) {
+                light.x = x;
+                light.y = y;
+              }
+            } else if (kind === "dodge") {
+              const point = tools.dodge_burn.points[index];
+              if (point) {
+                point.x = x;
+                point.y = y;
+              }
+            }
+          }
+        }
+      });
+    },
+
+    setColorReplaceSourceAt: (r, g, b) => {
+      set((state) => {
+        const tool = state.developEdl.interactive.color_replace;
+        tool.from_rgb = [r / 255, g / 255, b / 255];
+        tool.has_source = true;
+        if (tool.amount === 0) tool.amount = 1;
+        // Zielfarbe erstmalig auf die Quellfarbe setzen: der Nutzer
+        // sieht dann zunaechst KEINE Aenderung und dreht selbst am
+        // Farbwaehler — besser als ein willkuerlicher Farbsprung.
+        if (!state.developEdl.interactive.color_replace.to_rgb.some((c, i) => c !== tool.from_rgb[i])) {
+          tool.to_rgb = [...tool.from_rgb];
+        }
+        state.imageToolMode = "off";
+      });
+      void get().commitDevelopEdit("Quellfarbe gegriffen");
+    },
+
+    zoneOverlayEnabled: false,
+
+    toggleZoneOverlay: () => {
+      set((state) => {
+        state.zoneOverlayEnabled = !state.zoneOverlayEnabled;
+      });
+    },
+
+    zoneOverlayHighlight: null,
+
+    setZoneOverlayHighlight: (zone) => {
+      set((state) => {
+        state.zoneOverlayHighlight = zone;
+        // Eine Zone auszuwaehlen, ohne die Ueberlagerung zu sehen, waere
+        // folgenlos — der Klick schaltet sie deshalb gleich mit ein.
+        if (zone !== null) state.zoneOverlayEnabled = true;
+      });
+    },
+
+    resetInteractive: () => {
+      set((state) => {
+        state.developEdl.interactive = structuredClone(NEUTRAL_INTERACTIVE);
+        state.imageToolMode = "off";
+        state.selectedLightIndex = 0;
+        state.selectedDodgeBurnIndex = 0;
+        state.selectedGradientStopIndex = 0;
+      });
+      void get().commitDevelopEdit("Bild-Werkzeuge zurückgesetzt");
+    },
+
     setVirtualApertureAmount: (value) => {
       set((state) => {
         state.developEdl.virtual_aperture.amount = value;
@@ -5879,7 +6708,10 @@ export const useAppStore = create<AppStore>()(
           state.developEdl.virtual_aperture.depth_map = {
             bitmap_width: dto.bitmap_width,
             bitmap_height: dto.bitmap_height,
-            depth: dto.depth_base64,
+            // `base64ToByteArray` wie bei jedem anderen Patch — die
+            // Rust-Seite liest ein `Vec<u8>`, kein base64 (siehe
+            // `DepthMapPatch`s Doku in `lib/edl.ts`).
+            depth: base64ToByteArray(dto.depth_base64),
           };
         });
         playCue("success");
@@ -6073,11 +6905,13 @@ export const useAppStore = create<AppStore>()(
             table: dto.table,
             domain_min: dto.domain_min,
             domain_max: dto.domain_max,
+            id: dto.id,
           };
           if (state.developEdl.lut_filter.strength <= 0) {
             state.developEdl.lut_filter.strength = 1;
           }
         });
+        get().ensureLutFilterTableRegistered();
         void get().commitDevelopEdit(`Filter „${dto.name}“ angewendet`);
       } catch (err) {
         set((state) => {
@@ -6130,7 +6964,26 @@ export const useAppStore = create<AppStore>()(
           state.developEdl.lut_filter.strength = 1;
         }
       });
+      get().ensureLutFilterTableRegistered();
       void get().commitDevelopEdit(`Filter „${lut.name}“ angewendet`);
+    },
+
+    ensureLutFilterTableRegistered: () => {
+      const lut = get().developEdl.lut_filter.lut;
+      if (!lut || !lut.id || lut.table.length === 0) return;
+      if (registeredLutFilterTableIds.has(lut.id)) return;
+      // Optimistisch sofort eintragen (nicht erst nach Erfolg): ein
+      // doppelter, gleichzeitig laufender Aufruf für dieselbe `id` (z. B.
+      // `applyBuiltinLutFilter` und `Viewer.tsx`s Effekt kurz
+      // hintereinander) soll nicht zweimal denselben Datensatz senden.
+      registeredLutFilterTableIds.add(lut.id);
+      void api.registerLutFilterTable(lut.id, lut.size, lut.table).catch((err) => {
+        // Fehlschlag rückgängig machen erlaubt einen erneuten Versuch
+        // beim nächsten Aufruf, statt den Filter für die ganze Sitzung
+        // stillschweigend kaputt zu lassen.
+        registeredLutFilterTableIds.delete(lut.id);
+        console.error("LUT-Tabelle konnte nicht vorgewärmt werden:", err);
+      });
     },
 
     lutFilterBrushActive: false,
@@ -6633,6 +7486,12 @@ export const useAppStore = create<AppStore>()(
     openCompareView: (photoIds) => {
       set((state) => {
         state.compareViewPhotoIds = photoIds.slice(0, 9);
+      });
+    },
+
+    dropFromCompareView: (photoId) => {
+      set((state) => {
+        state.compareViewPhotoIds = state.compareViewPhotoIds.filter((id) => id !== photoId);
       });
     },
 
@@ -7284,6 +8143,36 @@ export const useAppStore = create<AppStore>()(
       } finally {
         set((state) => {
           state.videoBackgroundBusy = false;
+        });
+      }
+    },
+
+    videoStabilizeBusy: false,
+    videoStabilizeError: null,
+
+    stabilizeCurrentVideo: async (smoothingRadius, cropZoom) => {
+      const { selectedPhotoId, selectedFolderId } = get();
+      if (!selectedPhotoId) return;
+      set((state) => {
+        state.videoStabilizeBusy = true;
+        state.videoStabilizeError = null;
+      });
+      playCue("processing");
+      try {
+        const result = await api.stabilizeVideo(selectedPhotoId, smoothingRadius, cropZoom);
+        if (selectedFolderId) await get().loadPhotosForFolder(selectedFolderId);
+        set((state) => {
+          state.selectedPhotoId = result.id;
+        });
+        playCue("success");
+      } catch (err) {
+        playCue("error");
+        set((state) => {
+          state.videoStabilizeError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.videoStabilizeBusy = false;
         });
       }
     },

@@ -9,6 +9,8 @@ export const de = {
   "developPanel.tab.color": "Farbe",
   "developPanel.tab.details": "Details",
   "developPanel.tab.creative": "Kreativ",
+  "developPanel.tab.lightOptics": "Optik",
+  "developPanel.tab.imageTools": "Am Bild",
   "developPanel.tab.history": "Verlauf & Werkzeuge",
   "developPanel.tabs.label": "Entwickeln-Bereiche",
   "masksPanel.tabs.label": "Masken-Bereiche",
@@ -65,6 +67,11 @@ export const de = {
   // commandRegistry.ts — Kategorie- und KI-Status-Beschriftungen für das
   // Overflow-Menü und die Befehlspalette (Phase 18 Schritt 3).
   "commands.category.ai": "KI-Funktionen",
+  "commands.focusMode.on": "Fokus-Modus: Paletten ausblenden",
+  "commands.focusMode.off": "Fokus-Modus beenden: Paletten einblenden",
+  "commands.lightsOut.on": "Lichter aus: Umgebung dimmen",
+  "commands.lightsOut.darker": "Lichter aus: ganz abdunkeln",
+  "commands.lightsOut.off": "Lichter an: Umgebung zurückholen",
   "commands.onboarding": "Erste Schritte anzeigen",
   "commands.cheatsheet": "Tastenkürzel-Übersicht anzeigen",
   "commands.ai.inpaint": "KI-Ausfüllen",
@@ -147,6 +154,9 @@ export const de = {
   "onboarding.tour.next": "Weiter",
   "onboarding.tour.finish": "Fertig",
   "onboarding.tour.stepLabel": "Schritt {current} von {total}",
+
+  // GlobalBusyIndicator.tsx (Phase 23, ADR-0051)
+  "busyIndicator.label": "Wird verarbeitet…",
 
   // KeybindingsCheatsheet.tsx
   "cheatsheet.title": "Tastenkürzel",

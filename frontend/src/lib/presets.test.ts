@@ -376,3 +376,95 @@ describe("diffEdlSubsets", () => {
     expect(diff.some((entry) => entry.path === "basic.exposure_ev" && entry.b === undefined)).toBe(true);
   });
 });
+
+// ---- Phase 29: fotospezifische Karten in Presets --------------------------
+
+describe("Kreativ-/Licht-&-Optik-Sektionen in Presets (Phase 29)", () => {
+  /** Eine Bearbeitung mit berechneten Karten UND verstellten Reglern —
+   * genau der Zustand, aus dem ein Nutzer ein Preset speichern will. */
+  function edlWithMapsAndSliders() {
+    const edl = structuredClone(neutralEdlPayload());
+    edl.creative.depth_haze.amount = 0.6;
+    edl.creative.depth_haze.depth_map = { bitmap_width: 2, bitmap_height: 2, depth: [1, 2, 3, 4] };
+    edl.creative.subject_focus.blur = 0.5;
+    edl.creative.subject_focus.mask = { bitmap_width: 2, bitmap_height: 2, alpha: [255, 255, 0, 0] };
+    edl.light_optics.relight.amount = 0.8;
+    edl.light_optics.relight.depth_map = { bitmap_width: 2, bitmap_height: 2, depth: [9, 9, 9, 9] };
+    edl.light_optics.sky_drama.amount = 0.7;
+    edl.light_optics.sky_drama.mask = { bitmap_width: 2, bitmap_height: 2, alpha: [255, 0, 255, 0] };
+    edl.light_optics.star_filter.amount = 0.4;
+    return edl;
+  }
+
+  it("schneidet jede fotospezifische Karte beim Speichern heraus, behaelt aber alle Regler", () => {
+    const subset = buildPresetEdlSubset(edlWithMapsAndSliders(), ["creative", "light_optics"]);
+
+    // Die Karten sind weg …
+    expect(subset.creative?.depth_haze.depth_map).toBeNull();
+    expect(subset.creative?.subject_focus.mask).toBeNull();
+    expect(subset.light_optics?.relight.depth_map).toBeNull();
+    expect(subset.light_optics?.sky_drama.mask).toBeNull();
+    // … die uebertragbaren Werte nicht.
+    expect(subset.creative?.depth_haze.amount).toBe(0.6);
+    expect(subset.creative?.subject_focus.blur).toBe(0.5);
+    expect(subset.light_optics?.relight.amount).toBe(0.8);
+    expect(subset.light_optics?.star_filter.amount).toBe(0.4);
+  });
+
+  it("laesst die lebende Bearbeitung beim Speichern unangetastet", () => {
+    // Ohne die Kopie in `stripPhotoSpecificMaps` wuerde das Speichern
+    // eines Presets dem Nutzer die gerade berechnete Karte loeschen.
+    const edl = edlWithMapsAndSliders();
+    buildPresetEdlSubset(edl, ["creative", "light_optics"]);
+    expect(edl.creative.depth_haze.depth_map).not.toBeNull();
+    expect(edl.light_optics.sky_drama.mask).not.toBeNull();
+  });
+
+  it("behaelt beim Anwenden die Karten des ZIELFOTOS statt der Preset-Nullen", () => {
+    const preset = buildPresetEdlSubset(edlWithMapsAndSliders(), ["creative", "light_optics"]);
+
+    // Das Zielfoto hat eine eigene, andere Tiefenkarte.
+    const target = structuredClone(neutralEdlPayload());
+    target.creative.depth_haze.depth_map = { bitmap_width: 2, bitmap_height: 2, depth: [7, 7, 7, 7] };
+    target.light_optics.relight.depth_map = { bitmap_width: 2, bitmap_height: 2, depth: [8, 8, 8, 8] };
+
+    const merged = mergeEdlSubset(target, preset);
+
+    // Regler kommen aus dem Preset …
+    expect(merged.creative.depth_haze.amount).toBe(0.6);
+    expect(merged.light_optics.relight.amount).toBe(0.8);
+    // … die Karten aus dem Zielfoto.
+    expect(merged.creative.depth_haze.depth_map?.depth).toEqual([7, 7, 7, 7]);
+    expect(merged.light_optics.relight.depth_map?.depth).toEqual([8, 8, 8, 8]);
+  });
+
+  it("setzt fehlende Karten auf null statt auf undefined", () => {
+    // Zielfoto ohne jede Karte: das Werkzeug steht dann auf "aktiv, aber
+    // ohne Karte" — der Panel-Hinweis sagt das dem Nutzer.
+    const preset = buildPresetEdlSubset(edlWithMapsAndSliders(), ["creative", "light_optics"]);
+    const merged = mergeEdlSubset(structuredClone(neutralEdlPayload()), preset);
+    expect(merged.creative.depth_haze.depth_map).toBeNull();
+    expect(merged.light_optics.sky_drama.mask).toBeNull();
+    expect(merged.light_optics.sky_drama.amount).toBe(0.7);
+  });
+
+  it("skaliert die Preset-Staerke, ohne an den Karten zu haengen", () => {
+    const preset = buildPresetEdlSubset(edlWithMapsAndSliders(), ["creative", "light_optics"]);
+    const half = scalePresetEdlSubset(preset, 50);
+    expect(half.creative?.depth_haze.amount).toBeCloseTo(0.3, 6);
+    expect(half.light_optics?.relight.amount).toBeCloseTo(0.4, 6);
+    expect(half.creative?.depth_haze.depth_map).toBeNull();
+  });
+
+  it("nimmt die Karten anderer Sektionen nicht versehentlich mit", () => {
+    // `virtual_aperture` traegt ebenfalls eine Tiefenkarte, ist aber gar
+    // keine Preset-Sektion — es darf hier weder auftauchen noch
+    // verschwinden.
+    const edl = edlWithMapsAndSliders();
+    edl.virtual_aperture.depth_map = { bitmap_width: 2, bitmap_height: 2, depth: [5, 5, 5, 5] };
+    const subset = buildPresetEdlSubset(edl, ["creative", "light_optics"]);
+    expect("virtual_aperture" in subset).toBe(false);
+    const merged = mergeEdlSubset(edl, subset);
+    expect(merged.virtual_aperture.depth_map?.depth).toEqual([5, 5, 5, 5]);
+  });
+});

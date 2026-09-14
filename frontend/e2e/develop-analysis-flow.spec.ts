@@ -26,8 +26,13 @@ test.describe("Entwickeln-Analysewerkzeuge (Phase 9 Schritt 4)", () => {
     await expect(page.getByLabel("Histogramm")).toBeVisible();
     await expect(page.getByText("Bild überfahren…")).toBeVisible();
 
-    const viewer = page.locator("main").filter({ has: page.getByLabel("Histogramm") });
-    await viewer.hover();
+    // Phase 31 Schritt 1: Die Analyse hängt jetzt als eigene Palette
+    // NEBEN dem Foto, nicht mehr als Overlay DARIN — vorher stand hier
+    // `main`, gefiltert auf "enthält das Histogramm", was genau die alte
+    // Verschachtelung festschrieb. Der Viewer ist das `<main>`; dass das
+    // Histogramm sichtbar ist, prüfen die beiden Zusicherungen darüber
+    // bereits eigenständig.
+    await page.locator("main").hover();
 
     // Mock-Entwickeln-Route liefert immer denselben warm-orangen Farbwert
     // (180/140/100) — siehe `tauri-mock.ts`s Moduldoku dazu.

@@ -348,9 +348,20 @@ function AiPresetGeneratorSection() {
     setPastedJson("");
   }
 
+  // Phase 31 Schritt 1: der Generator lag ausgeklappt in der Palette und
+  // füllte sie mit acht Bedienelementen — direkt unter dem Satz "Keine
+  // Presets in diesem Ordner". Das Wichtige (die Presets) stand also
+  // oben als Leermeldung, das Seltene (vier KI-Erzeugungsarten) nahm den
+  // Platz. Jetzt hinter einer Klappe: ein Klick entfernt, aber nicht
+  // mehr der Standardzustand. `<details>` statt eines eigenen Zustands,
+  // weil der Browser Tastatur- und Screenreader-Verhalten dafür schon
+  // mitbringt — dasselbe Element, das der API-Schlüssel darunter nutzt.
   return (
-    <div className="flex flex-col gap-2 border-t border-border pt-2">
-      <h3 className="text-xs font-medium text-text-secondary">KI-Preset-Generator</h3>
+    <details className="flex flex-col gap-2 border-t border-border pt-2">
+      <summary className="cursor-pointer select-none text-xs font-medium text-text-secondary hover:text-text-primary">
+        KI-Preset-Generator
+      </summary>
+      <div className="mt-2 flex flex-col gap-2">
 
       <details className="text-xs text-text-secondary">
         <summary className="cursor-pointer select-none">Anthropic-API-Schlüssel {hasApiKey ? "(hinterlegt)" : "(fehlt)"}</summary>
@@ -501,7 +512,8 @@ function AiPresetGeneratorSection() {
           <p className="text-xs text-text-muted">Danach über „Preset speichern" im Entwickeln-Panel als echtes Preset sichern.</p>
         </div>
       )}
-    </div>
+      </div>
+    </details>
   );
 }
 

@@ -14,6 +14,18 @@ interface Viewport {
 }
 
 interface DevelopAnalysisPanelProps {
+  /** Angedockt (eigene Spalte neben dem Foto) statt schwebend darüber.
+   *
+   * Phase 31 Schritt 1: schwebend war die Vorgabe und damit der
+   * Normalfall — das Panel lag beim Öffnen des Entwickeln-Moduls IMMER
+   * über dem Foto. Verschieben und Einklappen gab es zwar seit Phase 18,
+   * aber beides musste man erst tun. Angedockt nimmt das Panel eine
+   * eigene Spalte ein, der Viewer misst sich an der Restbreite, und das
+   * Foto ist nie verdeckt. Schwebend bleibt für den Fall erhalten, dass
+   * jemand die volle Breite fürs Foto will und die Analyse kurz
+   * darüberlegt. */
+  docked?: boolean;
+  onToggleDocked?: () => void;
   frame: DevelopFrame | null;
   pointerSample: { r: number; g: number; b: number } | null;
   clippingOverlayEnabled: boolean;
@@ -257,7 +269,7 @@ const ANALYSIS_TAB_LABELS: Record<AnalysisTab, string> = {
   waveform: "Wellenform",
 };
 
-export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnabled, onToggleClippingOverlay, viewport, thumbnailUrl, onAutoTone }: DevelopAnalysisPanelProps) {
+export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnabled, onToggleClippingOverlay, viewport, thumbnailUrl, onAutoTone, docked = false, onToggleDocked }: DevelopAnalysisPanelProps) {
   // Vor dem `if (!frame) return null;` unten, sonst verletzt der Hook die
   // Rules of Hooks (unterschiedliche Hook-Zahl je nach `frame`).
   const [analysisTab, setAnalysisTab] = useState<AnalysisTab>("histogram");
@@ -332,8 +344,16 @@ export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnab
   // TAT-Leiste, da dieses Panel ohnehin frei verschiebbar ist.
   return (
     <div
-      className="pointer-events-none absolute right-2 top-12 flex w-60 flex-col gap-2 rounded border border-border bg-bg-raised/95 p-2 text-xs shadow-lg"
-      style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
+      className={
+        docked
+          ? // Angedockt: normales Layout-Element. Kein `pointer-events-none`
+            // nötig — hier liegt nichts mehr über dem Bild, das Klicks für
+            // Pipette oder Reparatur-Pinsel abfangen könnte.
+            "flex h-full w-full flex-col gap-2 overflow-y-auto border-l border-border bg-bg-raised p-2 text-xs"
+          : "pointer-events-none absolute right-2 top-12 flex w-60 flex-col gap-2 rounded border border-border bg-bg-raised/95 p-2 text-xs shadow-lg"
+      }
+      style={docked ? undefined : { transform: `translate(${offset.x}px, ${offset.y}px)` }}
+      data-testid="develop-analysis-panel"
     >
       {/* Kopfzeile ist der Ziehgriff fürs Verschieben (die ganze Zeile,
           nicht nur ein kleines Symbol — großzügigere Trefferfläche) plus
@@ -341,10 +361,27 @@ export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnab
           Knöpfen — die stoppen die Propagation selbst, sonst würde jeder
           Klick auf Registerkarte/Knopf zusätzlich das Ziehen starten. */}
       <div
-        className="pointer-events-auto -m-2 mb-0 flex cursor-grab items-center justify-between rounded-t border-b border-border bg-bg-panel px-2 py-1 active:cursor-grabbing"
-        onMouseDown={handleDragHandleMouseDown}
+        className={
+          docked
+            ? "-m-2 mb-0 flex items-center justify-between border-b border-border bg-bg-panel px-2 py-1"
+            : "pointer-events-auto -m-2 mb-0 flex cursor-grab items-center justify-between rounded-t border-b border-border bg-bg-panel px-2 py-1 active:cursor-grabbing"
+        }
+        onMouseDown={docked ? undefined : handleDragHandleMouseDown}
       >
         <span className="pointer-events-none select-none font-semibold text-text-secondary">Analyse</span>
+        {onToggleDocked ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleDocked();
+            }}
+            className="pointer-events-auto ml-auto mr-1 rounded border border-border px-1 text-text-secondary hover:border-accent"
+            title={docked ? "Analyse über das Foto legen" : "Analyse neben das Foto andocken"}
+          >
+            {docked ? "Lösen" : "Andocken"}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={(event) => {

@@ -44,6 +44,13 @@ import {
 } from "./ImageToolOverlay";
 import { CropOverlay } from "./CropOverlay";
 import { DevelopAnalysisPanel } from "./DevelopAnalysisPanel";
+import { PaletteFrame } from "./PaletteFrame";
+
+/** Ab dieser Fensterbreite darf die Analyse eine eigene Spalte bekommen
+ * (Phase 31 Schritt 1). Darunter bleibt sie schwebend: Sidebar, Presets,
+ * Entwickeln und Masken beanspruchen zusammen bereits den Großteil eines
+ * 1280px-Fensters, und der Viewer ist das einzige Element, das nachgibt. */
+const ANALYSIS_DOCK_MIN_WIDTH = 1500;
 import { LiquifyOverlay } from "./LiquifyOverlay";
 import { LutFilterOverlay } from "./LutFilterOverlay";
 import { MaskColorOverlay } from "./MaskColorOverlay";
@@ -476,6 +483,49 @@ export function Viewer() {
     g: number;
     b: number;
   } | null>(null);
+  // Phase 31 Schritt 1: Die Analyse startet ANGEDOCKT, nicht schwebend.
+  // Vorher lag sie beim Öffnen des Entwickeln-Moduls immer über dem Foto
+  // — in einem Fenster mit offener Ordner-, Preset-, Entwickeln- und
+  // Masken-Palette ist das Foto ohnehin die schmalste Spalte, und das
+  // Panel deckte ausgerechnet davon noch etwas ab. Die Wahl überlebt
+  // einen Neustart, weil sie eine Arbeitsplatz-Vorliebe ist, keine
+  // foto-lokale Einstellung.
+  const [analysisDocked, setAnalysisDocked] = useState(() => {
+    try {
+      return window.localStorage.getItem("apx.analysisDocked") !== "float";
+    } catch {
+      return true;
+    }
+  });
+  // Andocken kostet eine ganze Spalte. In einem schmalen Fenster mit
+  // mehreren offenen Paletten ist die nicht da — dann ist die schwebende
+  // Fassung (verschiebbar, einklappbar) das kleinere Übel gegenüber
+  // einem auf seine Mindestbreite gequetschten Foto. Gemessen wird die
+  // Fensterbreite, nicht die Zeilenbreite: die Zeile hängt selbst davon
+  // ab, ob angedockt wird, das wäre eine Rückkopplung.
+  const [windowWide, setWindowWide] = useState(
+    () => typeof window === "undefined" || window.innerWidth >= ANALYSIS_DOCK_MIN_WIDTH,
+  );
+  useEffect(() => {
+    const onResize = () => setWindowWide(window.innerWidth >= ANALYSIS_DOCK_MIN_WIDTH);
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const toggleAnalysisDocked = useCallback(() => {
+    setAnalysisDocked((previous) => {
+      const next = !previous;
+      try {
+        window.localStorage.setItem("apx.analysisDocked", next ? "dock" : "float");
+      } catch {
+        // Privater Modus o. Ä. — die Vorliebe geht verloren, die
+        // Oberfläche funktioniert unverändert.
+      }
+      return next;
+    });
+  }, []);
+
   const [clippingOverlayEnabled, setClippingOverlayEnabled] = useState(false);
   const clipCanvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -1156,10 +1206,32 @@ export function Viewer() {
     toggleMaskOverlay,
   ]);
 
-  return (
+  const analysisIsDocked = analysisDocked && windowWide;
+
+  const analysisPanel =
+    photo && developPanelOpen && developFrame ? (
+      <DevelopAnalysisPanel
+        frame={developFrame}
+        pointerSample={pointerSample}
+        clippingOverlayEnabled={clippingOverlayEnabled}
+        onToggleClippingOverlay={() => setClippingOverlayEnabled((v) => !v)}
+        viewport={navigatorViewport}
+        thumbnailUrl={previewUrl(photo.id, 0)}
+        onAutoTone={(histogram) => applyAutoTone(computeAutoTone(histogram))}
+        docked={analysisIsDocked}
+        onToggleDocked={toggleAnalysisDocked}
+      />
+    ) : null;
+
+  const viewerMain = (
     <main
       ref={containerRef}
-      className="relative flex flex-1 items-center justify-center overflow-hidden bg-bg-base"
+      // `min-w-[320px]`: alle Paletten sind `shrink-0`, der Viewer ist das
+      // einzige Element in der Zeile, das nachgibt — ohne Untergrenze
+      // drückt ihn eine weitere offene Palette auf null Breite, und das
+      // Foto verschwindet ganz. Aufgefallen, als die neue Analyse-Spalte
+      // in einem 1280px-Fenster genau das auslöste.
+      className="relative flex min-w-[320px] flex-1 items-center justify-center overflow-hidden bg-bg-base"
       onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -1780,17 +1852,48 @@ export function Viewer() {
         </div>
       )}
 
-      {photo && developPanelOpen && developFrame && (
-        <DevelopAnalysisPanel
-          frame={developFrame}
-          pointerSample={pointerSample}
-          clippingOverlayEnabled={clippingOverlayEnabled}
-          onToggleClippingOverlay={() => setClippingOverlayEnabled((v) => !v)}
-          viewport={navigatorViewport}
-          thumbnailUrl={previewUrl(photo.id, 0)}
-          onAutoTone={(histogram) => applyAutoTone(computeAutoTone(histogram))}
-        />
-      )}
+      {/* Schwebende Fassung: nur noch, wenn ausdrücklich gelöst. Die
+          angedockte steht unten als eigene Spalte NEBEN dem <main>. */}
+      {analysisPanel && !analysisIsDocked ? analysisPanel : null}
     </main>
+  );
+
+  // Der Viewer misst sich an `containerRef` (dem <main>), und alle
+  // Einpass-/Zoom-Rechnungen hängen daran. Genau deshalb steht die
+  // angedockte Analyse als GESCHWISTER daneben statt als Overlay darin:
+  // die Restbreite ist dann automatisch die, mit der das Bild rechnet —
+  // ohne eine einzige Zeile Mathematik anzufassen.
+  //
+  // Die Hülle steht IMMER da, auch ohne Analyse. Ein erster Entwurf gab
+  // stattdessen `viewerMain` direkt zurück, solange keine Analyse
+  // gebraucht wurde — und wechselte damit den Wurzelknoten zwischen
+  // <main> und <div>, sobald das Entwickeln-Bild eintraf. React
+  // reconciliert nach Position UND Elementtyp: ein anderer Typ an
+  // derselben Stelle heißt Aushängen, nicht Aktualisieren. Der ganze
+  // Viewer samt Canvas wurde also neu eingehängt, der ResizeObserver
+  // begann wieder bei 0×0, und "Einpassen" fiel auf 100 % zurück statt
+  // auf die 10 %, die zu einem 6000×4000-Foto gehören — das Bild war
+  // schlicht weg. Real im Screenshot aufgefallen, nicht beim Kompilieren.
+  return (
+    <div className="flex flex-1 overflow-hidden">
+      {viewerMain}
+      {/* `pt-12` gleicht die schwebende Kopfzeile aus, genau wie
+          `PaletteFrame.tsx` es für die übrigen Paletten tut (siehe dessen
+          Moduldoku). Ohne den Ausgleich verschwindet die Panel-Kopfzeile
+          unter der App-Kopfzeile — im Entwickeln-Modus gibt es keine
+          `FilterBar`, die den Ausgleich bereits für die ganze Zeile
+          übernähme. */}
+      {/* `PaletteFrame` statt eines eigenen <aside>: die angedockte
+          Analyse bekommt damit dieselbe Breiten-Ziehleiste, denselben
+          Einklapp-Knopf und dieselbe localStorage-Persistenz wie
+          Sidebar/Presets/Entwickeln/Masken — und denselben
+          Kopfzeilen-Ausgleich, statt ihn hier ein zweites Mal von Hand
+          zu setzen. */}
+      {analysisPanel && analysisIsDocked ? (
+        <PaletteFrame id="analysis" side="right" defaultWidth={256} label="Analyse">
+          {analysisPanel}
+        </PaletteFrame>
+      ) : null}
+    </div>
   );
 }

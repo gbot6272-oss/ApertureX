@@ -44,6 +44,8 @@ import {
 } from "./ImageToolOverlay";
 import { CropOverlay } from "./CropOverlay";
 import { DevelopAnalysisPanel } from "./DevelopAnalysisPanel";
+import { Maximize, ZoomIn, ZoomOut } from "lucide-react";
+
 import { PaletteFrame } from "./PaletteFrame";
 
 /** Ab dieser Fensterbreite darf die Analyse eine eigene Spalte bekommen
@@ -1334,7 +1336,7 @@ export function Viewer() {
             }
             className="rounded border border-border px-2 py-1 transition-colors duration-[var(--duration-fast)] hover:border-accent hover:text-accent"
           >
-            −
+            <ZoomOut aria-hidden="true" className="size-4" />
           </button>
           <span
             aria-live="polite"
@@ -1352,7 +1354,7 @@ export function Viewer() {
             }
             className="rounded border border-border px-2 py-1 transition-colors duration-[var(--duration-fast)] hover:border-accent hover:text-accent"
           >
-            +
+            <ZoomIn aria-hidden="true" className="size-4" />
           </button>
           <button
             type="button"
@@ -1366,7 +1368,7 @@ export function Viewer() {
                 : "border-border hover:border-accent"
             }`}
           >
-            Einpassen
+            <Maximize aria-hidden="true" className="size-4" />
           </button>
           <button
             type="button"

@@ -1,3 +1,4 @@
+import { Grid2x2, Info, Map, Scan, SlidersHorizontal, Users } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { MENU_CATEGORIES, useCommandRegistry, type AiFeatureStatus, type CommandCategory } from "../lib/commandRegistry";
@@ -267,10 +268,11 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           type="button"
           onClick={toggleCenterView}
           aria-pressed={centerView === "grid"}
-          className={`apx-btn-liquid rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+          className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
             centerView === "grid" ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
+          <Grid2x2 aria-hidden="true" className="size-3.5" />
           {t("header.viewGrid")}
         </button>
 
@@ -278,10 +280,11 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           type="button"
           onClick={() => setCenterView(centerView === "overview" ? "viewer" : "overview")}
           aria-pressed={centerView === "overview"}
-          className={`apx-btn-liquid rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+          className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
             centerView === "overview" ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
+          <Scan aria-hidden="true" className="size-3.5" />
           {t("header.viewOverview")}
         </button>
 
@@ -289,10 +292,11 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           type="button"
           onClick={() => setCenterView(centerView === "map" ? "viewer" : "map")}
           aria-pressed={centerView === "map"}
-          className={`apx-btn-liquid rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+          className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
             centerView === "map" ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
+          <Map aria-hidden="true" className="size-3.5" />
           {t("header.viewMap")}
         </button>
 
@@ -300,10 +304,11 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           type="button"
           onClick={() => setCenterView(centerView === "people" ? "viewer" : "people")}
           aria-pressed={centerView === "people"}
-          className={`apx-btn-liquid rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+          className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
             centerView === "people" ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
+          <Users aria-hidden="true" className="size-3.5" />
           {t("header.viewPeople")}
         </button>
 
@@ -312,10 +317,11 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           onClick={toggleMetadataPanel}
           disabled={!selectedPhotoId && !metadataPanelOpen}
           aria-pressed={metadataPanelOpen}
-          className={`apx-btn-liquid rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-50 ${
+          className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-50 ${
             metadataPanelOpen ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
+          <Info aria-hidden="true" className="size-3.5" />
           {t("header.viewInfo")}
         </button>
 
@@ -325,10 +331,11 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           onClick={toggleDevelopPanel}
           disabled={!selectedPhotoId && !developPanelOpen}
           aria-pressed={developPanelOpen}
-          className={`apx-btn-liquid rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-50 ${
+          className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-50 ${
             developPanelOpen ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
+          <SlidersHorizontal aria-hidden="true" className="size-3.5" />
           {t("header.viewDevelop")}
         </button>
       </nav>

@@ -1,4 +1,16 @@
-import { Copy, Eye, EyeOff, Pencil, X } from "lucide-react";
+import {
+  Aperture,
+  Brush,
+  Circle,
+  Contrast,
+  Copy,
+  Eye,
+  EyeOff,
+  MoveHorizontal,
+  Palette,
+  Pencil,
+  X,
+} from "lucide-react";
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
@@ -224,61 +236,81 @@ export function MasksPanel() {
       {/* Einspaltig statt eines Zwei-Spalten-Rasters (Phase 18-Nachtrag,
           siehe `DECISIONS.md`): bei der Standard-/Minimalbreite dieser
           Palette (180–256px, `PaletteFrame`/`useWorkspacePanel`) sind die
-          deutschen Beschriftungen ("+ Linearer Verlauf" u. Ä.) in einer
+          deutschen Beschriftungen ("Linearer Verlauf" u. Ä.) in einer
           zweispaltigen ~115px-Spalte auf zwei Zeilen umgebrochen — genau
           der gemeldete "Schrift nicht in den Kästen"-Befund. Volle Breite
           je Zeile behebt das strukturell, statt Text/Schriftgröße
           einzeln nachzujustieren; dieselbe volle Breite hatte die
           längste Beschriftung unten ohnehin schon per `col-span-2`. */}
       <div className="flex flex-col gap-1">
+        {/* Phase 31 Schritt 3: Überschrift statt eines "+" vor jeder
+            Beschriftung. Die neuen Symbole sagen, WELCHE Maske entsteht
+            (Verlauf, Kreis, Pinsel …) — "hinzufügen" sagen sie nicht,
+            das trug bisher das "+". Eine Überschrift für die ganze
+            Gruppe sagt es einmal statt sechsmal, und spiegelt die
+            bereits vorhandene "KI-Maske hinzufügen"-Überschrift
+            darunter. */}
+        <h3 className="text-xs font-medium text-text-secondary">Maske hinzufügen</h3>
         <button
           type="button"
           onClick={() => addMask("LinearGradient")}
+          aria-label="Linearer Verlauf hinzufügen"
           disabled={!selectedPhotoId}
-          className="rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex items-center gap-2 rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
-          + Linearer Verlauf
+          <MoveHorizontal aria-hidden="true" className="size-3.5 shrink-0 text-text-muted" />
+          Linearer Verlauf
         </button>
         <button
           type="button"
           onClick={() => addMask("RadialGradient")}
+          aria-label="Radialer Verlauf hinzufügen"
           disabled={!selectedPhotoId}
-          className="rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex items-center gap-2 rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
-          + Radialer Verlauf
+          <Circle aria-hidden="true" className="size-3.5 shrink-0 text-text-muted" />
+          Radialer Verlauf
         </button>
         <button
           type="button"
           onClick={() => addMask("Brush")}
+          aria-label="Pinsel hinzufügen"
           disabled={!selectedPhotoId}
-          className="rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex items-center gap-2 rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
-          + Pinsel
+          <Brush aria-hidden="true" className="size-3.5 shrink-0 text-text-muted" />
+          Pinsel
         </button>
         <button
           type="button"
           onClick={() => addMask("ColorRange")}
+          aria-label="Farbbereich hinzufügen"
           disabled={!selectedPhotoId}
-          className="rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex items-center gap-2 rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
-          + Farbbereich
+          <Palette aria-hidden="true" className="size-3.5 shrink-0 text-text-muted" />
+          Farbbereich
         </button>
         <button
           type="button"
           onClick={() => addMask("LuminanceRange")}
+          aria-label="Luminanzbereich hinzufügen"
           disabled={!selectedPhotoId}
-          className="rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex items-center gap-2 rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
-          + Luminanzbereich
+          <Contrast aria-hidden="true" className="size-3.5 shrink-0 text-text-muted" />
+          Luminanzbereich
         </button>
         <button
           type="button"
           onClick={() => addMask("BlurDepthApprox")}
+          aria-label="Unschärfe-basierte Tiefennäherung hinzufügen"
           disabled={!selectedPhotoId}
           title="Keine echte Tiefenkarte — eine Laplace-Varianz-Schärfeheuristik, funktioniert nur bei echtem Schärfentiefe-Effekt (siehe DECISIONS.md ADR-0038)"
-          className="rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex items-center gap-2 rounded border border-border px-2 py-1 text-left text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
         >
-          + Unschärfe-basierte Tiefennäherung
+          <Aperture aria-hidden="true" className="size-3.5 shrink-0 text-text-muted" />
+          Unschärfe-basierte Tiefennäherung
         </button>
       </div>
 

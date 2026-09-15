@@ -39,10 +39,11 @@ use time::OffsetDateTime;
 
 pub use models::{
     embedding_distance, parse_filter_node, BoolOp, CatalogStatistics, Collection, CollectionFolder,
-    ColorLabelDefinition, EditHistoryEntry, FaceDetection, FaceRect, FilterCondition,
-    FilterCriteria, FilterField, FilterNode, FilterOperator, Folder, HistoryPosition, Keyword,
-    NewPhoto, Person, Photo, Preset, PresetFolder, PresetVersion, Preview, PreviewLevel, Snapshot,
-    Stack, TagRule, Template, SAME_PERSON_EMBEDDING_THRESHOLD,
+    ColorLabelDefinition, DistributionBucket, EditHistoryEntry, ExposureRow, FaceDetection,
+    FaceRect, FilterCondition, FilterCriteria, FilterField, FilterNode, FilterOperator, Folder,
+    GearStatistics, HistoryPosition, Keyword, NewPhoto, Person, Photo, Preset, PresetFolder,
+    PresetVersion, Preview, PreviewLevel, Snapshot, Stack, TagRule, Template,
+    SAME_PERSON_EMBEDDING_THRESHOLD,
 };
 pub use repository::batch::BatchAction;
 pub use repository::share::ShareDiff;
@@ -486,6 +487,14 @@ impl Catalog {
     pub fn catalog_statistics(&self) -> Result<CatalogStatistics> {
         let conn = self.lock()?;
         repository::stats::compute(&conn)
+    }
+
+    /// Ausrüstungs- und Belichtungs-Statistik (Phase 32 F5) — vollständige
+    /// Kamera-/Objektivlisten plus Brennweiten-/Blenden-/ISO-/Zeit-
+    /// Verteilung, siehe `repository::stats`s Klassen-Tabellen.
+    pub fn gear_statistics(&self) -> Result<GearStatistics> {
+        let conn = self.lock()?;
+        repository::stats::compute_gear(&conn)
     }
 
     // ---- Sammlungen (ab Phase 3, Sammlungssätze/intelligente Sammlungen ---

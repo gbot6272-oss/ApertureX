@@ -365,6 +365,7 @@ fn main() {
             commands::import_xmp_sidecar_from_file,
             commands::get_photo,
             commands::catalog_statistics,
+            commands::gear_statistics,
             commands::get_active_catalog_info,
             commands::list_recent_catalogs,
             commands::create_new_catalog,

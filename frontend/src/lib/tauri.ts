@@ -2071,6 +2071,32 @@ export function catalogStatistics(): Promise<CatalogStatisticsDto> {
   return invoke<CatalogStatisticsDto>("catalog_statistics");
 }
 
+/** Ein Balken einer Verteilung (Phase 32 F5). `missing` markiert den
+ * Sammelbalken „keine Angabe" — kein Messwert, sondern die ehrliche
+ * Lücke. */
+export interface DistributionBucketDto {
+  label: string;
+  count: number;
+  missing: boolean;
+}
+
+/** Ausrüstungs-/Belichtungs-Statistik (Phase 32 F5) — vollständige
+ * Kamera-/Objektivlisten (nicht auf acht gekürzt wie
+ * `CatalogStatisticsDto`) plus vier Verteilungen. */
+export interface GearStatisticsDto {
+  cameras: [string, number][];
+  lenses: [string, number][];
+  focal_lengths: DistributionBucketDto[];
+  apertures: DistributionBucketDto[];
+  isos: DistributionBucketDto[];
+  shutters: DistributionBucketDto[];
+  total: number;
+}
+
+export function gearStatistics(): Promise<GearStatisticsDto> {
+  return invoke<GearStatisticsDto>("gear_statistics");
+}
+
 export interface PreviewCacheStatsDto {
   file_count: number;
   total_bytes: number;

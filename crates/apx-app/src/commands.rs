@@ -8307,6 +8307,78 @@ pub fn catalog_statistics(state: State<'_, AppState>) -> Result<CatalogStatistic
         .map_err(|err| err.to_string())
 }
 
+/// Ein Balken einer Verteilung (Phase 32 F5).
+#[derive(Debug, Clone, Serialize)]
+pub struct DistributionBucketDto {
+    pub label: String,
+    pub count: u64,
+    /// `true` beim Sammelbalken „keine Angabe" — die Oberfläche setzt ihn
+    /// optisch ab, statt ihn wie einen echten Messwert zu zeigen.
+    pub missing: bool,
+}
+
+/// Ausrüstungs-/Belichtungs-Statistik (Phase 32 F5) — ergänzt
+/// [`CatalogStatisticsDto`], ersetzt es nicht.
+#[derive(Debug, Clone, Serialize)]
+pub struct GearStatisticsDto {
+    pub cameras: Vec<(String, u64)>,
+    pub lenses: Vec<(String, u64)>,
+    pub focal_lengths: Vec<DistributionBucketDto>,
+    pub apertures: Vec<DistributionBucketDto>,
+    pub isos: Vec<DistributionBucketDto>,
+    pub shutters: Vec<DistributionBucketDto>,
+    pub total: u64,
+}
+
+impl From<apx_catalog::DistributionBucket> for DistributionBucketDto {
+    fn from(bucket: apx_catalog::DistributionBucket) -> Self {
+        Self {
+            label: bucket.label,
+            count: bucket.count,
+            missing: bucket.missing,
+        }
+    }
+}
+
+impl From<apx_catalog::GearStatistics> for GearStatisticsDto {
+    fn from(stats: apx_catalog::GearStatistics) -> Self {
+        Self {
+            cameras: stats.cameras,
+            lenses: stats.lenses,
+            focal_lengths: stats
+                .focal_lengths
+                .into_iter()
+                .map(DistributionBucketDto::from)
+                .collect(),
+            apertures: stats
+                .apertures
+                .into_iter()
+                .map(DistributionBucketDto::from)
+                .collect(),
+            isos: stats
+                .isos
+                .into_iter()
+                .map(DistributionBucketDto::from)
+                .collect(),
+            shutters: stats
+                .shutters
+                .into_iter()
+                .map(DistributionBucketDto::from)
+                .collect(),
+            total: stats.total,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn gear_statistics(state: State<'_, AppState>) -> Result<GearStatisticsDto, String> {
+    state
+        .catalog
+        .gear_statistics()
+        .map(GearStatisticsDto::from)
+        .map_err(|err| err.to_string())
+}
+
 // ---- Mehrere Kataloge + Katalog-Wartung (Phase 13 Schritt 6, siehe
 // DECISIONS.md ADR-0040-Nachtrag IV) -----------------------------------
 //

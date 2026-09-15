@@ -181,6 +181,7 @@ export function useCommandRegistry(): CommandEntry[] {
         run: () => selectedPhotoId && void openSecondaryDisplay(selectedPhotoId),
       },
       { id: "fn:stats", label: t("header.stats"), category: "analysis", run: () => requestCommand("stats") },
+      { id: "fn:gear-stats", label: t("header.gearStats"), category: "analysis", run: () => requestCommand("gear-stats") },
       { id: "fn:catalog", label: t("header.catalog"), category: "analysis", run: () => requestCommand("catalog") },
 
       // System — nicht im Overflow-Menü (eigenes Icon/Tastenkürzel), aber

@@ -91,6 +91,7 @@ import type {
   CollectionFolderDto,
   GpxTrackPointDto,
   CatalogStatisticsDto,
+  GearStatisticsDto,
   CameraInfoDto,
   CameraFileEntryDto,
   RemovableVolumeDto,
@@ -1978,6 +1979,15 @@ interface LibraryViewsSlice {
 
   catalogStatistics: CatalogStatisticsDto | null;
   refreshCatalogStatistics: () => Promise<void>;
+
+  /** Ausrüstungs-/Belichtungs-Statistik (Phase 32 F5, siehe
+   * `GearStatsDialog.tsx`). Getrennt von `catalogStatistics`, weil sie
+   * eine andere Frage beantwortet („womit fotografiere ich" statt „wie
+   * groß ist der Katalog") und deutlich mehr Daten überträgt — der
+   * kleine Statistik-Dialog soll davon nicht langsamer werden. */
+  gearStatistics: GearStatisticsDto | null;
+  gearStatisticsLoading: boolean;
+  refreshGearStatistics: () => Promise<void>;
 
   previewCacheStats: PreviewCacheStatsDto | null;
   refreshPreviewCacheStats: () => Promise<void>;
@@ -7567,6 +7577,27 @@ export const useAppStore = create<AppStore>()(
     deleteFilterPreset: async (templateId) => {
       await api.deleteTemplate(templateId);
       await get().refreshFilterPresets();
+    },
+
+    gearStatistics: null,
+    gearStatisticsLoading: false,
+
+    refreshGearStatistics: async () => {
+      set((state) => {
+        state.gearStatisticsLoading = true;
+      });
+      try {
+        const stats = await api.gearStatistics();
+        set((state) => {
+          state.gearStatistics = stats;
+          state.gearStatisticsLoading = false;
+        });
+      } catch (err) {
+        set((state) => {
+          state.gearStatisticsLoading = false;
+          state.catalogError = String(err);
+        });
+      }
     },
 
     refreshCatalogStatistics: async () => {

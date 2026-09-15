@@ -264,6 +264,19 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       top_camera_models: [],
       top_lenses: [],
     } as unknown,
+    // Ausrüstungs-Statistik (Phase 32 F5) — wie `catalogStatistics` ein
+    // fester Fixture-Wert statt einer im Mock nachgebauten Aggregation:
+    // die Klassengrenzen sind in `apx-catalog`s `stats`-Tests abgedeckt,
+    // hier geht es um die Darstellung und den Sprung in den Filter.
+    gearStatistics: {
+      cameras: [],
+      lenses: [],
+      focal_lengths: [],
+      apertures: [],
+      isos: [],
+      shutters: [],
+      total: 0,
+    } as unknown,
     previewCacheStats: { file_count: 0, total_bytes: 0 } as { file_count: number; total_bytes: number },
     // Entrauschung/Hochskalierung (Phase 9 Schritt 6).
     denoisedPhotoPath: "/mock/photos/IMG_0001_entrauscht.png" as string,
@@ -910,6 +923,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       }
       case "catalog_statistics":
         return fixtures.catalogStatistics;
+      case "gear_statistics":
+        return fixtures.gearStatistics;
       case "get_active_catalog_info":
         // Kein e2e-Test deckt Phase 13 Schritt 6 bisher ab — ein
         // plausibler fester Wert reicht als Platzhalter.

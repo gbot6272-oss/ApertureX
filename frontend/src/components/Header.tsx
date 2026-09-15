@@ -12,6 +12,7 @@ import { ImportDialog } from "./ImportDialog";
 import { PrintDialog } from "./PrintDialog";
 import { SlideshowDialog } from "./SlideshowDialog";
 import { VideoTimelineDialog } from "./VideoTimelineDialog";
+import { BatchRenameDialog } from "./BatchRenameDialog";
 import { TemplatesDialog } from "./TemplatesDialog";
 import { LibraryOrganizeDialog } from "./LibraryOrganizeDialog";
 import { BatchConsoleDialog } from "./BatchConsoleDialog";
@@ -69,6 +70,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
   const [importDialogSource, setImportDialogSource] = useState<string | null>(null);
   const [templatesDialogOpen, setTemplatesDialogOpen] = useState(false);
   const [organizeDialogOpen, setOrganizeDialogOpen] = useState(false);
+  const [batchRenameDialogOpen, setBatchRenameDialogOpen] = useState(false);
   const [batchConsoleDialogOpen, setBatchConsoleDialogOpen] = useState(false);
   const [stackingDialogOpen, setStackingDialogOpen] = useState(false);
   const [scriptPluginDialogOpen, setScriptPluginDialogOpen] = useState(false);
@@ -117,6 +119,9 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
         break;
       case "organize":
         setOrganizeDialogOpen(true);
+        break;
+      case "batch-rename":
+        setBatchRenameDialogOpen(true);
         break;
       case "batch-console":
         setBatchConsoleDialogOpen(true);
@@ -378,6 +383,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
       <BookDialog open={bookDialogOpen} photoIds={exportPhotoIds} onClose={closeBookDialog} />
       <WebDialog open={webDialogOpen} photoIds={exportPhotoIds} onClose={closeWebDialog} />
       <TemplatesDialog open={templatesDialogOpen} photoIds={exportPhotoIds} onClose={() => setTemplatesDialogOpen(false)} />
+      <BatchRenameDialog open={batchRenameDialogOpen} onClose={() => setBatchRenameDialogOpen(false)} />
       <LibraryOrganizeDialog open={organizeDialogOpen} onClose={() => setOrganizeDialogOpen(false)} />
       <BatchConsoleDialog open={batchConsoleDialogOpen} onClose={() => setBatchConsoleDialogOpen(false)} />
       <MetadataDialog open={metadataDialogOpen} onClose={() => setMetadataDialogOpen(false)} />

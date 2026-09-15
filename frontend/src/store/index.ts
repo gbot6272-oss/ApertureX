@@ -70,6 +70,7 @@ import type {
   ExportOutcomeDto,
   ExportPhotoOptions,
   FaceDetectionDto,
+  RenamePlanEntryDto,
   FilterCriteriaDto,
   FolderDto,
   HistoryPositionDto,
@@ -924,6 +925,20 @@ interface LibrarySlice {
    * `resetView()` an; bei 300 Fotos eines Urlaubstags wären das 300
    * Zustandsrunden für ein Ergebnis, das in einer zu haben ist. */
   setMultiSelection: (photoIds: readonly string[]) => void;
+
+  /** Stapel-Umbenennung (Phase 32 F4, siehe `BatchRenameDialog.tsx` und
+   * `apx-app`s `batch_rename`). Die Vorschau kommt aus **derselben**
+   * Rust-Planung, die das Anwenden später ausführt — bewusst nicht im
+   * Frontend nachgerechnet, sonst könnten Vorschau und Ergebnis
+   * auseinanderlaufen. */
+  batchRenamePreview: RenamePlanEntryDto[];
+  batchRenamePreviewLoading: boolean;
+  batchRenameRunning: boolean;
+  batchRenameError: string | null;
+  batchRenameResultCount: number | null;
+  loadBatchRenamePreview: (photoIds: string[], pattern: string, startSeq: number) => Promise<void>;
+  runBatchRename: (photoIds: string[], pattern: string, startSeq: number) => Promise<void>;
+  clearBatchRenameState: () => void;
 
   /** Schnellentwicklung im Raster (Phase 11 Schritt 3): pro Kachel bei
    * Hover/Auswahl ein kompaktes Overlay mit den sieben Phase-2-
@@ -3895,6 +3910,72 @@ export const useAppStore = create<AppStore>()(
         // Info-/Entwickeln-Panel weiter das vorherige Foto, obwohl die
         // Auswahl daneben eine ganz andere ist.
         if (photoIds.length > 0) state.selectedPhotoId = photoIds[0]!;
+      });
+    },
+
+    batchRenamePreview: [],
+    batchRenamePreviewLoading: false,
+    batchRenameRunning: false,
+    batchRenameError: null,
+    batchRenameResultCount: null,
+
+    loadBatchRenamePreview: async (photoIds, pattern, startSeq) => {
+      if (photoIds.length === 0) {
+        set((state) => {
+          state.batchRenamePreview = [];
+        });
+        return;
+      }
+      set((state) => {
+        state.batchRenamePreviewLoading = true;
+        state.batchRenameError = null;
+      });
+      try {
+        const preview = await api.previewBatchRename(photoIds, pattern, startSeq);
+        set((state) => {
+          state.batchRenamePreview = preview;
+          state.batchRenamePreviewLoading = false;
+        });
+      } catch (err) {
+        set((state) => {
+          state.batchRenamePreview = [];
+          state.batchRenamePreviewLoading = false;
+          state.batchRenameError = String(err);
+        });
+      }
+    },
+
+    runBatchRename: async (photoIds, pattern, startSeq) => {
+      set((state) => {
+        state.batchRenameRunning = true;
+        state.batchRenameError = null;
+        state.batchRenameResultCount = null;
+      });
+      try {
+        const renamed = await api.applyBatchRename(photoIds, pattern, startSeq);
+        set((state) => {
+          state.batchRenameRunning = false;
+          state.batchRenameResultCount = renamed.length;
+        });
+        // Die Fotoliste trägt den Dateinamen — ohne Nachladen zeigte das
+        // Raster weiter die alten Namen, obwohl die Dateien längst anders
+        // heissen.
+        const folderId = get().selectedFolderId;
+        if (folderId) await get().loadPhotosForFolder(folderId);
+        await get().loadBatchRenamePreview(photoIds, pattern, startSeq);
+      } catch (err) {
+        set((state) => {
+          state.batchRenameRunning = false;
+          state.batchRenameError = String(err);
+        });
+      }
+    },
+
+    clearBatchRenameState: () => {
+      set((state) => {
+        state.batchRenamePreview = [];
+        state.batchRenameError = null;
+        state.batchRenameResultCount = null;
       });
     },
 

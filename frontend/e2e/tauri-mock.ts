@@ -1774,6 +1774,58 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return null;
       }
 
+      // ---- Stapel-Umbenennung (Phase 32 F4) ---------------------------
+      //
+      // Bildet `apx-app`s `batch_rename::plan_batch_rename` nach, so weit
+      // der Frontend-Fluss es braucht: Tokens ersetzen, Endung erhalten,
+      // doppelte Zielnamen erkennen. Die echte Planung (inkl. Kollision
+      // mit fremden Dateien, virtuellen Kopien und Ringtausch) ist in
+      // Rust getestet — hier geht es nur darum, dass der Dialog eine
+      // plausible Antwort bekommt.
+      case "preview_batch_rename":
+      case "apply_batch_rename": {
+        const ids = args.photoIds as string[];
+        const pattern = args.pattern as string;
+        const startSeq = args.startSeq as number;
+        const taken = new Set<string>();
+        const plan = ids.map((id, index) => {
+          const photo = findPhoto(id);
+          const filename = photo?.filename ?? "unbekannt";
+          const dot = filename.lastIndexOf(".");
+          const stem = dot > 0 ? filename.slice(0, dot) : filename;
+          const ext = dot > 0 ? filename.slice(dot + 1) : null;
+          const captured = photo?.captured_at ? new Date(photo.captured_at) : new Date(0);
+          const date = `${captured.getFullYear()}${String(captured.getMonth() + 1).padStart(2, "0")}${String(captured.getDate()).padStart(2, "0")}`;
+          const rendered = pattern
+            .replaceAll("{date}", date)
+            .replaceAll("{seq}", String(startSeq + index).padStart(4, "0"))
+            .replaceAll("{camera}", photo?.camera_model ?? "Kamera")
+            .replaceAll("{original}", stem)
+            .trim();
+          const newFilename = rendered && ext ? `${rendered}.${ext}` : rendered;
+          let status = "planned";
+          if (!rendered) status = "empty_name";
+          else if (newFilename === filename) status = "unchanged";
+          else if (taken.has(newFilename)) status = "duplicate_in_batch";
+          if (status === "planned" || status === "unchanged") taken.add(newFilename);
+          return { photo_id: id, current_filename: filename, new_filename: newFilename, status };
+        });
+
+        if (cmd === "preview_batch_rename") return plan;
+
+        const blocked = plan.find((entry) => entry.status !== "planned" && entry.status !== "unchanged");
+        if (blocked) throw new Error(`Umbenennen abgebrochen: ${blocked.current_filename}`);
+        const renamed: MockPhoto[] = [];
+        for (const entry of plan) {
+          if (entry.status !== "planned") continue;
+          const photo = findPhoto(entry.photo_id);
+          if (!photo) continue;
+          photo.filename = entry.new_filename;
+          renamed.push(clonePhoto(photo));
+        }
+        return renamed;
+      }
+
       // ---- Vorlagen (Phase 8 Schritt 8) -------------------------------
       case "save_template": {
         const id = `template-${nextTemplateId++}`;

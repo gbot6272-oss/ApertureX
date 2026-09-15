@@ -326,6 +326,14 @@ impl Catalog {
     // ---- Bewertung/Flagge/Farbe (ab Phase 3) -----------------------------
 
     /// Setzt die Sternebewertung (0–5) eines Fotos.
+    /// Schreibt den Dateinamen eines Fotos um (Phase 32 F4) — siehe
+    /// `repository::photos::set_filename` für die Reihenfolge-Frage
+    /// Datei-vor-Katalogzeile.
+    pub fn set_photo_filename(&self, id: PhotoId, filename: &str) -> Result<()> {
+        let conn = self.lock()?;
+        repository::photos::set_filename(&conn, id, filename)
+    }
+
     pub fn set_photo_rating(&self, id: PhotoId, rating: u8) -> Result<()> {
         let conn = self.lock()?;
         repository::photos::set_rating(&conn, id, rating)

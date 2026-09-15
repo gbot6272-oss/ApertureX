@@ -3539,6 +3539,216 @@ pub fn list_virtual_copies(
     Ok(copies.into_iter().map(PhotoDto::from).collect())
 }
 
+// ---- Stapel-Umbenennung (Phase 32 F4) --------------------------------------
+
+/// Eine geplante Umbenennung, wie die Vorschau sie zeigt.
+#[derive(Debug, Clone, Serialize)]
+pub struct RenamePlanEntryDto {
+    pub photo_id: String,
+    pub current_filename: String,
+    pub new_filename: String,
+    /// `"planned"`, `"unchanged"`, `"empty_name"`, `"duplicate_in_batch"`,
+    /// `"collides_with_existing"` oder `"virtual_copy"` — die Oberfläche
+    /// übersetzt den Schlüssel, damit die Begründung nicht als fertiger
+    /// deutscher Satz durch die IPC-Grenze muss.
+    pub status: String,
+}
+
+fn status_key(status: &crate::batch_rename::RenameStatus) -> &'static str {
+    use crate::batch_rename::RenameStatus::*;
+    match status {
+        Planned => "planned",
+        Unchanged => "unchanged",
+        EmptyName => "empty_name",
+        DuplicateInBatch => "duplicate_in_batch",
+        CollidesWithExisting => "collides_with_existing",
+        VirtualCopy => "virtual_copy",
+    }
+}
+
+/// Baut den Plan für [`preview_batch_rename`] und [`apply_batch_rename`] —
+/// beide benutzen exakt dieselbe Funktion, damit die Vorschau nie etwas
+/// anderes zeigt als das, was das Anwenden tut.
+fn build_rename_plan(
+    state: &State<'_, AppState>,
+    photo_ids: &[apx_core::PhotoId],
+    pattern: &str,
+    start_seq: usize,
+) -> Result<Vec<crate::batch_rename::RenamePlanEntry>, String> {
+    let mut candidates = Vec::with_capacity(photo_ids.len());
+    let mut occupied: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_folders: std::collections::HashSet<apx_core::FolderId> =
+        std::collections::HashSet::new();
+
+    for photo_id in photo_ids {
+        let photo = state
+            .catalog
+            .get_photo(*photo_id)
+            .map_err(|err| err.to_string())?;
+
+        // Die bereits vergebenen Namen je Ordner nur einmal einsammeln —
+        // bei 300 ausgewählten Fotos aus einem Ordner wären es sonst 300
+        // identische Abfragen.
+        if seen_folders.insert(photo.folder_id) {
+            for existing in state
+                .catalog
+                .list_photos_by_folder(photo.folder_id)
+                .map_err(|err| err.to_string())?
+            {
+                occupied.insert(existing.filename);
+            }
+        }
+
+        candidates.push(crate::batch_rename::RenameCandidate {
+            photo_id: photo.id,
+            current_filename: photo.filename.clone(),
+            // Ohne Aufnahmedatum die Dateisystem-Änderungszeit — dieselbe
+            // Ersatzregel wie beim Import.
+            date: photo.captured_at.unwrap_or(photo.file_mtime),
+            camera: photo.camera_model.clone(),
+            is_virtual_copy: photo.source_photo_id.is_some(),
+        });
+    }
+
+    Ok(crate::batch_rename::plan_batch_rename(
+        &candidates,
+        pattern,
+        start_seq,
+        &occupied,
+    ))
+}
+
+/// Zeigt, was eine Stapel-Umbenennung täte — ohne irgendetwas zu ändern.
+#[tauri::command]
+pub fn preview_batch_rename(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    pattern: String,
+    start_seq: u32,
+) -> Result<Vec<RenamePlanEntryDto>, String> {
+    let photo_ids = photo_ids
+        .into_iter()
+        .map(parse_photo_id)
+        .collect::<Result<Vec<_>, _>>()?;
+    let plan = build_rename_plan(&state, &photo_ids, &pattern, start_seq.max(1) as usize)?;
+    Ok(plan
+        .into_iter()
+        .map(|entry| RenamePlanEntryDto {
+            photo_id: entry.photo_id.to_string(),
+            current_filename: entry.current_filename,
+            new_filename: entry.new_filename,
+            status: status_key(&entry.status).to_string(),
+        })
+        .collect())
+}
+
+/// Führt die Stapel-Umbenennung aus.
+///
+/// **Musterfehler blockieren, Foto-Eigenschaften nicht.** Ein leerer
+/// Name, doppelte Zielnamen oder eine Kollision mit einer fremden Datei
+/// sind Fehler *im Muster* — dann wird gar nichts umbenannt, denn ein
+/// halb angewandtes Muster hinterlässt einen Ordner, in dem niemand mehr
+/// weiß, welche Datei schon dran war. Eine virtuelle Kopie dagegen ist
+/// eine Eigenschaft *eines Fotos*: sie wird übersprungen, der Rest läuft
+/// durch.
+///
+/// **Zwei Phasen.** Erst bekommt jede betroffene Datei einen eindeutigen
+/// Zwischennamen, dann den Zielnamen. Ohne das scheitert jeder
+/// Ringtausch (a → b, b → a): der erste Schritt überschriebe b.
+#[tauri::command]
+pub fn apply_batch_rename(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    pattern: String,
+    start_seq: u32,
+) -> Result<Vec<PhotoDto>, String> {
+    let photo_ids = photo_ids
+        .into_iter()
+        .map(parse_photo_id)
+        .collect::<Result<Vec<_>, _>>()?;
+    let plan = build_rename_plan(&state, &photo_ids, &pattern, start_seq.max(1) as usize)?;
+
+    if let Some(blocked) = plan.iter().find(|entry| {
+        entry.is_blocked() && entry.status != crate::batch_rename::RenameStatus::VirtualCopy
+    }) {
+        return Err(format!(
+            "Umbenennen abgebrochen: „{}“ ergäbe „{}“ ({}). Kein Foto wurde umbenannt.",
+            blocked.current_filename,
+            blocked.new_filename,
+            match blocked.status {
+                crate::batch_rename::RenameStatus::EmptyName =>
+                    "das Muster ergibt einen leeren Namen",
+                crate::batch_rename::RenameStatus::DuplicateInBatch =>
+                    "zwei Fotos bekämen denselben Namen — fügen Sie {seq} ein",
+                _ => "eine andere Datei trägt diesen Namen bereits",
+            }
+        ));
+    }
+
+    let todo: Vec<_> = plan
+        .iter()
+        .filter(|entry| entry.status == crate::batch_rename::RenameStatus::Planned)
+        .collect();
+    if todo.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Quell- und Zielpfade sammeln; das eigentliche zweiphasige
+    // Umbenennen macht `batch_rename::rename_files` (dort auch getestet).
+    let mut moves: Vec<(PathBuf, PathBuf)> = Vec::with_capacity(todo.len());
+    let mut targets: Vec<(apx_core::PhotoId, String)> = Vec::with_capacity(todo.len());
+    for entry in &todo {
+        let photo = state
+            .catalog
+            .get_photo(entry.photo_id)
+            .map_err(|err| err.to_string())?;
+        let folder = state
+            .catalog
+            .get_folder(photo.folder_id)
+            .map_err(|err| err.to_string())?;
+        moves.push((
+            folder.path.join(&photo.filename),
+            folder.path.join(&entry.new_filename),
+        ));
+        targets.push((photo.id, entry.new_filename.clone()));
+    }
+
+    // Eine Datei, die auf der Platte liegt, aber nicht im Katalog steht,
+    // sieht die Planung nicht — hier wird sie gesehen. Ein Ziel, das
+    // einer Quelle dieses Stapels gehört, zählt nicht: das ist der
+    // Ringtausch, den `rename_files` gerade auflöst.
+    let sources: std::collections::HashSet<&PathBuf> =
+        moves.iter().map(|(source, _)| source).collect();
+    for (_, target) in &moves {
+        if target.exists() && !sources.contains(target) {
+            return Err(format!(
+                "Umbenennen abgebrochen: „{}“ existiert bereits auf der Platte, ist aber nicht im Katalog. Kein Foto wurde umbenannt.",
+                target.display()
+            ));
+        }
+    }
+
+    crate::batch_rename::rename_files(&moves)?;
+
+    // Erst jetzt der Katalog — siehe
+    // `apx_catalog::repository::photos::set_filename` zur Reihenfolge.
+    let mut renamed = Vec::with_capacity(targets.len());
+    for (photo_id, filename) in targets {
+        state
+            .catalog
+            .set_photo_filename(photo_id, &filename)
+            .map_err(|err| err.to_string())?;
+        renamed.push(
+            state
+                .catalog
+                .get_photo(photo_id)
+                .map(PhotoDto::from)
+                .map_err(|err| err.to_string())?,
+        );
+    }
+    Ok(renamed)
+}
+
 // ---- Stapel (Phase 9 Schritt 1) --------------------------------------------
 
 #[tauri::command]

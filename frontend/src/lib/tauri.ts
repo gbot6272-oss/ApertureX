@@ -883,6 +883,35 @@ export function listVirtualCopies(photoId: string): Promise<PhotoDto[]> {
   return invoke<PhotoDto[]>("list_virtual_copies", { photoId });
 }
 
+// ---- Bibliothek: Stapel-Umbenennung (Phase 32 F4) --------------------------
+
+/** Status einer geplanten Umbenennung — Schlüssel aus
+ * `apx-app`s `batch_rename::RenameStatus`, hier übersetzt angezeigt. */
+export type RenamePlanStatus =
+  | "planned"
+  | "unchanged"
+  | "empty_name"
+  | "duplicate_in_batch"
+  | "collides_with_existing"
+  | "virtual_copy";
+
+export interface RenamePlanEntryDto {
+  photo_id: string;
+  current_filename: string;
+  new_filename: string;
+  status: RenamePlanStatus;
+}
+
+/** Zeigt, was eine Stapel-Umbenennung täte — ohne etwas zu ändern. */
+export function previewBatchRename(photoIds: string[], pattern: string, startSeq: number): Promise<RenamePlanEntryDto[]> {
+  return invoke<RenamePlanEntryDto[]>("preview_batch_rename", { photoIds, pattern, startSeq });
+}
+
+/** Führt die Umbenennung aus; liefert die umbenannten Fotos zurück. */
+export function applyBatchRename(photoIds: string[], pattern: string, startSeq: number): Promise<PhotoDto[]> {
+  return invoke<PhotoDto[]>("apply_batch_rename", { photoIds, pattern, startSeq });
+}
+
 // ---- Bibliothek: Stapel (Phase 9 Schritt 1) --------------------------------
 
 export function createStack(name: string | undefined, photoIds: string[]): Promise<string> {
@@ -1978,7 +2007,7 @@ export function setPhotoGps(photoId: string, lat: number | null, lon: number | n
 // jeweilige `*Options`-DTO als JSON (für Export-/Layout-Vorlagen)
 // beziehungsweise `{ presetId, exportOptions }` (für Workflow-Vorlagen,
 // siehe {@link WorkflowTemplatePayload}).
-export type TemplateKind = "export" | "print" | "book" | "slideshow" | "web" | "workflow" | "filter";
+export type TemplateKind = "export" | "print" | "book" | "slideshow" | "web" | "workflow" | "filter" | "rename";
 
 export interface TemplateDto {
   id: string;

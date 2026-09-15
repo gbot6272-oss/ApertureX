@@ -148,6 +148,7 @@ export function useCommandRegistry(): CommandEntry[] {
       { id: "fn:import-template", label: t("header.importWithTemplate"), category: "templates", run: () => requestCommand("import-template") },
       { id: "fn:templates", label: t("header.templates"), category: "templates", run: () => requestCommand("templates") },
       { id: "fn:organize", label: t("header.organize"), category: "templates", run: () => requestCommand("organize") },
+      { id: "fn:batch-rename", label: t("header.batchRename"), category: "templates", run: () => requestCommand("batch-rename") },
       { id: "fn:batch-console", label: t("header.batchConsole"), category: "templates", run: () => requestCommand("batch-console") },
       { id: "fn:metadata", label: t("header.metadata"), category: "templates", run: () => requestCommand("metadata") },
 

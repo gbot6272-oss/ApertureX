@@ -7,6 +7,7 @@
 
 #![deny(clippy::unwrap_used)]
 
+mod batch_rename;
 mod commands;
 mod import;
 mod protocol;
@@ -406,6 +407,8 @@ fn main() {
             commands::list_collection_folders,
             commands::create_virtual_copy,
             commands::list_virtual_copies,
+            commands::preview_batch_rename,
+            commands::apply_batch_rename,
             commands::create_stack,
             commands::delete_stack,
             commands::set_stack_cover,

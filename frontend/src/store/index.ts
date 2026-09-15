@@ -155,6 +155,11 @@ export type ImageToolMode =
 
 export type SelectionMode = "replace" | "toggle" | "range";
 
+/** Die zentrale Ansicht zwischen Kopfleiste und Filmstreifen. Seit
+ * Phase 32 F3 als eigener Typ statt zweimal ausgeschriebener Union —
+ * `CalendarView.tsx` und `commandRegistry.ts` brauchen ihn ebenfalls. */
+export type CenterView = "viewer" | "grid" | "map" | "overview" | "people" | "calendar";
+
 /** Liest aus einem Klick-Event, welcher Auswahlmodus gemeint ist (Strg/Cmd
  * = einzelnes Umschalten, Umschalt = Bereich, sonst Ersetzen) — von Raster
  * und Filmstreifen gemeinsam genutzt (siehe `DECISIONS.md` ADR-0024). */
@@ -900,16 +905,25 @@ interface LibrarySlice {
    * Sichtungsmodus mit Schnellentwicklung statt Stapel-Bearbeitung.
    * `"people"` die Personenansicht (Phase 11 Schritt 5, siehe
    * `PeopleView.tsx`): grobe, nach Blob-Anzahl/-Fläche vorsortierte
-   * Gruppen statt echter Personen-Identifizierung. */
-  centerView: "viewer" | "grid" | "map" | "overview" | "people";
+   * Gruppen statt echter Personen-Identifizierung. `"calendar"` die
+   * Kalenderansicht (Phase 32 F3, siehe `CalendarView.tsx`): der Katalog
+   * nach Aufnahmetag statt nach Ordner/Sammlung. */
+  centerView: CenterView;
   toggleCenterView: () => void;
-  setCenterView: (view: "viewer" | "grid" | "map" | "overview" | "people") => void;
+  setCenterView: (view: CenterView) => void;
 
   /** Mehrfachauswahl fürs Stapel-Bearbeiten (Bewertung/Flagge/Sammlung-
    * Hinzufügen) — geteilt zwischen Raster und Filmstreifen. Enthält
    * `selectedPhotoId`, sobald eines gesetzt ist. */
   multiSelectedIds: string[];
   togglePhotoSelection: (photoId: string, mode: SelectionMode) => void;
+  /** Setzt die Mehrfachauswahl in einem Rutsch (Phase 32 F3): die
+   * Kalenderansicht wählt alle Fotos eines Tages aus. `togglePhotoSelection`
+   * je Foto aufzurufen wäre nicht dasselbe — jeder Aufruf setzt zusätzlich
+   * `selectedPhotoId`, lädt ggf. den Entwickeln-Zustand nach und stößt
+   * `resetView()` an; bei 300 Fotos eines Urlaubstags wären das 300
+   * Zustandsrunden für ein Ergebnis, das in einer zu haben ist. */
+  setMultiSelection: (photoIds: readonly string[]) => void;
 
   /** Schnellentwicklung im Raster (Phase 11 Schritt 3): pro Kachel bei
    * Hover/Auswahl ein kompaktes Overlay mit den sieben Phase-2-
@@ -3873,6 +3887,16 @@ export const useAppStore = create<AppStore>()(
     },
 
     multiSelectedIds: [],
+
+    setMultiSelection: (photoIds) => {
+      set((state) => {
+        state.multiSelectedIds = [...photoIds];
+        // Das erste Foto wird zusätzlich zum aktiven — sonst zeigten
+        // Info-/Entwickeln-Panel weiter das vorherige Foto, obwohl die
+        // Auswahl daneben eine ganz andere ist.
+        if (photoIds.length > 0) state.selectedPhotoId = photoIds[0]!;
+      });
+    },
 
     togglePhotoSelection: (photoId, mode) => {
       if (mode === "toggle") {

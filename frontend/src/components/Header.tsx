@@ -1,4 +1,4 @@
-import { Grid2x2, Info, Map, Scan, SlidersHorizontal, Users } from "lucide-react";
+import { CalendarDays, Grid2x2, Info, Map, Scan, SlidersHorizontal, Users } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { MENU_CATEGORIES, useCommandRegistry, type AiFeatureStatus, type CommandCategory } from "../lib/commandRegistry";
@@ -310,6 +310,18 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
         >
           <Users aria-hidden="true" className="size-3.5" />
           {t("header.viewPeople")}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setCenterView(centerView === "calendar" ? "viewer" : "calendar")}
+          aria-pressed={centerView === "calendar"}
+          className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+            centerView === "calendar" ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          }`}
+        >
+          <CalendarDays aria-hidden="true" className="size-3.5" />
+          {t("header.viewCalendar")}
         </button>
 
         <button

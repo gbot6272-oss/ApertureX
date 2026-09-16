@@ -103,6 +103,9 @@ define_id_type!(StackId);
 // Phase 9 Schritt 2: bedingte Auto-Schlagwort-Regel (siehe
 // `apx_catalog::repository::tag_rules`s Moduldoku).
 define_id_type!(TagRuleId);
+// Phase 32 F6: eine Notiz an einer Stelle im Bild (siehe
+// `apx_catalog::repository::notes`s Moduldoku).
+define_id_type!(PhotoNoteId);
 // Phase 11 Schritt 9: Stapelverarbeitungs-Konsole — ein journalisierter
 // Massenvorgang mit echtem Undo (siehe
 // `apx_catalog::repository::batch`s Moduldoku).

@@ -883,6 +883,46 @@ export function listVirtualCopies(photoId: string): Promise<PhotoDto[]> {
   return invoke<PhotoDto[]>("list_virtual_copies", { photoId });
 }
 
+// ---- Notizen am Foto (Phase 32 F6) -----------------------------------------
+
+/** Eine Notiz an einer Stelle im Bild. `x`/`y` sind normiert (0..1) und
+ * beziehen sich aufs **unbeschnittene** Original — siehe
+ * `lib/notePins.ts` für die Umrechnung auf den angezeigten Ausschnitt. */
+export interface PhotoNoteDto {
+  id: string;
+  photo_id: string;
+  x: number;
+  y: number;
+  body: string;
+  done: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export function createPhotoNote(photoId: string, x: number, y: number, body: string): Promise<PhotoNoteDto> {
+  return invoke<PhotoNoteDto>("create_photo_note", { photoId, x, y, body });
+}
+
+export function listPhotoNotes(photoId: string): Promise<PhotoNoteDto[]> {
+  return invoke<PhotoNoteDto[]>("list_photo_notes", { photoId });
+}
+
+/** Nicht übergebene Felder bleiben unverändert (`x`/`y` nur zusammen). */
+export function updatePhotoNote(
+  noteId: string,
+  patch: { body?: string; done?: boolean; x?: number; y?: number },
+): Promise<PhotoNoteDto> {
+  return invoke<PhotoNoteDto>("update_photo_note", { noteId, ...patch });
+}
+
+export function deletePhotoNote(noteId: string): Promise<void> {
+  return invoke<void>("delete_photo_note", { noteId });
+}
+
+export function photoNoteOpenCounts(): Promise<[string, number][]> {
+  return invoke<[string, number][]>("photo_note_open_counts");
+}
+
 // ---- Bibliothek: Stapel-Umbenennung (Phase 32 F4) --------------------------
 
 /** Status einer geplanten Umbenennung — Schlüssel aus

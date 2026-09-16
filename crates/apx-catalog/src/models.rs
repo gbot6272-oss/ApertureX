@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 use apx_core::{
     AppError, CollectionFolderId, CollectionId, EditHistoryId, EdlEnvelope, FaceDetectionId,
-    FolderId, KeywordId, PersonId, PhotoId, PresetFolderId, PresetId, PresetVersionId, Result,
-    SnapshotId, StackId, TagRuleId, TemplateId,
+    FolderId, KeywordId, PersonId, PhotoId, PhotoNoteId, PresetFolderId, PresetId, PresetVersionId,
+    Result, SnapshotId, StackId, TagRuleId, TemplateId,
 };
 use time::OffsetDateTime;
 
@@ -410,6 +410,23 @@ pub struct GearStatistics {
     pub shutters: Vec<DistributionBucket>,
     /// Fotos insgesamt (ohne virtuelle Kopien) — Bezugsgröße für Anteile.
     pub total: u64,
+}
+
+/// Eine Notiz an einer Stelle im Bild (Phase 32 F6, siehe
+/// `migrations/0013_photo_notes.sql` zur Koordinaten-Konvention).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PhotoNote {
+    pub id: PhotoNoteId,
+    pub photo_id: PhotoId,
+    /// Normiert 0..1, bezogen auf das unbeschnittene Original.
+    pub x: f64,
+    pub y: f64,
+    pub body: String,
+    /// Abgehakt — die Notiz bleibt als Beleg stehen, statt gelöscht zu
+    /// werden ("war schon mal Thema").
+    pub done: bool,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
 }
 
 // ---- Echte Personen-Wiedererkennung (Phase 13 Schritt 8) -------------------

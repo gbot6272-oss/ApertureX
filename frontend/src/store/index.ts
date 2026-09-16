@@ -70,6 +70,7 @@ import type {
   ExportOutcomeDto,
   ExportPhotoOptions,
   FaceDetectionDto,
+  PhotoNoteDto,
   RenamePlanEntryDto,
   FilterCriteriaDto,
   FolderDto,
@@ -932,6 +933,22 @@ interface LibrarySlice {
    * Rust-Planung, die das Anwenden später ausführt — bewusst nicht im
    * Frontend nachgerechnet, sonst könnten Vorschau und Ergebnis
    * auseinanderlaufen. */
+  /** Notizen am aktuell gewählten Foto (Phase 32 F6, siehe
+   * `NotesOverlay.tsx`). `notesMode` schaltet das Setzen neuer Pins ein
+   * — ohne diesen Modus wäre jeder Klick ins Bild eine neue Notiz, was
+   * beim Zoomen und Ziehen ständig aus Versehen passierte. */
+  photoNotes: PhotoNoteDto[];
+  photoNotesLoading: boolean;
+  notesMode: boolean;
+  /** Offene Notizen je Foto-ID — für die Markierung im Raster. */
+  noteOpenCounts: Record<string, number>;
+  toggleNotesMode: () => void;
+  loadPhotoNotes: (photoId: string) => Promise<void>;
+  addPhotoNote: (x: number, y: number, body: string) => Promise<void>;
+  editPhotoNote: (noteId: string, patch: { body?: string; done?: boolean; x?: number; y?: number }) => Promise<void>;
+  removePhotoNote: (noteId: string) => Promise<void>;
+  refreshNoteOpenCounts: () => Promise<void>;
+
   batchRenamePreview: RenamePlanEntryDto[];
   batchRenamePreviewLoading: boolean;
   batchRenameRunning: boolean;
@@ -3921,6 +3938,94 @@ export const useAppStore = create<AppStore>()(
         // Auswahl daneben eine ganz andere ist.
         if (photoIds.length > 0) state.selectedPhotoId = photoIds[0]!;
       });
+    },
+
+    photoNotes: [],
+    photoNotesLoading: false,
+    notesMode: false,
+    noteOpenCounts: {},
+
+    toggleNotesMode: () => {
+      set((state) => {
+        state.notesMode = !state.notesMode;
+      });
+    },
+
+    loadPhotoNotes: async (photoId) => {
+      set((state) => {
+        state.photoNotesLoading = true;
+      });
+      try {
+        const notes = await api.listPhotoNotes(photoId);
+        set((state) => {
+          // Zwischenzeitlicher Fotowechsel: das Ergebnis gehört dann zu
+          // einem Foto, das niemand mehr ansieht — verwerfen statt
+          // fremde Notizen über das neue Bild zu legen.
+          if (state.selectedPhotoId === photoId) state.photoNotes = notes;
+          state.photoNotesLoading = false;
+        });
+      } catch (err) {
+        set((state) => {
+          state.photoNotesLoading = false;
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    addPhotoNote: async (x, y, body) => {
+      const photoId = get().selectedPhotoId;
+      if (!photoId) return;
+      try {
+        const note = await api.createPhotoNote(photoId, x, y, body);
+        set((state) => {
+          state.photoNotes = [...state.photoNotes, note];
+        });
+        await get().refreshNoteOpenCounts();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    editPhotoNote: async (noteId, patch) => {
+      try {
+        const updated = await api.updatePhotoNote(noteId, patch);
+        set((state) => {
+          state.photoNotes = state.photoNotes.map((note) => (note.id === noteId ? updated : note));
+        });
+        await get().refreshNoteOpenCounts();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    removePhotoNote: async (noteId) => {
+      try {
+        await api.deletePhotoNote(noteId);
+        set((state) => {
+          state.photoNotes = state.photoNotes.filter((note) => note.id !== noteId);
+        });
+        await get().refreshNoteOpenCounts();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    refreshNoteOpenCounts: async () => {
+      try {
+        const counts = await api.photoNoteOpenCounts();
+        set((state) => {
+          state.noteOpenCounts = Object.fromEntries(counts);
+        });
+      } catch {
+        // Die Markierung im Raster ist Beiwerk — scheitert sie, soll
+        // deshalb kein Fehlerbanner über dem Katalog stehen.
+      }
     },
 
     batchRenamePreview: [],

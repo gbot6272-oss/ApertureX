@@ -536,6 +536,19 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     entries: Array<{ edl_json: string; created_at: string; label: string | null }>;
     currentIndex: number; // -1 = neutral (noch nie bearbeitet / bis zum Anfang zurück)
   }
+  interface MockPhotoNote {
+    id: string;
+    photo_id: string;
+    x: number;
+    y: number;
+    body: string;
+    done: boolean;
+    created_at: string;
+    updated_at: string;
+  }
+  const photoNotes: MockPhotoNote[] = [];
+  let nextNoteId = 1;
+
   const editHistories: Record<string, EditHistoryState> = {};
   let historyCounter = Date.now();
 
@@ -1787,6 +1800,53 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         photo.gps_lat = args.lat as number | null;
         photo.gps_lon = args.lon as number | null;
         return null;
+      }
+
+      // ---- Notizen am Foto (Phase 32 F6) ------------------------------
+      //
+      // Vollwertiger In-Memory-Ersatz für `photo_notes`: der Fluss
+      // (anlegen, abhaken, löschen, Zählung fürs Raster) läuft im Test
+      // wirklich durch, statt eine feste Liste zurückzugeben.
+      case "create_photo_note": {
+        const note = {
+          id: `note-${nextNoteId++}`,
+          photo_id: args.photoId as string,
+          x: args.x as number,
+          y: args.y as number,
+          body: (args.body as string).trim(),
+          done: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        photoNotes.push(note);
+        return { ...note };
+      }
+      case "list_photo_notes":
+        return photoNotes.filter((note) => note.photo_id === (args.photoId as string)).map((note) => ({ ...note }));
+      case "update_photo_note": {
+        const note = photoNotes.find((entry) => entry.id === (args.noteId as string));
+        if (!note) throw new Error(`Test-Stub: Notiz '${args.noteId as string}' nicht gefunden`);
+        if (typeof args.body === "string") note.body = args.body.trim();
+        if (typeof args.done === "boolean") note.done = args.done;
+        if (typeof args.x === "number" && typeof args.y === "number") {
+          note.x = args.x;
+          note.y = args.y;
+        }
+        note.updated_at = new Date().toISOString();
+        return { ...note };
+      }
+      case "delete_photo_note": {
+        const index = photoNotes.findIndex((entry) => entry.id === (args.noteId as string));
+        if (index >= 0) photoNotes.splice(index, 1);
+        return null;
+      }
+      case "photo_note_open_counts": {
+        const counts = new Map<string, number>();
+        for (const note of photoNotes) {
+          if (note.done) continue;
+          counts.set(note.photo_id, (counts.get(note.photo_id) ?? 0) + 1);
+        }
+        return [...counts.entries()];
       }
 
       // ---- Stapel-Umbenennung (Phase 32 F4) ---------------------------

@@ -36,6 +36,7 @@ import { QuadRenderer } from "../lib/webgl";
 import { useAppStore, selectCurrentPhotoAiProcessing } from "../store";
 import { BeforeAfterView } from "./BeforeAfterView";
 import { ContentAwareMoveOverlay } from "./ContentAwareMoveOverlay";
+import { NotesOverlay } from "./NotesOverlay";
 import {
   ImageToolOverlay,
   type OverlayEllipse,
@@ -44,7 +45,7 @@ import {
 } from "./ImageToolOverlay";
 import { CropOverlay } from "./CropOverlay";
 import { DevelopAnalysisPanel } from "./DevelopAnalysisPanel";
-import { FlipHorizontal, Maximize, RotateCw, ZoomIn, ZoomOut } from "lucide-react";
+import { FlipHorizontal, Maximize, RotateCw, StickyNote, ZoomIn, ZoomOut } from "lucide-react";
 
 import { orientationLabel, type GridOrientation } from "../lib/compositionGrid";
 import { buildPeakingOverlay, type PeakingColor } from "../lib/focusPeaking";
@@ -562,6 +563,19 @@ export function Viewer() {
   const [peakingThreshold, setPeakingThreshold] = useState(0.18);
   const [peakingColor, setPeakingColor] = useState<PeakingColor>("red");
   const [peakingCoverage, setPeakingCoverage] = useState(0);
+
+  // Notizen am Foto (Phase 32 F6, siehe `NotesOverlay.tsx`).
+  const photoNotes = useAppStore((s) => s.photoNotes);
+  const notesMode = useAppStore((s) => s.notesMode);
+  const toggleNotesMode = useAppStore((s) => s.toggleNotesMode);
+  const loadPhotoNotes = useAppStore((s) => s.loadPhotoNotes);
+  const refreshNoteOpenCounts = useAppStore((s) => s.refreshNoteOpenCounts);
+
+  useEffect(() => {
+    if (!selectedPhotoId) return;
+    void loadPhotoNotes(selectedPhotoId);
+    void refreshNoteOpenCounts();
+  }, [selectedPhotoId, loadPhotoNotes, refreshNoteOpenCounts]);
   const peakCanvasRef = useRef<HTMLCanvasElement>(null);
   const clipCanvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -1483,6 +1497,39 @@ export function Viewer() {
         </div>
       </div>
 
+      {/* Notizen (Phase 32 F6) — eigene Gruppe statt eines weiteren
+          Knopfes in der Zoom-Gruppe: es ist kein Zoom-Befehl, und ein
+          Screenreader läse ihn dort unter „Zoom" vor. */}
+      <div className="pointer-events-none absolute inset-x-3 bottom-3 flex justify-end">
+        <div
+          role="group"
+          aria-label="Notizen"
+          data-testid="notes-controls"
+          className="apx-glass pointer-events-auto flex items-center gap-1 rounded-lg border border-[var(--glass-border)] p-1 text-xs"
+          onClick={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            onClick={toggleNotesMode}
+            aria-pressed={notesMode}
+            aria-label="Notiz ins Bild setzen"
+            title="Danach in das Bild klicken"
+            className={`flex items-center gap-1.5 rounded border px-2 py-1 transition-colors duration-[var(--duration-fast)] ${
+              notesMode ? "border-accent bg-accent/10 text-accent" : "border-border hover:border-accent"
+            }`}
+          >
+            <StickyNote aria-hidden="true" className="size-4" />
+            Notiz
+          </button>
+          {photoNotes.length > 0 && (
+            <span data-testid="notes-count" className="px-1 tabular-nums text-text-secondary">
+              {photoNotes.filter((note) => !note.done).length} offen · {photoNotes.length} gesamt
+            </span>
+          )}
+        </div>
+      </div>
+
       {/* Zielgerichtetes Anpassungswerkzeug (TAT, Phase 11 Schritt 6,
           siehe DECISIONS.md ADR-0038) — nur sichtbar, während das
           Entwickeln-Panel offen ist (die Ziel-Regler leben dort). */}
@@ -1593,6 +1640,18 @@ export function Viewer() {
             height: imgH * effectiveScale,
             imageRendering: effectiveScale > 1 ? "pixelated" : "auto",
           }}
+        />
+      )}
+
+      {photo && imgW > 0 && imgH > 0 && (
+        <NotesOverlay
+          rect={{
+            left: clipOverlayOrigin.x,
+            top: clipOverlayOrigin.y,
+            width: imgW * effectiveScale,
+            height: imgH * effectiveScale,
+          }}
+          crop={developEdl.geometry.crop}
         />
       )}
 

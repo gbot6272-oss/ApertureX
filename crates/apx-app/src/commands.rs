@@ -3539,6 +3539,114 @@ pub fn list_virtual_copies(
     Ok(copies.into_iter().map(PhotoDto::from).collect())
 }
 
+// ---- Notizen am Foto (Phase 32 F6) -----------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PhotoNoteDto {
+    pub id: String,
+    pub photo_id: String,
+    /// Normiert 0..1 aufs unbeschnittene Original — siehe
+    /// `migrations/0013_photo_notes.sql`.
+    pub x: f64,
+    pub y: f64,
+    pub body: String,
+    pub done: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<apx_catalog::PhotoNote> for PhotoNoteDto {
+    fn from(note: apx_catalog::PhotoNote) -> Self {
+        Self {
+            id: note.id.to_string(),
+            photo_id: note.photo_id.to_string(),
+            x: note.x,
+            y: note.y,
+            body: note.body,
+            done: note.done,
+            created_at: format_rfc3339(Some(note.created_at)).unwrap_or_default(),
+            updated_at: format_rfc3339(Some(note.updated_at)).unwrap_or_default(),
+        }
+    }
+}
+
+#[tauri::command]
+pub fn create_photo_note(
+    state: State<'_, AppState>,
+    photo_id: String,
+    x: f64,
+    y: f64,
+    body: String,
+) -> Result<PhotoNoteDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    state
+        .catalog
+        .create_photo_note(photo_id, x, y, &body)
+        .map(PhotoNoteDto::from)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn list_photo_notes(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<Vec<PhotoNoteDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    state
+        .catalog
+        .list_photo_notes(photo_id)
+        .map(|notes| notes.into_iter().map(PhotoNoteDto::from).collect())
+        .map_err(|err| err.to_string())
+}
+
+/// Ein nicht gesetztes Feld bleibt unverändert — die Oberfläche kann
+/// einen Pin verschieben, ohne den Text erneut zu schicken.
+#[tauri::command]
+pub fn update_photo_note(
+    state: State<'_, AppState>,
+    note_id: String,
+    body: Option<String>,
+    done: Option<bool>,
+    x: Option<f64>,
+    y: Option<f64>,
+) -> Result<PhotoNoteDto, String> {
+    // Eine halbe Position (nur x, kein y) wäre ein Aufrufer-Fehler und
+    // ergäbe eine Notiz an einer Stelle, die niemand gemeint hat.
+    let position = match (x, y) {
+        (Some(x), Some(y)) => Some((x, y)),
+        (None, None) => None,
+        _ => return Err("Position braucht x und y zusammen".to_string()),
+    };
+    state
+        .catalog
+        .update_photo_note(&note_id, body.as_deref(), done, position)
+        .map(PhotoNoteDto::from)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn delete_photo_note(state: State<'_, AppState>, note_id: String) -> Result<(), String> {
+    state
+        .catalog
+        .delete_photo_note(&note_id)
+        .map_err(|err| err.to_string())
+}
+
+/// `(photo_id, Anzahl offener Notizen)` für den ganzen Katalog.
+#[tauri::command]
+pub fn photo_note_open_counts(state: State<'_, AppState>) -> Result<Vec<(String, u64)>, String> {
+    state
+        .catalog
+        .photo_note_open_counts()
+        .map(|counts| {
+            counts
+                .into_iter()
+                .map(|(id, count)| (id.to_string(), count))
+                .collect()
+        })
+        .map_err(|err| err.to_string())
+}
+
 // ---- Stapel-Umbenennung (Phase 32 F4) --------------------------------------
 
 /// Eine geplante Umbenennung, wie die Vorschau sie zeigt.

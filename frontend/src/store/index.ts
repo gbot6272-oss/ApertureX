@@ -162,7 +162,7 @@ export type SelectionMode = "replace" | "toggle" | "range";
 /** Die zentrale Ansicht zwischen Kopfleiste und Filmstreifen. Seit
  * Phase 32 F3 als eigener Typ statt zweimal ausgeschriebener Union —
  * `CalendarView.tsx` und `commandRegistry.ts` brauchen ihn ebenfalls. */
-export type CenterView = "viewer" | "grid" | "map" | "overview" | "people" | "calendar";
+export type CenterView = "viewer" | "grid" | "map" | "overview" | "people" | "calendar" | "board";
 
 /** Liest aus einem Klick-Event, welcher Auswahlmodus gemeint ist (Strg/Cmd
  * = einzelnes Umschalten, Umschalt = Bereich, sonst Ersetzen) — von Raster
@@ -1034,6 +1034,18 @@ interface LibrarySlice {
   /** Fügt die aktuelle Mehrfachauswahl (oder, falls leer, das fokussierte
    * Foto) zu `collectionId` hinzu. */
   addSelectionToCollection: (collectionId: string) => Promise<void>;
+
+  /** Sammlungs-Board (Phase 32 F9, siehe `BoardView.tsx`): lädt die
+   * Fotos **aller** Sammlungen, damit das Board alle Spalten auf einmal
+   * zeigen kann — der normale Weg lädt immer nur die gerade gewählte. */
+  loadAllCollectionPhotos: () => Promise<void>;
+  /** Verschiebt ein Foto zwischen zwei Sammlungen (Ziehen im Board).
+   * `fromCollectionId === null` = das Foto kam aus dem Ordner und war in
+   * keiner Sammlung; dann wird nur hinzugefügt. */
+  moveCollectionPhoto: (photoId: string, fromCollectionId: string | null, toCollectionId: string) => Promise<void>;
+  /** Nimmt ein Foto aus einer Sammlung (Ziehen zurück in die
+   * Ordner-Spalte). */
+  removeCollectionPhoto: (photoId: string, collectionId: string) => Promise<void>;
 
   /** Freitextsuche (FTS5 über Dateiname/Kamera/Objektiv) und Attributfilter
    * sind kombinierbar (per UND, Schritt 8.4, `DECISIONS.md` ADR-0027) —
@@ -4452,6 +4464,48 @@ export const useAppStore = create<AppStore>()(
       });
       if (collectionId) {
         void get().loadPhotosForCollection(collectionId);
+      }
+    },
+
+    loadAllCollectionPhotos: async () => {
+      const collections = get().collections;
+      try {
+        const lists = await Promise.all(
+          collections.map(async (collection) => [collection.id, await api.listPhotosInCollection(collection.id)] as const),
+        );
+        set((state) => {
+          for (const [id, photos] of lists) state.collectionPhotos[id] = photos;
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    moveCollectionPhoto: async (photoId, fromCollectionId, toCollectionId) => {
+      if (fromCollectionId === toCollectionId) return;
+      try {
+        await api.addToCollection(toCollectionId, photoId);
+        // Erst hinzufügen, dann entfernen: bricht es dazwischen ab, ist
+        // das Foto in beiden Sammlungen statt in keiner.
+        if (fromCollectionId) await api.removeFromCollection(fromCollectionId, photoId);
+        await get().loadAllCollectionPhotos();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    removeCollectionPhoto: async (photoId, collectionId) => {
+      try {
+        await api.removeFromCollection(collectionId, photoId);
+        await get().loadAllCollectionPhotos();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
       }
     },
 

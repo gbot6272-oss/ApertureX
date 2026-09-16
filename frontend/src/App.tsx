@@ -11,6 +11,7 @@ import { Filmstrip } from "./components/Filmstrip";
 import { GridView } from "./components/GridView";
 import { Header } from "./components/Header";
 import { KeybindingsCheatsheet } from "./components/KeybindingsCheatsheet";
+import { BoardView } from "./components/BoardView";
 import { CalendarView } from "./components/CalendarView";
 import { MapView } from "./components/MapView";
 import { MasksPanel } from "./components/MasksPanel";
@@ -400,6 +401,8 @@ export default function App() {
             <PeopleView />
           ) : centerView === "calendar" ? (
             <CalendarView />
+          ) : centerView === "board" ? (
+            <BoardView />
           ) : selectedPhotoIsVideo ? (
             <VideoPlayer />
           ) : (

@@ -25,6 +25,7 @@ export const de = {
   "header.viewMap": "Karte",
   "header.viewPeople": "Personen",
   "header.viewCalendar": "Kalender",
+  "header.viewBoard": "Sammlungs-Board",
   "header.viewInfo": "Info",
   "header.viewDevelop": "Entwickeln",
 

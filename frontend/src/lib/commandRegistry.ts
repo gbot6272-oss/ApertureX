@@ -98,6 +98,7 @@ export function useCommandRegistry(): CommandEntry[] {
       { id: "fn:view-map", label: t("header.viewMap"), category: "navigation", run: () => setCenterView("map") },
       { id: "fn:view-people", label: t("header.viewPeople"), category: "navigation", run: () => setCenterView("people") },
       { id: "fn:view-calendar", label: t("header.viewCalendar"), category: "navigation", run: () => setCenterView("calendar") },
+      { id: "fn:view-board", label: t("header.viewBoard"), category: "navigation", run: () => setCenterView("board") },
       { id: "fn:view-info", label: t("header.viewInfo"), category: "navigation", run: toggleMetadataPanel },
       { id: "fn:view-develop", label: t("header.viewDevelop"), category: "navigation", run: toggleDevelopPanel },
       {

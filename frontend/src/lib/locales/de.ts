@@ -55,7 +55,7 @@ export const de = {
   "header.secondaryDisplay": "Zweites Display…",
   "header.secondaryDisplayTitle": "Aktuelles Foto in einem zweiten Fenster anzeigen",
   "header.stats": "Statistik…",
-  "header.gearStats": "Aufnahme-Statistik…",
+  "header.gearStats": "Ausrüstung & Belichtung…",
   "header.series": "Serien erkennen…",
   "header.catalog": "Katalog…",
   "header.settings": "Einstellungen…",

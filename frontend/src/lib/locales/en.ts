@@ -52,7 +52,7 @@ export const en: Record<keyof typeof de, string> = {
   "header.secondaryDisplay": "Second display…",
   "header.secondaryDisplayTitle": "Show the current photo in a second window",
   "header.stats": "Statistics…",
-  "header.gearStats": "Shooting statistics…",
+  "header.gearStats": "Gear & exposure…",
   "header.series": "Detect series…",
   "header.catalog": "Catalog…",
   "header.settings": "Settings…",

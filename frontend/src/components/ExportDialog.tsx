@@ -1,6 +1,10 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
+import { estimateExportSize, totalBytes } from "../lib/exportEstimate";
+import { formatBytes } from "../lib/format";
 import { useT } from "../lib/i18n";
+import { useShallow } from "zustand/react/shallow";
+import { selectActivePhotos } from "../store";
 import type { ExportFormat, ExportPhotoOptions, IccProfileChoice, WatermarkPosition } from "../lib/tauri";
 import { pickFilePath, selectFolderDialog } from "../lib/tauri";
 import { useAppStore } from "../store";
@@ -177,6 +181,32 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
     );
   }
 
+  // Export-Vorschau (Phase 32 F10): Abmessungen und Dateigröße, bevor
+  // etwas geschrieben wird. Bezugsgröße ist das erste ausgewählte Foto —
+  // bei einer Auswahl aus einer Kamera haben alle dieselben Maße, und
+  // eine Schätzung je Foto einzeln auszuweisen wäre bei 300 Bildern
+  // unlesbar. Die Gesamtsumme rechnet mit diesem Foto hoch, was im
+  // Hinweistext auch so dasteht.
+  const photos = useAppStore(useShallow(selectActivePhotos));
+  const referencePhoto = useMemo(
+    () => photos.find((photo) => photo.id === photoIds[0]) ?? photos[0],
+    [photos, photoIds],
+  );
+  const estimate = useMemo(
+    () =>
+      estimateExportSize({
+        source: { width: referencePhoto?.width ?? 0, height: referencePhoto?.height ?? 0 },
+        limits: {
+          maxEdge: sizeMode === "edge" ? maxEdge : undefined,
+          maxMegapixels: sizeMode === "megapixels" ? maxMegapixels : undefined,
+        },
+        format,
+        quality,
+        bitDepth16: bitDepth16 && (format === "png" || format === "tiff"),
+      }),
+    [referencePhoto, sizeMode, maxEdge, maxMegapixels, format, quality, bitDepth16],
+  );
+
   const supportsBitDepth16 = format === "png" || format === "tiff";
   // JPEG-XL: Qualität 100 kodiert verlustfrei, darunter verlustbehaftet
   // (siehe `apx_export::format::encode_jxl`s Moduldoku) — derselbe
@@ -189,6 +219,45 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
       <p className="mb-3 text-xs text-text-muted">
         {t("exportDialog.photoCount", { count: photoIds.length, plural: photoIds.length === 1 ? "" : "s" })}
       </p>
+
+      {/* Export-Vorschau (Phase 32 F10) */}
+      <section aria-label="Export-Vorschau" data-testid="export-estimate" className="mb-3 rounded border border-border bg-bg-panel p-2 text-xs">
+        {referencePhoto && estimate.width > 0 ? (
+          <>
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="text-text-secondary">
+                Ausgabe:{" "}
+                <span className="font-medium tabular-nums text-text-primary">
+                  {estimate.width} × {estimate.height}
+                </span>{" "}
+                ({estimate.megapixels.toFixed(1)} MP)
+              </span>
+              <span className="text-text-secondary">
+                je Foto:{" "}
+                <span className="font-medium tabular-nums text-text-primary" data-testid="export-estimate-per-photo">
+                  {formatBytes(estimate.bytes)}
+                </span>
+              </span>
+              {photoIds.length > 1 && (
+                <span className="text-text-secondary">
+                  gesamt:{" "}
+                  <span className="font-medium tabular-nums text-text-primary" data-testid="export-estimate-total">
+                    {formatBytes(totalBytes(estimate, photoIds.length))}
+                  </span>
+                </span>
+              )}
+            </div>
+            <p className="mt-1 text-[11px] text-text-muted">
+              {estimate.exact
+                ? "Unkomprimiert — diese Größe ist exakt."
+                : `Schätzung, erwartet zwischen ${formatBytes(estimate.lowBytes)} und ${formatBytes(estimate.highBytes)}; glatte Flächen werden kleiner, feines Laub größer.`}
+              {photoIds.length > 1 ? " Die Summe rechnet mit den Maßen des ersten Fotos hoch." : ""}
+            </p>
+          </>
+        ) : (
+          <p className="text-text-muted">Keine Bildmaße bekannt — ohne sie lässt sich nichts abschätzen.</p>
+        )}
+      </section>
 
       <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
         {t("exportDialog.destFolder")}
@@ -246,6 +315,10 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
         <select
           value={format}
           onChange={(e) => setFormat(e.target.value as ExportFormat)}
+          // Eigenes Label: die umschließende Beschriftung enthält auch
+          // den Text aller Optionen, der Name des Feldes wäre sonst
+          // „Format JPEG PNG TIFF …".
+          aria-label="Ausgabeformat"
           className="rounded border border-border bg-bg-panel px-2 py-1 text-sm"
         >
           {(Object.keys(FORMAT_LABELS) as ExportFormat[]).map((key) => (

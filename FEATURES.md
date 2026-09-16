@@ -531,3 +531,24 @@ Alle Ortsangaben sind normierte Bildkoordinaten, die Bearbeitung sieht
 in der Vorschau also aus wie im Export. Die Sektion ist ohne
 Sonderbehandlung preset-fähig — anders als Kreativ und Licht & Optik
 trägt keines der Werkzeuge eine fotospezifisch berechnete Karte.
+
+## Phase 32 — Zehn Funktionen mit eigenem Gewicht
+
+| Funktion | Was sie tut | Bedienung |
+| --- | --- | --- |
+| Kompositionsraster | Drittel, Goldener Schnitt, Diagonalen, Dreiecke, goldene Spirale | Im Zuschnitt wählbar, drehbar und spiegelbar |
+| Histogramm zum Ziehen | Fünf Tonwertzonen direkt im Histogramm verschieben | Überfahren hebt die Zone hervor, Ziehen ändert den zugehörigen Regler |
+| Kalenderansicht | Der Katalog nach Aufnahmetag, nach Dichte eingefärbt | Monatskarten, Jahresleiste, Tagespanel mit „Ganzen Tag auswählen" |
+| Stapel-Umbenennung | Bereits importierte Fotos nach Tokenmuster umbenennen | Muster-Editor mit Token-Knöpfen, gespeicherten Mustern und Vorschau-Tabelle |
+| Ausrüstung & Belichtung | Vollständige Kamera-/Objektivlisten plus Brennweiten-, Blenden-, ISO- und Zeitverteilung | Balken, umschaltbar zwischen Anzahl und Anteil; Klick auf eine Kamera filtert den Katalog |
+| Notizen am Foto | Notizen mit Ort im Bild, abhakbar | Setzen-Modus, Pin anklicken, Erledigt-Haken; das Raster markiert offene Notizen |
+| Serien-Erkennung | Unterscheidet Reihenaufnahme, Belichtungsreihe und Gemischtes | Liste mit EV-Werten je Aufnahme; auswählen, vergleichen oder stapeln |
+| Rahmen und Passepartout | Rahmenlinie, Passepartout und Keylinie um das Bild | Drei Breitenregler, drei Farbwähler, drei Vorlagen |
+| Sammlungs-Board | Jede Sammlung eine Spalte, Fotos dazwischen ziehen | Ordner-Spalte mit allem, was noch unsortiert ist; neue Sammlung direkt im Board |
+| Export-Vorschau | Ausgabemaße und geschätzte Dateigröße vor dem Export | Steht im Export-Dialog und rechnet bei jeder Einstellung mit |
+
+**Ehrliche Grenzen:** Fokusreihen und Panoramen meldet die
+Serien-Erkennung als Reihenaufnahme (in den EXIF-Daten sind sie nicht zu
+unterscheiden). Die Größenschätzung im Export ist eine Schätzung mit
+ausgewiesener Spanne, exakt nur für unkomprimiertes TIFF. Der Rahmen
+vergrößert die Bildfläche nicht, sondern wird hineingezeichnet.

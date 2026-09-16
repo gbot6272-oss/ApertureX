@@ -7177,3 +7177,79 @@ linken Spalte zusammenzulegen, wie Lightroom es tut. Das ist ein eigener
 Umbau und wurde hier bewusst nicht nebenbei mitgemacht; die Paletten
 sind einzeln einklappbar, und der Fokus-Modus (Phase 26) blendet sie
 gesammelt aus.
+
+## ADR-0065: Phase 32 — zehn Funktionen, die etwas verändern
+
+**Kontext.** Nutzerwunsch nach Phase 31: zehn weitere Funktionen, jede
+mit echtem Umfang und wirklich neuen Bedienelementen — nicht zehn
+Regler mehr in einem bestehenden Panel. Die erste Liste enthielt drei
+Punkte, die es längst gab (Auto-Horizont, Vergleichsansicht,
+Kompositionsraster); aufgefallen ist das erst, als die Suche nicht nach
+den deutschen Beschriftungen, sondern nach den englischen Bezeichnern im
+Code lief. Diese drei wurden ausgetauscht bzw. auf das ausgebaut, was
+tatsächlich fehlte.
+
+**Die zehn Funktionen und ihre wesentliche Entscheidung.**
+
+1. **Kompositionsraster** (F1): die Raster gab es, aber Spirale und
+   Diagonalen lagen fest in einer Ecke. Neu sind echte SVG-Bögen für die
+   goldene Spirale mit alternierenden φ-Schnitten und eine Dreh-/
+   Spiegel-Steuerung. Der Test, der die Breite monoton fallen sah, hatte
+   die falsche Invariante — bei alternierenden Schnittrichtungen fällt
+   die *Fläche*.
+2. **Histogramm zum Ziehen** (F2): fünf Zonen, **nicht** gleich breit.
+   Ein gleichmäßiges Fünftel gäbe „Weiß" so viel Fläche wie der
+   Belichtung, obwohl der Weißpunkt nur die obersten Werte betrifft.
+3. **Kalenderansicht** (F3): gruppiert nach dem **lokalen** Kalendertag
+   (UTC schöbe eine mitteleuropäische Abendaufnahme auf den Folgetag);
+   Fotos ohne Aufnahmedatum werden benannt statt geraten; leere Monate
+   bleiben sichtbar, weil die Pause die Information ist.
+4. **Stapel-Umbenennung** (F4): Vorschau und Anwenden benutzen
+   **denselben** Rust-Planer. Zweiphasiges Umbenennen über
+   Zwischennamen, sonst scheitert jeder Ringtausch. Musterfehler
+   blockieren den ganzen Stapel, eine virtuelle Kopie wird nur
+   übersprungen — Fehler *im Muster* gegen Eigenschaft *eines Fotos*.
+5. **Ausrüstung & Belichtung** (F5): Klassengrenzen nach Objektiv- und
+   Blendenstufen statt gleichmäßig; fehlende EXIF-Werte bekommen einen
+   eigenen Balken „keine Angabe"; Brennweiten werden **nicht** auf
+   Kleinbild umgerechnet (der Crop-Faktor wäre geraten).
+6. **Notizen am Foto** (F6): normierte Koordinaten aufs **unbeschnittene
+   Original** — anders als `face_detections`, das Pixel einer
+   Vorschaustufe speichert. Liegt eine Notiz außerhalb des Zuschnitts,
+   wird sie nicht an den Rand geklebt, sondern gezählt und benannt.
+7. **Serien-Erkennung** (F7): unterscheidet Reihenaufnahme und
+   Belichtungsreihe über EV bei ISO 100. Ohne die ISO-Normierung sähe
+   eine ISO-Belichtungsreihe wie eine Reihenaufnahme aus. Fokusreihen
+   und Panoramen werden ausdrücklich **nicht** erkannt — sie sind in den
+   EXIF-Daten von einer Reihenaufnahme nicht zu unterscheiden.
+8. **Rahmen und Passepartout** (F8): der Rahmen vergrößert die
+   Bildfläche **nicht**, er wird hineingezeichnet. Eine wachsende
+   Leinwand würde jede Größenangabe im Export, jedes Zuschnitt-Rechteck
+   und jedes Overlay verschieben. Die Stufe läuft als letzte, nach
+   `geometry` — und deshalb CPU-only: dort liegen die Daten als RGBA8
+   auf der CPU, ein Compute-Dispatch fürs Füllen von vier Rechtecken
+   würde mehr Zeit mit Datentransfer verbringen als mit Rechnen.
+9. **Sammlungs-Board** (F9): Ziehen verschiebt, es kopiert nicht —
+   „Auswahl" und „Aussortiert" schließen sich aus. Beim Verschieben erst
+   hinzufügen, dann entfernen: bricht es dazwischen ab, ist das Foto in
+   beiden Sammlungen statt in keiner.
+10. **Export-Vorschau** (F10): eine Schätzung mit ausgewiesener Spanne
+    statt einer Zahl, die Genauigkeit vortäuscht. Für unkomprimiertes
+    TIFF ist die Rechnung exakt und wird auch so benannt. Eine Messung
+    wäre der ganze Export, nur eben zweimal.
+
+**Rückwärtskompatibilität.** Zwei neue EDL-Felder (`grain_midtone_bias`
+war Phase 31, `frame` ist F8) und eine neue Migration (0013,
+`photo_notes`). Wie seit Phase 28 gilt: bewiesen, nicht behauptet — ein
+Test entfernt das Feld aus einem serialisierten `EdlV4` und prüft den
+Neutralwert, ein zweiter prüft, dass ein neutraler Rahmen das Bild
+bit-für-bit unverändert lässt. Bei `frame` kam ein dritter Punkt dazu:
+`mat_color` bekommt ausdrücklich Weiß als Default, nicht das
+`[0.0, 0.0, 0.0]`, das ein `f32`-Array von sich aus liefert.
+
+**Was bewusst nicht gebaut wurde.** Ein Datumsfilter im Backend (F3
+füllt stattdessen die vorhandene Mehrfachauswahl), ein Objektivfilter
+(F5 macht Objektive deshalb bewusst nicht klickbar), eine Fokusreihen-
+Erkennung (F7, siehe oben) und ein WGSL-Zwilling für den Rahmen (F8).
+Jede dieser Lücken steht an ihrer Stelle im Code, statt durch ein
+Bedienelement überdeckt zu werden, das nichts tut.

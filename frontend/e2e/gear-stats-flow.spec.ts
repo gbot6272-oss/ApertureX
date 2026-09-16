@@ -24,12 +24,12 @@ const GEAR = {
 };
 
 /**
- * Deckt Phase 32 F5 ab: die Aufnahme-Statistik. Die Klassengrenzen und
+ * Deckt Phase 32 F5 ab: die Ausrüstungs-Statistik. Die Klassengrenzen und
  * die Aggregation sind in `apx-catalog`s `stats`-Tests abgedeckt — hier
  * geht es um die Darstellung und darum, dass der Klick auf eine Kamera
  * wirklich im Katalogfilter landet statt nur so auszusehen.
  */
-test.describe("Aufnahme-Statistik (Phase 32 F5)", () => {
+test.describe("Ausrüstung und Belichtung (Phase 32 F5)", () => {
   test.beforeEach(async ({ page }) => {
     await installTauriMock(page, {
       folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }],
@@ -38,7 +38,7 @@ test.describe("Aufnahme-Statistik (Phase 32 F5)", () => {
     });
     await page.goto("/");
     await openOverflowMenu(page);
-    await page.getByRole("menuitem", { name: "Aufnahme-Statistik…" }).click();
+    await page.getByRole("menuitem", { name: "Ausrüstung & Belichtung…" }).click();
   });
 
   test("zeigt Kameras, Objektive und die vier Verteilungen", async ({ page }) => {

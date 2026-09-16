@@ -8,6 +8,12 @@ import { Dialog } from "./ui/Dialog";
 /**
  * Ausrüstungs- und Belichtungs-Statistik (Phase 32 F5).
  *
+ * **Warum nicht „Aufnahme-Statistik".** Im selben Überlauf-Menü steht
+ * bereits „Statistik…" (Katalogumfang, Phase 9 Schritt 3). Zwei
+ * Einträge, die beide auf „Statistik" enden, sind für Auge und
+ * Screenreader kaum zu unterscheiden — der Name sagt jetzt, worum es
+ * geht: Ausrüstung und Belichtung.
+ *
  * Der bestehende Statistik-Dialog (`StatsCacheDialog.tsx`, Phase 9
  * Schritt 3) beantwortet „wie groß ist der Katalog": Anzahl, Größe,
  * Zeitraum, Bewertungsverteilung — und nebenbei die acht häufigsten
@@ -64,10 +70,10 @@ export function GearStatsDialog({ open, onClose }: GearStatsDialogProps) {
   const visibleLenses = showAllLenses ? lenses : lenses.slice(0, 6);
 
   return (
-    <Dialog open={open} onClose={onClose} label="Aufnahme-Statistik" className="flex max-h-[85vh] w-[52rem] max-w-[94vw] flex-col">
+    <Dialog open={open} onClose={onClose} label="Ausrüstung und Belichtung" className="flex max-h-[85vh] w-[52rem] max-w-[94vw] flex-col">
       <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-sm font-semibold text-text-primary">Aufnahme-Statistik</h2>
+          <h2 className="text-sm font-semibold text-text-primary">Ausrüstung und Belichtung</h2>
           <span className="text-xs text-text-muted" data-testid="gear-total">
             {stats ? `${stats.total} Aufnahmen ausgewertet` : "—"}
           </span>

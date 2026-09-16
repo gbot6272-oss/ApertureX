@@ -1743,3 +1743,26 @@ ADR-0064.
   bit-genau als rückwärtskompatibel belegt; CPU und WGSL gleichgezogen.
 - [x] 10. Dokumentation (ADR-0064, FEATURES.md), volle Verifikation,
   Abnahme.
+
+## Phase 32 — Zehn Funktionen, jede mit eigenem Gewicht
+
+Nutzerwunsch: zehn weitere Funktionen, jede mit echtem Umfang und
+wirklich neuen Bedienelementen. Drei Punkte der ersten Liste gab es
+bereits (Auto-Horizont, Vergleichsansicht, Kompositionsraster) — sie
+wurden ausgetauscht bzw. auf das ausgebaut, was tatsächlich fehlte.
+Entscheidungen in `DECISIONS.md` ADR-0065.
+
+- [x] F1. **Kompositionsraster** mit echter goldener Spirale, drehbar
+  und spiegelbar.
+- [x] F2. **Histogramm zum Ziehen** — fünf ungleich breite Zonen.
+- [x] F3. **Kalenderansicht** des Katalogs, nach lokalem Tag gruppiert.
+- [x] F4. **Stapel-Umbenennung** mit Muster-Editor, Vorschau aus
+  demselben Rust-Planer und zweiphasigem Umbenennen.
+- [x] F5. **Ausrüstung & Belichtung** — womit fotografiere ich eigentlich?
+- [x] F6. **Notizen am Foto** (Migration 0013), Pins im Bild.
+- [x] F7. **Serien- und Belichtungsreihen-Erkennung** über EV bei
+  ISO 100.
+- [x] F8. **Rahmen und Passepartout** — neue Pipeline-Stufe, neues
+  EDL-Feld, bit-genau rückwärtskompatibel.
+- [x] F9. **Sammlungs-Board** zum Sortieren per Ziehen.
+- [x] F10. **Export-Vorschau** mit Größenabschätzung und Spanne.

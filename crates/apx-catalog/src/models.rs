@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 use apx_core::{
     AppError, CollectionFolderId, CollectionId, EditHistoryId, EdlEnvelope, FaceDetectionId,
-    FolderId, KeywordId, PersonId, PhotoId, PresetFolderId, PresetId, PresetVersionId, Result,
-    SnapshotId, StackId, TagRuleId, TemplateId,
+    FolderId, KeywordId, PersonId, PhotoId, PhotoNoteId, PresetFolderId, PresetId, PresetVersionId,
+    Result, SnapshotId, StackId, TagRuleId, TemplateId,
 };
 use time::OffsetDateTime;
 
@@ -366,6 +366,67 @@ pub struct CatalogStatistics {
     /// `(Kameramodell, Anzahl)`, absteigend nach Anzahl, höchstens 8 Einträge.
     pub top_camera_models: Vec<(String, u64)>,
     pub top_lenses: Vec<(String, u64)>,
+}
+
+/// Ein Wert einer Aufnahme, wie ihn die Ausrüstungs-Statistik braucht
+/// (Phase 32 F5, siehe `repository::stats::gear`) — bewusst schmal:
+/// nur die vier Belichtungsfelder, nicht die ganze `Photo`-Zeile.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ExposureRow {
+    pub focal_length: Option<f32>,
+    pub aperture: Option<f32>,
+    pub iso: Option<u32>,
+    pub shutter: Option<f32>,
+}
+
+/// Ein Balken einer Verteilung: Beschriftung + Anzahl.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DistributionBucket {
+    pub label: String,
+    pub count: u64,
+    /// `true` beim Sammelbalken „keine Angabe" am Ende jeder Verteilung.
+    /// Fotos ohne das jeweilige EXIF-Feld verschwinden so nicht aus der
+    /// Statistik, werden aber auch nicht in einen erfundenen Bereich
+    /// einsortiert — bei alten Scans oder manuellen Objektiven fehlt
+    /// Blende und Brennweite regelmäßig.
+    pub missing: bool,
+}
+
+/// Ausrüstungs- und Belichtungs-Statistik (Phase 32 F5).
+///
+/// Ergänzt [`CatalogStatistics`], ersetzt sie nicht: dort stehen
+/// Gesamtzahl/Größe/Zeitraum/Bewertung und die *acht* häufigsten Kameras
+/// als Textliste, hier die **vollständigen** Listen plus die vier
+/// Belichtungsverteilungen. Virtuelle Kopien sind wie dort
+/// ausgeschlossen.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GearStatistics {
+    /// `(Kameramodell, Anzahl)`, absteigend — vollständig, nicht gekürzt.
+    pub cameras: Vec<(String, u64)>,
+    pub lenses: Vec<(String, u64)>,
+    pub focal_lengths: Vec<DistributionBucket>,
+    pub apertures: Vec<DistributionBucket>,
+    pub isos: Vec<DistributionBucket>,
+    pub shutters: Vec<DistributionBucket>,
+    /// Fotos insgesamt (ohne virtuelle Kopien) — Bezugsgröße für Anteile.
+    pub total: u64,
+}
+
+/// Eine Notiz an einer Stelle im Bild (Phase 32 F6, siehe
+/// `migrations/0013_photo_notes.sql` zur Koordinaten-Konvention).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PhotoNote {
+    pub id: PhotoNoteId,
+    pub photo_id: PhotoId,
+    /// Normiert 0..1, bezogen auf das unbeschnittene Original.
+    pub x: f64,
+    pub y: f64,
+    pub body: String,
+    /// Abgehakt — die Notiz bleibt als Beleg stehen, statt gelöscht zu
+    /// werden ("war schon mal Thema").
+    pub done: bool,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
 }
 
 // ---- Echte Personen-Wiedererkennung (Phase 13 Schritt 8) -------------------

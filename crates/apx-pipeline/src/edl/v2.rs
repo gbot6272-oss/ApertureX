@@ -477,6 +477,23 @@ pub struct EffectsAdjustment {
     /// meist bei kleinen Werten (`0..40`), aber jeder Farbton ist erlaubt.
     #[serde(default)]
     pub halation_hue: f32,
+    /// Wie stark das Korn den Mitteltönen folgt (Phase 31 Schritt 9,
+    /// `0.0..=100.0`).
+    ///
+    /// Echtes Filmkorn ist nicht gleichmäßig über den Tonwertumfang
+    /// verteilt: die Silberhalogenid-Dichtekurve sorgt dafür, dass es in
+    /// den Mitteltönen am deutlichsten ist und in tiefem Schwarz wie in
+    /// ausgebrannten Lichtern praktisch verschwindet. Gleichmäßiges Korn
+    /// sieht deshalb nach digitalem Rauschen aus — am auffälligsten
+    /// genau dort, wo es am meisten stört: in einem glatten Himmel und
+    /// in tiefen Schatten.
+    ///
+    /// `#[serde(default)]` und Neutralwert `0.0`: ein gespeichertes EDL
+    /// ohne dieses Feld — und jedes Foto, das bisher Korn benutzt —
+    /// behält exakt das bisherige, gleichmäßige Verhalten. Ein Test
+    /// hält das bit-genau fest.
+    #[serde(default)]
+    pub grain_midtone_bias: f32,
 }
 
 impl EffectsAdjustment {
@@ -492,6 +509,7 @@ impl EffectsAdjustment {
         halation_radius: 30.0,
         halation_hue: 15.0,
         grain_roughness: 50.0,
+        grain_midtone_bias: 0.0,
     };
 }
 

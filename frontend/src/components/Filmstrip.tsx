@@ -1,7 +1,8 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 
+import { usePrefersReducedMotion } from "../lib/motion";
 import { previewUrl } from "../lib/media";
 import { resolveSelectionMode, selectActivePhotos, useAppStore } from "../store";
 
@@ -50,6 +51,19 @@ export function Filmstrip() {
     overscan: 8,
   });
 
+  // Sanft zur ausgewählten Kachel scrollen statt eines Sprungs (Phase
+  // 24, siehe DECISIONS.md ADR-0052) — bisher scrollte der Filmstreifen
+  // beim Auswählen eines Fotos außerhalb der sichtbaren Fläche
+  // überhaupt nicht mit; `align: "auto"` bewegt nur, wenn die Kachel
+  // tatsächlich außerhalb liegt, statt bei jeder Auswahl zu zentrieren.
+  const reducedMotion = usePrefersReducedMotion();
+  useEffect(() => {
+    const index = photos.findIndex((p) => p.id === selectedPhotoId);
+    if (index === -1) return;
+    virtualizer.scrollToIndex(index, { align: "auto", behavior: reducedMotion ? "auto" : "smooth" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPhotoId]);
+
   if (photos.length === 0) {
     return (
       <footer data-tour="filmstrip" className="flex h-24 shrink-0 items-center justify-center border-t border-border bg-bg-raised text-sm text-text-muted">
@@ -92,7 +106,7 @@ export function Filmstrip() {
                 width: CELL_WIDTH,
                 height: "calc(100% - 8px)",
               }}
-              className={`relative overflow-hidden rounded border-2 ${
+              className={`relative overflow-hidden rounded border-2 transition-transform duration-[var(--duration-fast)] hover:z-10 hover:scale-[1.05] hover:shadow-lg ${
                 photo.id === selectedPhotoId ? "border-accent" : multiSelectedIds.includes(photo.id) ? "border-accent/50" : "border-transparent hover:border-border"
               } ${photo.missing ? "opacity-40" : ""}`}
             >

@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { useAppStore } from "../store";
 import { Dialog } from "./ui/Dialog";
+import { InlineSpinner } from "./ui/DotLoader";
 
 const NEUTRAL_FRACTION = 1;
 const MIN_FRACTION = 0.3;
@@ -114,7 +115,13 @@ export function ContentAwareScaleDialog() {
             disabled={!selectedPhotoId || !hasChange || contentAwareScaleLoading}
             className="rounded border border-accent bg-accent/10 px-3 py-1.5 text-xs text-accent disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {contentAwareScaleLoading ? "Berechnet…" : "Berechnen"}
+            {contentAwareScaleLoading ? (
+              <>
+                <InlineSpinner className="mr-1" /> Berechnet…
+              </>
+            ) : (
+              "Berechnen"
+            )}
           </button>
         </div>
       </div>

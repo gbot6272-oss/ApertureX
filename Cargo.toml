@@ -20,7 +20,10 @@ members = [
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.94"
-license = "MIT"
+# Apache-2.0 statt des vorher hier stehenden "MIT": das war eine
+# unbelegte Angabe — es gab keine LICENSE-Datei, auf die sie sich hätte
+# beziehen können. Siehe DECISIONS.md ADR-0063.
+license = "Apache-2.0"
 publish = false
 
 # Gemeinsam genutzte Abhängigkeiten mit fester Version über den ganzen

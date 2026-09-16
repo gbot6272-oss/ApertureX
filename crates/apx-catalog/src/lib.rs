@@ -25,6 +25,9 @@ pub mod iptc;
 mod migrations;
 mod models;
 mod repository;
+/// Serien-/Belichtungsreihen-Erkennung (Phase 32 F7) — reine Analyse,
+/// siehe Moduldoku.
+pub mod series;
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
@@ -39,10 +42,11 @@ use time::OffsetDateTime;
 
 pub use models::{
     embedding_distance, parse_filter_node, BoolOp, CatalogStatistics, Collection, CollectionFolder,
-    ColorLabelDefinition, EditHistoryEntry, FaceDetection, FaceRect, FilterCondition,
-    FilterCriteria, FilterField, FilterNode, FilterOperator, Folder, HistoryPosition, Keyword,
-    NewPhoto, Person, Photo, Preset, PresetFolder, PresetVersion, Preview, PreviewLevel, Snapshot,
-    Stack, TagRule, Template, SAME_PERSON_EMBEDDING_THRESHOLD,
+    ColorLabelDefinition, DistributionBucket, EditHistoryEntry, ExposureRow, FaceDetection,
+    FaceRect, FilterCondition, FilterCriteria, FilterField, FilterNode, FilterOperator, Folder,
+    GearStatistics, HistoryPosition, Keyword, NewPhoto, Person, Photo, PhotoNote, Preset,
+    PresetFolder, PresetVersion, Preview, PreviewLevel, Snapshot, Stack, TagRule, Template,
+    SAME_PERSON_EMBEDDING_THRESHOLD,
 };
 pub use repository::batch::BatchAction;
 pub use repository::share::ShareDiff;
@@ -326,6 +330,14 @@ impl Catalog {
     // ---- Bewertung/Flagge/Farbe (ab Phase 3) -----------------------------
 
     /// Setzt die Sternebewertung (0–5) eines Fotos.
+    /// Schreibt den Dateinamen eines Fotos um (Phase 32 F4) — siehe
+    /// `repository::photos::set_filename` für die Reihenfolge-Frage
+    /// Datei-vor-Katalogzeile.
+    pub fn set_photo_filename(&self, id: PhotoId, filename: &str) -> Result<()> {
+        let conn = self.lock()?;
+        repository::photos::set_filename(&conn, id, filename)
+    }
+
     pub fn set_photo_rating(&self, id: PhotoId, rating: u8) -> Result<()> {
         let conn = self.lock()?;
         repository::photos::set_rating(&conn, id, rating)
@@ -478,6 +490,64 @@ impl Catalog {
     pub fn catalog_statistics(&self) -> Result<CatalogStatistics> {
         let conn = self.lock()?;
         repository::stats::compute(&conn)
+    }
+
+    // ---- Notizen am Foto (Phase 32 F6) -----------------------------------
+
+    pub fn create_photo_note(
+        &self,
+        photo_id: PhotoId,
+        x: f64,
+        y: f64,
+        body: &str,
+    ) -> Result<PhotoNote> {
+        let conn = self.lock()?;
+        repository::notes::create(&conn, photo_id, x, y, body, OffsetDateTime::now_utc())
+    }
+
+    pub fn list_photo_notes(&self, photo_id: PhotoId) -> Result<Vec<PhotoNote>> {
+        let conn = self.lock()?;
+        repository::notes::list_for_photo(&conn, photo_id)
+    }
+
+    /// `None` lässt das jeweilige Feld unverändert — siehe
+    /// `repository::notes::update`.
+    pub fn update_photo_note(
+        &self,
+        note_id: &str,
+        body: Option<&str>,
+        done: Option<bool>,
+        position: Option<(f64, f64)>,
+    ) -> Result<PhotoNote> {
+        let conn = self.lock()?;
+        repository::notes::update(
+            &conn,
+            note_id,
+            body,
+            done,
+            position,
+            OffsetDateTime::now_utc(),
+        )
+    }
+
+    pub fn delete_photo_note(&self, note_id: &str) -> Result<()> {
+        let conn = self.lock()?;
+        repository::notes::delete(&conn, note_id)
+    }
+
+    /// Anzahl offener Notizen je Foto (Phase 32 F6) — eine Abfrage statt
+    /// einer je Rasterkachel.
+    pub fn photo_note_open_counts(&self) -> Result<Vec<(PhotoId, u64)>> {
+        let conn = self.lock()?;
+        repository::notes::open_counts(&conn)
+    }
+
+    /// Ausrüstungs- und Belichtungs-Statistik (Phase 32 F5) — vollständige
+    /// Kamera-/Objektivlisten plus Brennweiten-/Blenden-/ISO-/Zeit-
+    /// Verteilung, siehe `repository::stats`s Klassen-Tabellen.
+    pub fn gear_statistics(&self) -> Result<GearStatistics> {
+        let conn = self.lock()?;
+        repository::stats::compute_gear(&conn)
     }
 
     // ---- Sammlungen (ab Phase 3, Sammlungssätze/intelligente Sammlungen ---

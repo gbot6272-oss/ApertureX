@@ -1,3 +1,4 @@
+import { StickyNote } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -56,6 +57,8 @@ export function GridView({ variant = "grid" }: GridViewProps) {
   const photos = useAppStore(useShallow(selectActivePhotos));
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
   const multiSelectedIds = useAppStore((s) => s.multiSelectedIds);
+  const noteOpenCounts = useAppStore((s) => s.noteOpenCounts);
+  const refreshNoteOpenCounts = useAppStore((s) => s.refreshNoteOpenCounts);
   const togglePhotoSelection = useAppStore((s) => s.togglePhotoSelection);
   const selectPhoto = useAppStore((s) => s.selectPhoto);
   const setPhotoRating = useAppStore((s) => s.setPhotoRating);
@@ -80,6 +83,13 @@ export function GridView({ variant = "grid" }: GridViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
+
+  // Offene Notizen einmal beim Öffnen des Rasters holen (Phase 32 F6) —
+  // eine Abfrage für alle Kacheln statt einer je Kachel; jede Änderung
+  // im Viewer frischt sie ohnehin selbst nach.
+  useEffect(() => {
+    void refreshNoteOpenCounts();
+  }, [refreshNoteOpenCounts]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -191,7 +201,7 @@ export function GridView({ variant = "grid" }: GridViewProps) {
                       onMouseLeave={() => isOverview && setHoveredPhotoId((current) => (current === photo.id ? null : current))}
                       title={photo.missing ? `${photo.filename} (Datei fehlt)` : photo.filename}
                       style={{ width: cellSize, height: cellSize }}
-                      className={`apx-grid-cell-in relative shrink-0 cursor-pointer overflow-hidden rounded border-2 text-left ${
+                      className={`apx-grid-cell-in relative shrink-0 cursor-pointer overflow-hidden rounded border-2 text-left transition-transform duration-[var(--duration-fast)] hover:z-10 hover:scale-[1.04] hover:shadow-lg ${
                         isFocused ? "border-accent" : isSelected ? "border-accent/50" : "border-transparent hover:border-border"
                       } ${photo.missing ? "opacity-40" : ""}`}
                     >
@@ -211,6 +221,19 @@ export function GridView({ variant = "grid" }: GridViewProps) {
                       {photo.missing && (
                         <span className="absolute right-1 top-1 rounded bg-bg-base/80 px-1 text-[10px] leading-tight text-danger">
                           fehlt
+                        </span>
+                      )}
+                      {(noteOpenCounts[photo.id] ?? 0) > 0 && (
+                        // Offene Notizen sichtbar machen, ohne die Kachel
+                        // zuzubauen (Phase 32 F6): ein kleines Zeichen mit
+                        // Anzahl, oben links, wo sonst nichts liegt.
+                        <span
+                          data-testid="grid-note-badge"
+                          title={`${noteOpenCounts[photo.id]} offene Notiz(en)`}
+                          className="absolute left-1 top-1 flex items-center gap-0.5 rounded bg-bg-base/80 px-1 text-[10px] leading-tight text-accent"
+                        >
+                          <StickyNote aria-hidden="true" className="size-2.5" />
+                          {noteOpenCounts[photo.id]}
                         </span>
                       )}
                       {isOverview ? (

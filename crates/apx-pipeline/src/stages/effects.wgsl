@@ -12,7 +12,7 @@ struct Params {
     grain_amount: f32,
     grain_size: f32,
     grain_roughness: f32,
-    _pad0: f32,
+    grain_midtone_bias: f32,
     _pad1: f32,
 };
 
@@ -91,7 +91,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let raw_noise = noise_at(bx, by);
     let exponent = max(1.0 - (params.grain_roughness - 50.0) / 50.0 * ROUGHNESS_RANGE, 0.05);
     let shaped_noise = sign(raw_noise) * pow(abs(raw_noise), exponent);
-    let grain_delta = shaped_noise * (params.grain_amount / 100.0) * GRAIN_STRENGTH;
+    // Mitteltongewichtung — dieselbe Formel wie in `effects.rs`
+    // (Phase 31 Schritt 9). `bias = 0` ergibt exakt das bisherige,
+    // gleichmäßige Korn.
+    let midtone_weight = 4.0 * luminance * (1.0 - luminance);
+    let bias = clamp(params.grain_midtone_bias / 100.0, 0.0, 1.0);
+    let grain_weight = 1.0 + bias * (midtone_weight - 1.0);
+    let grain_delta = shaped_noise * (params.grain_amount / 100.0) * GRAIN_STRENGTH * grain_weight;
 
     let total_delta = vignette_delta + grain_delta;
 

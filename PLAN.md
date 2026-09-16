@@ -928,7 +928,7 @@ ADR-0037, nutzerangeordnete befristete Ausnahme).
 - [x] 8. Lokalisierung (Deutsch/Englisch) — Header/Sidebar/Presets/Metadaten/Settings/Cheatsheet übersetzt, die ca. 20 Dialog-Komponenten bewusst offen (siehe `lib/i18n.ts`-Moduldoku)
 - [x] 9. Onboarding
 - [x] 10. Performance-Profiling gegen SPEC.md §2.4 (siehe Detail-Absatz unten)
-- [ ] 11. Installer + Signierung (alle drei Plattformen, strukturell + konditional)
+- [x] 11. Installer + Signierung (alle drei Plattformen, strukturell + konditional) — vollständige Paketmetadaten, geprüfte Ziel-Liste statt `"all"`, `ffmpeg` als Laufzeit-Abhängigkeit deklariert (war nirgends erfasst), Versions-Divergenz zwischen `tauri.conf.json` und `Cargo.toml` beseitigt, Release-Job scheitert jetzt hörbar statt lautlos nichts zu liefern, SHA-256-Summen, Entwurfs-Release auf Tag, `RELEASE.md` als Betriebsanleitung, neun Konfigurationstests. Signierung bleibt **nie mit echtem Zertifikat nachgewiesen** (ADR-0037 Entscheidung 3 / ADR-0061). Zwei Punkte bleiben bewusst offen, weil sie Entscheidungen sind: Lizenzwahl und ADR-0002 Punkt 2 (`apx-raw` dynamisch für LGPL §6).
 - [x] 12. Dokumentation, einmalige volle Verifikation, Abnahme — `ARCHITECTURE.md` §14, `FEATURES.md` final (inkl. neuem §5 „Phase 10 — Politur" für die vier bisher nur als SPEC.md-§5-Prosa vorhandenen Punkte). Volle Suite: `cargo fmt --check`/`cargo clippy`/`cargo test --workspace` grün, `tsc -b` grün, volle Vitest-Suite (195 Tests) grün, volle Playwright-Suite (127 Tests, nicht nur Stichprobe) — ein echter Regressionsfund dabei: der neue `<nav>`-Gruppenname „Vorlagen" (Header.tsx Schritt 2/8) kollidierte per Teilstring mit `print-flow.spec.ts`s `getByLabel("Vorlage")`, behoben durch Entfernen des `aria-label` auf dieser einen Gruppe (Details siehe Commit)
 
 **Schritt 10 — Performance-Profiling gegen SPEC.md §2.4, im Detail:**
@@ -1171,9 +1171,239 @@ Volle Suite gebündelt erst im letzten Schritt.
 - [x] 6. Social-Media-Export-Presets (9:16/1:1/16:9) — reine Frontend-Erweiterung, Backend skaliert bereits "cover" auf beliebiges Seitenverhältnis
 - [x] 7. Bild-in-Bild / Split-Screen — `TimelinePipOverlay` (Quelle = normaler `TimelineItem`), Split-Screen als zwei gegenüberliegende 50%-Overlays statt eigenem Mechanismus
 - [x] 8. Greenscreen/Hintergrund entfernen (MediaPipe Selfie Segmentation) — Ein-Clip-Command wie die LUT-Anwendung, ehrliche URL-/Hash-Lücke wie beim LaMa-Modell (huggingface.co blockiert)
-- [ ] 9. Video-Stabilisierung (Wiederverwendung `apx-stacking`-Homografie) — **pausiert auf ausdrücklichen Nutzerwunsch, nicht autonom fortsetzen**
+- [x] 9. Video-Stabilisierung (Wiederverwendung `apx-stacking`-Homografie) — die Pause ist vom Nutzer aufgehoben worden. Neues Modul `apx_stacking::stabilize` (nur Mathematik: Bahn glätten, Korrektur je Bild, Verzerren), neuer `stabilize_video`-Command mit demselben zwei-`ffmpeg`-Prozesse-Muster wie `apply_lut_filter_to_video`/`remove_video_background`, Regler „Glättung"/„Zuschnitt" im Video-Modul. Zwei Durchgänge (messen, dann korrigieren), 4 statt 8 Freiheitsgrade gegen den „Wackelpudding", Korrekturen auf den Zuschnitt-Rand geklemmt statt gehofft — siehe `DECISIONS.md` ADR-0062.
 - [ ] 10. Dokumentation, volle Verifikation, Abnahme
 - [x] `tsc -b`, volle `vitest run`-Suite (251 Tests, 28 neue), `map-flow.spec.ts` grün
+
+## Aktuelle Phase: Phase 25 — Premium-UI-Plan + Bugfixes (Performance, Filter)
+
+Nutzerwunsch: UI wirkt "immer noch nicht premium genug" — ein
+5-Schritt-Plan für ein durchdachteres, premium-mäßigeres UI soll
+ausgearbeitet, präsentiert und direkt umgesetzt werden (keine
+Rückfrage abwarten); zusätzlich zwei konkrete Bugs fixen: "alles
+dauert so lange" (allgemeine Performance-Klage) sowie Filter/eigene
+`.cube`-Dateien und sogar die mitgelieferten Presets verändern das
+Bild nicht wirklich.
+
+- [x] 1. Bugfix Filter/Performance (siehe `DECISIONS.md` ADR-0053):
+  real untersucht statt vermutet — die Bild-/LUT-Mathematik selbst war
+  korrekt (Trilineare Interpolation, Rasterreihenfolge, Stufen-Gate,
+  `strength`-Default alle geprüft und bestätigt fehlerfrei); der echte
+  Fehler lag in der Übertragung — `buildEdlEnvelopeJson` schickte die
+  komplette LUT-Rastertabelle (300 KB–1 MB+ JSON) bei **jedem** Regler-
+  Tick erneut im URL-Pfad der `develop/...`-Live-Vorschau-Route, was
+  sowohl die spürbare Verlangsamung bei aktivem Filter erklärt als
+  auch — bei genügend großer Tabelle — zu scheiternden Anfragen führte,
+  deren Fehler `useDevelopRender`s Fehlerpfad nur stumm loggt (kein
+  sichtbarer Fehler, der zuletzt erfolgreiche Rahmen bleibt einfach
+  stehen — "der Filter verändert das Bild nicht"). Fix: neuer
+  Inhalts-Hash `LutFilterData::id` + serverseitiger
+  `apx_pipeline::lut_table_cache::LutTableCache` + neue
+  `buildDevelopPreviewEdlJson`, die die Tabelle aus der Live-Vorschau
+  herausschneidet, sobald der Server sie einmal kennt (`Tauri`-Befehl
+  `register_lut_filter_table` wärmt proaktiv vor). Persistierte
+  `edit_history` behält weiterhin die volle Tabelle (unverändert über
+  `buildEdlEnvelopeJson`), strikt nicht-regressiv für alte Daten ohne
+  `id`. Verifiziert: `cargo test -p apx-pipeline`/`-p apx-app protocol`
+  (neue `LutTableCache`-Tests + Rundlauf-Test mit absichtlich leerer
+  Tabelle), `cargo fmt`/`clippy -D warnings` sauber, `tsc -b`,
+  `vitest run` (251/251), volle Playwright-Suite (142/142).
+- [x] 0. 5-Schritt-Premium-UI-Plan ausgearbeitet (real recherchiert über
+  `.claude/skills/ui-ux-pro-max` + eigene `index.css`-Befunde, siehe
+  `DECISIONS.md` ADR-0054), präsentiert und direkt ausgeführt (kein
+  Rückfrage-Stopp, Nutzerwunsch): 1. eigene Schrift (`@fontsource/inter`
+  statt `system-ui`) + Laufweiten-Feinschliff für Überschriften, 2.
+  echte Farbtiefe (`--color-bg-*` von `#1a1a1a`-Bereich auf
+  `#050505`-Bereich, vorher "Grau-auf-Grau" innerhalb von 16 RGB-Werten),
+  3. neue `--shadow-2xl`-Stufe auf `Dialog`/`Sheet` (alle 25+ darauf
+  aufbauenden Dialoge/Sheets in einem Schritt), 4. Import-Knopf in
+  `Header.tsx` bekommt dieselbe Akzent-Tönung, die anderswo schon für
+  "aktiv" steht (vorher optisch identisch zum Such-Knopf daneben), 5.
+  `StatsCacheDialog.tsx`-Statistik-Dashboard als Bento-Kachelraster
+  statt flacher `<p>`-Liste (bewusst NICHT am virtualisierten
+  Foto-Raster, siehe ADR-0054 für die Risikoabwägung). Reale
+  Playwright-Screenshot-Verifikation (Kopfzeile, Import-Hover,
+  Statistik-Dashboard). Verifiziert: `tsc -b`, `vite build`, `vitest
+  run` (251/251), volle Playwright-Suite (142/142).
+
+- [x] Nachtrag: echtes "Liquid Glass" (siehe `DECISIONS.md` ADR-0055,
+  `PROMPTS.md` für die beiden vom Nutzer bereitgestellten Referenz-
+  Prompts) — realer Bug gefunden, nicht nur zu subtile Werte:
+  `vite.config.ts`s `build.target: "safari13"` ließ Lightning CSS die
+  STANDARD-`backdrop-filter`-Eigenschaft aus dem Produktions-Build
+  entfernen (nur `-webkit-backdrop-filter` blieb übrig) — in jedem
+  Chromium-basierten Webview (u. a. Windows/WebView2) war der
+  Weichzeichner seit Phase 21 dadurch komplett wirkungslos, per
+  `getComputedStyle` nachgewiesen. Fix: `@supports`-Guard um die
+  Standard-Deklaration (Lightning CSS behält das, anders als ein
+  direktes Duplikat, unabhängig vom Build-Ziel). Dazu echte Glas-
+  Verzerrung (`GlassDistortionFilter.tsx`, eine einmalig gemountete
+  SVG-`feTurbulence`+`feDisplacementMap`-Filterdefinition, `none` im
+  Kontrastmodus) über zwei `::before`/`::after`-Pseudo-Elemente statt
+  der bisherigen einzelnen Hintergrund-Ebene (sonst hätte `filter` auch
+  den Text mitverzerrt), `--glass-edge-shadow`-Kantenlicht, sowie eine
+  neue `.apx-btn-liquid`/`-active`-Knopf-Mechanik (elastisches
+  Überschwingen) auf `Header.tsx`s sechs Ansicht-Segmentknöpfen + dem
+  Import-Knopf. Zwei reale Regressionen unterwegs gefunden und behoben
+  bzw. als Nicht-Regression widerlegt (siehe ADR-0055 für die genaue
+  Untersuchung — u. a. ein `git stash`-Vergleichslauf gegen den
+  unveränderten Stand). Verifiziert: `tsc -b`, `vite build` (direkt am
+  gebauten CSS geprüft), `vitest run` (251/251), volle Playwright-Suite
+  (142/142), Pixel-/`getComputedStyle`-Messung statt reinem
+  Screenshot-Eyeballing.
+
+- [x] Nachtrag II: Liquid-Glass-Werte auf echte Nutzerkritik hin (mit
+  iOS-Control-Center-Referenzfoto) deutlich verstärkt — hellere,
+  durchsichtigere Tönung, `--glass-saturate` von 165 % auf 220 %,
+  `--glass-blur` von 26px auf 18px — UND die dahinterliegende
+  strukturelle Grenze real nachgewiesen statt nur vermutet: die
+  Kopfzeile lag im damaligen Layout NEBEN dem Fotobereich statt
+  darüber, konnte also unabhängig vom CSS-Wertetuning nie Farbe
+  durchscheinen lassen (siehe DECISIONS.md ADR-0055-Nachtrag für den
+  Vergleichstest). Verifiziert per eigens gebautem Vergleichs-
+  Screenshot (Dialog über knallbuntem Testverlauf), `tsc -b`, `vitest
+  run` (251/251), volle Playwright-Suite (142/142).
+
+- [x] Nachtrag III: die in Nachtrag II nur beschriebene strukturelle
+  Grenze tatsächlich aufgehoben, auf explizite Nutzerentscheidung
+  ("Ja, Kopfzeile als Overlay über den Fotos") — `Header.tsx` ist
+  jetzt `position: fixed` statt einer normalen Flex-Zeile, schwebt
+  also echt über dem Inhalt wie iOS Control Center über dem
+  Homescreen. Bewusst selektiv: der zentrale Inhaltsbereich
+  (Viewer/Karte/Personen/Video) reicht jetzt bis zum oberen Rand und
+  zeigt dadurch echte Fotofarbe durch die Kopfzeile; Raster/Übersicht
+  (mit `FilterBar`) bleiben unverändert — die Leiste hätte als
+  schwebendes Overlay eine variable Höhe (`flex-wrap`) bekommen, eine
+  verlässliche Kompensation für Sidebar/Presets/Metadaten-Panel wäre
+  damit nicht mehr statisch berechenbar gewesen. Dieselbe Tailwind-
+  v4-Kaskaden-Falle wie beim `z-index`-Fund in ADR-0055 traf hier
+  erneut zu (`.apx-glass`s unlayered `position: relative` schlug die
+  `fixed`-Utility-Klasse) — diesmal per spezifischerer Gegenregel
+  `header.apx-glass { position: fixed; }` gelöst statt per
+  `isolation`, weil der Wert selbst wirklich `fixed` sein musste.
+  Volle Playwright-Suite fing dabei real eine Regression
+  (`tat-flow.spec.ts`: Kopfzeile blockierte die jetzt unter ihr
+  liegende TAT-Werkzeugleiste) — behoben, indem alle betroffenen
+  Overlay-Kontrollen (`Viewer.tsx`, `MapView.tsx`, `GlobeView.tsx`,
+  `PeopleView.tsx`) um die neue Kopfzeilenhöhe nach unten versetzt
+  wurden. Siehe DECISIONS.md ADR-0055-Nachtrag III. Verifiziert:
+  `tsc -b`, `vitest run` (251/251), volle Playwright-Suite (142/142),
+  reale Playwright-Screenshots mit einem Testfarbverlauf hinter dem
+  Fotobereich (Beweis für echten Farbdurchschein) UND ohne (zeigt die
+  Rasteransicht bewusst unverändert).
+
+## Aktuelle Phase: Phase 26 — Das Foto im Mittelpunkt (drei neue Ansichts-Funktionen)
+
+Nutzerwunsch nach dem Kopfzeilen-Umbau: "Noch mehr Funktionen". Statt
+beliebiger Zusätze genau die Funktionen gebaut, die aus der neuen
+Struktur folgen (die Chrome liegt jetzt über dem Bild, also wird
+"Chrome wegnehmen" zur sinnvollen Geste). Untersuchung/Entscheidungen:
+siehe `DECISIONS.md` ADR-0056.
+
+- [x] 1. **Fokus-Modus** (`t`): blendet Sidebar, Presets-, Metadaten-,
+  Entwickeln-, Masken-Palette und Filmstreifen aus — die Paletten
+  werden gar nicht erst gerendert (sonst liefen ihre Effekte
+  unsichtbar weiter), ihr gespeicherter Ein-/Ausklappzustand bleibt
+  unberührt und kommt beim Verlassen zurück.
+- [x] 2. **Lichter aus** (`l`, dreistufig aus → gedimmt → schwarz):
+  Dimm-Sichtebene auf `z-20`, der Bildbereich hebt sich bei aktivem
+  Modus auf `z-[25]` darüber, die Kopfzeile bleibt auf `z-30` und
+  wird durch ihren eigenen `backdrop-filter` mit abgedunkelt.
+  `pointer-events-none` — der Modus verdunkelt, er sperrt nicht.
+- [x] 3. **Schwebende Zoom-Steuerung** im Viewer (unten links):
+  Prozentanzeige, +/−, Einpassen, 100 % — vorher war die Zoomstufe
+  ausschließlich per Tastatur/Mausrad erreichbar und nur im
+  Info-Overlay ablesbar.
+- [x] 4. **Lesbarkeitsschutz für Glasflächen**: an den eigenen
+  Screenshots der Vorrunde real aufgefallen (Platzhaltertext der
+  Befehlspalette vor hellem Foto kaum lesbar, direkte Folge davon,
+  dass Glas seit Nachtrag III echte Fotofarbe durchlässt) — neuer
+  Token `--glass-text-shadow` (hell/dunkel/Kontrastmodus getrennt)
+  plus hellerer Platzhalter.
+- [x] 5. **Auffindbarkeit**: beide Modi im Kommando-Register
+  (Befehlspalette) mit zustandsabhängiger Beschriftung, in `de.ts`/
+  `en.ts` übersetzt, Tastenkürzel über `KEYBINDING_ACTIONS` umbelegbar
+  und im Cheatsheet gelistet. `Tab` bewusst NICHT belegt (würde die
+  Tastaturnavigation app-weit brechen) — stattdessen `t`.
+- [x] 6. Verifikation: neuer e2e-Test `focus-lights-zoom-flow.spec.ts`
+  prüft alle drei Funktionen real. Die volle Suite fing dabei **8 echte
+  Fehlschläge**: die Zoom-Steuerung trug `apx-glass` zusammen mit
+  `absolute` auf demselben Element — `.apx-glass`s unlayered
+  `position: relative` schlägt Tailwinds Utility, die Leiste saß
+  dadurch mittig IM Bild statt unten links und fing die Bildklicks ab,
+  auf denen sechs bestehende Tests beruhen (per `elementFromPoint` am
+  echten Klickpunkt gemessen). Behoben über einen äußeren
+  Positionierungs-Rahmen; `.apx-glass` trägt jetzt eine Warnung für
+  künftige Aufrufer (dieselbe Falle traf in dieser Sitzung bereits
+  `z-index` und `fixed`). Zwei weitere Fehlschläge waren
+  Selektor-Kollisionen ("Zoom", "100 %") — beide Tests präzisiert,
+  ihre Aussage unverändert. `tsc -b` sauber, `vitest run` 251/251,
+  volle Playwright-Suite danach 143/143 mit real geprüftem Exit-Code.
+
+## Aktuelle Phase: Phase 24 — Transparenz, Karten-Bugfixes, zehn neue Animationen, mehr Übersicht
+
+Nutzerwunsch: UI transparenter, Kartenbugs (fehlerhafte Anzeige, keine
+gute Heatmap) fixen, mindestens 10 neue Animationen, mehr Übersicht/
+einfacher zu bedienen. Untersuchung, Entscheidungen: siehe
+`DECISIONS.md` ADR-0052.
+
+- [x] 0. ADR-0052 + PLAN.md-Abschnitt — Karten-Code real untersucht
+      (Heatmap-Farbskala-Bug bestätigt, Koordinaten-Versatz-Verdacht
+      anhand des Leaflet-Quellcodes widerlegt)
+- [x] 1. Heatmap-Farbskala repariert (`mid` war identisch mit `cool`)
+      in `MapView.tsx` + `GlobeView.tsx`
+- [x] 2. `index.css`: `--glass-bg`/`-bg-strong` deutlich transparenter,
+      `--glass-blur` angehoben (Lesbarkeits-Ausgleich)
+- [x] 3. Zehn neue Animationen: Bewertungssterne-Pop, Heatmap-Atmen
+      (Karte + Globus), Karten-Infobox-Eintritt, GPS-Hinweis-Puls,
+      Globus↔Karte-Überblendung, Befehlspalette-Gestaffelt,
+      Export-Fortschrittsbalken (neu + animiert), Einstellungen-
+      Reiterwechsel-Einblendung, Kopfzeilen-Import-Hinweis-Einblendung,
+      Filmstreifen-Sanftscroll zur Auswahl
+- [x] 4. Mehr Übersicht: echter Export-Fortschrittsbalken statt
+      reinem Text
+- [x] 5. Dokumentation, volle Verifikation (tsc, vitest, volle
+      Playwright-Suite), Commit+Push
+
+## Aktuelle Phase: Phase 23 — Echte Bewegung, Runde 2
+
+Nutzerwunsch: Animationen weiterhin unzureichend ("ist noch zu
+schlecht"), drei externe Komponenten-Prompts (DotLoader, Toolbar,
+Sparkles) als Referenz beigelegt. Analyse (keine wörtliche Übernahme
+— dieses Projekt ist kein shadcn/Next.js-Projekt) + Entscheidungen:
+siehe `DECISIONS.md` ADR-0051.
+
+- [x] 0. ADR-0051 + PLAN.md-Abschnitt — Prompt-Analyse, Ist-Zustand
+      (keine Icon-Bibliothek, GSAP statt framer-motion, 35 Lade-Stellen
+      ohne jede Animation)
+- [x] 1. `lib/utils.ts` (`cn()`) + `components/ui/DotLoader.tsx` portiert
+- [x] 2. `selectAnyBackgroundTaskRunning`-Auswahl (Store) +
+      `GlobalBusyIndicator`-Komponente — ein zentraler, dezenter
+      Indikator statt 35 Einzelstellen anzufassen
+- [x] 3. `lucide-react` + echte Symbole in `MasksPanel.tsx`s Masken-Zeile
+      statt roher Unicode-Zeichen (`title`/`aria-label` unverändert)
+- [x] 4. Federnder GSAP-Erfolgs-Funke beim Export-Abschluss
+- [x] 5. Dokumentation, volle Verifikation (tsc, vitest, volle
+      Playwright-Suite), Commit+Push
+
+### Nachtrag: "noch nicht gut genug" — Hover, KI-Bearbeitung-Animation, 5 weitere
+
+Nutzerwunsch: mehr Animationen, Hover-Bewegung, echte Animation
+während KI-Bearbeitung, fünf weitere Ergänzungen. Details/
+Entscheidungen: siehe `DECISIONS.md` ADR-0051-Nachtrag.
+
+- [x] 1. Echte Hover-Bewegung: `GridView.tsx`/`Filmstrip.tsx`-Kacheln
+      (Skalierung+Schatten), `PresetsPanel.tsx`/`Sidebar.tsx`-Zeilen
+      (sanfter Übergang statt hartem Sprung)
+- [x] 2. Gleitender Auswahl-Hintergrund in `ui/Tabs.tsx` (GSAP,
+      echte `getBoundingClientRect()`-Messung, funktioniert bei
+      `flex-wrap`)
+- [x] 3. `InlineSpinner` (`ui/DotLoader.tsx`) an acht sichtbaren
+      KI-Auslösestellen (KI-Ausfüllen, Sensorflecken, Content-Aware
+      Move/Scale, Entrauschen, Hochskalieren, DNG, Bildranderweiterung)
+- [x] 4. Schimmer-Überzug direkt auf dem bearbeiteten Foto im Viewer
+      (`selectCurrentPhotoAiProcessing`, `apx-ai-shimmer`)
+- [x] 5. Dokumentation, volle Verifikation, Commit+Push
 
 ## Aktuelle Phase: Phase 22 — Editor-Politur: ESC-Schnellmenü, Regler, Farbprofile
 
@@ -1272,3 +1502,267 @@ Suite inkl. visueller Verifikation gebündelt in Schritt 7.
 - [x] Nachtrag: drei reale Nutzungsfehler nach dem Merge behoben (Nutzer-Screenshots aus der echten App) — Foto stand in der Entwickeln-Großansicht auf dem Kopf (`lib/webgl.ts`s `uploadRgba8` brauchte, anders als `uploadImageBitmap`, `UNPACK_FLIP_Y_WEBGL = false` statt `true`, empirisch per isoliertem WebGL-Vergleichstest bewiesen — die EXIF-Orientierung selbst in `apx-raw` war die ganze Zeit korrekt, per neuem, echtem JPEG+EXIF-Testfall bestätigt), `MasksPanel.tsx`s Zwei-Spalten-Knopfraster brach deutsche Beschriftungen auf zwei Zeilen um (jetzt einspaltig), `DevelopAnalysisPanel.tsx` ließ sich weder verschieben noch einklappen und clippte zwei Knöpfe (jetzt ziehbare Kopfzeile + Einklapp-Knopf + `flex-wrap`) — siehe DECISIONS.md ADR-0046-Nachtrag; dabei aufgedeckte echte Test-Regression (neue Kopfzeile überlappte die TAT-Werkzeugleiste) sofort gefixt, volle Playwright-Suite wieder 142/142 grün. Auf `main` gemergt.
 - [x] Nachtrag II: gezielter Rundgang durch die restliche Oberfläche nach demselben Muster (schmale `PaletteFrame`-Paletten auf zu lange Knopfbeschriftungen in Mehrspalten-/`flex-1`-Reihen geprüft) — drei weitere echte Fälle behoben (`MasksPanel.tsx`s "+ Komponente hinzufügen"-Raster, `PresetsPanel.tsx`s KI-Preset-Generator-Knopfpaar, je einspaltig; `DevelopPanel.tsx`s Verflüssigen-Modus- und Entrauschen/Hochskalieren-Knopfreihen, per `flex-wrap` statt Umstrukturierung, da echte Segment-Umschalter) — siehe DECISIONS.md ADR-0046-Nachtrag II; alle anderen `grid-cols-*`-Stellen und schwebenden Overlays geprüft, ohne weiteren Fund; `tsc -b`/`vitest run` (251)/volle Playwright-Suite (142/142) grün
 - [x] Nachtrag III: die vier Entwickeln-Registerkarten (Licht/Farbe/Details/Kreativ) real durchgeklickt — ein echter Fehler gefunden und behoben (Kreativ-Registerkarte zeigte dauerhaft einen roten "Test-Stub: unbekannter invoke-Befehl 'list_builtin_lut_filters'"-Banner, weil `e2e/tauri-mock.ts` für diesen echten, seit Phase 16 Schritt 2 bestehenden Rust-Befehl nie einen Mock-Fall bekommen hatte) sowie das strukturelle "zu viel Scrollen"-Problem eine Ebene tiefer als in ADR-0046 behoben: alle 30 `<fieldset>`/`<legend>`-Abschnitte in `DevelopPanel.tsx` und 6 in `MasksPanel.tsx` sind jetzt einzeln einklappbare native `<details open>`/`<summary>` (neue `.apx-collapsible`-Klasse in `index.css`, ▸/▾-Pfeil mit Übergangsanimation, respektiert `prefers-reduced-motion`) — bleiben beim ersten Betrachten unverändert vollständig sichtbar, lassen sich aber ab jetzt einzeln zuklappen, reduziert den Scrollweg v. a. in "Kreativ" (acht Unterabschnitte) und "Licht" (fünf); der Node-Editor-"Öffnen"-Sprung klappt ein zuvor zugeklapptes Ziel automatisch wieder auf. Dabei eine echte Testfalle empirisch nachgewiesen und umschifft (`<details>`+`<summary>` bekommt anders als `<fieldset>`+`<legend>` keinen automatischen zugänglichen Namen — zwei versuchsweise gesetzte `aria-label`s kollidierten mit gleichnamigen `aria-label`s echter Komponenten und wurden wieder entfernt) — siehe DECISIONS.md ADR-0046-Nachtrag III; `tsc -b`/`vitest run` (251)/volle Playwright-Suite (142/142) grün, reale Bildschirm-Kontrolle aller fünf Registerkarten plus Zu-/Aufklappen-Verhalten
+
+## Phase 27 — Zehn Bearbeitungs-Funktionen mit großem Bildeffekt + Retro-Fuji-Thailand-Filter
+
+Nutzerwunsch wörtlich: zehn weitere Funktionen, die "wirklich bei der
+Bearbeitung von Fotos helfen, anspruchsvoll, teilweise mit KI, wirklich
+sichtbare Erfolge erzielend", dazu ein neues `.cube`-Template im
+"retro Fujifilm Thailand"-Look, und die UI der neuen Funktionen direkt
+im Liquid-Glass-Stil (Hover, wenig Subtext, einfach zu navigieren).
+Untersuchung/Entscheidungen: siehe `DECISIONS.md` ADR-0057.
+
+**Architektur (einmal festgelegt, gilt für alle zehn):** ein neues
+EDL-Feld `creative: CreativeAdjustments` mit zehn Unterstrukturen, EINE
+neue Pipeline-Stufe `stages/creative.rs`, EIN `StageEnabled.creative`.
+Zehn einzelne Stufen wären dieselbe Mathematik mit zehnfachem
+Gerüst-Aufwand und zehn zusätzlichen Pipeline-Zweigen in `develop.rs`.
+Position in der Pipeline: nach `lut_filter`, vor `liquify` — der
+LUT-Look ist die Grundgradation, die Kreativ-Stufe legt sich darüber.
+Feste, dokumentierte Reihenfolge innerhalb der Stufe: Korrektur →
+Atmosphäre → Optik → Licht → Gradation → Auflage.
+
+- [x] 1. **Farbabgleich zu Referenzfoto** (Reinhard-Statistiktransfer im
+  Lab-Raum): übernimmt Mittelwert und Streuung der Farbverteilung eines
+  Referenzfotos. Macht eine ganze Serie in einem Klick einheitlich —
+  der praktischste der zehn Punkte.
+- [x] 2. **Atmosphärischer Tiefennebel (KI)**: nutzt die bereits
+  vorhandene MiDaS-Tiefenkarte (`estimate_photo_depth`, bisher nur für
+  die Virtuelle Blende) und legt entfernungsabhängigen Dunst/Nebel in
+  wählbarer Farbe über das Bild. Erzeugt echte Tiefenstaffelung statt
+  eines flachen Verlaufs.
+- [x] 3. **KI-Motiv-Freistellung + Hintergrundbehandlung**: klassische
+  Segmentierung (`apx_ai::segmentation::subject_alpha`, kein
+  Modell-Download nötig) trennt Motiv und Hintergrund; der Hintergrund
+  lässt sich separat weichzeichnen, abdunkeln und entsättigen.
+  Porträt-Arbeitspferd.
+- [x] 4. **Tilt-Shift / Miniatur**: gerichtetes Schärfeband mit
+  weichem Abfall nach oben und unten plus Sättigungsanhebung.
+- [x] 5. **Sonnenstrahlen (God Rays)**: radiale Lichtschleppen aus einem
+  frei setzbaren Sonnenpunkt, gespeist aus den hellsten Bildpartien.
+- [x] 6. **Orton-Glanz**: weichgezeichnete, aufgehellte Kopie im
+  Negativ-Multiplikation-Modus — der Traumglanz-Klassiker.
+- [x] 7. **Filmlabor-Prozesse**: Bleach Bypass (Silber nicht
+  ausgebleicht: hoher Kontrast, entsättigt) und Cross-Processing
+  (Kanalkurven gegeneinander verschoben).
+- [x] 8. **Verlaufsabbildung (Gradient Map / Duotone)**: bildet die
+  Helligkeit auf einen Drei-Farb-Verlauf ab (Tiefen/Mitten/Lichter).
+- [x] 9. **Farbisolierung (Color Pop)**: ein wählbarer Farbtonbereich
+  bleibt farbig, der Rest wird stufenlos entsättigt.
+- [x] 10. **Lichtlecks (Analog-Lichtstimmung)**: gerichtete, farbige
+  Lichteinfälle am Bildrand nach dem Vorbild undichter Filmkameras.
+- [x] 11. **Neues `.cube`-Template "Retro Fuji Thailand"**: als echte
+  `.cube`-Datei im Projekt UND als eingebauter Filter (elfter
+  `BuiltinLut`), damit er sofort in der Filter-Bibliothek steht.
+  Charakter: warme, leicht ausgewaschene Schatten mit Grünstich,
+  gedämpfte Lichter mit Gelb-Orange-Kippung, angehobener Schwarzpunkt
+  (Retro-Negativ), kräftige, aber nicht neonartige Türkistöne im
+  Wasser/Himmel.
+- [x] 12. **UI im Liquid-Glass-Stil**: eigenes Kreativ-Panel mit
+  Glasflächen, Hover-Zuständen, kurzen Beschriftungen ohne
+  Erklärabsätze, klare Gruppierung; zwei Ein-Klick-KI-Knöpfe
+  ("Tiefenkarte berechnen", "Motiv freistellen").
+- [x] 13. Verifikation: Rust-Unit-Tests je Funktion, neuer e2e-Test,
+  `cargo fmt`/`clippy`/`test`, `tsc -b`, `vitest run`, volle
+  Playwright-Suite mit real geprüftem Exit-Code, dann Push.
+- [x] 14. **Nebenbefund, real nachgemessen statt angenommen:** beim Bau
+  von Punkt 2/3 stellte sich heraus, dass die seit Phase 14 bestehende
+  Tiefenkarte der Virtuellen Blende als base64-STRING ins EDL ging,
+  während die Rust-Seite ein `Vec<u8>` liest — das gesamte EDL war
+  damit unparsbar, sobald eine Tiefenkarte existierte, und der
+  Fehlerpfad protokolliert nur still (dieselbe Fehlerklasse wie der
+  LUT-Bug aus Phase 25). Behoben; der neue e2e-Test prüft für die
+  Motivmaske ausdrücklich, dass ein Zahlen-Array ankommt. Zusätzlich
+  korrigiert: `virtual-aperture-flow.spec.ts` hatte den kaputten
+  base64-Vertrag ausdrücklich festgeschrieben (`toBe("gICA…")`) — die
+  Zusicherung prüft jetzt die 16 dekodierten Bytes, also das Format, das
+  Rust wirklich deserialisiert. Siehe ADR-0057.
+
+
+## Phase 28 — „Licht & Optik": zwölf Werkzeuge, echtes Bokeh, drei neue .cube-Filter
+
+Nutzerwunsch wörtlich: „Noch nicht gut genug mach noch mehr Funktionen
+mehr alles". Phase 27 lieferte Looks; hier kommen die Werkzeuge, die
+Licht, Tiefe und Optik eines Fotos wirklich umbauen.
+Untersuchung/Entscheidungen: siehe `DECISIONS.md` ADR-0058.
+
+**Architektur:** ein EDL-Feld `light_optics: LightOpticsAdjustments` mit
+zwölf Unterstrukturen, EIN Modul `stages/light_optics.rs`, EIN
+`StageEnabled.light_optics`, EIN `develop.rs`-Zweig — dieselbe in
+Phase 27 bewährte Entscheidung. Pipeline-Position bewusst **vor**
+`lut_filter` (Korrektur und Optik gehen der Gradation voraus, die
+Phase-27-Looks bleiben danach):
+`… → sky_replace → light_optics → lut_filter → creative → liquify`.
+Feste Reihenfolge in der Stufe: Korrektur → Tiefe → Licht → Optik → Stil.
+
+- [x] 1. **Tonwert-Angleich an Referenzfoto**: neun Luminanz-Dezile des
+  Referenzfotos als monotone, stückweise lineare Abbildung. Ergänzt den
+  Farbabgleich aus Phase 27 zum vollständigen Serien-Angleich. Neuer
+  Befehl `compute_reference_tone_stats`.
+- [x] 2. **Zonensystem (10 Zonen, kantenbewusst)**: je Zone ±1 EV, die
+  Verstärkungskarte wird durch einen echten **Guided Filter** geglättet
+  statt durch einen Weichzeichner — genau das verhindert die
+  Lichtsäume, für die Zonenwerkzeuge berüchtigt sind.
+- [x] 3. **Detail-Pyramide**: drei Frequenzbänder (fein/mittel/grob) aus
+  gestaffelten Tiefpässen, je einzeln verstärkbar.
+- [x] 4. **Tiefenselektive Dunstentfernung**: Kontrast- und
+  Sättigungsrückgewinnung nur in der Ferne, gewichtet über die
+  MiDaS-Tiefenkarte. Die Umkehrung des Phase-27-Tiefennebels.
+- [x] 5. **Tiefenselektive Schärfe**: Unschärfemaske, deren Wirkung mit
+  dem Abstand von einer wählbaren Fokusebene abfällt.
+- [x] 6. **KI-Neubeleuchtung**: Normalenkarte aus dem Tiefengradienten,
+  darauf Lambert-Diffus + Blinn-Phong-Glanzlicht mit frei setzbarer
+  Lichtrichtung, -farbe und Umgebungshelligkeit.
+- [x] 7. **Himmel dramatisieren**: Kontrast/Sättigung/Abdunklung/Wärme
+  nur in der Himmelsmaske (`segment_photo_sky`, kein Modell-Download),
+  bewusst ohne Austausch.
+- [x] 8. **Bewegungsunschärfe**: gerichtet, radial und Zoom; optional
+  schützt die Motivmaske das Motiv („Mitzieher").
+- [x] 9. **Blendenstern**: Lichtschleppen auf Spitzlichtern, n Strahlen,
+  Winkel, Länge, Schwelle, optionaler Regenbogen-Anteil.
+- [x] 10. **Diffusionsfilter („Pro Mist")**: Weichzeichnung nur aus den
+  Lichtern, mit Schwarzwert-Erhalt — das unterscheidet ihn vom
+  Orton-Glanz.
+- [x] 11. **Kanalmatrix / Infrarot**: freie 3×3-Matrix plus vier
+  Ein-Klick-Vorgaben.
+- [x] 12. **Poster-/Comic-Look**: Quantisierung plus Konturzeichnung aus
+  dem Sobel-Betrag.
+- [x] 13. **Bokeh-Formen für die bestehende Virtuelle Blende**:
+  polygonale Blende, anamorphe Streckung, Wirbel,
+  Spitzlicht-Anhebung — als Erweiterung von `stages::virtual_aperture`
+  statt als dreizehntes Werkzeug (sonst doppelte Weichzeichnung). Ohne
+  gesetzte Werte bleibt der bisherige Kern unverändert, ein Test hält
+  das fest.
+- [x] 14. **Drei neue .cube-Vorlagen + eingebaute Filter**: „Nordic
+  Winter", „Tokyo Neon Night", „Sahara Gold", je mit Datei-gegen-Formel-Test.
+- [x] 15. **UI**: neue sechste Registerkarte „Licht & Optik"; beide
+  Kachel-Panels bekommen Suchfeld, „Nur aktive"-Schalter und je Kachel
+  einen Zurücksetzen-Knopf bei Hover/Fokus.
+- [x] 16. Verifikation: Rust-Unit-Tests je Werkzeug, neuer e2e-Test,
+  `cargo fmt`/`clippy`/`test --workspace`, `tsc -b`, `vitest run`, volle
+  Playwright-Suite mit real geprüftem Exit-Code, dann Push.
+
+
+## Phase 29 — Werkzeug-Sektionen preset-fähig (Nachtrag zu ADR-0057/0058)
+
+Der in beiden vorherigen ADRs offen gelassene Punkt: die zweiundzwanzig
+Werkzeuge aus Phase 27/28 waren keine Preset-Sektionen, weil sechs von
+ihnen fotospezifisch berechnete Karten tragen.
+Untersuchung/Entscheidungen: siehe `DECISIONS.md` ADR-0059.
+
+- [x] 1. Eine Liste `PHOTO_SPECIFIC_MAP_FIELDS` benennt die sechs
+  Stellen (Sektion → `werkzeug.feld`).
+- [x] 2. `stripPhotoSpecificMaps` schneidet sie beim Speichern heraus —
+  auf einer Kopie, damit die laufende Bearbeitung unangetastet bleibt.
+- [x] 3. `restorePhotoSpecificMaps` setzt beim Anwenden die Karten des
+  ZIELFOTOS ein, statt sie mit den `null`-Werten des Presets zu
+  überschreiben.
+- [x] 4. `creative` und `light_optics` in `PRESET_SECTION_KEYS` und
+  `PRESET_SECTION_LABELS` aufgenommen.
+- [x] 5. Beide Panels sagen in der Kachel, wenn ein Werkzeug aufgedreht
+  ist, ihm aber seine Voraussetzung fehlt („Ohne Tiefenkarte
+  wirkungslos"). Die Bewegungsunschärfe bewusst ausgenommen — sie
+  arbeitet auch ohne Maske.
+- [x] 6. Verifikation: sechs neue Vitest-Fälle, ein neuer e2e-Test über
+  zwei Fotos, volle Suite mit real geprüftem Exit-Code, dann Push.
+
+
+## Aktuelle Phase: Phase 30 — „Direkt am Bild": zehn Werkzeuge mit eigenen Bedienelementen
+
+Nutzerwunsch wörtlich: zehn Funktionen, „die wirklich visuell sichtbare
+Änderungen am Foto produzieren und neue UI-Elemente beinhalten",
+ausdrücklich aufwändig. Abgrenzung zu Phase 27/28: dort zweiundzwanzig
+Werkzeuge mit derselben Reglerkachel — hier sieben, die **im Bild**
+bedient werden, und drei mit Bedienelementen, die es bisher nicht gab.
+Untersuchung/Entscheidungen: siehe `DECISIONS.md` ADR-0060.
+
+**Architektur:** ein EDL-Feld `interactive: InteractiveAdjustments`, EIN
+Modul `stages/interactive.rs`, EIN `StageEnabled.interactive`, EIN
+`develop.rs`-Zweig — dieselbe in Phase 27/28 bewährte Bauform. Position:
+nach `light_optics`, vor `lut_filter`. Alle Bild-Bedienelemente laufen
+über EINE neue Viewer-Komponente `ImageToolOverlay` (Punkt, Linie,
+Ellipse), die die Umrechnung Bild ↔ Bildschirm genau einmal kennt.
+
+- [x] 1. **Lichtquellen**: beliebig viele Punktlichter, Pins im Bild
+  ziehbar, Liste zum Hinzufügen/Auswählen/Löschen.
+- [x] 2. **Lichtkegel**: frei aufziehbare, drehbare Ellipse mit weichem
+  Rand — innen aufhellen, außen abdunkeln.
+- [x] 3. **Abwedeln/Nachbelichten**: frei gesetzte Punkte mit Radius und
+  Vorzeichen.
+- [x] 4. **Split-Lighting**: zwei Bildpunkte mit je einer Lichtfarbe,
+  Einfärbung entlang der Achse dazwischen.
+- [x] 5. **Farbe ersetzen**: Quellfarbe per Bild-Pipette, Zielfarbe aus
+  dem Farbwähler, Toleranz und Weichheit im Gegenfarbenraum gemessen.
+- [x] 6. **Verlaufsband**: Luminanz auf einen Verlauf mit beliebig
+  vielen, frei verschiebbaren Stützstellen abbilden.
+- [x] 7. **Horizont-Verlaufsfilter**: Grauverlaufsfilter, dessen Kante
+  einer frei gezogenen Linie folgt.
+- [x] 8. **3×3-Kanalmatrix-Gitter**: macht die Phase-28-Matrix erstmals
+  erreichbar (bisher nur vier Ein-Klick-Vorgaben), mit Farbstreifen als
+  Vorschau.
+- [x] 9. **Blendenform-Vorschau**: Canvas, das den tatsächlichen
+  Bokeh-Kern zeichnet — die Phase-28-Regler waren ohne Rückmeldung
+  Blindflug.
+- [x] 10. **Zonen-Überlagerung**: die zehn Luminanzzonen als
+  Falschfarben über dem Foto, Zonenstreifen klickbar.
+- [x] 11. Verifikation: Rust-Unit-Tests je Werkzeug, Vitest für die
+  Overlay-Mathematik, neuer e2e-Test, `cargo fmt`/`clippy`/`test
+  --workspace`, `tsc -b`, `vitest run`, volle Playwright-Suite mit real
+  geprüftem Exit-Code, dann Push.
+
+
+## Aktuelle Phase: Phase 31 — „Dem Foto gehört der Platz" + neue Werkzeuge
+
+Nutzerwunsch: besseres Design, mehr Funktionen, zehn Schritte. Grundlage
+ist KEINE Vermutung, sondern ein realer Playwright-Screenshot des
+Entwickeln-Modus — Befunde und Entscheidungen in `DECISIONS.md`
+ADR-0064.
+
+- [x] 1. **Layout**: Die Analyse dockt als eigene Palette neben dem Foto
+  an, statt darüber zu schweben; der KI-Preset-Generator liegt hinter
+  einer Klappe; der Viewer bekommt eine Mindestbreite.
+- [x] 2. **Ein Regler, eine Zeile** (42 px → 22 px über alle ~40 Regler)
+  plus Mausrad-Bedienung, die es vorher gar nicht gab.
+- [x] 3. **Symbole** in Kopfzeile, Masken-Panel und Zoom-Steuerung;
+  Maskengruppe bekommt eine Überschrift statt eines „+" je Knopf, und
+  die Hinzufügen-Knöpfe ein eindeutiges `aria-label`.
+- [x] 4. **Fokus-Peaking** — Sobel statt Laplace (rauschfester), mit
+  Rückmeldung, wie viel gerade markiert ist. Keine Pipeline-Stufe: es
+  verändert das Foto nicht.
+- [x] 5. **Farbpalette aus dem Foto** — k-Means im Opponent-Raum mit
+  festen Startpunkten, ein Klick setzt den Weißabgleich.
+- [x] 6. **Vorher/Nachher-Kante ziehbar** — sie saß fest bei 50 % und
+  trug `pointer-events-none`.
+- [x] 7. **Auto-Horizont**: war schon da (Phase 13 Schritt 4) und nur
+  unauffindbar. Kein zweiter Erkenner, sondern ein Ein-Klick-Befehl
+  unter dem gebräuchlichen Namen.
+- [x] 8. **Vergleichsansicht sichten**: war schon da (Phase 9), konnte
+  aber nichts mit der Tastatur. Jetzt Pfeiltasten/P/X/0-5 und „aus dem
+  Vergleich nehmen" (kein Löschen).
+- [x] 9. **Korn folgt den Mitteltönen** — neues Feld, Neutralwert 0,
+  bit-genau als rückwärtskompatibel belegt; CPU und WGSL gleichgezogen.
+- [x] 10. Dokumentation (ADR-0064, FEATURES.md), volle Verifikation,
+  Abnahme.
+
+## Phase 32 — Zehn Funktionen, jede mit eigenem Gewicht
+
+Nutzerwunsch: zehn weitere Funktionen, jede mit echtem Umfang und
+wirklich neuen Bedienelementen. Drei Punkte der ersten Liste gab es
+bereits (Auto-Horizont, Vergleichsansicht, Kompositionsraster) — sie
+wurden ausgetauscht bzw. auf das ausgebaut, was tatsächlich fehlte.
+Entscheidungen in `DECISIONS.md` ADR-0065.
+
+- [x] F1. **Kompositionsraster** mit echter goldener Spirale, drehbar
+  und spiegelbar.
+- [x] F2. **Histogramm zum Ziehen** — fünf ungleich breite Zonen.
+- [x] F3. **Kalenderansicht** des Katalogs, nach lokalem Tag gruppiert.
+- [x] F4. **Stapel-Umbenennung** mit Muster-Editor, Vorschau aus
+  demselben Rust-Planer und zweiphasigem Umbenennen.
+- [x] F5. **Ausrüstung & Belichtung** — womit fotografiere ich eigentlich?
+- [x] F6. **Notizen am Foto** (Migration 0013), Pins im Bild.
+- [x] F7. **Serien- und Belichtungsreihen-Erkennung** über EV bei
+  ISO 100.
+- [x] F8. **Rahmen und Passepartout** — neue Pipeline-Stufe, neues
+  EDL-Feld, bit-genau rückwärtskompatibel.
+- [x] F9. **Sammlungs-Board** zum Sortieren per Ziehen.
+- [x] F10. **Export-Vorschau** mit Größenabschätzung und Spanne.

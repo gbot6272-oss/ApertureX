@@ -197,8 +197,22 @@ nachgeholt statt eines weiteren stillschweigenden Nachtrags.
 
 | Paket | Lizenz | Zweck | Hinweis |
 |---|---|---|---|
-| `gsap` (3.15) | Eigene "Standard No-Charge License" (seit April 2025, Webflow-Übernahme von GreenSock: 100 % kostenlos inkl. aller vormals kostenpflichtigen Plugins — ScrollTrigger, SplitText, Flip, MorphSVG usw. —, keine Attributionspflicht, kommerzielle Nutzung ausdrücklich erlaubt) | Animationen (Start-Ladeschirm, Beenden-Übergang, künftige Mikrointeraktionen) | Industriestandard; die 17 fertigen GSAP-Bewegungsrezepte des bereits integrierten `.claude/skills/ui-ux-pro-max`-Skills (siehe unten) sind ohne diese Laufzeitabhängigkeit ungenutzt geblieben |
+| `gsap` (3.15) | **GreenSock Standard "no charge" License** — `https://gsap.com/standard-license`, "Copyright (c) 2008-2026, GreenSock. All rights reserved." **KEINE Open-Source-Lizenz** (nicht OSI-anerkannt, siehe unten) | Animationen (Start-Ladeschirm, Beenden-Übergang, Dialoge/Sheets, Mikrointeraktionen) | **Einzige Komponente im Projekt, die nicht quelloffen ist — siehe ADR-0063.** Seit der Webflow-Übernahme (April 2025) vollständig kostenlos inkl. aller vormals kostenpflichtigen Plugins, ohne Attributionspflicht, kommerzielle Nutzung ausdrücklich erlaubt. Das ändert aber nichts daran, dass GSAP **nicht unter Apache-2.0 unterlizenziert werden kann**: ein Fork von Aperture X ist für diese eine Komponente an GreenSocks Bedingungen gebunden, nicht an die Apache-2.0-Erteilung, die alles andere abdeckt. GSAP landet im gebauten Anwendungsbündel, ist also Teil jeder Weitergabe. In `NOTICE` ausdrücklich benannt. Betroffen sind acht Dateien (`ui/Dialog`, `ui/Sheet`, `ui/Tabs`, `ui/SuccessSpark`, `OnboardingTour`, `ShutdownOverlay`, `GlobalBusyIndicator`, `StartupSplash`) — das ist zugleich der Umfang eines möglichen späteren Austauschs |
 | `uisfx` (0.4) | MIT (Code) + **CC0-1.0** (generierte Audiodateien, gemeinfrei, keine Attributionspflicht) | UI-Sounds (78 semantische Cues × 12 Klangwelten, App-Standard: "glass") | Null Laufzeit-Abhängigkeiten, ~12 kB komprimierte Web-Audio-Runtime, vollständig offline (kein Nachladen von Audiodateien zur Laufzeit) — Quelle: `github.com/romainsimon/uisfx` |
+
+## Frontend — Phase 23 (siehe `DECISIONS.md` ADR-0051)
+
+| Paket | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `lucide-react` (1.45) | ISC (permissiv, keine Attributionspflicht) | Icon-Bibliothek (bisher keine im Projekt — Knöpfe verwendeten rohe Unicode-Zeichen) | Erste Icon-Bibliothek dieses Projekts, baumschüttelbar (nur importierte Symbole landen im Bundle); zunächst in `MasksPanel.tsx` eingesetzt, `title`/`aria-label` der betroffenen Knöpfe unverändert |
+
+**Bewusst NICHT hinzugefügt** (siehe ADR-0051 für die volle Begründung): `framer-motion` — wäre eine zweite, mit `gsap` überlappende Animationslaufzeit für denselben Zweck; `@tsparticles/*` (Kern + React-Bindung + „slim"-Preset) — vollständiger Partikel-Physik-Motor, mehrere hundert KB für einen einzelnen Funkel-Effekt, den ein sechs Punkte umfassendes, selbst gebautes GSAP-`SuccessSpark` (`ui/SuccessSpark.tsx`) ohne neue Abhängigkeit abdeckt.
+
+## Frontend — Phase 25 (siehe `DECISIONS.md`, aktuelles ADR)
+
+| Paket | Lizenz | Zweck | Hinweis |
+|---|---|---|---|
+| `@fontsource/inter` (5.3) | OFL-1.1 (SIL Open Font License, permissiv, keine Attributionspflicht, kommerzielle Nutzung ausdrücklich erlaubt) | Eigene Schrift statt `system-ui` (Premium-UI-Plan Schritt 1) | Selbst gehostete `.woff2`-Dateien im Bundle statt eines `fonts.googleapis.com`-Laufzeit-Downloads — die App muss auch offline funktionieren (Desktop-Anwendung). Nur `latin`/`latin-ext`-Unicode-Bereiche × vier Schnitte (400/500/600/700) eingebunden, nicht der volle Sieben-Bereiche-Satz (kyrillisch/griechisch/vietnamesisch ungenutzt, `lib/i18n.ts` kennt nur `de`/`en`) — reduziert das gebündelte Schriftmaterial von ~500 KB auf ~100 KB. |
 
 ## Testdaten (`testdata/`)
 
@@ -219,3 +233,38 @@ Reine Claude-Code-Skills/-Nachschlagewerke für die Entwicklung dieses Projekts 
 ---
 
 *Einträge für Phase 2 und später kommen hinzu, sobald die jeweilige Phase startet.*
+
+
+---
+
+## Maschinelle Lizenzprüfung (Phase 10 Nachtrag, siehe `DECISIONS.md` ADR-0063)
+
+Diese Datei wird von Hand gepflegt und kann deshalb unvollständig sein —
+und war es auch: `gsap`s Eintrag beschrieb die Lizenz als „kostenlos",
+ohne zu sagen, dass sie keine Open-Source-Lizenz ist. Genau solche
+Lücken fallen erst auf, wenn jemand tatsächlich weitergibt.
+
+Seit ADR-0063 gibt es deshalb zusätzlich eine **maschinell erzeugte**
+Momentaufnahme aller Abhängigkeiten mit ihren Lizenzen:
+
+- `licenses/rust.tsv` — 952 Einträge, aus den `Cargo.toml`-Manifesten
+  der entpackten Registry gelesen (inkl. der nur für Windows/macOS/WASI
+  aufgelösten, die dafür eigens nachgeladen wurden).
+- `licenses/npm.tsv` — 170 Einträge, aus den `package.json` im
+  pnpm-Speicher gelesen.
+
+Erzeugt von `tools/license-audit.py`. Zwei Tests in
+`crates/apx-app/tests/bundle_config.rs` halten das ehrlich:
+
+1. `the_license_snapshot_covers_every_locked_crate` — jede Zeile aus
+   `Cargo.lock` muss in der Momentaufnahme stehen. Eine neue oder
+   aktualisierte Abhängigkeit macht den Test rot, bis jemand das Skript
+   laufen lässt; dabei landet ihre Lizenz sichtbar im Diff.
+2. `every_dependency_license_is_recorded_and_acceptable` — jede erfasste
+   Lizenz muss entweder unbedenklich sein oder als benannte Ausnahme
+   geführt werden. `A OR B` genügt, wenn ein Zweig unbedenklich ist;
+   `A AND B` verlangt beide.
+
+**Ergebnis des ersten Laufs:** außer den vier LGPL-Crates und `gsap`
+nichts mit Auflagen über die Namensnennung hinaus. Kein GPL (ohne „L")
+irgendwo im Baum, weder als Pflicht noch als Wahlmöglichkeit.

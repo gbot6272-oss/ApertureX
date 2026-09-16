@@ -430,6 +430,43 @@ pub(crate) fn set_missing(conn: &Connection, id: PhotoId, missing: bool) -> Resu
     Ok(())
 }
 
+/// Schreibt den Dateinamen eines Fotos um (Phase 32 F4, Stapel-
+/// Umbenennung — siehe `apx-app`s `batch_rename`).
+///
+/// Nur der Katalogeintrag; die Datei selbst benennt der Aufrufer um. Die
+/// Reihenfolge ist Absicht und gehört zum Aufrufer: erst die Datei, dann
+/// die Zeile. Bricht der Vorgang dazwischen ab, zeigt der Katalog auf
+/// einen nicht mehr existierenden Namen — das meldet der bestehende
+/// `missing`-Abgleich (`reconcile.rs`) als fehlende Datei. Andersherum
+/// wäre der Schaden größer: die Datei läge unter neuem Namen da, der
+/// Katalog zeigte weiter auf den alten, und der Abgleich würde sie als
+/// neues, zweites Foto importieren.
+///
+/// `UNIQUE(folder_id, filename)` aus dem Schema fängt einen Zielnamen ab,
+/// den es im selben Ordner schon gibt — der Fehler kommt dann als
+/// SQLite-Constraint-Verletzung zurück, nicht als stille Überschreibung.
+pub(crate) fn set_filename(conn: &Connection, id: PhotoId, filename: &str) -> Result<()> {
+    let trimmed = filename.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::validation("Dateiname darf nicht leer sein"));
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err(AppError::validation(format!(
+            "Dateiname darf keinen Pfad enthalten, war {trimmed}"
+        )));
+    }
+    let changed = conn
+        .execute(
+            "UPDATE photos SET filename = ?2 WHERE id = ?1",
+            params![id.to_string(), trimmed],
+        )
+        .map_err(map_sqlite_err)?;
+    if changed == 0 {
+        return Err(AppError::not_found("Foto", id.to_string()));
+    }
+    Ok(())
+}
+
 pub(crate) fn set_rating(conn: &Connection, id: PhotoId, rating: u8) -> Result<()> {
     if rating > 5 {
         return Err(AppError::validation(format!(
@@ -756,6 +793,54 @@ mod tests {
         assert!(get(&conn, id).expect("ok").missing);
 
         assert!(set_missing(&conn, PhotoId::new(), true).is_err());
+    }
+
+    #[test]
+    fn set_filename_renames_and_rejects_empty_or_path_like_names() {
+        let (conn, folder_id) = setup();
+        let mtime = OffsetDateTime::now_utc()
+            .replace_nanosecond(0)
+            .expect("gültig");
+        let (id, _) = upsert(
+            &conn,
+            &sample_photo(folder_id, 1000, mtime),
+            OffsetDateTime::now_utc(),
+        )
+        .expect("ok");
+
+        set_filename(&conn, id, "20240504_0001.CR2").expect("umbenennen");
+        assert_eq!(get(&conn, id).expect("ok").filename, "20240504_0001.CR2");
+
+        assert!(set_filename(&conn, id, "   ").is_err());
+        // Ein Name mit Pfadanteil würde das Foto aus seinem Ordner
+        // heraus zeigen lassen, obwohl `folder_id` unverändert bliebe.
+        assert!(set_filename(&conn, id, "unterordner/bild.CR2").is_err());
+        assert_eq!(get(&conn, id).expect("ok").filename, "20240504_0001.CR2");
+    }
+
+    #[test]
+    fn set_filename_refuses_a_name_another_photo_in_the_same_folder_already_has() {
+        // Verlässt sich auf UNIQUE(folder_id, filename) aus dem Schema —
+        // dieser Test hält fest, dass die Stapel-Umbenennung sich darauf
+        // verlassen DARF, statt still ein Duplikat anzulegen.
+        let (conn, folder_id) = setup();
+        let mtime = OffsetDateTime::now_utc()
+            .replace_nanosecond(0)
+            .expect("gültig");
+        let (first, _) = upsert(
+            &conn,
+            &sample_photo(folder_id, 1000, mtime),
+            OffsetDateTime::now_utc(),
+        )
+        .expect("ok");
+        let mut second = sample_photo(folder_id, 2000, mtime);
+        second.filename = "IMG_0002.CR2".to_string();
+        second.content_hash = Some("def456".to_string());
+        let (second_id, _) = upsert(&conn, &second, OffsetDateTime::now_utc()).expect("ok");
+
+        assert!(set_filename(&conn, second_id, "IMG_0001.CR2").is_err());
+        assert_eq!(get(&conn, first).expect("ok").filename, "IMG_0001.CR2");
+        assert_eq!(get(&conn, second_id).expect("ok").filename, "IMG_0002.CR2");
     }
 
     #[test]

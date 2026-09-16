@@ -44,6 +44,15 @@ export const KEYBINDING_ACTIONS: KeyBindingAction[] = [
   { id: "flag-reject", label: "Ablehnen markieren", defaultKey: "x" },
   { id: "zoom-fit", label: "Zoom einpassen (im Viewer)", defaultKey: "0" },
   { id: "zoom-100", label: "Zoom 100 % (im Viewer)", defaultKey: "1" },
+  // Phase 26 (siehe `DECISIONS.md` ADR-0056). Lightroom belegt diese
+  // beiden Modi mit Tab bzw. L. `l` wird hier übernommen, `tab`
+  // bewusst NICHT: Tab ist die Tastatur-Navigationstaste schlechthin —
+  // sie global abzufangen würde die Bedienung ohne Maus app-weit
+  // brechen (dieselbe Barrierefreiheits-Linie wie `reduced_motion`/
+  // Kontrastmodus/Fokus-Fallen an anderer Stelle). Stattdessen `t`;
+  // wer Tab trotzdem will, kann es hier selbst umbelegen.
+  { id: "focus-mode", label: "Fokus-Modus (alle Paletten aus-/einblenden)", defaultKey: "t" },
+  { id: "lights-out", label: "Lichter aus (aus → gedimmt → schwarz)", defaultKey: "l" },
 ];
 
 /** Rein informativ im Cheatsheet mit aufgeführt, hier fest (siehe

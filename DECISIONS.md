@@ -39,6 +39,8 @@ Ich habe die Lizenzlage der realistischen Alternativen geprüft:
 3. Vollständiger Lizenztext und Quellverweis in `THIRD_PARTY.md`.
 **Konsequenzen:** Falls das Gesamtprodukt closed-source vertrieben werden soll, ist Punkt 2 nicht optional, sondern Voraussetzung für Rechtssicherheit. Falls Aperture X ohnehin quelloffen wird, entfällt die Dringlichkeit weitgehend. **Diese Weichenstellung (closed-source vs. quelloffen) betrifft den Gesamtumfang des Projekts und wird hier nicht einseitig entschieden.**
 
+**Nachtrag (ADR-0063): Punkt 2 ist erledigt.** Die Weichenstellung ist gefallen — Aperture X steht unter Apache-2.0 und wird quelloffen weitergegeben. Damit ist die von LGPL-2.1 §6 verlangte Austauschbarkeit schon durch die Quelltextweitergabe gegeben; `apx-raw` muss **nicht** als dynamisch nachladbare Bibliothek gebaut werden. Käme je eine geschlossene Weitergabe auf, wäre Punkt 2 wieder offen. Die dortige Lizenztabelle ist außerdem unvollständig: `lensfun` (LGPL-3.0-or-later, seit Phase 12) kam später dazu und ist strenger als alles hier Aufgeführte.
+
 ---
 
 ## ADR-0003: Bildübertragung Backend→Frontend über Custom-Protokoll-Handler
@@ -5438,3 +5440,1816 @@ Verifiziert: `cargo fmt --check`/`clippy -p apx-pipeline -p apx-core
 --all-targets` sauber, `cargo test -p apx-pipeline` (251/251, inkl.
 dreier weiterhin grüner `builtin_luts`-Tests mit den fünf neuen
 Einträgen), `tsc -b` sauber, `vitest run` (251/251).
+
+## ADR-0051: Phase 23 — echte Bewegung, Runde 2: drei externe
+Komponenten-Prompts analysiert statt blind kopiert
+
+Nutzerwunsch (verbatim): "merge it in main dann mach es besser ist
+noch zu schlecht echte animationen schau dir prompts.md an (Echte
+Prompts-verwende diese". Es folgten drei vollständige
+"shadcn/Next.js-Komponente integrieren"-Aufträge (`DotLoader`,
+`Toolbar`, `SparklesCore`) mit fertigem Code, gedacht für ein anderes
+Ziel-Ökosystem (Next.js + shadcn CLI + `framer-motion`/
+`@tsparticles/*`). Dieses ADR hält fest, warum sie nicht wörtlich
+kopiert wurden, sondern als Referenz für die gewünschte
+Bewegungsqualität dienten.
+
+**Ist-Zustand-Befund (real geprüft, nicht angenommen):**
+
+- Dieses Projekt ist **kein** shadcn-Projekt: keine `components.json`,
+  kein `@/`-Pfad-Alias in `tsconfig.json`/`vite.config.ts`, keine
+  `cn()`-Hilfsfunktion, kein `clsx`/`tailwind-merge` in
+  `package.json`. `frontend/src/components/ui/` existiert zwar bereits
+  (seit Phase 18/21: `Dialog.tsx`, `Sheet.tsx`, `Menu.tsx`, `Tabs.tsx`)
+  — aber als eigene, GSAP-basierte Konvention, nicht als
+  shadcn-CLI-Ausgabe.
+- **Keine Icon-Bibliothek im gesamten Projekt** — Knöpfe verwenden
+  rohe Unicode-Zeichen (`✎`/`↶`/`↷`/`👁`/`🚫`/`⧉`/`×`, siehe
+  `GridView.tsx`/`MasksPanel.tsx`) statt echter Symbole. Das ist ein
+  echter, eigenständiger Beitrag zum "wirkt billig"-Eindruck,
+  unabhängig von Bewegung.
+- `gsap` (seit Phase 19, ADR-0047) ist die bewusst gewählte, einzige
+  Bewegungslaufzeit dieses Projekts — `framer-motion` zusätzlich
+  einzuführen wäre eine zweite, überlappende Animationsbibliothek für
+  denselben Zweck, kein Neuzugang, der eine Lücke schließt.
+- `@tsparticles/*` (Kern + React-Bindung + „slim"-Preset) ist ein
+  vollständiger Partikel-Physik-Motor (mehrere hundert KB) — der
+  Playwright-Build dieser Sitzung markiert das Haupt-Bundle bereits
+  jetzt als über der 500-kB-Warnschwelle (`vite build`-Ausgabe beim
+  letzten vollen Testlauf). Ein Partikel-Hintergrund für eine
+  professionelle Desktop-Bildbearbeitung ist zudem stilistisch nicht
+  das, was "premium" für dieses Produkt bedeutet (kein Marketing-Hero,
+  kein Spiel).
+- **Konkreter, verifizierter Befund zur eigentlichen Beschwerde**
+  ("echte Animationen"): keine der ~35 `*Loading`/`*Running`/
+  `*Downloading`-Zustände im Store (`grep` bestätigt) hat irgendeine
+  visuelle Ladeanimation — jede KI-/Verarbeitungsstelle tauscht
+  lediglich einen Text gegen einen anderen aus (z. B.
+  `DevelopPanel.tsx`: `"Anwenden"` → `"Berechnet…"`, `"Sensorflecken
+  suchen"` → `"Suche…"`), ganz ohne Bewegung. Das ist der eigentliche,
+  systemische Kern der "immer noch zu schlecht"-Rückmeldung, nicht ein
+  Mangel an Spring-Physik in Dialogen (die seit Phase 20 Nachtrag
+  bereits echte GSAP-Tweens haben).
+
+**Entscheidungen:**
+
+1. **`DotLoader`-Komponente nahezu wörtlich portiert** — sie ist
+   dependency-frei (reines React + CSS, referenziert nur `cn()`), passt
+   ohne jede neue Laufzeitabhängigkeit. Neu:
+   `frontend/src/lib/utils.ts` (`cn()`, eine minimale
+   `clsx`-Alternative ohne neue Abhängigkeit) +
+   `frontend/src/components/ui/DotLoader.tsx`.
+2. **Ein einziger, zentraler `GlobalBusyIndicator`** statt 35
+   Einzelstellen manuell nachzuziehen — eine neue abgeleitete Auswahl
+   (`selectAnyBackgroundTaskRunning` in `store/index.ts`) fasst alle
+   Lade-/Verarbeitungs-Flags zu einem Boolean zusammen; eine neue,
+   dezente, unten rechts angedockte Anzeige (`DotLoader` + Label)
+   erscheint automatisch, sobald irgendeine dieser Operationen läuft —
+   höherer Hebel als 15+ Einzeltexte anzufassen (und risikofrei
+   gegenüber den bestehenden Playwright-Selektoren, die exakt auf
+   diese Texte/`title`/`aria-label`-Werte zielen — siehe
+   `masks-flow.spec.ts`s `getByTitle("Umbenennen")`).
+3. **`lucide-react` statt roher Unicode-Zeichen** — echte, minimale
+   Bereicherung (klein, baumschüttelbar), behebt den oben verifizierten
+   Icon-Befund. Eingesetzt zunächst in `MasksPanel.tsx`s Masken-Zeile
+   (Sichtbarkeit/Umbenennen/Duplizieren/Löschen) — `title`/`aria-label`
+   bleiben dabei exakt unverändert (nur das sichtbare Symbol im
+   Inneren wechselt), damit `masks-flow.spec.ts` unverändert grün
+   bleibt.
+4. **Federnder Erfolgs-Funke statt Partikel-Engine** — ein kleiner,
+   selbst gebauter GSAP-Funken-Ausbruch (wenige `<span>`-Punkte,
+   Ease-out-Bahnen) erscheint beim Abschluss eines Exports
+   (`ExportDialog.tsx`s bestehende `filesWritten`-Erfolgsmeldung) —
+   liefert denselben "beschwingten Abschluss-Moment" wie
+   `SparklesCore`, ohne eine 130+-kB-Partikel-Bibliothek für ein
+   einziges Sechs-Punkte-Funkeln zu laden.
+
+**Bewusst außerhalb dieses Umfangs belassen:** nicht alle 35+
+Lade-Stellen einzeln auf `DotLoader` umgestellt (der zentrale
+Indikator deckt den Bedarf ab, ohne jede Stelle einzeln anzufassen und
+damit 35 potenzielle Playwright-Regressionsflächen zu öffnen); die
+lokalen `integrityRunning`/`optimizeRunning`/`backupRunning`-Zustände
+in `CatalogDialog.tsx` (Komponenten-lokaler `useState`, nicht global
+im Store sichtbar, daher nicht Teil von
+`selectAnyBackgroundTaskRunning`); Toolbar-Tooltip-Neubau mit
+eigenem Overlay (die bestehenden `title`-Attribute liefern bereits
+Browser-native Tooltips und werden von Tests direkt angesprochen —
+ein Ersatz wäre ein eigenständiger, riskanter Umbau ohne klaren
+Mehrwert gegenüber Schritt 2's zentralem Indikator).
+
+Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
+Playwright-Suite (142/142 — insbesondere `masks-flow.spec.ts`,
+Symbol-Austausch, und `export-flow.spec.ts`, `SuccessSpark`, beide
+vollständig grün, da `title`/`aria-label` unverändert blieben).
+
+## ADR-0051-Nachtrag: "noch nicht gut genug" — mehr Hover, Animation
+bei KI-Bearbeitung, sieben weitere gezielte Ergänzungen
+
+Nutzerwunsch (verbatim): "noch nicht gut genug - mach mehr
+Animationen, hover, animation bei ki bearbeitung und 5 weitere".
+
+**Real geprüfter Ist-Zustand vor dieser Ergänzung:**
+
+- `GridView.tsx`/`Filmstrip.tsx`: Foto-Kacheln hatten `grep`-bestätigt
+  **keine** `hover:scale`/`hover:shadow`/`hover:-translate`-Regel,
+  nur einen Rahmenfarbwechsel — die mit Abstand meistgenutzten
+  Flächen der App reagierten optisch kaum auf Hover.
+  `PresetsPanel.tsx`s Preset-Zeilen und `Sidebar.tsx`s Ordner-/
+  Sammlungszeilen: Hintergrundfarbwechsel ohne `transition`, also ein
+  harter Sprung statt einer Bewegung.
+- `ui/Tabs.tsx` (`DevelopPanel`/`MasksPanel`-Registerkarten):
+  reiner Textfarbwechsel beim Tab-Wechsel, kein gleitender
+  Auswahl-Hintergrund.
+- **KI-Bearbeitung:** jede der ~8 am häufigsten ausgelösten
+  KI-/Verarbeitungsstellen in `DevelopPanel.tsx`/
+  `CanvasExtendDialog.tsx`/`ContentAwareScaleDialog.tsx` tauschte
+  ausschließlich Text ("Anwenden"→"Berechnet…", "Sensorflecken
+  suchen"→"Suche…" usw.) — der in Phase 23 bereits gebaute
+  `GlobalBusyIndicator` sitzt unten rechts in der Ecke, spürbar
+  entkoppelt vom eigentlichen Auslöser-Knopf/Bild.
+
+**Entscheidungen:**
+
+1. **Echte Hover-Bewegung** auf den Foto-Kacheln:
+   `GridView.tsx` (`hover:scale-[1.04] hover:shadow-lg hover:z-10`)
+   und `Filmstrip.tsx` (`hover:scale-[1.05]`, Skalierung so gewählt,
+   dass sie innerhalb des vorhandenen 4-px-Rands bleibt, `overflow-
+   y-hidden` schneidet nichts ab); `PresetsPanel.tsx`-Zeilen und
+   `Sidebar.tsx`-Zeilen bekommen `transition-colors`/`-shadow` statt
+   eines harten Sprungs.
+2. **Gleitender Auswahl-Hintergrund in `ui/Tabs.tsx`** — ein per GSAP
+   auf Basis der echten `getBoundingClientRect()` des aktiven
+   Tab-Knopfs positioniertes Hintergrund-Rechteck (funktioniert auch
+   bei `flex-wrap`, da Position *und* Größe gemessen statt fest
+   verdrahtet werden) statt des reinen Textfarbwechsels. **Bewusst
+   nicht** auf `Header.tsx`s Ansicht-Umschalter übertragen: dort sind
+   `centerView`, `metadataPanelOpen` und `developPanelOpen`
+   unabhängige Zustände, mehrere Knöpfe können gleichzeitig aktiv
+   sein — ein einzelnes gleitendes Rechteck würde bei zwei aktiven
+   Knöpfen sichtbar falsch aussehen.
+3. **`InlineSpinner`** (`ui/DotLoader.tsx`, neu exportiert neben dem
+   bereits vorhandenen `RING_SPINNER_FRAMES`, das `GlobalBusyIndicator`
+   jetzt mitbenutzt statt einer eigenen Kopie) — ein winziger
+   Punkt-Spinner direkt im Knopftext während KI-Bearbeitung,
+   eingesetzt an den acht sichtbarsten Auslösestellen (KI-Ausfüllen
+   anwenden, Sensorflecken suchen, Content-Aware Move, Entrauschen,
+   2×hochskalieren, DNG-Konvertierung, Bildranderweiterung, Content-
+   Aware Scale). Rendert nur `<div>`-Elemente ohne Text, verändert
+   daher den textbasiert berechneten zugänglichen Namen der Knöpfe
+   nicht — risikofrei gegenüber den bestehenden `getByRole`-Selektoren.
+4. **Schimmer-Überzug direkt auf dem bearbeiteten Foto** —
+   `Viewer.tsx` blendet bei `selectCurrentPhotoAiProcessing` (neue,
+   auf die aktuell angezeigte Fotobearbeitung eingeschränkte
+   Teilmenge von `selectAnyBackgroundTaskRunning`) eine wandernde
+   Glanzfläche (`apx-ai-shimmer`, reines CSS `@keyframes`) über dem
+   Bild ein — die unübersehbarste mögliche Antwort auf "Animation bei
+   KI-Bearbeitung", ergänzt (nicht ersetzt) den kleinen Eck-Indikator.
+
+Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
+Playwright-Suite (142/142 — insbesondere `masks-flow.spec.ts`
+[gleitender Tab-Hintergrund], `enhance-flow.spec.ts`/
+`ai-flow.spec.ts` [`InlineSpinner`-Knöpfe], `presets-flow.spec.ts`
+["Hover über einen Preset..."], `viewer-flow.spec.ts`/
+`Filmstreifen-Virtualisierung` — alle vollständig grün, da keine
+`title`/`aria-label`/Text-Selektoren verändert wurden).
+
+## ADR-0052: Phase 24 — Mehr Transparenz, echte Karten-Bugfixes, zehn
+weitere neue Animationen, mehr Übersicht
+
+Nutzerwunsch (verbatim): "noch nicht gut genug-ui muss transparenter
+werden, kartenbugs (z.b. fehlerhafte anzeige, keine gute heatmap)
+alles fixen, mehr animationen, mindestens 10 neue, mehr übersicht
+einfacher zu bedienen".
+
+**Karten-Untersuchung (real geprüft, nicht angenommen):**
+
+- **Bestätigter Bug — Heatmap-Farbskala liefert keine Abstufung.**
+  `MapView.tsx`s `readHeatColors()` und `GlobeView.tsx`s Aufruf von
+  `heatScaleColor(...)` übergaben für `cool` **und** `mid` denselben
+  Wert (`--color-accent`) — `heatScaleColor` interpoliert Kühl→Mittel
+  in der unteren Intensitätshälfte, Mittel→Warm in der oberen (siehe
+  `lib/photoHeatmap.ts`). Mit `cool === mid` zeigt die gesamte untere
+  Hälfte (die meisten Rasterzellen — wenige Fotos je Ort sind der
+  Regelfall) **keinerlei** Farbunterschied, nur einen flachen
+  Akzentton; erst die wenigen dichtesten Orte wandern Richtung
+  `--color-danger`. Erklärt sowohl "keine gute Heatmap" als auch
+  "fehlerhafte Anzeige" plausibel (eine Heatmap ohne Abstufung wirkt
+  wie eine kaputte/nicht reagierende Anzeige). Betrifft **beide**
+  Heatmap-Implementierungen (Globus + flache Karte), da beide dieselbe
+  `heatScaleColor`-Funktion mit demselben Farbfehler aufrufen.
+- **Tiefer untersucht und bewusst NICHT geändert:** ein Verdacht, dass
+  `leafletHeatmap.ts`s `redraw()` mit `map.latLngToContainerPoint(...)`
+  statt `map.latLngToLayerPoint(...)` zeichnet und dadurch nach einem
+  Kartenschwenk versetzt wäre — anhand von Leaflets eigenem Quellcode
+  (`node_modules/leaflet/dist/leaflet-src.js`) nachgerechnet:
+  `latLngToContainerPoint(P) = latLngToLayerPoint(P) + _getMapPanePos()`,
+  und `_getMapPanePos()` wird von Leaflets eigenem `_resetView()`
+  (welches bei jedem `moveend`/`zoomend` — genau die Ereignisse, an die
+  `reset()` gebunden ist — vor der Neupositionierung aufgerufen wird)
+  auf `(0, 0)` zurückgesetzt. Zum Zeitpunkt, an dem `redraw()` läuft,
+  sind beide Ausdrücke daher rechnerisch identisch — kein tatsächlicher
+  Versatz-Bug, nur eine unnötig verwirrende Wahl der API (`containerPoint`
+  statt `layerPoint`, wie Leaflets eigene Layer es intern tun). Nicht
+  angefasst, um nicht ohne echten Befund ein funktionierendes
+  Koordinatensystem zu "reparieren".
+
+**Entscheidungen:**
+
+1. **Heatmap-Farbskala repariert** — `mid` liest jetzt `--color-success`
+   (Grün) statt `--color-accent`, ein echter Blau→Grün→Rot-Dreiklang
+   statt zwei identischer Werte. `GlobeView.tsx`s `readThemeColors()`
+   bekommt dafür ein neues `success`-Feld.
+2. **UI transparenter** (`index.css`): `--glass-bg`/`--glass-bg-strong`
+   von 62 %/78 % (dunkel) bzw. 62 %/80 % (hell) auf 44 %/60 % bzw.
+   44 %/62 % gesenkt, `--glass-blur` von 20px auf 26px angehoben (mehr
+   Weichzeichnung kompensiert die geringere Deckkraft, damit Text trotz
+   mehr Durchsicht lesbar bleibt). Kontrastmodus (voll deckend) bleibt
+   unverändert — Barrierefreiheit hat dort weiterhin Vorrang.
+3. **Zehn neue, echte Animationen** (nicht nur Politur bestehender
+   Hover-Zustände, siehe ADR-0051/-Nachtrag für die vorherige Runde):
+   - Bewertungssterne: kurzer "Pop"-Ausschlag beim tatsächlichen
+     Wertwechsel (`RatingFlagColor.tsx`, `apx-star-pop`)
+   - Heatmap-"Atmen" auf der flachen Karte (CSS-`filter`-Puls auf dem
+     dedizierten `apx-photo-heat-layer`-Canvas) **und** auf dem Globus
+     (echter, im rAF-Zeichen-Code berechneter `heatPulse`-Faktor, da
+     dort Kugel/Glüh-Rand/Blobs ein gemeinsames Canvas teilen)
+   - Karten-Infobox: Eintritts-Animation beim Wechsel zur flachen Karte
+   - GPS-Platzierungshinweis: pulsierender Text, solange auf einen
+     Kartenklick gewartet wird
+   - Globus ↔ Karte: sanfter Überblend-Wechsel statt hartem
+     Komponentenaustausch
+   - Befehlspalette: Ergebniszeilen fliegen gestaffelt herein (gedeckelt
+     auf die ersten 12 Zeilen)
+   - Export-Fortschrittsbalken: neuer, echter Balken (vorher nur reiner
+     Text) mit animierter Breite bei jedem Fortschritts-Tick
+   - Einstellungen-Dialog: Reiterinhalt blendet beim Wechsel sanft ein
+   - Kopfzeile: Import-Abschluss-Hinweis blendet ein statt abrupt
+     aufzutauchen
+   - Filmstreifen: scrollt jetzt tatsächlich sanft zur ausgewählten
+     Kachel (`@tanstack/react-virtual`s `scrollToIndex(..., {behavior:
+     "smooth"})`) — vorher scrollte der Streifen bei Auswahl einer
+     außerhalb sichtbaren Kachel überhaupt nicht mit
+   Alle zehn respektieren `prefers-reduced-motion` über den
+   bestehenden globalen Mechanismus bzw. (Bewertungssterne, Globus-Puls,
+   Filmstreifen) über `usePrefersReducedMotion()`/eine explizite
+   Prüfung.
+4. **Mehr Übersicht, einfacher zu bedienen** — der neue Export-
+   Fortschrittsbalken (Punkt 3) macht den Bearbeitungsstand auf einen
+   Blick erfassbar statt nur als Zahlentext; die reparierte Heatmap-
+   Farbskala macht die Kartenübersicht überhaupt erst wieder informativ
+   (Punkt 1); die erhöhte Transparenz (Punkt 2) lässt die App-Chrome
+   weniger blickdicht/schwer wirken.
+
+Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
+Playwright-Suite (142/142 — insbesondere `map-flow.spec.ts`
+[Heatmap-Farbfix], `settings-flow.spec.ts` [Reiterwechsel-Neumontage],
+`presets-flow.spec.ts`/`library-flow.spec.ts`, `viewer-flow.spec.ts`/
+`Filmstreifen-Virtualisierung` [Sanftscroll] — alle vollständig grün,
+da keine `title`/`aria-label`/Text-Selektoren verändert wurden).
+
+## ADR-0053: Phase 25 Schritt 1 — Bugfix: Filter/`.cube`-LUTs verändern
+das Bild nicht wirklich (+ Performance-Ursache)
+
+Nutzerwunsch (verbatim, Ausschnitt): "fixe außerdem den bug, dass alles
+so lang dauert und dass filter/eigene .cube dateien und sogar die von
+dir gegebenen presets das bild nicht wirklich verändern".
+
+**Untersuchung (real geprüft, nicht angenommen):** Die Bildlogik selbst
+war korrekt — `stages::lut_filter::apply`s trilineare Interpolation,
+`sample_lut`s Tabellen-Indizierung (`r` am schnellsten variierend) und
+die Rasterreihenfolge in `builtin_luts::generate`/`lut_cube::
+parse_cube_bytes` stimmen exakt überein (per Test bestätigt), die
+`StageEnabled`-Gate ist standardmäßig aktiv, `strength` wird beim
+Anwenden korrekt auf `1.0` gesetzt, falls zuvor `0`. Der tatsächliche
+Fehler lag eine Ebene höher, in der **Übertragung**:
+`frontend/src/lib/edl.ts`s `buildEdlEnvelopeJson(payload)` serialisiert
+das komplette EDL — inklusive der vollen `LutFilterData::table` — direkt
+in den URL-Pfad der `develop/...`-Live-Vorschau-Route
+(`crates/apx-app/src/protocol/mod.rs`), und zwar bei **jedem einzelnen**
+Regler-Tick (`useDevelopRender`s `requestAnimationFrame`-Entprellung
+löst pro Frame höchstens eine Anfrage aus, aber jede davon trägt die
+komplette `table` erneut mit, unabhängig davon, welches Feld sich
+gerade änderte). Nachgemessen (echtes `JSON.stringify` +
+`encodeURIComponent` eines realistischen Rasters): ein eingebauter
+17er-Look allein ergibt bereits **~314 KB** JSON-Nutzlast, ein
+importiertes 33er-`.cube` **über eine Megabyte** — pro Vorschau-
+Anfrage, nicht einmalig. Zwei Konsequenzen ergeben sich direkt daraus,
+beide vom Nutzer berichtet:
+
+1. **"alles dauert so lange"**: jede Vorschau-Anfrage bei aktivem
+   Filter musste dieses Vielfache an JSON serialisieren/parsen, als
+   String-Cache-Schlüssel in `apx-app`s `ImageCache` hashen/vergleichen
+   und über den Custom-Protokoll-IPC-Weg transportieren — spürbar
+   langsamer als ohne Filter, bei jedem Regler-Tick erneut.
+2. **"Filter verändern das Bild nicht wirklich"**: bei genügend großer
+   Tabelle (insbesondere importierte `.cube`-Dateien mit größerem
+   Raster) wird die Anfrage groß genug, um beim Parsen/Transport zu
+   scheitern. `hooks/useDevelopRender.ts`s Fehlerpfad reagiert auf
+   einen fehlgeschlagenen `fetch()` nur mit `console.error(...)` — der
+   zuletzt erfolgreich gerenderte (unveränderte) Rahmen bleibt
+   sichtbar. Für den Nutzer sieht das exakt aus wie "der Filter tut
+   nichts", ohne jede sichtbare Fehlermeldung.
+
+**Entscheidung — Inhalts-adressierter Server-Cache statt Neuübertragung
+bei jedem Tick:**
+
+1. `apx_pipeline::edl::LutFilterData` bekommt ein neues Feld `id: String`
+   (`#[serde(default)]`, leer bei alten `edit_history`-Einträgen) — ein
+   FNV-1a-Inhalts-Hash über `size`+`table`
+   (`stages::lut_filter::compute_lut_id`, neu). Sowohl
+   `builtin_luts::generate` als auch die `.cube`-Import-DTO-Konvertierung
+   (`apx-app`s `commands.rs`) berechnen ihn.
+2. Neuer `apx_pipeline::lut_table_cache::LutTableCache` (Muster wie
+   `tile_cache::TileCache`, aber unbegrenzt statt LRU-begrenzt — die
+   Anzahl unterschiedlicher LUTs pro Sitzung bleibt immer klein): hält
+   vollständige Tabellen unter ihrer `id`. `resolve(&mut LutFilterData)`
+   füllt eine leer ankommende `table` aus dem Cache auf, oder frischt
+   den Cache selbstheilend auf, wenn eine volle `table` ankommt (deckt
+   einen App-Neustart ab, ohne dass das Frontend das Timing kennen
+   muss). Als `AppState::lut_table_cache` verdrahtet, in
+   `protocol::mod::compute_develop` vor `render_rgba8` aufgerufen.
+3. `frontend/src/lib/edl.ts`s neue `buildDevelopPreviewEdlJson(payload)`
+   — wie `buildEdlEnvelopeJson`, aber schneidet `lut_filter.lut.table`
+   heraus, sobald `id` gesetzt ist. **Nur** für die Live-Vorschau-
+   Aufrufstellen (`Viewer.tsx`, `PresetThumbnail.tsx`, `ReferenceView.tsx`)
+   verwendet — `applyDevelopEdit`/`createSnapshot` (die persistierte
+   `edit_history`) behalten weiterhin die volle Tabelle über die
+   unveränderte `buildEdlEnvelopeJson`, damit ein Katalog unabhängig vom
+   flüchtigen Server-Cache portabel bleibt.
+4. Neuer Tauri-Befehl `register_lut_filter_table(id, size, table)` wärmt
+   den Cache proaktiv vor — `store/index.ts`s `applyBuiltinLutFilter`/
+   `importLutFilterForCurrentPhoto` rufen ihn direkt nach dem Setzen des
+   Filters auf, `Viewer.tsx` zusätzlich beim Öffnen des Entwickeln-
+   Panels/Fotowechsel (deckt den Fall ab, dass ein bereits gespeicherter
+   Filter geladen wird, ohne dass eine der beiden Aktionen in dieser
+   Sitzung lief). Ein modulweites `Set<string>` in `store/index.ts`
+   verhindert doppelte Registrierungen pro Sitzung, ohne den
+   selbstheilenden Cache-Pfad in Schritt 2 zur Korrektheitsvoraussetzung
+   zu machen — beide Mechanismen zusammen machen den Fix robust gegen
+   Aufruf-Reihenfolge.
+
+Strikt nicht-regressiv: fehlt `id` (alte, vor diesem Feld
+gespeicherte Session-Daten) oder ist `table` bereits leer ohne
+gewählten Filter, verhalten sich beide neuen Funktionen exakt wie die
+alten — kein Sonderfall kann schlechter rendern als vorher.
+
+Verifiziert: `cargo test -p apx-pipeline` (neue Tests in
+`lut_table_cache.rs` + `stages::lut_filter::compute_lut_id`-Abdeckung),
+`cargo test -p apx-app protocol` (neuer Test
+`compute_develop_resolves_lut_table_from_cache_on_second_request` —
+rendert einmal mit voller Tabelle, einmal mit absichtlich leerer
+Tabelle + `id`, beide Ergebnisse müssen byte-identisch sein),
+`cargo fmt`/`cargo clippy -D warnings` sauber für `apx-pipeline`/
+`apx-app`, `tsc -b` sauber.
+
+## ADR-0054: Phase 25 — 5-Schritt-Premium-UI-Plan (Typografie,
+Farbtiefe, Z-Tiefe, Hover-Tiers, Bento-Übersicht)
+
+Nutzerwunsch (verbatim, Ausschnitt): "ui sieht immer noch nicht
+premium genug aus arbeite einen 5 schritt plan […] aus, um die ganze
+ui noch durchdachter und premiummäßiger zu machen. präsentiere ihn mir
+und fang direkt mit der Ausführung an".
+
+**Recherche (real, nicht geraten):** über das bereits integrierte
+`.claude/skills/ui-ux-pro-max`-Skill echte, für genau dieses
+Produktgenre (dunkles professionelles Foto-/Kreativ-Werkzeug)
+recherchierte Referenzen gezogen (`--design-system`-Suche + gezielte
+`--domain`-Suchen zu `typography`/`style`/`color`/`gsap`), **kombiniert
+mit** einem echten Befund im eigenen `index.css`: `--font-sans` war
+bislang nur `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`
+(keine eigene Schrift — die App zeigt einfach, was das jeweilige
+Betriebssystem mitbringt) und `--color-bg-base/-raised/-panel` lagen
+alle innerhalb von 16 RGB-Werten (`#1a1a1a`/`#202020`/`#242424`) —
+genau die "Grau-auf-Grau"-Falle, vor der die Skill-Referenztabelle
+warnt. Eine gezogene, für "Photography Studio" recherchierte
+Referenzpalette (`#000000`/`#0C0C0C`/`#18181B`/`#27272A`) und die
+Schriftempfehlung "Modern Dark Cinema (Inter System)" (Inter,
+gewichts-/laufweitenpräzise, explizit für "dark, cinematic, technical,
+precision, premium, developer/high-end utility") passen beide direkt
+auf dieses Produkt.
+
+**Fünf Schritte, jeder gezielt auf einen real verifizierten Befund
+statt einer generischen Politur-Liste:**
+
+1. **Eigene Typografie statt `system-ui`.** `@fontsource/inter`
+   (selbst gehostet, siehe `THIRD_PARTY.md` — bewusst kein
+   `fonts.googleapis.com`-Laufzeit-Download, die App muss offline
+   funktionieren), nur `latin`/`latin-ext` × 400/500/600/700 (~100 KB
+   statt ~500 KB). `--font-sans` zeigt jetzt zuerst `"Inter"`.
+   Zusätzlich `--text-lg/-xl/-2xl--letter-spacing` (Tailwind-v4-
+   Theme-Overrides derselben Art wie die Radius-/Schatten-Skala aus
+   Phase 18) für engere, bewusst gesetzte Laufweite auf Überschriften
+   — ohne eine einzige Klassennamen-Änderung im gesamten Frontend.
+2. **Echte Farbtiefe statt Grau-auf-Grau.** `--color-bg-base/-raised/
+   -panel` von `#1a1a1a`/`#202020`/`#242424` auf `#050505`/`#0e0e0e`/
+   `#17171a` — deutlich näher an Schwarz, deutlich unterscheidbare
+   Stufen. `--color-border` von reinem Grau (`#333333`) auf einen
+   minimal wärmeren Ton (`#3a3733`). Hell-Theme/Kontrastmodus/
+   `--glass-*` unverändert (eigene, unabhängige Kaskaden-Ebenen).
+3. **Z-Tiefe konsequent statt dekorativ.** Neue oberste Schatten-Stufe
+   `--shadow-2xl` (dunkel UND hell) für Elemente, die sich bewusst vor
+   allem anderen befinden sollen — angewendet auf `components/ui/
+   Dialog.tsx`/`Sheet.tsx` (vorher `shadow-xl` wie jede normale Karte,
+   jetzt eine eigene, stärkere Stufe für alle 25+ darauf aufbauenden
+   Dialoge/Sheets in einem Schritt).
+4. **Hover-Bewegung nach Bedeutung, nicht mehr uniform.** Die
+   bestehende globale `[role="button"]:hover`-Regel (Phase 20) und die
+   Karten-Hover-Behandlung in `GridView.tsx`/`Filmstrip.tsx` (Phase
+   23) waren bereits gestuft vorhanden — der real verbliebene
+   Blindfleck war der Import-Knopf in `Header.tsx`: optisch identisch
+   zum direkt danebenliegenden Such-Knopf (`border-border bg-bg-panel`
+   für beide), obwohl Import die häufigste Einstiegsaktion ist.
+   Bekommt jetzt dieselbe Akzent-Tönung, die anderswo in der App schon
+   für "aktiv/ausgewählt" steht (`border-accent bg-accent/10
+   text-accent`, z. B. `ColorHarmonyWheel.tsx`) statt eines neu
+   erfundenen Vollton-Stils — konsistent mit der bestehenden
+   Bildsprache, aber deutlich von den umgebenden neutralen Knöpfen
+   abgesetzt.
+5. **Bento-artige Kacheln statt gleichförmiger Liste.** Bewusst NICHT
+   am virtualisierten Foto-Raster (`GridView.tsx`) angesetzt — echte
+   Asymmetrie in einem `@tanstack/react-virtual`-Raster mit fester
+   Zellgröße wäre ein eigenständiges, riskantes Vorhaben gegen die
+   dokumentierte 50.000-Foto-Performance-Garantie (`PHASE1_PROMPT.md`
+   Abschnitt 9), ohne dass ein Nutzerwunsch danach verlangt hätte.
+   Stattdessen am `StatsCacheDialog.tsx`-Statistik-Dashboard, bisher
+   eine flache `<p>`-Textliste: jetzt ein Kachelraster mit
+   unterschiedlichen Spannweiten (Foto-Gesamtzahl als große
+   "Hero"-Kachel mit großer Zahl, Größe/Zeitraum schmaler, Kamera-/
+   Bewertungslisten wieder breiter), `rounded-xl`, echte Karten statt
+   reinem Text — Textinhalt je Zeile unverändert (`name: count` etc.),
+   reine Neuanordnung.
+
+Reale visuelle Verifikation per Playwright-Screenshot (Kopfzeile,
+Import-Knopf-Hover, Statistik-Dashboard) — nicht nur Kompilieren,
+siehe dieselbe Disziplin wie ADR-0044.
+
+Verifiziert: `tsc -b`, `vite build` (bestätigt, dass die
+`@fontsource/inter`-CSS-`@import`s über Vite auflösen und nur die
+tatsächlich gebrauchten Subset-Dateien bündeln), `vitest run`
+(251/251), volle Playwright-Suite (142/142, insbesondere
+`library-views-flow.spec.ts` "Statistik-Dashboard zeigt die
+Foto-Gesamtzahl" weiterhin grün trotz der Kachel-Umstellung).
+
+## ADR-0055: Phase 25 Nachtrag — echtes "Liquid Glass" (Bugfix:
+`backdrop-filter` fehlte im Produktions-Build; Verzerrungsfilter,
+Kanten-Lichtkante, "Liquid"-Knopf-Mechanik)
+
+Nutzerurteil (verbatim, Ausschnitt): die Schritt-0-Screenshots seien
+"nicht wirklich das Liquid Glass" — dazu zwei vom Nutzer bereitgestellte
+21st.dev-Referenz-Prompts (siehe `PROMPTS.md`) mit der Anweisung, das
+dort gezeigte Design 1:1 zu erreichen und auf die ganze App,
+insbesondere Hauptmenü-Knöpfe/-Paletten, anzuwenden.
+
+**Real gefundener Bug, nicht nur "zu subtil" (siehe DECISIONS.md-
+Disziplin "real geprüft, nicht angenommen"):** `getComputedStyle(header,
+"::before").backdropFilter` ergab in einem frisch per `vite build`
+gebauten Produktions-Bundle `"none"` — der Weichzeichner war seit Phase
+21 nie tatsächlich aktiv, unabhängig von jeder Opazitäts-/Blur-Wert-
+Feinjustierung in den bisherigen Phasen. Ursache: `vite.config.ts`s
+`build.target` steht für nicht-Windows-Builds auf `"safari13"`; Lightning
+CSS (Tailwind v4s Build-Minifizierer) erkennt ein direkt
+nebeneinanderstehendes `-webkit-backdrop-filter`+`backdrop-filter`-Paar
+mit identischem Wert als "ein Duplikat für unterschiedliche Ziel-
+Browser" und behält bei diesem Ziel gezielt nur die für Safari 13
+nötige, präfigierte Form — die Standard-Eigenschaft verschwand komplett
+aus dem ausgelieferten CSS. In einem realen Chromium-basierten Webview
+(z. B. Windows/WebView2, aber auch jeder Chromium-basierte Test-/
+Vorschau-Browser) versteht der Browser aber nur die unpräfigierte Form
+— dort blieb `backdrop-filter` dadurch vollständig wirkungslos.
+
+**Fix:** die zweite (Standard-)Deklaration steht jetzt in einem
+`@supports (backdrop-filter: blur(1px)) { ... }`-Block statt direkt
+daneben — Lightning CSS erkennt einen `@supports`-umschlossenen Block
+nicht als simples Ziel-Browser-Duplikat und lässt ihn unabhängig vom
+`build.target` unangetastet (per gebautem CSS nachgeprüft: beide
+Eigenschaften bleiben jetzt erhalten, `@supports` bekommt zusätzlich
+automatisch eine Lightning-CSS-generierte `-webkit`-Alternativbedingung).
+Per `getComputedStyle` nach dem Fix bestätigt:
+`backdropFilter: "blur(26px) saturate(1.65)"`.
+
+**Echtes Glas statt reinem Weichzeichner** (adaptiert aus `PROMPTS.md`
+Prompt 1s `GlassFilter`, auf für dauerhaft sichtbare App-Chrome
+verträgliche, deutlich schwächere Werte reduziert): neue
+`GlassDistortionFilter.tsx` — eine einmalig in `App.tsx` gemountete,
+unsichtbare SVG-`<filter>`-Definition (`feTurbulence`+`feGaussianBlur`+
+`feDisplacementMap`), per `filter: var(--glass-distortion)` auf allen
+`.apx-glass`/`.apx-glass-strong`-Flächen referenziert — echte, wenn auch
+dezente Brechung statt eines rein flachen Weichzeichners. `none` im
+Kontrastmodus (Lesbarkeit hat dort Vorrang). Dazu `--glass-edge-shadow`
+(ebenfalls aus Prompt 1: "Licht fängt sich an der Kante") als `inset`-
+Lichtkante auf derselben Tönungs-Ebene.
+
+**Architektur-Umbau nötig, um Text nicht mitzuverzerren:** `filter`
+distorted die GESAMTE Box, in der es steht, inklusive Inhalt — auf der
+`.apx-glass`-Fläche selbst gesetzt, hätte es also auch den Text/die
+Knöpfe in der Kopfzeile selbst verzerrt. Löst das über zwei
+`::before`/`::after`-Pseudo-Elemente statt der bisherigen einzelnen
+`background`-Ebene: `::before` trägt ausschließlich `backdrop-filter`+
+die SVG-Verzerrung (eine leere Ebene, die nur das dahinterliegende Bild
+sampelt/verzerrt), `::after` die Tönung/den Schleier/die Kantenlicht-
+Kante, der echte Inhalt bleibt scharf im normalen Fluss darüber.
+
+**Zwei reale Regressionen dabei gefunden und behoben, bevor sie in den
+Commit gingen (nicht nur vermutet — je per `getComputedStyle`/
+`getBoundingClientRect()` nachgewiesen):**
+1. Ein zunächst gesetztes `z-index: 0` auf `.apx-glass`/`-strong` (um
+   den negativen Pseudo-Element-`z-index` einen eigenen Stapelkontext
+   zu geben) überschrieb an mehreren Aufrufstellen (u. a. `ui/Menu.tsx`s
+   Dropdown) deren eigenes `z-40`/`z-50` aus einer Tailwind-Utility-
+   Klasse auf demselben Element — das Überlauf-Menü verschwand hinter
+   dem Hauptinhalt. Durch `isolation: isolate` ersetzt (derselbe lokale
+   Stapelkontext, ohne den `z-index`-Wert des Elements selbst zu
+   berühren) — dann aber real geprüft, dass `isolation: isolate` für
+   diesen Zweck gar nicht nötig war (siehe Punkt 2).
+2. Beim Nachprüfen mit einem eigenen Debug-Test wurde `.apx-glass-
+   strong`s `position: relative` fälschlich als NEUE Regression
+   verdächtigt (Dropdown landete bei `top: -209px`, weit außerhalb des
+   Bildschirms) — durch einen Vergleichslauf gegen den unveränderten
+   Stand (`git stash`) widerlegt: **derselbe** Versatz trat bereits vor
+   jeder heutigen Änderung auf. Die tatsächliche Ursache war eine
+   Abweichung im eigenen Test-Skript (zusätzlicher Ordner-Auswahl-Klick
+   vor dem Öffnen des Überlauf-Menüs, den der echte, seit Phasen
+   zuverlässig grüne `library-views-flow.spec.ts`-Test nicht macht) —
+   eine bereits bestehende, fragile, aber in der echten Testabdeckung
+   nicht auftretende Eigenheit, keine neue Regression. Nicht "repariert"
+   (kein realer Befund, der das rechtfertigt), stattdessen dokumentiert.
+
+**"Liquid"-Knopf-Mechanik** (adaptiert aus `PROMPTS.md` Prompt 2s
+`LiquidButton`, ohne Radix/`class-variance-authority` — dieses Projekt
+nutzt bewusst keine davon, siehe `lib/utils.ts`s `cn()`-Begründung):
+neue `.apx-btn-liquid`/`.apx-btn-liquid-active`-Klassen (elastisches
+Überschwingen beim Hover, `cubic-bezier(0.175, 0.885, 0.32, 2.2)`,
+dieselbe Kurve wie im Referenz-Prompt; `.apx-btn-liquid-active` ergänzt
+die bestehende `bg-accent/10 text-accent`-Tönung um dieselbe Kanten-
+Lichtkante wie die Glasflächen) — angewendet auf `Header.tsx`s sechs
+Ansicht-Segmentknöpfe und den Import-Knopf: bewusst NUR auf diese
+wenigen, dauerhaft sichtbaren Hauptmenü-Knöpfe beschränkt (nicht
+flächendeckend, sonst verliert die Geste ihre Bedeutung als "das hier
+ist der Hauptweg durch die App") — der Rest der App bleibt auf der
+bereits bestehenden, gestuften "Subtil"/"Standard"-Hover-Mechanik aus
+ADR-0053/-0054.
+
+Verifiziert: `tsc -b`, `vite build` (direkt am gebauten CSS geprüft,
+dass `backdrop-filter` jetzt tatsächlich enthalten ist), `vitest run`
+(251/251), volle Playwright-Suite (142/142) — inklusive eines
+gezielten Vergleichslaufs gegen den unveränderten Stand zur
+Unterscheidung "echte Regression" vs. "bereits bestehende
+Eigenheit" (siehe oben). Reale visuelle Verifikation per Playwright-
+Screenshot (Kopfzeile, Statistik-Dialog mit sichtbarer Schatten-/
+Kantenwirkung) sowie direkte Pixel-/`getComputedStyle`-Messung statt
+reinem Screenshot-Eyeballing.
+
+## ADR-0055-Nachtrag: Werte deutlich verstärkt + strukturelle Grenze
+real nachgewiesen (Kopfzeile kann architektonisch nicht wie iOS
+Control Center aussehen)
+
+Nutzerkritik (ein reales iOS-Control-Center-Referenzfoto beigefügt):
+das bisherige Ergebnis sei "nicht ansatzweise" das gezeigte Liquid
+Glass. Berechtigt — zwei getrennte, real untersuchte Ursachen:
+
+1. **Werte zu zurückhaltend.** `--glass-bg`/`-bg-strong` waren dunkle,
+   recht deckende Grautöne (`rgb(32 32 32 / 44%)`) mit nur `165%`
+   Sättigung — das dämpft durchscheinende Farbe stark, statt sie wie im
+   Referenzfoto vivide durchscheinen zu lassen. Verstärkt auf hellere,
+   durchsichtigere Töne (`rgb(70 70 78 / 30%)` bzw. `rgb(60 60 70 /
+   40%)`), `--glass-saturate` von `165%` auf `220%`, `--glass-blur` von
+   `26px` auf `18px` (weniger Weichzeichnung, mehr Sättigung ergibt
+   sichtbar mehr Farbe statt eines matschigen Grau-Verlaufs),
+   `--glass-sheen`/`-edge-shadow`-Deckkraft ebenfalls angehoben.
+2. **Strukturelle Grenze für Kopfzeile/angedockte Paletten, real per
+   Test nachgewiesen (nicht nur vermutet):** ein Playwright-Test mit
+   einem knallbunten Test-Hintergrund auf `body` zeigte in der
+   Kopfzeile GAR KEINE Farbe — Ursache: `App.tsx`s Wurzel-`<div
+   className="... bg-bg-base">` überdeckt `body` vollständig und
+   deckend; `body`s eigener Hintergrund ist dadurch nirgends sichtbar.
+   Ein zweiter Test mit demselben bunten Verlauf auf dem zentralen
+   Inhaltsbereich (`<main>`, dort wo im echten Betrieb Fotos liegen)
+   bestätigte: der **Dialog** (der als echtes Overlay ÜBER diesem
+   Bereich liegt) zeigt danach deutlich sichtbare, durchscheinende
+   Farbe — die **Kopfzeile** dagegen weiterhin nicht, weil sie in
+   `App.tsx`s Flexbox-Layout eine eigene, mit dem Fotobereich nicht
+   überlappende Zeile ist (anders als iOS Control Center, das als
+   Overlay ÜBER dem Homescreen-Hintergrund schwebt). Kein CSS-
+   Wertetuning kann daran etwas ändern, solange die Kopfzeile
+   strukturell nie denselben Bildschirmbereich wie ein Foto belegt —
+   das ist eine Layout-Frage, keine Farb-/Blur-Frage. Nicht angetastet
+   (ein Umbau der Kopfzeile zu einem über den Inhalt schwebenden
+   Overlay wäre ein eigenständiger, für ein Profi-Fotowerkzeug
+   fragwürdiger Eingriff, den der Nutzer nicht verlangt hat) — aber
+   hier dokumentiert, damit klar ist, wo die Grenze liegt und warum.
+
+Verifiziert an einem eigens gebauten Vergleichstest (bunter Farbverlauf
+hinter `<main>`, Dialog geöffnet) — deutlich sichtbarer Sättigungs-/
+Farbdurchschein-Sprung gegenüber dem Vorher-Screenshot, per Playwright-
+Screenshot bestätigt. `tsc -b`, `vite build`, `vitest run` (251/251),
+volle Playwright-Suite (142/142) weiterhin grün.
+
+### ADR-0055-Nachtrag III: Kopfzeile als echtes Overlay über den Fotos
+
+Auf explizite Nutzerentscheidung (`AskUserQuestion`: "Ja, Kopfzeile als
+Overlay über den Fotos") die oben unter Nachtrag II dokumentierte
+strukturelle Grenze tatsächlich aufgehoben — nicht nur beschrieben.
+Kern: `Header.tsx` ist keine normale Flex-Zeile im Dokumentfluss mehr,
+sondern `position: fixed; inset-x-0; top-0; z-30` — dieselbe
+Technik wie iOS Control Center, das über dem Homescreen-Hintergrund
+schwebt statt eine eigene Zeile daneben zu sein.
+
+**Kaskaden-Falle (zweites Mal in dieser Phase, gleiche Ursache wie
+`z-index` bei Nachtrag/ADR-0055):** `.apx-glass` setzt unlayered
+`position: relative` (für die `::before`/`::after`-Ebenen nötig) —
+das schlägt die `fixed`-Tailwind-Utility-Klasse auf demselben Element
+IMMER, unabhängig von der Reihenfolge im Quelltext (Tailwind v4s
+`@layer utilities` ist gegenüber unlayered CSS strukturell
+nachrangig). Real gemessen: `getComputedStyle(header).position` ergab
+trotz der `fixed`-Klasse weiterhin `"relative"`. Diesmal nicht über
+`isolation` umgangen (der Wert MUSS wirklich `fixed` sein), sondern
+über eine gezielte, spezifischere Gegenregel `header.apx-glass {
+position: fixed; }` in `index.css` — Element+Klasse-Selektor schlägt
+die reine Klasse `.apx-glass` unabhängig von der Ebenenfrage.
+
+**Wer die freiwerdende 48px-Lücke zurückgewinnt und wer nicht (bewusst
+selektiv, nicht pauschal):**
+- `ErrorBanner.tsx`/`FilterBar.tsx`: eigenes `pt-12`/`pt-16` direkt am
+  jeweils selbst gerenderten Element (beide rendern bedingt — kein
+  Geisterabstand, wenn inaktiv).
+- `PaletteFrame.tsx` (gemeinsame Basis von Sidebar/Presets/Metadaten/
+  Entwickeln/Masken-Panel): `pt-12` an der Wurzel, aber NUR wenn
+  `centerView` NICHT `grid`/`overview` ist — in diesen zwei Ansichten
+  hat `FilterBar.tsx` die Lücke bereits durch ihre eigene Position vor
+  der Zeile zurückgewonnen; ein zusätzliches `pt-12` an den Paletten
+  wäre eine doppelte, zu große Lücke gewesen (Ursache/Wirkung real per
+  Screenshot verglichen, bevor die Bedingung eingebaut wurde).
+- Der zentrale Inhaltsbereich (`App.tsx`s `key={centerView}`-Wrapper um
+  GridView/Viewer/MapView/PeopleView/VideoPlayer) bekommt **bewusst
+  keine** Kompensation — er reicht jetzt bis `y=0`, das ist der ganze
+  Sinn der Änderung: echte Fotofarbe soll durch die Kopfzeile
+  scheinen. Für `grid`/`overview` bleibt der sichtbare Effekt dadurch
+  unverändert null (FilterBar blockiert strukturell weiterhin den
+  Weg dorthin — akzeptierter, bewusster Kompromiss, s. u.), für
+  `viewer`/`map`/`people`/`video` (keine FilterBar) ist der Effekt ab
+  sofort real vorhanden.
+
+**Gefundene und behobene Regression (volle Playwright-Suite, nicht nur
+Kompilieren, hat sie real gefangen):** `tat-flow.spec.ts` schlug fehl
+— "header intercepts pointer events" beim Klick auf den TAT-Knopf.
+Ursache: mehrere absolut positionierte Overlay-Kontrollen in
+`Viewer.tsx` (Offline-Badge, Zielgerichtetes-Anpassungswerkzeug-
+Leiste), `MapView.tsx` (Kartensteuerung) und `GlobeView.tsx`
+(Fotoanzahl-Hinweis) waren mit `top-3` relativ zum jeweiligen
+Container positioniert — dieser Container reicht jetzt bis `y=0`,
+die Overlays lagen dadurch buchstäblich unter der neuen, schwebenden
+Kopfzeile und wurden von deren Klickfläche blockiert. Auf `top-16`
+angehoben (48px Kopfzeile + Luft). `PeopleView.tsx`s eigenes
+`<main>` (in-Fluss-Inhalt, kein absolutes Overlay) bekam statt `p-4`
+ein asymmetrisches `pt-16`/`px-4`/`pb-4` — die zusätzliche Innenhöhe
+gehört zum scrollbaren Bereich, verschwindet beim Herunterscrollen
+also wieder (dasselbe Prinzip wie bei `FilterBar.tsx`).
+
+**Bewusst nicht angetastet:** Raster-/Übersichtsansicht (`FilterBar`
+bleibt eine normale, nicht schwebende Zeile) — ein Umbau auch dieser
+Leiste zu einem schwebenden Overlay hätte ihre Höhe variabel gemacht
+(`flex-wrap`, bricht bei schmalem Fenster auf mehrere Zeilen um), eine
+verlässliche Kompensationshöhe für die Paletten darunter wäre damit
+nicht mehr statisch berechenbar gewesen — außerhalb des vom Nutzer
+konkret verlangten Umfangs ("Kopfzeile als Overlay über den Fotos"),
+deshalb hier bewusst begrenzt statt spekulativ mit ausgebaut.
+
+**Reale visuelle Verifikation** (nicht nur Kompilieren/Tests, siehe
+ADR-0044-Disziplin): eigens gebauter Playwright-Test mit echten
+Katalog-Fixtures (Ordner+Foto über `installTauriMock`), `boundingBox`/
+`getComputedStyle` bestätigen `position: fixed`; Screenshot mit einem
+knallbunten Testverlauf hinter `<main>` in der Einzelbild-Ansicht
+(keine `FilterBar`) zeigt deutlich sichtbare, durch die Kopfzeile
+gebrochene Farbe — Screenshot derselben Aktion in der Rasteransicht
+(mit `FilterBar`) zeigt bewusst KEINE Veränderung gegenüber vorher
+(Sidebar/FilterBar/Raster exakt an ihrer alten Position). Beide
+Screenshots dem Nutzer geschickt.
+
+`tsc -b`: sauber. `vitest run`: 251/251. Volle Playwright-Suite:
+142/142 (inklusive der zunächst gefundenen und behobenen
+`tat-flow.spec.ts`-Regression).
+
+## ADR-0056: Phase 26 — drei Ansichts-Funktionen, die erst durch die schwebende Kopfzeile möglich wurden
+
+Nutzerwunsch nach dem Layout-Umbau: "Noch mehr Funktionen". Statt
+beliebiger Zusätze bewusst genau die drei Funktionen gebaut, die aus
+der neuen Struktur (Kopfzeile als Overlay, ADR-0055-Nachtrag III)
+folgerichtig entstehen — die Chrome liegt jetzt ÜBER dem Bild, also
+ist "Chrome wegnehmen" plötzlich eine sinnvolle, sichtbare Geste.
+
+1. **Fokus-Modus** (`t`, Store: `focusMode`): blendet Sidebar, Presets-,
+   Metadaten-, Entwickeln- und Masken-Palette sowie den Filmstreifen
+   aus — übrig bleiben Foto und schwebende Kopfzeile. Die Paletten
+   werden nicht per CSS versteckt, sondern **gar nicht gerendert**:
+   sonst liefen ihre Effekte (Vorschau-Nachladen, Histogramm-Zeichnen)
+   unsichtbar weiter. Der je Palette gespeicherte Ein-/Ausklappzustand
+   (`useWorkspacePanel`, localStorage) bleibt unberührt und kommt beim
+   Verlassen unverändert zurück — der Modus legt sich nur temporär
+   darüber.
+2. **Lichter aus** (`l`, Store: `lightsOut`, Ringtausch
+   `off` → `dim` → `black`): dimmt die Umgebung, das Foto bleibt hell.
+   Umgesetzt über eine `fixed inset-0`-Sichtebene auf `z-20`; der
+   zentrale Bildbereich hebt sich bei aktivem Modus auf `z-[25]` und
+   liegt damit darüber. Die Kopfzeile (`z-30`) bleibt oberhalb beider
+   Ebenen — ihr `backdrop-filter` tastet dadurch die bereits
+   abgedunkelte Umgebung ab und wird selbst dunkel, was genau der
+   gewünschte Effekt ist. `pointer-events-none` auf der Dimm-Ebene:
+   der Modus verdunkelt nur, er sperrt die Bedienung nicht (sonst wäre
+   er ohne Tastatur nicht mehr verlassbar). Ohne aktiven Modus bekommt
+   der Bildbereich bewusst KEINE Stapelkontext-Klasse — ein unnötig
+   gesetzter `z-index` hat in ADR-0055 schon einmal das Overflow-Menü
+   verdeckt.
+3. **Schwebende Zoom-Steuerung** im Viewer (unten links, zwischen
+   TAT-Leiste oben rechts und Info-Overlay unten rechts): die
+   Zoomstufe war bis hier ausschließlich über Tastatur (`0`/`1`/`+`/
+   `-`) und Mausrad erreichbar und nur als Prozentzahl im
+   Info-Overlay ablesbar — ohne Tastatur gab es keinen Weg, gezielt
+   auf 100 % zu gehen. Nutzt dieselben Store-Aktionen wie die
+   Tastenkürzel, keine eigene Zoom-Logik.
+
+**Tastenbelegung — bewusste Abweichung von Lightroom.** Lightroom legt
+diese beiden Modi auf `Tab` bzw. `L`. `l` ist übernommen, `tab`
+bewusst NICHT: Tab ist die Tastatur-Navigationstaste schlechthin, sie
+global abzufangen würde die Bedienung ohne Maus app-weit brechen —
+dieselbe Barrierefreiheits-Linie wie `reduced_motion`/Kontrastmodus/
+Fokus-Fallen an anderer Stelle. Stattdessen `t`; wer `Tab` trotzdem
+will, kann es im Cheatsheet selbst umbelegen (beide Kürzel laufen über
+`KEYBINDING_ACTIONS`/`matchesBinding`, sind also umbelegbar und durch
+den bestehenden `isEditable`-Wächter automatisch aus Eingabefeldern
+und `role="slider"`-Widgets herausgehalten).
+
+**Auffindbarkeit.** Beide Modi stehen zusätzlich im Kommando-Register
+(`commandRegistry.ts`, Kategorie `navigation`) mit zustandsabhängiger
+Beschriftung ("Lichter aus: Umgebung dimmen" → "… ganz abdunkeln" →
+"Lichter an: Umgebung zurückholen"), erscheinen also in der
+Befehlspalette und sind in `de.ts`/`en.ts` übersetzt. Genau das war
+ADR-0046s Befund: eine Funktion, die es nur auf einer Taste gibt, ist
+für die meisten Nutzer nicht vorhanden.
+
+**Lesbarkeitsschutz als eigener Punkt.** Beim Durchsehen der eigenen
+Screenshots der vorherigen Runde real aufgefallen (nicht vermutet):
+der Platzhaltertext der Befehlspalette stand vor einem hellen
+Sonnenuntergang-Foto und war kaum noch lesbar — eine direkte Folge
+davon, dass Glasflächen seit Nachtrag III echte Fotofarbe durchlassen.
+Zwei Maßnahmen: neuer Token `--glass-text-shadow` auf `.apx-glass`/
+`.apx-glass-strong` (dunkler Schlagschatten im Dunkel-Theme, heller im
+Hell-Theme, `none` im Kontrastmodus, wo Zeichenschärfe Vorrang hat)
+und der Platzhalter selbst von `text-text-muted` auf
+`text-text-secondary`.
+
+**Real gefundene Regression — dieselbe Kaskaden-Falle zum dritten
+Mal.** Die volle Playwright-Suite meldete nach dem ersten Durchgang
+**8 Fehlschläge** (nicht "alles grün"): sechs Tests, die in das Bild
+klicken (KI-Maske, Weißabgleich-Pipette, Farbmischer, Farbbereich-
+Maske, TAT, Virtuelle Blende), plus zwei Selektor-Kollisionen.
+Ursache der sechs, per `document.elementFromPoint` am echten
+Klickpunkt gemessen statt geraten: die Zoom-Steuerung trug
+`apx-glass` UND `absolute bottom-3 left-3` auf demselben Element —
+`.apx-glass` setzt aber unlayered `position: relative`, was Tailwinds
+`absolute`-Utility (`@layer utilities`) grundsätzlich schlägt. Die
+Leiste war dadurch ein normales Flex-Kind von `<main>` (`items-center
+justify-center`) und saß **mittig im Bild**, genau auf dem Klickpunkt
+(gemessen: Box bei y=274 statt y≈578, 248px breit in einem 224px
+breiten Bereich). Behoben durch einen äußeren, ungestylten
+Positionierungs-Rahmen um die Glasfläche (`pointer-events-none`
+außen, `pointer-events-auto` innen) statt eines weiteren
+Spezifitäts-Patches — und `.apx-glass` in `index.css` trägt jetzt
+eine ausdrückliche Warnung für künftige Aufrufer, weil dieselbe Falle
+in dieser Sitzung bereits dreimal zugeschlagen hat (`z-index` beim
+Überlauf-Menü, `fixed` bei der Kopfzeile, jetzt `absolute` hier).
+
+Die zwei übrigen Fehlschläge waren echte Selektor-Kollisionen, keine
+Funktionsfehler: `print-flow`s `getByLabel("Zoom")` traf jetzt auch
+die neue Viewer-Steuerung (auf den Druck-Dialog eingegrenzt), und
+`viewer-flow`s `getByText(/100 %/)` traf drei Elemente (prüft jetzt
+gezielt die neue, eindeutige Zoomanzeige — genauer als vorher, die
+Aussage des Tests bleibt dieselbe).
+
+**Methodischer Nachtrag zur Verifikation selbst:** der erste
+Suite-Lauf lief als `npx playwright test | tail -6` — dadurch war der
+gemeldete Exit-Code der von `tail` (immer 0), und die Zusammenfassung
+"135 passed" wurde beinahe als Erfolg gelesen, obwohl 143 Tests
+existieren. Aufgefallen ist es nur, weil die Zahl nicht zur erwarteten
+143 passte. Konsequenz: Suite-Läufe ab hier in eine Logdatei
+schreiben und den echten Exit-Code prüfen, nicht durch `tail` pipen.
+
+Verifiziert: neuer e2e-Test `focus-lights-zoom-flow.spec.ts` prüft
+alle drei Funktionen real (Paletten verschwinden/kommen zurück,
+Dimm-Ebene durchläuft beide Stufen mit gemessener
+`background-color`, Zoom springt über die Knöpfe auf 100 % und
+zurück auf Einpassen). `tsc -b` sauber, `vitest run` 251/251, volle
+Playwright-Suite nach den Korrekturen 143/143 (Exit-Code real
+geprüft).
+
+## ADR-0057: Phase 27 — zehn Kreativ-Werkzeuge mit großem Bildeffekt + Retro-Fuji-Thailand-Filter
+
+Nutzerwunsch: zehn weitere Funktionen, die "wirklich bei der Bearbeitung
+von Fotos helfen, anspruchsvoll, teilweise mit KI, wirklich sichtbare
+Erfolge erzielend", dazu ein `.cube`-Template im Retro-Fujifilm-
+Thailand-Look und eine Liquid-Glass-UI dafür.
+
+### Eine Stufe statt zehn
+
+Zehn einzelne Pipeline-Stufen wären zehnmal dasselbe Gerüst (EDL-Feld,
+`StageEnabled`-Flag, `develop.rs`-Zweig, Modul, Tests) für dieselbe
+Mathematik. Stattdessen EIN Feld `creative: CreativeAdjustments` mit
+zehn Unterstrukturen, EIN Modul `stages/creative.rs`, EIN Flag,
+EIN Pipeline-Zweig. Position: nach `lut_filter`, vor `liquify` — der
+LUT-Look ist die Grundgradation, die Kreativ-Stufe legt sich darüber.
+
+Die Reihenfolge **innerhalb** der Stufe ist fest und begründet
+(Korrektur → Atmosphäre → Optik → Licht → Gradation → Auflage): der
+Farbabgleich korrigiert die Grundfarbigkeit und muss deshalb vor allem
+Gestalterischen laufen; Nebel liegt „in der Luft" vor dem Motiv;
+Freistellung und Tilt-Shift sind optische Trennung; Sonnenstrahlen und
+Orton sind additives Licht; Filmlabor und Verlaufsabbildung graduieren
+das Gesamtbild inklusive dieses Lichts; die Farbisolierung arbeitet auf
+dem fertigen Farbergebnis; das Lichtleck liegt zum Schluss obenauf, wie
+im echten Labor.
+
+### Die zehn
+
+1. **Farbabgleich zu Referenzfoto** — Reinhard-Statistiktransfer
+   (Mittelwert + Streuung je Achse) in einem Gegenfarbenraum statt in
+   exaktem CIELAB: für einen Statistiktransfer zählt nur, dass die drei
+   Achsen weitgehend entkoppelt sind, nicht ihre exakte Normierung. Ein
+   Test prüft, dass Hin- und Rückrechnung die Ausgangsfarbe
+   rekonstruiert. Neuer Befehl `compute_reference_color_stats` liefert
+   sechs Zahlen — kein zweites Bild im EDL.
+2. **Atmosphärischer Tiefennebel** — nutzt die bereits vorhandene
+   MiDaS-Tiefenkarte (`estimate_photo_depth`, bisher nur Virtuelle
+   Blende). Einmal berechnen reicht für beide Werkzeuge.
+3. **KI-Motiv-Freistellung** — neuer Befehl `segment_photo_subject` auf
+   Basis der klassischen Center-Surround-Saliency
+   (`apx_ai::segmentation::subject_alpha`). Bewusst **kein**
+   Modell-Download: anders als Tiefenkarte/Stiltransfer läuft die
+   Funktion damit sofort, ohne Einstellungs-Umweg.
+4. **Tilt-Shift**, 5. **Sonnenstrahlen**, 6. **Orton-Glanz**,
+   7. **Filmlabor** (Bleach Bypass + Cross-Processing),
+   8. **Verlaufsabbildung**, 9. **Farbisolierung**, 10. **Lichtlecks** —
+   alle als geschlossene Formeln auf dem fertig entwickelten
+   sRGB-Bild, keine externen Daten.
+
+### Realer Bug dabei gefunden: die Tiefenkarte kam nie in Rust an
+
+Beim Bau von Punkt 2 und 3 stellte sich die Frage, wie eine Bytekarte
+überhaupt über die Tauri-Grenze kommt. Statt es anzunehmen, empirisch
+geprüft (Wegwerf-Test mit beiden Kandidaten-Formaten):
+
+    STRING -> Err("invalid type: string \"AAEC\", expected a sequence")
+    ARRAY  -> Ok(4)
+
+Die Rust-Seite ist ein schlichtes `Vec<u8>` ohne base64-Deserialisierer.
+`estimateDepthForCurrentPhoto` legte aber seit Phase 14 den **rohen
+base64-String** in `virtual_aperture.depth_map.depth` ab (alle anderen
+Patches im Projekt nutzen korrekt `base64ToByteArray`). Folge: sobald
+eine Tiefenkarte berechnet war, scheiterte das Parsen des gesamten EDL —
+und weil `useDevelopRender`s Fehlerpfad den Fehler nur still
+protokolliert, blieb einfach der zuletzt erfolgreiche Rahmen stehen.
+**Exakt dieselbe Fehlerklasse wie der LUT-Bug aus Phase 25**, und aus
+demselben Grund unentdeckt: die e2e-Tests laufen gegen den Mock, der
+das EDL nie durch Rust parst. Behoben (TS-Typ jetzt `number[]`, Store
+konvertiert), der neue e2e-Test prüft für die Motivmaske ausdrücklich,
+dass ein Zahlen-Array ankommt.
+
+Nachtrag zur Testlage: ein **bestehender** Test hat den kaputten Vertrag
+ausdrücklich festgeschrieben — `virtual-aperture-flow.spec.ts` prüfte
+`expect(...depth_map.depth).toBe("gICAgICAgICAgICAgICAgA==")`, also genau
+den base64-String, den Rust nie lesen konnte. Ein grüner Test war hier
+also kein Nachweis, sondern die Konservierung des Fehlers. Korrigiert auf
+den Vertrag, den die Rust-Seite tatsächlich deserialisiert (16 dekodierte
+Bytes mit Wert 128), mit Kommentar im Test, damit die Zusicherung nicht
+irgendwann „vereinfacht" zurückgedreht wird. Lehre, dieselbe wie aus dem
+LUT-Bug: eine Zusicherung, die nur den Mock gegen sich selbst prüft,
+kostet Vertrauen statt welches zu schaffen — Wire-Formate gehören gegen
+die echte Rust-Deserialisierung geprüft.
+
+### Retro Fuji Thailand
+
+Als echte `.cube`-Datei (`assets/luts/`, 33er Raster) **und** als elfter
+eingebauter Filter. Vier Merkmale, jedes als eigener Term: angehobener
+Schwarzpunkt mit Grünstich (Negativfilm hat kein echtes Schwarz, Fuji
+kippt unten ins Grüne), gedämpfte, nach Gelb-Orange gekippte Lichter,
+gezielte Türkis-Anhebung **nur dort, wo Blau ohnehin dominiert** (Wasser
+und Himmel, nicht pauschal), flachere Mitten. Original erstellt, kein
+fremdes Werk enthalten. Ein Test parst die ausgelieferte Datei und
+vergleicht sie Rasterpunkt für Rasterpunkt gegen die eingebaute Formel —
+beide können nicht auseinanderlaufen.
+
+### UI
+
+Ein Kreativ-Panel ganz oben in der Registerkarte „Kreativ" (nicht hinter
+acht Aufklapp-Abschnitten): je Werkzeug eine Glaskachel mit Titel, EINEM
+Halbsatz Wirkung und den Reglern, Hover hebt Rand und Schatten an, eine
+aktive Kachel bekommt Akzentrand und ein „aktiv"-Zeichen. Die beiden
+Ein-Klick-Vorbereitungen stehen in der Kachel, zu der sie gehören, nicht
+in einem separaten KI-Bereich. Reihenfolge = Verarbeitungsreihenfolge.
+
+### Bewusst nicht gemacht
+
+`creative` ist **keine** Preset-Sektion (anders als `lut_filter`): zwei
+der zehn tragen fotospezifisch berechnete Karten (Tiefenkarte,
+Motivmaske). Die in ein Preset zu übernehmen hieße, die Tiefe EINES
+Fotos auf ein anderes anzuwenden — ein stiller, schwer zu findender
+Fehler. Die übrigen acht wären für sich preset-fähig; sie erst
+aufzunehmen, wenn die beiden Karten beim Speichern gezielt
+herausgeschnitten werden, ist der saubere Weg (offener Nachtrag).
+
+Verifiziert: 15 neue Rust-Unit-Tests (darunter einer, der für jede der
+zehn Funktionen einzeln nachweist, dass sie das Bild real verändert),
+ein Test für die `.cube`-Datei gegen den eingebauten Filter, ein neuer
+e2e-Test für Panel/Regler/Ein-Klick-Knöpfe. `cargo fmt`/`clippy
+--workspace --all-targets` sauber, `cargo test -p apx-pipeline`
+271/271 und `cargo test --workspace` komplett grün, `tsc -b`,
+`vitest run` 251/251, volle Playwright-Suite 144/144 mit real geprüftem
+Exit-Code (`PLAYWRIGHT_EXIT=0`, in eine Logdatei umgeleitet statt durch
+`tail` gepipet — siehe ADR-0056).
+
+## ADR-0058: Phase 28 — „Licht & Optik": zwölf Werkzeuge, echtes Bokeh, drei neue .cube-Filter
+
+Nutzerwunsch nach Phase 27: „Noch nicht gut genug mach noch mehr
+Funktionen mehr alles". Phase 27 hat *Looks* geliefert (Filmlabor,
+Verlaufsabbildung, Lichtlecks) — was fehlt, sind die Werkzeuge, mit
+denen man **Licht, Tiefe und Optik** eines Fotos wirklich umbaut. Genau
+das ist der Gegenstand dieser Phase.
+
+### Wieder eine Stufe, aber an anderer Pipeline-Stelle
+
+Dieselbe Gerüst-Entscheidung wie in ADR-0057 (ein EDL-Feld, ein Modul,
+ein Flag, ein `develop.rs`-Zweig) — aber bewusst **vor** `lut_filter`
+statt danach: Korrekturen (Tonwert, Zonen, Detail) und optische
+Phänomene (Bokeh, Blendenstern, Diffusion, Bewegungsunschärfe) sind
+Dinge, die an der *Kamera* passieren und deshalb der Gradation
+vorausgehen. Die Phase-27-Looks liegen weiterhin danach, wie im Labor.
+Die vollständige Kette lautet damit:
+
+    … → sky_replace → light_optics (neu) → lut_filter → creative → liquify
+
+### Feste Reihenfolge innerhalb der Stufe
+
+Korrektur → Tiefe → Licht → Optik → Stil:
+
+1. Tonwert-Angleich an ein Referenzfoto (globale Tonwertkorrektur)
+2. Zonensystem (lokale Tonwertkorrektur)
+3. Detail-Pyramide (Detailkorrektur auf drei Größenordnungen)
+4. Tiefenselektive Dunstentfernung
+5. Tiefenselektive Schärfe
+6. KI-Neubeleuchtung
+7. Himmel dramatisieren
+8. Bewegungsunschärfe
+9. Blendenstern
+10. Diffusionsfilter („Pro Mist")
+11. Kanalmatrix / Infrarot
+12. Poster-/Comic-Look (quantisiert alles davor, muss deshalb zuletzt)
+
+### Die zwölf im Einzelnen
+
+1. **Tonwert-Angleich** — neun Luminanz-Dezile des Referenzfotos werden
+   zu einer monoton steigenden, stückweise linearen Abbildung
+   verrechnet. Bewusst nur die Luminanz: die Farbigkeit macht bereits
+   der Farbabgleich aus Phase 27, beides zusammen ergibt einen
+   vollständigen Serien-Angleich, ohne dass eines das andere doppelt.
+   Neuer Befehl `compute_reference_tone_stats` liefert die neun Zahlen —
+   kein zweites Bild im EDL, dasselbe Muster wie bei den Farbkennzahlen.
+2. **Zonensystem** — zehn Luminanzzonen nach Ansel Adams, je ±1 EV.
+   Der entscheidende Punkt ist nicht die Zoneneinteilung, sondern dass
+   die daraus entstehende Verstärkungskarte durch einen **echten
+   Guided Filter** (Box-Mittel von Führungsbild und Karte, Kovarianz →
+   `a`/`b`) geglättet wird. Ein simpler Weichzeichner erzeugt an harten
+   Kanten genau die Lichtsäume, für die Zonenwerkzeuge berüchtigt sind;
+   der Guided Filter folgt den Kanten des Führungsbilds und vermeidet
+   sie. Das ist der anspruchsvollste Teil dieser Phase und der Grund,
+   warum das Werkzeug überhaupt brauchbar ist.
+3. **Detail-Pyramide** — drei Frequenzbänder (fein/mittel/grob) aus
+   gestaffelten Tiefpässen, je einzeln verstärkbar. Anders als
+   „Klarheit" (ein Band) trennt das Struktur von Volumen.
+4. **Tiefenselektive Dunstentfernung** — die Umkehrung des
+   Phase-27-Tiefennebels: Kontrast- und Sättigungsrückgewinnung, aber
+   **nur in der Ferne**, gewichtet über dieselbe MiDaS-Tiefenkarte.
+   Der globale „Dunst"-Regler der Grundeinstellungen kann das nicht:
+   er trifft Vordergrund und Hintergrund gleichermaßen.
+5. **Tiefenselektive Schärfe** — Unschärfemaske, deren Wirkung mit dem
+   Abstand von einer wählbaren Fokusebene abfällt. Schärft das Motiv,
+   ohne Hintergrundrauschen mitzuschärfen.
+6. **KI-Neubeleuchtung** — aus der Tiefenkarte wird per Gradient eine
+   Normalenkarte gewonnen, darauf laufen Lambert-Diffus und
+   Blinn-Phong-Glanzlicht mit frei setzbarer Lichtrichtung, -farbe und
+   Umgebungshelligkeit. Der sichtbarste Effekt der ganzen Phase.
+   **Ehrliche Grenze:** eine aus einer *relativen* Tiefenkarte
+   gewonnene Normale ist keine gemessene Oberflächennormale — das
+   Ergebnis ist plausible Lichtführung, keine physikalisch korrekte
+   Neubeleuchtung. Deshalb ist der Glanzlicht-Anteil standardmäßig
+   klein.
+7. **Himmel dramatisieren** — nutzt `apx_ai::segmentation::sky_alpha`
+   (neuer Befehl `segment_photo_sky`, kein Modell-Download).
+   Bewusst **kein** Austausch: Kontrast, Sättigung, Abdunklung und
+   Wärme nur innerhalb der Himmelsmaske. Der bestehende
+   Himmelsaustausch bleibt für den Fall, dass der Himmel wirklich weg
+   soll.
+8. **Bewegungsunschärfe** — gerichtet, radial (Drehung) und Zoom, je
+   als echte Liniensammlung entlang der jeweiligen Bahn. Optional
+   schützt die Motivmaske das Motiv, sodass ein „Mitzieher" entsteht,
+   statt das ganze Bild zu verwischen.
+9. **Blendenstern** — Lichtschleppen auf Spitzlichtern, `n` Strahlen,
+   Winkel, Länge, Schwelle, plus optionaler Regenbogen-Anteil über die
+   Strahllänge (Beugung an den Blendenlamellen).
+10. **Diffusionsfilter** — der „Pro Mist"-Effekt: Weichzeichnung, die
+    **nur aus den Lichtern** gespeist wird und über
+    `black_retention` verhindert, dass die Schwarzwerte milchig
+    werden. Genau dieser zweite Teil unterscheidet ihn vom
+    Orton-Glanz aus Phase 27, der global aufhellt.
+11. **Kanalmatrix** — freie 3×3-Matrix mit vier Ein-Klick-Vorgaben
+    (neutral, Falschfarben-Infrarot, Rot/Blau-Tausch, Cyanotypie).
+12. **Poster-/Comic-Look** — Quantisierung auf `n` Stufen plus
+    Konturzeichnung aus dem Sobel-Betrag.
+
+### Bokeh-Formen statt eines dreizehnten Werkzeugs
+
+Ein eigenes „Bokeh"-Werkzeug hätte ein zweites Mal weichgezeichnet, was
+die Virtuelle Blende schon weichzeichnet — doppelte Rechenzeit für ein
+schlechteres Ergebnis. Stattdessen ist die **bestehende** Stufe
+`stages::virtual_aperture` erweitert worden: polygonale Blendenöffnung
+(`blades`, `rotation`), anamorphe Streckung, Wirbel (`swirl`) und
+Spitzlicht-Anhebung (`highlight_boost`/`highlight_threshold`). Ohne
+gesetzte Werte bleibt der bisherige Kreis-Kern Bit-für-Bit erhalten —
+ein Test hält das fest, damit bestehende Bearbeitungen sich nicht
+stillschweigend ändern.
+
+### Drei neue .cube-Vorlagen
+
+„Nordic Winter", „Tokyo Neon Night" und „Sahara Gold" — dasselbe
+Verfahren wie bei Retro Fuji Thailand (33er Raster, aus derselben Formel
+erzeugt wie der eingebaute Filter, ein Test vergleicht Datei und Formel
+Rasterpunkt für Rasterpunkt). Eigene Namen statt Filmmarken, eigene
+Formeln, kein fremdes Werk enthalten.
+
+### UI: Suchen statt Scrollen
+
+Mit Phase 28 stehen 22 Kachel-Werkzeuge in zwei Panels. Ohne Hilfe wäre
+das genau die Scroll-Wüste, die Phase 18 abgeschafft hat. Deshalb
+bekommen **beide** Panels (Kreativ und Licht & Optik) denselben Kopf:
+ein Suchfeld über Titel und Wirkung, ein „Nur aktive"-Schalter und je
+Kachel einen Zurücksetzen-Knopf, der erst bei Hover/Fokus erscheint.
+Neue sechste Registerkarte „Licht & Optik" im Entwickeln-Panel — die
+zwölf in die bestehende „Licht"-Karte zu stopfen hätte sie verdoppelt.
+
+### Bewusst nicht gemacht
+
+Wie `creative` ist auch `light_optics` **keine** Preset-Sektion: vier
+der zwölf tragen fotospezifisch berechnete Karten (Tiefe, Himmel,
+Motiv). Derselbe offene Nachtrag wie in ADR-0057 — erst wenn beim
+Speichern eines Presets die Karten gezielt herausgeschnitten werden,
+können die übrigen acht preset-fähig werden.
+
+### Zwei selbstverschuldete Namenskollisionen (real gemessen)
+
+Der erste volle Playwright-Lauf nach der UI-Arbeit meldete sechs
+Fehlschläge, beide Ursachen aus dieser Phase:
+
+1. `getByRole("tab", { name: "Licht" })` traf plötzlich zwei Karten —
+   Playwrights Standard-Namensvergleich ist ein **Teilstring**-Treffer,
+   und „Licht" steckt in „Licht & Optik".
+2. `getByRole("button", { name: "Motiv freistellen" })` traf zwei
+   Knöpfe — den Aktionsknopf und den neuen Zurücksetzen-Knopf der
+   Kachel, dessen zugänglicher Name „Motiv freistellen zurücksetzen"
+   lautet.
+
+Beide sind in den **Tests** korrigiert (`exact: true`), nicht in der
+Oberfläche: „Licht & Optik" ist der richtige Kartenname, und
+„<Werkzeug> zurücksetzen" ist für Screenreader-Nutzer die richtige
+Beschriftung. Den Namen zu verstümmeln, um einen ungenauen Locator zu
+retten, wäre die falsche Richtung.
+
+Verifiziert: 16 neue Rust-Unit-Tests in `stages::light_optics` (darunter
+einer, der für jedes der zwölf Werkzeuge einzeln nachweist, dass es das
+Bild real verändert, und einer, der den Guided Filter gegen das
+Kastenmittel an einer harten Kante misst), 4 neue Bokeh-Tests (darunter
+der Bit-für-Bit-Vergleich gegen das Verfahren vor dieser Phase), der
+`.cube`-gegen-Formel-Test über alle vier Dateien, ein neuer e2e-Test mit
+vier Fällen. `cargo fmt`/`clippy --workspace --all-targets` sauber,
+`cargo test --workspace` komplett grün (apx-pipeline 290/290), `tsc -b`,
+`vitest run` 251/251, volle Playwright-Suite **148/148** mit real
+geprüftem Exit-Code (`PLAYWRIGHT_EXIT=0`).
+
+## ADR-0059: Phase 29 — Kreativ- und Licht-&-Optik-Werkzeuge preset-fähig machen
+
+ADR-0057 und ADR-0058 haben beide dieselbe Einschränkung offengelassen:
+die zweiundzwanzig Werkzeuge der Phasen 27 und 28 sind **keine**
+Preset-Sektionen, weil sechs von ihnen fotospezifisch berechnete Karten
+tragen (MiDaS-Tiefenkarte bei Tiefennebel, Dunstentfernung,
+Tiefenschärfe und Neubeleuchtung; Motivmaske bei Freistellung und
+Bewegungsunschärfe; Himmelsmaske beim Dramatisieren). Die Tiefe EINES
+Fotos auf ein anderes anzuwenden wäre ein stiller, schwer zu findender
+Fehler. Dieser Nachtrag löst das.
+
+### Trennen statt ausschließen
+
+Eine Sektion ist nicht deshalb unübertragbar, weil sie *irgendetwas*
+Fotospezifisches enthält — sondern nur, soweit sie es enthält. Die
+Regler („60 % Nebel ab Entfernung 0,3", „Himmel kontrastreicher und
+dunkler") sind ein Look wie jeder andere; allein die Bytekarten sind es
+nicht. Eine einzige Liste `PHOTO_SPECIFIC_MAP_FIELDS` (Sektion →
+`werkzeug.feld`) benennt die sechs Stellen, und zwei kleine Funktionen
+tun den Rest:
+
+- `stripPhotoSpecificMaps` setzt sie beim **Speichern** auf `null` —
+  auf einer Kopie, damit das Speichern eines Presets dem Nutzer nicht
+  die gerade berechnete Karte aus der laufenden Bearbeitung löscht. Ein
+  Test hält genau das fest.
+- `restorePhotoSpecificMaps` setzt beim **Anwenden** die Karten des
+  ZIELFOTOS wieder ein. Ohne diesen zweiten Schritt wäre die Sache
+  schlimmer als vorher: jedes angewendete Preset würde eine bereits
+  berechnete Tiefenkarte mit `null` überschreiben.
+
+### Der ehrliche Rest: „aktiv, aber wirkungslos"
+
+Ein Preset bringt `sky_drama.amount = 0.7` mit, aber keine Maske. Das
+Werkzeug stünde dann auf „aktiv" und täte still nichts — genau die
+Sorte Fehler, die zu vermeiden der ganze Zweck der Übung ist, nur an
+eine andere Stelle verschoben. Beide Panels sagen es deshalb jetzt in
+der Kachel: „Ohne Himmelsmaske wirkungslos", „Ohne Tiefenkarte
+wirkungslos", „Ohne Referenzfoto wirkungslos". Ein Halbsatz, dieselbe
+Zeile wie der Ein-Klick-Knopf, der ihn auflöst.
+
+Die Bewegungsunschärfe ist bewusst **nicht** dabei: sie arbeitet auch
+ohne Maske, nur eben aufs ganze Bild. Ein Hinweis wäre dort schlicht
+falsch.
+
+### Was mit den Referenzwerten passiert
+
+Farbabgleich (sechs Farbkennzahlen) und Tonwert-Angleich (neun Dezile)
+bleiben **im** Preset. Sie sind zwar aus einem Referenzfoto gewonnen,
+aber genau das ist ihr Zweck: „mach diese Serie so wie jenes Foto" ist
+der Anwendungsfall, und ein Preset ist der richtige Transportweg dafür.
+Anders als eine Tiefenkarte beziehen sie sich nicht auf den Bildinhalt
+des bearbeiteten Fotos.
+
+### Ein Fehler, den erst der e2e-Test fand
+
+Die erste Fassung von `stripPhotoSpecificMaps` hat mit
+`structuredClone` kopiert. Alle sechs Vitest-Fälle liefen grün — sie
+arbeiten mit gewöhnlichen Objekten. In der App wird die Funktion aber
+auch aus einem Zustand/Immer-Erzeuger heraus aufgerufen, und
+`structuredClone` scheitert an einem Immer-Draft (das ist ein Proxy)
+mit `DataCloneError`: „Kopieren" im Entwickeln-Panel warf, der
+„Einfügen"-Knopf blieb deaktiviert. Der volle Playwright-Lauf hat das
+gefunden, nicht die Einheitentests.
+
+Zwei Konsequenzen, beide umgesetzt: die Helfer kopieren jetzt per
+Spread statt per `structuredClone` (zwei Ebenen reichen, tiefer greifen
+sie ohnehin nicht), und die drei Aufrufe, die bisher *innerhalb* eines
+Erzeugers rechneten, rechnen jetzt davor auf dem fertigen Zustand aus
+`get()` und weisen drinnen nur noch zu. Das ist auch unabhängig vom
+Fehler die klarere Aufteilung.
+
+Verifiziert: sechs neue Vitest-Fälle in `presets.test.ts` (Schneiden,
+Nicht-Anfassen der laufenden Bearbeitung, Zielfoto-Karten beim
+Zusammenführen, fehlende Karten als `null`, Stärke-Skalierung, keine
+Fremdsektion mitgenommen) und ein neuer e2e-Test, der den ganzen Weg
+geht: Maske auf Foto A berechnen, Preset speichern, auf Foto B anwenden,
+prüfen dass die Regler ankommen und die Maske ausdrücklich nicht.
+`tsc -b`, `vitest run` 257/257, `clippy --workspace --all-targets`
+sauber, volle Playwright-Suite **149/149** mit real geprüftem Exit-Code
+(`PLAYWRIGHT_EXIT=0`).
+
+## ADR-0060: Phase 30 — „Direkt am Bild": zehn Werkzeuge mit eigenen Bedienelementen
+
+Nutzerwunsch: zehn weitere Funktionen, „die wirklich visuell sichtbare
+Änderungen am Foto produzieren **und neue UI-Elemente beinhalten**",
+ausdrücklich aufwändig.
+
+Das ist die entscheidende Abgrenzung zu Phase 27 und 28: die lieferten
+zweiundzwanzig Werkzeuge, aber alle mit derselben Bedienung — eine
+Glaskachel mit Reglern. Diese Phase dreht das um. Sieben der zehn
+Werkzeuge werden **im Bild selbst** bedient (Lichter ziehen, eine
+Horizontlinie legen, einen Lichtkegel aufziehen, Punkte setzen, Farben
+mit der Pipette greifen), die übrigen drei bekommen Bedienelemente, die
+es im Projekt bisher nicht gab (ein Verlaufsband mit frei
+verschiebbaren Stützstellen, ein 3×3-Matrix-Gitter, eine
+Falschfarben-Überlagerung mit klickbarem Zonenstreifen).
+
+### Eine neue Stufe, dieselbe bewährte Bauform
+
+`stages/interactive.rs`, ein EDL-Feld `interactive`, ein
+`StageEnabled`-Flag, ein `develop.rs`-Zweig — wie in Phase 27/28.
+Position: nach `light_optics`, vor `lut_filter`. Alles hier ist
+gesetztes Licht und gesetzte Farbe, gehört also in dieselbe Familie wie
+Licht & Optik und ebenfalls vor die Gradation.
+
+Reihenfolge innerhalb der Stufe (Licht → Farbe → Verlauf → Auflage):
+Lichtquellen → Lichtkegel → Abwedeln/Nachbelichten → Split-Lighting →
+Farbe ersetzen → Verlaufsband → Horizont-Verlaufsfilter.
+
+### Die sieben mit eigener Bildmathematik
+
+1. **Lichtquellen** — beliebig viele Punktlichter, je mit Ort, Radius,
+   Farbe, Stärke und Abfall. Additiv mit quadratischem Abfall.
+   Bedienung: Pins im Bild, die man zieht; eine Liste daneben zum
+   Hinzufügen, Auswählen und Löschen.
+2. **Lichtkegel** — eine frei aufziehbare, drehbare Ellipse mit
+   weichem Rand, die innen aufhellt und außen abdunkelt. Das
+   Bühnenlicht-Werkzeug, das eine Radialmaske nur umständlich
+   nachbaut.
+3. **Abwedeln/Nachbelichten** — frei gesetzte Punkte, je mit Radius und
+   Vorzeichen (aufhellen/abdunkeln). Die Dunkelkammer-Technik, direkt
+   am Bild statt über Masken.
+4. **Split-Lighting** — zwei Bildpunkte mit je einer Lichtfarbe; das
+   Bild wird entlang der Achse dazwischen eingefärbt. Erzeugt die
+   zweifarbige Lichtstimmung, für die man sonst zwei Verlaufsmasken
+   bräuchte.
+5. **Farbe ersetzen** — Quellfarbe per Pipette aus dem Bild, Zielfarbe
+   aus dem Farbwähler, dazu Toleranz und Weichheit. Der Abstand wird im
+   Gegenfarbenraum gemessen, nicht in RGB: ein RGB-Abstand hält
+   Helligkeit und Farbton nicht auseinander und greift deshalb
+   entweder zu viel oder zu wenig.
+6. **Verlaufsband** — bildet die Luminanz auf einen Verlauf mit
+   **beliebig vielen** Stützstellen ab. Die Verlaufsabbildung aus
+   Phase 27 kann genau drei; hier legt der Nutzer sie selbst fest.
+7. **Horizont-Verlaufsfilter** — ein Grauverlaufsfilter, dessen Kante
+   einer frei gezogenen Linie folgt statt dem Bildrand. Genau das
+   unterscheidet ihn von einer Verlaufsmaske mit fester Achse.
+
+### Die drei, die bestehende Funktionen erst bedienbar machen
+
+8. **3×3-Kanalmatrix-Gitter** — Phase 28 hat die Matrix eingeführt,
+   aber nur vier Ein-Klick-Vorgaben dafür gebaut; die neun Zahlen waren
+   überhaupt nicht erreichbar. Jetzt ein beschriftetes Gitter mit
+   Zeilen- und Spaltenköpfen und einem Farbstreifen, der die Wirkung
+   sofort zeigt.
+9. **Blendenform-Vorschau** — ein kleines Canvas, das den tatsächlich
+   verwendeten Bokeh-Kern zeichnet (Lamellenzahl, Drehung, anamorphe
+   Streckung). Die Phase-28-Regler waren ohne diese Rückmeldung
+   Blindflug.
+10. **Zonen-Überlagerung** — legt die zehn Luminanzzonen als
+    Falschfarben über das Foto und macht den Zonenstreifen klickbar.
+    Erst damit ist zu sehen, welcher Regler welchen Bildteil trifft.
+
+### Ein gemeinsames Bild-Overlay statt sieben Einzellösungen
+
+Alle Bild-Bedienelemente laufen über **eine** neue Komponente
+`ImageToolOverlay`. Sie kennt die Umrechnung Bild ↔ Bildschirm
+(Zoom, Pan, Ausrichtung) genau einmal und bietet drei Formen an: Punkt,
+Linie, Ellipse. Sieben eigene Overlays mit je eigener Koordinatenlogik
+wären sieben Gelegenheiten, dieselbe Umrechnung leicht unterschiedlich
+falsch zu machen — und beim Zoomen fällt so etwas sofort auf.
+
+Die Komponente liegt bewusst **im Viewer**, nicht im Panel: nur dort
+sind Zoom, Pan und die tatsächliche Bildfläche bekannt.
+
+### Bewusst nicht gemacht
+
+Keine Perspektiv-/Fluchtpunktkorrektur. Sie wäre das naheliegende achte
+Bild-Werkzeug, braucht aber einen Homographie-Eingriff in die
+Geometriestufe (die die Bildgröße ändert) statt einer Farbrechnung auf
+fester Größe — ein eigener, deutlich riskanterer Umbau. Lieber
+ausgelassen als halb gebaut.
+
+### Der Fehler, den die eigene Abstraktion trotzdem nicht verhindert hat
+
+Das gemeinsame Overlay sollte genau verhindern, dass dieselbe
+Umrechnung mehrfach leicht unterschiedlich falsch gemacht wird. Beim
+ersten e2e-Lauf landete ein Klick in die untere Bildhälfte trotzdem bei
+`y = 0`.
+
+Ursache: `screenToNormalized` erwartet **Container**-Koordinaten und
+zieht den Bildursprung selbst ab — das Overlay reichte ihm aber bereits
+**bild**-relative Koordinaten aus seinem eigenen
+`getBoundingClientRect()`. Der Ursprung wurde also zweimal abgezogen.
+In x fiel das gar nicht auf, weil das Testbild seitlich anliegt und
+`origin.x` dort schlicht 0 ist; nur die vertikale Letterbox machte den
+Fehler sichtbar.
+
+Zwei Lehren, beide festgehalten: eine Umrechnung an einer Stelle zu
+bündeln hilft nur, wenn auch ihr **Bezugssystem** dokumentiert ist —
+das steht jetzt im Kommentar an der Aufrufstelle. Und eine
+Koordinatenrechnung braucht einen Test mit einem Bild, das **nicht**
+bündig anliegt: bei `origin = (0, 0)` sind erstaunlich viele falsche
+Formeln zufällig richtig.
+
+Verifiziert: 10 neue Rust-Unit-Tests in `stages::interactive` (darunter
+einer, der dieselbe Lichtsetzung in 32 und 128 Pixeln rendert und
+vergleicht, und einer, der die byte-genaue Unversehrtheit des nicht
+getroffenen Bildteils bei „Farbe ersetzen" prüft), 12 neue Vitest-Fälle
+für Overlay-Mathematik und Zoneneinteilung, ein neuer e2e-Test mit sechs
+Fällen. `cargo fmt`/`clippy --workspace --all-targets` ohne Warnung,
+`cargo test --workspace` grün (apx-pipeline 300/300), `tsc -b`,
+`vitest run` 269/269, volle Playwright-Suite **155/155** mit real
+geprüftem Exit-Code (`PLAYWRIGHT_EXIT=0`).
+
+## ADR-0061: Installer und Signierung fertiggestellt — und die zwei Punkte, die eine Entscheidung brauchen
+
+`PLAN.md` Phase 10 Schritt 11 („Installer + Signierung, alle drei
+Plattformen, strukturell + konditional") war als einziger Punkt der
+Phase 10 nie abgehakt. Bei der Durchsicht zeigte sich: der
+CI-Release-Job aus ADR-0037 existierte bereits samt konditionaler
+Signierungsschritte — was fehlte, waren die Teile davor und danach.
+
+### Was tatsächlich gefehlt hat
+
+1. **Paketmetadaten.** `tauri.conf.json` enthielt nur `active`,
+   `targets` und Icons. Hersteller, Copyright, Kategorie, Kurz- und
+   Langbeschreibung, Startseite: alles leer. Ein so gebautes Paket
+   zeigt in der Windows-Dateiinfo und in Linux-Paketverwaltungen leere
+   Felder — das sieht nach unfertiger Software aus, unabhängig davon,
+   wie fertig sie ist.
+2. **`ffmpeg` war nirgends als Abhängigkeit deklariert.** Die
+   Video-Funktionen rufen es über `std::process::Command::new("ffmpeg")`
+   als externes Programm auf (fünf Stellen in `commands.rs`). Auf einem
+   frischen System hätte die Anwendung sauber gestartet und beim ersten
+   Videoexport versagt. Jetzt als `recommends` im deb-Paket, bewusst
+   nicht als `depends`: die Foto-Seite arbeitet vollständig ohne, und
+   ein reiner Foto-Nutzer soll nicht zur ffmpeg-Installation gezwungen
+   werden. Es mitzuliefern (`bundle.externalBin`) wäre robuster, wirft
+   aber je nach ffmpeg-Build eine eigene GPL-Frage auf — deshalb nicht
+   gemacht, sondern in `RELEASE.md` benannt.
+3. **Eine stille Versions-Divergenz.** `tauri.conf.json` stand fest auf
+   `"version": "0.1.0"`, die Crate auf `version.workspace`. Beim
+   nächsten Versionssprung hätte der Installer weiter 0.1.0 gemeldet.
+   Das Feld ist jetzt entfernt — Tauri nimmt dann die Version aus
+   `Cargo.toml` — und ein Test verhindert, dass es zurückkommt.
+4. **`targets: "all"` statt einer geprüften Liste.** „all" schließt
+   `rpm` und `msi` ein, deren Werkzeugbedarf auf den CI-Runnern hier
+   nicht nachweisbar war. Jetzt eine ausdrückliche Liste
+   (`deb`, `appimage`, `app`, `dmg`, `nsis`), die je Plattform
+   mindestens ein Ziel übrig lässt; ein Test hält das fest.
+5. **Der Release-Job konnte lautlos nichts liefern.**
+   `if-no-files-found: warn` ließ ihn grün durchlaufen, auch wenn
+   `tauri build` kein einziges Paket erzeugt hatte. Jetzt bricht ein
+   eigener Prüfschritt mit `::error::` ab, bevor irgendetwas
+   hochgeladen wird.
+6. **Es gab keine Veröffentlichung.** Die Pakete landeten nur in den
+   Workflow-Artefakten — 14 Tage Aufbewahrung, für Nutzer ohne
+   Actions-Zugriff überhaupt nicht erreichbar. Damit war die
+   „Distribution" aus Phase 10 faktisch nicht vorhanden. Jetzt hängt
+   ein Tag-Push die Pakete samt SHA-256-Summen an eine
+   **Entwurfs**-Release.
+
+### Prüfsummen sind hier keine Zierde
+
+Bei unsignierten Paketen — und das ist ohne hinterlegte Zertifikate der
+Normalfall — sind die `SHA256SUMS-*.txt` die **einzige** verfügbare
+Integritätsaussage. Deshalb entstehen sie im selben Job, aus denselben
+Dateien, die hochgeladen werden.
+
+### Zwei Shell-Fallen, vorher gefunden statt beim Tag-Push
+
+`mapfile` gibt es erst ab Bash 4; die macOS-Runner haben die
+vorinstallierte Bash 3.2, der Prüfschritt wäre dort mit „command not
+found" abgebrochen. Und `sha256sum` existiert auf Linux und in der
+Git-Bash der Windows-Runner, auf macOS aber nicht (dort `shasum`).
+Beides ist ersetzt; die Skripte sind mit `bash -n` syntaktisch geprüft.
+
+### Was NICHT nachgewiesen ist
+
+Unverändert gegenüber ADR-0037 Entscheidung 3: die Signierungsschritte
+sind **nie mit einem echten Zertifikat ausgeführt** worden — weder ein
+Apple-Developer-Konto noch ein Windows-Codesigning-Zertifikat war
+beschaffbar. Sie lesen die dokumentierten Umgebungsvariablen und
+überspringen sich selbst, wenn die Secrets fehlen. Ob sie mit einem
+echten Zertifikat durchlaufen, bleibt offen. `RELEASE.md` sagt das in
+der ersten Tabelle, nicht im Kleingedruckten, und empfiehlt einen
+Testtag vor dem ersten echten Release.
+
+Neu dazugekommen ist eine Einschränkung, die ADR-0037 noch nicht kannte:
+seit Juni 2023 verlangen alle Zertifizierungsstellen Hardware-
+Schlüsselspeicher für Windows-Codesigning. Der vorhandene
+PFX-Import-Schritt funktioniert deshalb nur mit älteren oder intern
+ausgestellten Zertifikaten; für ein HSM-gebundenes Zertifikat wäre
+`bundle.windows.signCommand` der Weg — nicht eingerichtet, weil sich
+ohne konkretes Zertifikat nicht sagen lässt, wie der Aufruf aussieht.
+
+### Zwei Punkte, die bewusst offen bleiben
+
+Beides sind keine Programmierfragen:
+
+1. **Es gibt keine Lizenzdatei.** `bundle.license`/`licenseFile` sind
+   deshalb nicht gesetzt — eine eingetragene Lizenz ohne Entscheidung
+   dahinter wäre eine Behauptung. `THIRD_PARTY.md` wird trotzdem
+   mitgeliefert (`bundle.resources`): die Drittanbieter-Hinweise
+   müssen beim Nutzer ankommen, unabhängig davon, wie das Gesamtwerk
+   lizenziert wird.
+**Nachtrag beim Schreiben dieses ADRs gefunden:** `README.md` bezeichnet
+Aperture X bereits als „fully open sourced". Das ist eine Aussage des
+Projektinhabers und verschiebt die Lage deutlich — LGPL §6 verlangt die
+Austauschbarkeit der Komponente nur bei **geschlossener** Weitergabe.
+Punkt 2 unten wäre damit weitgehend erledigt. Was fehlt, ist der
+formale Teil: **es gibt keine `LICENSE`-Datei.** Ohne sie gilt
+urheberrechtlich „alle Rechte vorbehalten", egal was im README steht —
+niemand darf den Code rechtssicher weitergeben oder ändern. Eine
+Lizenz auszusuchen ist eine Eigentümerentscheidung und wird hier nicht
+getroffen; sie zu benennen ist der eine offene Schritt, der aus
+„open source gemeint" auch „open source wirksam" macht.
+
+2. **ADR-0002 Punkt 2 ist weiterhin offen.** Dort steht, dass `apx-raw`
+   „ab Phase 10 / Installer" als dynamisch nachladbare Komponente
+   gebaut werden soll, damit die LGPL-2.1-Komponente `rawler` gemäß
+   LGPL §6 austauschbar bleibt. Das ist nur für eine **geschlossene**
+   Weitergabe zwingend und hängt vollständig an Punkt 1 — ADR-0002 hält
+   ausdrücklich fest, dass diese Weichenstellung nicht einseitig
+   getroffen wird. Ein spürbarer architektonischer Umbau auf Verdacht
+   wäre hier die falsche Reihenfolge.
+
+Verifiziert: neun neue Integrationstests in
+`crates/apx-app/tests/bundle_config.rs`, die die Konfiguration gegen die
+echten Dateien prüfen (jedes referenzierte Icon existiert, je Plattform
+ein passendes Format, die Ressourcendatei existiert und nennt die
+LGPL-Komponente, keine gepinnte Version, alle Anzeige-Metadaten gesetzt,
+nur geprüfte Ziele, gültiger Bezeichner, und die CI baut die Installer
+tatsächlich noch). `cargo fmt`/`clippy --workspace --all-targets` ohne
+Warnung, `cargo test --workspace` grün. Die YAML ist geparst und die
+beiden neuen Shell-Schritte mit `bash -n` geprüft.
+
+## ADR-0062: Phase 17 Schritt 9 — Video-Stabilisierung
+
+**Status:** angenommen (Phase 17 Schritt 9)
+
+### Kontext
+
+Der letzte offene Funktionspunkt von Phase 17. Der Plan von damals sah
+ausdrücklich „Wiederverwendung `apx-stacking`-Homografie" vor: die
+merkmalsbasierte Bild-zu-Bild-Messung, die seit Phase 13 Schritt 5 das
+Panorama-Stitching trägt (`apx_stacking::homography_stitch`, AKAZE +
+eigener RANSAC-Loop), misst genau das, was eine Stabilisierung braucht —
+wie sich die Kamera zwischen zwei Aufnahmen bewegt hat. Der Punkt war
+auf ausdrücklichen Nutzerwunsch pausiert und ist jetzt freigegeben
+worden.
+
+### Entscheidungen
+
+**1. Zwei Durchgänge, nicht einer.** Eine Kamerabahn lässt sich nicht
+glätten, solange man ihre Zukunft nicht kennt. Ein einzelner Durchlauf
+könnte Bewegung nur *dämpfen* — und würde damit auch jeden gewollten
+Schwenk verschleppen. Also: erst das ganze Video messen, dann die Bahn
+glätten, dann in einem zweiten Durchlauf korrigieren. Der Preis ist,
+dass das Video zweimal dekodiert wird; abgefedert wird er dadurch, dass
+der Messdurchgang auf 480 px längste Kante herunterskaliert läuft (siehe
+Punkt 3).
+
+**2. Vier Freiheitsgrade statt acht.** Die Messung liefert eine volle
+8-Freiheitsgrad-Homografie. Die direkt auf eine wackelige
+Freihandaufnahme anzuwenden erzeugt den berüchtigten „Wackelpudding":
+perspektivische Anteile, die aus Rauschen in den Merkmalspaaren stammen,
+lassen Bildkanten schwabbeln. `Similarity::from_homography` projiziert
+deshalb auf Verschiebung, Drehung und Maßstab — dieselbe Beschränkung,
+die übliche Stabilisierer vornehmen. Maßstab und Winkel kommen aus dem
+linken oberen 2×2-Block, gemittelt über beide Diagonalen statt aus einem
+herausgegriffenen Eintrag, weil eine verrauschte Messung dort nur
+näherungsweise die Form `s·[[cos, −sin], [sin, cos]]` hat.
+
+**3. Gemessen wird verkleinert, korrigiert in voller Auflösung.** Das
+Wackeln einer Freihandaufnahme steckt in groben Bildstrukturen, nicht im
+Pixelrauschen; in voller Auflösung zu messen kostet ein Vielfaches, ohne
+die Bahn genauer zu machen. Der Rückrechnungsfaktor kommt aus der
+*tatsächlich* entstandenen Messbreite, nicht aus dem ungerundeten
+Wunschfaktor — `ffmpeg`s `scale` rundet auf gerade Kanten, und ein
+Bruchteil Abweichung je Bild summiert sich über die Bahn auf. Genau das
+prüft `the_scale_back_factor_comes_from_the_rounded_width`.
+
+**4. Korrekturen werden auf den Zuschnitt-Rand begrenzt, nicht
+gehofft.** Jede Korrektur schiebt das Bild und legt am Rand leere Fläche
+frei; dagegen hilft nur Hineinzoomen. Statt darauf zu vertrauen, dass
+der gewählte Zoom reicht, *klemmt* `stabilize_path` jede Korrektur auf
+das, was der Rand hergibt. Lieber eine leicht verbleibende Restbewegung
+als ein schwarzer Rand, der im fertigen Video nicht mehr zu reparieren
+ist. Die Konsequenz ist bewusst und im UI benannt: bei `crop_zoom = 1.0`
+gibt es keinen Rand, also auch keine Korrektur — der Video-Modus sagt
+das als Hinweis, statt den Nutzer einen wirkungslosen Lauf starten zu
+lassen.
+
+**5. Eine nicht messbare Stelle heißt „keine Bewegung", nicht
+„geschätzte Bewegung".** Findet die Merkmalssuche zwischen zwei Bildern
+nichts Verlässliches (zu wenig Struktur, zu starke Bewegungsunschärfe),
+liefert sie `None`. Daraus einen Sprung zu raten wäre im fertigen Video
+als Ruck sichtbar und damit schlimmer als das ausgelassene Bild.
+
+**6. Die Mathematik liegt in `apx-stacking`, nicht in `apx-app`.** Die
+gesamte Stabilisierung ist in `crates/apx-stacking/src/stabilize.rs`
+gekapselt: Zahlen rein, Zahlen raus, ohne `ffmpeg` und ohne Videodatei —
+sonst wäre sie nur über einen echten Videolauf prüfbar gewesen.
+`apx-app`s `stabilize_video` macht ausschließlich das Drumherum
+(dekodieren, messen, neu kodieren), nach genau demselben
+zwei-`ffmpeg`-Prozesse-Muster wie `apply_lut_filter_to_video` und
+`remove_video_background`, inklusive `-map 1:a?` für die unverändert
+durchgereichte Tonspur.
+
+### Verifikation
+
+Sechzehn Unit-Tests in `apx_stacking::stabilize` — darunter, dass ein
+gleichmäßiger Schwenk unangetastet bleibt, dass Zittern *auf* einem
+Schwenk verschwindet während der Schwenk überlebt, dass ohne
+Zuschnitt-Rand nichts korrigiert wird, und dass ein wackeliges Bild nach
+der Stabilisierung dort landet, wo die ruhigen Bilder landen (verglichen
+gegen ein ruhiges Bild durch dieselbe Kette, nicht gegen einen fest
+eingetippten Zielwert). Vier weitere in `apx-app` für die
+Messauflösungs-Rechnung. Dazu der erste e2e-Test überhaupt, der das
+Video-Modul betritt (`video-stabilize-flow.spec.ts`).
+
+### Bekannte Grenze
+
+Der e2e-Test prüft die Kette *vor* der Stabilisierung — Reglerwerte,
+Command-Argumente, Umschalten auf das Ergebnis, der Hinweis bei
+wirkungslosem Zuschnitt. Die Stabilisierung selbst braucht `ffmpeg` und
+läuft komplett in Rust; sie ist dort geprüft, nicht im Browser. Das ist
+dieselbe Grenze, die ADR-0010 für alle Playwright-Tests dieses Projekts
+festhält.
+
+---
+
+## ADR-0063: Aperture X steht unter Apache-2.0 — und eine Abhängigkeit steht es nicht
+
+**Status:** angenommen (Nutzerentscheidung, auf Vorlage von drei
+maschinell geprüften Befunden)
+
+### Kontext
+
+`README.md` nannte das Projekt seit Phase 1 „fully open sourced", es gab
+aber keine `LICENSE`-Datei. Urheberrechtlich heißt das: alle Rechte
+vorbehalten. Der Satz im README erlaubte niemandem, den Code
+weiterzugeben oder zu ändern. RELEASE.md führte das seit ADR-0061 als
+den einen offenen Punkt, der aus „open source gemeint" auch „open
+source wirksam" macht.
+
+### Was die Prüfung ergab — und warum sie nötig war
+
+Statt eine Lizenz zu wählen und die Abhängigkeiten für unkritisch zu
+halten, sind beide Bäume einmal wirklich gelesen worden (`Cargo.lock`
+gegen die Manifeste der entpackten Registry, `pnpm`-Speicher gegen die
+`package.json`). Drei Befunde, von denen keiner aus der handgepflegten
+`THIRD_PARTY.md` hervorging:
+
+**1. `Cargo.toml` behauptete seit jeher `license = "MIT"`.** Eine
+Angabe ohne Datei dahinter — sie erschien in jedem
+`cargo metadata`-Aufruf und in jedem daraus erzeugten
+Abhängigkeitsbericht, ohne dass sich jemand darauf hätte berufen
+können. Sie ist jetzt korrigiert, nicht gelöscht.
+
+**2. `lensfun` steht unter LGPL-3.0-or-later, nicht LGPL-2.1.** Das
+schließt **GPL-2.0-only als Projektlizenz aus** — die beiden sind
+unvereinbar. Die Wahl war also von Anfang an enger, als sie aussah.
+`lensfun` ist zudem keine optionale Abhängigkeit wie `gphoto2`, sondern
+fest in `apx-pipeline`.
+
+**3. GSAP ist nicht quelloffen.** Die Animationsbibliothek (seit Phase
+19, acht Dateien) steht unter GreenSocks eigener Standard-„no
+charge"-Lizenz: „Copyright (c) 2008-2026, GreenSock. All rights
+reserved." Kostenlos nutzbar und weitergebbar, auch kommerziell — aber
+keine OSI-anerkannte Open-Source-Lizenz, und nicht unter Apache-2.0
+unterlizenzierbar. GSAP wird ins Anwendungsbündel kompiliert, ist also
+Teil jeder Weitergabe. `THIRD_PARTY.md`s bisheriger Eintrag beschrieb
+die Lizenz als „100 % kostenlos … kommerzielle Nutzung ausdrücklich
+erlaubt" — alles zutreffend, aber die entscheidende Eigenschaft fehlte.
+
+### Entscheidungen
+
+**1. Apache-2.0 für Aperture X' eigenen Code.** Gegenüber MIT die
+ausdrückliche Patentlizenz (§3) — eine Bildverarbeitungsanwendung ist
+die Art Software, bei der Patentfragen auftauchen können, und MIT
+schweigt dazu. Verträglich mit allen vier LGPL-Abhängigkeiten. Der
+Lizenztext ist nicht abgetippt, sondern aus drei unabhängigen lokalen
+Kopien übernommen, die bis auf den SHA-256 übereinstimmen.
+
+**2. GSAP bleibt und wird ausdrücklich ausgewiesen.** Die Alternative
+wäre gewesen, es gegen eine quelloffene Bibliothek zu tauschen — ein
+eigener Arbeitsblock über acht Dateien plus erneute visuelle Prüfung
+der Phase-19/20-Animationen. Dagegen sprach nichts Rechtliches: GSAPs
+Lizenz erlaubt genau diese Weitergabe. Dafür sprach, dass ein
+stillschweigendes Mitlaufen unter der eigenen Lizenz die schlechtere
+Variante gewesen wäre. Also: `NOTICE`, `THIRD_PARTY.md` und `README.md`
+benennen es, und der README-Satz „fully open sourced" ist entsprechend
+präzisiert — ein Fork muss wissen, dass er für diese eine Komponente an
+GreenSocks Bedingungen gebunden ist.
+
+**3. ADR-0002 Punkt 2 erledigt sich.** Weil Aperture X quelloffen mit
+vollständigem Quelltext weitergegeben wird, ist die Austauschbarkeit,
+die LGPL-2.1 §6 bzw. LGPL-3.0 §4 verlangt, durch diese Weitergabe schon
+gegeben. `apx-raw` muss **nicht** als dynamisch nachladbare Bibliothek
+gebaut werden. Für eine geschlossene Weitergabe wäre der Punkt wieder
+offen.
+
+**4. Rechteinhaber: „Aperture X contributors".** Kein Klarname im
+Repository, und neue Beitragende sind ohne weitere Änderung abgedeckt.
+
+### Was diese Entscheidung dauerhaft hält
+
+Eine handgepflegte `THIRD_PARTY.md` hat genau den Fehler erzeugt, der
+oben unter Punkt 3 steht. Deshalb zusätzlich:
+
+- `tools/license-audit.py` liest die echten Manifeste und schreibt
+  `licenses/rust.tsv` (952 Einträge) und `licenses/npm.tsv` (170).
+  Plattformgebundene Crates, die auf Linux nie geholt werden
+  (`winreg`, `system-configuration`, `wasi`), sind dafür eigens über
+  `cargo fetch --target …` nachgeladen worden — sonst hätte die
+  Momentaufnahme vier ungeprüfte Löcher gehabt und der Test hätte in
+  falscher Sicherheit gewiegt.
+- Zwei Tests in `crates/apx-app/tests/bundle_config.rs`: einer verlangt
+  vollständige Abdeckung von `Cargo.lock` durch die Momentaufnahme, der
+  andere prüft jede erfasste Lizenz gegen eine Liste unbedenklicher plus
+  die fünf benannten Ausnahmen.
+
+**Zwei eigene Fehler, die diese Tests beim ersten Lauf gefunden haben**
+— beide festgehalten, weil sie die Art Fehler sind, die sonst als
+grüner Test durchgehen:
+
+- Der erste Entwurf des Wächters verglich Crate-**Namen** gegen eine
+  Sperrliste (`"libgphoto2" | "gtk" | …`). Das sah aus wie eine Prüfung,
+  war aber keine: ein Crate-Name sagt nichts über seine Lizenz, und die
+  Liste hätte auf crates.io praktisch nie angeschlagen. Ersetzt durch
+  den Weg über die Momentaufnahme.
+- Die SPDX-Auswertung behandelte `AND` wie `OR`. Das ist genau in die
+  falsche Richtung falsch: `Unbedenklich AND GPL` hätte bestanden.
+  Aufgefallen an `brotli` (`BSD-3-Clause AND MIT`), das der Test
+  zurecht bemängelte, und danach richtig implementiert — `OR` braucht
+  einen unbedenklichen Zweig, `AND` alle.
+
+### Ergebnis der Prüfung
+
+Außer den vier LGPL-Crates (`rawler`, `lensfun`, `gphoto2`,
+`libgphoto2_sys`) und `gsap` trägt keine der 1.122 Abhängigkeiten eine
+Auflage, die über Namensnennung hinausgeht. Kein GPL ohne „L"
+irgendwo im Baum — weder als Pflicht noch als Wahlmöglichkeit.
+
+---
+
+## ADR-0064: Phase 31 — Layout, Regler, und wie oft „fehlt" in Wahrheit „findet niemand"
+
+**Status:** angenommen (Phase 31)
+
+### Kontext
+
+Nutzerurteil: „besseres Design, mehr Funktionen". Statt zu raten, wurde
+die App zuerst wirklich angesehen — Playwright-Screenshot des
+Entwickeln-Modus bei 1680×1000.
+
+### Was der Blick zeigte
+
+1. **Fünf Spalten, und das Foto ist die schmalste.** Ordner, Presets,
+   Bild, Entwickeln, Masken teilen sich die Breite; auf das Foto
+   entfielen rund 370 px.
+2. **Das Analyse-Panel lag ÜBER dem Foto.** Verschieben und Einklappen
+   gab es seit Phase 18 — aber der Zustand beim Öffnen war „Panel
+   verdeckt das Bild".
+3. **Der KI-Preset-Generator füllte die Preset-Palette** mit acht
+   Bedienelementen, direkt unter dem Satz „Keine Presets in diesem
+   Ordner". Das Seltene nahm den Platz, das Wichtige stand als
+   Leermeldung darüber.
+4. **Regler brauchten zwei Zeilen à 42 px.** Bei rund vierzig Reglern
+   ist das der Grund, warum man schon für die Grundeinstellungen
+   scrollen muss.
+
+### Entscheidungen
+
+**1. Die Analyse dockt an, statt zu schweben** — als `PaletteFrame`, mit
+Breite-Ziehen, Einklappen und Persistenz wie jede andere Palette. Der
+Viewer misst sich an seinem eigenen `<main>`, deshalb steht die Analyse
+als Geschwister daneben: die Restbreite ist dann automatisch die, mit
+der das Bild rechnet, ohne eine Zeile Einpass-Mathematik anzufassen.
+
+**2. Ein Regler, eine Zeile.** Beschriftung | Regler | Zahl
+nebeneinander, rund 22 px. Am Screenshot nachgemessen: die dreizehn
+Regler von Weißabgleich und Grundeinstellungen brauchen 312 px statt
+546 px — der Kurven-Editor ist dadurch ohne Scrollen sichtbar. Die
+Beschriftung wird abgeschnitten statt umzubrechen; ein Umbruch machte
+die Zeile wieder hoch und die Änderung damit zunichte.
+
+**3. Sichthilfen gehören nicht ins EDL.** Fokus-Peaking und Farbpalette
+rechnen im Frontend auf dem fertig entwickelten Vorschaubild, nach dem
+Muster des Clipping-Overlays. Im EDL würden sie exportiert und in
+Presets weitergereicht — beides will niemand.
+
+**4. Erweiterungen am Bild sind rückwärtskompatibel zu BELEGEN, nicht zu
+behaupten.** Das mitteltonbetonte Korn kam als neues Feld mit
+Neutralwert 0 dazu, und ein Test vergleicht das Ergebnis bit-genau gegen
+die von Hand nachgebaute alte Formel — dieselbe Disziplin wie bei der
+Bokeh-Erweiterung in Phase 28.
+
+### Der Befund, der die Phase am meisten geprägt hat
+
+**Zweimal von zehn Schritten war die geplante Funktion bereits da.**
+
+- *Auto-Horizont*: `apx_ai::upright` macht seit Phase 13 Schritt 4 genau
+  das (Canny + Hough), samt Tauri-Command und Tests. Es lag als Eintrag
+  „Level" in einer Klappliste „Perspektive/Upright" im
+  Objektivkorrekturen-Feldsatz unter der Registerkarte „Details", plus
+  ein zweiter Klick auf „Automatisch erkennen".
+- *Vergleichsmodus*: existiert seit Phase 9 mit neun Fotos und
+  gemeinsamem Zoom. Was fehlte, war der Sichtungs-Ablauf — die Ansicht
+  konnte gar nichts mit der Tastatur.
+
+In beiden Fällen wurde **nicht neu gebaut**, sondern das Vorhandene
+erreichbar gemacht: ein Kommando-Register-Eintrag unter dem
+gebräuchlichen Namen, bzw. Tastaturbedienung und „aus dem Vergleich
+nehmen". Das ist die eigentliche Lehre dieser Phase: bei einer App
+dieser Größe ist „fehlt" oft „findet niemand", und der Unterschied
+zeigt sich nur, wenn man vor dem Bauen nachsieht.
+
+### Drei eigene Fehler, die nur durch reales Hinsehen auffielen
+
+**1. Wechselnder Wurzelknoten.** Der erste Entwurf der Andockung gab
+`viewerMain` direkt zurück, solange keine Analyse gebraucht wurde — und
+wechselte damit den Wurzelknoten zwischen `<main>` und `<div>`, sobald
+das Entwickeln-Bild eintraf. React reconciliert nach Position UND
+Elementtyp: der ganze Viewer samt Canvas wurde neu eingehängt, der
+ResizeObserver begann wieder bei 0×0, „Einpassen" fiel auf 100 % statt
+10 % — **das Bild war weg**. Kompiliert hat das einwandfrei.
+
+**2. Die neue Spalte drückte den Viewer auf null Breite.** In einem
+1280-px-Fenster sind alle Paletten `shrink-0`, der Viewer ist das
+einzige Element, das nachgibt. Deshalb jetzt eine Mindestbreite und eine
+Untergrenze fürs Andocken (ab 1500 px Fensterbreite).
+
+**3. Ein Listener, der sich selbst abhängte.** Die Tastaturbedienung der
+Vergleichsansicht hatte `[photos, cursor, …]` in der
+Abhängigkeitsliste; `photos` ist bei jedem Rendern ein neues Array. Bei
+den **Pfeiltasten** ändert der App-weite Handler die Auswahl, React
+rendert synchron neu — und der Listener wurde mitten in der laufenden
+Ereignis-Auslieferung entfernt und neu gehängt. Das DOM ruft einen so
+entfernten Listener nicht mehr auf. Ergebnis: Pfeiltasten taten nichts,
+`Entf` (löst kein Neurendern aus) funktionierte einwandfrei. Diese
+Teil-Funktion ist das Tückische — ein Test mit `Entf` allein wäre grün
+gewesen. Gefunden durch gezieltes Messen im Browser (welche Taste
+erreicht den Handler überhaupt?), nicht durch Raten.
+
+### Bekannte Grenze
+
+Auch nach Schritt 1 bleiben es fünf Spalten. Die strukturell richtige
+Antwort wäre, im Entwickeln-Modus Ordner- und Preset-Palette zu EINER
+linken Spalte zusammenzulegen, wie Lightroom es tut. Das ist ein eigener
+Umbau und wurde hier bewusst nicht nebenbei mitgemacht; die Paletten
+sind einzeln einklappbar, und der Fokus-Modus (Phase 26) blendet sie
+gesammelt aus.
+
+## ADR-0065: Phase 32 — zehn Funktionen, die etwas verändern
+
+**Kontext.** Nutzerwunsch nach Phase 31: zehn weitere Funktionen, jede
+mit echtem Umfang und wirklich neuen Bedienelementen — nicht zehn
+Regler mehr in einem bestehenden Panel. Die erste Liste enthielt drei
+Punkte, die es längst gab (Auto-Horizont, Vergleichsansicht,
+Kompositionsraster); aufgefallen ist das erst, als die Suche nicht nach
+den deutschen Beschriftungen, sondern nach den englischen Bezeichnern im
+Code lief. Diese drei wurden ausgetauscht bzw. auf das ausgebaut, was
+tatsächlich fehlte.
+
+**Die zehn Funktionen und ihre wesentliche Entscheidung.**
+
+1. **Kompositionsraster** (F1): die Raster gab es, aber Spirale und
+   Diagonalen lagen fest in einer Ecke. Neu sind echte SVG-Bögen für die
+   goldene Spirale mit alternierenden φ-Schnitten und eine Dreh-/
+   Spiegel-Steuerung. Der Test, der die Breite monoton fallen sah, hatte
+   die falsche Invariante — bei alternierenden Schnittrichtungen fällt
+   die *Fläche*.
+2. **Histogramm zum Ziehen** (F2): fünf Zonen, **nicht** gleich breit.
+   Ein gleichmäßiges Fünftel gäbe „Weiß" so viel Fläche wie der
+   Belichtung, obwohl der Weißpunkt nur die obersten Werte betrifft.
+3. **Kalenderansicht** (F3): gruppiert nach dem **lokalen** Kalendertag
+   (UTC schöbe eine mitteleuropäische Abendaufnahme auf den Folgetag);
+   Fotos ohne Aufnahmedatum werden benannt statt geraten; leere Monate
+   bleiben sichtbar, weil die Pause die Information ist.
+4. **Stapel-Umbenennung** (F4): Vorschau und Anwenden benutzen
+   **denselben** Rust-Planer. Zweiphasiges Umbenennen über
+   Zwischennamen, sonst scheitert jeder Ringtausch. Musterfehler
+   blockieren den ganzen Stapel, eine virtuelle Kopie wird nur
+   übersprungen — Fehler *im Muster* gegen Eigenschaft *eines Fotos*.
+5. **Ausrüstung & Belichtung** (F5): Klassengrenzen nach Objektiv- und
+   Blendenstufen statt gleichmäßig; fehlende EXIF-Werte bekommen einen
+   eigenen Balken „keine Angabe"; Brennweiten werden **nicht** auf
+   Kleinbild umgerechnet (der Crop-Faktor wäre geraten).
+6. **Notizen am Foto** (F6): normierte Koordinaten aufs **unbeschnittene
+   Original** — anders als `face_detections`, das Pixel einer
+   Vorschaustufe speichert. Liegt eine Notiz außerhalb des Zuschnitts,
+   wird sie nicht an den Rand geklebt, sondern gezählt und benannt.
+7. **Serien-Erkennung** (F7): unterscheidet Reihenaufnahme und
+   Belichtungsreihe über EV bei ISO 100. Ohne die ISO-Normierung sähe
+   eine ISO-Belichtungsreihe wie eine Reihenaufnahme aus. Fokusreihen
+   und Panoramen werden ausdrücklich **nicht** erkannt — sie sind in den
+   EXIF-Daten von einer Reihenaufnahme nicht zu unterscheiden.
+8. **Rahmen und Passepartout** (F8): der Rahmen vergrößert die
+   Bildfläche **nicht**, er wird hineingezeichnet. Eine wachsende
+   Leinwand würde jede Größenangabe im Export, jedes Zuschnitt-Rechteck
+   und jedes Overlay verschieben. Die Stufe läuft als letzte, nach
+   `geometry` — und deshalb CPU-only: dort liegen die Daten als RGBA8
+   auf der CPU, ein Compute-Dispatch fürs Füllen von vier Rechtecken
+   würde mehr Zeit mit Datentransfer verbringen als mit Rechnen.
+9. **Sammlungs-Board** (F9): Ziehen verschiebt, es kopiert nicht —
+   „Auswahl" und „Aussortiert" schließen sich aus. Beim Verschieben erst
+   hinzufügen, dann entfernen: bricht es dazwischen ab, ist das Foto in
+   beiden Sammlungen statt in keiner.
+10. **Export-Vorschau** (F10): eine Schätzung mit ausgewiesener Spanne
+    statt einer Zahl, die Genauigkeit vortäuscht. Für unkomprimiertes
+    TIFF ist die Rechnung exakt und wird auch so benannt. Eine Messung
+    wäre der ganze Export, nur eben zweimal.
+
+**Rückwärtskompatibilität.** Zwei neue EDL-Felder (`grain_midtone_bias`
+war Phase 31, `frame` ist F8) und eine neue Migration (0013,
+`photo_notes`). Wie seit Phase 28 gilt: bewiesen, nicht behauptet — ein
+Test entfernt das Feld aus einem serialisierten `EdlV4` und prüft den
+Neutralwert, ein zweiter prüft, dass ein neutraler Rahmen das Bild
+bit-für-bit unverändert lässt. Bei `frame` kam ein dritter Punkt dazu:
+`mat_color` bekommt ausdrücklich Weiß als Default, nicht das
+`[0.0, 0.0, 0.0]`, das ein `f32`-Array von sich aus liefert.
+
+**Was bewusst nicht gebaut wurde.** Ein Datumsfilter im Backend (F3
+füllt stattdessen die vorhandene Mehrfachauswahl), ein Objektivfilter
+(F5 macht Objektive deshalb bewusst nicht klickbar), eine Fokusreihen-
+Erkennung (F7, siehe oben) und ein WGSL-Zwilling für den Rahmen (F8).
+Jede dieser Lücken steht an ihrer Stelle im Code, statt durch ein
+Bedienelement überdeckt zu werden, das nichts tut.

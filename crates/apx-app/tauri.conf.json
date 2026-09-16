@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Aperture X",
-  "version": "0.1.0",
   "identifier": "dev.aperturex.desktop",
   "build": {
     "beforeDevCommand": "pnpm --dir ../../frontend dev",
@@ -25,13 +24,62 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "deb",
+      "appimage",
+      "app",
+      "dmg",
+      "nsis"
+    ],
+    "publisher": "Aperture X",
+    "homepage": "https://github.com/gbot6272-oss/room-of-flash",
+    "copyright": "© 2026 Aperture X contributors",
+    "license": "Apache-2.0",
+    "licenseFile": "../../LICENSE",
+    "category": "Photography",
+    "shortDescription": "RAW-Fotoeditor mit nicht-destruktiver Bearbeitung",
+    "longDescription": "Aperture X ist ein nicht-destruktiver RAW-Foto- und Videoeditor: Katalog, Entwickeln-Modul mit Masken und KI-Werkzeugen, Filter-/LUT-Bibliothek, Export und Druck.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "../../THIRD_PARTY.md": "THIRD_PARTY.md",
+      "../../LICENSE": "LICENSE",
+      "../../NOTICE": "NOTICE"
+    },
+    "linux": {
+      "deb": {
+        "section": "graphics",
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "librsvg2-2"
+        ],
+        "recommends": [
+          "ffmpeg",
+          "libayatana-appindicator3-1"
+        ]
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "hardenedRuntime": true
+    },
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": [
+          "German",
+          "English"
+        ],
+        "displayLanguageSelector": true
+      }
+    }
   }
 }

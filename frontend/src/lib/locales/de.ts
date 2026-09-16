@@ -9,6 +9,8 @@ export const de = {
   "developPanel.tab.color": "Farbe",
   "developPanel.tab.details": "Details",
   "developPanel.tab.creative": "Kreativ",
+  "developPanel.tab.lightOptics": "Optik",
+  "developPanel.tab.imageTools": "Am Bild",
   "developPanel.tab.history": "Verlauf & Werkzeuge",
   "developPanel.tabs.label": "Entwickeln-Bereiche",
   "masksPanel.tabs.label": "Masken-Bereiche",
@@ -22,6 +24,8 @@ export const de = {
   "header.viewOverview": "Übersicht",
   "header.viewMap": "Karte",
   "header.viewPeople": "Personen",
+  "header.viewCalendar": "Kalender",
+  "header.viewBoard": "Sammlungs-Board",
   "header.viewInfo": "Info",
   "header.viewDevelop": "Entwickeln",
 
@@ -35,6 +39,7 @@ export const de = {
   "header.group.templates": "Vorlagen",
   "header.templates": "Vorlagen…",
   "header.organize": "Organisieren…",
+  "header.batchRename": "Stapel-Umbenennung…",
   "header.batchConsole": "Stapelverarbeitung…",
   "header.metadata": "Metadaten…",
   "header.group.advanced": "Fortgeschritten",
@@ -50,6 +55,8 @@ export const de = {
   "header.secondaryDisplay": "Zweites Display…",
   "header.secondaryDisplayTitle": "Aktuelles Foto in einem zweiten Fenster anzeigen",
   "header.stats": "Statistik…",
+  "header.gearStats": "Ausrüstung & Belichtung…",
+  "header.series": "Serien erkennen…",
   "header.catalog": "Katalog…",
   "header.settings": "Einstellungen…",
   "header.settingsTitle": "Theme, Sprache, UI-Skalierung, Barrierefreiheit (Phase 10)",
@@ -65,6 +72,11 @@ export const de = {
   // commandRegistry.ts — Kategorie- und KI-Status-Beschriftungen für das
   // Overflow-Menü und die Befehlspalette (Phase 18 Schritt 3).
   "commands.category.ai": "KI-Funktionen",
+  "commands.focusMode.on": "Fokus-Modus: Paletten ausblenden",
+  "commands.focusMode.off": "Fokus-Modus beenden: Paletten einblenden",
+  "commands.lightsOut.on": "Lichter aus: Umgebung dimmen",
+  "commands.lightsOut.darker": "Lichter aus: ganz abdunkeln",
+  "commands.lightsOut.off": "Lichter an: Umgebung zurückholen",
   "commands.onboarding": "Erste Schritte anzeigen",
   "commands.cheatsheet": "Tastenkürzel-Übersicht anzeigen",
   "commands.ai.inpaint": "KI-Ausfüllen",
@@ -147,6 +159,9 @@ export const de = {
   "onboarding.tour.next": "Weiter",
   "onboarding.tour.finish": "Fertig",
   "onboarding.tour.stepLabel": "Schritt {current} von {total}",
+
+  // GlobalBusyIndicator.tsx (Phase 23, ADR-0051)
+  "busyIndicator.label": "Wird verarbeitet…",
 
   // KeybindingsCheatsheet.tsx
   "cheatsheet.title": "Tastenkürzel",
@@ -388,6 +403,7 @@ export const de = {
   "templatesDialog.kindWeb": "Web",
   "templatesDialog.kindWorkflow": "Workflow",
   "templatesDialog.kindFilter": "Filter",
+  "templatesDialog.kindRename": "Umbenennungsmuster",
   "templatesDialog.noTemplates": "Keine gespeicherten Vorlagen",
   "templatesDialog.run": "Ausführen",
   "templatesDialog.export": "Exportieren",

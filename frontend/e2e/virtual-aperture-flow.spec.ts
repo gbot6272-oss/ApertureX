@@ -75,7 +75,18 @@ test("Virtuelle Blende: Fokuspunkt per Klick setzen, Tiefenkarte berechnen und d
     .toBe(true);
   const afterDepth = await lastCommit(page);
   expect(afterDepth.virtual_aperture.depth_map.bitmap_width).toBe(4);
-  expect(afterDepth.virtual_aperture.depth_map.depth).toBe("gICAgICAgICAgICAgICAgA==");
+  // `depth` ist ein Byte-Array, kein Base64-String: Rust liest das Feld als
+  // schlichtes `Vec<u8>` ohne Base64-Deserialisierer. Bis Phase 27 hat der
+  // Store hier den rohen Base64-String abgelegt — diese Zusicherung hat genau
+  // dieses kaputte Verhalten festgeschrieben, weshalb der Fehler seit Phase 14
+  // unbemerkt blieb (die e2e-Tests parsen die EDL nie durch Rust). Siehe
+  // ADR-0057. Erwartet wird jetzt der Vertrag, den Rust wirklich lesen kann:
+  // 16 dekodierte Bytes mit Wert 128.
+  expect(Array.isArray(afterDepth.virtual_aperture.depth_map.depth)).toBe(true);
+  expect(afterDepth.virtual_aperture.depth_map.depth).toHaveLength(16);
+  expect(
+    (afterDepth.virtual_aperture.depth_map.depth as number[]).every((byte) => byte === 128),
+  ).toBe(true);
 
   const amountInput = page.getByRole("spinbutton", { name: "Virtuelle Blende: Betrag (Zahlenwert)" });
   await amountInput.fill("60");

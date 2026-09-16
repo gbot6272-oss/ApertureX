@@ -7,6 +7,7 @@
 
 #![deny(clippy::unwrap_used)]
 
+mod batch_rename;
 mod commands;
 mod import;
 mod protocol;
@@ -296,6 +297,7 @@ fn main() {
             active_import,
             pipeline,
             tile_cache: Arc::new(apx_pipeline::tile_cache::TileCache::new()),
+            lut_table_cache: Arc::new(apx_pipeline::lut_table_cache::LutTableCache::new()),
             export_queue,
             tether: Arc::new(Mutex::new(None)),
         })
@@ -319,6 +321,7 @@ fn main() {
             commands::import_dcp_profile,
             commands::import_lut_cube_file,
             commands::list_builtin_lut_filters,
+            commands::register_lut_filter_table,
             commands::trim_video,
             commands::detect_video_scene_changes,
             commands::denoise_video_audio,
@@ -327,6 +330,7 @@ fn main() {
             commands::download_selfie_segmentation_model,
             commands::clear_selfie_segmentation_model_path,
             commands::remove_video_background,
+            commands::stabilize_video,
             commands::render_video_timeline,
             commands::download_whisper_model,
             commands::clear_whisper_model_path,
@@ -361,6 +365,7 @@ fn main() {
             commands::import_xmp_sidecar_from_file,
             commands::get_photo,
             commands::catalog_statistics,
+            commands::gear_statistics,
             commands::get_active_catalog_info,
             commands::list_recent_catalogs,
             commands::create_new_catalog,
@@ -403,6 +408,14 @@ fn main() {
             commands::list_collection_folders,
             commands::create_virtual_copy,
             commands::list_virtual_copies,
+            commands::detect_photo_series,
+            commands::create_photo_note,
+            commands::list_photo_notes,
+            commands::update_photo_note,
+            commands::delete_photo_note,
+            commands::photo_note_open_counts,
+            commands::preview_batch_rename,
+            commands::apply_batch_rename,
             commands::create_stack,
             commands::delete_stack,
             commands::set_stack_cover,
@@ -439,6 +452,10 @@ fn main() {
             commands::analyze_style_consistency,
             commands::extract_color_palette,
             commands::generate_ai_mask,
+            commands::segment_photo_subject,
+            commands::compute_reference_color_stats,
+            commands::segment_photo_sky,
+            commands::compute_reference_tone_stats,
             commands::suggest_repair_source,
             commands::detect_sensor_spots,
             commands::get_ai_settings,

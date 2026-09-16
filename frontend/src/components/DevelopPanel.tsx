@@ -57,6 +57,9 @@ import { selectActivePhotos, useAppStore } from "../store";
 import { ColorHarmonyWheel } from "./ColorHarmonyWheel";
 import { ColorWheel } from "./ColorWheel";
 import { CurveEditor } from "./CurveEditor";
+import { CreativePanel } from "./CreativePanel";
+import { LightOpticsPanel } from "./LightOpticsPanel";
+import { ImageToolsPanel } from "./ImageToolsPanel";
 import { DevelopSlider } from "./DevelopSlider";
 import { LensCalibrationDialog } from "./LensCalibrationDialog";
 import { CanvasExtendDialog } from "./CanvasExtendDialog";
@@ -65,10 +68,12 @@ import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import { PaletteFrame } from "./PaletteFrame";
 import { SavePresetDialog } from "./SavePresetDialog";
 import { LutFilterPanel } from "./LutFilterPanel";
+import { FramePanel } from "./FramePanel";
 import { SkinSmoothingPanel } from "./SkinSmoothingPanel";
 import { SkyReplacePanel } from "./SkyReplacePanel";
 import { StyleTransferPanel } from "./StyleTransferPanel";
 import { TabBar, type TabItem } from "./ui/Tabs";
+import { InlineSpinner } from "./ui/DotLoader";
 import { VirtualAperturePanel } from "./VirtualAperturePanel";
 
 // ---- Reparatur (Klonen/Reparieren) — Phase 4 Schritt 12 --------------------
@@ -131,6 +136,8 @@ const STAGE_ANCHOR_IDS: Record<keyof StageEnabled, string> = {
   lut_filter: "stage-lut_filter",
   liquify: "stage-liquify",
   geometry: "stage-geometry",
+  // Rahmen/Passepartout (Phase 32 F8) — eigener Abschnitt im Kreativ-Tab.
+  frame: "stage-frame",
 };
 
 function openStageAnchor(key: keyof StageEnabled): void {
@@ -150,7 +157,7 @@ function openStageAnchor(key: keyof StageEnabled): void {
  * ist, sonst wäre "Öffnen" ein stiller No-Op. `masks` fehlt hier bewusst:
  * der Anker liegt in `MasksPanel.tsx`, einem eigenen, nicht getabten
  * Panel. */
-const STAGE_TAB_IDS: Partial<Record<keyof StageEnabled, "light" | "color" | "details" | "creative" | "history">> = {
+const STAGE_TAB_IDS: Partial<Record<keyof StageEnabled, DevelopTabId>> = {
   repair: "creative",
   calibration: "light",
   basic: "light",
@@ -214,7 +221,14 @@ const WHITE_BALANCE_KEYS = new Set(["temp_shift_kelvin", "tint_shift"]);
  * geteilt. `"light"` ist der Standard, damit die
  * Grundeinstellungen-Regler wie bisher ohne Klick sichtbar sind.
  */
-type DevelopTabId = "light" | "color" | "details" | "creative" | "history";
+type DevelopTabId =
+  | "light"
+  | "color"
+  | "details"
+  | "creative"
+  | "lightOptics"
+  | "imageTools"
+  | "history";
 
 /** Die vier numerischen Objektivkorrektur-Regler (Phase 4 Schritt 9,
  * ohne `manual_transform`, `profile_id`, `auto_ca`, `upright_mode`,
@@ -482,6 +496,8 @@ export function DevelopPanel() {
     { id: "color", label: t("developPanel.tab.color") },
     { id: "details", label: t("developPanel.tab.details") },
     { id: "creative", label: t("developPanel.tab.creative") },
+    { id: "lightOptics", label: t("developPanel.tab.lightOptics") },
+    { id: "imageTools", label: t("developPanel.tab.imageTools") },
     { id: "history", label: t("developPanel.tab.history") },
   ];
 
@@ -1543,6 +1559,13 @@ export function DevelopPanel() {
 
           {activeTab === "creative" && (
             <>
+              {/* Die zehn Kreativ-Werkzeuge aus Phase 27 stehen bewusst
+                  GANZ OBEN in dieser Registerkarte: sie haben von allem
+                  hier den groessten Bildeffekt, und der Nutzer soll sie
+                  nicht erst hinter acht aufklappbaren Abschnitten
+                  suchen muessen (siehe DECISIONS.md ADR-0057). */}
+              <CreativePanel />
+
               <details id="stage-repair" open className="apx-collapsible flex flex-col gap-3" aria-label="Reparatur (Klonen/Reparieren)">
                 <summary className="mb-1 text-xs font-medium text-text-secondary">Reparatur (Klonen/Reparieren)</summary>
 
@@ -1592,7 +1615,12 @@ export function DevelopPanel() {
                     {contentAwareMoveRect
                       ? "Auswahl an die Zielposition ziehen und loslassen."
                       : "Rechteck um das zu verschiebende Objekt aufziehen."}
-                    {contentAwareMoveLoading && " Berechnet…"}
+                    {contentAwareMoveLoading && (
+                      <>
+                        {" "}
+                        <InlineSpinner className="mr-1 inline-grid" /> Berechnet…
+                      </>
+                    )}
                   </p>
                 )}
 
@@ -1732,7 +1760,13 @@ export function DevelopPanel() {
                               onClick={() => void runAiInpaintForStroke(index)}
                               className="text-accent underline disabled:cursor-not-allowed disabled:opacity-40"
                             >
-                              {aiInpaintLoadingIndex === index ? "Berechnet…" : "Anwenden"}
+                              {aiInpaintLoadingIndex === index ? (
+                                <>
+                                  <InlineSpinner className="mr-1" /> Berechnet…
+                                </>
+                              ) : (
+                                "Anwenden"
+                              )}
                             </button>
                           )}
                           <button type="button" onClick={() => removeRepairStroke(index)} className="text-danger underline">
@@ -1755,7 +1789,13 @@ export function DevelopPanel() {
                     onClick={() => void detectSensorSpotsForCurrentPhoto(0.5)}
                     className="rounded border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-panel disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {sensorSpotsLoading ? "Suche…" : "Sensorflecken suchen"}
+                    {sensorSpotsLoading ? (
+                      <>
+                        <InlineSpinner className="mr-1" /> Suche…
+                      </>
+                    ) : (
+                      "Sensorflecken suchen"
+                    )}
                   </button>
                   {sensorSpotCandidates.length > 0 && (
                     <button type="button" onClick={clearSensorSpots} className="text-xs text-text-muted hover:text-danger">
@@ -1872,6 +1912,14 @@ export function DevelopPanel() {
               <details id="stage-lut_filter" open className="apx-collapsible flex flex-col gap-2" aria-label="Filter">
                 <summary className="mb-1 text-xs font-medium text-text-secondary">Filter</summary>
                 <LutFilterPanel />
+              </details>
+
+              {/* Rahmen und Passepartout (Phase 32 F8) — letzte Stufe der
+                  Pipeline, nach dem Zuschnitt (siehe `stages::frame`s
+                  Moduldoku). */}
+              <details id="stage-frame" open className="apx-collapsible flex flex-col gap-2" aria-label="Rahmen">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Rahmen</summary>
+                <FramePanel />
               </details>
 
               <details id="stage-composite" open className="apx-collapsible flex flex-col gap-2" aria-label="Compositing">
@@ -2011,6 +2059,15 @@ export function DevelopPanel() {
             </>
           )}
 
+          {/* Licht & Optik (Phase 28, siehe DECISIONS.md ADR-0058) —
+              eigene Registerkarte statt Anbau an "Licht": die zwoelf
+              haetten die bestehende Karte verdoppelt. */}
+          {activeTab === "lightOptics" && <LightOpticsPanel />}
+
+          {/* Am Bild (Phase 30, siehe DECISIONS.md ADR-0060) — die
+              Kachel ist hier nur der Schalter, bedient wird im Foto. */}
+          {activeTab === "imageTools" && <ImageToolsPanel />}
+
           {activeTab === "history" && (
             <>
               <details open className="apx-collapsible flex flex-col gap-2" aria-label="Entrauschung &amp; Hochskalierung">
@@ -2027,7 +2084,13 @@ export function DevelopPanel() {
                     onClick={() => selectedPhotoId && void runDenoise(selectedPhotoId)}
                     className="flex-1 basis-[45%] rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {enhanceRunning === "denoise" ? "Entrauscht…" : "Entrauschen"}
+                    {enhanceRunning === "denoise" ? (
+                      <>
+                        <InlineSpinner className="mr-1" /> Entrauscht…
+                      </>
+                    ) : (
+                      "Entrauschen"
+                    )}
                   </button>
                   <button
                     type="button"
@@ -2035,7 +2098,13 @@ export function DevelopPanel() {
                     onClick={() => selectedPhotoId && void runUpscale(selectedPhotoId)}
                     className="flex-1 basis-[45%] rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {enhanceRunning === "upscale" ? "Skaliert…" : "2× hochskalieren"}
+                    {enhanceRunning === "upscale" ? (
+                      <>
+                        <InlineSpinner className="mr-1" /> Skaliert…
+                      </>
+                    ) : (
+                      "2× hochskalieren"
+                    )}
                   </button>
                 </div>
                 {enhanceStatus && <p className="text-xs text-text-muted">{enhanceStatus}</p>}
@@ -2054,7 +2123,13 @@ export function DevelopPanel() {
                   onClick={() => selectedPhotoId && void runConvertToDng(selectedPhotoId)}
                   className="rounded border border-border px-2 py-1 text-xs hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {enhanceRunning === "dng" ? "Konvertiert…" : "Als DNG konvertieren"}
+                  {enhanceRunning === "dng" ? (
+                    <>
+                      <InlineSpinner className="mr-1" /> Konvertiert…
+                    </>
+                  ) : (
+                    "Als DNG konvertieren"
+                  )}
                 </button>
               </details>
             </>

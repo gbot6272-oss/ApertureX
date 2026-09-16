@@ -120,8 +120,12 @@ test.describe("Drucken (Phase 8 Schritt 3)", () => {
     await openOverflowMenu(page);
     await page.getByRole("menuitem", { name: "Drucken…" }).click();
 
-    await page.getByLabel("Zoom").selectOption("cover");
-    await page.getByLabel("Farbraum (ICC)").selectOption("pro_photo_rgb");
+    // Auf den Druck-Dialog eingegrenzt: seit Phase 26 gibt es im Viewer
+    // dahinter eine eigene Zoom-Steuerung, "Zoom" ist global also nicht
+    // mehr eindeutig (der Test verliess sich vorher darauf).
+    const printDialog = page.getByRole("dialog");
+    await printDialog.getByLabel("Zoom").selectOption("cover");
+    await printDialog.getByLabel("Farbraum (ICC)").selectOption("pro_photo_rgb");
 
     await page.getByRole("button", { name: "Als JPEG speichern" }).click();
 

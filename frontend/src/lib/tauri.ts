@@ -410,6 +410,10 @@ export interface LutFilterDataDto {
   table: number[];
   domain_min: [number, number, number];
   domain_max: [number, number, number];
+  /** Inhalts-Hash (Phase 25, siehe `DECISIONS.md`, aktuelles ADR) —
+   * siehe `lib/edl.ts`s `LutFilterData.id`-Feld und
+   * `registerLutFilterTable`s Moduldoku. */
+  id: string;
 }
 
 /** Öffnet einen Datei-Dialog für eine `.cube`-3D-LUT-Datei und parst sie
@@ -427,6 +431,27 @@ export function importLutCubeFile(): Promise<LutFilterDataDto | null> {
  * neu anzufragen (siehe `store`s `loadBuiltinLutFilters`). */
 export function listBuiltinLutFilters(): Promise<LutFilterDataDto[]> {
   return invoke<LutFilterDataDto[]>("list_builtin_lut_filters");
+}
+
+/**
+ * Wärmt den serverseitigen `LutTableCache` für `id` vor (Phase 25, siehe
+ * `DECISIONS.md`, aktuelles ADR) — behebt den Bug, bei dem Filter/
+ * `.cube`-Importe das Bild nicht wirklich veränderten: die
+ * `develop/...`-Live-Vorschau-Route bekam bislang bei **jedem** Regler-
+ * Tick die komplette `table` (bei einem 17er-Raster über 300 KB JSON,
+ * bei einem importierten 33er-Raster über eine Megabyte) erneut im
+ * URL-Pfad übertragen, was nicht nur spürbar langsamer war, sondern bei
+ * großen Rastern die Anfrage scheitern ließ — sichtbar für Nutzer nur
+ * als "das Bild verändert sich nicht" (`useDevelopRender`s Fehlerpfad
+ * aktualisiert den zuletzt erfolgreich gerenderten Rahmen nicht).
+ *
+ * `store/index.ts`s `ensureLutFilterTableRegistered` ruft dies einmal
+ * pro `id` und Sitzung auf, **bevor** `lib/edl.ts`s
+ * `buildDevelopPreviewEdlJson` die `table` aus der Vorschau-Anfrage
+ * herausschneidet — danach reicht `id` allein, der Server löst
+ * serverseitig auf. */
+export function registerLutFilterTable(id: string, size: number, table: number[]): Promise<void> {
+  return invoke<void>("register_lut_filter_table", { id, size, table });
 }
 
 // ---- Video-Bearbeitung (Phase 16 Schritt 6) --------------------------------
@@ -507,6 +532,24 @@ export function clearSelfieSegmentationModelPath(): Promise<void> {
  * Videos spürbar dauern (Segmentierung läuft je Einzelbild). */
 export function removeVideoBackground(photoId: string, backgroundRgb: [number, number, number]): Promise<PhotoDto> {
   return invoke<PhotoDto>("remove_video_background", { photoId, backgroundRgb });
+}
+
+/** Stabilisiert ein Video (Phase 17 Schritt 9, siehe `DECISIONS.md`
+ * ADR-0062) und legt das Ergebnis als neues Katalog-Video daneben —
+ * nicht-destruktiv wie jeder andere Video-Bearbeitungs-Command.
+ *
+ * `smoothingRadius` ist die halbe Fensterbreite der Glättung in
+ * Einzelbildern (größer = ruhiger, gewollte Schwenks setzen träger ein),
+ * `cropZoom` der Hineinzoom, der die von der Korrektur freigelegten
+ * Ränder verdeckt. Braucht KEIN KI-Modell (anders als
+ * `removeVideoBackground`), kann aber spürbar dauern: das Video wird
+ * zweimal durchlaufen — einmal zum Messen, einmal zum Verzerren. */
+export function stabilizeVideo(
+  photoId: string,
+  smoothingRadius: number,
+  cropZoom: number,
+): Promise<PhotoDto> {
+  return invoke<PhotoDto>("stabilize_video", { photoId, smoothingRadius, cropZoom });
 }
 
 /** Ein Video innerhalb einer `listSimilarVideoGroups`-Gruppe —
@@ -838,6 +881,92 @@ export function createVirtualCopy(photoId: string): Promise<PhotoDto> {
 
 export function listVirtualCopies(photoId: string): Promise<PhotoDto[]> {
   return invoke<PhotoDto[]>("list_virtual_copies", { photoId });
+}
+
+// ---- Serien-/Belichtungsreihen-Erkennung (Phase 32 F7) ---------------------
+
+export type SeriesKind = "burst" | "exposure_bracket" | "mixed";
+
+export interface DetectedSeriesDto {
+  kind: SeriesKind;
+  photo_ids: string[];
+  span_seconds: number;
+  /** EV bei ISO 100 je Aufnahme, `null` wo die EXIF-Werte fehlen. */
+  ev_values: (number | null)[];
+  ev_spread: number | null;
+}
+
+export function detectPhotoSeries(folderId: string, maxGapSeconds: number): Promise<DetectedSeriesDto[]> {
+  return invoke<DetectedSeriesDto[]>("detect_photo_series", { folderId, maxGapSeconds });
+}
+
+// ---- Notizen am Foto (Phase 32 F6) -----------------------------------------
+
+/** Eine Notiz an einer Stelle im Bild. `x`/`y` sind normiert (0..1) und
+ * beziehen sich aufs **unbeschnittene** Original — siehe
+ * `lib/notePins.ts` für die Umrechnung auf den angezeigten Ausschnitt. */
+export interface PhotoNoteDto {
+  id: string;
+  photo_id: string;
+  x: number;
+  y: number;
+  body: string;
+  done: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export function createPhotoNote(photoId: string, x: number, y: number, body: string): Promise<PhotoNoteDto> {
+  return invoke<PhotoNoteDto>("create_photo_note", { photoId, x, y, body });
+}
+
+export function listPhotoNotes(photoId: string): Promise<PhotoNoteDto[]> {
+  return invoke<PhotoNoteDto[]>("list_photo_notes", { photoId });
+}
+
+/** Nicht übergebene Felder bleiben unverändert (`x`/`y` nur zusammen). */
+export function updatePhotoNote(
+  noteId: string,
+  patch: { body?: string; done?: boolean; x?: number; y?: number },
+): Promise<PhotoNoteDto> {
+  return invoke<PhotoNoteDto>("update_photo_note", { noteId, ...patch });
+}
+
+export function deletePhotoNote(noteId: string): Promise<void> {
+  return invoke<void>("delete_photo_note", { noteId });
+}
+
+export function photoNoteOpenCounts(): Promise<[string, number][]> {
+  return invoke<[string, number][]>("photo_note_open_counts");
+}
+
+// ---- Bibliothek: Stapel-Umbenennung (Phase 32 F4) --------------------------
+
+/** Status einer geplanten Umbenennung — Schlüssel aus
+ * `apx-app`s `batch_rename::RenameStatus`, hier übersetzt angezeigt. */
+export type RenamePlanStatus =
+  | "planned"
+  | "unchanged"
+  | "empty_name"
+  | "duplicate_in_batch"
+  | "collides_with_existing"
+  | "virtual_copy";
+
+export interface RenamePlanEntryDto {
+  photo_id: string;
+  current_filename: string;
+  new_filename: string;
+  status: RenamePlanStatus;
+}
+
+/** Zeigt, was eine Stapel-Umbenennung täte — ohne etwas zu ändern. */
+export function previewBatchRename(photoIds: string[], pattern: string, startSeq: number): Promise<RenamePlanEntryDto[]> {
+  return invoke<RenamePlanEntryDto[]>("preview_batch_rename", { photoIds, pattern, startSeq });
+}
+
+/** Führt die Umbenennung aus; liefert die umbenannten Fotos zurück. */
+export function applyBatchRename(photoIds: string[], pattern: string, startSeq: number): Promise<PhotoDto[]> {
+  return invoke<PhotoDto[]>("apply_batch_rename", { photoIds, pattern, startSeq });
 }
 
 // ---- Bibliothek: Stapel (Phase 9 Schritt 1) --------------------------------
@@ -1935,7 +2064,7 @@ export function setPhotoGps(photoId: string, lat: number | null, lon: number | n
 // jeweilige `*Options`-DTO als JSON (für Export-/Layout-Vorlagen)
 // beziehungsweise `{ presetId, exportOptions }` (für Workflow-Vorlagen,
 // siehe {@link WorkflowTemplatePayload}).
-export type TemplateKind = "export" | "print" | "book" | "slideshow" | "web" | "workflow" | "filter";
+export type TemplateKind = "export" | "print" | "book" | "slideshow" | "web" | "workflow" | "filter" | "rename";
 
 export interface TemplateDto {
   id: string;
@@ -1997,6 +2126,32 @@ export interface CatalogStatisticsDto {
 
 export function catalogStatistics(): Promise<CatalogStatisticsDto> {
   return invoke<CatalogStatisticsDto>("catalog_statistics");
+}
+
+/** Ein Balken einer Verteilung (Phase 32 F5). `missing` markiert den
+ * Sammelbalken „keine Angabe" — kein Messwert, sondern die ehrliche
+ * Lücke. */
+export interface DistributionBucketDto {
+  label: string;
+  count: number;
+  missing: boolean;
+}
+
+/** Ausrüstungs-/Belichtungs-Statistik (Phase 32 F5) — vollständige
+ * Kamera-/Objektivlisten (nicht auf acht gekürzt wie
+ * `CatalogStatisticsDto`) plus vier Verteilungen. */
+export interface GearStatisticsDto {
+  cameras: [string, number][];
+  lenses: [string, number][];
+  focal_lengths: DistributionBucketDto[];
+  apertures: DistributionBucketDto[];
+  isos: DistributionBucketDto[];
+  shutters: DistributionBucketDto[];
+  total: number;
+}
+
+export function gearStatistics(): Promise<GearStatisticsDto> {
+  return invoke<GearStatisticsDto>("gear_statistics");
 }
 
 export interface PreviewCacheStatsDto {
@@ -2215,4 +2370,54 @@ export function importFromCamera(
   presetName?: string,
 ): Promise<PhotoDto | null> {
   return invoke<PhotoDto | null>("import_from_camera", { folder, name, presetName: presetName ?? null });
+}
+
+// ---- Kreativ-Werkzeuge (Phase 27, siehe DECISIONS.md ADR-0057) -------------
+
+export interface SubjectMaskDto {
+  bitmapWidth: number;
+  bitmapHeight: number;
+  /** Base64-kodierte `0..=255`-Alphamaske (`255` = Motiv). */
+  alphaBase64: string;
+}
+
+/** Trennt Motiv und Hintergrund für die Hintergrundbehandlung der
+ * Kreativ-Stufe. Anders als Tiefenkarte/Stiltransfer braucht das **kein**
+ * heruntergeladenes Modell — klassische Saliency, läuft sofort. */
+export function segmentPhotoSubject(photoId: string): Promise<SubjectMaskDto> {
+  return invoke<SubjectMaskDto>("segment_photo_subject", { photoId });
+}
+
+export interface ColorStatsDto {
+  lMean: number;
+  lStd: number;
+  aMean: number;
+  aStd: number;
+  bMean: number;
+  bStd: number;
+}
+
+/** Liest die Farbstatistik eines Referenzfotos für den Farbabgleich —
+ * nur sechs Zahlen, kein zweites Bild im EDL. */
+export function computeReferenceColorStats(photoId: string): Promise<ColorStatsDto> {
+  return invoke<ColorStatsDto>("compute_reference_color_stats", { photoId });
+}
+
+// ---- Licht & Optik (Phase 28, siehe `DECISIONS.md` ADR-0058) --------------
+
+/** Trennt Himmel und Boden für „Himmel dramatisieren". Dieselbe Hülle
+ * wie `segmentPhotoSubject` und ebenfalls **ohne** Modell-Download. */
+export function segmentPhotoSky(photoId: string): Promise<SubjectMaskDto> {
+  return invoke<SubjectMaskDto>("segment_photo_sky", { photoId });
+}
+
+export interface ToneStatsDto {
+  /** 10 %, 20 %, …, 90 % der Luminanzverteilung. */
+  deciles: number[];
+}
+
+/** Liest die Tonwertverteilung eines Referenzfotos für den
+ * Tonwert-Angleich — neun Zahlen, kein zweites Bild im EDL. */
+export function computeReferenceToneStats(photoId: string): Promise<ToneStatsDto> {
+  return invoke<ToneStatsDto>("compute_reference_tone_stats", { photoId });
 }

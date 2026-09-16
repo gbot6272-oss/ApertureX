@@ -1,3 +1,4 @@
+import { CalendarDays, Grid2x2, Info, Map, Scan, SlidersHorizontal, Users } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { MENU_CATEGORIES, useCommandRegistry, type AiFeatureStatus, type CommandCategory } from "../lib/commandRegistry";
@@ -11,6 +12,9 @@ import { ImportDialog } from "./ImportDialog";
 import { PrintDialog } from "./PrintDialog";
 import { SlideshowDialog } from "./SlideshowDialog";
 import { VideoTimelineDialog } from "./VideoTimelineDialog";
+import { BatchRenameDialog } from "./BatchRenameDialog";
+import { GearStatsDialog } from "./GearStatsDialog";
+import { SeriesDialog } from "./SeriesDialog";
 import { TemplatesDialog } from "./TemplatesDialog";
 import { LibraryOrganizeDialog } from "./LibraryOrganizeDialog";
 import { BatchConsoleDialog } from "./BatchConsoleDialog";
@@ -68,6 +72,9 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
   const [importDialogSource, setImportDialogSource] = useState<string | null>(null);
   const [templatesDialogOpen, setTemplatesDialogOpen] = useState(false);
   const [organizeDialogOpen, setOrganizeDialogOpen] = useState(false);
+  const [batchRenameDialogOpen, setBatchRenameDialogOpen] = useState(false);
+  const [gearStatsDialogOpen, setGearStatsDialogOpen] = useState(false);
+  const [seriesDialogOpen, setSeriesDialogOpen] = useState(false);
   const [batchConsoleDialogOpen, setBatchConsoleDialogOpen] = useState(false);
   const [stackingDialogOpen, setStackingDialogOpen] = useState(false);
   const [scriptPluginDialogOpen, setScriptPluginDialogOpen] = useState(false);
@@ -117,6 +124,9 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
       case "organize":
         setOrganizeDialogOpen(true);
         break;
+      case "batch-rename":
+        setBatchRenameDialogOpen(true);
+        break;
       case "batch-console":
         setBatchConsoleDialogOpen(true);
         break;
@@ -137,6 +147,12 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
         break;
       case "stats":
         setStatsDialogOpen(true);
+        break;
+      case "gear-stats":
+        setGearStatsDialogOpen(true);
+        break;
+      case "series":
+        setSeriesDialogOpen(true);
         break;
       case "catalog":
         setCatalogDialogOpen(true);
@@ -183,15 +199,41 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
     // Einstellungen. Kein Knopf wurde entfernt oder hinter mehr als
     // einer zusätzlichen Ebene versteckt — nur die dauerhaft sichtbare
     // Knopfzahl sinkt drastisch.
-    <header className="apx-glass flex h-12 shrink-0 items-center gap-3 border-b border-[var(--glass-border)] px-4">
+    //
+    // Phase 25 Nachtrag III (siehe DECISIONS.md, aktuelles ADR): auf
+    // ausdrücklichen Nutzerwunsch ("Kopfzeile als Overlay über den
+    // Fotos") kein normales Flex-Zeilen-Element mehr, sondern eine
+    // schwebende, aus dem Dokumentfluss gelöste Überlagerung
+    // (`fixed inset-x-0 top-0`) — genau wie beim iOS Control Center
+    // liegt sie jetzt wirklich ÜBER dem Inhalt statt daneben, wodurch
+    // `backdrop-filter` echte Fotofarbe durchscheinen lassen kann statt
+    // nur der eigenen App-Hintergrundfarbe. `z-30` bewusst unter dem
+    // Overflow-Menü (`z-40`, siehe `ui/Menu.tsx`) und den
+    // Dialogen/Sheets (`z-50`), damit beide weiterhin über der
+    // Kopfzeile selbst erscheinen. Die Feinabstimmung, welche
+    // Geschwisterelemente diese neue 48px-Lücke kompensieren müssen
+    // (und welche bewusst NICHT, damit dort echte Fotofarbe
+    // durchscheint), sitzt in `App.tsx`, `FilterBar.tsx`,
+    // `ErrorBanner.tsx` und `PaletteFrame.tsx`.
+    <header className="apx-glass fixed inset-x-0 top-0 z-30 flex h-12 items-center gap-3 border-b border-[var(--glass-border)] px-4">
       <span className="shrink-0 font-semibold tracking-wide">Aperture X</span>
 
+      {/* Phase 25 Schritt 4 (siehe DECISIONS.md, aktuelles ADR):
+          einzige bewusst hervorgehobene Geste der Kopfzeile — Import
+          ist die häufigste Einstiegsaktion, sah aber bisher optisch
+          identisch zum daneben liegenden Such-Knopf aus (beide nur
+          `border-border bg-bg-panel`). Nutzt dieselbe Akzent-Tönung
+          wie "aktiv/ausgewählt"-Zustände anderswo in der App (z. B.
+          `ColorHarmonyWheel.tsx`s `border-accent bg-accent/10
+          text-accent`), statt eines neu erfundenen Vollton-Knopf-Stils
+          — konsistent mit der bestehenden Bildsprache, aber deutlich
+          von den umgebenden neutralen Knöpfen abgesetzt. */}
       <button
         type="button"
         data-tour="import"
         onClick={() => void handleImportClick()}
         disabled={importRunning}
-        className="shrink-0 rounded border border-border bg-bg-panel px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+        className="apx-btn-liquid apx-btn-liquid-active shrink-0 rounded border border-accent bg-accent/10 px-3 py-1 text-sm font-medium text-accent shadow-[var(--shadow-md)] transition-[background-color,box-shadow] duration-[var(--duration-fast)] hover:bg-accent/20 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
       >
         {t("header.importFolder")}
       </button>
@@ -228,7 +270,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
       )}
 
       {!importRunning && importResult && (
-        <span className="hidden shrink-0 truncate text-xs text-text-secondary lg:inline">
+        <span className="apx-notice-in hidden shrink-0 truncate text-xs text-text-secondary lg:inline">
           {importResult.cancelled ? "Import abgebrochen: " : "Import abgeschlossen: "}
           {importResult.imported} importiert · {importResult.skipped} übersprungen
           {importResult.errorCount > 0 ? ` · ${importResult.errorCount} Fehler` : ""}
@@ -241,10 +283,11 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           type="button"
           onClick={toggleCenterView}
           aria-pressed={centerView === "grid"}
-          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
-            centerView === "grid" ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+            centerView === "grid" ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
+          <Grid2x2 aria-hidden="true" className="size-3.5" />
           {t("header.viewGrid")}
         </button>
 
@@ -252,10 +295,11 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           type="button"
           onClick={() => setCenterView(centerView === "overview" ? "viewer" : "overview")}
           aria-pressed={centerView === "overview"}
-          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
-            centerView === "overview" ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+            centerView === "overview" ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
+          <Scan aria-hidden="true" className="size-3.5" />
           {t("header.viewOverview")}
         </button>
 
@@ -263,10 +307,11 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           type="button"
           onClick={() => setCenterView(centerView === "map" ? "viewer" : "map")}
           aria-pressed={centerView === "map"}
-          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
-            centerView === "map" ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+            centerView === "map" ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
+          <Map aria-hidden="true" className="size-3.5" />
           {t("header.viewMap")}
         </button>
 
@@ -274,11 +319,24 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           type="button"
           onClick={() => setCenterView(centerView === "people" ? "viewer" : "people")}
           aria-pressed={centerView === "people"}
-          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
-            centerView === "people" ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+            centerView === "people" ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
+          <Users aria-hidden="true" className="size-3.5" />
           {t("header.viewPeople")}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setCenterView(centerView === "calendar" ? "viewer" : "calendar")}
+          aria-pressed={centerView === "calendar"}
+          className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
+            centerView === "calendar" ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          }`}
+        >
+          <CalendarDays aria-hidden="true" className="size-3.5" />
+          {t("header.viewCalendar")}
         </button>
 
         <button
@@ -286,10 +344,11 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           onClick={toggleMetadataPanel}
           disabled={!selectedPhotoId && !metadataPanelOpen}
           aria-pressed={metadataPanelOpen}
-          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-50 ${
-            metadataPanelOpen ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-50 ${
+            metadataPanelOpen ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
+          <Info aria-hidden="true" className="size-3.5" />
           {t("header.viewInfo")}
         </button>
 
@@ -299,10 +358,11 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           onClick={toggleDevelopPanel}
           disabled={!selectedPhotoId && !developPanelOpen}
           aria-pressed={developPanelOpen}
-          className={`rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-50 ${
-            developPanelOpen ? "bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
+          className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] disabled:cursor-not-allowed disabled:opacity-50 ${
+            developPanelOpen ? "apx-btn-liquid-active bg-accent/10 text-accent" : "text-text-secondary hover:text-text-primary"
           }`}
         >
+          <SlidersHorizontal aria-hidden="true" className="size-3.5" />
           {t("header.viewDevelop")}
         </button>
       </nav>
@@ -333,6 +393,9 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
       <BookDialog open={bookDialogOpen} photoIds={exportPhotoIds} onClose={closeBookDialog} />
       <WebDialog open={webDialogOpen} photoIds={exportPhotoIds} onClose={closeWebDialog} />
       <TemplatesDialog open={templatesDialogOpen} photoIds={exportPhotoIds} onClose={() => setTemplatesDialogOpen(false)} />
+      <BatchRenameDialog open={batchRenameDialogOpen} onClose={() => setBatchRenameDialogOpen(false)} />
+      <GearStatsDialog open={gearStatsDialogOpen} onClose={() => setGearStatsDialogOpen(false)} />
+      <SeriesDialog open={seriesDialogOpen} onClose={() => setSeriesDialogOpen(false)} />
       <LibraryOrganizeDialog open={organizeDialogOpen} onClose={() => setOrganizeDialogOpen(false)} />
       <BatchConsoleDialog open={batchConsoleDialogOpen} onClose={() => setBatchConsoleDialogOpen(false)} />
       <MetadataDialog open={metadataDialogOpen} onClose={() => setMetadataDialogOpen(false)} />

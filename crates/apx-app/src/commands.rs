@@ -1001,6 +1001,12 @@ pub struct LutFilterDataDto {
     pub table: Vec<f32>,
     pub domain_min: [f32; 3],
     pub domain_max: [f32; 3],
+    /// Inhalts-Hash, siehe `LutFilterData::id`s Moduldoku — das Frontend
+    /// schickt diesen anschließend bei jeder `develop/...`-Live-
+    /// Vorschau-Anfrage statt der vollen `table` (siehe
+    /// `register_lut_filter_table`).
+    #[serde(default)]
+    pub id: String,
 }
 
 impl From<LutFilterDataDto> for apx_pipeline::edl::LutFilterData {
@@ -1011,12 +1017,14 @@ impl From<LutFilterDataDto> for apx_pipeline::edl::LutFilterData {
             table: dto.table,
             domain_min: dto.domain_min,
             domain_max: dto.domain_max,
+            id: dto.id,
         }
     }
 }
 
 impl From<apx_pipeline::lut_cube::ParsedLut> for LutFilterDataDto {
     fn from(parsed: apx_pipeline::lut_cube::ParsedLut) -> Self {
+        let id = apx_pipeline::stages::lut_filter::compute_lut_id(parsed.size, &parsed.table);
         Self {
             name: parsed
                 .title
@@ -1025,6 +1033,7 @@ impl From<apx_pipeline::lut_cube::ParsedLut> for LutFilterDataDto {
             table: parsed.table,
             domain_min: parsed.domain_min,
             domain_max: parsed.domain_max,
+            id,
         }
     }
 }
@@ -1080,6 +1089,7 @@ impl From<apx_pipeline::edl::LutFilterData> for LutFilterDataDto {
             table: data.table,
             domain_min: data.domain_min,
             domain_max: data.domain_max,
+            id: data.id,
         }
     }
 }
@@ -1096,6 +1106,30 @@ pub fn list_builtin_lut_filters() -> Vec<LutFilterDataDto> {
         .into_iter()
         .map(|kind| apx_pipeline::builtin_luts::generate(kind, 17).into())
         .collect()
+}
+
+/// Wärmt `AppState::lut_table_cache` proaktiv für `id` vor (Phase 25,
+/// siehe `DECISIONS.md`, aktuelles ADR, und `LutFilterData`s Moduldoku)
+/// — das Frontend ruft dies einmal auf, sobald ein Filter-Look gewählt
+/// wird (Bibliothekseintrag oder `.cube`-Import) bzw. sobald das
+/// Entwickeln-Panel für ein Foto mit bereits gespeichertem Filter
+/// geöffnet wird, **bevor** es die erste `develop/...`-Live-
+/// Vorschauanfrage mit leerer `table` (nur `id`) stellt. Ohne diesen
+/// Vorab-Aufruf würde `LutTableCache::resolve` zwar beim allerersten Mal
+/// automatisch aus einer vollen `table` selbst aufwärmen (siehe dessen
+/// Moduldoku), das Frontend müsste dafür aber wissen, wann genau das
+/// "allererste Mal" ist — dieser explizite Befehl macht die Reihenfolge
+/// robust statt sich auf ein Timing-Detail zu verlassen. Ein leeres `id`
+/// oder eine zu kurze `table` werden ignoriert (`LutTableCache::
+/// register` bzw. der bestehende `apply`-Sicherheitsweg fangen das ab).
+#[tauri::command]
+pub fn register_lut_filter_table(
+    state: State<'_, AppState>,
+    id: String,
+    size: u32,
+    table: Vec<f32>,
+) {
+    state.lut_table_cache.register(&id, size, &table);
 }
 
 // ---- Video-Bearbeitung (Phase 16 Schritt 6) --------------------------------
@@ -1943,6 +1977,316 @@ fn composite_with_background(rgb: &[u8], mask: &[u8], background_rgb: [u8; 3]) -
         }
     }
     out
+}
+
+// --- Video-Stabilisierung (Phase 17 Schritt 9, siehe DECISIONS.md
+// ADR-0062) — Ein-Clip-Command wie `apply_lut_filter_to_video` und
+// `remove_video_background` oben. Die Mathematik liegt vollständig in
+// `apx_stacking::stabilize`; hier steht nur das Drumherum: dekodieren,
+// messen, neu kodieren.
+
+/// Längste Kante, auf die für die **Messung** herunterskaliert wird.
+///
+/// Das Wackeln einer Freihandaufnahme steckt in groben Bildstrukturen,
+/// nicht im Pixelrauschen — in voller Auflösung zu messen kostet ein
+/// Vielfaches, ohne die Bahn genauer zu machen. Die gemessene
+/// Verschiebung wird danach über
+/// [`apx_stacking::stabilize::Similarity::scaled_translation`] wieder
+/// auf volle Pixel hochgerechnet.
+const STABILIZE_ANALYSIS_LONG_EDGE: u32 = 480;
+
+/// Stabilisiert ein Video und legt das Ergebnis als neues Katalog-Video
+/// daneben — nicht-destruktiv wie jeder andere Video-Command dieser
+/// Datei, das Original bleibt unangetastet.
+///
+/// `smoothing_radius` ist die halbe Fensterbreite der Glättung in
+/// Einzelbildern (größer = ruhiger, gewollte Schwenks setzen träger
+/// ein), `crop_zoom` der Hineinzoom, der die von der Korrektur
+/// freigelegten Ränder verdeckt. Beide begrenzen einander: aus
+/// `crop_zoom` folgt, wie weit eine Korrektur überhaupt gehen darf
+/// (siehe `StabilizeParams::max_shift`).
+#[tauri::command]
+pub fn stabilize_video(
+    state: State<'_, AppState>,
+    photo_id: String,
+    smoothing_radius: u32,
+    crop_zoom: f64,
+) -> Result<PhotoDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let photo = state
+        .catalog
+        .get_photo(photo_id)
+        .map_err(|err| err.to_string())?;
+    if photo.media_kind != "video" {
+        return Err("Stabilisierung funktioniert nur bei Videos".to_string());
+    }
+    let (Some(width), Some(height)) = (photo.width, photo.height) else {
+        return Err("Video-Auflösung unbekannt (fehlende Metadaten)".to_string());
+    };
+    let fps = photo.frame_rate.unwrap_or(30.0).max(1.0);
+    let folder = state
+        .catalog
+        .get_folder(photo.folder_id)
+        .map_err(|err| err.to_string())?;
+    let source_path = folder.path.join(&photo.filename);
+
+    let params = apx_stacking::stabilize::StabilizeParams {
+        smoothing_radius: smoothing_radius.clamp(1, 120) as usize,
+        crop_zoom: crop_zoom.clamp(1.0, 1.5),
+        width: width as f64,
+        height: height as f64,
+    };
+
+    // Durchgang 1: Kamerabahn messen (verkleinert, siehe
+    // STABILIZE_ANALYSIS_LONG_EDGE). Ohne die Zukunft der Bahn lässt
+    // sie sich nicht glätten — deshalb überhaupt zwei Durchgänge.
+    let measured = measure_camera_path(&source_path, width, height)?;
+    if measured.len() < 2 {
+        return Err(
+            "Video zu kurz oder nicht dekodierbar — Stabilisierung braucht mindestens zwei Bilder."
+                .to_string(),
+        );
+    }
+    let corrections = apx_stacking::stabilize::stabilize_path(&measured, &params);
+
+    // Durchgang 2: in voller Auflösung verzerren und neu kodieren.
+    let dest_path = unique_sibling_video_path(&folder.path, &source_path, "stabilisiert");
+    run_ffmpeg_stabilize(
+        &source_path,
+        &dest_path,
+        width,
+        height,
+        fps,
+        &corrections,
+        &params,
+    )?;
+
+    register_video_result_as_new_photo(&state, photo.folder_id, &dest_path)
+}
+
+/// Die Auflösung, in der gemessen wird: längste Kante auf
+/// [`STABILIZE_ANALYSIS_LONG_EDGE`], Seitenverhältnis erhalten, beide
+/// Kanten gerade (`ffmpeg`s `scale` mag ungerade Kanten bei manchen
+/// Pixelformaten nicht) und mindestens 2 px.
+fn stabilize_analysis_size(width: u32, height: u32) -> (u32, u32, f64) {
+    let long_edge = width.max(height).max(1);
+    let factor = (STABILIZE_ANALYSIS_LONG_EDGE as f64 / long_edge as f64).min(1.0);
+    let even = |value: u32| (((value as f64 * factor).round() as u32) & !1).max(2);
+    let (analysis_width, analysis_height) = (even(width), even(height));
+    // Der Rückrechnungsfaktor kommt aus der TATSÄCHLICH entstandenen
+    // Breite, nicht aus `factor` — das Runden auf gerade Kanten
+    // verschiebt ihn sonst um bis zu ein Pixel je Bild, und das
+    // summiert sich über die Bahn auf.
+    let scale_back = width as f64 / analysis_width as f64;
+    (analysis_width, analysis_height, scale_back)
+}
+
+/// Misst die Bewegung jedes Einzelbilds zu seinem Vorgänger.
+///
+/// Dieselbe merkmalsbasierte Messung, die das Panorama-Stitching trägt
+/// (`apx_stacking::homography_stitch`), nur paarweise entlang der Zeit
+/// statt sternförmig auf ein Referenzbild. Das Ergebnis ist auf vier
+/// Freiheitsgrade projiziert — siehe `apx_stacking::stabilize`s
+/// Moduldoku dazu, warum die volle Homografie hier schadet.
+///
+/// `None` an einer Stelle heißt „nicht messbar" (zu wenig Struktur, zu
+/// starke Bewegungsunschärfe); die Glättung behandelt das als
+/// „keine Bewegung" statt zu raten.
+fn measure_camera_path(
+    source: &Path,
+    width: u32,
+    height: u32,
+) -> Result<Vec<Option<apx_stacking::stabilize::Similarity>>, String> {
+    use std::io::Read;
+
+    let (analysis_width, analysis_height, scale_back) = stabilize_analysis_size(width, height);
+    let mut decode = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(source)
+        .args([
+            "-vf",
+            &format!("scale={analysis_width}:{analysis_height}"),
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+            "-",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("ffmpeg (Messen) nicht startbar: {err}"))?;
+    let mut decode_stdout = decode
+        .stdout
+        .take()
+        .ok_or_else(|| "ffmpeg-Messausgabe nicht verfügbar".to_string())?;
+
+    let frame_bytes = (analysis_width as usize) * (analysis_height as usize) * 4;
+    let mut frame = vec![0u8; frame_bytes];
+    let mut previous: Option<Vec<u8>> = None;
+    let mut path = Vec::new();
+
+    let read_result: Result<(), String> = (|| {
+        loop {
+            match decode_stdout.read_exact(&mut frame) {
+                Ok(()) => {
+                    let step = match previous.as_ref() {
+                        // Das erste Bild hat keinen Vorgänger: es ist
+                        // per Definition der Ausgangspunkt der Bahn.
+                        None => Some(apx_stacking::stabilize::Similarity::IDENTITY),
+                        Some(prev) => {
+                            apx_stacking::homography_stitch::estimate_pairwise_homographies_rgba8(
+                                prev,
+                                &[&frame],
+                                analysis_width,
+                                analysis_height,
+                            )
+                            .into_iter()
+                            .next()
+                            .flatten()
+                            .map(|homography| {
+                                apx_stacking::stabilize::Similarity::from_homography(&homography)
+                                    .scaled_translation(scale_back)
+                            })
+                        }
+                    };
+                    path.push(step);
+                    previous = Some(frame.clone());
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(err) => return Err(format!("Lesen von ffmpeg fehlgeschlagen: {err}")),
+            }
+        }
+        Ok(())
+    })();
+
+    // Die Pipe muss geleert sein, bevor auf den Prozess gewartet wird —
+    // sonst blockiert ffmpeg beim Schreiben und `wait` kehrt nie zurück.
+    drop(decode_stdout);
+    let status = decode
+        .wait()
+        .map_err(|err| format!("Warten auf ffmpeg (Messen) fehlgeschlagen: {err}"))?;
+    read_result?;
+    if !status.success() {
+        return Err("ffmpeg (Messen) fehlgeschlagen".to_string());
+    }
+    Ok(path)
+}
+
+/// Zweiter Durchgang: jedes Einzelbild um seine Korrektur verzerren,
+/// hineinzoomen und neu kodieren — dasselbe zwei-Prozesse-Pipe-Muster
+/// wie [`run_ffmpeg_remove_background`], inklusive `-map 1:a?` für die
+/// unveränderte Original-Tonspur.
+///
+/// Läuft die Bildfolge des Encoders aus den Korrekturen heraus (der
+/// Dekodierer liefert ein Bild mehr als der Messdurchgang gesehen hat,
+/// etwa durch unterschiedliche Rundung der Bildrate), wird die letzte
+/// bekannte Korrektur weiterverwendet statt abzubrechen: ein Bild mit
+/// leicht veralteter Korrektur fällt nicht auf, ein fehlendes schon.
+#[allow(clippy::too_many_arguments)]
+fn run_ffmpeg_stabilize(
+    source: &Path,
+    dest: &Path,
+    width: u32,
+    height: u32,
+    fps: f32,
+    corrections: &[apx_stacking::stabilize::Similarity],
+    params: &apx_stacking::stabilize::StabilizeParams,
+) -> Result<(), String> {
+    use std::io::{Read, Write};
+
+    let mut decode = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(source)
+        .args(["-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("ffmpeg (Dekodieren) nicht startbar: {err}"))?;
+    let mut decode_stdout = decode
+        .stdout
+        .take()
+        .ok_or_else(|| "ffmpeg-Dekodier-Ausgabe nicht verfügbar".to_string())?;
+
+    let mut encode = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24"])
+        .args([
+            "-s",
+            &format!("{width}x{height}"),
+            "-r",
+            &format!("{fps}"),
+            "-i",
+            "-",
+        ])
+        .arg("-i")
+        .arg(source)
+        .args([
+            "-map", "0:v", "-map", "1:a?", "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+            "-c:a", "copy",
+        ])
+        .arg(dest)
+        .stdin(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("ffmpeg (Kodieren) nicht startbar: {err}"))?;
+    let mut encode_stdin = encode
+        .stdin
+        .take()
+        .ok_or_else(|| "ffmpeg-Kodier-Eingabe nicht verfügbar".to_string())?;
+
+    let frame_bytes = (width as usize) * (height as usize) * 3;
+    let mut frame = vec![0u8; frame_bytes];
+    let mut index = 0usize;
+    let pump_result: Result<(), String> = (|| {
+        loop {
+            match decode_stdout.read_exact(&mut frame) {
+                Ok(()) => {
+                    let correction = corrections
+                        .get(index)
+                        .or_else(|| corrections.last())
+                        .copied()
+                        .unwrap_or(apx_stacking::stabilize::Similarity::IDENTITY);
+                    let transform = apx_stacking::stabilize::frame_transform(&correction, params);
+                    let warped =
+                        apx_stacking::stabilize::warp_rgb8(&frame, width, height, &transform);
+                    encode_stdin
+                        .write_all(&warped)
+                        .map_err(|err| format!("Schreiben an ffmpeg fehlgeschlagen: {err}"))?;
+                    index += 1;
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(err) => return Err(format!("Lesen von ffmpeg fehlgeschlagen: {err}")),
+            }
+        }
+        Ok(())
+    })();
+    drop(encode_stdin); // EOF für ffmpeg (Kodieren)
+
+    let decode_status = decode
+        .wait()
+        .map_err(|err| format!("Warten auf ffmpeg (Dekodieren) fehlgeschlagen: {err}"))?;
+    let encode_output = {
+        let status = encode
+            .wait()
+            .map_err(|err| format!("Warten auf ffmpeg (Kodieren) fehlgeschlagen: {err}"))?;
+        let mut stderr = String::new();
+        if let Some(mut pipe) = encode.stderr.take() {
+            let _ = pipe.read_to_string(&mut stderr);
+        }
+        (status, stderr)
+    };
+
+    pump_result?;
+    if !decode_status.success() {
+        let _ = std::fs::remove_file(dest);
+        return Err("ffmpeg (Dekodieren) fehlgeschlagen".to_string());
+    }
+    if !encode_output.0.success() {
+        let _ = std::fs::remove_file(dest);
+        return Err(format!(
+            "ffmpeg (Kodieren) fehlgeschlagen: {}",
+            encode_output.1
+        ));
+    }
+    Ok(())
 }
 
 /// Ein einzelner Zeitachsen-Eintrag (Phase 17 Schritt 1, siehe
@@ -3193,6 +3537,389 @@ pub fn list_virtual_copies(
         .list_virtual_copies(photo_id)
         .map_err(|err| err.to_string())?;
     Ok(copies.into_iter().map(PhotoDto::from).collect())
+}
+
+// ---- Serien-/Belichtungsreihen-Erkennung (Phase 32 F7) ---------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DetectedSeriesDto {
+    /// `"burst"`, `"exposure_bracket"` oder `"mixed"` — die Oberfläche
+    /// beschriftet den Schlüssel, damit der deutsche Text nicht durch
+    /// die IPC-Grenze muss.
+    pub kind: String,
+    pub photo_ids: Vec<String>,
+    pub span_seconds: i64,
+    pub ev_values: Vec<Option<f32>>,
+    pub ev_spread: Option<f32>,
+}
+
+/// Erkennt Serien in einem Ordner.
+///
+/// Fotos ohne Aufnahmedatum fallen heraus — ohne Zeit gibt es keine
+/// Serie. Virtuelle Kopien ebenfalls: sie teilen sich die Datei mit dem
+/// Original und würden jede Serie künstlich verlängern.
+#[tauri::command]
+pub fn detect_photo_series(
+    state: State<'_, AppState>,
+    folder_id: String,
+    max_gap_seconds: i64,
+) -> Result<Vec<DetectedSeriesDto>, String> {
+    let folder_id: apx_core::FolderId = folder_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    let photos = state
+        .catalog
+        .list_photos_by_folder(folder_id)
+        .map_err(|err| err.to_string())?;
+
+    let shots: Vec<apx_catalog::series::Shot> = photos
+        .into_iter()
+        .filter(|photo| photo.source_photo_id.is_none())
+        .filter_map(|photo| {
+            photo.captured_at.map(|captured| apx_catalog::series::Shot {
+                photo_id: photo.id,
+                captured_at: captured.unix_timestamp(),
+                aperture: photo.aperture,
+                shutter: photo.shutter,
+                iso: photo.iso,
+            })
+        })
+        .collect();
+
+    let detected = apx_catalog::series::detect_series(&shots, max_gap_seconds.max(1));
+    Ok(detected
+        .into_iter()
+        .map(|series| DetectedSeriesDto {
+            kind: match series.kind {
+                apx_catalog::series::SeriesKind::Burst => "burst",
+                apx_catalog::series::SeriesKind::ExposureBracket => "exposure_bracket",
+                apx_catalog::series::SeriesKind::Mixed => "mixed",
+            }
+            .to_string(),
+            photo_ids: series.photo_ids.iter().map(|id| id.to_string()).collect(),
+            span_seconds: series.span_seconds,
+            ev_values: series.ev_values,
+            ev_spread: series.ev_spread,
+        })
+        .collect())
+}
+
+// ---- Notizen am Foto (Phase 32 F6) -----------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PhotoNoteDto {
+    pub id: String,
+    pub photo_id: String,
+    /// Normiert 0..1 aufs unbeschnittene Original — siehe
+    /// `migrations/0013_photo_notes.sql`.
+    pub x: f64,
+    pub y: f64,
+    pub body: String,
+    pub done: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<apx_catalog::PhotoNote> for PhotoNoteDto {
+    fn from(note: apx_catalog::PhotoNote) -> Self {
+        Self {
+            id: note.id.to_string(),
+            photo_id: note.photo_id.to_string(),
+            x: note.x,
+            y: note.y,
+            body: note.body,
+            done: note.done,
+            created_at: format_rfc3339(Some(note.created_at)).unwrap_or_default(),
+            updated_at: format_rfc3339(Some(note.updated_at)).unwrap_or_default(),
+        }
+    }
+}
+
+#[tauri::command]
+pub fn create_photo_note(
+    state: State<'_, AppState>,
+    photo_id: String,
+    x: f64,
+    y: f64,
+    body: String,
+) -> Result<PhotoNoteDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    state
+        .catalog
+        .create_photo_note(photo_id, x, y, &body)
+        .map(PhotoNoteDto::from)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn list_photo_notes(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<Vec<PhotoNoteDto>, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    state
+        .catalog
+        .list_photo_notes(photo_id)
+        .map(|notes| notes.into_iter().map(PhotoNoteDto::from).collect())
+        .map_err(|err| err.to_string())
+}
+
+/// Ein nicht gesetztes Feld bleibt unverändert — die Oberfläche kann
+/// einen Pin verschieben, ohne den Text erneut zu schicken.
+#[tauri::command]
+pub fn update_photo_note(
+    state: State<'_, AppState>,
+    note_id: String,
+    body: Option<String>,
+    done: Option<bool>,
+    x: Option<f64>,
+    y: Option<f64>,
+) -> Result<PhotoNoteDto, String> {
+    // Eine halbe Position (nur x, kein y) wäre ein Aufrufer-Fehler und
+    // ergäbe eine Notiz an einer Stelle, die niemand gemeint hat.
+    let position = match (x, y) {
+        (Some(x), Some(y)) => Some((x, y)),
+        (None, None) => None,
+        _ => return Err("Position braucht x und y zusammen".to_string()),
+    };
+    state
+        .catalog
+        .update_photo_note(&note_id, body.as_deref(), done, position)
+        .map(PhotoNoteDto::from)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn delete_photo_note(state: State<'_, AppState>, note_id: String) -> Result<(), String> {
+    state
+        .catalog
+        .delete_photo_note(&note_id)
+        .map_err(|err| err.to_string())
+}
+
+/// `(photo_id, Anzahl offener Notizen)` für den ganzen Katalog.
+#[tauri::command]
+pub fn photo_note_open_counts(state: State<'_, AppState>) -> Result<Vec<(String, u64)>, String> {
+    state
+        .catalog
+        .photo_note_open_counts()
+        .map(|counts| {
+            counts
+                .into_iter()
+                .map(|(id, count)| (id.to_string(), count))
+                .collect()
+        })
+        .map_err(|err| err.to_string())
+}
+
+// ---- Stapel-Umbenennung (Phase 32 F4) --------------------------------------
+
+/// Eine geplante Umbenennung, wie die Vorschau sie zeigt.
+#[derive(Debug, Clone, Serialize)]
+pub struct RenamePlanEntryDto {
+    pub photo_id: String,
+    pub current_filename: String,
+    pub new_filename: String,
+    /// `"planned"`, `"unchanged"`, `"empty_name"`, `"duplicate_in_batch"`,
+    /// `"collides_with_existing"` oder `"virtual_copy"` — die Oberfläche
+    /// übersetzt den Schlüssel, damit die Begründung nicht als fertiger
+    /// deutscher Satz durch die IPC-Grenze muss.
+    pub status: String,
+}
+
+fn status_key(status: &crate::batch_rename::RenameStatus) -> &'static str {
+    use crate::batch_rename::RenameStatus::*;
+    match status {
+        Planned => "planned",
+        Unchanged => "unchanged",
+        EmptyName => "empty_name",
+        DuplicateInBatch => "duplicate_in_batch",
+        CollidesWithExisting => "collides_with_existing",
+        VirtualCopy => "virtual_copy",
+    }
+}
+
+/// Baut den Plan für [`preview_batch_rename`] und [`apply_batch_rename`] —
+/// beide benutzen exakt dieselbe Funktion, damit die Vorschau nie etwas
+/// anderes zeigt als das, was das Anwenden tut.
+fn build_rename_plan(
+    state: &State<'_, AppState>,
+    photo_ids: &[apx_core::PhotoId],
+    pattern: &str,
+    start_seq: usize,
+) -> Result<Vec<crate::batch_rename::RenamePlanEntry>, String> {
+    let mut candidates = Vec::with_capacity(photo_ids.len());
+    let mut occupied: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_folders: std::collections::HashSet<apx_core::FolderId> =
+        std::collections::HashSet::new();
+
+    for photo_id in photo_ids {
+        let photo = state
+            .catalog
+            .get_photo(*photo_id)
+            .map_err(|err| err.to_string())?;
+
+        // Die bereits vergebenen Namen je Ordner nur einmal einsammeln —
+        // bei 300 ausgewählten Fotos aus einem Ordner wären es sonst 300
+        // identische Abfragen.
+        if seen_folders.insert(photo.folder_id) {
+            for existing in state
+                .catalog
+                .list_photos_by_folder(photo.folder_id)
+                .map_err(|err| err.to_string())?
+            {
+                occupied.insert(existing.filename);
+            }
+        }
+
+        candidates.push(crate::batch_rename::RenameCandidate {
+            photo_id: photo.id,
+            current_filename: photo.filename.clone(),
+            // Ohne Aufnahmedatum die Dateisystem-Änderungszeit — dieselbe
+            // Ersatzregel wie beim Import.
+            date: photo.captured_at.unwrap_or(photo.file_mtime),
+            camera: photo.camera_model.clone(),
+            is_virtual_copy: photo.source_photo_id.is_some(),
+        });
+    }
+
+    Ok(crate::batch_rename::plan_batch_rename(
+        &candidates,
+        pattern,
+        start_seq,
+        &occupied,
+    ))
+}
+
+/// Zeigt, was eine Stapel-Umbenennung täte — ohne irgendetwas zu ändern.
+#[tauri::command]
+pub fn preview_batch_rename(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    pattern: String,
+    start_seq: u32,
+) -> Result<Vec<RenamePlanEntryDto>, String> {
+    let photo_ids = photo_ids
+        .into_iter()
+        .map(parse_photo_id)
+        .collect::<Result<Vec<_>, _>>()?;
+    let plan = build_rename_plan(&state, &photo_ids, &pattern, start_seq.max(1) as usize)?;
+    Ok(plan
+        .into_iter()
+        .map(|entry| RenamePlanEntryDto {
+            photo_id: entry.photo_id.to_string(),
+            current_filename: entry.current_filename,
+            new_filename: entry.new_filename,
+            status: status_key(&entry.status).to_string(),
+        })
+        .collect())
+}
+
+/// Führt die Stapel-Umbenennung aus.
+///
+/// **Musterfehler blockieren, Foto-Eigenschaften nicht.** Ein leerer
+/// Name, doppelte Zielnamen oder eine Kollision mit einer fremden Datei
+/// sind Fehler *im Muster* — dann wird gar nichts umbenannt, denn ein
+/// halb angewandtes Muster hinterlässt einen Ordner, in dem niemand mehr
+/// weiß, welche Datei schon dran war. Eine virtuelle Kopie dagegen ist
+/// eine Eigenschaft *eines Fotos*: sie wird übersprungen, der Rest läuft
+/// durch.
+///
+/// **Zwei Phasen.** Erst bekommt jede betroffene Datei einen eindeutigen
+/// Zwischennamen, dann den Zielnamen. Ohne das scheitert jeder
+/// Ringtausch (a → b, b → a): der erste Schritt überschriebe b.
+#[tauri::command]
+pub fn apply_batch_rename(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    pattern: String,
+    start_seq: u32,
+) -> Result<Vec<PhotoDto>, String> {
+    let photo_ids = photo_ids
+        .into_iter()
+        .map(parse_photo_id)
+        .collect::<Result<Vec<_>, _>>()?;
+    let plan = build_rename_plan(&state, &photo_ids, &pattern, start_seq.max(1) as usize)?;
+
+    if let Some(blocked) = plan.iter().find(|entry| {
+        entry.is_blocked() && entry.status != crate::batch_rename::RenameStatus::VirtualCopy
+    }) {
+        return Err(format!(
+            "Umbenennen abgebrochen: „{}“ ergäbe „{}“ ({}). Kein Foto wurde umbenannt.",
+            blocked.current_filename,
+            blocked.new_filename,
+            match blocked.status {
+                crate::batch_rename::RenameStatus::EmptyName =>
+                    "das Muster ergibt einen leeren Namen",
+                crate::batch_rename::RenameStatus::DuplicateInBatch =>
+                    "zwei Fotos bekämen denselben Namen — fügen Sie {seq} ein",
+                _ => "eine andere Datei trägt diesen Namen bereits",
+            }
+        ));
+    }
+
+    let todo: Vec<_> = plan
+        .iter()
+        .filter(|entry| entry.status == crate::batch_rename::RenameStatus::Planned)
+        .collect();
+    if todo.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Quell- und Zielpfade sammeln; das eigentliche zweiphasige
+    // Umbenennen macht `batch_rename::rename_files` (dort auch getestet).
+    let mut moves: Vec<(PathBuf, PathBuf)> = Vec::with_capacity(todo.len());
+    let mut targets: Vec<(apx_core::PhotoId, String)> = Vec::with_capacity(todo.len());
+    for entry in &todo {
+        let photo = state
+            .catalog
+            .get_photo(entry.photo_id)
+            .map_err(|err| err.to_string())?;
+        let folder = state
+            .catalog
+            .get_folder(photo.folder_id)
+            .map_err(|err| err.to_string())?;
+        moves.push((
+            folder.path.join(&photo.filename),
+            folder.path.join(&entry.new_filename),
+        ));
+        targets.push((photo.id, entry.new_filename.clone()));
+    }
+
+    // Eine Datei, die auf der Platte liegt, aber nicht im Katalog steht,
+    // sieht die Planung nicht — hier wird sie gesehen. Ein Ziel, das
+    // einer Quelle dieses Stapels gehört, zählt nicht: das ist der
+    // Ringtausch, den `rename_files` gerade auflöst.
+    let sources: std::collections::HashSet<&PathBuf> =
+        moves.iter().map(|(source, _)| source).collect();
+    for (_, target) in &moves {
+        if target.exists() && !sources.contains(target) {
+            return Err(format!(
+                "Umbenennen abgebrochen: „{}“ existiert bereits auf der Platte, ist aber nicht im Katalog. Kein Foto wurde umbenannt.",
+                target.display()
+            ));
+        }
+    }
+
+    crate::batch_rename::rename_files(&moves)?;
+
+    // Erst jetzt der Katalog — siehe
+    // `apx_catalog::repository::photos::set_filename` zur Reihenfolge.
+    let mut renamed = Vec::with_capacity(targets.len());
+    for (photo_id, filename) in targets {
+        state
+            .catalog
+            .set_photo_filename(photo_id, &filename)
+            .map_err(|err| err.to_string())?;
+        renamed.push(
+            state
+                .catalog
+                .get_photo(photo_id)
+                .map(PhotoDto::from)
+                .map_err(|err| err.to_string())?,
+        );
+    }
+    Ok(renamed)
 }
 
 // ---- Stapel (Phase 9 Schritt 1) --------------------------------------------
@@ -7753,6 +8480,78 @@ pub fn catalog_statistics(state: State<'_, AppState>) -> Result<CatalogStatistic
         .map_err(|err| err.to_string())
 }
 
+/// Ein Balken einer Verteilung (Phase 32 F5).
+#[derive(Debug, Clone, Serialize)]
+pub struct DistributionBucketDto {
+    pub label: String,
+    pub count: u64,
+    /// `true` beim Sammelbalken „keine Angabe" — die Oberfläche setzt ihn
+    /// optisch ab, statt ihn wie einen echten Messwert zu zeigen.
+    pub missing: bool,
+}
+
+/// Ausrüstungs-/Belichtungs-Statistik (Phase 32 F5) — ergänzt
+/// [`CatalogStatisticsDto`], ersetzt es nicht.
+#[derive(Debug, Clone, Serialize)]
+pub struct GearStatisticsDto {
+    pub cameras: Vec<(String, u64)>,
+    pub lenses: Vec<(String, u64)>,
+    pub focal_lengths: Vec<DistributionBucketDto>,
+    pub apertures: Vec<DistributionBucketDto>,
+    pub isos: Vec<DistributionBucketDto>,
+    pub shutters: Vec<DistributionBucketDto>,
+    pub total: u64,
+}
+
+impl From<apx_catalog::DistributionBucket> for DistributionBucketDto {
+    fn from(bucket: apx_catalog::DistributionBucket) -> Self {
+        Self {
+            label: bucket.label,
+            count: bucket.count,
+            missing: bucket.missing,
+        }
+    }
+}
+
+impl From<apx_catalog::GearStatistics> for GearStatisticsDto {
+    fn from(stats: apx_catalog::GearStatistics) -> Self {
+        Self {
+            cameras: stats.cameras,
+            lenses: stats.lenses,
+            focal_lengths: stats
+                .focal_lengths
+                .into_iter()
+                .map(DistributionBucketDto::from)
+                .collect(),
+            apertures: stats
+                .apertures
+                .into_iter()
+                .map(DistributionBucketDto::from)
+                .collect(),
+            isos: stats
+                .isos
+                .into_iter()
+                .map(DistributionBucketDto::from)
+                .collect(),
+            shutters: stats
+                .shutters
+                .into_iter()
+                .map(DistributionBucketDto::from)
+                .collect(),
+            total: stats.total,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn gear_statistics(state: State<'_, AppState>) -> Result<GearStatisticsDto, String> {
+    state
+        .catalog
+        .gear_statistics()
+        .map(GearStatisticsDto::from)
+        .map_err(|err| err.to_string())
+}
+
 // ---- Mehrere Kataloge + Katalog-Wartung (Phase 13 Schritt 6, siehe
 // DECISIONS.md ADR-0040-Nachtrag IV) -----------------------------------
 //
@@ -9349,4 +10148,252 @@ mod tests {
         let err = parse_export_format("heif").expect_err("sollte fehlschlagen");
         assert!(err.contains("heif"));
     }
+
+    // --- Video-Stabilisierung (Phase 17 Schritt 9) -----------------
+    //
+    // Die eigentliche Mathematik liegt in `apx_stacking::stabilize` und
+    // ist dort getestet. Hier wird nur die Größenrechnung geprüft, die
+    // diese Datei selbst beisteuert — sie entscheidet, mit welchem
+    // Faktor die Messung zurückgerechnet wird, und ein Fehler darin
+    // verschiebt jede Korrektur systematisch.
+
+    #[test]
+    fn the_analysis_resolution_keeps_the_aspect_ratio_and_stays_even() {
+        let (width, height, _) = stabilize_analysis_size(1920, 1080);
+        assert!(width <= STABILIZE_ANALYSIS_LONG_EDGE);
+        assert_eq!(width % 2, 0, "Breite {width} ist ungerade");
+        assert_eq!(height % 2, 0, "Höhe {height} ist ungerade");
+        let ratio = width as f64 / height as f64;
+        assert!(
+            (ratio - 1920.0 / 1080.0).abs() < 0.02,
+            "Seitenverhältnis {ratio} weicht ab"
+        );
+    }
+
+    #[test]
+    fn a_portrait_video_is_measured_against_its_longer_edge() {
+        let (width, height, _) = stabilize_analysis_size(1080, 1920);
+        assert!(height <= STABILIZE_ANALYSIS_LONG_EDGE);
+        assert!(width < height, "{width}x{height} ist nicht hochkant");
+    }
+
+    #[test]
+    fn the_scale_back_factor_comes_from_the_rounded_width() {
+        // Entscheidend: der Faktor muss zur TATSÄCHLICHEN Messbreite
+        // passen, nicht zum ungerundeten Wunsch — sonst wandert jede
+        // gemessene Verschiebung um einen Bruchteil daneben, und über
+        // die Bahn summiert sich das auf.
+        let (analysis_width, _, scale_back) = stabilize_analysis_size(1913, 1077);
+        assert!(
+            (scale_back - 1913.0 / analysis_width as f64).abs() < 1e-12,
+            "Faktor {scale_back} passt nicht zu {analysis_width}"
+        );
+    }
+
+    #[test]
+    fn a_video_smaller_than_the_analysis_edge_is_not_enlarged() {
+        let (width, height, scale_back) = stabilize_analysis_size(320, 240);
+        assert_eq!((width, height), (320, 240));
+        assert!((scale_back - 1.0).abs() < 1e-12);
+    }
+}
+
+// ---- Kreativ-Werkzeuge (Phase 27, siehe `DECISIONS.md` ADR-0057) ----------
+
+/// Ergebnis von [`segment_photo_subject`] — dieselbe
+/// Übertragungskonvention wie [`AiMaskAlphaDto`] (Base64, ein Byte je
+/// Pixel), hier aber für die Kreativ-Stufe statt für eine Maske.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubjectMaskDto {
+    pub bitmap_width: u32,
+    pub bitmap_height: u32,
+    /// Base64-kodierte `0..=255`-Alphamaske (`255` = Motiv).
+    pub alpha_base64: String,
+}
+
+/// Trennt einmalig Motiv und Hintergrund für `photo_id` (Phase 27
+/// Punkt 3) — Grundlage der getrennten Hintergrundbehandlung in
+/// `stages::creative`. Nutzt dieselbe klassische Center-Surround-
+/// Saliency wie die bestehende "Motiv"-KI-Maske
+/// (`apx_ai::segmentation::subject_alpha`), **kein Modell-Download
+/// nötig** — anders als Tiefenkarte/Stiltransfer läuft diese Funktion
+/// deshalb sofort.
+///
+/// Dasselbe „einmal berechnen, dann im EDL ablegen"-Muster wie
+/// [`estimate_photo_depth`]: Das Frontend ruft den Befehl auf
+/// ausdrücklichen Nutzerwunsch auf, nicht bei jedem Regler-Tick.
+#[tauri::command]
+pub fn segment_photo_subject(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<SubjectMaskDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let alpha = apx_ai::segmentation::subject_alpha(&linear.pixels, linear.width, linear.height)
+        .map_err(|err| err.to_string())?;
+
+    Ok(SubjectMaskDto {
+        bitmap_width: linear.width,
+        bitmap_height: linear.height,
+        alpha_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &alpha),
+    })
+}
+
+/// Die sechs Kennzahlen, die ein Referenzfoto für den Farbabgleich
+/// liefert (Phase 27 Punkt 1) — Mittelwert und Streuung der drei
+/// Gegenfarben-Achsen, siehe `stages::creative::opponent_stats`.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ColorStatsDto {
+    pub l_mean: f32,
+    pub l_std: f32,
+    pub a_mean: f32,
+    pub a_std: f32,
+    pub b_mean: f32,
+    pub b_std: f32,
+}
+
+/// Berechnet die Farbstatistik eines Referenzfotos für den Farbabgleich
+/// (Phase 27 Punkt 1). Bewusst nur die sechs Zahlen statt des ganzen
+/// Referenzbilds: das EDL bleibt klein, und beim Rendern ist kein
+/// zweites Foto nötig.
+///
+/// **Ehrliche Grenze:** die Statistik wird auf dem linearen
+/// Dekodierergebnis des Referenzfotos berechnet, ohne dessen eigene
+/// Entwicklungseinstellungen anzuwenden — der Abgleich übernimmt also
+/// die Farbigkeit der *Aufnahme*, nicht die einer bereits darauf
+/// angewandten Bearbeitung. Für den Zweck (eine Serie einheitlich
+/// machen) ist das die brauchbarere Bezugsgröße; für „übernimm genau
+/// diesen fertigen Look" gibt es Presets und den Stiltransfer.
+#[tauri::command]
+pub fn compute_reference_color_stats(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<ColorStatsDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let stats = apx_pipeline::stages::creative::opponent_stats(&linear.pixels);
+    Ok(ColorStatsDto {
+        l_mean: stats[0],
+        l_std: stats[1],
+        a_mean: stats[2],
+        a_std: stats[3],
+        b_mean: stats[4],
+        b_std: stats[5],
+    })
+}
+
+// ---- Licht & Optik (Phase 28, siehe `DECISIONS.md` ADR-0058) --------------
+
+/// Trennt einmalig Himmel und Boden für `photo_id` (Phase 28 Punkt 7).
+/// Dieselbe Übertragungskonvention und dasselbe „einmal berechnen, dann
+/// im EDL ablegen"-Muster wie [`segment_photo_subject`], nur mit
+/// `apx_ai::segmentation::sky_alpha` statt der Motiv-Saliency —
+/// ebenfalls **ohne Modell-Download**.
+///
+/// Bewusst ein eigener Befehl statt eines Parameters an
+/// [`segment_photo_subject`]: die beiden liefern semantisch
+/// verschiedene Masken, und ein Aufrufer, der sich vertippt, bekäme
+/// sonst stillschweigend die falsche.
+#[tauri::command]
+pub fn segment_photo_sky(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<SubjectMaskDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    let alpha = apx_ai::segmentation::sky_alpha(&linear.pixels, linear.width, linear.height)
+        .map_err(|err| err.to_string())?;
+
+    Ok(SubjectMaskDto {
+        bitmap_width: linear.width,
+        bitmap_height: linear.height,
+        alpha_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &alpha),
+    })
+}
+
+/// Die neun Luminanz-Dezile, die ein Referenzfoto für den
+/// Tonwert-Angleich liefert (Phase 28 Punkt 1).
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToneStatsDto {
+    /// 10 %, 20 %, …, 90 % der Luminanzverteilung, jeweils `0.0..=1.0`.
+    pub deciles: [f32; 9],
+}
+
+/// Berechnet die Tonwertverteilung eines Referenzfotos (Phase 28
+/// Punkt 1). Wie bei [`compute_reference_color_stats`] wandern nur
+/// wenige Zahlen ins EDL, kein zweites Bild — und es gilt dieselbe
+/// ehrliche Grenze: gemessen wird das lineare Dekodierergebnis des
+/// Referenzfotos ohne dessen eigene Entwicklungseinstellungen.
+#[tauri::command]
+pub fn compute_reference_tone_stats(
+    state: State<'_, AppState>,
+    photo_id: String,
+) -> Result<ToneStatsDto, String> {
+    let photo_id = parse_photo_id(photo_id)?;
+    let source_path = resolve_source_path_for_ai(&state.catalog, photo_id)?;
+    let max_edge = Some(apx_ai::segmentation::ANALYSIS_MAX_EDGE);
+    let linear = state
+        .tile_cache
+        .get_or_decode(photo_id, max_edge, || {
+            apx_raw::decode_linear(&source_path, max_edge)
+        })
+        .map_err(|err| err.to_string())?;
+
+    // Dieselbe Luminanz-Gewichtung wie die Pipeline (siehe
+    // `stages::pixel_util::luminance`) — eine abweichende Gewichtung
+    // hier würde die Zielwerte systematisch verschieben.
+    let mut histogram = [0u32; 256];
+    for px in linear.pixels.chunks_exact(3) {
+        let l = (0.3 * px[0] + 0.59 * px[1] + 0.11 * px[2]).clamp(0.0, 1.0);
+        histogram[(l * 255.0).round() as usize] += 1;
+    }
+    let total: u32 = histogram.iter().sum();
+    if total == 0 {
+        return Err("Referenzfoto enthält keine Bildpunkte".to_string());
+    }
+    let mut deciles = [0.0f32; 9];
+    let mut cumulative = 0u32;
+    let mut next = 0usize;
+    for (bin, count) in histogram.iter().enumerate() {
+        cumulative += count;
+        while next < 9 && cumulative as f32 / total as f32 >= (next + 1) as f32 * 0.1 {
+            deciles[next] = bin as f32 / 255.0;
+            next += 1;
+        }
+        if next >= 9 {
+            break;
+        }
+    }
+    for slot in deciles.iter_mut().skip(next) {
+        *slot = 1.0;
+    }
+
+    Ok(ToneStatsDto { deciles })
 }

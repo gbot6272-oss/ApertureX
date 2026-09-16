@@ -54,6 +54,7 @@ export function useCommandRegistry(): CommandEntry[] {
 
   const requestCommand = useAppStore((s) => s.requestCommand);
   const toggleCenterView = useAppStore((s) => s.toggleCenterView);
+  const levelHorizon = useAppStore((s) => s.levelHorizon);
   const setCenterView = useAppStore((s) => s.setCenterView);
   const toggleMetadataPanel = useAppStore((s) => s.toggleMetadataPanel);
   const toggleDevelopPanel = useAppStore((s) => s.toggleDevelopPanel);
@@ -73,6 +74,14 @@ export function useCommandRegistry(): CommandEntry[] {
   const openVersionsCompareView = useAppStore((s) => s.openVersionsCompareView);
   const openSecondaryDisplay = useAppStore((s) => s.openSecondaryDisplay);
   const aiSettings = useAppStore((s) => s.aiSettings);
+  // Ansichtsmodi (Phase 26, siehe `DECISIONS.md` ADR-0056) — bewusst
+  // auch hier eingetragen und nicht nur als Tastenkuerzel: genau das
+  // war ADR-0046s Befund (eine Funktion, die es nur auf einer Taste
+  // gibt, ist fuer die meisten Nutzer nicht vorhanden).
+  const focusMode = useAppStore((s) => s.focusMode);
+  const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
+  const lightsOut = useAppStore((s) => s.lightsOut);
+  const cycleLightsOut = useAppStore((s) => s.cycleLightsOut);
 
   const exportPhotoIds = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
 
@@ -88,8 +97,39 @@ export function useCommandRegistry(): CommandEntry[] {
       { id: "fn:view-overview", label: t("header.viewOverview"), category: "navigation", run: () => setCenterView("overview") },
       { id: "fn:view-map", label: t("header.viewMap"), category: "navigation", run: () => setCenterView("map") },
       { id: "fn:view-people", label: t("header.viewPeople"), category: "navigation", run: () => setCenterView("people") },
+      { id: "fn:view-calendar", label: t("header.viewCalendar"), category: "navigation", run: () => setCenterView("calendar") },
+      { id: "fn:view-board", label: t("header.viewBoard"), category: "navigation", run: () => setCenterView("board") },
       { id: "fn:view-info", label: t("header.viewInfo"), category: "navigation", run: toggleMetadataPanel },
       { id: "fn:view-develop", label: t("header.viewDevelop"), category: "navigation", run: toggleDevelopPanel },
+      {
+        id: "fn:focus-mode",
+        label: focusMode ? t("commands.focusMode.off") : t("commands.focusMode.on"),
+        category: "navigation",
+        run: toggleFocusMode,
+      },
+      {
+        id: "fn:lights-out",
+        label: lightsOut === "off" ? t("commands.lightsOut.on") : lightsOut === "dim" ? t("commands.lightsOut.darker") : t("commands.lightsOut.off"),
+        category: "navigation",
+        run: cycleLightsOut,
+      },
+
+      // Phase 31 Schritt 7: Der Auto-Horizont existiert seit Phase 13
+      // Schritt 4 vollständig (Canny + Hough), lag aber als Eintrag einer
+      // Klappliste tief in den Objektivkorrekturen — dort sucht ihn
+      // niemand. Hier taucht er unter seinem gebräuchlichen Namen auf und
+      // öffnet nebenbei das Entwickeln-Panel, damit das Ergebnis
+      // sichtbar ist.
+      {
+        id: "fn:level-horizon",
+        label: "Horizont ausrichten",
+        category: "advanced",
+        disabled: selectedPhotoId === null,
+        run: () => {
+          openDevelopPanel();
+          void levelHorizon();
+        },
+      },
 
       // Ausgabe
       { id: "fn:export", label: t("header.export"), category: "output", disabled: exportPhotoIds.length === 0, run: openExportDialog },
@@ -109,6 +149,7 @@ export function useCommandRegistry(): CommandEntry[] {
       { id: "fn:import-template", label: t("header.importWithTemplate"), category: "templates", run: () => requestCommand("import-template") },
       { id: "fn:templates", label: t("header.templates"), category: "templates", run: () => requestCommand("templates") },
       { id: "fn:organize", label: t("header.organize"), category: "templates", run: () => requestCommand("organize") },
+      { id: "fn:batch-rename", label: t("header.batchRename"), category: "templates", run: () => requestCommand("batch-rename") },
       { id: "fn:batch-console", label: t("header.batchConsole"), category: "templates", run: () => requestCommand("batch-console") },
       { id: "fn:metadata", label: t("header.metadata"), category: "templates", run: () => requestCommand("metadata") },
 
@@ -141,6 +182,8 @@ export function useCommandRegistry(): CommandEntry[] {
         run: () => selectedPhotoId && void openSecondaryDisplay(selectedPhotoId),
       },
       { id: "fn:stats", label: t("header.stats"), category: "analysis", run: () => requestCommand("stats") },
+      { id: "fn:gear-stats", label: t("header.gearStats"), category: "analysis", run: () => requestCommand("gear-stats") },
+      { id: "fn:series", label: t("header.series"), category: "analysis", run: () => requestCommand("series") },
       { id: "fn:catalog", label: t("header.catalog"), category: "analysis", run: () => requestCommand("catalog") },
 
       // System — nicht im Overflow-Menü (eigenes Icon/Tastenkürzel), aber
@@ -248,5 +291,9 @@ export function useCommandRegistry(): CommandEntry[] {
     openSecondaryDisplay,
     setSettingsDialogOpen,
     aiSettings,
+    focusMode,
+    toggleFocusMode,
+    lightsOut,
+    cycleLightsOut,
   ]);
 }

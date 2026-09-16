@@ -152,7 +152,11 @@ test.describe("KI-Funktionen (Phase 7)", () => {
     await setUpWithSelectedPhoto(page);
     await setMockFixtures(page, { presetGeneratorSubsetJson: JSON.stringify({ basic: { exposure_ev: 0.75, contrast: 20 } }) });
 
-    await expect(page.getByText("KI-Preset-Generator")).toBeVisible();
+    // Phase 31 Schritt 1: Der Generator liegt jetzt hinter einer Klappe
+    // — er fuellte die Preset-Palette mit acht Bedienelementen, direkt
+    // unter dem Satz "Keine Presets in diesem Ordner". Erst oeffnen,
+    // genau wie ein Nutzer es jetzt tut.
+    await page.getByText("KI-Preset-Generator").click();
     await page.getByText("Anthropic-API-Schlüssel (fehlt)").click();
     await page.getByLabel("Anthropic-API-Schlüssel").fill("sk-ant-test-key");
     await page.getByRole("button", { name: "Speichern", exact: true }).click();
@@ -173,6 +177,8 @@ test.describe("KI-Funktionen (Phase 7)", () => {
     await setUpWithSelectedPhoto(page);
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
 
+    // Klappe oeffnen (siehe Phase 31 Schritt 1 im Test darueber).
+    await page.getByText("KI-Preset-Generator").click();
     await page.getByLabel("Beschreibung (LLM-Modus)").fill("kühler, entsättigter Look");
 
     // "Aus Beschreibung erzeugen" bleibt ohne Schlüssel deaktiviert, "Prompt

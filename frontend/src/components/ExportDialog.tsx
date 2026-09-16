@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
+import { estimateExportSize, totalBytes } from "../lib/exportEstimate";
+import { formatBytes } from "../lib/format";
 import { useT } from "../lib/i18n";
+import { useShallow } from "zustand/react/shallow";
+import { selectActivePhotos } from "../store";
 import type { ExportFormat, ExportPhotoOptions, IccProfileChoice, WatermarkPosition } from "../lib/tauri";
 import { pickFilePath, selectFolderDialog } from "../lib/tauri";
 import { useAppStore } from "../store";
 import { Sheet } from "./ui/Sheet";
+import { SuccessSpark } from "./ui/SuccessSpark";
 
 interface ExportDialogProps {
   open: boolean;
@@ -176,6 +181,32 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
     );
   }
 
+  // Export-Vorschau (Phase 32 F10): Abmessungen und Dateigröße, bevor
+  // etwas geschrieben wird. Bezugsgröße ist das erste ausgewählte Foto —
+  // bei einer Auswahl aus einer Kamera haben alle dieselben Maße, und
+  // eine Schätzung je Foto einzeln auszuweisen wäre bei 300 Bildern
+  // unlesbar. Die Gesamtsumme rechnet mit diesem Foto hoch, was im
+  // Hinweistext auch so dasteht.
+  const photos = useAppStore(useShallow(selectActivePhotos));
+  const referencePhoto = useMemo(
+    () => photos.find((photo) => photo.id === photoIds[0]) ?? photos[0],
+    [photos, photoIds],
+  );
+  const estimate = useMemo(
+    () =>
+      estimateExportSize({
+        source: { width: referencePhoto?.width ?? 0, height: referencePhoto?.height ?? 0 },
+        limits: {
+          maxEdge: sizeMode === "edge" ? maxEdge : undefined,
+          maxMegapixels: sizeMode === "megapixels" ? maxMegapixels : undefined,
+        },
+        format,
+        quality,
+        bitDepth16: bitDepth16 && (format === "png" || format === "tiff"),
+      }),
+    [referencePhoto, sizeMode, maxEdge, maxMegapixels, format, quality, bitDepth16],
+  );
+
   const supportsBitDepth16 = format === "png" || format === "tiff";
   // JPEG-XL: Qualität 100 kodiert verlustfrei, darunter verlustbehaftet
   // (siehe `apx_export::format::encode_jxl`s Moduldoku) — derselbe
@@ -188,6 +219,45 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
       <p className="mb-3 text-xs text-text-muted">
         {t("exportDialog.photoCount", { count: photoIds.length, plural: photoIds.length === 1 ? "" : "s" })}
       </p>
+
+      {/* Export-Vorschau (Phase 32 F10) */}
+      <section aria-label="Export-Vorschau" data-testid="export-estimate" className="mb-3 rounded border border-border bg-bg-panel p-2 text-xs">
+        {referencePhoto && estimate.width > 0 ? (
+          <>
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="text-text-secondary">
+                Ausgabe:{" "}
+                <span className="font-medium tabular-nums text-text-primary">
+                  {estimate.width} × {estimate.height}
+                </span>{" "}
+                ({estimate.megapixels.toFixed(1)} MP)
+              </span>
+              <span className="text-text-secondary">
+                je Foto:{" "}
+                <span className="font-medium tabular-nums text-text-primary" data-testid="export-estimate-per-photo">
+                  {formatBytes(estimate.bytes)}
+                </span>
+              </span>
+              {photoIds.length > 1 && (
+                <span className="text-text-secondary">
+                  gesamt:{" "}
+                  <span className="font-medium tabular-nums text-text-primary" data-testid="export-estimate-total">
+                    {formatBytes(totalBytes(estimate, photoIds.length))}
+                  </span>
+                </span>
+              )}
+            </div>
+            <p className="mt-1 text-[11px] text-text-muted">
+              {estimate.exact
+                ? "Unkomprimiert — diese Größe ist exakt."
+                : `Schätzung, erwartet zwischen ${formatBytes(estimate.lowBytes)} und ${formatBytes(estimate.highBytes)}; glatte Flächen werden kleiner, feines Laub größer.`}
+              {photoIds.length > 1 ? " Die Summe rechnet mit den Maßen des ersten Fotos hoch." : ""}
+            </p>
+          </>
+        ) : (
+          <p className="text-text-muted">Keine Bildmaße bekannt — ohne sie lässt sich nichts abschätzen.</p>
+        )}
+      </section>
 
       <label className="mb-3 flex flex-col gap-1 text-xs text-text-secondary">
         {t("exportDialog.destFolder")}
@@ -245,6 +315,10 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
         <select
           value={format}
           onChange={(e) => setFormat(e.target.value as ExportFormat)}
+          // Eigenes Label: die umschließende Beschriftung enthält auch
+          // den Text aller Optionen, der Name des Feldes wäre sonst
+          // „Format JPEG PNG TIFF …".
+          aria-label="Ausgabeformat"
           className="rounded border border-border bg-bg-panel px-2 py-1 text-sm"
         >
           {(Object.keys(FORMAT_LABELS) as ExportFormat[]).map((key) => (
@@ -460,21 +534,36 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
       )}
 
       {exportProgress && (
-        <div className="mb-2 flex items-center gap-2 text-xs text-text-secondary">
-          <span>
-            {t("exportDialog.progress", { done: exportProgress.done, total: exportProgress.total })}
-            {exportProgress.failed > 0 ? ` (${t("exportDialog.failedCount", { count: exportProgress.failed })})` : ""}
-          </span>
-          {exportRunning && (
-            <button type="button" onClick={() => void toggleExportQueuePause()} className="rounded border border-border px-2 py-0.5 text-xs hover:border-accent">
-              {exportQueuePaused ? t("exportDialog.resume") : t("exportDialog.pause")}
-            </button>
-          )}
+        <div className="mb-2 flex flex-col gap-1">
+          {/* Echter Fortschrittsbalken statt nur der Textzahl (Phase 24,
+              siehe DECISIONS.md ADR-0052 — Nutzerwunsch "mehr Übersicht")
+              — animierte Breite (`apx-progress-fill`) statt hartem Sprung
+              bei jedem Fortschritts-Tick. */}
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-panel" role="progressbar" aria-valuemin={0} aria-valuemax={exportProgress.total} aria-valuenow={exportProgress.done}>
+            <div
+              className="apx-progress-fill h-full rounded-full bg-accent"
+              style={{ width: `${exportProgress.total > 0 ? (exportProgress.done / exportProgress.total) * 100 : 0}%` }}
+            />
+          </div>
+          <div className="flex items-center gap-2 text-xs text-text-secondary">
+            <span>
+              {t("exportDialog.progress", { done: exportProgress.done, total: exportProgress.total })}
+              {exportProgress.failed > 0 ? ` (${t("exportDialog.failedCount", { count: exportProgress.failed })})` : ""}
+            </span>
+            {exportRunning && (
+              <button type="button" onClick={() => void toggleExportQueuePause()} className="rounded border border-border px-2 py-0.5 text-xs hover:border-accent">
+                {exportQueuePaused ? t("exportDialog.resume") : t("exportDialog.pause")}
+              </button>
+            )}
+          </div>
         </div>
       )}
       {exportError && <p className="mb-2 text-xs text-danger">{t("exportDialog.error", { message: exportError })}</p>}
       {!exportRunning && exportProgress && exportProgress.done > 0 && (
-        <p className="mb-2 text-xs text-text-secondary">{t("exportDialog.filesWritten", { count: exportProgress.done - exportProgress.failed })}</p>
+        <p className="relative mb-2 pl-2 text-xs text-text-secondary">
+          <SuccessSpark active={!exportRunning && exportProgress.done > 0} />
+          {t("exportDialog.filesWritten", { count: exportProgress.done - exportProgress.failed })}
+        </p>
       )}
 
       <div className="flex justify-end gap-2">

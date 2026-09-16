@@ -1,4 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import { extractPalette } from "../lib/colorPalette";
+import {
+  dragDelta,
+  HISTOGRAM_ZONES,
+  zoneAt,
+  type HistogramZone,
+  type HistogramZoneField,
+} from "../lib/histogramZones";
+import { PEAKING_COLORS, type PeakingColor } from "../lib/focusPeaking";
 
 import type { DevelopFrame } from "../hooks/useDevelopRender";
 import { computeHistogram, countClipping, type Histogram } from "../lib/histogram";
@@ -13,7 +23,53 @@ interface Viewport {
   height: number;
 }
 
+/** Bedienung des Fokus-Peakings (Phase 31 Schritt 4). Der Zustand liegt
+ * im Viewer — dort entsteht auch die Überlagerung; dieses Panel ist nur
+ * die Bedienfläche dafür, wie schon beim Clipping-Overlay. */
+/** Die aus dem Foto gezogene Farbpalette (Phase 31 Schritt 5). */
+/** Ziehen im Histogramm (Phase 32 F2). */
+export interface HistogramDragControls {
+  /** Zwischenstand beim Ziehen — noch nicht gespeichert. */
+  onAdjust: (field: HistogramZoneField, delta: number) => void;
+  /** Loslassen: jetzt dauerhaft speichern. */
+  onCommit: () => void;
+}
+
+export interface PaletteControls {
+  /** Ein Klick auf ein Feld setzt den Weissabgleich auf diese Farbe —
+   * dieselbe Wirkung wie die Pipette, nur ohne im Bild zielen zu
+   * müssen. */
+  onPick: (r: number, g: number, b: number) => void;
+}
+
+export interface PeakingControls {
+  enabled: boolean;
+  threshold: number;
+  color: PeakingColor;
+  /** Anteil markierter Pixel (0…1) — ohne diese Rückmeldung wäre der
+   * Schwellwert Blindflug. */
+  coverage: number;
+  onToggle: () => void;
+  onThresholdChange: (value: number) => void;
+  onColorChange: (value: PeakingColor) => void;
+}
+
 interface DevelopAnalysisPanelProps {
+  peaking?: PeakingControls;
+  palette?: PaletteControls;
+  histogramDrag?: HistogramDragControls;
+  /** Angedockt (eigene Spalte neben dem Foto) statt schwebend darüber.
+   *
+   * Phase 31 Schritt 1: schwebend war die Vorgabe und damit der
+   * Normalfall — das Panel lag beim Öffnen des Entwickeln-Moduls IMMER
+   * über dem Foto. Verschieben und Einklappen gab es zwar seit Phase 18,
+   * aber beides musste man erst tun. Angedockt nimmt das Panel eine
+   * eigene Spalte ein, der Viewer misst sich an der Restbreite, und das
+   * Foto ist nie verdeckt. Schwebend bleibt für den Fall erhalten, dass
+   * jemand die volle Breite fürs Foto will und die Analyse kurz
+   * darüberlegt. */
+  docked?: boolean;
+  onToggleDocked?: () => void;
   frame: DevelopFrame | null;
   pointerSample: { r: number; g: number; b: number } | null;
   clippingOverlayEnabled: boolean;
@@ -53,8 +109,52 @@ function useCanvasDprWidth(canvasRef: React.RefObject<HTMLCanvasElement | null>)
   return state;
 }
 
-function HistogramCanvas({ histogram }: { histogram: Histogram }) {
+function HistogramCanvas({
+  histogram,
+  drag,
+}: {
+  histogram: Histogram;
+  drag?: HistogramDragControls;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Phase 32 F2: Das Histogramm war reine Anzeige. Im Ziehen liegt aber
+  // der schnellste Weg zu einer Tonwertkorrektur — man sieht, wo die
+  // Werte kleben, und schiebt genau dort, statt erst zu lesen und dann
+  // in der Reglerliste den passenden Namen zu suchen.
+  const [hoverZone, setHoverZone] = useState<HistogramZone | null>(null);
+  const dragState = useRef<{ zone: HistogramZone; lastX: number; width: number } | null>(null);
+
+  const fractionFromEvent = (event: React.PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return { fraction: (event.clientX - rect.left) / rect.width, width: rect.width };
+  };
+
+  useEffect(() => {
+    if (!drag) return;
+    function onMove(event: PointerEvent) {
+      const state = dragState.current;
+      if (!state) return;
+      event.preventDefault();
+      drag!.onAdjust(state.zone.field, dragDelta(state.zone, event.clientX - state.lastX, state.width));
+      state.lastX = event.clientX;
+    }
+    function onUp() {
+      if (!dragState.current) return;
+      dragState.current = null;
+      drag!.onCommit();
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    // Der Listener haengt genau einmal; `drag` ist je Panel-Instanz
+    // stabil. (Phase 31 F8 hat gezeigt, was passiert, wenn ein
+    // keydown-/pointer-Listener sich mitten in der Auslieferung selbst
+    // abhaengt — deshalb hier bewusst keine wechselnde Abhaengigkeit.)
+  }, [drag]);
+
   const { cssWidth, dpr } = useCanvasDprWidth(canvasRef);
   const cssHeight = 80;
 
@@ -93,7 +193,53 @@ function HistogramCanvas({ histogram }: { histogram: Histogram }) {
     ctx.globalCompositeOperation = "source-over";
   }, [histogram, cssWidth, dpr]);
 
-  return <canvas ref={canvasRef} className="w-full rounded" style={{ height: cssHeight }} aria-label="Histogramm" />;
+  if (!drag) {
+    return <canvas ref={canvasRef} className="w-full rounded" style={{ height: cssHeight }} aria-label="Histogramm" />;
+  }
+
+  return (
+    <div
+      className="pointer-events-auto relative cursor-ew-resize select-none"
+      data-testid="histogram-zones"
+      onPointerMove={(event) => {
+        if (dragState.current) return;
+        setHoverZone(zoneAt(fractionFromEvent(event).fraction));
+      }}
+      onPointerLeave={() => setHoverZone(null)}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        const { fraction, width } = fractionFromEvent(event);
+        const zone = zoneAt(fraction);
+        setHoverZone(zone);
+        dragState.current = { zone, lastX: event.clientX, width };
+      }}
+    >
+      <canvas ref={canvasRef} className="w-full rounded" style={{ height: cssHeight }} aria-label="Histogramm" />
+      {/* Die Zonen liegen ueber der Canvas statt darin: so bleibt die
+          Histogramm-Zeichnung unveraendert (und ihr dpr-Aufbau
+          unangetastet), und die Hervorhebung ist ein reines
+          CSS-Rechteck. */}
+      <div className="pointer-events-none absolute inset-0 flex">
+        {HISTOGRAM_ZONES.map((zone) => (
+          <div
+            key={zone.field}
+            style={{ width: `${(zone.end - zone.start) * 100}%` }}
+            className={`h-full border-r border-white/10 last:border-r-0 ${
+              hoverZone?.field === zone.field ? "bg-accent/20" : ""
+            }`}
+          />
+        ))}
+      </div>
+      {hoverZone ? (
+        <span
+          data-testid="histogram-zone-label"
+          className="pointer-events-none absolute left-1 top-1 rounded bg-bg-raised/90 px-1 text-[10px] text-text-secondary"
+        >
+          {hoverZone.label} — ziehen
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 /** Vektorskop-Canvas (Phase 14 Schritt 6, siehe `lib/vectorscope.ts`s
@@ -257,7 +403,7 @@ const ANALYSIS_TAB_LABELS: Record<AnalysisTab, string> = {
   waveform: "Wellenform",
 };
 
-export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnabled, onToggleClippingOverlay, viewport, thumbnailUrl, onAutoTone }: DevelopAnalysisPanelProps) {
+export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnabled, onToggleClippingOverlay, viewport, thumbnailUrl, onAutoTone, docked = false, onToggleDocked, peaking, palette, histogramDrag }: DevelopAnalysisPanelProps) {
   // Vor dem `if (!frame) return null;` unten, sonst verletzt der Hook die
   // Rules of Hooks (unterschiedliche Hook-Zahl je nach `frame`).
   const [analysisTab, setAnalysisTab] = useState<AnalysisTab>("histogram");
@@ -315,6 +461,14 @@ export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnab
   // Bildschleife je Kanal statt nur ein 256er-Array-Update) — nur die
   // gerade sichtbare Analyse berechnen, nicht alle drei bei jedem Render.
   const vectorscope: Vectorscope | null = analysisTab === "vectorscope" ? computeVectorscope(frame.pixels, frame.width, frame.height) : null;
+  // Die Palette hängt nur am Bild, nicht an der Reiterwahl — `useMemo`
+  // verhindert, dass k-Means bei jedem Zeigerzucken neu läuft (der
+  // Punktfarbmesser löst sehr häufige Neurenderings aus).
+  const swatches = useMemo(
+    () => (palette && frame ? extractPalette(frame.pixels, frame.width, frame.height) : []),
+    [palette, frame],
+  );
+
   const waveform: Waveform | null = analysisTab === "waveform" ? computeWaveform(frame.pixels, frame.width, frame.height) : null;
 
   // `pointer-events-none` auf dem Container, `pointer-events-auto` nur auf
@@ -332,8 +486,16 @@ export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnab
   // TAT-Leiste, da dieses Panel ohnehin frei verschiebbar ist.
   return (
     <div
-      className="pointer-events-none absolute right-2 top-12 flex w-60 flex-col gap-2 rounded border border-border bg-bg-raised/95 p-2 text-xs shadow-lg"
-      style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
+      className={
+        docked
+          ? // Angedockt: normales Layout-Element. Kein `pointer-events-none`
+            // nötig — hier liegt nichts mehr über dem Bild, das Klicks für
+            // Pipette oder Reparatur-Pinsel abfangen könnte.
+            "flex h-full w-full flex-col gap-2 overflow-y-auto border-l border-border bg-bg-raised p-2 text-xs"
+          : "pointer-events-none absolute right-2 top-12 flex w-60 flex-col gap-2 rounded border border-border bg-bg-raised/95 p-2 text-xs shadow-lg"
+      }
+      style={docked ? undefined : { transform: `translate(${offset.x}px, ${offset.y}px)` }}
+      data-testid="develop-analysis-panel"
     >
       {/* Kopfzeile ist der Ziehgriff fürs Verschieben (die ganze Zeile,
           nicht nur ein kleines Symbol — großzügigere Trefferfläche) plus
@@ -341,10 +503,27 @@ export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnab
           Knöpfen — die stoppen die Propagation selbst, sonst würde jeder
           Klick auf Registerkarte/Knopf zusätzlich das Ziehen starten. */}
       <div
-        className="pointer-events-auto -m-2 mb-0 flex cursor-grab items-center justify-between rounded-t border-b border-border bg-bg-panel px-2 py-1 active:cursor-grabbing"
-        onMouseDown={handleDragHandleMouseDown}
+        className={
+          docked
+            ? "-m-2 mb-0 flex items-center justify-between border-b border-border bg-bg-panel px-2 py-1"
+            : "pointer-events-auto -m-2 mb-0 flex cursor-grab items-center justify-between rounded-t border-b border-border bg-bg-panel px-2 py-1 active:cursor-grabbing"
+        }
+        onMouseDown={docked ? undefined : handleDragHandleMouseDown}
       >
         <span className="pointer-events-none select-none font-semibold text-text-secondary">Analyse</span>
+        {onToggleDocked ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleDocked();
+            }}
+            className="pointer-events-auto ml-auto mr-1 rounded border border-border px-1 text-text-secondary hover:border-accent"
+            title={docked ? "Analyse über das Foto legen" : "Analyse neben das Foto andocken"}
+          >
+            {docked ? "Lösen" : "Andocken"}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={(event) => {
@@ -399,7 +578,7 @@ export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnab
                 </button>
               </div>
             </div>
-            {analysisTab === "histogram" && <HistogramCanvas histogram={histogram} />}
+            {analysisTab === "histogram" && <HistogramCanvas histogram={histogram} drag={histogramDrag} />}
             {analysisTab === "vectorscope" && vectorscope && <VectorscopeCanvas vectorscope={vectorscope} />}
             {analysisTab === "waveform" && waveform && <WaveformCanvas waveform={waveform} />}
             {analysisTab === "histogram" && (
@@ -444,6 +623,85 @@ export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnab
           </div>
         </>
       )}
+
+      {/* Fokus-Peaking (Phase 31 Schritt 4) — markiert farbig, welche
+          Kanten wirklich scharf sind. Steht hier bei den übrigen
+          Beurteilungswerkzeugen, nicht im Entwickeln-Panel: es verändert
+          das Foto nicht. */}
+      {peaking ? (
+        <div className="flex flex-col gap-1 border-t border-border pt-2">
+          <label className="pointer-events-auto flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={peaking.enabled}
+              onChange={peaking.onToggle}
+              className="accent-[var(--color-accent)]"
+            />
+            <span className="font-semibold text-text-secondary">Fokus-Peaking</span>
+            {peaking.enabled ? (
+              <span className="ml-auto tabular-nums text-text-muted">
+                {(peaking.coverage * 100).toFixed(1)} %
+              </span>
+            ) : null}
+          </label>
+          {peaking.enabled ? (
+            <div className="pointer-events-auto flex flex-col gap-1">
+              <label className="flex items-center gap-2 text-text-secondary">
+                Schwelle
+                <input
+                  type="range"
+                  aria-label="Peaking-Schwelle"
+                  min={0.02}
+                  max={0.6}
+                  step={0.01}
+                  value={peaking.threshold}
+                  onChange={(event) => peaking.onThresholdChange(Number(event.target.value))}
+                  className="apx-range min-w-0 flex-1"
+                />
+              </label>
+              <div className="flex items-center gap-2 text-text-secondary">
+                Farbe
+                {(["red", "green", "blue"] as const).map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    aria-label={`Peaking-Farbe ${name}`}
+                    aria-pressed={peaking.color === name}
+                    onClick={() => peaking.onColorChange(name)}
+                    className={`size-4 rounded-full border ${
+                      peaking.color === name ? "border-text-primary" : "border-border"
+                    }`}
+                    style={{ backgroundColor: `rgb(${PEAKING_COLORS[name].join(" ")})` }}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Farbpalette aus dem Foto (Phase 31 Schritt 5) — ein Klick setzt
+          den Weissabgleich auf diese Farbe, ohne dass man im Bild
+          zielen muss. Besonders nützlich für eine Fläche, die zu klein
+          zum Treffen ist. */}
+      {palette && swatches.length > 0 ? (
+        <div className="flex flex-col gap-1 border-t border-border pt-2">
+          <span className="font-semibold text-text-secondary">Farben im Bild</span>
+          <div className="pointer-events-auto flex gap-1" data-testid="photo-palette">
+            {swatches.map((swatch) => (
+              <button
+                key={swatch.hex}
+                type="button"
+                onClick={() => palette.onPick(swatch.r, swatch.g, swatch.b)}
+                title={`${swatch.hex} · ${(swatch.share * 100).toFixed(0)} % des Bildes — als Weissabgleich übernehmen`}
+                aria-label={`Farbe ${swatch.hex} als Weissabgleich übernehmen`}
+                className="h-6 min-w-0 flex-1 rounded border border-border transition-transform duration-[var(--duration-fast)] hover:scale-110 hover:border-accent"
+                style={{ backgroundColor: swatch.hex }}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -264,6 +264,19 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       top_camera_models: [],
       top_lenses: [],
     } as unknown,
+    // Ausrüstungs-Statistik (Phase 32 F5) — wie `catalogStatistics` ein
+    // fester Fixture-Wert statt einer im Mock nachgebauten Aggregation:
+    // die Klassengrenzen sind in `apx-catalog`s `stats`-Tests abgedeckt,
+    // hier geht es um die Darstellung und den Sprung in den Filter.
+    gearStatistics: {
+      cameras: [],
+      lenses: [],
+      focal_lengths: [],
+      apertures: [],
+      isos: [],
+      shutters: [],
+      total: 0,
+    } as unknown,
     previewCacheStats: { file_count: 0, total_bytes: 0 } as { file_count: number; total_bytes: number },
     // Entrauschung/Hochskalierung (Phase 9 Schritt 6).
     denoisedPhotoPath: "/mock/photos/IMG_0001_entrauscht.png" as string,
@@ -523,6 +536,19 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     entries: Array<{ edl_json: string; created_at: string; label: string | null }>;
     currentIndex: number; // -1 = neutral (noch nie bearbeitet / bis zum Anfang zurück)
   }
+  interface MockPhotoNote {
+    id: string;
+    photo_id: string;
+    x: number;
+    y: number;
+    body: string;
+    done: boolean;
+    created_at: string;
+    updated_at: string;
+  }
+  const photoNotes: MockPhotoNote[] = [];
+  let nextNoteId = 1;
+
   const editHistories: Record<string, EditHistoryState> = {};
   let historyCounter = Date.now();
 
@@ -910,6 +936,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       }
       case "catalog_statistics":
         return fixtures.catalogStatistics;
+      case "gear_statistics":
+        return fixtures.gearStatistics;
       case "get_active_catalog_info":
         // Kein e2e-Test deckt Phase 13 Schritt 6 bisher ab — ein
         // plausibler fester Wert reicht als Platzhalter.
@@ -933,14 +961,24 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           "Goldene Stunde",
           "Film Noir",
           "Pastell",
-        ].map((name) => ({
+        ].map((name, index) => ({
           name,
           size: 2,
           table: identityCube,
           domain_min: [0, 0, 0],
           domain_max: [1, 1, 1],
+          // Phase 25: fester, eindeutiger Test-Platzhalter statt des
+          // echten Inhalts-Hashs (`compute_lut_id`) — reicht hier, da
+          // der Test-Stub `register_lut_filter_table` unten ohnehin
+          // keinen echten Cache führt.
+          id: `test-builtin-lut-${index}`,
         }));
       }
+      // Phase 25 (siehe DECISIONS.md ADR-0053): wärmt im echten Backend
+      // `AppState::lut_table_cache` vor — im Test-Stub gibt es keinen
+      // Server-Cache, also reicht ein reines No-op.
+      case "register_lut_filter_table":
+        return null;
       case "create_new_catalog":
       case "switch_active_catalog":
       case "run_catalog_optimize":
@@ -1443,6 +1481,34 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "estimate_photo_depth":
         return fixtures.depthMapResult;
 
+      // ---- Kreativ-Werkzeuge (Phase 27) — die eigentliche Bildmathematik
+      // ist in `stages::creative`s 15 Rust-Unit-Tests abgedeckt; hier nur
+      // die beiden Vorbereitungs-Befehle. -------------------------------
+      case "segment_photo_subject":
+        return {
+          bitmapWidth: 4,
+          bitmapHeight: 4,
+          // 16 Byte: obere Haelfte Motiv (255), untere Hintergrund (0).
+          alphaBase64: btoa(String.fromCharCode(...Array.from({ length: 16 }, (_, i) => (i < 8 ? 255 : 0)))),
+        };
+
+      case "compute_reference_color_stats":
+        return { lMean: 0.52, lStd: 0.21, aMean: 0.04, aStd: 0.09, bMean: -0.03, bStd: 0.08 };
+
+      // ---- Licht & Optik (Phase 28) — dieselbe Aufteilung: die
+      // Bildmathematik deckt `stages::light_optics`s Rust-Unit-Tests ab,
+      // hier nur die beiden Vorbereitungs-Befehle. ---------------------
+      case "segment_photo_sky":
+        return {
+          bitmapWidth: 4,
+          bitmapHeight: 4,
+          // 16 Byte: obere Haelfte Himmel (255), untere Boden (0).
+          alphaBase64: btoa(String.fromCharCode(...Array.from({ length: 16 }, (_, i) => (i < 8 ? 255 : 0)))),
+        };
+
+      case "compute_reference_tone_stats":
+        return { deciles: [0.05, 0.11, 0.18, 0.26, 0.37, 0.49, 0.63, 0.78, 0.92] };
+
       // ---- KI-Stiltransfer zwischen Fotos (Phase 14 Schritt 9) — die
       // echte fast_neural_style-Inferenz ist bereits in
       // `apx-ai::style_transfer`s Rust-Unit-Tests abgedeckt. ---------------
@@ -1736,6 +1802,151 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return null;
       }
 
+      // ---- Serien-Erkennung (Phase 32 F7) -----------------------------
+      //
+      // Bildet `apx_catalog::series::detect_series` so weit nach, wie der
+      // Oberflächen-Fluss es braucht (zeitliche Gruppierung + EV-Spanne).
+      // Die eigentliche Klassifikation samt Grenzfällen ist in Rust
+      // getestet.
+      case "detect_photo_series": {
+        const gap = args.maxGapSeconds as number;
+        const photos = (fixtures.photosByFolder[args.folderId as string] ?? []) as MockPhoto[];
+        const timed = photos
+          .filter((photo) => photo.captured_at)
+          .map((photo) => ({ photo, ts: Math.floor(new Date(photo.captured_at as string).getTime() / 1000) }))
+          .sort((a, b) => a.ts - b.ts);
+
+        const ev = (photo: MockPhoto): number | null => {
+          if (!photo.aperture || !photo.shutter || !photo.iso) return null;
+          return Math.log2((photo.aperture * photo.aperture) / photo.shutter) - Math.log2(photo.iso / 100);
+        };
+
+        const groups: Array<Array<{ photo: MockPhoto; ts: number }>> = [];
+        for (const entry of timed) {
+          const current = groups[groups.length - 1];
+          if (current && entry.ts - current[current.length - 1]!.ts <= gap) current.push(entry);
+          else groups.push([entry]);
+        }
+
+        return groups
+          .filter((group) => group.length >= 2)
+          .map((group) => {
+            const evs = group.map(({ photo }) => ev(photo));
+            const known = evs.filter((value): value is number => value !== null);
+            const spread = known.length >= 2 ? Math.max(...known) - Math.min(...known) : null;
+            const distinct = new Set(known.map((value) => Math.round(value * 6))).size;
+            let kind = "mixed";
+            if (spread !== null && spread >= 0.5 && distinct >= 3 && distinct === known.length) kind = "exposure_bracket";
+            else if (spread !== null && spread <= 0.2) kind = "burst";
+            return {
+              kind,
+              photo_ids: group.map(({ photo }) => photo.id),
+              span_seconds: group[group.length - 1]!.ts - group[0]!.ts,
+              ev_values: evs,
+              ev_spread: spread,
+            };
+          });
+      }
+
+      // ---- Notizen am Foto (Phase 32 F6) ------------------------------
+      //
+      // Vollwertiger In-Memory-Ersatz für `photo_notes`: der Fluss
+      // (anlegen, abhaken, löschen, Zählung fürs Raster) läuft im Test
+      // wirklich durch, statt eine feste Liste zurückzugeben.
+      case "create_photo_note": {
+        const note = {
+          id: `note-${nextNoteId++}`,
+          photo_id: args.photoId as string,
+          x: args.x as number,
+          y: args.y as number,
+          body: (args.body as string).trim(),
+          done: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        photoNotes.push(note);
+        return { ...note };
+      }
+      case "list_photo_notes":
+        return photoNotes.filter((note) => note.photo_id === (args.photoId as string)).map((note) => ({ ...note }));
+      case "update_photo_note": {
+        const note = photoNotes.find((entry) => entry.id === (args.noteId as string));
+        if (!note) throw new Error(`Test-Stub: Notiz '${args.noteId as string}' nicht gefunden`);
+        if (typeof args.body === "string") note.body = args.body.trim();
+        if (typeof args.done === "boolean") note.done = args.done;
+        if (typeof args.x === "number" && typeof args.y === "number") {
+          note.x = args.x;
+          note.y = args.y;
+        }
+        note.updated_at = new Date().toISOString();
+        return { ...note };
+      }
+      case "delete_photo_note": {
+        const index = photoNotes.findIndex((entry) => entry.id === (args.noteId as string));
+        if (index >= 0) photoNotes.splice(index, 1);
+        return null;
+      }
+      case "photo_note_open_counts": {
+        const counts = new Map<string, number>();
+        for (const note of photoNotes) {
+          if (note.done) continue;
+          counts.set(note.photo_id, (counts.get(note.photo_id) ?? 0) + 1);
+        }
+        return [...counts.entries()];
+      }
+
+      // ---- Stapel-Umbenennung (Phase 32 F4) ---------------------------
+      //
+      // Bildet `apx-app`s `batch_rename::plan_batch_rename` nach, so weit
+      // der Frontend-Fluss es braucht: Tokens ersetzen, Endung erhalten,
+      // doppelte Zielnamen erkennen. Die echte Planung (inkl. Kollision
+      // mit fremden Dateien, virtuellen Kopien und Ringtausch) ist in
+      // Rust getestet — hier geht es nur darum, dass der Dialog eine
+      // plausible Antwort bekommt.
+      case "preview_batch_rename":
+      case "apply_batch_rename": {
+        const ids = args.photoIds as string[];
+        const pattern = args.pattern as string;
+        const startSeq = args.startSeq as number;
+        const taken = new Set<string>();
+        const plan = ids.map((id, index) => {
+          const photo = findPhoto(id);
+          const filename = photo?.filename ?? "unbekannt";
+          const dot = filename.lastIndexOf(".");
+          const stem = dot > 0 ? filename.slice(0, dot) : filename;
+          const ext = dot > 0 ? filename.slice(dot + 1) : null;
+          const captured = photo?.captured_at ? new Date(photo.captured_at) : new Date(0);
+          const date = `${captured.getFullYear()}${String(captured.getMonth() + 1).padStart(2, "0")}${String(captured.getDate()).padStart(2, "0")}`;
+          const rendered = pattern
+            .replaceAll("{date}", date)
+            .replaceAll("{seq}", String(startSeq + index).padStart(4, "0"))
+            .replaceAll("{camera}", photo?.camera_model ?? "Kamera")
+            .replaceAll("{original}", stem)
+            .trim();
+          const newFilename = rendered && ext ? `${rendered}.${ext}` : rendered;
+          let status = "planned";
+          if (!rendered) status = "empty_name";
+          else if (newFilename === filename) status = "unchanged";
+          else if (taken.has(newFilename)) status = "duplicate_in_batch";
+          if (status === "planned" || status === "unchanged") taken.add(newFilename);
+          return { photo_id: id, current_filename: filename, new_filename: newFilename, status };
+        });
+
+        if (cmd === "preview_batch_rename") return plan;
+
+        const blocked = plan.find((entry) => entry.status !== "planned" && entry.status !== "unchanged");
+        if (blocked) throw new Error(`Umbenennen abgebrochen: ${blocked.current_filename}`);
+        const renamed: MockPhoto[] = [];
+        for (const entry of plan) {
+          if (entry.status !== "planned") continue;
+          const photo = findPhoto(entry.photo_id);
+          if (!photo) continue;
+          photo.filename = entry.new_filename;
+          renamed.push(clonePhoto(photo));
+        }
+        return renamed;
+      }
+
       // ---- Vorlagen (Phase 8 Schritt 8) -------------------------------
       case "save_template": {
         const id = `template-${nextTemplateId++}`;
@@ -1781,6 +1992,31 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         // liefert konsistent "abgebrochen" statt eines unbekannten-
         // Befehl-Fehlers, falls doch einmal geklickt wird.
         return null;
+
+      // Video-Stabilisierung (Phase 17 Schritt 9, siehe `DECISIONS.md`
+      // ADR-0062). Das echte Gegenstück lässt `ffmpeg` das Video zweimal
+      // durchlaufen; hier entsteht nur das Katalog-Ergebnis — ein neues
+      // Video im selben Ordner, wie es `register_video_result_as_new_photo`
+      // drüben anlegt. Damit prüft der Test genau das, was im Browser
+      // überhaupt prüfbar ist: dass die Regler die richtigen Argumente
+      // schicken und dass die Oberfläche auf das neue Video umschaltet.
+      case "stabilize_video": {
+        const source = findPhoto(args.photoId as string);
+        if (!source) throw new Error(`Test-Stub: Video '${args.photoId}' nicht gefunden`);
+        const result: MockPhoto = {
+          ...source,
+          id: `${source.id}-stabilisiert`,
+          filename: source.filename.replace(/(\.[^.]+)$/, "_stabilisiert$1"),
+        };
+        const fixtures = w.__mockFixtures as { photosByFolder: Record<string, MockPhoto[]> };
+        for (const folderId of Object.keys(fixtures.photosByFolder)) {
+          if (fixtures.photosByFolder[folderId].some((p) => p.id === source.id)) {
+            fixtures.photosByFolder[folderId] = [...fixtures.photosByFolder[folderId], result];
+            break;
+          }
+        }
+        return clonePhoto(result);
+      }
 
       default:
         throw new Error(`Test-Stub: unbekannter invoke-Befehl "${cmd}"`);

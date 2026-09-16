@@ -15,7 +15,7 @@
 
 pub(crate) mod mode;
 pub(crate) mod presets;
-mod rename;
+pub(crate) mod rename;
 pub(crate) mod thumbnails;
 pub(crate) mod video;
 

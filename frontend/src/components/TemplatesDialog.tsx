@@ -43,6 +43,11 @@ export function TemplatesDialog({ open, photoIds, onClose }: TemplatesDialogProp
     // bewusst nicht mit auf, der Eintrag hier ist nur für die
     // `Record<TemplateKind, string>`-Vollständigkeit nötig.
     filter: t("templatesDialog.kindFilter"),
+    // Umbenennungsmuster (Phase 32 F4) werden im Stapel-Umbenennen-Dialog
+    // selbst gespeichert und gewählt — hier wie `filter` nur der
+    // Vollständigkeit halber, damit `Record<TemplateKind, string>` alle
+    // Arten kennt.
+    rename: t("templatesDialog.kindRename"),
   };
 
   const templatesByKind = useAppStore((s) => s.templatesByKind);

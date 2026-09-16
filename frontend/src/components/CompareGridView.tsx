@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+
 import { previewUrl } from "../lib/media";
 import { useAppStore } from "../store";
 import { FlagToggle, RatingStars } from "./RatingFlagColor";
@@ -39,17 +41,90 @@ export function CompareGridView() {
   const setPhotoFlag = useAppStore((s) => s.setPhotoFlag);
   const zoom = useAppStore((s) => s.compareViewZoom);
   const setCompareViewZoom = useAppStore((s) => s.setCompareViewZoom);
+  const dropFromCompareView = useAppStore((s) => s.dropFromCompareView);
+
+  // Phase 31 Schritt 8: Tastaturbedienung zum Aussortieren. Die Ansicht
+  // konnte bis hierher gar nichts mit der Tastatur — bei neun Fotos
+  // heisst das neun Mal zielen und klicken, und das ist der Grund,
+  // warum Sichten in dieser App laenger dauerte als noetig.
+  const [cursor, setCursor] = useState(0);
+
+  const photos = photoIds
+    .map((id) => photosInFolder?.find((p) => p.id === id))
+    .filter((p): p is NonNullable<typeof p> => p !== undefined);
+
+  // Der Marker darf nicht ins Leere zeigen, wenn ein Foto herausfliegt.
+  const safeCursor = photos.length === 0 ? 0 : Math.min(cursor, photos.length - 1);
+
+  // Der Listener wird GENAU EINMAL gehängt; Fotos und Marker kommen über
+  // Refs herein. Ein erster Entwurf hatte `[photos, cursor, …]` in der
+  // Abhängigkeitsliste — `photos` ist bei jedem Rendern ein neues Array,
+  // der Listener wurde also fortwährend ab- und wieder angehängt.
+  //
+  // Das war nicht nur verschwenderisch, es war ein echter Fehler, und
+  // zwar ein sehr unauffälliger: bei den Pfeiltasten ändert der
+  // App-weite Tastatur-Handler die Auswahl, React rendert daraufhin
+  // synchron neu, und dabei wurde dieser Listener mitten in der
+  // laufenden Ereignis-Auslieferung entfernt und neu gehängt. Das DOM
+  // ruft einen während der Auslieferung entfernten Listener nicht mehr
+  // auf — die Pfeiltasten taten also nichts, während `Entf` (die kein
+  // Neurendern auslöst) einwandfrei funktionierte. Genau dieses Muster
+  // macht solche Fehler so schwer zu sehen.
+  const photosRef = useRef(photos);
+  const cursorRef = useRef(cursor);
+  photosRef.current = photos;
+  cursorRef.current = cursor;
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const photos = photosRef.current;
+      const cursor = cursorRef.current;
+      if (photos.length === 0) return;
+      // In einem Eingabefeld hat die Ansicht nichts zu suchen.
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+
+      const current = photos[Math.min(cursor, photos.length - 1)];
+      if (!current) return;
+
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setCursor((c) => Math.min(photos.length - 1, c + 1));
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setCursor((c) => Math.max(0, c - 1));
+      } else if (event.key === "p" || event.key === "P") {
+        event.preventDefault();
+        void setPhotoFlag(current.id, current.flag === 1 ? 0 : 1);
+      } else if (event.key === "x" || event.key === "X") {
+        event.preventDefault();
+        void setPhotoFlag(current.id, current.flag === -1 ? 0 : -1);
+      } else if (event.key === "Backspace" || event.key === "Delete") {
+        // Aus dem Vergleich nehmen — nicht loeschen.
+        event.preventDefault();
+        dropFromCompareView(current.id);
+      } else if (/^[0-5]$/.test(event.key)) {
+        event.preventDefault();
+        void setPhotoRating(current.id, Number(event.key));
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [setPhotoFlag, setPhotoRating, dropFromCompareView]);
 
   if (photoIds.length === 0) return null;
-
-  const photos = photoIds.map((id) => photosInFolder?.find((p) => p.id === id)).filter((p): p is NonNullable<typeof p> => p !== undefined);
 
   const columns = photos.length <= 2 ? photos.length : photos.length <= 4 ? 2 : 3;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-bg-base" aria-label="Vergleichsansicht">
       <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
-        <h2 className="text-sm font-semibold text-text-primary">Vergleichsansicht — {photos.length} Fotos</h2>
+        <div className="flex items-baseline gap-3">
+          <h2 className="text-sm font-semibold text-text-primary">Vergleichsansicht — {photos.length} Fotos</h2>
+          <span className="text-xs text-text-muted">
+            ←/→ wählen · P behalten · X ablehnen · 0–5 bewerten · Entf aus dem Vergleich nehmen
+          </span>
+        </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-text-secondary" id="compare-zoom-label">
             Zoom (synchronisiert)
@@ -73,8 +148,15 @@ export function CompareGridView() {
         </div>
       </div>
       <div className="grid flex-1 gap-2 overflow-auto p-2" style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}>
-        {photos.map((photo) => (
-          <div key={photo.id} className="flex flex-col overflow-hidden rounded border border-border bg-bg-panel">
+        {photos.map((photo, index) => (
+          <div
+            key={photo.id}
+            data-testid={index === safeCursor ? "compare-tile-active" : "compare-tile"}
+            onClick={() => setCursor(index)}
+            className={`flex flex-col overflow-hidden rounded border bg-bg-panel ${
+              index === safeCursor ? "border-accent" : "border-border"
+            } ${photo.flag === -1 ? "opacity-40" : ""}`}
+          >
             <div className="min-h-0 flex-1 overflow-hidden">
               <img
                 src={previewUrl(photo.id, 1)}
@@ -90,6 +172,18 @@ export function CompareGridView() {
               <div className="flex items-center gap-2">
                 <RatingStars rating={photo.rating} onChange={(rating) => void setPhotoRating(photo.id, rating)} compact />
                 <FlagToggle flag={photo.flag} onChange={(flag) => void setPhotoFlag(photo.id, flag)} compact />
+                <button
+                  type="button"
+                  aria-label={`${photo.filename} aus dem Vergleich nehmen`}
+                  title="Aus dem Vergleich nehmen (das Foto bleibt im Katalog)"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    dropFromCompareView(photo.id);
+                  }}
+                  className="rounded border border-border px-1 text-xs text-text-muted hover:border-danger hover:text-danger"
+                >
+                  ✕
+                </button>
               </div>
             </div>
           </div>

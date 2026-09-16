@@ -1295,6 +1295,10 @@ export interface StageEnabled {
    * `stages::liquify`s Moduldoku). */
   liquify: boolean;
   geometry: boolean;
+  /** Rahmen und Passepartout (Phase 32 F8) — letzte Stufe, NACH
+   * `geometry`: ein Rahmen davor würde vom Zuschnitt weggeschnitten
+   * (siehe `stages::frame`s Moduldoku). */
+  frame: boolean;
 }
 
 export const NEUTRAL_STAGE_ENABLED: StageEnabled = {
@@ -1318,6 +1322,7 @@ export const NEUTRAL_STAGE_ENABLED: StageEnabled = {
   lut_filter: true,
   liquify: true,
   geometry: true,
+  frame: true,
 };
 
 /** Ein einmalig aufgelöstes Foto oder eine Textur, als fertige Bitmap
@@ -2176,7 +2181,45 @@ export interface EdlPayload {
   creative: CreativeAdjustments;
   light_optics: LightOpticsAdjustments;
   interactive: InteractiveAdjustments;
+  /** Rahmen und Passepartout (Phase 32 F8). */
+  frame: FrameAdjustment;
 }
+
+/** Rahmen und Passepartout (Phase 32 F8, siehe `apx-pipeline`s
+ * `stages::frame`). Alle drei Breiten sind Prozent der **kürzeren**
+ * Bildkante, die Farben sRGB-Anteile 0..1.
+ *
+ * Der Rahmen vergrößert die Bildfläche NICHT — er wird hineingezeichnet,
+ * das Foto rückt entsprechend zusammen. Begründung in der Rust-Moduldoku. */
+export interface FrameAdjustment {
+  mat_width: number;
+  mat_color: [number, number, number];
+  border_width: number;
+  border_color: [number, number, number];
+  inner_line_width: number;
+  inner_line_color: [number, number, number];
+}
+
+/** Rahmen-Regler (Phase 32 F8) — Prozent der kürzeren Bildkante.
+ *
+ * Die Obergrenzen sind bewusst verschieden: ein Passepartout darf breit
+ * sein (bis 25 %), eine Rahmenlinie bleibt eine Linie (5 %), und die
+ * Keylinie ist nur ein Strich (2 %). Ein einheitliches 0..100 würde die
+ * beiden schmalen Regler unbrauchbar fein machen. */
+export const FRAME_SLIDER_SPECS: readonly SliderSpec[] = [
+  { key: "mat_width", label: "Passepartout", min: 0, max: 25, fineStep: 0.5, coarseStep: 2, neutral: 0 },
+  { key: "border_width", label: "Rahmenlinie", min: 0, max: 5, fineStep: 0.1, coarseStep: 1, neutral: 0 },
+  { key: "inner_line_width", label: "Keylinie", min: 0, max: 2, fineStep: 0.05, coarseStep: 0.5, neutral: 0 },
+];
+
+export const NEUTRAL_FRAME: FrameAdjustment = {
+  mat_width: 0,
+  mat_color: [1, 1, 1],
+  border_width: 0,
+  border_color: [0, 0, 0],
+  inner_line_width: 0,
+  inner_line_color: [0, 0, 0],
+};
 
 export function neutralEdlPayload(): EdlPayload {
   return {
@@ -2206,6 +2249,7 @@ export function neutralEdlPayload(): EdlPayload {
     creative: structuredClone(NEUTRAL_CREATIVE),
     light_optics: structuredClone(NEUTRAL_LIGHT_OPTICS),
     interactive: structuredClone(NEUTRAL_INTERACTIVE),
+    frame: structuredClone(NEUTRAL_FRAME),
   };
 }
 

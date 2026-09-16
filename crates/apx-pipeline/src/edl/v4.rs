@@ -115,6 +115,12 @@ pub struct StageEnabled {
     #[serde(default = "default_true")]
     pub interactive: bool,
     pub geometry: bool,
+    /// Rahmen und Passepartout (Phase 32 F8) — laeuft als letzte Stufe
+    /// NACH `geometry`: ein Rahmen vor dem Zuschnitt wuerde
+    /// weggeschnitten (siehe `stages::frame`s Moduldoku). Dieselbe
+    /// `default_true`-Begruendung wie `interactive` oben.
+    #[serde(default = "default_true")]
+    pub frame: bool,
 }
 
 fn default_true() -> bool {
@@ -148,6 +154,7 @@ impl StageEnabled {
         light_optics: true,
         interactive: true,
         geometry: true,
+        frame: true,
     };
 }
 
@@ -1695,6 +1702,58 @@ impl Default for HorizonGradAdjustment {
     }
 }
 
+/// Rahmen und Passepartout (Phase 32 F8, siehe `stages::frame`s
+/// Moduldoku).
+///
+/// Alle drei Breiten sind Prozentangaben bezogen auf die **kürzere**
+/// Bildkante (`0.0..`), damit der Rand rundherum gleich dick ist. Die
+/// Farben sind sRGB-Anteile `0.0..=1.0`.
+///
+/// Neutral sind alle drei Breiten `0.0` — der Rahmen ist damit aus, und
+/// ein gespeichertes EDL ohne dieses Feld rendert bit-genau wie vorher
+/// (`#[serde(default)]` am Feld in [`EdlV4`], Test in `stages::frame`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FrameAdjustment {
+    /// Breite des Passepartouts, der breiten Fläche zwischen Rahmenlinie
+    /// und Foto.
+    #[serde(default)]
+    pub mat_width: f32,
+    #[serde(default = "white")]
+    pub mat_color: [f32; 3],
+    /// Äußere Rahmenlinie.
+    #[serde(default)]
+    pub border_width: f32,
+    #[serde(default)]
+    pub border_color: [f32; 3],
+    /// Feine Linie direkt am Foto („Keylinie") — trennt ein helles Bild
+    /// optisch vom hellen Passepartout.
+    #[serde(default)]
+    pub inner_line_width: f32,
+    #[serde(default)]
+    pub inner_line_color: [f32; 3],
+}
+
+fn white() -> [f32; 3] {
+    [1.0, 1.0, 1.0]
+}
+
+impl FrameAdjustment {
+    pub const NEUTRAL: Self = Self {
+        mat_width: 0.0,
+        mat_color: [1.0, 1.0, 1.0],
+        border_width: 0.0,
+        border_color: [0.0, 0.0, 0.0],
+        inner_line_width: 0.0,
+        inner_line_color: [0.0, 0.0, 0.0],
+    };
+}
+
+impl Default for FrameAdjustment {
+    fn default() -> Self {
+        Self::NEUTRAL
+    }
+}
+
 /// Die sieben am Bild bedienten Werkzeuge in EINER Struktur (Phase 30,
 /// siehe `DECISIONS.md` ADR-0060) — dieselbe Bauform wie
 /// [`CreativeAdjustments`] und [`LightOpticsAdjustments`]. Feste
@@ -1811,6 +1870,13 @@ pub struct EdlV4 {
     /// dieselbe `#[serde(default)]`-Begründung wie bei `creative`.
     #[serde(default)]
     pub interactive: InteractiveAdjustments,
+
+    /// Rahmen und Passepartout (Phase 32 F8) — additiv, dieselbe
+    /// `#[serde(default)]`-Begründung wie bei `creative`: ein
+    /// gespeichertes `EdlV4` ohne dieses Feld liest den Neutralwert und
+    /// rendert unverändert.
+    #[serde(default)]
+    pub frame: FrameAdjustment,
 }
 
 impl EdlV4 {
@@ -1844,6 +1910,7 @@ impl EdlV4 {
             creative: CreativeAdjustments::default(),
             light_optics: LightOpticsAdjustments::default(),
             interactive: InteractiveAdjustments::default(),
+            frame: FrameAdjustment::NEUTRAL,
         }
     }
 
@@ -1880,6 +1947,7 @@ impl EdlV4 {
             creative: CreativeAdjustments::default(),
             light_optics: LightOpticsAdjustments::default(),
             interactive: InteractiveAdjustments::default(),
+            frame: FrameAdjustment::NEUTRAL,
         }
     }
 }
@@ -1933,6 +2001,44 @@ mod tests {
         let parsed: EdlV4 =
             serde_json::from_value(serde_json::Value::Object(object)).expect("sollte parsen");
         assert_eq!(parsed.stage_enabled, StageEnabled::ALL);
+    }
+
+    #[test]
+    fn old_payload_without_frame_field_reads_as_no_frame() {
+        // Rückwärtskompatibilität für Phase 32 F8: jedes gespeicherte
+        // EDL von vor dem Rahmen muss ohne Rahmen gelesen werden — und
+        // zwar mit WEISSEM Passepartout, nicht mit schwarzem (`[f32; 3]`s
+        // eigener Default wäre [0,0,0]). Sichtbar wird der Unterschied
+        // erst, wenn jemand nur die Breite aufdreht.
+        let json = serde_json::to_value(EdlV4::neutral()).expect("serialisieren");
+        let mut object = json.as_object().expect("Objekt").clone();
+        object.remove("frame");
+        let parsed: EdlV4 =
+            serde_json::from_value(serde_json::Value::Object(object)).expect("sollte parsen");
+        assert_eq!(parsed.frame, FrameAdjustment::NEUTRAL);
+        assert_eq!(parsed.frame.mat_color, [1.0, 1.0, 1.0]);
+        assert!(
+            parsed.stage_enabled.frame,
+            "Stufe muss aktiv gelesen werden"
+        );
+    }
+
+    #[test]
+    fn a_frame_survives_the_json_roundtrip() {
+        let edl = EdlV4 {
+            frame: FrameAdjustment {
+                mat_width: 8.0,
+                mat_color: [0.9, 0.88, 0.84],
+                border_width: 1.5,
+                border_color: [0.1, 0.1, 0.1],
+                inner_line_width: 0.4,
+                inner_line_color: [0.2, 0.2, 0.2],
+            },
+            ..EdlV4::neutral()
+        };
+        let json = serde_json::to_string(&edl).expect("serialisieren");
+        let parsed: EdlV4 = serde_json::from_str(&json).expect("parsen");
+        assert_eq!(parsed.frame, edl.frame);
     }
 
     #[test]

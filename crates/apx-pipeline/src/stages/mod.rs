@@ -21,6 +21,7 @@ pub mod curves;
 pub mod details;
 pub mod effects;
 pub mod exposure;
+pub mod frame;
 pub mod frequency_separation;
 pub mod geometry;
 pub mod highlights_shadows;

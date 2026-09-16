@@ -68,6 +68,7 @@ import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import { PaletteFrame } from "./PaletteFrame";
 import { SavePresetDialog } from "./SavePresetDialog";
 import { LutFilterPanel } from "./LutFilterPanel";
+import { FramePanel } from "./FramePanel";
 import { SkinSmoothingPanel } from "./SkinSmoothingPanel";
 import { SkyReplacePanel } from "./SkyReplacePanel";
 import { StyleTransferPanel } from "./StyleTransferPanel";
@@ -135,6 +136,8 @@ const STAGE_ANCHOR_IDS: Record<keyof StageEnabled, string> = {
   lut_filter: "stage-lut_filter",
   liquify: "stage-liquify",
   geometry: "stage-geometry",
+  // Rahmen/Passepartout (Phase 32 F8) — eigener Abschnitt im Kreativ-Tab.
+  frame: "stage-frame",
 };
 
 function openStageAnchor(key: keyof StageEnabled): void {
@@ -1909,6 +1912,14 @@ export function DevelopPanel() {
               <details id="stage-lut_filter" open className="apx-collapsible flex flex-col gap-2" aria-label="Filter">
                 <summary className="mb-1 text-xs font-medium text-text-secondary">Filter</summary>
                 <LutFilterPanel />
+              </details>
+
+              {/* Rahmen und Passepartout (Phase 32 F8) — letzte Stufe der
+                  Pipeline, nach dem Zuschnitt (siehe `stages::frame`s
+                  Moduldoku). */}
+              <details id="stage-frame" open className="apx-collapsible flex flex-col gap-2" aria-label="Rahmen">
+                <summary className="mb-1 text-xs font-medium text-text-secondary">Rahmen</summary>
+                <FramePanel />
               </details>
 
               <details id="stage-composite" open className="apx-collapsible flex flex-col gap-2" aria-label="Compositing">

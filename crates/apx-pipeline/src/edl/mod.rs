@@ -23,7 +23,8 @@ pub use v3::{
     MaskCombine, MaskComponent, MaskGeometry, MaskGroup, MaskPoint, OverlayColor, Treatment,
 };
 pub use v4::{
-    CompositeLayer, CompositeLayerSource, EdlV4, LutFilterAdjustment, LutFilterData, StageEnabled,
+    CompositeLayer, CompositeLayerSource, EdlV4, FrameAdjustment, LutFilterAdjustment,
+    LutFilterData, StageEnabled,
 };
 
 /// Die aktuelle EDL-Schema-Version — `EdlV4` (siehe `v4.rs`). Version 1

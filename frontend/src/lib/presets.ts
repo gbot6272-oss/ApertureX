@@ -95,6 +95,11 @@ export const PRESET_SECTION_KEYS: readonly PresetSectionKey[] = [
   // jedem Foto der Serie an derselben relativen Stelle. Deshalb steht
   // "interactive" auch NICHT in `PHOTO_SPECIFIC_MAP_FIELDS`.
   "interactive",
+  // Phase 32 F8: Rahmen/Passepartout ist ein Look wie jeder andere —
+  // ohne fotospezifische Karte, in Prozent der Bildkante angegeben und
+  // damit auf jedem Foto einer Serie gleich dick. Preset-fähig ohne
+  // Sonderbehandlung, wie "interactive".
+  "frame",
 ];
 
 /** Die Felder, die eine fuer GENAU EIN Foto berechnete Karte tragen —
@@ -166,6 +171,7 @@ function restorePhotoSpecificMaps(section: string, incoming: unknown, base: unkn
 }
 
 export const PRESET_SECTION_LABELS: Record<PresetSectionKey, string> = {
+  frame: "Rahmen",
   basic: "Grundeinstellungen",
   curves: "Kurven",
   hsl: "HSL",

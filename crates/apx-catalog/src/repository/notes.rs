@@ -14,9 +14,11 @@ use crate::models::{from_unix, to_unix, PhotoNote};
 
 const SELECT_COLUMNS: &str = "id, photo_id, x, y, body, done, created_at, updated_at";
 
-fn row_to_note(
-    row: &rusqlite::Row,
-) -> rusqlite::Result<(String, String, f64, f64, String, i64, i64, i64)> {
+/// Eine rohe Zeile, bevor sie zu [`PhotoNote`] wird — als eigener Typ,
+/// weil das Tupel sonst an drei Stellen ausgeschrieben stünde.
+type RawNote = (String, String, f64, f64, String, i64, i64, i64);
+
+fn row_to_note(row: &rusqlite::Row) -> rusqlite::Result<RawNote> {
     Ok((
         row.get(0)?,
         row.get(1)?,
@@ -29,7 +31,7 @@ fn row_to_note(
     ))
 }
 
-fn build(raw: (String, String, f64, f64, String, i64, i64, i64)) -> Result<PhotoNote> {
+fn build(raw: RawNote) -> Result<PhotoNote> {
     Ok(PhotoNote {
         id: raw.0.parse()?,
         photo_id: raw.1.parse()?,

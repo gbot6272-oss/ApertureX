@@ -37,7 +37,7 @@ import {
   writeBasicField,
   writeBwMixerField,
 } from "../lib/edl";
-import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, LiquifyMode, LiquifyPoint, LutFilterData, LutFilterPoint, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairLayer, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
+import type { AiMaskKind, BlackAndWhiteMixerAdjustment, BlendMode, CalibrationAdjustment, ColorGradingAdjustment, ColorGradingWheel, ColorMixerRegion, CropRect, CurveChannel, CurvesAdjustment, DetailsAdjustment, EdlPayload, EffectsAdjustment, FrameAdjustment, GridOverlay, GuidedLine, HslAdjustment, HslBand, LensCorrectionAdjustment, LiquifyMode, LiquifyPoint, LutFilterData, LutFilterPoint, ManualTransform, Mask, MaskCombine, MaskGeometry, MaskPoint, PrimaryColorAdjustment, RepairLayer, RepairMode, RepairPoint, StageEnabled, Treatment, UprightMode } from "../lib/edl";
 import { hueDegreesFromRgbByte } from "../lib/colorSampling";
 import type { FrequencyViewMode } from "../lib/frequencySeparation";
 import { computeHarmonizeShifts } from "../lib/colorHarmony";
@@ -728,6 +728,12 @@ interface DevelopSlice {
   /** Setzt eines der acht numerischen Effekte-Felder (Phase 4 Schritt
    * 10, Vignettierung + Körnung) — Zwischenstand beim Ziehen. */
   setEffectsField: (key: keyof EffectsAdjustment, value: number) => void;
+  /** Rahmen/Passepartout (Phase 32 F8) — Breite eines der drei Ränder. */
+  setFrameWidth: (key: "mat_width" | "border_width" | "inner_line_width", value: number) => void;
+  /** Farbe eines der drei Ränder, als sRGB-Anteile 0..1. */
+  setFrameColor: (key: "mat_color" | "border_color" | "inner_line_color", color: [number, number, number]) => void;
+  /** Setzt alle sechs Rahmenfelder auf einmal (Vorlagen im Panel). */
+  applyFramePreset: (frame: FrameAdjustment) => void;
   /** Ob das Freistellen-Werkzeug gerade aktiv ist (Phase 4 Schritt 11)
    * — blendet `CropOverlay` im Viewer ein. */
   geometryCropActive: boolean;
@@ -3211,6 +3217,24 @@ export const useAppStore = create<AppStore>()(
     setEffectsField: (key, value) => {
       set((state) => {
         state.developEdl.effects[key] = value;
+      });
+    },
+
+    setFrameWidth: (key, value) => {
+      set((state) => {
+        state.developEdl.frame[key] = Math.max(0, value);
+      });
+    },
+
+    setFrameColor: (key, color) => {
+      set((state) => {
+        state.developEdl.frame[key] = color;
+      });
+    },
+
+    applyFramePreset: (frame) => {
+      set((state) => {
+        state.developEdl.frame = structuredClone(frame);
       });
     },
 

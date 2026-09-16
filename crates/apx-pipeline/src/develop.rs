@@ -14,15 +14,15 @@ use apx_raw::LinearImage;
 use crate::color::linear_camera_rgb_to_srgb_rgba8;
 use crate::edl::{
     CalibrationAdjustment, ColorGradingAdjustment, CurvesAdjustment, DetailsAdjustment, EdlV4,
-    EffectsAdjustment, GeometryAdjustment, HslAdjustment, Treatment,
+    EffectsAdjustment, FrameAdjustment, GeometryAdjustment, HslAdjustment, Treatment,
 };
 use crate::error::Result;
 use crate::gpu::GpuContext;
 use crate::stages::{
     basic_fused, bw_mixer, calibration, color_grading, composite, creative, curves, details,
-    effects, geometry, hsl_color_mixer, interactive, lens_corrections, light_optics, liquify,
-    local_contrast, lut_filter, masks, repair, skin_smoothing, sky_replace, style_transfer,
-    virtual_aperture, white_balance,
+    effects, frame, geometry, hsl_color_mixer, interactive, lens_corrections, light_optics,
+    liquify, local_contrast, lut_filter, masks, repair, skin_smoothing, sky_replace,
+    style_transfer, virtual_aperture, white_balance,
 };
 
 /// Das Ergebnis von [`render_rgba8`] — `width`/`height` beschreiben
@@ -483,6 +483,16 @@ pub fn render_rgba8(
         geometry::apply(&liquified, linear.width, linear.height, &edl.geometry)
     };
 
+    // Rahmen und Passepartout (Phase 32 F8) — die letzte Stufe, NACH dem
+    // Zuschnitt: ein Rahmen davor würde von `geometry` weggeschnitten
+    // (siehe `stages::frame`s Moduldoku). Die Abmessungen bleiben
+    // unverändert, der Rahmen wird in die vorhandene Fläche gezeichnet.
+    let pixels = if !stages.frame || edl.frame == FrameAdjustment::NEUTRAL {
+        pixels
+    } else {
+        frame::apply(&pixels, width, height, &edl.frame)
+    };
+
     Ok(RenderedImage {
         width,
         height,
@@ -890,6 +900,7 @@ mod tests {
             creative: crate::edl::v4::CreativeAdjustments::default(),
             light_optics: Default::default(),
             interactive: Default::default(),
+            frame: FrameAdjustment::NEUTRAL,
         };
 
         if let Some(ctx) = &ctx {

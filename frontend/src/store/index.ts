@@ -70,6 +70,7 @@ import type {
   ExportOutcomeDto,
   ExportPhotoOptions,
   FaceDetectionDto,
+  DetectedSeriesDto,
   PhotoNoteDto,
   RenamePlanEntryDto,
   FilterCriteriaDto,
@@ -937,6 +938,18 @@ interface LibrarySlice {
    * `NotesOverlay.tsx`). `notesMode` schaltet das Setzen neuer Pins ein
    * — ohne diesen Modus wäre jeder Klick ins Bild eine neue Notiz, was
    * beim Zoomen und Ziehen ständig aus Versehen passierte. */
+  /** Erkannte Serien im aktuellen Ordner (Phase 32 F7, siehe
+   * `SeriesDialog.tsx`). Die Erkennung läuft in Rust
+   * (`apx_catalog::series`), hier liegt nur das Ergebnis. */
+  detectedSeries: DetectedSeriesDto[];
+  seriesDetectionRunning: boolean;
+  seriesGapSeconds: number;
+  setSeriesGapSeconds: (seconds: number) => void;
+  runSeriesDetection: () => Promise<void>;
+  /** Legt aus einer erkannten Serie einen Stapel an (Phase 9 Schritt 1) —
+   * derselbe Stapel-Mechanismus, kein zweiter Gruppierungsbegriff. */
+  stackDetectedSeries: (photoIds: string[]) => Promise<void>;
+
   photoNotes: PhotoNoteDto[];
   photoNotesLoading: boolean;
   notesMode: boolean;
@@ -3938,6 +3951,52 @@ export const useAppStore = create<AppStore>()(
         // Auswahl daneben eine ganz andere ist.
         if (photoIds.length > 0) state.selectedPhotoId = photoIds[0]!;
       });
+    },
+
+    detectedSeries: [],
+    seriesDetectionRunning: false,
+    seriesGapSeconds: 2,
+
+    setSeriesGapSeconds: (seconds) => {
+      set((state) => {
+        state.seriesGapSeconds = Math.max(1, Math.round(seconds));
+      });
+    },
+
+    runSeriesDetection: async () => {
+      const folderId = get().selectedFolderId;
+      if (!folderId) {
+        set((state) => {
+          state.detectedSeries = [];
+        });
+        return;
+      }
+      set((state) => {
+        state.seriesDetectionRunning = true;
+      });
+      try {
+        const series = await api.detectPhotoSeries(folderId, get().seriesGapSeconds);
+        set((state) => {
+          state.detectedSeries = series;
+          state.seriesDetectionRunning = false;
+        });
+      } catch (err) {
+        set((state) => {
+          state.seriesDetectionRunning = false;
+          state.catalogError = String(err);
+        });
+      }
+    },
+
+    stackDetectedSeries: async (photoIds) => {
+      try {
+        await api.createStack(undefined, photoIds);
+        await get().refreshStacks();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      }
     },
 
     photoNotes: [],

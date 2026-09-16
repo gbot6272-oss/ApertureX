@@ -408,6 +408,7 @@ fn main() {
             commands::list_collection_folders,
             commands::create_virtual_copy,
             commands::list_virtual_copies,
+            commands::detect_photo_series,
             commands::create_photo_note,
             commands::list_photo_notes,
             commands::update_photo_note,

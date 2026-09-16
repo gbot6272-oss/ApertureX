@@ -182,6 +182,7 @@ export function useCommandRegistry(): CommandEntry[] {
       },
       { id: "fn:stats", label: t("header.stats"), category: "analysis", run: () => requestCommand("stats") },
       { id: "fn:gear-stats", label: t("header.gearStats"), category: "analysis", run: () => requestCommand("gear-stats") },
+      { id: "fn:series", label: t("header.series"), category: "analysis", run: () => requestCommand("series") },
       { id: "fn:catalog", label: t("header.catalog"), category: "analysis", run: () => requestCommand("catalog") },
 
       // System — nicht im Overflow-Menü (eigenes Icon/Tastenkürzel), aber

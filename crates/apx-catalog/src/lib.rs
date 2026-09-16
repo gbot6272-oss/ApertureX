@@ -25,6 +25,9 @@ pub mod iptc;
 mod migrations;
 mod models;
 mod repository;
+/// Serien-/Belichtungsreihen-Erkennung (Phase 32 F7) — reine Analyse,
+/// siehe Moduldoku.
+pub mod series;
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};

@@ -1802,6 +1802,52 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return null;
       }
 
+      // ---- Serien-Erkennung (Phase 32 F7) -----------------------------
+      //
+      // Bildet `apx_catalog::series::detect_series` so weit nach, wie der
+      // Oberflächen-Fluss es braucht (zeitliche Gruppierung + EV-Spanne).
+      // Die eigentliche Klassifikation samt Grenzfällen ist in Rust
+      // getestet.
+      case "detect_photo_series": {
+        const gap = args.maxGapSeconds as number;
+        const photos = (fixtures.photosByFolder[args.folderId as string] ?? []) as MockPhoto[];
+        const timed = photos
+          .filter((photo) => photo.captured_at)
+          .map((photo) => ({ photo, ts: Math.floor(new Date(photo.captured_at as string).getTime() / 1000) }))
+          .sort((a, b) => a.ts - b.ts);
+
+        const ev = (photo: MockPhoto): number | null => {
+          if (!photo.aperture || !photo.shutter || !photo.iso) return null;
+          return Math.log2((photo.aperture * photo.aperture) / photo.shutter) - Math.log2(photo.iso / 100);
+        };
+
+        const groups: Array<Array<{ photo: MockPhoto; ts: number }>> = [];
+        for (const entry of timed) {
+          const current = groups[groups.length - 1];
+          if (current && entry.ts - current[current.length - 1]!.ts <= gap) current.push(entry);
+          else groups.push([entry]);
+        }
+
+        return groups
+          .filter((group) => group.length >= 2)
+          .map((group) => {
+            const evs = group.map(({ photo }) => ev(photo));
+            const known = evs.filter((value): value is number => value !== null);
+            const spread = known.length >= 2 ? Math.max(...known) - Math.min(...known) : null;
+            const distinct = new Set(known.map((value) => Math.round(value * 6))).size;
+            let kind = "mixed";
+            if (spread !== null && spread >= 0.5 && distinct >= 3 && distinct === known.length) kind = "exposure_bracket";
+            else if (spread !== null && spread <= 0.2) kind = "burst";
+            return {
+              kind,
+              photo_ids: group.map(({ photo }) => photo.id),
+              span_seconds: group[group.length - 1]!.ts - group[0]!.ts,
+              ev_values: evs,
+              ev_spread: spread,
+            };
+          });
+      }
+
       // ---- Notizen am Foto (Phase 32 F6) ------------------------------
       //
       // Vollwertiger In-Memory-Ersatz für `photo_notes`: der Fluss

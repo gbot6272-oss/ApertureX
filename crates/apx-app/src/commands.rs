@@ -3539,6 +3539,71 @@ pub fn list_virtual_copies(
     Ok(copies.into_iter().map(PhotoDto::from).collect())
 }
 
+// ---- Serien-/Belichtungsreihen-Erkennung (Phase 32 F7) ---------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DetectedSeriesDto {
+    /// `"burst"`, `"exposure_bracket"` oder `"mixed"` — die Oberfläche
+    /// beschriftet den Schlüssel, damit der deutsche Text nicht durch
+    /// die IPC-Grenze muss.
+    pub kind: String,
+    pub photo_ids: Vec<String>,
+    pub span_seconds: i64,
+    pub ev_values: Vec<Option<f32>>,
+    pub ev_spread: Option<f32>,
+}
+
+/// Erkennt Serien in einem Ordner.
+///
+/// Fotos ohne Aufnahmedatum fallen heraus — ohne Zeit gibt es keine
+/// Serie. Virtuelle Kopien ebenfalls: sie teilen sich die Datei mit dem
+/// Original und würden jede Serie künstlich verlängern.
+#[tauri::command]
+pub fn detect_photo_series(
+    state: State<'_, AppState>,
+    folder_id: String,
+    max_gap_seconds: i64,
+) -> Result<Vec<DetectedSeriesDto>, String> {
+    let folder_id: apx_core::FolderId = folder_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    let photos = state
+        .catalog
+        .list_photos_by_folder(folder_id)
+        .map_err(|err| err.to_string())?;
+
+    let shots: Vec<apx_catalog::series::Shot> = photos
+        .into_iter()
+        .filter(|photo| photo.source_photo_id.is_none())
+        .filter_map(|photo| {
+            photo.captured_at.map(|captured| apx_catalog::series::Shot {
+                photo_id: photo.id,
+                captured_at: captured.unix_timestamp(),
+                aperture: photo.aperture,
+                shutter: photo.shutter,
+                iso: photo.iso,
+            })
+        })
+        .collect();
+
+    let detected = apx_catalog::series::detect_series(&shots, max_gap_seconds.max(1));
+    Ok(detected
+        .into_iter()
+        .map(|series| DetectedSeriesDto {
+            kind: match series.kind {
+                apx_catalog::series::SeriesKind::Burst => "burst",
+                apx_catalog::series::SeriesKind::ExposureBracket => "exposure_bracket",
+                apx_catalog::series::SeriesKind::Mixed => "mixed",
+            }
+            .to_string(),
+            photo_ids: series.photo_ids.iter().map(|id| id.to_string()).collect(),
+            span_seconds: series.span_seconds,
+            ev_values: series.ev_values,
+            ev_spread: series.ev_spread,
+        })
+        .collect())
+}
+
 // ---- Notizen am Foto (Phase 32 F6) -----------------------------------------
 
 #[derive(Debug, Clone, Serialize)]

@@ -883,6 +883,23 @@ export function listVirtualCopies(photoId: string): Promise<PhotoDto[]> {
   return invoke<PhotoDto[]>("list_virtual_copies", { photoId });
 }
 
+// ---- Serien-/Belichtungsreihen-Erkennung (Phase 32 F7) ---------------------
+
+export type SeriesKind = "burst" | "exposure_bracket" | "mixed";
+
+export interface DetectedSeriesDto {
+  kind: SeriesKind;
+  photo_ids: string[];
+  span_seconds: number;
+  /** EV bei ISO 100 je Aufnahme, `null` wo die EXIF-Werte fehlen. */
+  ev_values: (number | null)[];
+  ev_spread: number | null;
+}
+
+export function detectPhotoSeries(folderId: string, maxGapSeconds: number): Promise<DetectedSeriesDto[]> {
+  return invoke<DetectedSeriesDto[]>("detect_photo_series", { folderId, maxGapSeconds });
+}
+
 // ---- Notizen am Foto (Phase 32 F6) -----------------------------------------
 
 /** Eine Notiz an einer Stelle im Bild. `x`/`y` sind normiert (0..1) und

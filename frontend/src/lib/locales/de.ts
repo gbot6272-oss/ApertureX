@@ -55,6 +55,7 @@ export const de = {
   "header.secondaryDisplayTitle": "Aktuelles Foto in einem zweiten Fenster anzeigen",
   "header.stats": "Statistik…",
   "header.gearStats": "Aufnahme-Statistik…",
+  "header.series": "Serien erkennen…",
   "header.catalog": "Katalog…",
   "header.settings": "Einstellungen…",
   "header.settingsTitle": "Theme, Sprache, UI-Skalierung, Barrierefreiheit (Phase 10)",

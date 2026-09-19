@@ -180,3 +180,43 @@ test.describe("Entwickeln-Analysewerkzeuge (Phase 9 Schritt 4)", () => {
     await expect(page.getByLabel("Wellenform")).not.toBeVisible();
   });
 });
+
+/**
+ * Phase 33 F6: RGB-Parade. Die Auswertung selbst (Schwarz-/Weißpunkt je
+ * Kanal per Perzentil, Farbstich je Tonwertbereich) ist in
+ * `lib/parade.test.ts` abgedeckt — hier läuft der Weg durch die
+ * Oberfläche: Registerkarte wählen, Parade sehen, und dass die
+ * abgelesenen Werte zur fest verdrahteten Mock-Farbe passen.
+ *
+ * Die Mock-Entwickeln-Route liefert eine einheitlich warm-orange Fläche
+ * (180/140/100). Jeder Kanal liegt damit in einem anderen
+ * Tonwertbereich, also hat keiner der drei alle Kanäle beisammen — genau
+ * der Fall, für den es die Gesamtzeile gibt.
+ */
+test.describe("RGB-Parade (Phase 33 F6)", () => {
+  test("zeigt Kanalpegel und benennt den Farbstich", async ({ page }) => {
+    await installTauriMock(page, {
+      folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }],
+      photosByFolder: { [FOLDER_ID]: [PHOTO] },
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Urlaub/ }).click();
+    await page.getByRole("img", { name: PHOTO.filename }).click();
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    await page.getByRole("button", { name: "Parade", exact: true }).click();
+    await expect(page.getByLabel("RGB-Parade")).toBeVisible();
+
+    // 180/140/100 — jeder Kanal beginnt und endet auf seinem eigenen Wert.
+    const levels = page.getByTestId("parade-levels");
+    await expect(levels).toContainText("Rot 180–180");
+    await expect(levels).toContainText("Grün 140–140");
+    await expect(levels).toContainText("Blau 100–100");
+
+    const casts = page.getByTestId("parade-casts");
+    await expect(casts).toContainText("Rotstich, 80 Stufen");
+    // Und die drei Bereiche melden ehrlich nichts, statt aus je einem
+    // Kanal einen Stich zu erfinden.
+    await expect(casts).toContainText("Tiefenneutral");
+  });
+});

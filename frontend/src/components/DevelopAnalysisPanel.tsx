@@ -14,6 +14,7 @@ import type { DevelopFrame } from "../hooks/useDevelopRender";
 import { computeHistogram, countClipping, type Histogram } from "../lib/histogram";
 import { computeVectorscope, type Vectorscope } from "../lib/vectorscope";
 import { computeWaveform, type Waveform } from "../lib/waveform";
+import { analyzeParade, readCasts, type Channel } from "../lib/parade";
 
 interface Viewport {
   /** Bildkoordinaten des sichtbaren Ausschnitts, 0..1 normiert. */
@@ -386,6 +387,112 @@ function WaveformCanvas({ waveform }: { waveform: Waveform }) {
   return <canvas ref={canvasRef} className="w-full rounded" style={{ height: cssHeight }} aria-label="Wellenform" />;
 }
 
+/** RGB-Parade (Phase 33 F6, siehe `lib/parade.ts`s Moduldoku): dieselben
+ * Wellenformdaten wie oben, aber die drei Kanäle nebeneinander statt
+ * übereinander. Übereinander verdeckt ein Kanal den anderen genau dort,
+ * wo sie dicht beieinanderliegen — und das ist der Bereich, in dem ein
+ * Farbstich entsteht. */
+function ParadeCanvas({ waveform }: { waveform: Waveform }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { cssWidth, dpr } = useCanvasDprWidth(canvasRef);
+  const cssHeight = 80;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || cssWidth === 0) return;
+    const { columns, rows, r, g, b, maxCount } = waveform;
+
+    // Drei Tafeln nebeneinander, dazwischen je eine Trennspalte — ohne
+    // die verschwimmen die Panels an der Grenze ineinander.
+    const gap = 2;
+    const offscreen = document.createElement("canvas");
+    offscreen.width = columns * 3 + gap * 2;
+    offscreen.height = rows;
+    const offCtx = offscreen.getContext("2d");
+    if (!offCtx) return;
+    const imageData = offCtx.createImageData(offscreen.width, rows);
+    const max = Math.max(1, maxCount);
+    const bg = 26;
+
+    const channels: { data: Uint32Array; tint: [number, number, number] }[] = [
+      { data: r, tint: [255, 90, 90] },
+      { data: g, tint: [90, 255, 90] },
+      { data: b, tint: [90, 150, 255] },
+    ];
+
+    for (let panel = 0; panel < channels.length; panel += 1) {
+      const { data, tint } = channels[panel]!;
+      const xOffset = panel * (columns + gap);
+      for (let col = 0; col < columns; col += 1) {
+        for (let value = 0; value < rows; value += 1) {
+          const intensity = Math.min(1, Math.sqrt((data[col * rows + value] ?? 0) / max));
+          // Wie in der Wellenform: Zeile 0 = Wert 255, Lichter oben.
+          const canvasRow = rows - 1 - value;
+          const offset = (canvasRow * offscreen.width + xOffset + col) * 4;
+          imageData.data[offset] = Math.round(bg + intensity * (tint[0] - bg));
+          imageData.data[offset + 1] = Math.round(bg + intensity * (tint[1] - bg));
+          imageData.data[offset + 2] = Math.round(bg + intensity * (tint[2] - bg));
+          imageData.data[offset + 3] = 255;
+        }
+      }
+    }
+    offCtx.putImageData(imageData, 0, 0);
+
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height);
+  }, [waveform, cssWidth, cssHeight, dpr]);
+
+  return <canvas ref={canvasRef} className="w-full rounded" style={{ height: cssHeight }} aria-label="RGB-Parade" />;
+}
+
+const CHANNEL_LABEL: Record<Channel, string> = { r: "Rot", g: "Grün", b: "Blau" };
+
+/** Parade plus die Auswertung, für die sie eigentlich da ist: Schwarz-
+ * und Weißpunkt je Kanal und der Farbstich je Tonwertbereich. Das Bild
+ * allein zu zeigen hieße, die Ablesearbeit dem Auge zu überlassen —
+ * dabei lässt sie sich ausrechnen. */
+function ParadePanel({ waveform }: { waveform: Waveform }) {
+  const analysis = analyzeParade(waveform);
+  const casts = readCasts(analysis);
+
+  const castLine = (label: string, reading: { channel: Channel | null; delta: number }) => (
+    <li className="flex items-center gap-1">
+      <span className="w-12 shrink-0 text-text-muted">{label}</span>
+      {reading.channel ? (
+        <span className="text-text-primary">
+          {CHANNEL_LABEL[reading.channel]}stich, {Math.round(reading.delta)} Stufen
+        </span>
+      ) : (
+        <span className="text-text-muted">neutral</span>
+      )}
+    </li>
+  );
+
+  return (
+    <div className="flex flex-col gap-1">
+      <ParadeCanvas waveform={waveform} />
+      <div className="grid grid-cols-3 gap-1 text-[10px] tabular-nums" data-testid="parade-levels">
+        {(["r", "g", "b"] as Channel[]).map((channel) => (
+          <span key={channel} className="text-text-secondary">
+            {CHANNEL_LABEL[channel]} {analysis[channel].black}–{analysis[channel].white}
+          </span>
+        ))}
+      </div>
+      <ul className="flex flex-col gap-0.5 text-[10px]" data-testid="parade-casts">
+        {castLine("Gesamt", casts.overall)}
+        {castLine("Tiefen", casts.shadows)}
+        {castLine("Mitten", casts.midtones)}
+        {castLine("Lichter", casts.highlights)}
+      </ul>
+    </div>
+  );
+}
+
 /**
  * Entwickeln-Analysewerkzeuge (Phase 9 Schritt 4, siehe `PLAN.md`/
  * `DECISIONS.md` ADR-0035): Live-Histogramm, Clipping-Warnungen,
@@ -395,12 +502,13 @@ function WaveformCanvas({ waveform }: { waveform: Waveform }) {
  * Entwickeln-Panel offen ist (`Viewer.tsx` reicht `frame`/`pointerSample`
  * nur dann durch).
  */
-type AnalysisTab = "histogram" | "vectorscope" | "waveform";
+type AnalysisTab = "histogram" | "vectorscope" | "waveform" | "parade";
 
 const ANALYSIS_TAB_LABELS: Record<AnalysisTab, string> = {
   histogram: "Histogramm",
   vectorscope: "Vektorskop",
   waveform: "Wellenform",
+  parade: "Parade",
 };
 
 export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnabled, onToggleClippingOverlay, viewport, thumbnailUrl, onAutoTone, docked = false, onToggleDocked, peaking, palette, histogramDrag }: DevelopAnalysisPanelProps) {
@@ -469,7 +577,12 @@ export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnab
     [palette, frame],
   );
 
-  const waveform: Waveform | null = analysisTab === "waveform" ? computeWaveform(frame.pixels, frame.width, frame.height) : null;
+  // Parade und Wellenform teilen sich dieselbe Berechnung — die Parade
+  // ist eine andere Darstellung derselben Daten, keine zweite Messung.
+  const waveform: Waveform | null =
+    analysisTab === "waveform" || analysisTab === "parade"
+      ? computeWaveform(frame.pixels, frame.width, frame.height)
+      : null;
 
   // `pointer-events-none` auf dem Container, `pointer-events-auto` nur auf
   // einzelnen Schaltflächen/der Kopfzeile — dieses Panel schwebt über dem
@@ -581,6 +694,7 @@ export function DevelopAnalysisPanel({ frame, pointerSample, clippingOverlayEnab
             {analysisTab === "histogram" && <HistogramCanvas histogram={histogram} drag={histogramDrag} />}
             {analysisTab === "vectorscope" && vectorscope && <VectorscopeCanvas vectorscope={vectorscope} />}
             {analysisTab === "waveform" && waveform && <WaveformCanvas waveform={waveform} />}
+            {analysisTab === "parade" && waveform && <ParadePanel waveform={waveform} />}
             {analysisTab === "histogram" && (
               <button
                 type="button"

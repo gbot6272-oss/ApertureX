@@ -33,5 +33,6 @@ pub mod sharpen;
 pub mod timeline;
 pub mod video;
 pub mod watermark;
+pub mod watermark_layout;
 pub mod web;
 pub mod xmp;

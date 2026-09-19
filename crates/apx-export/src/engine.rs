@@ -26,6 +26,7 @@ use crate::metadata::{self, MetadataFilter};
 use crate::resize::{self, SizeConstraint};
 use crate::sharpen;
 use crate::watermark::{self, WatermarkPosition};
+use crate::watermark_layout::{self, RelativePlacement};
 
 /// Ein einzelnes Wasserzeichen (Schritt 2) — Bild- oder Textvariante, s.
 /// `watermark.rs`s Moduldoku. Bild-Wasserzeichen tragen die bereits
@@ -79,6 +80,13 @@ pub struct ExportRequest {
     /// der Aufrufer mehrere `ExportRequest`s hintereinander (selten genug
     /// gebraucht, keine eigene Liste nötig).
     pub watermark: Option<WatermarkSpec>,
+    /// Relative Platzierung des Wasserzeichens (Phase 33 F5) — `None`
+    /// behält das bisherige Verhalten bei: die absoluten Pixelwerte in
+    /// [`WatermarkSpec`] gelten unverändert. Gesetzt, überschreibt sie
+    /// Größe, Rand und Position und erlaubt zusätzlich Kachelung und
+    /// Drehung; siehe `watermark_layout.rs` dazu, warum eine Vorlage
+    /// ohne das über verschiedene Exportgrößen hinweg nicht funktioniert.
+    pub watermark_layout: Option<RelativePlacement>,
     /// Leer (`MetadataFilter::default()`) = keine Metadaten eingebettet.
     /// Nur für JPEG wirksam, siehe `metadata.rs`s Moduldoku.
     pub metadata: MetadataFilter,
@@ -99,6 +107,7 @@ impl ExportRequest {
             max_file_size_bytes: None,
             icc_target: None,
             watermark: None,
+            watermark_layout: None,
             metadata: MetadataFilter::default(),
             sharpen: None,
         }
@@ -203,54 +212,127 @@ pub fn render_to_pixels(
 
     let mut watermarked = color_managed;
     if let Some(spec) = &request.watermark {
-        match spec {
-            WatermarkSpec::Image {
-                width,
-                height,
-                rgba,
-                position,
-                opacity,
-                margin,
-            } => {
-                watermark::apply_image_watermark(
-                    target_w,
-                    target_h,
-                    &mut watermarked,
-                    *width,
-                    *height,
-                    rgba,
-                    *position,
-                    *opacity,
-                    *margin,
-                )?;
-            }
-            WatermarkSpec::Text {
-                font_bytes,
-                text,
-                font_size_px,
-                color,
-                position,
-                opacity,
-                margin,
-            } => {
-                watermark::apply_text_watermark(
-                    target_w,
-                    target_h,
-                    &mut watermarked,
-                    font_bytes,
-                    text,
-                    *font_size_px,
-                    *color,
-                    *position,
-                    *opacity,
-                    *margin,
-                )?;
-            }
-        }
+        compose_watermark(
+            target_w,
+            target_h,
+            &mut watermarked,
+            spec,
+            request.watermark_layout.as_ref(),
+        )?;
     }
     let final_pixels = watermarked;
 
     Ok((target_w, target_h, final_pixels))
+}
+
+/// Baut das Wasserzeichen-Overlay und komponiert es ins Bild.
+///
+/// Der ganze Ablauf hängt daran, dass das Overlay **erst** in seiner
+/// Zielgröße entsteht und **dann** gedreht wird, nicht umgekehrt: ein
+/// gedrehtes und danach skaliertes Overlay bekäme treppige Kanten, weil
+/// die Skalierung die Zwischenwerte der Drehung noch einmal mittelt.
+fn compose_watermark(
+    width: u32,
+    height: u32,
+    pixels: &mut [u8],
+    spec: &WatermarkSpec,
+    layout: Option<&RelativePlacement>,
+) -> Result<()> {
+    // 1. Overlay in Zielgröße erzeugen.
+    let (mut overlay_w, mut overlay_h, mut overlay_rgba, position, opacity, mut margin) = match spec
+    {
+        WatermarkSpec::Image {
+            width: ow,
+            height: oh,
+            rgba,
+            position,
+            opacity,
+            margin,
+        } => {
+            let (target_ow, target_oh) = match layout {
+                Some(layout) => watermark_layout::scaled_overlay_size(
+                    width,
+                    height,
+                    *ow,
+                    *oh,
+                    layout.size_percent,
+                ),
+                None => (*ow, *oh),
+            };
+            let scaled = resize::resize_rgba8(*ow, *oh, rgba, target_ow, target_oh)?;
+            (target_ow, target_oh, scaled, *position, *opacity, *margin)
+        }
+        WatermarkSpec::Text {
+            font_bytes,
+            text,
+            font_size_px,
+            color,
+            position,
+            opacity,
+            margin,
+        } => {
+            let size = match layout {
+                Some(layout) => watermark_layout::font_size_px(width, height, layout.size_percent),
+                None => *font_size_px,
+            };
+            let (tw, th, rgba) = watermark::rasterize_text(font_bytes, text, size, *color)?;
+            (tw, th, rgba, *position, *opacity, *margin)
+        }
+    };
+
+    if let Some(layout) = layout {
+        margin = watermark_layout::margin_px(width, height, layout.margin_percent);
+    }
+
+    // 2. Drehen, falls gekachelt werden soll.
+    let tile = layout.and_then(|layout| layout.tile);
+    if let Some(tile) = tile {
+        let (rotated_w, rotated_h, rotated) = watermark_layout::rotate_rgba8(
+            overlay_w,
+            overlay_h,
+            &overlay_rgba,
+            tile.rotation_degrees,
+        )?;
+        overlay_w = rotated_w;
+        overlay_h = rotated_h;
+        overlay_rgba = rotated;
+    }
+
+    // 3. Komponieren — gekachelt oder an einer Position.
+    match tile {
+        Some(tile) => {
+            let spacing = watermark_layout::margin_px(width, height, tile.spacing_percent);
+            for (origin_x, origin_y) in
+                watermark_layout::tile_origins(width, height, overlay_w, overlay_h, spacing)
+            {
+                watermark::apply_image_at(
+                    width,
+                    height,
+                    pixels,
+                    overlay_w,
+                    overlay_h,
+                    &overlay_rgba,
+                    origin_x,
+                    origin_y,
+                    opacity,
+                )?;
+            }
+        }
+        None => {
+            watermark::apply_image_watermark(
+                width,
+                height,
+                pixels,
+                overlay_w,
+                overlay_h,
+                &overlay_rgba,
+                position,
+                opacity,
+                margin,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// Wie [`render_and_encode`], schreibt das Ergebnis aber zusätzlich nach
@@ -358,6 +440,83 @@ mod tests {
         let decoded = image::load_from_memory(&outcome.bytes).unwrap().to_rgba8();
         let corner = decoded.get_pixel(0, 0);
         assert_eq!(corner.0, [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn ein_gekacheltes_wasserzeichen_erreicht_alle_vier_ecken() {
+        // Der Unterschied zum Eck-Wasserzeichen darüber: ein Andruck
+        // soll sich nicht durch Beschneiden befreien lassen.
+        let dir = tempfile::tempdir().unwrap();
+        let source = write_test_png(dir.path());
+        let mut request = ExportRequest::new(source, EdlV4::default(), ExportFormat::Png);
+        request.watermark = Some(WatermarkSpec::Image {
+            width: 4,
+            height: 4,
+            rgba: [255u8, 0, 0, 255].repeat(16),
+            position: WatermarkPosition::TopLeft,
+            opacity: 1.0,
+            margin: 0,
+        });
+        request.watermark_layout = Some(RelativePlacement {
+            size_percent: 10.0,
+            margin_percent: 0.0,
+            position: WatermarkPosition::TopLeft,
+            tile: Some(crate::watermark_layout::TileSpec {
+                spacing_percent: 5.0,
+                rotation_degrees: 0.0,
+            }),
+        });
+        let outcome = render_and_encode(None, &request).unwrap();
+        let decoded = image::load_from_memory(&outcome.bytes).unwrap().to_rgba8();
+        let (w, h) = decoded.dimensions();
+        // Das Testbild hat selbst rote Anteile — eindeutig ist nur der
+        // Blaukanal: in der Quelle immer 128, im Overlay 0.
+        let is_red = |x: u32, y: u32| decoded.get_pixel(x, y).0[2] < 20;
+        // In jedem Viertel muss mindestens ein Wasserzeichen-Pixel liegen.
+        for (x0, y0) in [(0, 0), (w / 2, 0), (0, h / 2), (w / 2, h / 2)] {
+            let found = (y0..y0 + h / 2).any(|y| (x0..x0 + w / 2).any(|x| is_red(x, y)));
+            assert!(found, "Viertel bei ({x0},{y0}) ohne Wasserzeichen");
+        }
+    }
+
+    #[test]
+    fn eine_relative_groesse_skaliert_das_wasserzeichen_mit() {
+        // Dasselbe 4x4-Overlay, einmal absolut und einmal auf 25 % der
+        // kürzeren Kante (48 px) — letzteres muss deutlich mehr Fläche
+        // bedecken.
+        let dir = tempfile::tempdir().unwrap();
+        let source = write_test_png(dir.path());
+        let spec = WatermarkSpec::Image {
+            width: 4,
+            height: 4,
+            rgba: [255u8, 0, 0, 255].repeat(16),
+            position: WatermarkPosition::TopLeft,
+            opacity: 1.0,
+            margin: 0,
+        };
+
+        let count_red = |request: &ExportRequest| {
+            let outcome = render_and_encode(None, request).unwrap();
+            let decoded = image::load_from_memory(&outcome.bytes).unwrap().to_rgba8();
+            decoded.pixels().filter(|px| px.0[2] < 20).count()
+        };
+
+        let mut absolute = ExportRequest::new(source.clone(), EdlV4::default(), ExportFormat::Png);
+        absolute.watermark = Some(spec.clone());
+        let mut relative = ExportRequest::new(source, EdlV4::default(), ExportFormat::Png);
+        relative.watermark = Some(spec);
+        relative.watermark_layout = Some(RelativePlacement {
+            size_percent: 25.0,
+            margin_percent: 0.0,
+            position: WatermarkPosition::TopLeft,
+            tile: None,
+        });
+
+        assert_eq!(count_red(&absolute), 16);
+        assert!(
+            count_red(&relative) > 100,
+            "relativ skaliertes Wasserzeichen zu klein"
+        );
     }
 
     #[test]

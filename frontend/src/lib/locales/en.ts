@@ -59,6 +59,7 @@ export const en: Record<keyof typeof de, string> = {
   "header.folderSync": "Sync folder…",
   "header.sharpness": "Rate sharpness…",
   "header.metadataPresets": "Metadata presets…",
+  "header.watermarkTemplates": "Watermark templates…",
   "commands.trashSelection": "Move selection to trash",
   "header.settings": "Settings…",
   "header.settingsTitle": "Theme, language, UI scaling, accessibility (Phase 10)",

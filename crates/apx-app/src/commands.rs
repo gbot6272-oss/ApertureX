@@ -7248,6 +7248,18 @@ pub struct ExportPhotoOptions {
     pub watermark_position: Option<String>,
     pub watermark_opacity: Option<f32>,
     pub watermark_margin: Option<u32>,
+    /// Relative Platzierung (Phase 33 F5). Gesetzt, gelten Größe und
+    /// Rand in Prozent der kürzeren Kante statt in Pixeln — erst damit
+    /// funktioniert eine gespeicherte Vorlage über verschiedene
+    /// Exportgrößen hinweg, siehe `apx_export::watermark_layout`. Nicht
+    /// gesetzt bleibt alles wie bisher.
+    pub watermark_size_percent: Option<f32>,
+    pub watermark_margin_percent: Option<f32>,
+    /// `true` kachelt das Wasserzeichen über das ganze Bild; Position
+    /// und Rand spielen dann keine Rolle mehr.
+    pub watermark_tile: Option<bool>,
+    pub watermark_tile_spacing_percent: Option<f32>,
+    pub watermark_rotation_degrees: Option<f32>,
     pub metadata_make: Option<String>,
     pub metadata_model: Option<String>,
     pub metadata_date_time: Option<String>,
@@ -7345,6 +7357,32 @@ fn build_export_request(
             opacity: options.watermark_opacity.unwrap_or(1.0),
             margin: options.watermark_margin.unwrap_or(16),
         });
+    }
+
+    // Die relative Platzierung greift nur, wenn überhaupt ein
+    // Wasserzeichen gesetzt wurde — und nur, wenn eine Größe in Prozent
+    // angegeben ist. Ohne die bleibt das bisherige Pixel-Verhalten
+    // unverändert, auch wenn versehentlich eine Kachelung mitgeschickt
+    // wurde.
+    if request.watermark.is_some() {
+        if let Some(size_percent) = options.watermark_size_percent {
+            request.watermark_layout = Some(apx_export::watermark_layout::RelativePlacement {
+                size_percent,
+                margin_percent: options.watermark_margin_percent.unwrap_or(3.0),
+                position: parse_watermark_position(
+                    options
+                        .watermark_position
+                        .as_deref()
+                        .unwrap_or("bottom_right"),
+                )?,
+                tile: options.watermark_tile.unwrap_or(false).then(|| {
+                    apx_export::watermark_layout::TileSpec {
+                        spacing_percent: options.watermark_tile_spacing_percent.unwrap_or(5.0),
+                        rotation_degrees: options.watermark_rotation_degrees.unwrap_or(-30.0),
+                    }
+                }),
+            });
+        }
     }
 
     request.metadata = apx_export::metadata::MetadataFilter {

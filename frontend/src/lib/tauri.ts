@@ -1735,6 +1735,15 @@ export interface ExportPhotoOptions {
   watermarkPosition?: WatermarkPosition;
   watermarkOpacity?: number;
   watermarkMargin?: number;
+  /** Relative Platzierung (Phase 33 F5) — gesetzt, gelten Größe und Rand
+   * in Prozent der kürzeren Kante statt in Pixeln. Erst damit
+   * funktioniert eine gespeicherte Vorlage über verschiedene
+   * Exportgrößen hinweg. */
+  watermarkSizePercent?: number;
+  watermarkMarginPercent?: number;
+  watermarkTile?: boolean;
+  watermarkTileSpacingPercent?: number;
+  watermarkRotationDegrees?: number;
   metadataMake?: string;
   metadataModel?: string;
   metadataDateTime?: string;

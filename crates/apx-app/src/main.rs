@@ -11,6 +11,7 @@ mod batch_rename;
 mod commands;
 mod folder_sync;
 mod import;
+mod metadata_preset;
 mod protocol;
 mod reconcile;
 mod state;
@@ -424,6 +425,7 @@ fn main() {
             commands::preview_folder_sync,
             commands::apply_folder_sync,
             commands::score_photo_sharpness,
+            commands::apply_metadata_preset,
             commands::create_stack,
             commands::delete_stack,
             commands::set_stack_cover,

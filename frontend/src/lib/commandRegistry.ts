@@ -188,6 +188,7 @@ export function useCommandRegistry(): CommandEntry[] {
       { id: "fn:catalog", label: t("header.catalog"), category: "analysis", run: () => requestCommand("catalog") },
       { id: "fn:trash", label: t("header.trash"), category: "advanced", run: () => requestCommand("trash") },
       { id: "fn:folder-sync", label: t("header.folderSync"), category: "advanced", run: () => requestCommand("folder-sync") },
+      { id: "fn:metadata-presets", label: t("header.metadataPresets"), category: "templates", run: () => requestCommand("metadata-presets") },
       {
         id: "fn:sharpness",
         label: t("header.sharpness"),

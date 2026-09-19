@@ -1974,6 +1974,39 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return renamed;
       }
 
+      // ---- Metadaten-Vorgaben (Phase 33 F4) ---------------------------
+      // Die Auflösungsregeln (Platzhalter, „nicht gesetzt" gegen
+      // „leeren", Stichwort-Modus) sind in `apx-app`s
+      // `metadata_preset`-Tests abgedeckt. Der Mock schreibt nur so weit
+      // in die Fixture-Fotos zurück, dass die Oberfläche das Ergebnis
+      // zeigen kann.
+      case "apply_metadata_preset": {
+        const ids = args.photoIds as string[];
+        const preset = JSON.parse(args.presetJson as string) as {
+          title: string | null;
+          caption: string | null;
+          copyright: string | null;
+          creator: string | null;
+          keywords: string[];
+          keyword_mode: string;
+        };
+        const year = new Date().getFullYear();
+        let keywordsSet = 0;
+        for (const id of ids) {
+          const photo = findPhoto(id);
+          if (!photo) continue;
+          for (const field of ["title", "caption", "copyright", "creator"] as const) {
+            const value = preset[field];
+            if (value === null) continue;
+            (photo as unknown as Record<string, unknown>)[field] = value
+              .replace("{year}", String(year))
+              .replace("{stem}", (photo.filename ?? "").replace(/\.[^.]+$/, ""));
+          }
+          keywordsSet += preset.keywords.length;
+        }
+        return { photos: ids.length, keywords_set: keywordsSet, keywords_removed: 0 };
+      }
+
       // ---- Schärfe-Bewertung (Phase 33 F3) ----------------------------
       // Die Messung selbst (Laplace je Kachel, Kontrastnormierung,
       // Perzentil) ist in `apx-stacking`s Rust-Tests abgedeckt. Hier

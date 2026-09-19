@@ -105,6 +105,8 @@ import type {
   FolderSyncPlanDto,
   FolderSyncResultDto,
   SharpnessResultDto,
+  MetadataPreset,
+  MetadataPresetApplyResultDto,
   TrashEntryDto,
   TrashReason,
   TemplateKind,
@@ -960,6 +962,21 @@ interface LibrarySlice {
   /** Legt aus einer erkannten Serie einen Stapel an (Phase 9 Schritt 1) —
    * derselbe Stapel-Mechanismus, kein zweiter Gruppierungsbegriff. */
   stackDetectedSeries: (photoIds: string[]) => Promise<void>;
+
+  /** Metadaten-Vorgaben (Phase 33 F4, siehe `MetadataPresetDialog.tsx`).
+   * Gespeichert werden sie als Vorlagen der Art `"metadata"` — es gibt
+   * dafür keine eigene Tabelle, siehe `metadata_preset.rs`. */
+  metadataPresets: TemplateDto[];
+  metadataPresetDraft: MetadataPreset;
+  metadataPresetRunning: boolean;
+  metadataPresetResult: MetadataPresetApplyResultDto | null;
+  metadataPresetError: string | null;
+  refreshMetadataPresets: () => Promise<void>;
+  setMetadataPresetDraft: (patch: Partial<MetadataPreset>) => void;
+  loadMetadataPresetDraft: (templateId: string) => void;
+  saveMetadataPresetDraft: (name: string) => Promise<void>;
+  deleteMetadataPreset: (templateId: string) => Promise<void>;
+  applyMetadataPresetToSelection: () => Promise<void>;
 
   /** Schärfe-Bewertung (Phase 33 F3, siehe `SharpnessDialog.tsx`).
    * Gemessen wird in Rust auf der Standardvorschau; hier liegt nur die
@@ -4044,6 +4061,113 @@ export const useAppStore = create<AppStore>()(
         // Auswahl daneben eine ganz andere ist.
         if (photoIds.length > 0) state.selectedPhotoId = photoIds[0]!;
       });
+    },
+
+    metadataPresets: [],
+    metadataPresetDraft: {
+      title: null,
+      caption: null,
+      copyright: null,
+      creator: null,
+      custom: {},
+      keywords: [],
+      keyword_mode: "add",
+    },
+    metadataPresetRunning: false,
+    metadataPresetResult: null,
+    metadataPresetError: null,
+
+    refreshMetadataPresets: async () => {
+      try {
+        const presets = await api.listTemplates("metadata");
+        set((state) => {
+          state.metadataPresets = presets;
+        });
+      } catch (err) {
+        set((state) => {
+          state.metadataPresetError = String(err);
+        });
+      }
+    },
+
+    setMetadataPresetDraft: (patch) => {
+      set((state) => {
+        state.metadataPresetDraft = { ...state.metadataPresetDraft, ...patch };
+        state.metadataPresetResult = null;
+      });
+    },
+
+    loadMetadataPresetDraft: (templateId) => {
+      const template = get().metadataPresets.find((entry) => entry.id === templateId);
+      if (!template) return;
+      try {
+        const parsed = JSON.parse(template.payload_json) as Partial<MetadataPreset>;
+        set((state) => {
+          // Bewusst feldweise gegen die Vorgabewerte: eine mit einer
+          // früheren Version geschriebene Vorlage kennt vielleicht nicht
+          // alle Felder, und ein fehlendes soll hier `null`/leer sein,
+          // nicht `undefined` (was React zu einem unkontrollierten
+          // Eingabefeld machen würde).
+          state.metadataPresetDraft = {
+            title: parsed.title ?? null,
+            caption: parsed.caption ?? null,
+            copyright: parsed.copyright ?? null,
+            creator: parsed.creator ?? null,
+            custom: parsed.custom ?? {},
+            keywords: parsed.keywords ?? [],
+            keyword_mode: parsed.keyword_mode ?? "add",
+          };
+          state.metadataPresetResult = null;
+          state.metadataPresetError = null;
+        });
+      } catch (err) {
+        set((state) => {
+          state.metadataPresetError = `Vorgabe „${template.name}" ist beschädigt: ${String(err)}`;
+        });
+      }
+    },
+
+    saveMetadataPresetDraft: async (name) => {
+      if (!name.trim()) return;
+      try {
+        await api.saveTemplate("metadata", name.trim(), JSON.stringify(get().metadataPresetDraft));
+      } catch (err) {
+        set((state) => {
+          state.metadataPresetError = String(err);
+        });
+        return;
+      }
+      await get().refreshMetadataPresets();
+    },
+
+    deleteMetadataPreset: async (templateId) => {
+      await api.deleteTemplate(templateId);
+      await get().refreshMetadataPresets();
+    },
+
+    applyMetadataPresetToSelection: async () => {
+      const { multiSelectedIds, selectedPhotoId } = get();
+      const targets = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
+      if (targets.length === 0) return;
+      set((state) => {
+        state.metadataPresetRunning = true;
+        state.metadataPresetError = null;
+      });
+      try {
+        const result = await api.applyMetadataPreset(targets, get().metadataPresetDraft);
+        set((state) => {
+          state.metadataPresetResult = result;
+          state.metadataPresetRunning = false;
+        });
+      } catch (err) {
+        set((state) => {
+          state.metadataPresetRunning = false;
+          state.metadataPresetError = String(err);
+        });
+        return;
+      }
+      const folderId = get().selectedFolderId;
+      if (folderId) await get().loadPhotosForFolder(folderId);
     },
 
     sharpnessResults: [],

@@ -2064,7 +2064,7 @@ export function setPhotoGps(photoId: string, lat: number | null, lon: number | n
 // jeweilige `*Options`-DTO als JSON (für Export-/Layout-Vorlagen)
 // beziehungsweise `{ presetId, exportOptions }` (für Workflow-Vorlagen,
 // siehe {@link WorkflowTemplatePayload}).
-export type TemplateKind = "export" | "print" | "book" | "slideshow" | "web" | "workflow" | "filter" | "rename";
+export type TemplateKind = "export" | "print" | "book" | "slideshow" | "web" | "workflow" | "filter" | "rename" | "metadata" | "watermark";
 
 export interface TemplateDto {
   id: string;
@@ -2513,4 +2513,39 @@ export interface SharpnessResultDto {
 
 export function scorePhotoSharpness(photoIds: string[]): Promise<SharpnessResultDto[]> {
   return invoke<SharpnessResultDto[]>("score_photo_sharpness", { photoIds });
+}
+
+// ---- Metadaten-Vorgaben (Phase 33 F4) --------------------------------------
+
+/** Was mit den Stichwörtern der Vorgabe passiert. */
+export type KeywordMode = "add" | "replace";
+
+/** Eine Metadaten-Vorgabe. `null` in einem der vier IPTC-Felder heißt
+ * „nicht Teil der Vorgabe" (bestehender Wert bleibt), `""` heißt
+ * „leeren" — siehe `crates/apx-app/src/metadata_preset.rs`. Gespeichert
+ * wird sie als `templates`-Eintrag der Art `"metadata"`. */
+export interface MetadataPreset {
+  title: string | null;
+  caption: string | null;
+  copyright: string | null;
+  creator: string | null;
+  custom: Record<string, string>;
+  keywords: string[];
+  keyword_mode: KeywordMode;
+}
+
+export interface MetadataPresetApplyResultDto {
+  photos: number;
+  keywords_set: number;
+  keywords_removed: number;
+}
+
+export function applyMetadataPreset(
+  photoIds: string[],
+  preset: MetadataPreset,
+): Promise<MetadataPresetApplyResultDto> {
+  return invoke<MetadataPresetApplyResultDto>("apply_metadata_preset", {
+    photoIds,
+    presetJson: JSON.stringify(preset),
+  });
 }

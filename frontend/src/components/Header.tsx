@@ -18,6 +18,7 @@ import { SeriesDialog } from "./SeriesDialog";
 import { TrashDialog } from "./TrashDialog";
 import { FolderSyncDialog } from "./FolderSyncDialog";
 import { SharpnessDialog } from "./SharpnessDialog";
+import { MetadataPresetDialog } from "./MetadataPresetDialog";
 import { TemplatesDialog } from "./TemplatesDialog";
 import { LibraryOrganizeDialog } from "./LibraryOrganizeDialog";
 import { BatchConsoleDialog } from "./BatchConsoleDialog";
@@ -81,6 +82,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
   const [trashDialogOpen, setTrashDialogOpen] = useState(false);
   const [folderSyncDialogOpen, setFolderSyncDialogOpen] = useState(false);
   const [sharpnessDialogOpen, setSharpnessDialogOpen] = useState(false);
+  const [metadataPresetDialogOpen, setMetadataPresetDialogOpen] = useState(false);
   const [batchConsoleDialogOpen, setBatchConsoleDialogOpen] = useState(false);
   const [stackingDialogOpen, setStackingDialogOpen] = useState(false);
   const [scriptPluginDialogOpen, setScriptPluginDialogOpen] = useState(false);
@@ -168,6 +170,9 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
         break;
       case "sharpness":
         setSharpnessDialogOpen(true);
+        break;
+      case "metadata-presets":
+        setMetadataPresetDialogOpen(true);
         break;
       case "catalog":
         setCatalogDialogOpen(true);
@@ -414,6 +419,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
       <TrashDialog open={trashDialogOpen} onClose={() => setTrashDialogOpen(false)} />
       <FolderSyncDialog open={folderSyncDialogOpen} onClose={() => setFolderSyncDialogOpen(false)} />
       <SharpnessDialog open={sharpnessDialogOpen} onClose={() => setSharpnessDialogOpen(false)} />
+      <MetadataPresetDialog open={metadataPresetDialogOpen} onClose={() => setMetadataPresetDialogOpen(false)} />
       <LibraryOrganizeDialog open={organizeDialogOpen} onClose={() => setOrganizeDialogOpen(false)} />
       <BatchConsoleDialog open={batchConsoleDialogOpen} onClose={() => setBatchConsoleDialogOpen(false)} />
       <MetadataDialog open={metadataDialogOpen} onClose={() => setMetadataDialogOpen(false)} />

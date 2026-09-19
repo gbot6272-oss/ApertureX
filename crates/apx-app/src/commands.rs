@@ -10860,3 +10860,114 @@ pub fn score_photo_sharpness(
         })
         .collect())
 }
+
+// ---- Metadaten-Vorgaben (Phase 33 F4) --------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MetadataPresetApplyResultDto {
+    pub photos: usize,
+    /// Wie oft ein Stichwort neu vergeben wurde (nicht wie viele
+    /// verschiedene) — bei zehn Fotos und zwei Stichwörtern sind das 20.
+    pub keywords_set: usize,
+    pub keywords_removed: usize,
+}
+
+/// Wendet eine Metadaten-Vorgabe auf Fotos an.
+///
+/// Die Vorgabe kommt als JSON herein statt als Vorlagen-ID: dieselbe
+/// Funktion bedient damit sowohl „gespeicherte Vorgabe anwenden" als
+/// auch „diese Eingaben einmalig anwenden, ohne sie zu speichern" —
+/// letzteres ist der häufigere Fall und bräuchte sonst eine
+/// Wegwerf-Vorlage im Katalog.
+#[tauri::command]
+pub fn apply_metadata_preset(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    preset_json: String,
+) -> Result<MetadataPresetApplyResultDto, String> {
+    let preset: crate::metadata_preset::MetadataPreset = serde_json::from_str(&preset_json)
+        .map_err(|err| format!("Vorgabe ist kein gültiges JSON: {err}"))?;
+    let ids = parse_photo_ids(photo_ids)?;
+
+    let mut keywords_set = 0usize;
+    let mut keywords_removed = 0usize;
+
+    for id in &ids {
+        let photo = state
+            .catalog
+            .get_photo(*id)
+            .map_err(|err| err.to_string())?;
+        let ctx = crate::metadata_preset::PhotoContext {
+            filename: photo.filename.clone(),
+            year: photo.captured_at.map(|dt| dt.year()),
+            camera_model: photo.camera_model.clone(),
+            lens: photo.lens.clone(),
+        };
+        let resolved = crate::metadata_preset::resolve(&preset, &ctx);
+
+        // `set_photo_metadata` schreibt alle vier Felder auf einmal —
+        // die nicht gesetzten müssen deshalb mit ihrem bisherigen Wert
+        // durchgereicht werden, sonst wäre „nicht Teil der Vorgabe"
+        // faktisch doch ein Löschauftrag.
+        let pick = |from_preset: &Option<String>, current: &Option<String>| -> Option<String> {
+            match from_preset {
+                Some(value) if value.is_empty() => None,
+                Some(value) => Some(value.clone()),
+                None => current.clone(),
+            }
+        };
+        state
+            .catalog
+            .set_photo_metadata(
+                *id,
+                pick(&resolved.title, &photo.title).as_deref(),
+                pick(&resolved.caption, &photo.caption).as_deref(),
+                pick(&resolved.copyright, &photo.copyright).as_deref(),
+                pick(&resolved.creator, &photo.creator).as_deref(),
+            )
+            .map_err(|err| err.to_string())?;
+
+        if !resolved.custom.is_empty() {
+            let merged =
+                crate::metadata_preset::merge_custom(&photo.custom_metadata, &resolved.custom);
+            state
+                .catalog
+                .set_photo_custom_metadata(*id, &merged)
+                .map_err(|err| err.to_string())?;
+        }
+
+        if resolved.replace_keywords || !resolved.keywords_to_add.is_empty() {
+            let existing = state
+                .catalog
+                .list_keywords_for_photo(*id)
+                .map_err(|err| err.to_string())?;
+            if resolved.replace_keywords {
+                for keyword in &existing {
+                    if !resolved.keywords_to_add.contains(&keyword.name) {
+                        state
+                            .catalog
+                            .remove_keyword(*id, keyword.id)
+                            .map_err(|err| err.to_string())?;
+                        keywords_removed += 1;
+                    }
+                }
+            }
+            for keyword in &resolved.keywords_to_add {
+                if existing.iter().any(|existing| &existing.name == keyword) {
+                    continue;
+                }
+                state
+                    .catalog
+                    .add_keyword(*id, keyword)
+                    .map_err(|err| err.to_string())?;
+                keywords_set += 1;
+            }
+        }
+    }
+
+    Ok(MetadataPresetApplyResultDto {
+        photos: ids.len(),
+        keywords_set,
+        keywords_removed,
+    })
+}

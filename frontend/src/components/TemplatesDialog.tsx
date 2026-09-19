@@ -48,6 +48,11 @@ export function TemplatesDialog({ open, photoIds, onClose }: TemplatesDialogProp
     // Vollständigkeit halber, damit `Record<TemplateKind, string>` alle
     // Arten kennt.
     rename: t("templatesDialog.kindRename"),
+    // Metadaten-Vorgaben (Phase 33 F4) und Wasserzeichen-Vorlagen
+    // (Phase 33 F5) haben ebenfalls ihre eigenen Dialoge — wie `filter`
+    // und `rename` nur der Vollständigkeit halber hier.
+    metadata: t("templatesDialog.kindMetadata"),
+    watermark: t("templatesDialog.kindWatermark"),
   };
 
   const templatesByKind = useAppStore((s) => s.templatesByKind);

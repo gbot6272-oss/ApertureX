@@ -350,7 +350,7 @@ pub(crate) fn reorder_photo(
 
     reordered
         .into_iter()
-        .map(|id| PhotoId::from_str(&id).map_err(Into::into))
+        .map(|id| PhotoId::from_str(&id))
         .collect()
 }
 

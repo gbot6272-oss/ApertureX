@@ -45,6 +45,9 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     catalogStatus: { catalog_path: "mock-catalog.sqlite3", folder_count: 0, photo_count: 0 },
     folders: [] as unknown[],
     photosByFolder: {} as Record<string, unknown[]>,
+    // Ordner-Abgleich (Phase 33 F2): Der Mock kennt kein Dateisystem, die
+    // Fixture ist deshalb der Ordnerzustand, den der Test behauptet.
+    folderSyncPlan: [] as { filename: string; change: string; photo_id: string | null }[],
     // `.apx`-Import/-Export (Phase 5 Schritt 10) — die echten Commands
     // öffnen einen nativen Datei-Dialog im Backend; hier stattdessen fest
     // hinterlegte Ergebnisse, per Fixture steuerbar (siehe
@@ -616,6 +619,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       catalogStatus: unknown;
       folders: unknown[];
       photosByFolder: Record<string, unknown[]>;
+      folderSyncPlan?: { filename: string; change: string; photo_id: string | null }[];
       exportApxPathResult: string | null;
       exportLrtemplatePathResult: string | null;
       importApxFile: { name: string; tags: string[]; conditions_json: string; edl_subset_json: string } | null;
@@ -1964,6 +1968,37 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           renamed.push(clonePhoto(photo));
         }
         return renamed;
+      }
+
+      // ---- Ordner-Abgleich (Phase 33 F2) ------------------------------
+      // Der Mock kennt kein Dateisystem. `folderSyncPlan` in den Fixtures
+      // ist deshalb der Ordnerzustand, den der Test behauptet — genau die
+      // Grenze, die `installTauriMock`s Moduldoku beschreibt.
+      case "preview_folder_sync": {
+        const entries = (fixtures.folderSyncPlan ?? []) as { filename: string; change: string; photo_id: string | null }[];
+        const count = (change: string) => entries.filter((entry) => entry.change === change).length;
+        return {
+          entries,
+          new_count: count("new"),
+          vanished_count: count("vanished"),
+          modified_count: count("modified"),
+          returned_count: count("returned"),
+        };
+      }
+      case "apply_folder_sync": {
+        const entries = (fixtures.folderSyncPlan ?? []) as { filename: string; change: string; photo_id: string | null }[];
+        const returned = entries.filter((entry) => entry.change === "returned").length;
+        const vanished = entries.filter((entry) => entry.change === "vanished");
+        if (args.trashVanished) {
+          for (const entry of vanished) if (entry.photo_id) trashPhoto(entry.photo_id, "missing");
+        }
+        const importStarted =
+          Boolean(args.importNew) && entries.some((entry) => entry.change === "new" || entry.change === "modified");
+        // Angewendet ist angewendet: der behauptete Ordnerzustand gilt
+        // danach als eingearbeitet, sonst meldete die zweite Vorschau
+        // dieselben Abweichungen noch einmal.
+        fixtures.folderSyncPlan = [];
+        return { returned, handled_vanished: vanished.length, import_started: importStarted };
       }
 
       // ---- Papierkorb (Phase 33 F1) -----------------------------------

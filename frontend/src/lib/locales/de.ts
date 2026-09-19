@@ -59,6 +59,7 @@ export const de = {
   "header.series": "Serien erkennen…",
   "header.catalog": "Katalog…",
   "header.trash": "Papierkorb…",
+  "header.folderSync": "Ordner abgleichen…",
   "commands.trashSelection": "Auswahl wegwerfen",
   "header.settings": "Einstellungen…",
   "header.settingsTitle": "Theme, Sprache, UI-Skalierung, Barrierefreiheit (Phase 10)",

@@ -10534,3 +10534,239 @@ pub struct EmptyTrashResultDto {
     pub purged: u64,
     pub failed_files: Vec<String>,
 }
+
+// ---- Ordner-Abgleich (Phase 33 F2) -----------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncEntryDto {
+    pub filename: String,
+    /// `"new"`, `"vanished"`, `"modified"` oder `"returned"`.
+    pub change: String,
+    pub photo_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FolderSyncPlanDto {
+    pub entries: Vec<SyncEntryDto>,
+    pub new_count: usize,
+    pub vanished_count: usize,
+    pub modified_count: usize,
+    pub returned_count: usize,
+}
+
+fn change_key(change: &crate::folder_sync::SyncChange) -> &'static str {
+    use crate::folder_sync::SyncChange;
+    match change {
+        SyncChange::New => "new",
+        SyncChange::Vanished => "vanished",
+        SyncChange::Modified => "modified",
+        SyncChange::Returned => "returned",
+    }
+}
+
+/// Liest den Ordner auf der Platte und vergleicht ihn mit dem Katalog.
+///
+/// Nur lesend — hier wird nichts importiert, nichts markiert, nichts
+/// weggeworfen. Das ist der Punkt: man soll sehen können, was ein
+/// Abgleich täte, bevor er es tut.
+fn build_folder_sync_plan(
+    state: &State<'_, AppState>,
+    folder_id: apx_core::FolderId,
+) -> Result<crate::folder_sync::FolderSyncPlan, String> {
+    let folder = state
+        .catalog
+        .get_folder(folder_id)
+        .map_err(|err| err.to_string())?;
+
+    let catalog_files: Vec<crate::folder_sync::CatalogFile> = state
+        .catalog
+        .list_photos_by_folder(folder_id)
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .map(|photo| crate::folder_sync::CatalogFile {
+            photo_id: photo.id,
+            filename: photo.filename,
+            file_size: photo.file_size,
+            file_mtime: photo.file_mtime.unix_timestamp(),
+            is_virtual_copy: photo.source_photo_id.is_some(),
+            already_missing: photo.missing,
+        })
+        .collect();
+
+    // Nur die oberste Ebene: ein Katalog-Ordnereintrag entspricht genau
+    // einem Verzeichnis (Unterordner haben eigene Einträge, siehe
+    // `import::ensure_folder`). Ein rekursiver Durchlauf würde die
+    // Dateien der Unterordner hier als „neu" melden, obwohl sie längst
+    // unter ihrem eigenen Ordnereintrag im Katalog stehen.
+    let mut disk_files: Vec<crate::folder_sync::DiskFile> = Vec::new();
+    let read_dir = std::fs::read_dir(&folder.path)
+        .map_err(|err| format!("Ordner '{}' nicht lesbar: {err}", folder.path.display()))?;
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if !path.is_file() || !apx_raw::is_supported_extension(&path) {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|dur| dur.as_secs() as i64)
+            .unwrap_or(0);
+        let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        disk_files.push(crate::folder_sync::DiskFile {
+            filename: filename.to_string(),
+            file_size: meta.len(),
+            file_mtime: mtime,
+        });
+    }
+
+    Ok(crate::folder_sync::plan_folder_sync(
+        &catalog_files,
+        &disk_files,
+    ))
+}
+
+#[tauri::command]
+pub fn preview_folder_sync(
+    state: State<'_, AppState>,
+    folder_id: String,
+) -> Result<FolderSyncPlanDto, String> {
+    use crate::folder_sync::SyncChange;
+    let folder_id: apx_core::FolderId = folder_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    let plan = build_folder_sync_plan(&state, folder_id)?;
+    Ok(FolderSyncPlanDto {
+        new_count: plan.count(&SyncChange::New),
+        vanished_count: plan.count(&SyncChange::Vanished),
+        modified_count: plan.count(&SyncChange::Modified),
+        returned_count: plan.count(&SyncChange::Returned),
+        entries: plan
+            .entries
+            .iter()
+            .map(|entry| SyncEntryDto {
+                filename: entry.filename.clone(),
+                change: change_key(&entry.change).to_string(),
+                photo_id: entry.photo_id.map(|id| id.to_string()),
+            })
+            .collect(),
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FolderSyncResultDto {
+    /// Zurückgekehrte Dateien, deren `missing`-Markierung aufgehoben wurde.
+    pub returned: usize,
+    /// Verschwundene Fotos, die markiert oder weggeworfen wurden.
+    pub handled_vanished: usize,
+    /// Ob ein Import für die neuen/geänderten Dateien angestoßen wurde.
+    /// Der läuft im Hintergrund weiter und meldet sich über dieselben
+    /// Fortschritts-Ereignisse wie ein normaler Import.
+    pub import_started: bool,
+}
+
+/// Wendet den Abgleich an.
+///
+/// Für die neuen und geänderten Dateien wird bewusst **der normale
+/// Import** angestoßen statt eines eigenen Pfades: er kennt bereits
+/// Metadaten-Lesen, Vorschau-Erzeugung, Hashing und das Upsert, das eine
+/// geänderte Datei aktualisiert statt zu verdoppeln. Ein zweiter, nur
+/// hier verwendeter Weg dorthin wäre eine zweite Stelle, an der das
+/// falsch sein kann.
+///
+/// `trash_vanished` entscheidet, was mit Verschwundenem passiert:
+/// `false` markiert es nur als fehlend (der bisherige, jederzeit
+/// umkehrbare Zustand), `true` wirft es in den Papierkorb (Phase 33 F1)
+/// — auch das bleibt umkehrbar, ist aber die Ansage „das kommt nicht
+/// wieder".
+#[tauri::command]
+pub async fn apply_folder_sync(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    folder_id: String,
+    import_new: bool,
+    trash_vanished: bool,
+) -> Result<FolderSyncResultDto, String> {
+    use crate::folder_sync::SyncChange;
+    let parsed: apx_core::FolderId = folder_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    let plan = build_folder_sync_plan(&state, parsed)?;
+    if plan.is_clean() {
+        // Nichts zu tun — und vor allem kein Import anstoßen, der dann
+        // jede Datei einzeln als unverändert wieder verwirft.
+        return Ok(FolderSyncResultDto {
+            returned: 0,
+            handled_vanished: 0,
+            import_started: false,
+        });
+    }
+    let folder = state
+        .catalog
+        .get_folder(parsed)
+        .map_err(|err| err.to_string())?;
+
+    let mut returned = 0usize;
+    let mut handled_vanished = 0usize;
+    let mut vanished_ids: Vec<apx_core::PhotoId> = Vec::new();
+
+    for entry in &plan.entries {
+        let Some(photo_id) = entry.photo_id else {
+            continue;
+        };
+        match entry.change {
+            SyncChange::Returned => {
+                state
+                    .catalog
+                    .set_photo_missing(photo_id, false)
+                    .map_err(|err| err.to_string())?;
+                returned += 1;
+            }
+            SyncChange::Vanished => {
+                if trash_vanished {
+                    vanished_ids.push(photo_id);
+                } else {
+                    state
+                        .catalog
+                        .set_photo_missing(photo_id, true)
+                        .map_err(|err| err.to_string())?;
+                }
+                handled_vanished += 1;
+            }
+            _ => {}
+        }
+    }
+
+    if !vanished_ids.is_empty() {
+        state
+            .catalog
+            .trash_photos(
+                &vanished_ids,
+                apx_catalog::TrashReason::Missing,
+                time::OffsetDateTime::now_utc(),
+            )
+            .map_err(|err| err.to_string())?;
+    }
+
+    let needs_import = plan.count(&SyncChange::New) > 0 || plan.count(&SyncChange::Modified) > 0;
+    let import_started = import_new && needs_import;
+    if import_started {
+        start_import(
+            app,
+            state,
+            folder.path.to_string_lossy().to_string(),
+            crate::import::ImportMode::AddInPlace,
+            None,
+        )
+        .await?;
+    }
+
+    Ok(FolderSyncResultDto {
+        returned,
+        handled_vanished,
+        import_started,
+    })
+}

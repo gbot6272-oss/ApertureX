@@ -102,6 +102,8 @@ import type {
   TagRuleDto,
   SubtitleSegmentDto,
   TemplateDto,
+  FolderSyncPlanDto,
+  FolderSyncResultDto,
   TrashEntryDto,
   TrashReason,
   TemplateKind,
@@ -957,6 +959,27 @@ interface LibrarySlice {
   /** Legt aus einer erkannten Serie einen Stapel an (Phase 9 Schritt 1) —
    * derselbe Stapel-Mechanismus, kein zweiter Gruppierungsbegriff. */
   stackDetectedSeries: (photoIds: string[]) => Promise<void>;
+
+  /** Ordner-Abgleich (Phase 33 F2, siehe `FolderSyncDialog.tsx`).
+   * Die Planung läuft in Rust (`folder_sync::plan_folder_sync`) — hier
+   * liegt nur das Ergebnis und was daraus gemacht werden soll. */
+  folderSyncPlan: FolderSyncPlanDto | null;
+  folderSyncLoading: boolean;
+  folderSyncRunning: boolean;
+  folderSyncResult: FolderSyncResultDto | null;
+  folderSyncError: string | null;
+  /** Ob verschwundene Fotos in den Papierkorb sollen statt nur als
+   * fehlend markiert zu werden. Voreinstellung `false`: Markieren ist
+   * jederzeit umkehrbar und die harmlosere Annahme, wenn z. B. gerade
+   * nur eine externe Platte nicht angesteckt ist. */
+  folderSyncTrashVanished: boolean;
+  setFolderSyncTrashVanished: (value: boolean) => void;
+  /** `keepResult` behält die Meldung des letzten Anwendens stehen —
+   * das Anwenden schiebt selbst eine frische Vorschau hinterher, und
+   * ohne das würde die Erfolgsmeldung im selben Atemzug wieder
+   * verschwinden. */
+  previewFolderSync: (keepResult?: boolean) => Promise<void>;
+  applyFolderSync: () => Promise<void>;
 
   /** Papierkorb (Phase 33 F1). Weggeworfene Fotos bleiben im Katalog
    * stehen — hier liegt nur die geladene Liste; entschieden wird in
@@ -4008,6 +4031,73 @@ export const useAppStore = create<AppStore>()(
         // Auswahl daneben eine ganz andere ist.
         if (photoIds.length > 0) state.selectedPhotoId = photoIds[0]!;
       });
+    },
+
+    folderSyncPlan: null,
+    folderSyncLoading: false,
+    folderSyncRunning: false,
+    folderSyncResult: null,
+    folderSyncError: null,
+    folderSyncTrashVanished: false,
+
+    setFolderSyncTrashVanished: (value) => {
+      set((state) => {
+        state.folderSyncTrashVanished = value;
+      });
+    },
+
+    previewFolderSync: async (keepResult = false) => {
+      const folderId = get().selectedFolderId;
+      if (!folderId) {
+        set((state) => {
+          state.folderSyncPlan = null;
+        });
+        return;
+      }
+      set((state) => {
+        state.folderSyncLoading = true;
+        state.folderSyncError = null;
+        if (!keepResult) state.folderSyncResult = null;
+      });
+      try {
+        const plan = await api.previewFolderSync(folderId);
+        set((state) => {
+          state.folderSyncPlan = plan;
+          state.folderSyncLoading = false;
+        });
+      } catch (err) {
+        set((state) => {
+          state.folderSyncLoading = false;
+          state.folderSyncError = String(err);
+        });
+      }
+    },
+
+    applyFolderSync: async () => {
+      const folderId = get().selectedFolderId;
+      if (!folderId) return;
+      set((state) => {
+        state.folderSyncRunning = true;
+        state.folderSyncError = null;
+      });
+      try {
+        const result = await api.applyFolderSync(folderId, true, get().folderSyncTrashVanished);
+        set((state) => {
+          state.folderSyncResult = result;
+          state.folderSyncRunning = false;
+        });
+      } catch (err) {
+        set((state) => {
+          state.folderSyncRunning = false;
+          state.folderSyncError = String(err);
+        });
+        return;
+      }
+      await get().refreshFolders();
+      await get().loadPhotosForFolder(folderId);
+      // Der Abgleich ist danach ein anderer — die alte Vorschau würde
+      // weiter Dateien melden, die es gerade nicht mehr gibt.
+      await get().previewFolderSync(true);
     },
 
     trashEntries: [],

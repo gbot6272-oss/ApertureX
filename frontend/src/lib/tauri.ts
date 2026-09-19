@@ -2458,3 +2458,42 @@ export function listTrash(): Promise<TrashEntryDto[]> {
 export function emptyTrash(photoIds: string[], deleteFiles: boolean): Promise<EmptyTrashResultDto> {
   return invoke<EmptyTrashResultDto>("empty_trash", { photoIds, deleteFiles });
 }
+
+// ---- Ordner-Abgleich (Phase 33 F2) -----------------------------------------
+
+/** Was sich an einer Datei geändert hat. Schlüssel statt Text — die
+ * Beschriftung bleibt im Frontend. */
+export type SyncChange = "new" | "vanished" | "modified" | "returned";
+
+export interface SyncEntryDto {
+  filename: string;
+  change: SyncChange;
+  /** `null` bei neuen Dateien — die stehen noch in keinem Katalog. */
+  photo_id: string | null;
+}
+
+export interface FolderSyncPlanDto {
+  entries: SyncEntryDto[];
+  new_count: number;
+  vanished_count: number;
+  modified_count: number;
+  returned_count: number;
+}
+
+export interface FolderSyncResultDto {
+  returned: number;
+  handled_vanished: number;
+  import_started: boolean;
+}
+
+export function previewFolderSync(folderId: string): Promise<FolderSyncPlanDto> {
+  return invoke<FolderSyncPlanDto>("preview_folder_sync", { folderId });
+}
+
+export function applyFolderSync(
+  folderId: string,
+  importNew: boolean,
+  trashVanished: boolean,
+): Promise<FolderSyncResultDto> {
+  return invoke<FolderSyncResultDto>("apply_folder_sync", { folderId, importNew, trashVanished });
+}

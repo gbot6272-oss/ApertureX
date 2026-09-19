@@ -9,6 +9,7 @@
 
 mod batch_rename;
 mod commands;
+mod folder_sync;
 mod import;
 mod protocol;
 mod reconcile;
@@ -420,6 +421,8 @@ fn main() {
             commands::restore_photos,
             commands::list_trash,
             commands::empty_trash,
+            commands::preview_folder_sync,
+            commands::apply_folder_sync,
             commands::create_stack,
             commands::delete_stack,
             commands::set_stack_cover,

@@ -56,6 +56,7 @@ export const en: Record<keyof typeof de, string> = {
   "header.series": "Detect series…",
   "header.catalog": "Catalog…",
   "header.trash": "Trash…",
+  "header.folderSync": "Sync folder…",
   "commands.trashSelection": "Move selection to trash",
   "header.settings": "Settings…",
   "header.settingsTitle": "Theme, language, UI scaling, accessibility (Phase 10)",

@@ -187,6 +187,7 @@ export function useCommandRegistry(): CommandEntry[] {
       { id: "fn:series", label: t("header.series"), category: "analysis", run: () => requestCommand("series") },
       { id: "fn:catalog", label: t("header.catalog"), category: "analysis", run: () => requestCommand("catalog") },
       { id: "fn:trash", label: t("header.trash"), category: "advanced", run: () => requestCommand("trash") },
+      { id: "fn:folder-sync", label: t("header.folderSync"), category: "advanced", run: () => requestCommand("folder-sync") },
       {
         id: "fn:trash-selection",
         label: t("commands.trashSelection"),

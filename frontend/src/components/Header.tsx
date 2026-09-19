@@ -16,6 +16,7 @@ import { BatchRenameDialog } from "./BatchRenameDialog";
 import { GearStatsDialog } from "./GearStatsDialog";
 import { SeriesDialog } from "./SeriesDialog";
 import { TrashDialog } from "./TrashDialog";
+import { FolderSyncDialog } from "./FolderSyncDialog";
 import { TemplatesDialog } from "./TemplatesDialog";
 import { LibraryOrganizeDialog } from "./LibraryOrganizeDialog";
 import { BatchConsoleDialog } from "./BatchConsoleDialog";
@@ -77,6 +78,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
   const [gearStatsDialogOpen, setGearStatsDialogOpen] = useState(false);
   const [seriesDialogOpen, setSeriesDialogOpen] = useState(false);
   const [trashDialogOpen, setTrashDialogOpen] = useState(false);
+  const [folderSyncDialogOpen, setFolderSyncDialogOpen] = useState(false);
   const [batchConsoleDialogOpen, setBatchConsoleDialogOpen] = useState(false);
   const [stackingDialogOpen, setStackingDialogOpen] = useState(false);
   const [scriptPluginDialogOpen, setScriptPluginDialogOpen] = useState(false);
@@ -158,6 +160,9 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
         break;
       case "trash":
         setTrashDialogOpen(true);
+        break;
+      case "folder-sync":
+        setFolderSyncDialogOpen(true);
         break;
       case "catalog":
         setCatalogDialogOpen(true);
@@ -402,6 +407,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
       <GearStatsDialog open={gearStatsDialogOpen} onClose={() => setGearStatsDialogOpen(false)} />
       <SeriesDialog open={seriesDialogOpen} onClose={() => setSeriesDialogOpen(false)} />
       <TrashDialog open={trashDialogOpen} onClose={() => setTrashDialogOpen(false)} />
+      <FolderSyncDialog open={folderSyncDialogOpen} onClose={() => setFolderSyncDialogOpen(false)} />
       <LibraryOrganizeDialog open={organizeDialogOpen} onClose={() => setOrganizeDialogOpen(false)} />
       <BatchConsoleDialog open={batchConsoleDialogOpen} onClose={() => setBatchConsoleDialogOpen(false)} />
       <MetadataDialog open={metadataDialogOpen} onClose={() => setMetadataDialogOpen(false)} />

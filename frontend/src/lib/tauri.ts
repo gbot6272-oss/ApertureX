@@ -2497,3 +2497,20 @@ export function applyFolderSync(
 ): Promise<FolderSyncResultDto> {
   return invoke<FolderSyncResultDto>("apply_folder_sync", { folderId, importNew, trashVanished });
 }
+
+// ---- Schärfe-Bewertung (Phase 33 F3) ---------------------------------------
+
+export interface SharpnessResultDto {
+  photo_id: string;
+  filename: string;
+  score: number;
+  mean: number;
+  /** `score` relativ zum besten Wert der Gruppe, 0..1. */
+  relative: number;
+  /** 1 = schärfste Aufnahme. */
+  rank: number;
+}
+
+export function scorePhotoSharpness(photoIds: string[]): Promise<SharpnessResultDto[]> {
+  return invoke<SharpnessResultDto[]>("score_photo_sharpness", { photoIds });
+}

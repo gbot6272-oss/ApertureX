@@ -423,6 +423,7 @@ fn main() {
             commands::empty_trash,
             commands::preview_folder_sync,
             commands::apply_folder_sync,
+            commands::score_photo_sharpness,
             commands::create_stack,
             commands::delete_stack,
             commands::set_stack_cover,

@@ -189,6 +189,13 @@ export function useCommandRegistry(): CommandEntry[] {
       { id: "fn:trash", label: t("header.trash"), category: "advanced", run: () => requestCommand("trash") },
       { id: "fn:folder-sync", label: t("header.folderSync"), category: "advanced", run: () => requestCommand("folder-sync") },
       {
+        id: "fn:sharpness",
+        label: t("header.sharpness"),
+        category: "analysis",
+        disabled: exportPhotoIds.length === 0,
+        run: () => requestCommand("sharpness"),
+      },
+      {
         id: "fn:trash-selection",
         label: t("commands.trashSelection"),
         category: "advanced",

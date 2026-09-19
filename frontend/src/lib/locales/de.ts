@@ -60,6 +60,7 @@ export const de = {
   "header.catalog": "Katalog…",
   "header.trash": "Papierkorb…",
   "header.folderSync": "Ordner abgleichen…",
+  "header.sharpness": "Schärfe bewerten…",
   "commands.trashSelection": "Auswahl wegwerfen",
   "header.settings": "Einstellungen…",
   "header.settingsTitle": "Theme, Sprache, UI-Skalierung, Barrierefreiheit (Phase 10)",

@@ -104,6 +104,7 @@ import type {
   TemplateDto,
   FolderSyncPlanDto,
   FolderSyncResultDto,
+  SharpnessResultDto,
   TrashEntryDto,
   TrashReason,
   TemplateKind,
@@ -959,6 +960,18 @@ interface LibrarySlice {
   /** Legt aus einer erkannten Serie einen Stapel an (Phase 9 Schritt 1) —
    * derselbe Stapel-Mechanismus, kein zweiter Gruppierungsbegriff. */
   stackDetectedSeries: (photoIds: string[]) => Promise<void>;
+
+  /** Schärfe-Bewertung (Phase 33 F3, siehe `SharpnessDialog.tsx`).
+   * Gemessen wird in Rust auf der Standardvorschau; hier liegt nur die
+   * fertige Rangfolge. */
+  sharpnessResults: SharpnessResultDto[];
+  sharpnessRunning: boolean;
+  sharpnessError: string | null;
+  scoreSelectionSharpness: () => Promise<void>;
+  /** Wirft alles außer `keepPhotoId` aus der bewerteten Gruppe weg —
+   * mit dem Grund „unscharf", damit im Papierkorb später erkennbar
+   * bleibt, warum. */
+  trashAllButSharpest: (keepPhotoId: string) => Promise<void>;
 
   /** Ordner-Abgleich (Phase 33 F2, siehe `FolderSyncDialog.tsx`).
    * Die Planung läuft in Rust (`folder_sync::plan_folder_sync`) — hier
@@ -4031,6 +4044,61 @@ export const useAppStore = create<AppStore>()(
         // Auswahl daneben eine ganz andere ist.
         if (photoIds.length > 0) state.selectedPhotoId = photoIds[0]!;
       });
+    },
+
+    sharpnessResults: [],
+    sharpnessRunning: false,
+    sharpnessError: null,
+
+    scoreSelectionSharpness: async () => {
+      const { multiSelectedIds, selectedPhotoId } = get();
+      const targets = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
+      if (targets.length === 0) {
+        set((state) => {
+          state.sharpnessResults = [];
+        });
+        return;
+      }
+      set((state) => {
+        state.sharpnessRunning = true;
+        state.sharpnessError = null;
+      });
+      try {
+        const results = await api.scorePhotoSharpness(targets);
+        set((state) => {
+          state.sharpnessResults = results;
+          state.sharpnessRunning = false;
+        });
+      } catch (err) {
+        set((state) => {
+          state.sharpnessRunning = false;
+          state.sharpnessError = String(err);
+        });
+      }
+    },
+
+    trashAllButSharpest: async (keepPhotoId) => {
+      const losers = get()
+        .sharpnessResults.filter((entry) => entry.photo_id !== keepPhotoId)
+        .map((entry) => entry.photo_id);
+      if (losers.length === 0) return;
+      try {
+        await api.trashPhotos(losers, "blurry");
+      } catch (err) {
+        set((state) => {
+          state.sharpnessError = String(err);
+        });
+        return;
+      }
+      set((state) => {
+        state.multiSelectedIds = [keepPhotoId];
+        state.selectedPhotoId = keepPhotoId;
+        state.sharpnessResults = state.sharpnessResults.filter((entry) => entry.photo_id === keepPhotoId);
+      });
+      await get().refreshFolders();
+      const folderId = get().selectedFolderId;
+      if (folderId) await get().loadPhotosForFolder(folderId);
+      await get().refreshTrash();
     },
 
     folderSyncPlan: null,

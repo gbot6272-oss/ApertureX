@@ -1,4 +1,4 @@
-import { Camera, Layers, Loader2, SlidersHorizontal, Sparkles } from "lucide-react";
+import { Camera, Crosshair, Layers, Loader2, SlidersHorizontal, Sparkles } from "lucide-react";
 import { useEffect } from "react";
 
 import { previewUrl } from "../lib/media";
@@ -55,6 +55,7 @@ export function SeriesDialog({ open, onClose }: SeriesDialogProps) {
   const setMultiSelection = useAppStore((s) => s.setMultiSelection);
   const openCompareView = useAppStore((s) => s.openCompareView);
   const selectedFolderId = useAppStore((s) => s.selectedFolderId);
+  const requestCommand = useAppStore((s) => s.requestCommand);
 
   useEffect(() => {
     if (open) void runDetection();
@@ -121,6 +122,13 @@ export function SeriesDialog({ open, onClose }: SeriesDialogProps) {
                   openCompareView(entry.photo_ids.slice(0, 9));
                   onClose();
                 }}
+                onRateSharpness={() => {
+                  // Die Bewertung arbeitet auf der Auswahl — die Serie
+                  // wird also erst ausgewählt, dann der Dialog geöffnet.
+                  setMultiSelection(entry.photo_ids);
+                  onClose();
+                  requestCommand("sharpness");
+                }}
               />
             ))}
           </ul>
@@ -146,9 +154,12 @@ interface SeriesRowProps {
   onStack: () => void;
   onSelect: () => void;
   onCompare: () => void;
+  /** Phase 33 F3: die naheliegendste Anschlussfrage an eine erkannte
+   * Reihenaufnahme ist „und welche davon ist die schärfste?". */
+  onRateSharpness: () => void;
 }
 
-function SeriesRow({ entry, onStack, onSelect, onCompare }: SeriesRowProps) {
+function SeriesRow({ entry, onStack, onSelect, onCompare, onRateSharpness }: SeriesRowProps) {
   const Icon = KIND_ICON[entry.kind];
   return (
     <li className="rounded border border-border bg-bg-panel p-2" data-testid="series-row" data-kind={entry.kind}>
@@ -172,6 +183,14 @@ function SeriesRow({ entry, onStack, onSelect, onCompare }: SeriesRowProps) {
         </button>
         <button type="button" onClick={onCompare} className="apx-btn-liquid rounded border border-border px-2 py-0.5 text-[11px] text-text-secondary">
           Vergleichen
+        </button>
+        <button
+          type="button"
+          onClick={onRateSharpness}
+          className="apx-btn-liquid flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] text-text-secondary"
+        >
+          <Crosshair aria-hidden="true" className="size-3" />
+          Schärfe
         </button>
         <button
           type="button"

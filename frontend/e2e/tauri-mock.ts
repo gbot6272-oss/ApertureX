@@ -48,6 +48,9 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // Ordner-Abgleich (Phase 33 F2): Der Mock kennt kein Dateisystem, die
     // Fixture ist deshalb der Ordnerzustand, den der Test behauptet.
     folderSyncPlan: [] as { filename: string; change: string; photo_id: string | null }[],
+    // Schärfe-Bewertung (Phase 33 F3): Rohwert je Foto-ID, aus dem der
+    // Mock Rangfolge und Relativwert ableitet.
+    sharpnessScores: {} as Record<string, number>,
     // `.apx`-Import/-Export (Phase 5 Schritt 10) — die echten Commands
     // öffnen einen nativen Datei-Dialog im Backend; hier stattdessen fest
     // hinterlegte Ergebnisse, per Fixture steuerbar (siehe
@@ -620,6 +623,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       folders: unknown[];
       photosByFolder: Record<string, unknown[]>;
       folderSyncPlan?: { filename: string; change: string; photo_id: string | null }[];
+      sharpnessScores?: Record<string, number>;
       exportApxPathResult: string | null;
       exportLrtemplatePathResult: string | null;
       importApxFile: { name: string; tags: string[]; conditions_json: string; edl_subset_json: string } | null;
@@ -1968,6 +1972,27 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           renamed.push(clonePhoto(photo));
         }
         return renamed;
+      }
+
+      // ---- Schärfe-Bewertung (Phase 33 F3) ----------------------------
+      // Die Messung selbst (Laplace je Kachel, Kontrastnormierung,
+      // Perzentil) ist in `apx-stacking`s Rust-Tests abgedeckt. Hier
+      // liefert die Fixture die Rangfolge, die der Dialog darstellen
+      // soll — ein Browser-Mock hat keine Vorschaubilder zum Messen.
+      case "score_photo_sharpness": {
+        const ids = args.photoIds as string[];
+        const scores = (fixtures.sharpnessScores ?? {}) as Record<string, number>;
+        const entries = ids.map((id) => ({ id, score: scores[id] ?? 1 }));
+        entries.sort((a, b) => b.score - a.score);
+        const best = entries[0]?.score ?? 0;
+        return entries.map((entry, index) => ({
+          photo_id: entry.id,
+          filename: findPhoto(entry.id)?.filename ?? "unbekannt",
+          score: entry.score,
+          mean: entry.score * 0.8,
+          relative: best > 0 ? entry.score / best : 0,
+          rank: index + 1,
+        }));
       }
 
       // ---- Ordner-Abgleich (Phase 33 F2) ------------------------------

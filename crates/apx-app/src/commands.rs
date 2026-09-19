@@ -10770,3 +10770,93 @@ pub async fn apply_folder_sync(
         import_started,
     })
 }
+
+// ---- Schärfe-Bewertung (Phase 33 F3) ---------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SharpnessResultDto {
+    pub photo_id: String,
+    pub filename: String,
+    /// Vergleichswert (hohes Perzentil über die Kachelwerte).
+    pub score: f32,
+    /// Mittelwert über alle Kacheln — niedrig bei selektiver Schärfe.
+    pub mean: f32,
+    /// `score` relativ zum besten Wert der Gruppe, 0..1. Die Rohwerte
+    /// sind zwischen verschiedenen Motiven bedeutungslos; dieser Anteil
+    /// ist das, was sich in der Oberfläche sinnvoll als Balken zeigen
+    /// lässt.
+    pub relative: f32,
+    /// Platz in der Rangfolge, 1 = schärfste Aufnahme.
+    pub rank: usize,
+}
+
+/// Bewertet die Schärfe mehrerer Fotos und gibt sie sortiert zurück
+/// (schärfste zuerst).
+///
+/// **Gemessen wird auf der Standardvorschau (2048 px), nicht auf dem
+/// Original.** Das ist eine bewusste Grenze: zwanzig RAWs in voller
+/// Auflösung zu dekodieren dauert Minuten, und die Frage hier ist nicht
+/// „wie scharf ist dieses Foto absolut", sondern „welches dieser Fotos
+/// ist das schärfste". Für den Vergleich reicht die Vorschau, weil alle
+/// Aufnahmen dieselbe Skalierung durchlaufen — eine unschärfere Aufnahme
+/// bleibt auch verkleinert die unschärfere.
+///
+/// Fotos ohne erzeugte Vorschau werden übersprungen statt erzwungen
+/// dekodiert — dieselbe Linie wie bei der Perceptual-Hash-Duplikatsuche.
+#[tauri::command]
+pub fn score_photo_sharpness(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+) -> Result<Vec<SharpnessResultDto>, String> {
+    let ids = parse_photo_ids(photo_ids)?;
+
+    let mut scored: Vec<(
+        apx_core::PhotoId,
+        String,
+        apx_stacking::sharpness::SharpnessScore,
+    )> = Vec::new();
+    for id in ids {
+        let Ok(photo) = state.catalog.get_photo(id) else {
+            continue;
+        };
+        let Ok(Some(preview)) = state
+            .catalog
+            .get_preview(id, apx_catalog::PreviewLevel::Standard)
+        else {
+            continue;
+        };
+        let Ok(img) = image::open(&preview.path) else {
+            continue;
+        };
+        let rgba = img.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        let Ok(score) = apx_stacking::sharpness::score_rgba8(rgba.as_raw(), width, height) else {
+            continue;
+        };
+        scored.push((id, photo.filename, score));
+    }
+
+    let scores: Vec<apx_stacking::sharpness::SharpnessScore> =
+        scored.iter().map(|(_, _, score)| *score).collect();
+    let order = apx_stacking::sharpness::rank_best_first(&scores);
+    let best = order
+        .first()
+        .map(|&index| scores[index].score)
+        .unwrap_or(0.0);
+
+    Ok(order
+        .into_iter()
+        .enumerate()
+        .map(|(rank, index)| {
+            let (id, filename, score) = &scored[index];
+            SharpnessResultDto {
+                photo_id: id.to_string(),
+                filename: filename.clone(),
+                score: score.score,
+                mean: score.mean,
+                relative: if best > 0.0 { score.score / best } else { 0.0 },
+                rank: rank + 1,
+            }
+        })
+        .collect())
+}

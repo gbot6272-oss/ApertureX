@@ -1749,6 +1749,13 @@ interface LibraryBacklogSlice {
   moveCollectionToFolder: (collectionId: string, folderId: string | null) => Promise<void>;
 
   stacks: StackDto[];
+  /** Aufgeklappte Stapel im Raster (Phase 33 F10). Bewusst nur im
+   * Speicher und nicht im Katalog: ob ein Stapel gerade offen ist, ist
+   * eine Frage der Sitzung, kein Eigenschaft des Stapels — beim
+   * nächsten Öffnen will man wieder den aufgeräumten Zustand. */
+  expandedStackIds: string[];
+  toggleStackExpanded: (stackId: string) => void;
+  setAllStacksExpanded: (expanded: boolean) => void;
   refreshStacks: () => Promise<void>;
   createStackFromSelection: (name?: string) => Promise<void>;
   deleteStack: (stackId: string) => Promise<void>;
@@ -6752,6 +6759,21 @@ export const useAppStore = create<AppStore>()(
 
     collectionFolders: [],
     stacks: [],
+    expandedStackIds: [],
+
+    toggleStackExpanded: (stackId) => {
+      set((state) => {
+        state.expandedStackIds = state.expandedStackIds.includes(stackId)
+          ? state.expandedStackIds.filter((id) => id !== stackId)
+          : [...state.expandedStackIds, stackId];
+      });
+    },
+
+    setAllStacksExpanded: (expanded) => {
+      set((state) => {
+        state.expandedStackIds = expanded ? state.stacks.map((stack) => stack.id) : [];
+      });
+    },
     virtualCopiesByPhotoId: {},
     colorLabelDefinitions: [],
     perceptualDuplicateGroups: [],

@@ -62,7 +62,7 @@ export const de = {
   "header.folderSync": "Ordner abgleichen…",
   "header.sharpness": "Schärfe bewerten…",
   "header.metadataPresets": "Metadaten-Vorgaben…",
-  "header.watermarkTemplates": "Wasserzeichen-Vorlagen…",
+  "header.watermarkTemplates": "Wasserzeichen…",
   "header.similarPhotos": "Ähnliche Fotos finden…",
   "commands.trashSelection": "Auswahl wegwerfen",
   "header.settings": "Einstellungen…",

@@ -552,3 +552,18 @@ Serien-Erkennung als Reihenaufnahme (in den EXIF-Daten sind sie nicht zu
 unterscheiden). Die Größenschätzung im Export ist eine Schätzung mit
 ausgewiesener Spanne, exakt nur für unkomprimiertes TIFF. Der Rahmen
 vergrößert die Bildfläche nicht, sondern wird hineingezeichnet.
+
+## Phase 33 — Zehn Lücken geschlossen
+
+| Funktion | Was sie kann | Wo |
+| --- | --- | --- |
+| Papierkorb | Fotos wegwerfen und zurückholen, gruppiert nach Grund; endgültiges Löschen wahlweise mit Datei | `Entf`, Menü „Papierkorb…" |
+| Ordner abgleichen | Neue, geänderte, verschwundene und zurückgekehrte Dateien melden und einarbeiten | Menü „Ordner abgleichen…" |
+| Schärfe bewerten | Aufnahmen einer Serie nach Schärfe sortieren, die schärfste behalten | Menü „Schärfe bewerten…", Knopf in der Serien-Erkennung |
+| Metadaten-Vorgaben | IPTC-Sätze speichern und anwenden, mit Platzhaltern wie `{year}` | Menü „Metadaten-Vorgaben…" |
+| Wasserzeichen-Vorlagen | Größe und Rand in Prozent, Kachelung mit Drehung, Live-Vorschau | Menü „Wasserzeichen-Vorlagen…", Auswahl im Export |
+| RGB-Parade | Kanäle nebeneinander, Schwarz-/Weißpunkt je Kanal, benannter Farbstich | Entwickeln → Analyse → „Parade" |
+| Erweiterte Katalogfilter | Objektiv, ISO-Bereich, Zeitraum, Seitenverhältnis, Medienart | Filterleiste → „Mehr" |
+| Manuelle Reihenfolge | Fotos einer Sammlung per Ziehen umordnen | Sortierung „Manuell (Sammlung)" |
+| Ähnliche Fotos | Treffer zu einem Referenzfoto, Regler zwischen Motiv und Farbe | Menü „Ähnliche Fotos finden…" |
+| Stapel im Raster | Stapel als eine Kachel mit Zähler, einzeln oder gesammelt aufklappbar | Abzeichen auf der Kachel, Schalter in der Filterleiste |

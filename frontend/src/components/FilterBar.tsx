@@ -1,7 +1,11 @@
-import { SlidersHorizontal } from "lucide-react";
+import { Layers, SlidersHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { SORT_FIELDS, sortFieldLabel } from "../lib/sortPhotos";
+import { useShallow } from "zustand/react/shallow";
+
+import { stacksInView } from "../lib/stackGrouping";
+import { selectActivePhotos } from "../store";
 import type { AspectFilter } from "../lib/tauri";
 import { useAppStore } from "../store";
 import { COLOR_LABELS, COLOR_SWATCH } from "./RatingFlagColor";
@@ -42,6 +46,20 @@ export function FilterBar() {
   // neuen Filter gesetzt, klappt der Bereich von selbst auf — sonst wäre
   // ein aktiver Filter unsichtbar, und das ist die schlimmste Sorte
   // Filter.
+  // Stapel im Raster (Phase 33 F10): ein Sammel-Schalter, weil ein
+  // Stapel-Abzeichen je Kachel zwar zum gezielten Aufklappen taugt, aber
+  // nicht zum „zeig mir mal alles".
+  const stacks = useAppStore((s) => s.stacks);
+  // `selectActivePhotos` sortiert und liefert damit bei jedem Aufruf
+  // ein neues Array — ohne `useShallow` hielte Zustand das für eine
+  // Änderung und liefe in eine Endlosschleife (genau das hat hier beim
+  // ersten Versuch die ganze Oberfläche lahmgelegt).
+  const activePhotos = useAppStore(useShallow(selectActivePhotos));
+  const expandedStackIds = useAppStore((s) => s.expandedStackIds);
+  const setAllStacksExpanded = useAppStore((s) => s.setAllStacksExpanded);
+  const stackIdsInView = stacksInView(activePhotos, stacks);
+  const allExpanded = stackIdsInView.length > 0 && stackIdsInView.every((id) => expandedStackIds.includes(id));
+
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const advancedActive =
     libraryFilter.lens !== undefined ||
@@ -167,6 +185,23 @@ export function FilterBar() {
         aria-label="Nach Kameramodell filtern"
         className="w-40 rounded border border-border bg-bg-panel px-2 py-1 text-xs"
       />
+
+      {stackIdsInView.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setAllStacksExpanded(!allExpanded)}
+          aria-pressed={allExpanded}
+          data-testid="toggle-all-stacks"
+          className={`flex items-center gap-1 rounded border px-2 py-1 text-xs ${
+            allExpanded ? "border-accent text-accent" : "border-border text-text-secondary hover:border-accent"
+          }`}
+        >
+          <Layers aria-hidden="true" className="size-3.5" />
+          {allExpanded
+            ? `${stackIdsInView.length} Stapel einklappen`
+            : `${stackIdsInView.length} Stapel aufklappen`}
+        </button>
+      )}
 
       <button
         type="button"

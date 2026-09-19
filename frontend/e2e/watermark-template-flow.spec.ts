@@ -34,7 +34,7 @@ test.describe("Wasserzeichen-Vorlagen (Phase 33 F5)", () => {
 
   test("zeigt eine Vorschau und schaltet beim Kacheln auf andere Regler um", async ({ page }) => {
     await openOverflowMenu(page);
-    await page.getByRole("menuitem", { name: "Wasserzeichen-Vorlagen…" }).click();
+    await page.getByRole("menuitem", { name: "Wasserzeichen…" }).click();
 
     await expect(page.getByTestId("watermark-preview")).toBeVisible();
     // Ohne Kachelung: Position und Rand.
@@ -50,7 +50,7 @@ test.describe("Wasserzeichen-Vorlagen (Phase 33 F5)", () => {
 
   test("eine gespeicherte Vorlage steht im Export-Dialog zur Wahl", async ({ page }) => {
     await openOverflowMenu(page);
-    await page.getByRole("menuitem", { name: "Wasserzeichen-Vorlagen…" }).click();
+    await page.getByRole("menuitem", { name: "Wasserzeichen…" }).click();
 
     await page.getByLabel("Wasserzeichen-Text").fill("© Anna Beispiel");
     await page.getByLabel("Name der Wasserzeichen-Vorlage").fill("Andruck");
@@ -67,7 +67,7 @@ test.describe("Wasserzeichen-Vorlagen (Phase 33 F5)", () => {
 
   test("eine gewählte Vorlage sagt, dass die Regler darunter ohne Wirkung sind", async ({ page }) => {
     await openOverflowMenu(page);
-    await page.getByRole("menuitem", { name: "Wasserzeichen-Vorlagen…" }).click();
+    await page.getByRole("menuitem", { name: "Wasserzeichen…" }).click();
     await page.getByLabel("Name der Wasserzeichen-Vorlage").fill("Andruck");
     await page.getByRole("button", { name: "Wasserzeichen-Vorlage speichern" }).click();
     await page.getByRole("button", { name: "Schließen" }).click();

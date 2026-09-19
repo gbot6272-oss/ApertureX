@@ -51,6 +51,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // Schärfe-Bewertung (Phase 33 F3): Rohwert je Foto-ID, aus dem der
     // Mock Rangfolge und Relativwert ableitet.
     sharpnessScores: {} as Record<string, number>,
+    stacks: [] as { id: string; name: string | null; cover_photo_id: string | null; photo_ids: string[] }[],
     // Ähnliche Fotos (Phase 33 F9): je Foto die beiden Rohähnlichkeiten,
     // aus denen der Mock nach derselben Formel wie Rust mischt.
     similarityScores: {} as Record<string, { structure: number; color: number }>,
@@ -352,7 +353,12 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     cover_photo_id: string | null;
     photo_ids: string[];
   }
-  const stacks: MockStack[] = [];
+  // Stapel im Raster (Phase 33 F10): vorbelegbar über die Fixtures,
+  // damit ein Test das Raster mit Stapeln sehen kann, ohne sie erst
+  // durch die Oberfläche anlegen zu müssen.
+  const stacks: MockStack[] = ((w.__mockFixtures as { stacks?: MockStack[] }).stacks ?? []).map(
+    (stack) => ({ ...stack }),
+  );
   let nextStackId = 1;
 
   const virtualCopiesBySource: Record<string, string[]> = {};

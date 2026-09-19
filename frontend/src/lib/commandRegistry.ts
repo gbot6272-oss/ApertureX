@@ -73,6 +73,7 @@ export function useCommandRegistry(): CommandEntry[] {
   const openCompareView = useAppStore((s) => s.openCompareView);
   const openVersionsCompareView = useAppStore((s) => s.openVersionsCompareView);
   const openSecondaryDisplay = useAppStore((s) => s.openSecondaryDisplay);
+  const trashSelectedPhotos = useAppStore((s) => s.trashSelectedPhotos);
   const aiSettings = useAppStore((s) => s.aiSettings);
   // Ansichtsmodi (Phase 26, siehe `DECISIONS.md` ADR-0056) — bewusst
   // auch hier eingetragen und nicht nur als Tastenkuerzel: genau das
@@ -185,6 +186,14 @@ export function useCommandRegistry(): CommandEntry[] {
       { id: "fn:gear-stats", label: t("header.gearStats"), category: "analysis", run: () => requestCommand("gear-stats") },
       { id: "fn:series", label: t("header.series"), category: "analysis", run: () => requestCommand("series") },
       { id: "fn:catalog", label: t("header.catalog"), category: "analysis", run: () => requestCommand("catalog") },
+      { id: "fn:trash", label: t("header.trash"), category: "advanced", run: () => requestCommand("trash") },
+      {
+        id: "fn:trash-selection",
+        label: t("commands.trashSelection"),
+        category: "advanced",
+        disabled: exportPhotoIds.length === 0,
+        run: () => void trashSelectedPhotos("manual"),
+      },
 
       // System — nicht im Overflow-Menü (eigenes Icon/Tastenkürzel), aber
       // weiterhin über die Befehlspalette auffindbar.

@@ -58,6 +58,8 @@ export const de = {
   "header.gearStats": "Ausrüstung & Belichtung…",
   "header.series": "Serien erkennen…",
   "header.catalog": "Katalog…",
+  "header.trash": "Papierkorb…",
+  "commands.trashSelection": "Auswahl wegwerfen",
   "header.settings": "Einstellungen…",
   "header.settingsTitle": "Theme, Sprache, UI-Skalierung, Barrierefreiheit (Phase 10)",
   "header.paletteHint": "Strg/Cmd+K — Befehlspalette",

@@ -19,7 +19,7 @@ fn top_value_counts(conn: &Connection, column: &str) -> Result<Vec<(String, u64)
     // nicht möglich (SQLite bindet nur Werte, keine Bezeichner).
     let sql = format!(
         "SELECT {column}, COUNT(*) as cnt FROM photos \
-         WHERE {column} IS NOT NULL AND source_photo_id IS NULL \
+         WHERE {column} IS NOT NULL AND source_photo_id IS NULL AND deleted_at IS NULL \
          GROUP BY {column} ORDER BY cnt DESC, {column} ASC LIMIT {TOP_N}"
     );
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
@@ -37,7 +37,7 @@ fn top_value_counts(conn: &Connection, column: &str) -> Result<Vec<(String, u64)
 fn rating_distribution(conn: &Connection) -> Result<Vec<(u8, u64)>> {
     let mut stmt = conn
         .prepare(
-            "SELECT rating, COUNT(*) FROM photos WHERE source_photo_id IS NULL \
+            "SELECT rating, COUNT(*) FROM photos WHERE source_photo_id IS NULL AND deleted_at IS NULL \
              GROUP BY rating ORDER BY rating ASC",
         )
         .map_err(map_sqlite_err)?;
@@ -59,7 +59,7 @@ fn rating_distribution(conn: &Connection) -> Result<Vec<(u8, u64)>> {
 pub(crate) fn compute(conn: &Connection) -> Result<CatalogStatistics> {
     let (total_photos, total_file_size): (i64, i64) = conn
         .query_row(
-            "SELECT COUNT(*), COALESCE(SUM(file_size), 0) FROM photos WHERE source_photo_id IS NULL",
+            "SELECT COUNT(*), COALESCE(SUM(file_size), 0) FROM photos WHERE source_photo_id IS NULL AND deleted_at IS NULL",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -68,7 +68,7 @@ pub(crate) fn compute(conn: &Connection) -> Result<CatalogStatistics> {
     let (earliest, latest): (Option<i64>, Option<i64>) = conn
         .query_row(
             "SELECT MIN(captured_at), MAX(captured_at) FROM photos \
-             WHERE source_photo_id IS NULL AND captured_at IS NOT NULL",
+             WHERE source_photo_id IS NULL AND deleted_at IS NULL AND captured_at IS NOT NULL",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -217,7 +217,7 @@ fn all_value_counts(conn: &Connection, column: &str) -> Result<Vec<(String, u64)
     // Nutzereingabe.
     let sql = format!(
         "SELECT {column}, COUNT(*) as cnt FROM photos \
-         WHERE {column} IS NOT NULL AND source_photo_id IS NULL \
+         WHERE {column} IS NOT NULL AND source_photo_id IS NULL AND deleted_at IS NULL \
          GROUP BY {column} ORDER BY cnt DESC, {column} ASC"
     );
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
@@ -236,7 +236,7 @@ pub(crate) fn compute_gear(conn: &Connection) -> Result<GearStatistics> {
     let mut stmt = conn
         .prepare(
             "SELECT focal_length, aperture, iso, shutter FROM photos \
-             WHERE source_photo_id IS NULL",
+             WHERE source_photo_id IS NULL AND deleted_at IS NULL",
         )
         .map_err(map_sqlite_err)?;
     let rows = stmt

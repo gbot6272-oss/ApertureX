@@ -42,6 +42,7 @@ export const KEYBINDING_ACTIONS: KeyBindingAction[] = [
   { id: "fullscreen", label: "Vollbild umschalten", defaultKey: "f" },
   { id: "flag-pick", label: "Als Favorit markieren", defaultKey: "p" },
   { id: "flag-reject", label: "Ablehnen markieren", defaultKey: "x" },
+  { id: "trash-selection", label: "Auswahl in den Papierkorb werfen", defaultKey: "delete" },
   { id: "zoom-fit", label: "Zoom einpassen (im Viewer)", defaultKey: "0" },
   { id: "zoom-100", label: "Zoom 100 % (im Viewer)", defaultKey: "1" },
   // Phase 26 (siehe `DECISIONS.md` ADR-0056). Lightroom belegt diese

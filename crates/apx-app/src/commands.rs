@@ -10397,3 +10397,140 @@ pub fn compute_reference_tone_stats(
 
     Ok(ToneStatsDto { deciles })
 }
+
+// ---- Papierkorb (Phase 33 F1) ----------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TrashEntryDto {
+    pub photo: PhotoDto,
+    /// RFC-3339, wie überall an der IPC-Grenze.
+    pub deleted_at: String,
+    /// `"manual"`, `"duplicate"`, `"blurry"` oder `"missing"` — die
+    /// Oberfläche beschriftet den Schlüssel.
+    pub reason: String,
+}
+
+fn parse_trash_reason(value: &str) -> apx_catalog::TrashReason {
+    apx_catalog::TrashReason::from_str_lossy(value)
+}
+
+/// Wirft Fotos in den Papierkorb.
+///
+/// Die Dateien auf der Platte bleiben liegen — das ist der ganze Punkt
+/// eines Papierkorbs im Katalog: rückgängig zu machen, ohne dass dafür
+/// etwas aus dem Dateisystem zurückgeholt werden müsste.
+#[tauri::command]
+pub fn trash_photos(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    reason: String,
+) -> Result<u64, String> {
+    let ids = photo_ids
+        .into_iter()
+        .map(parse_photo_id)
+        .collect::<Result<Vec<_>, _>>()?;
+    state
+        .catalog
+        .trash_photos(
+            &ids,
+            parse_trash_reason(&reason),
+            time::OffsetDateTime::now_utc(),
+        )
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn restore_photos(state: State<'_, AppState>, photo_ids: Vec<String>) -> Result<u64, String> {
+    let ids = photo_ids
+        .into_iter()
+        .map(parse_photo_id)
+        .collect::<Result<Vec<_>, _>>()?;
+    state
+        .catalog
+        .restore_photos(&ids)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn list_trash(state: State<'_, AppState>) -> Result<Vec<TrashEntryDto>, String> {
+    let entries = state.catalog.list_trash().map_err(|err| err.to_string())?;
+    Ok(entries
+        .into_iter()
+        .map(|entry| TrashEntryDto {
+            deleted_at: entry
+                .deleted_at
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_default(),
+            reason: entry.reason.as_str().to_string(),
+            photo: PhotoDto::from(entry.photo),
+        })
+        .collect())
+}
+
+/// Leert den Papierkorb — entweder komplett (`photo_ids` leer) oder
+/// gezielt.
+///
+/// `delete_files` entscheidet, ob die Dateien selbst mitgehen. Schlägt
+/// das Löschen einer Datei fehl (Rechte, Laufwerk weg), wird der
+/// Katalogeintrag trotzdem entfernt und der Pfad in
+/// `failed_files` zurückgemeldet, statt den ganzen Vorgang abzubrechen:
+/// ein halb geleerter Papierkorb, bei dem niemand weiß, was noch drin
+/// ist, wäre das schlechtere Ergebnis. Virtuelle Kopien zählen nie mit —
+/// sie haben keine eigene Datei, nur einen Bearbeitungsstand.
+#[tauri::command]
+pub fn empty_trash(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    delete_files: bool,
+) -> Result<EmptyTrashResultDto, String> {
+    let ids: Vec<apx_core::PhotoId> = if photo_ids.is_empty() {
+        state
+            .catalog
+            .list_trash()
+            .map_err(|err| err.to_string())?
+            .into_iter()
+            .map(|entry| entry.photo.id)
+            .collect()
+    } else {
+        photo_ids
+            .into_iter()
+            .map(parse_photo_id)
+            .collect::<Result<Vec<_>, _>>()?
+    };
+
+    let mut failed_files = Vec::new();
+    if delete_files {
+        for id in &ids {
+            let Ok(photo) = state.catalog.get_photo(*id) else {
+                continue;
+            };
+            if photo.source_photo_id.is_some() {
+                continue;
+            }
+            let Ok(folder) = state.catalog.get_folder(photo.folder_id) else {
+                continue;
+            };
+            let path = folder.path.join(&photo.filename);
+            if path.exists() {
+                if let Err(err) = std::fs::remove_file(&path) {
+                    failed_files.push(format!("{}: {err}", path.display()));
+                }
+            }
+        }
+    }
+
+    let purged = state
+        .catalog
+        .purge_photos(&ids)
+        .map_err(|err| err.to_string())?;
+    Ok(EmptyTrashResultDto {
+        purged,
+        failed_files,
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EmptyTrashResultDto {
+    pub purged: u64,
+    pub failed_files: Vec<String>,
+}

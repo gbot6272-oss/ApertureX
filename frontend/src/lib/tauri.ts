@@ -2421,3 +2421,40 @@ export interface ToneStatsDto {
 export function computeReferenceToneStats(photoId: string): Promise<ToneStatsDto> {
   return invoke<ToneStatsDto>("compute_reference_tone_stats", { photoId });
 }
+
+// ---- Papierkorb (Phase 33 F1) ----------------------------------------------
+
+/** Warum ein Foto im Papierkorb liegt. Schlüssel statt Text, damit die
+ * Beschriftung im Frontend bleibt — siehe `migrations/0014_trash.sql`. */
+export type TrashReason = "manual" | "duplicate" | "blurry" | "missing";
+
+export interface TrashEntryDto {
+  photo: PhotoDto;
+  /** RFC-3339. */
+  deleted_at: string;
+  reason: TrashReason;
+}
+
+export interface EmptyTrashResultDto {
+  purged: number;
+  /** Dateien, die nicht gelöscht werden konnten (Rechte, Laufwerk weg) —
+   * der Katalogeintrag ist trotzdem weg. */
+  failed_files: string[];
+}
+
+export function trashPhotos(photoIds: string[], reason: TrashReason): Promise<number> {
+  return invoke<number>("trash_photos", { photoIds, reason });
+}
+
+export function restorePhotos(photoIds: string[]): Promise<number> {
+  return invoke<number>("restore_photos", { photoIds });
+}
+
+export function listTrash(): Promise<TrashEntryDto[]> {
+  return invoke<TrashEntryDto[]>("list_trash");
+}
+
+/** Leert den Papierkorb. Leeres `photoIds` = alles. */
+export function emptyTrash(photoIds: string[], deleteFiles: boolean): Promise<EmptyTrashResultDto> {
+  return invoke<EmptyTrashResultDto>("empty_trash", { photoIds, deleteFiles });
+}

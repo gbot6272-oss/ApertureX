@@ -20,6 +20,15 @@ pub(crate) const SELECT_COLUMNS: &str =
      photos.custom_metadata_json, photos.media_kind, photos.duration_ms, photos.video_codec, \
      photos.has_audio, photos.frame_rate";
 
+/// Filter, der Fotos im Papierkorb ausblendet (Phase 33 F1, siehe
+/// `migrations/0014_trash.sql`). Genau eine Konstante, damit die
+/// Bedingung nicht in einem Dutzend Abfragen einzeln danebengehen kann.
+///
+/// [`get`] führt sie bewusst NICHT mit: die Papierkorb-Ansicht muss
+/// weggeworfene Fotos noch laden können, um sie anzuzeigen und
+/// wiederherzustellen. Alles, was den Katalog *auflistet*, führt sie mit.
+pub(crate) const NOT_TRASHED: &str = "photos.deleted_at IS NULL";
+
 #[allow(clippy::type_complexity)]
 pub(crate) struct PhotoRow {
     id: String,
@@ -195,7 +204,7 @@ pub(crate) fn find_by_folder_and_filename(
 ) -> Result<Option<Photo>> {
     let sql = format!(
         "SELECT {SELECT_COLUMNS} FROM photos \
-         WHERE folder_id = ?1 AND filename = ?2 AND source_photo_id IS NULL"
+         WHERE folder_id = ?1 AND filename = ?2 AND source_photo_id IS NULL AND {NOT_TRASHED}"
     );
     let raw: Option<PhotoRow> = conn
         .query_row(&sql, params![folder_id.to_string(), filename], row_to_raw)
@@ -216,7 +225,7 @@ pub(crate) fn get(conn: &Connection, id: PhotoId) -> Result<Photo> {
 }
 
 pub(crate) fn list_by_folder(conn: &Connection, folder_id: FolderId) -> Result<Vec<Photo>> {
-    let sql = format!("SELECT {SELECT_COLUMNS} FROM photos WHERE folder_id = ?1 ORDER BY filename");
+    let sql = format!("SELECT {SELECT_COLUMNS} FROM photos WHERE folder_id = ?1 AND {NOT_TRASHED} ORDER BY filename");
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
     let rows = stmt
         .query_map(params![folder_id.to_string()], row_to_raw)
@@ -231,7 +240,7 @@ pub(crate) fn list_by_folder(conn: &Connection, folder_id: FolderId) -> Result<V
 pub(crate) fn count_by_folder(conn: &Connection, folder_id: FolderId) -> Result<u64> {
     let count: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM photos WHERE folder_id = ?1",
+            "SELECT COUNT(*) FROM photos WHERE folder_id = ?1 AND deleted_at IS NULL",
             params![folder_id.to_string()],
             |row| row.get(0),
         )
@@ -248,7 +257,7 @@ pub(crate) fn list_duplicate_groups(conn: &Connection) -> Result<Vec<Vec<Photo>>
     let mut stmt = conn
         .prepare(
             "SELECT content_hash FROM photos \
-             WHERE content_hash IS NOT NULL \
+             WHERE content_hash IS NOT NULL AND deleted_at IS NULL \
              GROUP BY content_hash HAVING COUNT(*) > 1",
         )
         .map_err(map_sqlite_err)?;
@@ -260,7 +269,7 @@ pub(crate) fn list_duplicate_groups(conn: &Connection) -> Result<Vec<Vec<Photo>>
     drop(stmt);
 
     let sql =
-        format!("SELECT {SELECT_COLUMNS} FROM photos WHERE content_hash = ?1 ORDER BY filename");
+        format!("SELECT {SELECT_COLUMNS} FROM photos WHERE content_hash = ?1 AND {NOT_TRASHED} ORDER BY filename");
     let mut groups = Vec::with_capacity(hashes.len());
     for hash in hashes {
         let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
@@ -286,7 +295,7 @@ pub(crate) fn list_duplicate_groups(conn: &Connection) -> Result<Vec<Vec<Photo>>
 /// „keine feste Anspruchshaltung auf Eindeutigkeit"-Kompromiss wie dort.
 pub(crate) fn find_by_content_hash(conn: &Connection, hash: &str) -> Result<Option<Photo>> {
     let sql = format!(
-        "SELECT {SELECT_COLUMNS} FROM photos WHERE content_hash = ?1 ORDER BY filename LIMIT 1"
+        "SELECT {SELECT_COLUMNS} FROM photos WHERE content_hash = ?1 AND {NOT_TRASHED} ORDER BY filename LIMIT 1"
     );
     conn.query_row(&sql, params![hash], row_to_raw)
         .optional()
@@ -303,7 +312,7 @@ pub(crate) fn find_by_content_hash(conn: &Connection, hash: &str) -> Result<Opti
 pub(crate) fn list_geotagged(conn: &Connection) -> Result<Vec<Photo>> {
     let sql = format!(
         "SELECT {SELECT_COLUMNS} FROM photos \
-         WHERE gps_lat IS NOT NULL AND gps_lon IS NOT NULL \
+         WHERE gps_lat IS NOT NULL AND gps_lon IS NOT NULL AND {NOT_TRASHED} \
          ORDER BY captured_at IS NULL, captured_at"
     );
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
@@ -404,7 +413,7 @@ pub(crate) fn create_virtual_copy(
 /// Alle virtuellen Kopien eines Quellfotos, nach Anlagezeit sortiert.
 pub(crate) fn list_virtual_copies(conn: &Connection, source_id: PhotoId) -> Result<Vec<Photo>> {
     let sql = format!(
-        "SELECT {SELECT_COLUMNS} FROM photos WHERE source_photo_id = ?1 ORDER BY imported_at"
+        "SELECT {SELECT_COLUMNS} FROM photos WHERE source_photo_id = ?1 AND {NOT_TRASHED} ORDER BY imported_at"
     );
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
     let rows = stmt

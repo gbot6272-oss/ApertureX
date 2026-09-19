@@ -55,6 +55,8 @@ export const en: Record<keyof typeof de, string> = {
   "header.gearStats": "Gear & exposure…",
   "header.series": "Detect series…",
   "header.catalog": "Catalog…",
+  "header.trash": "Trash…",
+  "commands.trashSelection": "Move selection to trash",
   "header.settings": "Settings…",
   "header.settingsTitle": "Theme, language, UI scaling, accessibility (Phase 10)",
   "header.paletteHint": "Ctrl/Cmd+K — Command palette",

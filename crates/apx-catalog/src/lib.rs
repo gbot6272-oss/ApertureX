@@ -46,7 +46,7 @@ pub use models::{
     FaceRect, FilterCondition, FilterCriteria, FilterField, FilterNode, FilterOperator, Folder,
     GearStatistics, HistoryPosition, Keyword, NewPhoto, Person, Photo, PhotoNote, Preset,
     PresetFolder, PresetVersion, Preview, PreviewLevel, Snapshot, Stack, TagRule, Template,
-    SAME_PERSON_EMBEDDING_THRESHOLD,
+    TrashEntry, TrashReason, SAME_PERSON_EMBEDDING_THRESHOLD,
 };
 pub use repository::batch::BatchAction;
 pub use repository::share::ShareDiff;
@@ -336,6 +336,46 @@ impl Catalog {
     pub fn set_photo_filename(&self, id: PhotoId, filename: &str) -> Result<()> {
         let conn = self.lock()?;
         repository::photos::set_filename(&conn, id, filename)
+    }
+
+    // ---- Papierkorb (Phase 33 F1) ----------------------------------------
+
+    /// Wirft Fotos in den Papierkorb. Sie bleiben im Katalog stehen, samt
+    /// allem, was an ihnen hängt, tauchen aber in keiner Liste mehr auf.
+    pub fn trash_photos(
+        &self,
+        ids: &[PhotoId],
+        reason: TrashReason,
+        now: OffsetDateTime,
+    ) -> Result<u64> {
+        let conn = self.lock()?;
+        repository::trash::trash_photos(&conn, ids, reason, now)
+    }
+
+    /// Holt Fotos aus dem Papierkorb zurück.
+    pub fn restore_photos(&self, ids: &[PhotoId]) -> Result<u64> {
+        let conn = self.lock()?;
+        repository::trash::restore_photos(&conn, ids)
+    }
+
+    /// Alles im Papierkorb, zuletzt Weggeworfenes zuerst.
+    pub fn list_trash(&self) -> Result<Vec<TrashEntry>> {
+        let conn = self.lock()?;
+        repository::trash::list_trash(&conn)
+    }
+
+    /// Löscht Papierkorb-Einträge endgültig aus dem Katalog (die Dateien
+    /// auf der Platte bleiben unangetastet — darüber entscheidet der
+    /// Aufrufer).
+    pub fn purge_photos(&self, ids: &[PhotoId]) -> Result<u64> {
+        let conn = self.lock()?;
+        repository::trash::purge_photos(&conn, ids)
+    }
+
+    /// IDs aller Papierkorb-Einträge, die vor `cutoff` weggeworfen wurden.
+    pub fn trashed_ids_older_than(&self, cutoff: OffsetDateTime) -> Result<Vec<PhotoId>> {
+        let conn = self.lock()?;
+        repository::trash::ids_older_than(&conn, cutoff)
     }
 
     pub fn set_photo_rating(&self, id: PhotoId, rating: u8) -> Result<()> {

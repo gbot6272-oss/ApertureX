@@ -473,6 +473,25 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     return allPhotos().find((p) => p.id === photoId);
   }
 
+  /** Papierkorb (Phase 33 F1). Der Mock bildet nach, was Rust tut: das
+   * Foto verschwindet aus `photosByFolder` (dort liest das Raster) und
+   * liegt stattdessen hier, mit Grund und Zeitpunkt. Wiederherstellen
+   * schiebt es in seinen Ursprungsordner zurück — deshalb merkt sich
+   * der Eintrag die Ordner-ID, die Rust aus der Zeile selbst liest. */
+  const trashed: { photo: MockPhoto; folderId: string; deleted_at: string; reason: string }[] = [];
+
+  function trashPhoto(photoId: string, reason: string): boolean {
+    const fixtures = w.__mockFixtures as { photosByFolder: Record<string, MockPhoto[]> };
+    for (const folderId of Object.keys(fixtures.photosByFolder)) {
+      const photo = fixtures.photosByFolder[folderId].find((p) => p.id === photoId);
+      if (!photo) continue;
+      fixtures.photosByFolder[folderId] = fixtures.photosByFolder[folderId].filter((p) => p.id !== photoId);
+      trashed.unshift({ photo, folderId, deleted_at: new Date().toISOString(), reason });
+      return true;
+    }
+    return false;
+  }
+
   /** Mock-Gegenstück zu `apx-app::commands::import_stack_result_photo`
    * (Phase 9 Schritt 8) — legt ein synthetisches Ergebnisfoto im selben
    * Ordner wie das erste Quellfoto an und verknüpft es per Stapel mit
@@ -1945,6 +1964,44 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           renamed.push(clonePhoto(photo));
         }
         return renamed;
+      }
+
+      // ---- Papierkorb (Phase 33 F1) -----------------------------------
+      case "trash_photos": {
+        const ids = args.photoIds as string[];
+        const reason = (args.reason as string) ?? "manual";
+        return ids.filter((id) => trashPhoto(id, reason)).length;
+      }
+      case "restore_photos": {
+        const ids = args.photoIds as string[];
+        const fixtures = w.__mockFixtures as { photosByFolder: Record<string, MockPhoto[]> };
+        let restored = 0;
+        for (const id of ids) {
+          const index = trashed.findIndex((entry) => entry.photo.id === id);
+          if (index < 0) continue;
+          const [entry] = trashed.splice(index, 1);
+          fixtures.photosByFolder[entry.folderId] = [...(fixtures.photosByFolder[entry.folderId] ?? []), entry.photo];
+          restored += 1;
+        }
+        return restored;
+      }
+      case "list_trash":
+        return trashed.map((entry) => ({
+          photo: clonePhoto(entry.photo),
+          deleted_at: entry.deleted_at,
+          reason: entry.reason,
+        }));
+      case "empty_trash": {
+        const ids = args.photoIds as string[];
+        const targets = ids.length > 0 ? ids : trashed.map((entry) => entry.photo.id);
+        let purged = 0;
+        for (const id of targets) {
+          const index = trashed.findIndex((entry) => entry.photo.id === id);
+          if (index < 0) continue;
+          trashed.splice(index, 1);
+          purged += 1;
+        }
+        return { purged, failed_files: [] };
       }
 
       // ---- Vorlagen (Phase 8 Schritt 8) -------------------------------

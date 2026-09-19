@@ -102,6 +102,8 @@ import type {
   TagRuleDto,
   SubtitleSegmentDto,
   TemplateDto,
+  TrashEntryDto,
+  TrashReason,
   TemplateKind,
   TimelineItemInput,
   VideoTimelineOptions,
@@ -955,6 +957,25 @@ interface LibrarySlice {
   /** Legt aus einer erkannten Serie einen Stapel an (Phase 9 Schritt 1) —
    * derselbe Stapel-Mechanismus, kein zweiter Gruppierungsbegriff. */
   stackDetectedSeries: (photoIds: string[]) => Promise<void>;
+
+  /** Papierkorb (Phase 33 F1). Weggeworfene Fotos bleiben im Katalog
+   * stehen — hier liegt nur die geladene Liste; entschieden wird in
+   * Rust (`repository::trash`). */
+  trashEntries: TrashEntryDto[];
+  trashLoading: boolean;
+  /** Auswahl *innerhalb* des Papierkorbs — bewusst getrennt von
+   * `multiSelectedIds`: dort liegen Fotos, die es im Katalog noch gibt,
+   * und beide Listen gleichzeitig zu bedienen würde beim
+   * Wiederherstellen sonst unweigerlich durcheinandergehen. */
+  trashSelectedIds: string[];
+  trashError: string | null;
+  refreshTrash: () => Promise<void>;
+  toggleTrashSelection: (photoId: string) => void;
+  setTrashSelection: (photoIds: string[]) => void;
+  /** Wirft die aktuelle Auswahl (oder das gewählte Foto) weg. */
+  trashSelectedPhotos: (reason?: TrashReason) => Promise<void>;
+  restoreFromTrash: (photoIds: string[]) => Promise<void>;
+  emptyTrash: (photoIds: string[], deleteFiles: boolean) => Promise<void>;
 
   photoNotes: PhotoNoteDto[];
   photoNotesLoading: boolean;
@@ -3987,6 +4008,106 @@ export const useAppStore = create<AppStore>()(
         // Auswahl daneben eine ganz andere ist.
         if (photoIds.length > 0) state.selectedPhotoId = photoIds[0]!;
       });
+    },
+
+    trashEntries: [],
+    trashLoading: false,
+    trashSelectedIds: [],
+    trashError: null,
+
+    refreshTrash: async () => {
+      set((state) => {
+        state.trashLoading = true;
+      });
+      try {
+        const entries = await api.listTrash();
+        set((state) => {
+          state.trashEntries = entries;
+          state.trashLoading = false;
+          // IDs, die nicht mehr im Papierkorb liegen, fliegen aus der
+          // Auswahl — sonst zeigte ein zweiter Klick auf
+          // „Wiederherstellen" auf Fotos, die schon zurück sind.
+          const known = new Set(entries.map((entry) => entry.photo.id));
+          state.trashSelectedIds = state.trashSelectedIds.filter((id) => known.has(id));
+        });
+      } catch (err) {
+        set((state) => {
+          state.trashLoading = false;
+          state.trashError = String(err);
+        });
+      }
+    },
+
+    toggleTrashSelection: (photoId) => {
+      set((state) => {
+        state.trashSelectedIds = state.trashSelectedIds.includes(photoId)
+          ? state.trashSelectedIds.filter((id) => id !== photoId)
+          : [...state.trashSelectedIds, photoId];
+      });
+    },
+
+    setTrashSelection: (photoIds) => {
+      set((state) => {
+        state.trashSelectedIds = photoIds;
+      });
+    },
+
+    trashSelectedPhotos: async (reason = "manual") => {
+      const { multiSelectedIds, selectedPhotoId } = get();
+      const targets = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
+      if (targets.length === 0) return;
+      try {
+        await api.trashPhotos(targets, reason);
+      } catch (err) {
+        set((state) => {
+          state.trashError = String(err);
+        });
+        return;
+      }
+      set((state) => {
+        state.multiSelectedIds = [];
+        if (state.selectedPhotoId && targets.includes(state.selectedPhotoId)) {
+          state.selectedPhotoId = null;
+        }
+      });
+      await get().refreshFolders();
+      const folderId = get().selectedFolderId;
+      if (folderId) await get().loadPhotosForFolder(folderId);
+      await get().refreshTrash();
+    },
+
+    restoreFromTrash: async (photoIds) => {
+      if (photoIds.length === 0) return;
+      try {
+        await api.restorePhotos(photoIds);
+      } catch (err) {
+        set((state) => {
+          state.trashError = String(err);
+        });
+        return;
+      }
+      await get().refreshFolders();
+      const folderId = get().selectedFolderId;
+      if (folderId) await get().loadPhotosForFolder(folderId);
+      await get().refreshTrash();
+    },
+
+    emptyTrash: async (photoIds, deleteFiles) => {
+      try {
+        const result = await api.emptyTrash(photoIds, deleteFiles);
+        set((state) => {
+          state.trashError =
+            result.failed_files.length > 0
+              ? `Aus dem Katalog entfernt, aber diese Dateien blieben liegen: ${result.failed_files.join(", ")}`
+              : null;
+        });
+      } catch (err) {
+        set((state) => {
+          state.trashError = String(err);
+        });
+        return;
+      }
+      await get().refreshTrash();
     },
 
     detectedSeries: [],

@@ -731,3 +731,55 @@ mod tests {
         assert!(PreviewLevel::from_i64(42).is_err());
     }
 }
+
+/// Warum ein Foto im Papierkorb liegt (Phase 33 F1).
+///
+/// Ein fester Satz statt freiem Text, weil die Papierkorb-Ansicht danach
+/// gruppiert und beim Leeren eine Gruppe gezielt behalten werden kann —
+/// „alle als Duplikat aussortierten endgültig weg, die von Hand
+/// weggeworfenen erstmal behalten" ist der Fall, für den das da ist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrashReason {
+    /// Von Hand weggeworfen.
+    Manual,
+    /// Beim Aufräumen einer Duplikatgruppe aussortiert.
+    Duplicate,
+    /// Als unscharf aussortiert (Phase 33 F3).
+    Blurry,
+    /// Beim Ordner-Abgleich als verschwunden entfernt (Phase 33 F2).
+    Missing,
+}
+
+impl TrashReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TrashReason::Manual => "manual",
+            TrashReason::Duplicate => "duplicate",
+            TrashReason::Blurry => "blurry",
+            TrashReason::Missing => "missing",
+        }
+    }
+
+    /// Unbekannte Werte werden zu [`TrashReason::Manual`] statt zu einem
+    /// Fehler: der Grund ist eine Notiz, kein Zustand, an dem etwas hängt.
+    /// Ein Katalog, der von einer neueren Version einen zusätzlichen Grund
+    /// mitbekommen hat, soll sich hier nicht weigern, den Papierkorb
+    /// überhaupt zu öffnen.
+    pub fn from_str_lossy(value: &str) -> Self {
+        match value {
+            "duplicate" => TrashReason::Duplicate,
+            "blurry" => TrashReason::Blurry,
+            "missing" => TrashReason::Missing,
+            _ => TrashReason::Manual,
+        }
+    }
+}
+
+/// Ein Eintrag im Papierkorb: das Foto selbst plus wann und warum es
+/// weggeworfen wurde.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrashEntry {
+    pub photo: Photo,
+    pub deleted_at: OffsetDateTime,
+    pub reason: TrashReason,
+}

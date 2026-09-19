@@ -8,7 +8,7 @@ use rusqlite::Connection;
 
 use crate::error::map_sqlite_err;
 use crate::models::FilterCriteria;
-use crate::repository::photos::{raw_to_photo, row_to_raw, SELECT_COLUMNS};
+use crate::repository::photos::{raw_to_photo, row_to_raw, NOT_TRASHED, SELECT_COLUMNS};
 use crate::Photo;
 
 /// Volltextsuche über Dateiname, Kamerahersteller/-modell und Objektiv.
@@ -19,7 +19,7 @@ pub(crate) fn search_photos(conn: &Connection, query: &str) -> Result<Vec<Photo>
     let sql = format!(
         "SELECT {SELECT_COLUMNS} FROM photos_fts \
          JOIN photos ON photos.rowid = photos_fts.rowid \
-         WHERE photos_fts MATCH ?1 ORDER BY rank"
+         WHERE photos_fts MATCH ?1 AND {NOT_TRASHED} ORDER BY rank"
     );
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
     let rows = stmt
@@ -42,7 +42,10 @@ fn build_filter_clause(
     criteria: &FilterCriteria,
     start_index: usize,
 ) -> (Vec<String>, Vec<Box<dyn ToSql>>) {
-    let mut clauses: Vec<String> = Vec::new();
+    // Immer mitgeführt, nie abschaltbar: Fotos im Papierkorb (Phase 33 F1)
+    // gehören in keine Filter- oder Suchtrefferliste. Hier statt in den
+    // beiden Aufrufern, damit es nicht an einer Stelle fehlen kann.
+    let mut clauses: Vec<String> = vec![NOT_TRASHED.to_string()];
     let mut values: Vec<Box<dyn ToSql>> = Vec::new();
 
     if let Some(min) = criteria.rating_at_least {
@@ -93,11 +96,7 @@ fn run_filtered_query(
 /// Dateiname — konsistent mit [`crate::repository::photos::list_by_folder`].
 pub(crate) fn filter_photos(conn: &Connection, criteria: &FilterCriteria) -> Result<Vec<Photo>> {
     let (clauses, values) = build_filter_clause(criteria, 0);
-    let where_clause = if clauses.is_empty() {
-        "1 = 1".to_string()
-    } else {
-        clauses.join(" AND ")
-    };
+    let where_clause = clauses.join(" AND ");
     let sql = format!("SELECT {SELECT_COLUMNS} FROM photos WHERE {where_clause} ORDER BY filename");
     run_filtered_query(conn, &sql, &values)
 }

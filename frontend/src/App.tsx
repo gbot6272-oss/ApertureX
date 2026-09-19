@@ -143,6 +143,7 @@ export default function App() {
   const selectedPhotoIsVideo = activeFolderPhotos?.find((p) => p.id === selectedPhotoId)?.media_kind === "video";
   const setPhotoRating = useAppStore((s) => s.setPhotoRating);
   const setPhotoFlag = useAppStore((s) => s.setPhotoFlag);
+  const trashSelectedPhotos = useAppStore((s) => s.trashSelectedPhotos);
   const developPanelOpen = useAppStore((s) => s.developPanelOpen);
   const undoLibraryAction = useAppStore((s) => s.undoLibraryAction);
   const redoLibraryAction = useAppStore((s) => s.redoLibraryAction);
@@ -337,6 +338,13 @@ export default function App() {
         void setPhotoFlag(selectedPhotoId, 1);
       } else if (selectedPhotoId && matchesBinding(event, "flag-reject")) {
         void setPhotoFlag(selectedPhotoId, -1);
+      } else if (selectedPhotoId && matchesBinding(event, "trash-selection")) {
+        // Kein Rückfrage-Dialog: das Foto landet im Papierkorb, nicht im
+        // Nichts (Phase 33 F1). Die Rückfrage gehört an die eine Stelle,
+        // an der wirklich etwas verloren geht — das Leeren des
+        // Papierkorbs.
+        event.preventDefault();
+        void trashSelectedPhotos("manual");
       }
     }
 
@@ -347,6 +355,7 @@ export default function App() {
     selectedPhotoId,
     setPhotoRating,
     setPhotoFlag,
+    trashSelectedPhotos,
     developPanelOpen,
     undoLibraryAction,
     redoLibraryAction,

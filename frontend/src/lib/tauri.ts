@@ -146,15 +146,41 @@ export interface FilterCriteriaDto {
   flag?: number;
   color_label?: string;
   camera_model?: string;
+  /** Erweiterte Katalogfilter (Phase 33 F7) — schließen die in ADR-0065
+   * offengelassenen Lücken (Datum aus F3, Objektiv aus F5). */
+  lens?: string;
+  iso_min?: number;
+  iso_max?: number;
+  /** Unix-Sekunden. Die Umrechnung aus dem lokalen Datum passiert hier
+   * im Frontend — nur hier ist die Zeitzone des Nutzers bekannt. */
+  captured_from?: number;
+  captured_to?: number;
+  aspect?: AspectFilter;
+  media_kind?: "photo" | "video";
 }
+
+/** Seitenverhältnis, wie es auf dem Bildschirm erscheint — nicht zu
+ * verwechseln mit `PhotoDto.orientation`, dem EXIF-Drehungs-Flag. Bei
+ * den Werten 5..8 liegt das Bild in der Datei quer und steht auf dem
+ * Schirm hochkant; gefiltert wird nach dem, was man sieht. */
+export type AspectFilter = "landscape" | "portrait" | "square";
 
 /** Blatt-Bedingung für den intelligenten-Sammlung-Regelbaum (Phase 13
  * Schritt 7, siehe `apx_catalog::{FilterField,FilterOperator,FilterCondition}`
  * und `DECISIONS.md` ADR-0040-Nachtrag V). `value` ist immer ein String,
  * auch für die numerischen Felder Bewertung/Flagge — `RuleTreeEditor.tsx`
  * nutzt ohnehin ein Texteingabefeld. */
-export type SmartCollectionField = "rating" | "flag" | "color_label" | "camera_model";
-export type SmartCollectionOperator = "at_least" | "equals" | "not_equals" | "contains";
+export type SmartCollectionField =
+  | "rating"
+  | "flag"
+  | "color_label"
+  | "camera_model"
+  | "lens"
+  | "iso"
+  | "media_kind"
+  | "aspect"
+  | "captured_at";
+export type SmartCollectionOperator = "at_least" | "at_most" | "equals" | "not_equals" | "contains";
 export interface SmartCollectionLeaf {
   field: SmartCollectionField;
   op: SmartCollectionOperator;
@@ -166,6 +192,14 @@ export const SMART_COLLECTION_FIELD_OPTIONS: ReadonlyArray<{ value: SmartCollect
   { value: "flag", label: "Flagge (-1/0/1)" },
   { value: "color_label", label: "Farbmarkierung" },
   { value: "camera_model", label: "Kameramodell" },
+  // Phase 33 F7: dieselben Kriterien, die auch die Filterleiste kennt —
+  // sonst gingen sie beim Speichern einer intelligenten Sammlung
+  // stillschweigend verloren.
+  { value: "lens", label: "Objektiv" },
+  { value: "iso", label: "ISO" },
+  { value: "media_kind", label: "Medienart (photo/video)" },
+  { value: "aspect", label: "Seitenverhältnis (landscape/portrait/square)" },
+  { value: "captured_at", label: "Aufnahmezeit (Unix-Sekunden)" },
 ];
 
 /** Nicht jeder Operator ergibt für jedes Feld Sinn — `matches` auf der
@@ -174,6 +208,7 @@ export const SMART_COLLECTION_FIELD_OPTIONS: ReadonlyArray<{ value: SmartCollect
  * nicht erfüllt, statt sie im UI hart zu verbieten. */
 export const SMART_COLLECTION_OPERATOR_OPTIONS: ReadonlyArray<{ value: SmartCollectionOperator; label: string }> = [
   { value: "at_least", label: ">=" },
+  { value: "at_most", label: "<=" },
   { value: "equals", label: "=" },
   { value: "not_equals", label: "≠" },
   { value: "contains", label: "enthält" },

@@ -309,6 +309,16 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     rating: number;
     flag: number;
     color_label: string | null;
+    // Erweiterte Katalogfilter (Phase 33 F7) — `[key: string]: unknown`
+    // deckt sie zwar ab, aber ohne Typ liest sich jeder Zugriff wie ein
+    // Ratespiel.
+    lens?: string | null;
+    iso?: number | null;
+    captured_at?: string | null;
+    width?: number | null;
+    height?: number | null;
+    orientation?: number;
+    media_kind?: string;
     [key: string]: unknown;
   }
   interface MockCollection {
@@ -526,14 +536,53 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   /** Gemeinsame Kriterien-Prüfung für `filter_photos`/`search_and_filter_photos`
    * (Schritt 8.4) — spiegelt `crates/apx-catalog/src/repository/search.rs`s
    * `build_filter_clause`. */
-  function matchesFilterCriteria(
-    photo: MockPhoto,
-    criteria: { rating_at_least?: number; flag?: number; color_label?: string; camera_model?: string },
-  ): boolean {
+  /** Die Kriterien, die `apx_catalog::FilterCriteria` spiegelt. */
+  interface MockFilterCriteria {
+    rating_at_least?: number;
+    flag?: number;
+    color_label?: string;
+    camera_model?: string;
+    lens?: string;
+    iso_min?: number;
+    iso_max?: number;
+    captured_from?: number;
+    captured_to?: number;
+    aspect?: "landscape" | "portrait" | "square";
+    media_kind?: string;
+  }
+
+  function matchesFilterCriteria(photo: MockPhoto, criteria: MockFilterCriteria): boolean {
     if (criteria.rating_at_least !== undefined && photo.rating < criteria.rating_at_least) return false;
     if (criteria.flag !== undefined && photo.flag !== criteria.flag) return false;
     if (criteria.color_label !== undefined && photo.color_label !== criteria.color_label) return false;
     if (criteria.camera_model !== undefined && photo.camera_model !== criteria.camera_model) return false;
+
+    // Erweiterte Katalogfilter (Phase 33 F7). Dieselben Regeln wie in
+    // `repository::search`: ein Foto ohne den jeweiligen Wert faellt aus
+    // dem Filter heraus, statt vorsichtshalber drinzubleiben.
+    if (criteria.lens !== undefined && photo.lens !== criteria.lens) return false;
+    if (criteria.iso_min !== undefined && (photo.iso === null || photo.iso === undefined || photo.iso < criteria.iso_min))
+      return false;
+    if (criteria.iso_max !== undefined && (photo.iso === null || photo.iso === undefined || photo.iso > criteria.iso_max))
+      return false;
+    if (criteria.captured_from !== undefined || criteria.captured_to !== undefined) {
+      if (!photo.captured_at) return false;
+      const seconds = Math.floor(new Date(photo.captured_at).getTime() / 1000);
+      if (criteria.captured_from !== undefined && seconds < criteria.captured_from) return false;
+      if (criteria.captured_to !== undefined && seconds > criteria.captured_to) return false;
+    }
+    if (criteria.aspect !== undefined) {
+      const width = photo.width;
+      const height = photo.height;
+      if (!width || !height) return false;
+      // Wie in Rust: bei EXIF-Orientierung 5..8 sind die angezeigten
+      // Kanten vertauscht.
+      const rotated = typeof photo.orientation === "number" && photo.orientation >= 5 && photo.orientation <= 8;
+      const [w, h] = rotated ? [height, width] : [width, height];
+      const actual = w > h ? "landscape" : w < h ? "portrait" : "square";
+      if (actual !== criteria.aspect) return false;
+    }
+    if (criteria.media_kind !== undefined && (photo.media_kind ?? "photo") !== criteria.media_kind) return false;
     return true;
   }
 
@@ -1208,24 +1257,14 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           .map(clonePhoto);
       }
       case "filter_photos": {
-        const criteria = args.criteria as {
-          rating_at_least?: number;
-          flag?: number;
-          color_label?: string;
-          camera_model?: string;
-        };
+        const criteria = args.criteria as MockFilterCriteria;
         return allPhotos()
           .filter((p) => matchesFilterCriteria(p, criteria))
           .map(clonePhoto);
       }
       case "search_and_filter_photos": {
         const query = (args.query as string | null)?.trim().toLowerCase();
-        const criteria = args.criteria as {
-          rating_at_least?: number;
-          flag?: number;
-          color_label?: string;
-          camera_model?: string;
-        };
+        const criteria = args.criteria as MockFilterCriteria;
         return allPhotos()
           .filter((p) => (!query ? true : p.filename.toLowerCase().includes(query)))
           .filter((p) => matchesFilterCriteria(p, criteria))

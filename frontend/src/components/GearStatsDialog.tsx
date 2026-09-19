@@ -27,12 +27,12 @@ import { Dialog } from "./ui/Dialog";
  * er wirklich braucht — und welches seit zwei Jahren nur mitgetragen
  * wird.
  *
- * **Klick auf eine Kamera filtert den Katalog.** `camera_model` ist eines
- * der vier Felder, die `FilterCriteriaDto` kennt — der Sprung von der
- * Statistik zu den Fotos ist damit echt und nicht nur angedeutet.
- * Objektive sind bewusst **nicht** klickbar: ein Objektivfilter existiert
- * im Backend nicht, und ein Knopf, der nichts tut, wäre schlimmer als
- * gar keiner.
+ * **Klick auf eine Kamera oder ein Objektiv filtert den Katalog.** Der
+ * Sprung von der Statistik zu den Fotos ist damit echt und nicht nur
+ * angedeutet. Objektive waren hier bis Phase 33 F7 bewusst *nicht*
+ * klickbar, weil es im Backend keinen Objektivfilter gab und ein Knopf,
+ * der nichts tut, schlimmer ist als gar keiner — mit F7 gibt es ihn,
+ * und damit den Knopf.
  */
 
 interface GearStatsDialogProps {
@@ -60,6 +60,12 @@ export function GearStatsDialog({ open, onClose }: GearStatsDialogProps) {
 
   function filterByCamera(model: string) {
     void setLibraryFilterChip({ camera_model: model });
+    setCenterView("grid");
+    onClose();
+  }
+
+  function filterByLens(lens: string) {
+    void setLibraryFilterChip({ lens });
     setCenterView("grid");
     onClose();
   }
@@ -159,8 +165,16 @@ export function GearStatsDialog({ open, onClose }: GearStatsDialogProps) {
                 </h3>
                 <ul className="flex flex-col gap-1" data-testid="gear-lenses">
                   {visibleLenses.map(([name, count]) => (
-                    <li key={name} className="px-1 py-0.5">
-                      <BarRow label={name} count={count} total={stats.total} unit={unit} />
+                    <li key={name}>
+                      <button
+                        type="button"
+                        onClick={() => filterByLens(name)}
+                        aria-label={`Nur Fotos mit ${name} zeigen`}
+                        aria-pressed={libraryFilter.lens === name}
+                        className="apx-btn-liquid w-full rounded px-1 py-0.5 text-left transition-colors duration-[var(--duration-fast)] hover:bg-accent/10"
+                      >
+                        <BarRow label={name} count={count} total={stats.total} unit={unit} />
+                      </button>
                     </li>
                   ))}
                   {lenses.length === 0 && <li className="text-xs text-text-muted">Keine Objektivangaben im EXIF.</li>}

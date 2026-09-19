@@ -41,12 +41,12 @@ use rusqlite::Connection;
 use time::OffsetDateTime;
 
 pub use models::{
-    embedding_distance, parse_filter_node, BoolOp, CatalogStatistics, Collection, CollectionFolder,
-    ColorLabelDefinition, DistributionBucket, EditHistoryEntry, ExposureRow, FaceDetection,
-    FaceRect, FilterCondition, FilterCriteria, FilterField, FilterNode, FilterOperator, Folder,
-    GearStatistics, HistoryPosition, Keyword, NewPhoto, Person, Photo, PhotoNote, Preset,
-    PresetFolder, PresetVersion, Preview, PreviewLevel, Snapshot, Stack, TagRule, Template,
-    TrashEntry, TrashReason, SAME_PERSON_EMBEDDING_THRESHOLD,
+    embedding_distance, parse_filter_node, Aspect, BoolOp, CatalogStatistics, Collection,
+    CollectionFolder, ColorLabelDefinition, DistributionBucket, EditHistoryEntry, ExposureRow,
+    FaceDetection, FaceRect, FilterCondition, FilterCriteria, FilterField, FilterNode,
+    FilterOperator, Folder, GearStatistics, HistoryPosition, Keyword, NewPhoto, Person, Photo,
+    PhotoNote, Preset, PresetFolder, PresetVersion, Preview, PreviewLevel, Snapshot, Stack,
+    TagRule, Template, TrashEntry, TrashReason, SAME_PERSON_EMBEDDING_THRESHOLD,
 };
 pub use repository::batch::BatchAction;
 pub use repository::share::ShareDiff;

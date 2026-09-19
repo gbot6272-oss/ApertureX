@@ -421,6 +421,27 @@ pub struct FilterCriteriaDto {
     pub color_label: Option<String>,
     #[serde(default)]
     pub camera_model: Option<String>,
+    // Erweiterte Katalogfilter (Phase 33 F7) — schließen die in ADR-0065
+    // ausdrücklich offengelassenen Lücken (Datum aus F3, Objektiv aus
+    // F5).
+    #[serde(default)]
+    pub lens: Option<String>,
+    #[serde(default)]
+    pub iso_min: Option<u32>,
+    #[serde(default)]
+    pub iso_max: Option<u32>,
+    /// Unix-Sekunden. Die Umrechnung aus dem lokalen Datum macht das
+    /// Frontend — nur dort ist die Zeitzone des Nutzers bekannt.
+    #[serde(default)]
+    pub captured_from: Option<i64>,
+    #[serde(default)]
+    pub captured_to: Option<i64>,
+    /// `"landscape"`, `"portrait"` oder `"square"`.
+    #[serde(default)]
+    pub aspect: Option<String>,
+    /// `"photo"` oder `"video"`.
+    #[serde(default)]
+    pub media_kind: Option<String>,
 }
 
 impl From<FilterCriteriaDto> for apx_catalog::FilterCriteria {
@@ -430,6 +451,22 @@ impl From<FilterCriteriaDto> for apx_catalog::FilterCriteria {
             flag: dto.flag,
             color_label: dto.color_label,
             camera_model: dto.camera_model,
+            lens: dto.lens,
+            iso_min: dto.iso_min,
+            iso_max: dto.iso_max,
+            captured_from: dto.captured_from,
+            captured_to: dto.captured_to,
+            // Ein unbekannter Wert wird zu „kein Filter" statt zu einem
+            // Fehler: das Seitenverhältnis ist eine Einschränkung, keine
+            // Anweisung, und eine abgelehnte Filteranfrage wäre die
+            // schlechtere Antwort auf einen Tippfehler.
+            aspect: match dto.aspect.as_deref() {
+                Some("landscape") => Some(apx_catalog::Aspect::Landscape),
+                Some("portrait") => Some(apx_catalog::Aspect::Portrait),
+                Some("square") => Some(apx_catalog::Aspect::Square),
+                _ => None,
+            },
+            media_kind: dto.media_kind,
         }
     }
 }

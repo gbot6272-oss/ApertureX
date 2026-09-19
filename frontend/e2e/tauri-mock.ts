@@ -2013,6 +2013,26 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return renamed;
       }
 
+      // ---- Manuelle Reihenfolge (Phase 33 F8) -------------------------
+      // Die Off-by-one-Korrektur (Zielindex vor gegen nach dem Entfernen)
+      // ist in `apx-catalog`s `plan_reorder`-Tests abgedeckt; hier wird
+      // dieselbe Regel nachgebildet, damit die Oberfläche eine
+      // plausible neue Reihenfolge zurückbekommt.
+      case "reorder_collection_photo": {
+        const collectionId = args.collectionId as string;
+        const photoId = args.photoId as string;
+        const targetIndex = args.targetIndex as number;
+        const ids = collectionPhotoIds[collectionId] ?? [];
+        const from = ids.indexOf(photoId);
+        if (from < 0) throw new Error(`Test-Stub: Foto '${photoId}' ist nicht in dieser Sammlung`);
+        const next = [...ids];
+        next.splice(from, 1);
+        const adjusted = targetIndex > from ? targetIndex - 1 : targetIndex;
+        next.splice(Math.min(adjusted, next.length), 0, photoId);
+        collectionPhotoIds[collectionId] = next;
+        return next;
+      }
+
       // ---- Metadaten-Vorgaben (Phase 33 F4) ---------------------------
       // Die Auflösungsregeln (Platzhalter, „nicht gesetzt" gegen
       // „leeren", Stichwort-Modus) sind in `apx-app`s

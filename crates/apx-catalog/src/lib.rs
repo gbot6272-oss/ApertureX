@@ -671,6 +671,18 @@ impl Catalog {
     /// Die Fotos einer Sammlung — bei einer intelligenten Sammlung live
     /// aus den gespeicherten Kriterien berechnet, sonst die festgelegte
     /// Reihenfolge.
+    /// Ordnet ein Foto innerhalb einer Sammlung um (Phase 33 F8) und
+    /// gibt die neue Reihenfolge zurück.
+    pub fn reorder_collection_photo(
+        &self,
+        collection_id: CollectionId,
+        photo_id: PhotoId,
+        target_index: usize,
+    ) -> Result<Vec<PhotoId>> {
+        let conn = self.lock()?;
+        repository::collections::reorder_photo(&conn, collection_id, photo_id, target_index)
+    }
+
     pub fn list_photos_in_collection(&self, collection_id: CollectionId) -> Result<Vec<Photo>> {
         let conn = self.lock()?;
         repository::collections::list_photos(&conn, collection_id)

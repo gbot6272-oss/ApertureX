@@ -426,6 +426,7 @@ fn main() {
             commands::apply_folder_sync,
             commands::score_photo_sharpness,
             commands::apply_metadata_preset,
+            commands::reorder_collection_photo,
             commands::create_stack,
             commands::delete_stack,
             commands::set_stack_cover,

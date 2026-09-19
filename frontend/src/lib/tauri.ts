@@ -2593,3 +2593,16 @@ export function applyMetadataPreset(
     presetJson: JSON.stringify(preset),
   });
 }
+
+// ---- Manuelle Reihenfolge in einer Sammlung (Phase 33 F8) ------------------
+
+/** Verschiebt ein Foto innerhalb einer Sammlung an `targetIndex` —
+ * gezählt in der Liste **vor** dem Verschieben, so wie das Ziehen es
+ * liefert. Gibt die neue Reihenfolge als Foto-IDs zurück. */
+export function reorderCollectionPhoto(
+  collectionId: string,
+  photoId: string,
+  targetIndex: number,
+): Promise<string[]> {
+  return invoke<string[]>("reorder_collection_photo", { collectionId, photoId, targetIndex });
+}

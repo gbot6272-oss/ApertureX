@@ -11046,3 +11046,31 @@ pub fn apply_metadata_preset(
         keywords_removed,
     })
 }
+
+// ---- Manuelle Reihenfolge in einer Sammlung (Phase 33 F8) ------------------
+
+/// Verschiebt ein Foto innerhalb einer Sammlung an `target_index` und
+/// gibt die neue Reihenfolge zurück.
+///
+/// `target_index` zählt in der Liste **vor** dem Verschieben — so wie
+/// eine Oberfläche es beim Ziehen natürlicherweise liefert („zwischen
+/// das dritte und das vierte Element"). Die Umrechnung auf die Liste
+/// danach passiert in `apx_catalog` und hat dort eigene Tests; genau an
+/// dieser Stelle greift so eine Funktion sonst um eins daneben.
+#[tauri::command]
+pub fn reorder_collection_photo(
+    state: State<'_, AppState>,
+    collection_id: String,
+    photo_id: String,
+    target_index: usize,
+) -> Result<Vec<String>, String> {
+    let collection_id: apx_core::CollectionId = collection_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    let photo_id = parse_photo_id(photo_id)?;
+    let order = state
+        .catalog
+        .reorder_collection_photo(collection_id, photo_id, target_index)
+        .map_err(|err| err.to_string())?;
+    Ok(order.into_iter().map(|id| id.to_string()).collect())
+}

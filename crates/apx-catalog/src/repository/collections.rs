@@ -5,6 +5,8 @@
 //! Sammlungssätze (`collection_folders`) spiegeln `preset_folders`
 //! strukturell exakt.
 
+use std::str::FromStr;
+
 use apx_core::{AppError, CollectionFolderId, CollectionId, PhotoId, Result};
 use rusqlite::{params, Connection};
 use time::OffsetDateTime;
@@ -13,7 +15,7 @@ use crate::error::map_sqlite_err;
 use crate::models::{
     from_unix, parse_filter_node, to_unix, Collection, CollectionFolder, FilterCriteria, FilterNode,
 };
-use crate::repository::photos::{raw_to_photo, row_to_raw, SELECT_COLUMNS};
+use crate::repository::photos::{raw_to_photo, row_to_raw, NOT_TRASHED, SELECT_COLUMNS};
 use crate::repository::search::filter_photos;
 use crate::Photo;
 
@@ -289,6 +291,93 @@ pub(crate) fn add_photo(
     Ok(())
 }
 
+/// Ordnet ein Foto innerhalb einer Sammlung um (Phase 33 F8) und
+/// schreibt die neue Reihenfolge lückenlos als 0..n-1 zurück.
+///
+/// **Warum alle Positionen neu geschrieben werden** statt eine
+/// Bruchzahl zwischen die Nachbarn zu setzen: das Lücken-Verfahren
+/// (Positionen 0, 100, 200 …) verschiebt die Neuvergabe nur, bis
+/// zwischen zwei Nachbarn keine ganze Zahl mehr passt — dann muss doch
+/// alles neu nummeriert werden, nur eben zu einem unvorhersehbaren
+/// Zeitpunkt. Eine Sammlung hat höchstens ein paar tausend Zeilen; die
+/// jedes Mal in einer Anweisung neu zu schreiben ist billiger als der
+/// Sonderfall.
+///
+/// Auf eine intelligente Sammlung angewendet ein Fehler: ihre
+/// Reihenfolge kommt aus den Kriterien, eine gespeicherte Position
+/// hätte dort nichts, worauf sie sich bezieht.
+pub(crate) fn reorder_photo(
+    conn: &Connection,
+    collection_id: CollectionId,
+    photo_id: PhotoId,
+    target_index: usize,
+) -> Result<Vec<PhotoId>> {
+    if get(conn, collection_id)?.is_smart {
+        return Err(AppError::validation(
+            "Die Reihenfolge einer intelligenten Sammlung ergibt sich aus ihren Kriterien"
+                .to_string(),
+        ));
+    }
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT photo_id FROM collection_photos WHERE collection_id = ?1 ORDER BY position",
+        )
+        .map_err(map_sqlite_err)?;
+    let current: Vec<String> = stmt
+        .query_map(params![collection_id.to_string()], |row| row.get(0))
+        .map_err(map_sqlite_err)?
+        .collect::<rusqlite::Result<Vec<String>>>()
+        .map_err(map_sqlite_err)?;
+    drop(stmt);
+
+    let moved = photo_id.to_string();
+    if !current.contains(&moved) {
+        return Err(AppError::not_found(
+            "Foto in dieser Sammlung",
+            photo_id.to_string(),
+        ));
+    }
+
+    let reordered = plan_reorder(&current, &moved, target_index);
+    for (position, id) in reordered.iter().enumerate() {
+        conn.execute(
+            "UPDATE collection_photos SET position = ?3 WHERE collection_id = ?1 AND photo_id = ?2",
+            params![collection_id.to_string(), id, position as i64],
+        )
+        .map_err(map_sqlite_err)?;
+    }
+
+    reordered
+        .into_iter()
+        .map(|id| PhotoId::from_str(&id).map_err(Into::into))
+        .collect()
+}
+
+/// Verschiebt `moved` in `ids` an die Stelle `target_index` — gezählt in
+/// der Liste **vor** dem Entfernen.
+///
+/// Genau das ist die Stelle, an der so eine Funktion üblicherweise
+/// danebengreift: entfernt man erst und fügt dann an `target_index` ein,
+/// landet ein nach hinten geschobenes Element eine Position zu weit
+/// vorne, weil sich durch das Entfernen alles dahinter verschoben hat.
+/// Deshalb wird der Zielindex angepasst, wenn das Element von vorne
+/// kommt — und deshalb hat das hier eigene Tests.
+fn plan_reorder(ids: &[String], moved: &str, target_index: usize) -> Vec<String> {
+    let Some(from) = ids.iter().position(|id| id == moved) else {
+        return ids.to_vec();
+    };
+    let mut result: Vec<String> = ids.to_vec();
+    result.remove(from);
+    let adjusted = if target_index > from {
+        target_index - 1
+    } else {
+        target_index
+    };
+    result.insert(adjusted.min(result.len()), moved.to_string());
+    result
+}
+
 pub(crate) fn remove_photo(
     conn: &Connection,
     collection_id: CollectionId,
@@ -330,7 +419,7 @@ pub(crate) fn list_photos(conn: &Connection, collection_id: CollectionId) -> Res
     let sql = format!(
         "SELECT {SELECT_COLUMNS} FROM collection_photos cp \
          JOIN photos ON photos.id = cp.photo_id \
-         WHERE cp.collection_id = ?1 ORDER BY cp.position"
+         WHERE cp.collection_id = ?1 AND {NOT_TRASHED} ORDER BY cp.position"
     );
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
     let rows = stmt
@@ -716,5 +805,175 @@ mod tests {
         let members = list_photos(&conn, id).expect("ok");
         assert_eq!(members.len(), 1);
         assert_eq!(members[0].id, photo_a);
+    }
+
+    // ---- Manuelle Reihenfolge (Phase 33 F8) ------------------------------
+
+    fn ids(values: &[&str]) -> Vec<String> {
+        values.iter().map(|v| v.to_string()).collect()
+    }
+
+    #[test]
+    fn nach_hinten_schieben_landet_an_der_gemeinten_stelle() {
+        // Genau der Off-by-one: "a" soll dorthin, wo jetzt "c" steht
+        // (Index 2). Wer erst entfernt und dann bei 2 einfügt, landet
+        // zwischen b und c statt dahinter.
+        let result = plan_reorder(&ids(&["a", "b", "c", "d"]), "a", 2);
+        assert_eq!(result, ids(&["b", "a", "c", "d"]));
+    }
+
+    #[test]
+    fn nach_vorne_schieben_braucht_keine_korrektur() {
+        let result = plan_reorder(&ids(&["a", "b", "c", "d"]), "d", 1);
+        assert_eq!(result, ids(&["a", "d", "b", "c"]));
+    }
+
+    #[test]
+    fn an_den_anfang_schieben() {
+        assert_eq!(
+            plan_reorder(&ids(&["a", "b", "c"]), "c", 0),
+            ids(&["c", "a", "b"])
+        );
+    }
+
+    #[test]
+    fn an_das_ende_schieben() {
+        assert_eq!(
+            plan_reorder(&ids(&["a", "b", "c"]), "a", 3),
+            ids(&["b", "c", "a"])
+        );
+    }
+
+    #[test]
+    fn ein_zu_grosser_zielindex_landet_am_ende_statt_zu_panischen() {
+        assert_eq!(
+            plan_reorder(&ids(&["a", "b", "c"]), "a", 99),
+            ids(&["b", "c", "a"])
+        );
+    }
+
+    #[test]
+    fn an_die_eigene_stelle_schieben_aendert_nichts() {
+        assert_eq!(
+            plan_reorder(&ids(&["a", "b", "c"]), "b", 1),
+            ids(&["a", "b", "c"])
+        );
+    }
+
+    #[test]
+    fn ein_unbekanntes_element_laesst_die_liste_unveraendert() {
+        assert_eq!(plan_reorder(&ids(&["a", "b"]), "x", 0), ids(&["a", "b"]));
+    }
+
+    /// Drei Fotos in einer frischen Sammlung, in dieser Reihenfolge.
+    fn setup_ordered() -> (Connection, CollectionId, Vec<PhotoId>) {
+        let (conn, first) = setup();
+        let folder_id = photos::get(&conn, first).unwrap().folder_id;
+        let collection_id = create(&conn, "Auswahl", None, OffsetDateTime::now_utc()).unwrap();
+        let mut ids = vec![first];
+        for name in ["b", "c", "d"] {
+            ids.push(extra_photo(&conn, folder_id, &format!("{name}.cr2")));
+        }
+        for id in &ids {
+            add_photo(&conn, collection_id, *id).unwrap();
+        }
+        (conn, collection_id, ids)
+    }
+
+    /// Wie `second_photo`, aber mit frei wählbarem Dateinamen — für die
+    /// Reihenfolge-Tests, die mehr als zwei Fotos brauchen.
+    fn extra_photo(conn: &Connection, folder_id: apx_core::FolderId, filename: &str) -> PhotoId {
+        let photo = NewPhoto {
+            media_kind: "photo".to_string(),
+            duration_ms: None,
+            video_codec: None,
+            has_audio: None,
+            frame_rate: None,
+            folder_id,
+            filename: filename.to_string(),
+            file_size: 100,
+            file_mtime: OffsetDateTime::now_utc()
+                .replace_nanosecond(0)
+                .expect("gültig"),
+            content_hash: None,
+            width: None,
+            height: None,
+            orientation: 1,
+            camera_make: None,
+            camera_model: None,
+            lens: None,
+            iso: None,
+            shutter: None,
+            aperture: None,
+            focal_length: None,
+            captured_at: None,
+            gps_lat: None,
+            gps_lon: None,
+        };
+        photos::upsert(conn, &photo, OffsetDateTime::now_utc())
+            .expect("Foto anlegen")
+            .0
+    }
+
+    #[test]
+    fn eine_umordnung_wird_gespeichert_und_beim_lesen_beachtet() {
+        let (conn, collection_id, ids) = setup_ordered();
+        let c = ids[2];
+
+        reorder_photo(&conn, collection_id, c, 0).unwrap();
+
+        let names: Vec<String> = list_photos(&conn, collection_id)
+            .unwrap()
+            .into_iter()
+            .map(|photo| photo.filename)
+            .collect();
+        assert_eq!(names, vec!["c.cr2", "a.cr2", "b.cr2", "d.cr2"]);
+    }
+
+    #[test]
+    fn die_positionen_bleiben_nach_einer_umordnung_lueckenlos() {
+        let (conn, collection_id, ids) = setup_ordered();
+
+        reorder_photo(&conn, collection_id, ids[3], 1).unwrap();
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT position FROM collection_photos WHERE collection_id = ?1 ORDER BY position",
+            )
+            .unwrap();
+        let positions: Vec<i64> = stmt
+            .query_map(params![collection_id.to_string()], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<i64>>>()
+            .unwrap();
+        assert_eq!(positions, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn ein_foto_das_nicht_in_der_sammlung_ist_laesst_sich_nicht_umordnen() {
+        let (conn, collection_id, ids) = setup_ordered();
+        let folder_id = photos::get(&conn, ids[0]).unwrap().folder_id;
+        let draussen = extra_photo(&conn, folder_id, "draussen.cr2");
+
+        let err = reorder_photo(&conn, collection_id, draussen, 0).unwrap_err();
+        assert!(matches!(err, AppError::NotFound { .. }));
+    }
+
+    #[test]
+    fn eine_intelligente_sammlung_laesst_sich_nicht_von_hand_ordnen() {
+        let (conn, photo) = setup();
+        let collection_id = create_smart(
+            &conn,
+            "Klug",
+            None,
+            &FilterNode::Group {
+                operator: crate::models::BoolOp::And,
+                children: Vec::new(),
+            },
+            OffsetDateTime::now_utc(),
+        )
+        .unwrap();
+        let err = reorder_photo(&conn, collection_id, photo, 0).unwrap_err();
+        assert!(matches!(err, AppError::Validation { .. }));
     }
 }

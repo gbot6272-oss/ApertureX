@@ -66,6 +66,17 @@ export function GridView({ variant = "grid" }: GridViewProps) {
   const setPhotoColorLabel = useAppStore((s) => s.setPhotoColorLabel);
 
   const [hoveredPhotoId, setHoveredPhotoId] = useState<string | null>(null);
+  // Manuelle Reihenfolge (Phase 33 F8): nur innerhalb einer Sammlung und
+  // nur, wenn auch wirklich manuell sortiert wird. Sonst wäre das Ziehen
+  // ein Versprechen, das die Ansicht im nächsten Moment bricht — die
+  // Liste würde sofort wieder nach Dateiname umsortiert.
+  const selectedCollectionId = useAppStore((s) => s.selectedCollectionId);
+  const librarySortField = useAppStore((s) => s.librarySortField);
+  const libraryResults = useAppStore((s) => s.libraryResults);
+  const reorderCollectionPhoto = useAppStore((s) => s.reorderCollectionPhoto);
+  const canReorder = librarySortField === "manual" && selectedCollectionId !== null && libraryResults === null;
+  const [draggedPhotoId, setDraggedPhotoId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
 
   // Klick-vs-Ziehen-Unterscheidung (Phase 20, siehe `DECISIONS.md`
   // ADR-0048): der Browser feuert nach einem `mousedown`/`mouseup`-Paar
@@ -121,7 +132,7 @@ export function GridView({ variant = "grid" }: GridViewProps) {
   }
 
   return (
-    <main ref={containerRef} className="flex flex-1 overflow-hidden">
+    <main ref={containerRef} data-testid="photo-grid" className="flex flex-1 overflow-hidden">
       <div ref={scrollRef} className="w-full overflow-y-auto p-2">
         <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}>
           {rowVirtualizer.getVirtualItems().map((row) => {
@@ -165,6 +176,41 @@ export function GridView({ variant = "grid" }: GridViewProps) {
                       // vollwertig fokussierbar.
                       role="button"
                       tabIndex={0}
+                      draggable={canReorder}
+                      onDragStart={(event) => {
+                        if (!canReorder) return;
+                        setDraggedPhotoId(photo.id);
+                        // Ohne gesetzte Daten startet in manchen Browsern
+                        // gar kein Zieh-Vorgang.
+                        event.dataTransfer.setData("text/plain", photo.id);
+                        event.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragOver={(event) => {
+                        if (!canReorder || draggedPhotoId === null) return;
+                        // Ohne `preventDefault` lehnt der Browser das
+                        // Ablegen ab — dasselbe wie im Sammlungs-Board.
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = "move";
+                        setDropTargetId(photo.id);
+                      }}
+                      onDragLeave={() => {
+                        setDropTargetId((current) => (current === photo.id ? null : current));
+                      }}
+                      onDrop={(event) => {
+                        if (!canReorder || draggedPhotoId === null) return;
+                        event.preventDefault();
+                        const targetIndex = photos.findIndex((entry) => entry.id === photo.id);
+                        const moved = draggedPhotoId;
+                        setDraggedPhotoId(null);
+                        setDropTargetId(null);
+                        if (targetIndex < 0 || moved === photo.id) return;
+                        playCue("drop");
+                        void reorderCollectionPhoto(moved, targetIndex);
+                      }}
+                      onDragEnd={() => {
+                        setDraggedPhotoId(null);
+                        setDropTargetId(null);
+                      }}
                       onMouseDown={(event) => {
                         pointerDownPosRef.current = { x: event.clientX, y: event.clientY };
                       }}
@@ -203,7 +249,9 @@ export function GridView({ variant = "grid" }: GridViewProps) {
                       style={{ width: cellSize, height: cellSize }}
                       className={`apx-grid-cell-in relative shrink-0 cursor-pointer overflow-hidden rounded border-2 text-left transition-transform duration-[var(--duration-fast)] hover:z-10 hover:scale-[1.04] hover:shadow-lg ${
                         isFocused ? "border-accent" : isSelected ? "border-accent/50" : "border-transparent hover:border-border"
-                      } ${photo.missing ? "opacity-40" : ""}`}
+                      } ${photo.missing ? "opacity-40" : ""} ${
+                        dropTargetId === photo.id ? "ring-2 ring-accent" : ""
+                      } ${draggedPhotoId === photo.id ? "opacity-50" : ""}`}
                     >
                       <img
                         src={previewUrl(photo.id, 0)}

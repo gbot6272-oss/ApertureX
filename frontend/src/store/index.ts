@@ -1109,6 +1109,12 @@ interface LibrarySlice {
    * Foto) zu `collectionId` hinzu. */
   addSelectionToCollection: (collectionId: string) => Promise<void>;
 
+  /** Manuelle Reihenfolge (Phase 33 F8): verschiebt ein Foto innerhalb
+   * der gerade gewählten Sammlung an `targetIndex`. Ohne gewählte
+   * Sammlung ein No-Op — eine Ordnerliste hat die Reihenfolge des
+   * Dateisystems. */
+  reorderCollectionPhoto: (photoId: string, targetIndex: number) => Promise<void>;
+
   /** Sammlungs-Board (Phase 32 F9, siehe `BoardView.tsx`): lädt die
    * Fotos **aller** Sammlungen, damit das Board alle Spalten auf einmal
    * zeigen kann — der normale Weg lädt immer nur die gerade gewählte. */
@@ -4867,6 +4873,30 @@ export const useAppStore = create<AppStore>()(
       });
       if (collectionId) {
         void get().loadPhotosForCollection(collectionId);
+      }
+    },
+
+    reorderCollectionPhoto: async (photoId, targetIndex) => {
+      const collectionId = get().selectedCollectionId;
+      if (!collectionId) return;
+      try {
+        const order = await api.reorderCollectionPhoto(collectionId, photoId, targetIndex);
+        set((state) => {
+          const current = state.collectionPhotos[collectionId] ?? [];
+          const byId = new Map(current.map((photo) => [photo.id, photo]));
+          // Nach der vom Backend zurückgegebenen Reihenfolge neu legen,
+          // statt die lokale Liste selbst umzusortieren: was gespeichert
+          // wurde, entscheidet der Katalog, und ein zweites Mal
+          // dieselbe Rechnung wäre eine zweite Stelle, an der sie falsch
+          // sein kann.
+          state.collectionPhotos[collectionId] = order
+            .map((id) => byId.get(id))
+            .filter((photo): photo is NonNullable<typeof photo> => photo !== undefined);
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
       }
     },
 

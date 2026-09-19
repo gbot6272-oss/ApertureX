@@ -2606,3 +2606,21 @@ export function reorderCollectionPhoto(
 ): Promise<string[]> {
   return invoke<string[]>("reorder_collection_photo", { collectionId, photoId, targetIndex });
 }
+
+// ---- Ähnliche Fotos zu einem Referenzfoto (Phase 33 F9) -------------------
+
+export interface SimilarPhotoDto {
+  photo: PhotoDto;
+  /** `0..1`, 1 = gleich. */
+  similarity: number;
+}
+
+/** `colorWeight` mischt zwischen Motiv (0) und Farbe (1). */
+export function findSimilarPhotos(
+  photoId: string,
+  colorWeight: number,
+  minSimilarity: number,
+  limit: number,
+): Promise<SimilarPhotoDto[]> {
+  return invoke<SimilarPhotoDto[]>("find_similar_photos", { photoId, colorWeight, minSimilarity, limit });
+}

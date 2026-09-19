@@ -20,6 +20,7 @@ import { FolderSyncDialog } from "./FolderSyncDialog";
 import { SharpnessDialog } from "./SharpnessDialog";
 import { MetadataPresetDialog } from "./MetadataPresetDialog";
 import { WatermarkTemplateDialog } from "./WatermarkTemplateDialog";
+import { SimilarPhotosDialog } from "./SimilarPhotosDialog";
 import { TemplatesDialog } from "./TemplatesDialog";
 import { LibraryOrganizeDialog } from "./LibraryOrganizeDialog";
 import { BatchConsoleDialog } from "./BatchConsoleDialog";
@@ -85,6 +86,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
   const [sharpnessDialogOpen, setSharpnessDialogOpen] = useState(false);
   const [metadataPresetDialogOpen, setMetadataPresetDialogOpen] = useState(false);
   const [watermarkTemplateDialogOpen, setWatermarkTemplateDialogOpen] = useState(false);
+  const [similarPhotosDialogOpen, setSimilarPhotosDialogOpen] = useState(false);
   const [batchConsoleDialogOpen, setBatchConsoleDialogOpen] = useState(false);
   const [stackingDialogOpen, setStackingDialogOpen] = useState(false);
   const [scriptPluginDialogOpen, setScriptPluginDialogOpen] = useState(false);
@@ -178,6 +180,9 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
         break;
       case "watermark-templates":
         setWatermarkTemplateDialogOpen(true);
+        break;
+      case "similar-photos":
+        setSimilarPhotosDialogOpen(true);
         break;
       case "catalog":
         setCatalogDialogOpen(true);
@@ -426,6 +431,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
       <SharpnessDialog open={sharpnessDialogOpen} onClose={() => setSharpnessDialogOpen(false)} />
       <MetadataPresetDialog open={metadataPresetDialogOpen} onClose={() => setMetadataPresetDialogOpen(false)} />
       <WatermarkTemplateDialog open={watermarkTemplateDialogOpen} onClose={() => setWatermarkTemplateDialogOpen(false)} />
+      <SimilarPhotosDialog open={similarPhotosDialogOpen} onClose={() => setSimilarPhotosDialogOpen(false)} />
       <LibraryOrganizeDialog open={organizeDialogOpen} onClose={() => setOrganizeDialogOpen(false)} />
       <BatchConsoleDialog open={batchConsoleDialogOpen} onClose={() => setBatchConsoleDialogOpen(false)} />
       <MetadataDialog open={metadataDialogOpen} onClose={() => setMetadataDialogOpen(false)} />

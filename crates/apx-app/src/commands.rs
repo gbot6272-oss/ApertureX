@@ -11074,3 +11074,85 @@ pub fn reorder_collection_photo(
         .map_err(|err| err.to_string())?;
     Ok(order.into_iter().map(|id| id.to_string()).collect())
 }
+
+// ---- Ähnliche Fotos zu einem Referenzfoto (Phase 33 F9) -------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SimilarPhotoDto {
+    pub photo: PhotoDto,
+    /// `0.0..=1.0`, 1 = gleich.
+    pub similarity: f32,
+}
+
+/// Sucht die Fotos, die `photo_id` am ähnlichsten sind.
+///
+/// `color_weight` mischt zwischen Motiv (0) und Farbe (1) — siehe
+/// `similarity.rs`s Moduldoku dazu, warum beides gebraucht wird.
+/// `min_similarity` schneidet die Trefferliste ab, `limit` begrenzt sie.
+///
+/// Gerechnet wird auf den bereits erzeugten Miniaturansichten, wie bei
+/// der Duplikatsuche: Fotos ohne Vorschau werden übersprungen statt
+/// erzwungen dekodiert. Das Referenzfoto selbst taucht nie in den
+/// Treffern auf — es ist sich selbst trivialerweise am ähnlichsten und
+/// würde nur den ersten Platz besetzen.
+#[tauri::command]
+pub fn find_similar_photos(
+    state: State<'_, AppState>,
+    photo_id: String,
+    color_weight: f32,
+    min_similarity: f32,
+    limit: usize,
+) -> Result<Vec<SimilarPhotoDto>, String> {
+    let reference_id = parse_photo_id(photo_id)?;
+    let hasher = image_hasher::HasherConfig::new().to_hasher();
+
+    let fingerprint_of = |id: apx_core::PhotoId| -> Option<crate::similarity::Fingerprint> {
+        let preview = state
+            .catalog
+            .get_preview(id, apx_catalog::PreviewLevel::Thumbnail)
+            .ok()??;
+        let img = image::open(&preview.path).ok()?;
+        let hash = hasher.hash_image(&img);
+        Some(crate::similarity::Fingerprint {
+            hash_bits: hash.as_bytes().to_vec(),
+            color: crate::similarity::color_histogram(img.to_rgba8().as_raw()),
+        })
+    };
+
+    let reference = fingerprint_of(reference_id)
+        .ok_or_else(|| "Für dieses Foto gibt es noch keine Miniaturansicht".to_string())?;
+
+    let photos = state
+        .catalog
+        .search_and_filter_photos(None, &apx_catalog::FilterCriteria::default())
+        .map_err(|err| err.to_string())?;
+
+    let mut scored: Vec<SimilarPhotoDto> = Vec::new();
+    for photo in photos {
+        if photo.id == reference_id {
+            continue;
+        }
+        let Some(fingerprint) = fingerprint_of(photo.id) else {
+            continue;
+        };
+        let score = crate::similarity::similarity(&reference, &fingerprint, color_weight);
+        if score < min_similarity {
+            continue;
+        }
+        scored.push(SimilarPhotoDto {
+            photo: PhotoDto::from(photo),
+            similarity: score,
+        });
+    }
+
+    scored.sort_by(|a, b| {
+        b.similarity
+            .partial_cmp(&a.similarity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            // Bei gleichem Wert der Dateiname, damit die Liste zwischen
+            // zwei Durchläufen nicht springt.
+            .then_with(|| a.photo.filename.cmp(&b.photo.filename))
+    });
+    scored.truncate(limit.max(1));
+    Ok(scored)
+}

@@ -60,6 +60,7 @@ export const en: Record<keyof typeof de, string> = {
   "header.sharpness": "Rate sharpness…",
   "header.metadataPresets": "Metadata presets…",
   "header.watermarkTemplates": "Watermark templates…",
+  "header.similarPhotos": "Find similar photos…",
   "commands.trashSelection": "Move selection to trash",
   "header.settings": "Settings…",
   "header.settingsTitle": "Theme, language, UI scaling, accessibility (Phase 10)",

@@ -191,6 +191,13 @@ export function useCommandRegistry(): CommandEntry[] {
       { id: "fn:metadata-presets", label: t("header.metadataPresets"), category: "templates", run: () => requestCommand("metadata-presets") },
       { id: "fn:watermark-templates", label: t("header.watermarkTemplates"), category: "templates", run: () => requestCommand("watermark-templates") },
       {
+        id: "fn:similar-photos",
+        label: t("header.similarPhotos"),
+        category: "analysis",
+        disabled: selectedPhotoId === null,
+        run: () => requestCommand("similar-photos"),
+      },
+      {
         id: "fn:sharpness",
         label: t("header.sharpness"),
         category: "analysis",

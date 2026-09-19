@@ -51,6 +51,9 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // Schärfe-Bewertung (Phase 33 F3): Rohwert je Foto-ID, aus dem der
     // Mock Rangfolge und Relativwert ableitet.
     sharpnessScores: {} as Record<string, number>,
+    // Ähnliche Fotos (Phase 33 F9): je Foto die beiden Rohähnlichkeiten,
+    // aus denen der Mock nach derselben Formel wie Rust mischt.
+    similarityScores: {} as Record<string, { structure: number; color: number }>,
     // `.apx`-Import/-Export (Phase 5 Schritt 10) — die echten Commands
     // öffnen einen nativen Datei-Dialog im Backend; hier stattdessen fest
     // hinterlegte Ergebnisse, per Fixture steuerbar (siehe
@@ -673,6 +676,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       photosByFolder: Record<string, unknown[]>;
       folderSyncPlan?: { filename: string; change: string; photo_id: string | null }[];
       sharpnessScores?: Record<string, number>;
+      similarityScores?: Record<string, { structure: number; color: number }>;
       exportApxPathResult: string | null;
       exportLrtemplatePathResult: string | null;
       importApxFile: { name: string; tags: string[]; conditions_json: string; edl_subset_json: string } | null;
@@ -2011,6 +2015,34 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           renamed.push(clonePhoto(photo));
         }
         return renamed;
+      }
+
+      // ---- Ähnliche Fotos (Phase 33 F9) -------------------------------
+      // Die Maße selbst (Hamming auf dem Perceptual Hash, halbierte
+      // L1-Distanz auf dem Farbhistogramm, die Mischung dazwischen) sind
+      // in `apx-app`s `similarity`-Tests abgedeckt. Hier liefert die
+      // Fixture je Foto zwei Rohähnlichkeiten, aus denen der Mock nach
+      // derselben Formel mischt — ein Browser-Mock hat keine
+      // Miniaturansichten zum Messen.
+      case "find_similar_photos": {
+        const reference = args.photoId as string;
+        const colorWeight = args.colorWeight as number;
+        const minSimilarity = args.minSimilarity as number;
+        const limit = args.limit as number;
+        const table = (fixtures.similarityScores ?? {}) as Record<
+          string,
+          { structure: number; color: number }
+        >;
+        return allPhotos()
+          .filter((photo) => photo.id !== reference)
+          .map((photo) => {
+            const entry = table[photo.id] ?? { structure: 0, color: 0 };
+            const similarity = entry.structure * (1 - colorWeight) + entry.color * colorWeight;
+            return { photo: clonePhoto(photo), similarity };
+          })
+          .filter((entry) => entry.similarity >= minSimilarity)
+          .sort((a, b) => b.similarity - a.similarity || a.photo.filename.localeCompare(b.photo.filename))
+          .slice(0, Math.max(1, limit));
       }
 
       // ---- Manuelle Reihenfolge (Phase 33 F8) -------------------------

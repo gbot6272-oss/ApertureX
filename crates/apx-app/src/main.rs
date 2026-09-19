@@ -14,6 +14,7 @@ mod import;
 mod metadata_preset;
 mod protocol;
 mod reconcile;
+mod similarity;
 mod state;
 
 use std::path::PathBuf;
@@ -427,6 +428,7 @@ fn main() {
             commands::score_photo_sharpness,
             commands::apply_metadata_preset,
             commands::reorder_collection_photo,
+            commands::find_similar_photos,
             commands::create_stack,
             commands::delete_stack,
             commands::set_stack_cover,

@@ -63,6 +63,7 @@ export const de = {
   "header.sharpness": "Schärfe bewerten…",
   "header.metadataPresets": "Metadaten-Vorgaben…",
   "header.watermarkTemplates": "Wasserzeichen-Vorlagen…",
+  "header.similarPhotos": "Ähnliche Fotos finden…",
   "commands.trashSelection": "Auswahl wegwerfen",
   "header.settings": "Einstellungen…",
   "header.settingsTitle": "Theme, Sprache, UI-Skalierung, Barrierefreiheit (Phase 10)",

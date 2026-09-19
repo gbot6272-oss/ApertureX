@@ -105,6 +105,7 @@ import type {
   FolderSyncPlanDto,
   FolderSyncResultDto,
   SharpnessResultDto,
+  SimilarPhotoDto,
   MetadataPreset,
   MetadataPresetApplyResultDto,
   TrashEntryDto,
@@ -977,6 +978,19 @@ interface LibrarySlice {
   saveMetadataPresetDraft: (name: string) => Promise<void>;
   deleteMetadataPreset: (templateId: string) => Promise<void>;
   applyMetadataPresetToSelection: () => Promise<void>;
+
+  /** Ähnliche Fotos zu einem Referenzfoto (Phase 33 F9, siehe
+   * `SimilarPhotosDialog.tsx`). Gerechnet wird in Rust über
+   * Perceptual-Hash und Farbhistogramm der Miniaturansichten. */
+  similarPhotos: SimilarPhotoDto[];
+  similarPhotosRunning: boolean;
+  similarPhotosError: string | null;
+  /** 0 = nur Motiv, 1 = nur Farbe. */
+  similarityColorWeight: number;
+  similarityThreshold: number;
+  setSimilarityColorWeight: (value: number) => void;
+  setSimilarityThreshold: (value: number) => void;
+  findSimilarToSelected: () => Promise<void>;
 
   /** Schärfe-Bewertung (Phase 33 F3, siehe `SharpnessDialog.tsx`).
    * Gemessen wird in Rust auf der Standardvorschau; hier liegt nur die
@@ -4174,6 +4188,58 @@ export const useAppStore = create<AppStore>()(
       }
       const folderId = get().selectedFolderId;
       if (folderId) await get().loadPhotosForFolder(folderId);
+    },
+
+    similarPhotos: [],
+    similarPhotosRunning: false,
+    similarPhotosError: null,
+    // Vorgabe 0.35: das Motiv gibt den Ton an, die Farbe redet mit.
+    // Reines Motiv fände auch die Schwarzweiß-Fassung, reine Farbe jedes
+    // beliebige Foto mit demselben Himmel.
+    similarityColorWeight: 0.35,
+    similarityThreshold: 0.6,
+
+    setSimilarityColorWeight: (value) => {
+      set((state) => {
+        state.similarityColorWeight = Math.min(1, Math.max(0, value));
+      });
+    },
+
+    setSimilarityThreshold: (value) => {
+      set((state) => {
+        state.similarityThreshold = Math.min(1, Math.max(0, value));
+      });
+    },
+
+    findSimilarToSelected: async () => {
+      const photoId = get().selectedPhotoId;
+      if (!photoId) {
+        set((state) => {
+          state.similarPhotos = [];
+        });
+        return;
+      }
+      set((state) => {
+        state.similarPhotosRunning = true;
+        state.similarPhotosError = null;
+      });
+      try {
+        const results = await api.findSimilarPhotos(
+          photoId,
+          get().similarityColorWeight,
+          get().similarityThreshold,
+          60,
+        );
+        set((state) => {
+          state.similarPhotos = results;
+          state.similarPhotosRunning = false;
+        });
+      } catch (err) {
+        set((state) => {
+          state.similarPhotosRunning = false;
+          state.similarPhotosError = String(err);
+        });
+      }
     },
 
     sharpnessResults: [],

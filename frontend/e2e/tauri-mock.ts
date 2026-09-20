@@ -45,6 +45,16 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     catalogStatus: { catalog_path: "mock-catalog.sqlite3", folder_count: 0, photo_count: 0 },
     folders: [] as unknown[],
     photosByFolder: {} as Record<string, unknown[]>,
+    // Ordner-Abgleich (Phase 33 F2): Der Mock kennt kein Dateisystem, die
+    // Fixture ist deshalb der Ordnerzustand, den der Test behauptet.
+    folderSyncPlan: [] as { filename: string; change: string; photo_id: string | null }[],
+    // Schärfe-Bewertung (Phase 33 F3): Rohwert je Foto-ID, aus dem der
+    // Mock Rangfolge und Relativwert ableitet.
+    sharpnessScores: {} as Record<string, number>,
+    stacks: [] as { id: string; name: string | null; cover_photo_id: string | null; photo_ids: string[] }[],
+    // Ähnliche Fotos (Phase 33 F9): je Foto die beiden Rohähnlichkeiten,
+    // aus denen der Mock nach derselben Formel wie Rust mischt.
+    similarityScores: {} as Record<string, { structure: number; color: number }>,
     // `.apx`-Import/-Export (Phase 5 Schritt 10) — die echten Commands
     // öffnen einen nativen Datei-Dialog im Backend; hier stattdessen fest
     // hinterlegte Ergebnisse, per Fixture steuerbar (siehe
@@ -303,6 +313,16 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     rating: number;
     flag: number;
     color_label: string | null;
+    // Erweiterte Katalogfilter (Phase 33 F7) — `[key: string]: unknown`
+    // deckt sie zwar ab, aber ohne Typ liest sich jeder Zugriff wie ein
+    // Ratespiel.
+    lens?: string | null;
+    iso?: number | null;
+    captured_at?: string | null;
+    width?: number | null;
+    height?: number | null;
+    orientation?: number;
+    media_kind?: string;
     [key: string]: unknown;
   }
   interface MockCollection {
@@ -333,7 +353,12 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     cover_photo_id: string | null;
     photo_ids: string[];
   }
-  const stacks: MockStack[] = [];
+  // Stapel im Raster (Phase 33 F10): vorbelegbar über die Fixtures,
+  // damit ein Test das Raster mit Stapeln sehen kann, ohne sie erst
+  // durch die Oberfläche anlegen zu müssen.
+  const stacks: MockStack[] = ((w.__mockFixtures as { stacks?: MockStack[] }).stacks ?? []).map(
+    (stack) => ({ ...stack }),
+  );
   let nextStackId = 1;
 
   const virtualCopiesBySource: Record<string, string[]> = {};
@@ -473,6 +498,25 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     return allPhotos().find((p) => p.id === photoId);
   }
 
+  /** Papierkorb (Phase 33 F1). Der Mock bildet nach, was Rust tut: das
+   * Foto verschwindet aus `photosByFolder` (dort liest das Raster) und
+   * liegt stattdessen hier, mit Grund und Zeitpunkt. Wiederherstellen
+   * schiebt es in seinen Ursprungsordner zurück — deshalb merkt sich
+   * der Eintrag die Ordner-ID, die Rust aus der Zeile selbst liest. */
+  const trashed: { photo: MockPhoto; folderId: string; deleted_at: string; reason: string }[] = [];
+
+  function trashPhoto(photoId: string, reason: string): boolean {
+    const fixtures = w.__mockFixtures as { photosByFolder: Record<string, MockPhoto[]> };
+    for (const folderId of Object.keys(fixtures.photosByFolder)) {
+      const photo = fixtures.photosByFolder[folderId].find((p) => p.id === photoId);
+      if (!photo) continue;
+      fixtures.photosByFolder[folderId] = fixtures.photosByFolder[folderId].filter((p) => p.id !== photoId);
+      trashed.unshift({ photo, folderId, deleted_at: new Date().toISOString(), reason });
+      return true;
+    }
+    return false;
+  }
+
   /** Mock-Gegenstück zu `apx-app::commands::import_stack_result_photo`
    * (Phase 9 Schritt 8) — legt ein synthetisches Ergebnisfoto im selben
    * Ordner wie das erste Quellfoto an und verknüpft es per Stapel mit
@@ -501,14 +545,53 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   /** Gemeinsame Kriterien-Prüfung für `filter_photos`/`search_and_filter_photos`
    * (Schritt 8.4) — spiegelt `crates/apx-catalog/src/repository/search.rs`s
    * `build_filter_clause`. */
-  function matchesFilterCriteria(
-    photo: MockPhoto,
-    criteria: { rating_at_least?: number; flag?: number; color_label?: string; camera_model?: string },
-  ): boolean {
+  /** Die Kriterien, die `apx_catalog::FilterCriteria` spiegelt. */
+  interface MockFilterCriteria {
+    rating_at_least?: number;
+    flag?: number;
+    color_label?: string;
+    camera_model?: string;
+    lens?: string;
+    iso_min?: number;
+    iso_max?: number;
+    captured_from?: number;
+    captured_to?: number;
+    aspect?: "landscape" | "portrait" | "square";
+    media_kind?: string;
+  }
+
+  function matchesFilterCriteria(photo: MockPhoto, criteria: MockFilterCriteria): boolean {
     if (criteria.rating_at_least !== undefined && photo.rating < criteria.rating_at_least) return false;
     if (criteria.flag !== undefined && photo.flag !== criteria.flag) return false;
     if (criteria.color_label !== undefined && photo.color_label !== criteria.color_label) return false;
     if (criteria.camera_model !== undefined && photo.camera_model !== criteria.camera_model) return false;
+
+    // Erweiterte Katalogfilter (Phase 33 F7). Dieselben Regeln wie in
+    // `repository::search`: ein Foto ohne den jeweiligen Wert faellt aus
+    // dem Filter heraus, statt vorsichtshalber drinzubleiben.
+    if (criteria.lens !== undefined && photo.lens !== criteria.lens) return false;
+    if (criteria.iso_min !== undefined && (photo.iso === null || photo.iso === undefined || photo.iso < criteria.iso_min))
+      return false;
+    if (criteria.iso_max !== undefined && (photo.iso === null || photo.iso === undefined || photo.iso > criteria.iso_max))
+      return false;
+    if (criteria.captured_from !== undefined || criteria.captured_to !== undefined) {
+      if (!photo.captured_at) return false;
+      const seconds = Math.floor(new Date(photo.captured_at).getTime() / 1000);
+      if (criteria.captured_from !== undefined && seconds < criteria.captured_from) return false;
+      if (criteria.captured_to !== undefined && seconds > criteria.captured_to) return false;
+    }
+    if (criteria.aspect !== undefined) {
+      const width = photo.width;
+      const height = photo.height;
+      if (!width || !height) return false;
+      // Wie in Rust: bei EXIF-Orientierung 5..8 sind die angezeigten
+      // Kanten vertauscht.
+      const rotated = typeof photo.orientation === "number" && photo.orientation >= 5 && photo.orientation <= 8;
+      const [w, h] = rotated ? [height, width] : [width, height];
+      const actual = w > h ? "landscape" : w < h ? "portrait" : "square";
+      if (actual !== criteria.aspect) return false;
+    }
+    if (criteria.media_kind !== undefined && (photo.media_kind ?? "photo") !== criteria.media_kind) return false;
     return true;
   }
 
@@ -597,6 +680,9 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       catalogStatus: unknown;
       folders: unknown[];
       photosByFolder: Record<string, unknown[]>;
+      folderSyncPlan?: { filename: string; change: string; photo_id: string | null }[];
+      sharpnessScores?: Record<string, number>;
+      similarityScores?: Record<string, { structure: number; color: number }>;
       exportApxPathResult: string | null;
       exportLrtemplatePathResult: string | null;
       importApxFile: { name: string; tags: string[]; conditions_json: string; edl_subset_json: string } | null;
@@ -1181,24 +1267,14 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           .map(clonePhoto);
       }
       case "filter_photos": {
-        const criteria = args.criteria as {
-          rating_at_least?: number;
-          flag?: number;
-          color_label?: string;
-          camera_model?: string;
-        };
+        const criteria = args.criteria as MockFilterCriteria;
         return allPhotos()
           .filter((p) => matchesFilterCriteria(p, criteria))
           .map(clonePhoto);
       }
       case "search_and_filter_photos": {
         const query = (args.query as string | null)?.trim().toLowerCase();
-        const criteria = args.criteria as {
-          rating_at_least?: number;
-          flag?: number;
-          color_label?: string;
-          camera_model?: string;
-        };
+        const criteria = args.criteria as MockFilterCriteria;
         return allPhotos()
           .filter((p) => (!query ? true : p.filename.toLowerCase().includes(query)))
           .filter((p) => matchesFilterCriteria(p, criteria))
@@ -1945,6 +2021,177 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
           renamed.push(clonePhoto(photo));
         }
         return renamed;
+      }
+
+      // ---- Ähnliche Fotos (Phase 33 F9) -------------------------------
+      // Die Maße selbst (Hamming auf dem Perceptual Hash, halbierte
+      // L1-Distanz auf dem Farbhistogramm, die Mischung dazwischen) sind
+      // in `apx-app`s `similarity`-Tests abgedeckt. Hier liefert die
+      // Fixture je Foto zwei Rohähnlichkeiten, aus denen der Mock nach
+      // derselben Formel mischt — ein Browser-Mock hat keine
+      // Miniaturansichten zum Messen.
+      case "find_similar_photos": {
+        const reference = args.photoId as string;
+        const colorWeight = args.colorWeight as number;
+        const minSimilarity = args.minSimilarity as number;
+        const limit = args.limit as number;
+        const table = (fixtures.similarityScores ?? {}) as Record<
+          string,
+          { structure: number; color: number }
+        >;
+        return allPhotos()
+          .filter((photo) => photo.id !== reference)
+          .map((photo) => {
+            const entry = table[photo.id] ?? { structure: 0, color: 0 };
+            const similarity = entry.structure * (1 - colorWeight) + entry.color * colorWeight;
+            return { photo: clonePhoto(photo), similarity };
+          })
+          .filter((entry) => entry.similarity >= minSimilarity)
+          .sort((a, b) => b.similarity - a.similarity || a.photo.filename.localeCompare(b.photo.filename))
+          .slice(0, Math.max(1, limit));
+      }
+
+      // ---- Manuelle Reihenfolge (Phase 33 F8) -------------------------
+      // Die Off-by-one-Korrektur (Zielindex vor gegen nach dem Entfernen)
+      // ist in `apx-catalog`s `plan_reorder`-Tests abgedeckt; hier wird
+      // dieselbe Regel nachgebildet, damit die Oberfläche eine
+      // plausible neue Reihenfolge zurückbekommt.
+      case "reorder_collection_photo": {
+        const collectionId = args.collectionId as string;
+        const photoId = args.photoId as string;
+        const targetIndex = args.targetIndex as number;
+        const ids = collectionPhotoIds[collectionId] ?? [];
+        const from = ids.indexOf(photoId);
+        if (from < 0) throw new Error(`Test-Stub: Foto '${photoId}' ist nicht in dieser Sammlung`);
+        const next = [...ids];
+        next.splice(from, 1);
+        const adjusted = targetIndex > from ? targetIndex - 1 : targetIndex;
+        next.splice(Math.min(adjusted, next.length), 0, photoId);
+        collectionPhotoIds[collectionId] = next;
+        return next;
+      }
+
+      // ---- Metadaten-Vorgaben (Phase 33 F4) ---------------------------
+      // Die Auflösungsregeln (Platzhalter, „nicht gesetzt" gegen
+      // „leeren", Stichwort-Modus) sind in `apx-app`s
+      // `metadata_preset`-Tests abgedeckt. Der Mock schreibt nur so weit
+      // in die Fixture-Fotos zurück, dass die Oberfläche das Ergebnis
+      // zeigen kann.
+      case "apply_metadata_preset": {
+        const ids = args.photoIds as string[];
+        const preset = JSON.parse(args.presetJson as string) as {
+          title: string | null;
+          caption: string | null;
+          copyright: string | null;
+          creator: string | null;
+          keywords: string[];
+          keyword_mode: string;
+        };
+        const year = new Date().getFullYear();
+        let keywordsSet = 0;
+        for (const id of ids) {
+          const photo = findPhoto(id);
+          if (!photo) continue;
+          for (const field of ["title", "caption", "copyright", "creator"] as const) {
+            const value = preset[field];
+            if (value === null) continue;
+            (photo as unknown as Record<string, unknown>)[field] = value
+              .replace("{year}", String(year))
+              .replace("{stem}", (photo.filename ?? "").replace(/\.[^.]+$/, ""));
+          }
+          keywordsSet += preset.keywords.length;
+        }
+        return { photos: ids.length, keywords_set: keywordsSet, keywords_removed: 0 };
+      }
+
+      // ---- Schärfe-Bewertung (Phase 33 F3) ----------------------------
+      // Die Messung selbst (Laplace je Kachel, Kontrastnormierung,
+      // Perzentil) ist in `apx-stacking`s Rust-Tests abgedeckt. Hier
+      // liefert die Fixture die Rangfolge, die der Dialog darstellen
+      // soll — ein Browser-Mock hat keine Vorschaubilder zum Messen.
+      case "score_photo_sharpness": {
+        const ids = args.photoIds as string[];
+        const scores = (fixtures.sharpnessScores ?? {}) as Record<string, number>;
+        const entries = ids.map((id) => ({ id, score: scores[id] ?? 1 }));
+        entries.sort((a, b) => b.score - a.score);
+        const best = entries[0]?.score ?? 0;
+        return entries.map((entry, index) => ({
+          photo_id: entry.id,
+          filename: findPhoto(entry.id)?.filename ?? "unbekannt",
+          score: entry.score,
+          mean: entry.score * 0.8,
+          relative: best > 0 ? entry.score / best : 0,
+          rank: index + 1,
+        }));
+      }
+
+      // ---- Ordner-Abgleich (Phase 33 F2) ------------------------------
+      // Der Mock kennt kein Dateisystem. `folderSyncPlan` in den Fixtures
+      // ist deshalb der Ordnerzustand, den der Test behauptet — genau die
+      // Grenze, die `installTauriMock`s Moduldoku beschreibt.
+      case "preview_folder_sync": {
+        const entries = (fixtures.folderSyncPlan ?? []) as { filename: string; change: string; photo_id: string | null }[];
+        const count = (change: string) => entries.filter((entry) => entry.change === change).length;
+        return {
+          entries,
+          new_count: count("new"),
+          vanished_count: count("vanished"),
+          modified_count: count("modified"),
+          returned_count: count("returned"),
+        };
+      }
+      case "apply_folder_sync": {
+        const entries = (fixtures.folderSyncPlan ?? []) as { filename: string; change: string; photo_id: string | null }[];
+        const returned = entries.filter((entry) => entry.change === "returned").length;
+        const vanished = entries.filter((entry) => entry.change === "vanished");
+        if (args.trashVanished) {
+          for (const entry of vanished) if (entry.photo_id) trashPhoto(entry.photo_id, "missing");
+        }
+        const importStarted =
+          Boolean(args.importNew) && entries.some((entry) => entry.change === "new" || entry.change === "modified");
+        // Angewendet ist angewendet: der behauptete Ordnerzustand gilt
+        // danach als eingearbeitet, sonst meldete die zweite Vorschau
+        // dieselben Abweichungen noch einmal.
+        fixtures.folderSyncPlan = [];
+        return { returned, handled_vanished: vanished.length, import_started: importStarted };
+      }
+
+      // ---- Papierkorb (Phase 33 F1) -----------------------------------
+      case "trash_photos": {
+        const ids = args.photoIds as string[];
+        const reason = (args.reason as string) ?? "manual";
+        return ids.filter((id) => trashPhoto(id, reason)).length;
+      }
+      case "restore_photos": {
+        const ids = args.photoIds as string[];
+        const fixtures = w.__mockFixtures as { photosByFolder: Record<string, MockPhoto[]> };
+        let restored = 0;
+        for (const id of ids) {
+          const index = trashed.findIndex((entry) => entry.photo.id === id);
+          if (index < 0) continue;
+          const [entry] = trashed.splice(index, 1);
+          fixtures.photosByFolder[entry.folderId] = [...(fixtures.photosByFolder[entry.folderId] ?? []), entry.photo];
+          restored += 1;
+        }
+        return restored;
+      }
+      case "list_trash":
+        return trashed.map((entry) => ({
+          photo: clonePhoto(entry.photo),
+          deleted_at: entry.deleted_at,
+          reason: entry.reason,
+        }));
+      case "empty_trash": {
+        const ids = args.photoIds as string[];
+        const targets = ids.length > 0 ? ids : trashed.map((entry) => entry.photo.id);
+        let purged = 0;
+        for (const id of targets) {
+          const index = trashed.findIndex((entry) => entry.photo.id === id);
+          if (index < 0) continue;
+          trashed.splice(index, 1);
+          purged += 1;
+        }
+        return { purged, failed_files: [] };
       }
 
       // ---- Vorlagen (Phase 8 Schritt 8) -------------------------------

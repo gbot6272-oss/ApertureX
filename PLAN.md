@@ -1766,3 +1766,27 @@ Entscheidungen in `DECISIONS.md` ADR-0065.
   EDL-Feld, bit-genau rückwärtskompatibel.
 - [x] F9. **Sammlungs-Board** zum Sortieren per Ziehen.
 - [x] F10. **Export-Vorschau** mit Größenabschätzung und Spanne.
+
+## Phase 33 — Zehn Lücken geschlossen
+
+Zehn Funktionen, jede aus einem im Code nachgewiesenen Befund, nicht aus
+einer Wunschliste. Die Recherche lief über englische Bezeichner statt
+deutscher Beschriftungen — in Phase 32 hatten sich drei vermeintliche
+Lücken als bereits gebaute Funktionen herausgestellt, weil nach der
+Oberflächensprache gesucht worden war.
+
+| Schritt | Inhalt | Ergebnis |
+| --- | --- | --- |
+| F1 | Papierkorb mit Wiederherstellen (Migration 14) | 13 Rust-, 3 Playwright-Tests |
+| F2 | Ordner abgleichen (`folder_sync`) | 13 Rust-, 3 Playwright-Tests |
+| F3 | Schärfe bewerten (`apx_stacking::sharpness`) | 11 Rust-, 2 Playwright-Tests |
+| F4 | Metadaten-Vorgaben (`metadata_preset`) | 14 Rust-, 3 Playwright-Tests |
+| F5 | Wasserzeichen-Vorlagen (`watermark_layout`) | 20 Rust-, 15 Vitest-, 3 Playwright-Tests |
+| F6 | RGB-Parade (`lib/parade.ts`) | 12 Vitest-, 1 Playwright-Test |
+| F7 | Erweiterte Katalogfilter | 10 Rust-, 5 Playwright-Tests |
+| F8 | Manuelle Reihenfolge in Sammlungen | 11 Rust-, 3 Playwright-Tests |
+| F9 | Ähnliche Fotos zu einem Referenzfoto (`similarity`) | 12 Rust-, 4 Playwright-Tests |
+| F10 | Stapel im Raster ein-/ausklappen + Abnahme | 13 Vitest-, 3 Playwright-Tests |
+
+Die Entwurfsentscheidungen samt Begründung stehen in `DECISIONS.md`
+ADR-0066, inklusive der vier bewusst offen gelassenen Lücken.

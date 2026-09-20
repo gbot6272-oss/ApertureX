@@ -117,6 +117,7 @@ export default function App() {
   const refreshFolders = useAppStore((s) => s.refreshFolders);
   const refreshCatalogStatus = useAppStore((s) => s.refreshCatalogStatus);
   const loadUiSettings = useAppStore((s) => s.loadUiSettings);
+  const refreshStacks = useAppStore((s) => s.refreshStacks);
   const uiSettings = useAppStore((s) => s.uiSettings);
   const saveUiSettings = useAppStore((s) => s.saveUiSettings);
   const settingsDialogOpen = useAppStore((s) => s.settingsDialogOpen);
@@ -143,6 +144,8 @@ export default function App() {
   const selectedPhotoIsVideo = activeFolderPhotos?.find((p) => p.id === selectedPhotoId)?.media_kind === "video";
   const setPhotoRating = useAppStore((s) => s.setPhotoRating);
   const setPhotoFlag = useAppStore((s) => s.setPhotoFlag);
+  const trashSelectedPhotos = useAppStore((s) => s.trashSelectedPhotos);
+  const compareViewOpen = useAppStore((s) => s.compareViewPhotoIds.length > 0);
   const developPanelOpen = useAppStore((s) => s.developPanelOpen);
   const undoLibraryAction = useAppStore((s) => s.undoLibraryAction);
   const redoLibraryAction = useAppStore((s) => s.redoLibraryAction);
@@ -166,7 +169,11 @@ export default function App() {
     void refreshFolders();
     void refreshCatalogStatus();
     void loadUiSettings();
-  }, [refreshFolders, refreshCatalogStatus, loadUiSettings]);
+    // Stapel (Phase 33 F10): das Raster gruppiert danach, also müssen
+    // sie beim Start da sein — bisher wurden sie nur geladen, wenn man
+    // den Organisieren-Dialog öffnete.
+    void refreshStacks();
+  }, [refreshFolders, refreshCatalogStatus, loadUiSettings, refreshStacks]);
 
   // Barrierefreiheit (Phase 10 Schritt 6): Kontrastmodus/UI-Skalierung/
   // reduzierte Bewegung wirken app-weit auf `<html>`, nicht nur innerhalb
@@ -337,6 +344,20 @@ export default function App() {
         void setPhotoFlag(selectedPhotoId, 1);
       } else if (selectedPhotoId && matchesBinding(event, "flag-reject")) {
         void setPhotoFlag(selectedPhotoId, -1);
+      } else if (selectedPhotoId && compareViewOpen && matchesBinding(event, "trash-selection")) {
+        // In der Vergleichsansicht heißt Entf seit Phase 31 Schritt 8
+        // „aus dem Vergleich nehmen" — das hat dort den Vorrang, und der
+        // Vergleich hat seinen eigenen Tastatur-Handler dafür. Hier nur
+        // aus dem Weg gehen, statt zusätzlich in den Papierkorb zu
+        // werfen: zwei Bedeutungen auf einer Taste wären ein Datenverlust
+        // mit Ansage.
+      } else if (selectedPhotoId && matchesBinding(event, "trash-selection")) {
+        // Kein Rückfrage-Dialog: das Foto landet im Papierkorb, nicht im
+        // Nichts (Phase 33 F1). Die Rückfrage gehört an die eine Stelle,
+        // an der wirklich etwas verloren geht — das Leeren des
+        // Papierkorbs.
+        event.preventDefault();
+        void trashSelectedPhotos("manual");
       }
     }
 
@@ -347,6 +368,8 @@ export default function App() {
     selectedPhotoId,
     setPhotoRating,
     setPhotoFlag,
+    trashSelectedPhotos,
+    compareViewOpen,
     developPanelOpen,
     undoLibraryAction,
     redoLibraryAction,

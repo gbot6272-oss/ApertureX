@@ -7253,3 +7253,115 @@ füllt stattdessen die vorhandene Mehrfachauswahl), ein Objektivfilter
 Erkennung (F7, siehe oben) und ein WGSL-Zwilling für den Rahmen (F8).
 Jede dieser Lücken steht an ihrer Stelle im Code, statt durch ein
 Bedienelement überdeckt zu werden, das nichts tut.
+
+## ADR-0066: Phase 33 — zehn Funktionen, die Lücken schließen
+
+**Kontext.** Nach Phase 32 stand die Frage, was im Katalog tatsächlich
+fehlt und nicht nur anders heißt. Die Recherche lief diesmal über
+englische Bezeichner statt deutscher Beschriftungen — in Phase 32 hatten
+sich drei vermeintliche Lücken als bereits gebaute Funktionen
+herausgestellt, weil nach der Oberflächensprache gesucht worden war.
+Übrig blieben zehn Befunde, jeder im Code nachgewiesen.
+
+**Die zehn Funktionen und ihre jeweils entscheidende Wahl:**
+
+**F1 — Papierkorb.** `delete_photo` gab es nicht; nur
+`delete_photo_note`. Weggeworfene Fotos bekommen jetzt ein
+`deleted_at` (Migration 14) statt gelöscht zu werden. Eine eigene
+`trash`-Tabelle mit einer Kopie der Zeile wäre die Alternative gewesen;
+dagegen sprach, dass an einem Foto ein Dutzend Tabellen per
+`ON DELETE CASCADE` hängen — ein echtes DELETE reißt sie alle mit, und
+ein „Wiederherstellen" könnte davon nur die Foto-Zeile zurückbringen,
+nicht die daran hängende Arbeit. Der Preis ist, dass jede auflistende
+Abfrage `deleted_at IS NULL` mitführen muss; dafür gibt es genau eine
+Konstante (`repository::photos::NOT_TRASHED`), und ein Test prüft, dass
+ein weggeworfenes Foto wirklich aus Ordnerliste, Volltextsuche,
+Attributfilter und Statistik verschwindet.
+
+**F2 — Ordner abgleichen.** `reconcile.rs` prüfte nur „ist die Datei
+noch da?", der Import nur die Gegenrichtung. Was der Katalog *mehr* hat
+als der Ordner, sah keiner von beiden. Die Planung ist jetzt eine reine
+Funktion über zwei Listen — dieselbe Trennung wie bei der
+Stapel-Umbenennung aus Phase 32 F4, damit Vorschau und Anwenden
+garantiert dasselbe rechnen. Eine Änderung heißt Größe **oder**
+Zeitstempel: nur die Größe übersieht ein verlustfrei gedrehtes JPEG, nur
+der Zeitstempel schlägt bei einem Backup-Rückspiel falsch an. Sicher
+wäre nur ein Hash — und den für jede Datei jedes Mal zu lesen macht aus
+dem Abgleich einen Neu-Import.
+
+**F3 — Schärfe bewerten.** Kein Schärfemaß für ein ganzes Bild
+existierte. Gemessen wird je 64px-Kachel und als 90. Perzentil
+ausgewertet, nicht als Bildmittel: ein Porträt mit offener Blende ist zu
+80 % unscharf und soll es sein. Die Laplace-Energie wird durch die
+Varianz derselben Kachel geteilt, sonst gewönne jedes Mal die hellere
+Aufnahme, auch die unschärfere.
+
+**F4 — Metadaten-Vorgaben.** Keine neue Tabelle: `templates` ist seit
+Migration 6 der Ablageort für „ein JSON unter einem Namen". Die
+Entscheidung, an der alles hängt, ist `Option<String>` je Feld — `None`
+heißt „nicht Teil der Vorgabe", `Some("")` heißt „leeren". Ohne diese
+Unterscheidung hätte die Vorgabe, die nur Urheber und Copyright
+nachträgt, beim ersten Anwenden alle einzeln geschriebenen
+Bildunterschriften mitgenommen.
+
+**F5 — Wasserzeichen-Vorlagen.** Wasserzeichen gab es seit Phase 8, aber
+mit Schriftgröße und Rand in absoluten Pixeln — auf einem 6000-px-Export
+ein Fliegenschiss, auf einem 800-px-Export ein Balken. Genau deshalb
+ließen sie sich nicht als Vorlage speichern. Jetzt Prozent **der
+kürzeren Kante** (nur so ist Hoch- und Querformat gleich), dazu
+Kachelung mit Drehung. Reihenfolge ist Absicht: erst skalieren, dann
+drehen — andersherum mittelte die Skalierung die Zwischenwerte der
+Drehung noch einmal und die Kanten würden treppig.
+
+**F6 — RGB-Parade.** Die Wellenform aus Phase 14 legt die Kanäle
+übereinander und kombiniert sie per Maximum; wo zwei dicht
+beieinanderliegen, verdeckt einer den anderen — genau dort, wo ein
+Farbstich entsteht. Neu ist nicht nur die Darstellung nebeneinander,
+sondern die Auswertung: Schwarz- und Weißpunkt je Kanal über das
+0,5-%-Perzentil (ein einziger ausgefressener Pixel verschöbe ein
+Minimum auf 0) und der benannte Farbstich je Tonwertbereich. Fehlt einem
+Kanal in einem Bereich jedes Pixel, wird dort kein Stich gemeldet — aus
+zwei von drei Kanälen lässt sich keiner ablesen; dafür gibt es die
+Gesamtzeile.
+
+**F7 — Erweiterte Katalogfilter.** Schließt die beiden in ADR-0065
+ausdrücklich offengelassenen Lücken (Datum aus F3, Objektiv aus F5) und
+ergänzt ISO-Bereich, Seitenverhältnis und Medienart. Das
+Seitenverhältnis heißt `Aspect` und nicht `orientation`, weil die
+`photos`-Tabelle diese Spalte bereits für das EXIF-Drehungs-Flag
+verwendet; bei den Werten 5 bis 8 steht das Bild in der Datei quer und
+auf dem Schirm hochkant, und gefiltert wird nach dem, was man sieht.
+`FilterField` und der Regelbaum haben dieselben Felder bekommen — ohne
+das hätte die Umwandlung `FilterCriteria` → `FilterNode` die neuen
+Filter beim Speichern einer intelligenten Sammlung verloren. Dafür
+brauchte es den neuen Operator `AtMost`.
+
+**F8 — Manuelle Reihenfolge.** `collection_photos.position` gab es seit
+Migration 3 und bestimmte die Anzeigereihenfolge — nur ändern ließ sie
+sich nicht. Beim Speichern werden alle Positionen neu als 0..n-1
+geschrieben statt Bruchzahlen zwischen die Nachbarn zu setzen: das
+Lücken-Verfahren verschiebt die Neuvergabe nur, bis keine ganze Zahl
+mehr passt. Nur in einer Sammlung, nicht im Ordner — der hat die
+Reihenfolge des Dateisystems.
+
+**F9 — Ähnliche Fotos zu einem Referenzfoto.** Die Duplikatsuche
+gruppiert alle gegen alle, ohne Referenz und damit ohne Rangfolge. Hier
+braucht es zwei Maße: ein Perceptual Hash ist fast farbenblind — ein
+Foto und seine Schwarzweiß-Fassung sind für ihn nahezu identisch, und
+wer „ähnliche" sagt, meint oft genau das Gegenteil. Struktur und Farbe
+werden beide gerechnet, ein Regler mischt.
+
+**F10 — Stapel im Raster.** Stapel gab es seit Phase 9, im Raster sah
+man davon nichts. Ein eingeklappter Stapel steht an der Stelle seines
+ersten sichtbaren Mitglieds (sonst würde Einklappen das Raster
+umsortieren), gezählt wird nur, was sichtbar ist (die volle Zahl wäre
+ein Versprechen auf weggefilterte Fotos), und ist das Deckblatt
+weggefiltert, übernimmt das erste sichtbare Mitglied.
+
+**Bewusst offen geblieben.** Ein automatisches Leeren des Papierkorbs
+nach N Tagen (die Abfrage dafür steht, der Auslöser fehlt); eine
+Umbenennungs-Erkennung beim Ordner-Abgleich (bräuchte einen
+Inhaltsvergleich, und ein falsch geratenes „dieselbe Datei" würde
+Bearbeitungen dem falschen Foto zuschlagen); die Schärfe-Bewertung auf
+dem Original statt auf der Vorschau; eine Vorschau der echten Schrift im
+Wasserzeichen-Dialog. Jede dieser Lücken steht an ihrer Stelle im Code.

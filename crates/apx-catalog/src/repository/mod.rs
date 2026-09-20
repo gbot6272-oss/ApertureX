@@ -20,3 +20,4 @@ pub(crate) mod stacks;
 pub(crate) mod stats;
 pub(crate) mod tag_rules;
 pub(crate) mod templates;
+pub(crate) mod trash;

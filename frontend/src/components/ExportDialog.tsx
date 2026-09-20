@@ -1,14 +1,23 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { estimateExportSize, totalBytes } from "../lib/exportEstimate";
 import { formatBytes } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { useShallow } from "zustand/react/shallow";
 import { selectActivePhotos } from "../store";
-import type { ExportFormat, ExportPhotoOptions, IccProfileChoice, WatermarkPosition } from "../lib/tauri";
+import type { ExportFormat, ExportPhotoOptions, IccProfileChoice, TemplateDto, WatermarkPosition } from "../lib/tauri";
 import { pickFilePath, selectFolderDialog } from "../lib/tauri";
+import {
+  DEFAULT_WATERMARK_TEMPLATE,
+  templateToExportOptions,
+  type WatermarkTemplate,
+} from "../lib/watermarkTemplate";
 import { useAppStore } from "../store";
 import { Sheet } from "./ui/Sheet";
+
+/** Stabile leere Liste — ein `[]`-Literal im Selektor löste bei jedem
+ * Render ein neues Objekt und damit eine Endlosschleife aus. */
+const EMPTY_TEMPLATES: TemplateDto[] = [];
 import { SuccessSpark } from "./ui/SuccessSpark";
 
 interface ExportDialogProps {
@@ -49,6 +58,8 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
   const exportPhotos = useAppStore((s) => s.exportPhotos);
   const exportPhotosToDestinations = useAppStore((s) => s.exportPhotosToDestinations);
   const toggleExportQueuePause = useAppStore((s) => s.toggleExportQueuePause);
+  const watermarkTemplates = useAppStore((s) => s.templatesByKind.watermark ?? EMPTY_TEMPLATES);
+  const refreshTemplates = useAppStore((s) => s.refreshTemplates);
 
   const FORMAT_LABELS: Record<ExportFormat, string> = {
     jpeg: "JPEG",
@@ -95,8 +106,18 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
   const [watermarkImagePath, setWatermarkImagePath] = useState("");
   const [watermarkPosition, setWatermarkPosition] = useState<WatermarkPosition>("bottom_right");
   const [watermarkOpacity, setWatermarkOpacity] = useState(0.7);
+  // Wasserzeichen-Vorlage (Phase 33 F5) — ausgewählt heißt: die
+  // relativen Werte der Vorlage gelten statt der Regler hier drüber.
+  // Bewusst kein Zusammenmischen: eine Vorlage, die man nur halb
+  // übernimmt, ist keine Vorlage mehr, und man sähe dem Dialog nicht
+  // an, welcher Wert woher kommt.
+  const [watermarkTemplateId, setWatermarkTemplateId] = useState("");
   const [metadataMake, setMetadataMake] = useState("");
   const [metadataCopyright, setMetadataCopyright] = useState("");
+
+  useEffect(() => {
+    if (open) void refreshTemplates("watermark");
+  }, [open, refreshTemplates]);
 
   async function handlePickDestFolder() {
     const path = await selectFolderDialog();
@@ -138,7 +159,16 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
       if (iccProfile === "custom") options.iccProfilePath = iccProfilePath;
     }
 
-    if (watermarkMode === "text" && watermarkText && watermarkFontPath) {
+    const chosenTemplate = watermarkTemplates.find((entry) => entry.id === watermarkTemplateId);
+    if (chosenTemplate) {
+      try {
+        const parsed = JSON.parse(chosenTemplate.payload_json) as Partial<WatermarkTemplate>;
+        Object.assign(options, templateToExportOptions({ ...DEFAULT_WATERMARK_TEMPLATE, ...parsed }));
+      } catch {
+        // Eine beschädigte Vorlage darf den Export nicht verhindern —
+        // dann eben ohne Wasserzeichen, sichtbar im Auswahlfeld.
+      }
+    } else if (watermarkMode === "text" && watermarkText && watermarkFontPath) {
       options.watermarkText = watermarkText;
       options.watermarkFontPath = watermarkFontPath;
       options.watermarkPosition = watermarkPosition;
@@ -443,6 +473,29 @@ export function ExportDialog({ open, photoIds, onClose }: ExportDialogProps) {
 
       <fieldset className="mb-3 flex flex-col gap-1">
         <legend className="mb-1 text-xs font-medium text-text-secondary">{t("exportDialog.watermark")}</legend>
+        <label className="mb-1 flex flex-col gap-1 text-xs text-text-secondary">
+          Gespeicherte Vorlage
+          <select
+            value={watermarkTemplateId}
+            onChange={(e) => setWatermarkTemplateId(e.target.value)}
+            aria-label="Wasserzeichen-Vorlage"
+            data-testid="export-watermark-template"
+            className="rounded border border-border bg-bg-panel px-2 py-1 text-xs"
+          >
+            <option value="">Keine — Einstellungen hier verwenden</option>
+            {watermarkTemplates.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {watermarkTemplateId !== "" && (
+          <p className="mb-1 text-[11px] text-text-muted">
+            Die Vorlage gilt — Größe und Rand in Prozent der kürzeren Kante, also auf jeder Exportgröße gleich. Die
+            Einstellungen darunter sind währenddessen ohne Wirkung.
+          </p>
+        )}
         <label className="mb-1 flex flex-col gap-1 text-xs text-text-secondary">
           {t("exportDialog.watermarkKind")}
           <select

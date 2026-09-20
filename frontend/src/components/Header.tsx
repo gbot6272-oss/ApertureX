@@ -15,6 +15,12 @@ import { VideoTimelineDialog } from "./VideoTimelineDialog";
 import { BatchRenameDialog } from "./BatchRenameDialog";
 import { GearStatsDialog } from "./GearStatsDialog";
 import { SeriesDialog } from "./SeriesDialog";
+import { TrashDialog } from "./TrashDialog";
+import { FolderSyncDialog } from "./FolderSyncDialog";
+import { SharpnessDialog } from "./SharpnessDialog";
+import { MetadataPresetDialog } from "./MetadataPresetDialog";
+import { WatermarkTemplateDialog } from "./WatermarkTemplateDialog";
+import { SimilarPhotosDialog } from "./SimilarPhotosDialog";
 import { TemplatesDialog } from "./TemplatesDialog";
 import { LibraryOrganizeDialog } from "./LibraryOrganizeDialog";
 import { BatchConsoleDialog } from "./BatchConsoleDialog";
@@ -75,6 +81,12 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
   const [batchRenameDialogOpen, setBatchRenameDialogOpen] = useState(false);
   const [gearStatsDialogOpen, setGearStatsDialogOpen] = useState(false);
   const [seriesDialogOpen, setSeriesDialogOpen] = useState(false);
+  const [trashDialogOpen, setTrashDialogOpen] = useState(false);
+  const [folderSyncDialogOpen, setFolderSyncDialogOpen] = useState(false);
+  const [sharpnessDialogOpen, setSharpnessDialogOpen] = useState(false);
+  const [metadataPresetDialogOpen, setMetadataPresetDialogOpen] = useState(false);
+  const [watermarkTemplateDialogOpen, setWatermarkTemplateDialogOpen] = useState(false);
+  const [similarPhotosDialogOpen, setSimilarPhotosDialogOpen] = useState(false);
   const [batchConsoleDialogOpen, setBatchConsoleDialogOpen] = useState(false);
   const [stackingDialogOpen, setStackingDialogOpen] = useState(false);
   const [scriptPluginDialogOpen, setScriptPluginDialogOpen] = useState(false);
@@ -153,6 +165,24 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
         break;
       case "series":
         setSeriesDialogOpen(true);
+        break;
+      case "trash":
+        setTrashDialogOpen(true);
+        break;
+      case "folder-sync":
+        setFolderSyncDialogOpen(true);
+        break;
+      case "sharpness":
+        setSharpnessDialogOpen(true);
+        break;
+      case "metadata-presets":
+        setMetadataPresetDialogOpen(true);
+        break;
+      case "watermark-templates":
+        setWatermarkTemplateDialogOpen(true);
+        break;
+      case "similar-photos":
+        setSimilarPhotosDialogOpen(true);
         break;
       case "catalog":
         setCatalogDialogOpen(true);
@@ -396,6 +426,12 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
       <BatchRenameDialog open={batchRenameDialogOpen} onClose={() => setBatchRenameDialogOpen(false)} />
       <GearStatsDialog open={gearStatsDialogOpen} onClose={() => setGearStatsDialogOpen(false)} />
       <SeriesDialog open={seriesDialogOpen} onClose={() => setSeriesDialogOpen(false)} />
+      <TrashDialog open={trashDialogOpen} onClose={() => setTrashDialogOpen(false)} />
+      <FolderSyncDialog open={folderSyncDialogOpen} onClose={() => setFolderSyncDialogOpen(false)} />
+      <SharpnessDialog open={sharpnessDialogOpen} onClose={() => setSharpnessDialogOpen(false)} />
+      <MetadataPresetDialog open={metadataPresetDialogOpen} onClose={() => setMetadataPresetDialogOpen(false)} />
+      <WatermarkTemplateDialog open={watermarkTemplateDialogOpen} onClose={() => setWatermarkTemplateDialogOpen(false)} />
+      <SimilarPhotosDialog open={similarPhotosDialogOpen} onClose={() => setSimilarPhotosDialogOpen(false)} />
       <LibraryOrganizeDialog open={organizeDialogOpen} onClose={() => setOrganizeDialogOpen(false)} />
       <BatchConsoleDialog open={batchConsoleDialogOpen} onClose={() => setBatchConsoleDialogOpen(false)} />
       <MetadataDialog open={metadataDialogOpen} onClose={() => setMetadataDialogOpen(false)} />

@@ -9,9 +9,12 @@
 
 mod batch_rename;
 mod commands;
+mod folder_sync;
 mod import;
+mod metadata_preset;
 mod protocol;
 mod reconcile;
+mod similarity;
 mod state;
 
 use std::path::PathBuf;
@@ -416,6 +419,16 @@ fn main() {
             commands::photo_note_open_counts,
             commands::preview_batch_rename,
             commands::apply_batch_rename,
+            commands::trash_photos,
+            commands::restore_photos,
+            commands::list_trash,
+            commands::empty_trash,
+            commands::preview_folder_sync,
+            commands::apply_folder_sync,
+            commands::score_photo_sharpness,
+            commands::apply_metadata_preset,
+            commands::reorder_collection_photo,
+            commands::find_similar_photos,
             commands::create_stack,
             commands::delete_stack,
             commands::set_stack_cover,

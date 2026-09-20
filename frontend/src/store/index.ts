@@ -102,6 +102,14 @@ import type {
   TagRuleDto,
   SubtitleSegmentDto,
   TemplateDto,
+  FolderSyncPlanDto,
+  FolderSyncResultDto,
+  SharpnessResultDto,
+  SimilarPhotoDto,
+  MetadataPreset,
+  MetadataPresetApplyResultDto,
+  TrashEntryDto,
+  TrashReason,
   TemplateKind,
   TimelineItemInput,
   VideoTimelineOptions,
@@ -956,6 +964,86 @@ interface LibrarySlice {
    * derselbe Stapel-Mechanismus, kein zweiter Gruppierungsbegriff. */
   stackDetectedSeries: (photoIds: string[]) => Promise<void>;
 
+  /** Metadaten-Vorgaben (Phase 33 F4, siehe `MetadataPresetDialog.tsx`).
+   * Gespeichert werden sie als Vorlagen der Art `"metadata"` — es gibt
+   * dafür keine eigene Tabelle, siehe `metadata_preset.rs`. */
+  metadataPresets: TemplateDto[];
+  metadataPresetDraft: MetadataPreset;
+  metadataPresetRunning: boolean;
+  metadataPresetResult: MetadataPresetApplyResultDto | null;
+  metadataPresetError: string | null;
+  refreshMetadataPresets: () => Promise<void>;
+  setMetadataPresetDraft: (patch: Partial<MetadataPreset>) => void;
+  loadMetadataPresetDraft: (templateId: string) => void;
+  saveMetadataPresetDraft: (name: string) => Promise<void>;
+  deleteMetadataPreset: (templateId: string) => Promise<void>;
+  applyMetadataPresetToSelection: () => Promise<void>;
+
+  /** Ähnliche Fotos zu einem Referenzfoto (Phase 33 F9, siehe
+   * `SimilarPhotosDialog.tsx`). Gerechnet wird in Rust über
+   * Perceptual-Hash und Farbhistogramm der Miniaturansichten. */
+  similarPhotos: SimilarPhotoDto[];
+  similarPhotosRunning: boolean;
+  similarPhotosError: string | null;
+  /** 0 = nur Motiv, 1 = nur Farbe. */
+  similarityColorWeight: number;
+  similarityThreshold: number;
+  setSimilarityColorWeight: (value: number) => void;
+  setSimilarityThreshold: (value: number) => void;
+  findSimilarToSelected: () => Promise<void>;
+
+  /** Schärfe-Bewertung (Phase 33 F3, siehe `SharpnessDialog.tsx`).
+   * Gemessen wird in Rust auf der Standardvorschau; hier liegt nur die
+   * fertige Rangfolge. */
+  sharpnessResults: SharpnessResultDto[];
+  sharpnessRunning: boolean;
+  sharpnessError: string | null;
+  scoreSelectionSharpness: () => Promise<void>;
+  /** Wirft alles außer `keepPhotoId` aus der bewerteten Gruppe weg —
+   * mit dem Grund „unscharf", damit im Papierkorb später erkennbar
+   * bleibt, warum. */
+  trashAllButSharpest: (keepPhotoId: string) => Promise<void>;
+
+  /** Ordner-Abgleich (Phase 33 F2, siehe `FolderSyncDialog.tsx`).
+   * Die Planung läuft in Rust (`folder_sync::plan_folder_sync`) — hier
+   * liegt nur das Ergebnis und was daraus gemacht werden soll. */
+  folderSyncPlan: FolderSyncPlanDto | null;
+  folderSyncLoading: boolean;
+  folderSyncRunning: boolean;
+  folderSyncResult: FolderSyncResultDto | null;
+  folderSyncError: string | null;
+  /** Ob verschwundene Fotos in den Papierkorb sollen statt nur als
+   * fehlend markiert zu werden. Voreinstellung `false`: Markieren ist
+   * jederzeit umkehrbar und die harmlosere Annahme, wenn z. B. gerade
+   * nur eine externe Platte nicht angesteckt ist. */
+  folderSyncTrashVanished: boolean;
+  setFolderSyncTrashVanished: (value: boolean) => void;
+  /** `keepResult` behält die Meldung des letzten Anwendens stehen —
+   * das Anwenden schiebt selbst eine frische Vorschau hinterher, und
+   * ohne das würde die Erfolgsmeldung im selben Atemzug wieder
+   * verschwinden. */
+  previewFolderSync: (keepResult?: boolean) => Promise<void>;
+  applyFolderSync: () => Promise<void>;
+
+  /** Papierkorb (Phase 33 F1). Weggeworfene Fotos bleiben im Katalog
+   * stehen — hier liegt nur die geladene Liste; entschieden wird in
+   * Rust (`repository::trash`). */
+  trashEntries: TrashEntryDto[];
+  trashLoading: boolean;
+  /** Auswahl *innerhalb* des Papierkorbs — bewusst getrennt von
+   * `multiSelectedIds`: dort liegen Fotos, die es im Katalog noch gibt,
+   * und beide Listen gleichzeitig zu bedienen würde beim
+   * Wiederherstellen sonst unweigerlich durcheinandergehen. */
+  trashSelectedIds: string[];
+  trashError: string | null;
+  refreshTrash: () => Promise<void>;
+  toggleTrashSelection: (photoId: string) => void;
+  setTrashSelection: (photoIds: string[]) => void;
+  /** Wirft die aktuelle Auswahl (oder das gewählte Foto) weg. */
+  trashSelectedPhotos: (reason?: TrashReason) => Promise<void>;
+  restoreFromTrash: (photoIds: string[]) => Promise<void>;
+  emptyTrash: (photoIds: string[], deleteFiles: boolean) => Promise<void>;
+
   photoNotes: PhotoNoteDto[];
   photoNotesLoading: boolean;
   notesMode: boolean;
@@ -1034,6 +1122,12 @@ interface LibrarySlice {
   /** Fügt die aktuelle Mehrfachauswahl (oder, falls leer, das fokussierte
    * Foto) zu `collectionId` hinzu. */
   addSelectionToCollection: (collectionId: string) => Promise<void>;
+
+  /** Manuelle Reihenfolge (Phase 33 F8): verschiebt ein Foto innerhalb
+   * der gerade gewählten Sammlung an `targetIndex`. Ohne gewählte
+   * Sammlung ein No-Op — eine Ordnerliste hat die Reihenfolge des
+   * Dateisystems. */
+  reorderCollectionPhoto: (photoId: string, targetIndex: number) => Promise<void>;
 
   /** Sammlungs-Board (Phase 32 F9, siehe `BoardView.tsx`): lädt die
    * Fotos **aller** Sammlungen, damit das Board alle Spalten auf einmal
@@ -1655,6 +1749,13 @@ interface LibraryBacklogSlice {
   moveCollectionToFolder: (collectionId: string, folderId: string | null) => Promise<void>;
 
   stacks: StackDto[];
+  /** Aufgeklappte Stapel im Raster (Phase 33 F10). Bewusst nur im
+   * Speicher und nicht im Katalog: ob ein Stapel gerade offen ist, ist
+   * eine Frage der Sitzung, kein Eigenschaft des Stapels — beim
+   * nächsten Öffnen will man wieder den aufgeräumten Zustand. */
+  expandedStackIds: string[];
+  toggleStackExpanded: (stackId: string) => void;
+  setAllStacksExpanded: (expanded: boolean) => void;
   refreshStacks: () => Promise<void>;
   createStackFromSelection: (name?: string) => Promise<void>;
   deleteStack: (stackId: string) => Promise<void>;
@@ -3989,6 +4090,387 @@ export const useAppStore = create<AppStore>()(
       });
     },
 
+    metadataPresets: [],
+    metadataPresetDraft: {
+      title: null,
+      caption: null,
+      copyright: null,
+      creator: null,
+      custom: {},
+      keywords: [],
+      keyword_mode: "add",
+    },
+    metadataPresetRunning: false,
+    metadataPresetResult: null,
+    metadataPresetError: null,
+
+    refreshMetadataPresets: async () => {
+      try {
+        const presets = await api.listTemplates("metadata");
+        set((state) => {
+          state.metadataPresets = presets;
+        });
+      } catch (err) {
+        set((state) => {
+          state.metadataPresetError = String(err);
+        });
+      }
+    },
+
+    setMetadataPresetDraft: (patch) => {
+      set((state) => {
+        state.metadataPresetDraft = { ...state.metadataPresetDraft, ...patch };
+        state.metadataPresetResult = null;
+      });
+    },
+
+    loadMetadataPresetDraft: (templateId) => {
+      const template = get().metadataPresets.find((entry) => entry.id === templateId);
+      if (!template) return;
+      try {
+        const parsed = JSON.parse(template.payload_json) as Partial<MetadataPreset>;
+        set((state) => {
+          // Bewusst feldweise gegen die Vorgabewerte: eine mit einer
+          // früheren Version geschriebene Vorlage kennt vielleicht nicht
+          // alle Felder, und ein fehlendes soll hier `null`/leer sein,
+          // nicht `undefined` (was React zu einem unkontrollierten
+          // Eingabefeld machen würde).
+          state.metadataPresetDraft = {
+            title: parsed.title ?? null,
+            caption: parsed.caption ?? null,
+            copyright: parsed.copyright ?? null,
+            creator: parsed.creator ?? null,
+            custom: parsed.custom ?? {},
+            keywords: parsed.keywords ?? [],
+            keyword_mode: parsed.keyword_mode ?? "add",
+          };
+          state.metadataPresetResult = null;
+          state.metadataPresetError = null;
+        });
+      } catch (err) {
+        set((state) => {
+          state.metadataPresetError = `Vorgabe „${template.name}" ist beschädigt: ${String(err)}`;
+        });
+      }
+    },
+
+    saveMetadataPresetDraft: async (name) => {
+      if (!name.trim()) return;
+      try {
+        await api.saveTemplate("metadata", name.trim(), JSON.stringify(get().metadataPresetDraft));
+      } catch (err) {
+        set((state) => {
+          state.metadataPresetError = String(err);
+        });
+        return;
+      }
+      await get().refreshMetadataPresets();
+    },
+
+    deleteMetadataPreset: async (templateId) => {
+      await api.deleteTemplate(templateId);
+      await get().refreshMetadataPresets();
+    },
+
+    applyMetadataPresetToSelection: async () => {
+      const { multiSelectedIds, selectedPhotoId } = get();
+      const targets = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
+      if (targets.length === 0) return;
+      set((state) => {
+        state.metadataPresetRunning = true;
+        state.metadataPresetError = null;
+      });
+      try {
+        const result = await api.applyMetadataPreset(targets, get().metadataPresetDraft);
+        set((state) => {
+          state.metadataPresetResult = result;
+          state.metadataPresetRunning = false;
+        });
+      } catch (err) {
+        set((state) => {
+          state.metadataPresetRunning = false;
+          state.metadataPresetError = String(err);
+        });
+        return;
+      }
+      const folderId = get().selectedFolderId;
+      if (folderId) await get().loadPhotosForFolder(folderId);
+    },
+
+    similarPhotos: [],
+    similarPhotosRunning: false,
+    similarPhotosError: null,
+    // Vorgabe 0.35: das Motiv gibt den Ton an, die Farbe redet mit.
+    // Reines Motiv fände auch die Schwarzweiß-Fassung, reine Farbe jedes
+    // beliebige Foto mit demselben Himmel.
+    similarityColorWeight: 0.35,
+    similarityThreshold: 0.6,
+
+    setSimilarityColorWeight: (value) => {
+      set((state) => {
+        state.similarityColorWeight = Math.min(1, Math.max(0, value));
+      });
+    },
+
+    setSimilarityThreshold: (value) => {
+      set((state) => {
+        state.similarityThreshold = Math.min(1, Math.max(0, value));
+      });
+    },
+
+    findSimilarToSelected: async () => {
+      const photoId = get().selectedPhotoId;
+      if (!photoId) {
+        set((state) => {
+          state.similarPhotos = [];
+        });
+        return;
+      }
+      set((state) => {
+        state.similarPhotosRunning = true;
+        state.similarPhotosError = null;
+      });
+      try {
+        const results = await api.findSimilarPhotos(
+          photoId,
+          get().similarityColorWeight,
+          get().similarityThreshold,
+          60,
+        );
+        set((state) => {
+          state.similarPhotos = results;
+          state.similarPhotosRunning = false;
+        });
+      } catch (err) {
+        set((state) => {
+          state.similarPhotosRunning = false;
+          state.similarPhotosError = String(err);
+        });
+      }
+    },
+
+    sharpnessResults: [],
+    sharpnessRunning: false,
+    sharpnessError: null,
+
+    scoreSelectionSharpness: async () => {
+      const { multiSelectedIds, selectedPhotoId } = get();
+      const targets = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
+      if (targets.length === 0) {
+        set((state) => {
+          state.sharpnessResults = [];
+        });
+        return;
+      }
+      set((state) => {
+        state.sharpnessRunning = true;
+        state.sharpnessError = null;
+      });
+      try {
+        const results = await api.scorePhotoSharpness(targets);
+        set((state) => {
+          state.sharpnessResults = results;
+          state.sharpnessRunning = false;
+        });
+      } catch (err) {
+        set((state) => {
+          state.sharpnessRunning = false;
+          state.sharpnessError = String(err);
+        });
+      }
+    },
+
+    trashAllButSharpest: async (keepPhotoId) => {
+      const losers = get()
+        .sharpnessResults.filter((entry) => entry.photo_id !== keepPhotoId)
+        .map((entry) => entry.photo_id);
+      if (losers.length === 0) return;
+      try {
+        await api.trashPhotos(losers, "blurry");
+      } catch (err) {
+        set((state) => {
+          state.sharpnessError = String(err);
+        });
+        return;
+      }
+      set((state) => {
+        state.multiSelectedIds = [keepPhotoId];
+        state.selectedPhotoId = keepPhotoId;
+        state.sharpnessResults = state.sharpnessResults.filter((entry) => entry.photo_id === keepPhotoId);
+      });
+      await get().refreshFolders();
+      const folderId = get().selectedFolderId;
+      if (folderId) await get().loadPhotosForFolder(folderId);
+      await get().refreshTrash();
+    },
+
+    folderSyncPlan: null,
+    folderSyncLoading: false,
+    folderSyncRunning: false,
+    folderSyncResult: null,
+    folderSyncError: null,
+    folderSyncTrashVanished: false,
+
+    setFolderSyncTrashVanished: (value) => {
+      set((state) => {
+        state.folderSyncTrashVanished = value;
+      });
+    },
+
+    previewFolderSync: async (keepResult = false) => {
+      const folderId = get().selectedFolderId;
+      if (!folderId) {
+        set((state) => {
+          state.folderSyncPlan = null;
+        });
+        return;
+      }
+      set((state) => {
+        state.folderSyncLoading = true;
+        state.folderSyncError = null;
+        if (!keepResult) state.folderSyncResult = null;
+      });
+      try {
+        const plan = await api.previewFolderSync(folderId);
+        set((state) => {
+          state.folderSyncPlan = plan;
+          state.folderSyncLoading = false;
+        });
+      } catch (err) {
+        set((state) => {
+          state.folderSyncLoading = false;
+          state.folderSyncError = String(err);
+        });
+      }
+    },
+
+    applyFolderSync: async () => {
+      const folderId = get().selectedFolderId;
+      if (!folderId) return;
+      set((state) => {
+        state.folderSyncRunning = true;
+        state.folderSyncError = null;
+      });
+      try {
+        const result = await api.applyFolderSync(folderId, true, get().folderSyncTrashVanished);
+        set((state) => {
+          state.folderSyncResult = result;
+          state.folderSyncRunning = false;
+        });
+      } catch (err) {
+        set((state) => {
+          state.folderSyncRunning = false;
+          state.folderSyncError = String(err);
+        });
+        return;
+      }
+      await get().refreshFolders();
+      await get().loadPhotosForFolder(folderId);
+      // Der Abgleich ist danach ein anderer — die alte Vorschau würde
+      // weiter Dateien melden, die es gerade nicht mehr gibt.
+      await get().previewFolderSync(true);
+    },
+
+    trashEntries: [],
+    trashLoading: false,
+    trashSelectedIds: [],
+    trashError: null,
+
+    refreshTrash: async () => {
+      set((state) => {
+        state.trashLoading = true;
+      });
+      try {
+        const entries = await api.listTrash();
+        set((state) => {
+          state.trashEntries = entries;
+          state.trashLoading = false;
+          // IDs, die nicht mehr im Papierkorb liegen, fliegen aus der
+          // Auswahl — sonst zeigte ein zweiter Klick auf
+          // „Wiederherstellen" auf Fotos, die schon zurück sind.
+          const known = new Set(entries.map((entry) => entry.photo.id));
+          state.trashSelectedIds = state.trashSelectedIds.filter((id) => known.has(id));
+        });
+      } catch (err) {
+        set((state) => {
+          state.trashLoading = false;
+          state.trashError = String(err);
+        });
+      }
+    },
+
+    toggleTrashSelection: (photoId) => {
+      set((state) => {
+        state.trashSelectedIds = state.trashSelectedIds.includes(photoId)
+          ? state.trashSelectedIds.filter((id) => id !== photoId)
+          : [...state.trashSelectedIds, photoId];
+      });
+    },
+
+    setTrashSelection: (photoIds) => {
+      set((state) => {
+        state.trashSelectedIds = photoIds;
+      });
+    },
+
+    trashSelectedPhotos: async (reason = "manual") => {
+      const { multiSelectedIds, selectedPhotoId } = get();
+      const targets = multiSelectedIds.length > 0 ? multiSelectedIds : selectedPhotoId ? [selectedPhotoId] : [];
+      if (targets.length === 0) return;
+      try {
+        await api.trashPhotos(targets, reason);
+      } catch (err) {
+        set((state) => {
+          state.trashError = String(err);
+        });
+        return;
+      }
+      set((state) => {
+        state.multiSelectedIds = [];
+        if (state.selectedPhotoId && targets.includes(state.selectedPhotoId)) {
+          state.selectedPhotoId = null;
+        }
+      });
+      await get().refreshFolders();
+      const folderId = get().selectedFolderId;
+      if (folderId) await get().loadPhotosForFolder(folderId);
+      await get().refreshTrash();
+    },
+
+    restoreFromTrash: async (photoIds) => {
+      if (photoIds.length === 0) return;
+      try {
+        await api.restorePhotos(photoIds);
+      } catch (err) {
+        set((state) => {
+          state.trashError = String(err);
+        });
+        return;
+      }
+      await get().refreshFolders();
+      const folderId = get().selectedFolderId;
+      if (folderId) await get().loadPhotosForFolder(folderId);
+      await get().refreshTrash();
+    },
+
+    emptyTrash: async (photoIds, deleteFiles) => {
+      try {
+        const result = await api.emptyTrash(photoIds, deleteFiles);
+        set((state) => {
+          state.trashError =
+            result.failed_files.length > 0
+              ? `Aus dem Katalog entfernt, aber diese Dateien blieben liegen: ${result.failed_files.join(", ")}`
+              : null;
+        });
+      } catch (err) {
+        set((state) => {
+          state.trashError = String(err);
+        });
+        return;
+      }
+      await get().refreshTrash();
+    },
+
     detectedSeries: [],
     seriesDetectionRunning: false,
     seriesGapSeconds: 2,
@@ -4464,6 +4946,30 @@ export const useAppStore = create<AppStore>()(
       });
       if (collectionId) {
         void get().loadPhotosForCollection(collectionId);
+      }
+    },
+
+    reorderCollectionPhoto: async (photoId, targetIndex) => {
+      const collectionId = get().selectedCollectionId;
+      if (!collectionId) return;
+      try {
+        const order = await api.reorderCollectionPhoto(collectionId, photoId, targetIndex);
+        set((state) => {
+          const current = state.collectionPhotos[collectionId] ?? [];
+          const byId = new Map(current.map((photo) => [photo.id, photo]));
+          // Nach der vom Backend zurückgegebenen Reihenfolge neu legen,
+          // statt die lokale Liste selbst umzusortieren: was gespeichert
+          // wurde, entscheidet der Katalog, und ein zweites Mal
+          // dieselbe Rechnung wäre eine zweite Stelle, an der sie falsch
+          // sein kann.
+          state.collectionPhotos[collectionId] = order
+            .map((id) => byId.get(id))
+            .filter((photo): photo is NonNullable<typeof photo> => photo !== undefined);
+        });
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
       }
     },
 
@@ -6253,6 +6759,21 @@ export const useAppStore = create<AppStore>()(
 
     collectionFolders: [],
     stacks: [],
+    expandedStackIds: [],
+
+    toggleStackExpanded: (stackId) => {
+      set((state) => {
+        state.expandedStackIds = state.expandedStackIds.includes(stackId)
+          ? state.expandedStackIds.filter((id) => id !== stackId)
+          : [...state.expandedStackIds, stackId];
+      });
+    },
+
+    setAllStacksExpanded: (expanded) => {
+      set((state) => {
+        state.expandedStackIds = expanded ? state.stacks.map((stack) => stack.id) : [];
+      });
+    },
     virtualCopiesByPhotoId: {},
     colorLabelDefinitions: [],
     perceptualDuplicateGroups: [],

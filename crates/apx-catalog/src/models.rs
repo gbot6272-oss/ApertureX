@@ -134,6 +134,31 @@ pub struct Photo {
     pub frame_rate: Option<f32>,
 }
 
+impl Photo {
+    /// Das Seitenverhältnis, wie es auf dem Bildschirm erscheint (Phase
+    /// 33 F7).
+    ///
+    /// Bei den EXIF-Orientierungen 5 bis 8 liegt das Bild in der Datei
+    /// quer und steht auf dem Schirm hochkant — gefragt ist hier immer
+    /// das, was man sieht. `None`, wenn die Abmessungen fehlen; raten
+    /// wäre hier schlechter als schweigen, denn ein falsch einsortiertes
+    /// Foto fällt aus einem Filter heraus, ohne dass man merkt, warum.
+    pub fn displayed_aspect(&self) -> Option<Aspect> {
+        let (width, height) = (self.width?, self.height?);
+        let rotated = matches!(self.orientation, 5..=8);
+        let (w, h) = if rotated {
+            (height, width)
+        } else {
+            (width, height)
+        };
+        Some(match w.cmp(&h) {
+            std::cmp::Ordering::Greater => Aspect::Landscape,
+            std::cmp::Ordering::Less => Aspect::Portrait,
+            std::cmp::Ordering::Equal => Aspect::Square,
+        })
+    }
+}
+
 /// Auflösungsstufe eines Vorschaubilds, siehe `PHASE1_PROMPT.md` Abschnitt 5.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewLevel {
@@ -496,6 +521,51 @@ pub struct FilterCriteria {
     pub flag: Option<i8>,
     pub color_label: Option<String>,
     pub camera_model: Option<String>,
+    /// Objektiv (Phase 33 F7). Schließt die in ADR-0065 ausdrücklich
+    /// offengelassene Lücke: die Ausrüstungs-Statistik aus Phase 32 F5
+    /// listete Objektive, konnte aber nicht danach filtern, weil es das
+    /// Kriterium nicht gab.
+    #[serde(default)]
+    pub lens: Option<String>,
+    /// ISO-Bereich, beide Grenzen einschließlich.
+    #[serde(default)]
+    pub iso_min: Option<u32>,
+    #[serde(default)]
+    pub iso_max: Option<u32>,
+    /// Aufnahmezeitraum als Unix-Sekunden, beide Grenzen einschließlich.
+    /// Fotos ohne Aufnahmedatum fallen heraus, sobald eine der beiden
+    /// Grenzen gesetzt ist — „irgendwann" ist keine Antwort auf „in
+    /// diesem Zeitraum".
+    #[serde(default)]
+    pub captured_from: Option<i64>,
+    #[serde(default)]
+    pub captured_to: Option<i64>,
+    /// Seitenverhältnis (siehe [`Aspect`]).
+    #[serde(default)]
+    pub aspect: Option<Aspect>,
+    /// `"photo"` oder `"video"`.
+    #[serde(default)]
+    pub media_kind: Option<String>,
+}
+
+/// Seitenverhältnis eines Fotos (Phase 33 F7).
+///
+/// **Bewusst nicht `orientation` genannt**, obwohl das die gängige
+/// Bezeichnung wäre: die `photos`-Tabelle hat bereits eine Spalte
+/// `orientation`, und die enthält das EXIF-Drehungs-Flag (1..8), nicht
+/// das Seitenverhältnis. Zwei Dinge mit demselben Namen an derselben
+/// Zeile wären eine Falle.
+///
+/// Der Unterschied ist nicht akademisch: bei den EXIF-Werten 5 bis 8
+/// steht das Bild quer in der Datei und hochkant auf dem Bildschirm.
+/// Gefiltert wird nach dem, was man sieht, nicht nach dem, was in der
+/// Datei steht.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Aspect {
+    Landscape,
+    Portrait,
+    Square,
 }
 
 // ---- Verschachtelter UND/ODER-Regelbaum (Phase 13 Schritt 7) --------------
@@ -557,12 +627,31 @@ pub enum FilterField {
     Flag,
     ColorLabel,
     CameraModel,
+    /// Phase 33 F7 — damit der Regelbaum (intelligente Sammlungen)
+    /// dieselben Kriterien kennt wie die Filterleiste. Ohne das wäre die
+    /// Umwandlung [`FilterCriteria`] → [`FilterNode`] unvollständig und
+    /// würde die neuen Filter beim Speichern einer intelligenten
+    /// Sammlung stillschweigend verlieren.
+    Lens,
+    Iso,
+    MediaKind,
+    /// Seitenverhältnis, Wert `"landscape"`/`"portrait"`/`"square"` —
+    /// siehe [`Aspect`] dazu, warum das nicht `orientation` heißt.
+    Aspect,
+    /// Aufnahmezeitpunkt als Unix-Sekunden.
+    CapturedAt,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FilterOperator {
     AtLeast,
+    /// Phase 33 F7 — die Gegenrichtung zu [`FilterOperator::AtLeast`].
+    /// Neu, weil die ISO- und Datumsbereiche der Filterleiste beide
+    /// Grenzen haben und sich eine Obergrenze sonst nicht in einen
+    /// Regelbaum übersetzen ließe. Ein `NotEquals` wäre schlicht falsch
+    /// gewesen.
+    AtMost,
     Equals,
     NotEquals,
     Contains,
@@ -582,6 +671,7 @@ impl FilterCondition {
                 };
                 match self.op {
                     FilterOperator::AtLeast => photo.rating >= expected,
+                    FilterOperator::AtMost => photo.rating <= expected,
                     FilterOperator::Equals => photo.rating == expected,
                     FilterOperator::NotEquals => photo.rating != expected,
                     FilterOperator::Contains => false,
@@ -594,7 +684,9 @@ impl FilterCondition {
                 match self.op {
                     FilterOperator::Equals => photo.flag == expected,
                     FilterOperator::NotEquals => photo.flag != expected,
-                    FilterOperator::AtLeast | FilterOperator::Contains => false,
+                    FilterOperator::AtLeast | FilterOperator::AtMost | FilterOperator::Contains => {
+                        false
+                    }
                 }
             }
             FilterField::ColorLabel => match &photo.color_label {
@@ -605,6 +697,54 @@ impl FilterCondition {
                 Some(actual) => Self::matches_text(self.op, actual, &self.value),
                 None => false,
             },
+            FilterField::Lens => match &photo.lens {
+                Some(actual) => Self::matches_text(self.op, actual, &self.value),
+                None => false,
+            },
+            FilterField::MediaKind => Self::matches_text(self.op, &photo.media_kind, &self.value),
+            FilterField::Iso => {
+                let (Some(actual), Ok(expected)) = (photo.iso, self.value.parse::<u32>()) else {
+                    return false;
+                };
+                match self.op {
+                    FilterOperator::AtLeast => actual >= expected,
+                    FilterOperator::AtMost => actual <= expected,
+                    FilterOperator::Equals => actual == expected,
+                    FilterOperator::NotEquals => actual != expected,
+                    FilterOperator::Contains => false,
+                }
+            }
+            FilterField::CapturedAt => {
+                let (Some(actual), Ok(expected)) = (photo.captured_at, self.value.parse::<i64>())
+                else {
+                    return false;
+                };
+                match self.op {
+                    FilterOperator::AtLeast => actual.unix_timestamp() >= expected,
+                    FilterOperator::AtMost => actual.unix_timestamp() <= expected,
+                    FilterOperator::Equals => actual.unix_timestamp() == expected,
+                    FilterOperator::NotEquals => actual.unix_timestamp() != expected,
+                    FilterOperator::Contains => false,
+                }
+            }
+            FilterField::Aspect => {
+                let Some(actual) = photo.displayed_aspect() else {
+                    return false;
+                };
+                let expected = match self.value.as_str() {
+                    "landscape" => Aspect::Landscape,
+                    "portrait" => Aspect::Portrait,
+                    "square" => Aspect::Square,
+                    _ => return false,
+                };
+                match self.op {
+                    FilterOperator::Equals => actual == expected,
+                    FilterOperator::NotEquals => actual != expected,
+                    FilterOperator::AtLeast | FilterOperator::AtMost | FilterOperator::Contains => {
+                        false
+                    }
+                }
+            }
         }
     }
 
@@ -613,7 +753,7 @@ impl FilterCondition {
             FilterOperator::Equals => actual.eq_ignore_ascii_case(expected),
             FilterOperator::NotEquals => !actual.eq_ignore_ascii_case(expected),
             FilterOperator::Contains => actual.to_lowercase().contains(&expected.to_lowercase()),
-            FilterOperator::AtLeast => false,
+            FilterOperator::AtLeast | FilterOperator::AtMost => false,
         }
     }
 }
@@ -680,6 +820,74 @@ impl From<FilterCriteria> for FilterNode {
                 },
             });
         }
+        if let Some(lens) = criteria.lens {
+            children.push(FilterNode::Condition {
+                condition: FilterCondition {
+                    field: FilterField::Lens,
+                    op: FilterOperator::Equals,
+                    value: lens,
+                },
+            });
+        }
+        if let Some(min) = criteria.iso_min {
+            children.push(FilterNode::Condition {
+                condition: FilterCondition {
+                    field: FilterField::Iso,
+                    op: FilterOperator::AtLeast,
+                    value: min.to_string(),
+                },
+            });
+        }
+        if let Some(max) = criteria.iso_max {
+            children.push(FilterNode::Condition {
+                condition: FilterCondition {
+                    field: FilterField::Iso,
+                    op: FilterOperator::AtMost,
+                    value: max.to_string(),
+                },
+            });
+        }
+        if let Some(from) = criteria.captured_from {
+            children.push(FilterNode::Condition {
+                condition: FilterCondition {
+                    field: FilterField::CapturedAt,
+                    op: FilterOperator::AtLeast,
+                    value: from.to_string(),
+                },
+            });
+        }
+        if let Some(to) = criteria.captured_to {
+            children.push(FilterNode::Condition {
+                condition: FilterCondition {
+                    field: FilterField::CapturedAt,
+                    op: FilterOperator::AtMost,
+                    value: to.to_string(),
+                },
+            });
+        }
+        if let Some(aspect) = criteria.aspect {
+            children.push(FilterNode::Condition {
+                condition: FilterCondition {
+                    field: FilterField::Aspect,
+                    op: FilterOperator::Equals,
+                    value: match aspect {
+                        Aspect::Landscape => "landscape",
+                        Aspect::Portrait => "portrait",
+                        Aspect::Square => "square",
+                    }
+                    .to_string(),
+                },
+            });
+        }
+        if let Some(kind) = criteria.media_kind {
+            children.push(FilterNode::Condition {
+                condition: FilterCondition {
+                    field: FilterField::MediaKind,
+                    op: FilterOperator::Equals,
+                    value: kind,
+                },
+            });
+        }
         FilterNode::Group {
             operator: BoolOp::And,
             children,
@@ -730,4 +938,56 @@ mod tests {
     fn unknown_preview_level_is_rejected() {
         assert!(PreviewLevel::from_i64(42).is_err());
     }
+}
+
+/// Warum ein Foto im Papierkorb liegt (Phase 33 F1).
+///
+/// Ein fester Satz statt freiem Text, weil die Papierkorb-Ansicht danach
+/// gruppiert und beim Leeren eine Gruppe gezielt behalten werden kann —
+/// „alle als Duplikat aussortierten endgültig weg, die von Hand
+/// weggeworfenen erstmal behalten" ist der Fall, für den das da ist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrashReason {
+    /// Von Hand weggeworfen.
+    Manual,
+    /// Beim Aufräumen einer Duplikatgruppe aussortiert.
+    Duplicate,
+    /// Als unscharf aussortiert (Phase 33 F3).
+    Blurry,
+    /// Beim Ordner-Abgleich als verschwunden entfernt (Phase 33 F2).
+    Missing,
+}
+
+impl TrashReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TrashReason::Manual => "manual",
+            TrashReason::Duplicate => "duplicate",
+            TrashReason::Blurry => "blurry",
+            TrashReason::Missing => "missing",
+        }
+    }
+
+    /// Unbekannte Werte werden zu [`TrashReason::Manual`] statt zu einem
+    /// Fehler: der Grund ist eine Notiz, kein Zustand, an dem etwas hängt.
+    /// Ein Katalog, der von einer neueren Version einen zusätzlichen Grund
+    /// mitbekommen hat, soll sich hier nicht weigern, den Papierkorb
+    /// überhaupt zu öffnen.
+    pub fn from_str_lossy(value: &str) -> Self {
+        match value {
+            "duplicate" => TrashReason::Duplicate,
+            "blurry" => TrashReason::Blurry,
+            "missing" => TrashReason::Missing,
+            _ => TrashReason::Manual,
+        }
+    }
+}
+
+/// Ein Eintrag im Papierkorb: das Foto selbst plus wann und warum es
+/// weggeworfen wurde.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrashEntry {
+    pub photo: Photo,
+    pub deleted_at: OffsetDateTime,
+    pub reason: TrashReason,
 }

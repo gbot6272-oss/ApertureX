@@ -146,15 +146,41 @@ export interface FilterCriteriaDto {
   flag?: number;
   color_label?: string;
   camera_model?: string;
+  /** Erweiterte Katalogfilter (Phase 33 F7) — schließen die in ADR-0065
+   * offengelassenen Lücken (Datum aus F3, Objektiv aus F5). */
+  lens?: string;
+  iso_min?: number;
+  iso_max?: number;
+  /** Unix-Sekunden. Die Umrechnung aus dem lokalen Datum passiert hier
+   * im Frontend — nur hier ist die Zeitzone des Nutzers bekannt. */
+  captured_from?: number;
+  captured_to?: number;
+  aspect?: AspectFilter;
+  media_kind?: "photo" | "video";
 }
+
+/** Seitenverhältnis, wie es auf dem Bildschirm erscheint — nicht zu
+ * verwechseln mit `PhotoDto.orientation`, dem EXIF-Drehungs-Flag. Bei
+ * den Werten 5..8 liegt das Bild in der Datei quer und steht auf dem
+ * Schirm hochkant; gefiltert wird nach dem, was man sieht. */
+export type AspectFilter = "landscape" | "portrait" | "square";
 
 /** Blatt-Bedingung für den intelligenten-Sammlung-Regelbaum (Phase 13
  * Schritt 7, siehe `apx_catalog::{FilterField,FilterOperator,FilterCondition}`
  * und `DECISIONS.md` ADR-0040-Nachtrag V). `value` ist immer ein String,
  * auch für die numerischen Felder Bewertung/Flagge — `RuleTreeEditor.tsx`
  * nutzt ohnehin ein Texteingabefeld. */
-export type SmartCollectionField = "rating" | "flag" | "color_label" | "camera_model";
-export type SmartCollectionOperator = "at_least" | "equals" | "not_equals" | "contains";
+export type SmartCollectionField =
+  | "rating"
+  | "flag"
+  | "color_label"
+  | "camera_model"
+  | "lens"
+  | "iso"
+  | "media_kind"
+  | "aspect"
+  | "captured_at";
+export type SmartCollectionOperator = "at_least" | "at_most" | "equals" | "not_equals" | "contains";
 export interface SmartCollectionLeaf {
   field: SmartCollectionField;
   op: SmartCollectionOperator;
@@ -166,6 +192,14 @@ export const SMART_COLLECTION_FIELD_OPTIONS: ReadonlyArray<{ value: SmartCollect
   { value: "flag", label: "Flagge (-1/0/1)" },
   { value: "color_label", label: "Farbmarkierung" },
   { value: "camera_model", label: "Kameramodell" },
+  // Phase 33 F7: dieselben Kriterien, die auch die Filterleiste kennt —
+  // sonst gingen sie beim Speichern einer intelligenten Sammlung
+  // stillschweigend verloren.
+  { value: "lens", label: "Objektiv" },
+  { value: "iso", label: "ISO" },
+  { value: "media_kind", label: "Medienart (photo/video)" },
+  { value: "aspect", label: "Seitenverhältnis (landscape/portrait/square)" },
+  { value: "captured_at", label: "Aufnahmezeit (Unix-Sekunden)" },
 ];
 
 /** Nicht jeder Operator ergibt für jedes Feld Sinn — `matches` auf der
@@ -174,6 +208,7 @@ export const SMART_COLLECTION_FIELD_OPTIONS: ReadonlyArray<{ value: SmartCollect
  * nicht erfüllt, statt sie im UI hart zu verbieten. */
 export const SMART_COLLECTION_OPERATOR_OPTIONS: ReadonlyArray<{ value: SmartCollectionOperator; label: string }> = [
   { value: "at_least", label: ">=" },
+  { value: "at_most", label: "<=" },
   { value: "equals", label: "=" },
   { value: "not_equals", label: "≠" },
   { value: "contains", label: "enthält" },
@@ -1735,6 +1770,15 @@ export interface ExportPhotoOptions {
   watermarkPosition?: WatermarkPosition;
   watermarkOpacity?: number;
   watermarkMargin?: number;
+  /** Relative Platzierung (Phase 33 F5) — gesetzt, gelten Größe und Rand
+   * in Prozent der kürzeren Kante statt in Pixeln. Erst damit
+   * funktioniert eine gespeicherte Vorlage über verschiedene
+   * Exportgrößen hinweg. */
+  watermarkSizePercent?: number;
+  watermarkMarginPercent?: number;
+  watermarkTile?: boolean;
+  watermarkTileSpacingPercent?: number;
+  watermarkRotationDegrees?: number;
   metadataMake?: string;
   metadataModel?: string;
   metadataDateTime?: string;
@@ -2064,7 +2108,7 @@ export function setPhotoGps(photoId: string, lat: number | null, lon: number | n
 // jeweilige `*Options`-DTO als JSON (für Export-/Layout-Vorlagen)
 // beziehungsweise `{ presetId, exportOptions }` (für Workflow-Vorlagen,
 // siehe {@link WorkflowTemplatePayload}).
-export type TemplateKind = "export" | "print" | "book" | "slideshow" | "web" | "workflow" | "filter" | "rename";
+export type TemplateKind = "export" | "print" | "book" | "slideshow" | "web" | "workflow" | "filter" | "rename" | "metadata" | "watermark";
 
 export interface TemplateDto {
   id: string;
@@ -2420,4 +2464,163 @@ export interface ToneStatsDto {
  * Tonwert-Angleich — neun Zahlen, kein zweites Bild im EDL. */
 export function computeReferenceToneStats(photoId: string): Promise<ToneStatsDto> {
   return invoke<ToneStatsDto>("compute_reference_tone_stats", { photoId });
+}
+
+// ---- Papierkorb (Phase 33 F1) ----------------------------------------------
+
+/** Warum ein Foto im Papierkorb liegt. Schlüssel statt Text, damit die
+ * Beschriftung im Frontend bleibt — siehe `migrations/0014_trash.sql`. */
+export type TrashReason = "manual" | "duplicate" | "blurry" | "missing";
+
+export interface TrashEntryDto {
+  photo: PhotoDto;
+  /** RFC-3339. */
+  deleted_at: string;
+  reason: TrashReason;
+}
+
+export interface EmptyTrashResultDto {
+  purged: number;
+  /** Dateien, die nicht gelöscht werden konnten (Rechte, Laufwerk weg) —
+   * der Katalogeintrag ist trotzdem weg. */
+  failed_files: string[];
+}
+
+export function trashPhotos(photoIds: string[], reason: TrashReason): Promise<number> {
+  return invoke<number>("trash_photos", { photoIds, reason });
+}
+
+export function restorePhotos(photoIds: string[]): Promise<number> {
+  return invoke<number>("restore_photos", { photoIds });
+}
+
+export function listTrash(): Promise<TrashEntryDto[]> {
+  return invoke<TrashEntryDto[]>("list_trash");
+}
+
+/** Leert den Papierkorb. Leeres `photoIds` = alles. */
+export function emptyTrash(photoIds: string[], deleteFiles: boolean): Promise<EmptyTrashResultDto> {
+  return invoke<EmptyTrashResultDto>("empty_trash", { photoIds, deleteFiles });
+}
+
+// ---- Ordner-Abgleich (Phase 33 F2) -----------------------------------------
+
+/** Was sich an einer Datei geändert hat. Schlüssel statt Text — die
+ * Beschriftung bleibt im Frontend. */
+export type SyncChange = "new" | "vanished" | "modified" | "returned";
+
+export interface SyncEntryDto {
+  filename: string;
+  change: SyncChange;
+  /** `null` bei neuen Dateien — die stehen noch in keinem Katalog. */
+  photo_id: string | null;
+}
+
+export interface FolderSyncPlanDto {
+  entries: SyncEntryDto[];
+  new_count: number;
+  vanished_count: number;
+  modified_count: number;
+  returned_count: number;
+}
+
+export interface FolderSyncResultDto {
+  returned: number;
+  handled_vanished: number;
+  import_started: boolean;
+}
+
+export function previewFolderSync(folderId: string): Promise<FolderSyncPlanDto> {
+  return invoke<FolderSyncPlanDto>("preview_folder_sync", { folderId });
+}
+
+export function applyFolderSync(
+  folderId: string,
+  importNew: boolean,
+  trashVanished: boolean,
+): Promise<FolderSyncResultDto> {
+  return invoke<FolderSyncResultDto>("apply_folder_sync", { folderId, importNew, trashVanished });
+}
+
+// ---- Schärfe-Bewertung (Phase 33 F3) ---------------------------------------
+
+export interface SharpnessResultDto {
+  photo_id: string;
+  filename: string;
+  score: number;
+  mean: number;
+  /** `score` relativ zum besten Wert der Gruppe, 0..1. */
+  relative: number;
+  /** 1 = schärfste Aufnahme. */
+  rank: number;
+}
+
+export function scorePhotoSharpness(photoIds: string[]): Promise<SharpnessResultDto[]> {
+  return invoke<SharpnessResultDto[]>("score_photo_sharpness", { photoIds });
+}
+
+// ---- Metadaten-Vorgaben (Phase 33 F4) --------------------------------------
+
+/** Was mit den Stichwörtern der Vorgabe passiert. */
+export type KeywordMode = "add" | "replace";
+
+/** Eine Metadaten-Vorgabe. `null` in einem der vier IPTC-Felder heißt
+ * „nicht Teil der Vorgabe" (bestehender Wert bleibt), `""` heißt
+ * „leeren" — siehe `crates/apx-app/src/metadata_preset.rs`. Gespeichert
+ * wird sie als `templates`-Eintrag der Art `"metadata"`. */
+export interface MetadataPreset {
+  title: string | null;
+  caption: string | null;
+  copyright: string | null;
+  creator: string | null;
+  custom: Record<string, string>;
+  keywords: string[];
+  keyword_mode: KeywordMode;
+}
+
+export interface MetadataPresetApplyResultDto {
+  photos: number;
+  keywords_set: number;
+  keywords_removed: number;
+}
+
+export function applyMetadataPreset(
+  photoIds: string[],
+  preset: MetadataPreset,
+): Promise<MetadataPresetApplyResultDto> {
+  return invoke<MetadataPresetApplyResultDto>("apply_metadata_preset", {
+    photoIds,
+    presetJson: JSON.stringify(preset),
+  });
+}
+
+// ---- Manuelle Reihenfolge in einer Sammlung (Phase 33 F8) ------------------
+
+/** Verschiebt ein Foto innerhalb einer Sammlung an `targetIndex` —
+ * gezählt in der Liste **vor** dem Verschieben, so wie das Ziehen es
+ * liefert. Gibt die neue Reihenfolge als Foto-IDs zurück. */
+export function reorderCollectionPhoto(
+  collectionId: string,
+  photoId: string,
+  targetIndex: number,
+): Promise<string[]> {
+  return invoke<string[]>("reorder_collection_photo", { collectionId, photoId, targetIndex });
+}
+
+// ---- Ähnliche Fotos zu einem Referenzfoto (Phase 33 F9) -------------------
+
+export interface SimilarPhotoDto {
+  photo: PhotoDto;
+  /** `0..1`, 1 = gleich. */
+  similarity: number;
+}
+
+/** `colorWeight` mischt zwischen Motiv (0) und Farbe (1). */
+export function findSimilarPhotos(
+  photoId: string,
+  colorWeight: number,
+  minSimilarity: number,
+  limit: number,
+): Promise<SimilarPhotoDto[]> {
+  return invoke<SimilarPhotoDto[]>("find_similar_photos", { photoId, colorWeight, minSimilarity, limit });
 }

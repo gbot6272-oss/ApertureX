@@ -39,6 +39,7 @@ pub mod hdr;
 pub mod homography_stitch;
 mod luma;
 pub mod panorama;
+pub mod sharpness;
 pub mod stabilize;
 
 pub use error::{Result, StackingError};

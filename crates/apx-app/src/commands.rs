@@ -421,6 +421,27 @@ pub struct FilterCriteriaDto {
     pub color_label: Option<String>,
     #[serde(default)]
     pub camera_model: Option<String>,
+    // Erweiterte Katalogfilter (Phase 33 F7) — schließen die in ADR-0065
+    // ausdrücklich offengelassenen Lücken (Datum aus F3, Objektiv aus
+    // F5).
+    #[serde(default)]
+    pub lens: Option<String>,
+    #[serde(default)]
+    pub iso_min: Option<u32>,
+    #[serde(default)]
+    pub iso_max: Option<u32>,
+    /// Unix-Sekunden. Die Umrechnung aus dem lokalen Datum macht das
+    /// Frontend — nur dort ist die Zeitzone des Nutzers bekannt.
+    #[serde(default)]
+    pub captured_from: Option<i64>,
+    #[serde(default)]
+    pub captured_to: Option<i64>,
+    /// `"landscape"`, `"portrait"` oder `"square"`.
+    #[serde(default)]
+    pub aspect: Option<String>,
+    /// `"photo"` oder `"video"`.
+    #[serde(default)]
+    pub media_kind: Option<String>,
 }
 
 impl From<FilterCriteriaDto> for apx_catalog::FilterCriteria {
@@ -430,6 +451,22 @@ impl From<FilterCriteriaDto> for apx_catalog::FilterCriteria {
             flag: dto.flag,
             color_label: dto.color_label,
             camera_model: dto.camera_model,
+            lens: dto.lens,
+            iso_min: dto.iso_min,
+            iso_max: dto.iso_max,
+            captured_from: dto.captured_from,
+            captured_to: dto.captured_to,
+            // Ein unbekannter Wert wird zu „kein Filter" statt zu einem
+            // Fehler: das Seitenverhältnis ist eine Einschränkung, keine
+            // Anweisung, und eine abgelehnte Filteranfrage wäre die
+            // schlechtere Antwort auf einen Tippfehler.
+            aspect: match dto.aspect.as_deref() {
+                Some("landscape") => Some(apx_catalog::Aspect::Landscape),
+                Some("portrait") => Some(apx_catalog::Aspect::Portrait),
+                Some("square") => Some(apx_catalog::Aspect::Square),
+                _ => None,
+            },
+            media_kind: dto.media_kind,
         }
     }
 }
@@ -7248,6 +7285,18 @@ pub struct ExportPhotoOptions {
     pub watermark_position: Option<String>,
     pub watermark_opacity: Option<f32>,
     pub watermark_margin: Option<u32>,
+    /// Relative Platzierung (Phase 33 F5). Gesetzt, gelten Größe und
+    /// Rand in Prozent der kürzeren Kante statt in Pixeln — erst damit
+    /// funktioniert eine gespeicherte Vorlage über verschiedene
+    /// Exportgrößen hinweg, siehe `apx_export::watermark_layout`. Nicht
+    /// gesetzt bleibt alles wie bisher.
+    pub watermark_size_percent: Option<f32>,
+    pub watermark_margin_percent: Option<f32>,
+    /// `true` kachelt das Wasserzeichen über das ganze Bild; Position
+    /// und Rand spielen dann keine Rolle mehr.
+    pub watermark_tile: Option<bool>,
+    pub watermark_tile_spacing_percent: Option<f32>,
+    pub watermark_rotation_degrees: Option<f32>,
     pub metadata_make: Option<String>,
     pub metadata_model: Option<String>,
     pub metadata_date_time: Option<String>,
@@ -7345,6 +7394,32 @@ fn build_export_request(
             opacity: options.watermark_opacity.unwrap_or(1.0),
             margin: options.watermark_margin.unwrap_or(16),
         });
+    }
+
+    // Die relative Platzierung greift nur, wenn überhaupt ein
+    // Wasserzeichen gesetzt wurde — und nur, wenn eine Größe in Prozent
+    // angegeben ist. Ohne die bleibt das bisherige Pixel-Verhalten
+    // unverändert, auch wenn versehentlich eine Kachelung mitgeschickt
+    // wurde.
+    if request.watermark.is_some() {
+        if let Some(size_percent) = options.watermark_size_percent {
+            request.watermark_layout = Some(apx_export::watermark_layout::RelativePlacement {
+                size_percent,
+                margin_percent: options.watermark_margin_percent.unwrap_or(3.0),
+                position: parse_watermark_position(
+                    options
+                        .watermark_position
+                        .as_deref()
+                        .unwrap_or("bottom_right"),
+                )?,
+                tile: options.watermark_tile.unwrap_or(false).then(|| {
+                    apx_export::watermark_layout::TileSpec {
+                        spacing_percent: options.watermark_tile_spacing_percent.unwrap_or(5.0),
+                        rotation_degrees: options.watermark_rotation_degrees.unwrap_or(-30.0),
+                    }
+                }),
+            });
+        }
     }
 
     request.metadata = apx_export::metadata::MetadataFilter {
@@ -10396,4 +10471,688 @@ pub fn compute_reference_tone_stats(
     }
 
     Ok(ToneStatsDto { deciles })
+}
+
+// ---- Papierkorb (Phase 33 F1) ----------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TrashEntryDto {
+    pub photo: PhotoDto,
+    /// RFC-3339, wie überall an der IPC-Grenze.
+    pub deleted_at: String,
+    /// `"manual"`, `"duplicate"`, `"blurry"` oder `"missing"` — die
+    /// Oberfläche beschriftet den Schlüssel.
+    pub reason: String,
+}
+
+fn parse_trash_reason(value: &str) -> apx_catalog::TrashReason {
+    apx_catalog::TrashReason::from_str_lossy(value)
+}
+
+/// Wirft Fotos in den Papierkorb.
+///
+/// Die Dateien auf der Platte bleiben liegen — das ist der ganze Punkt
+/// eines Papierkorbs im Katalog: rückgängig zu machen, ohne dass dafür
+/// etwas aus dem Dateisystem zurückgeholt werden müsste.
+#[tauri::command]
+pub fn trash_photos(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    reason: String,
+) -> Result<u64, String> {
+    let ids = photo_ids
+        .into_iter()
+        .map(parse_photo_id)
+        .collect::<Result<Vec<_>, _>>()?;
+    state
+        .catalog
+        .trash_photos(
+            &ids,
+            parse_trash_reason(&reason),
+            time::OffsetDateTime::now_utc(),
+        )
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn restore_photos(state: State<'_, AppState>, photo_ids: Vec<String>) -> Result<u64, String> {
+    let ids = photo_ids
+        .into_iter()
+        .map(parse_photo_id)
+        .collect::<Result<Vec<_>, _>>()?;
+    state
+        .catalog
+        .restore_photos(&ids)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub fn list_trash(state: State<'_, AppState>) -> Result<Vec<TrashEntryDto>, String> {
+    let entries = state.catalog.list_trash().map_err(|err| err.to_string())?;
+    Ok(entries
+        .into_iter()
+        .map(|entry| TrashEntryDto {
+            deleted_at: entry
+                .deleted_at
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_default(),
+            reason: entry.reason.as_str().to_string(),
+            photo: PhotoDto::from(entry.photo),
+        })
+        .collect())
+}
+
+/// Leert den Papierkorb — entweder komplett (`photo_ids` leer) oder
+/// gezielt.
+///
+/// `delete_files` entscheidet, ob die Dateien selbst mitgehen. Schlägt
+/// das Löschen einer Datei fehl (Rechte, Laufwerk weg), wird der
+/// Katalogeintrag trotzdem entfernt und der Pfad in
+/// `failed_files` zurückgemeldet, statt den ganzen Vorgang abzubrechen:
+/// ein halb geleerter Papierkorb, bei dem niemand weiß, was noch drin
+/// ist, wäre das schlechtere Ergebnis. Virtuelle Kopien zählen nie mit —
+/// sie haben keine eigene Datei, nur einen Bearbeitungsstand.
+#[tauri::command]
+pub fn empty_trash(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    delete_files: bool,
+) -> Result<EmptyTrashResultDto, String> {
+    let ids: Vec<apx_core::PhotoId> = if photo_ids.is_empty() {
+        state
+            .catalog
+            .list_trash()
+            .map_err(|err| err.to_string())?
+            .into_iter()
+            .map(|entry| entry.photo.id)
+            .collect()
+    } else {
+        photo_ids
+            .into_iter()
+            .map(parse_photo_id)
+            .collect::<Result<Vec<_>, _>>()?
+    };
+
+    let mut failed_files = Vec::new();
+    if delete_files {
+        for id in &ids {
+            let Ok(photo) = state.catalog.get_photo(*id) else {
+                continue;
+            };
+            if photo.source_photo_id.is_some() {
+                continue;
+            }
+            let Ok(folder) = state.catalog.get_folder(photo.folder_id) else {
+                continue;
+            };
+            let path = folder.path.join(&photo.filename);
+            if path.exists() {
+                if let Err(err) = std::fs::remove_file(&path) {
+                    failed_files.push(format!("{}: {err}", path.display()));
+                }
+            }
+        }
+    }
+
+    let purged = state
+        .catalog
+        .purge_photos(&ids)
+        .map_err(|err| err.to_string())?;
+    Ok(EmptyTrashResultDto {
+        purged,
+        failed_files,
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EmptyTrashResultDto {
+    pub purged: u64,
+    pub failed_files: Vec<String>,
+}
+
+// ---- Ordner-Abgleich (Phase 33 F2) -----------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncEntryDto {
+    pub filename: String,
+    /// `"new"`, `"vanished"`, `"modified"` oder `"returned"`.
+    pub change: String,
+    pub photo_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FolderSyncPlanDto {
+    pub entries: Vec<SyncEntryDto>,
+    pub new_count: usize,
+    pub vanished_count: usize,
+    pub modified_count: usize,
+    pub returned_count: usize,
+}
+
+fn change_key(change: &crate::folder_sync::SyncChange) -> &'static str {
+    use crate::folder_sync::SyncChange;
+    match change {
+        SyncChange::New => "new",
+        SyncChange::Vanished => "vanished",
+        SyncChange::Modified => "modified",
+        SyncChange::Returned => "returned",
+    }
+}
+
+/// Liest den Ordner auf der Platte und vergleicht ihn mit dem Katalog.
+///
+/// Nur lesend — hier wird nichts importiert, nichts markiert, nichts
+/// weggeworfen. Das ist der Punkt: man soll sehen können, was ein
+/// Abgleich täte, bevor er es tut.
+fn build_folder_sync_plan(
+    state: &State<'_, AppState>,
+    folder_id: apx_core::FolderId,
+) -> Result<crate::folder_sync::FolderSyncPlan, String> {
+    let folder = state
+        .catalog
+        .get_folder(folder_id)
+        .map_err(|err| err.to_string())?;
+
+    let catalog_files: Vec<crate::folder_sync::CatalogFile> = state
+        .catalog
+        .list_photos_by_folder(folder_id)
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .map(|photo| crate::folder_sync::CatalogFile {
+            photo_id: photo.id,
+            filename: photo.filename,
+            file_size: photo.file_size,
+            file_mtime: photo.file_mtime.unix_timestamp(),
+            is_virtual_copy: photo.source_photo_id.is_some(),
+            already_missing: photo.missing,
+        })
+        .collect();
+
+    // Nur die oberste Ebene: ein Katalog-Ordnereintrag entspricht genau
+    // einem Verzeichnis (Unterordner haben eigene Einträge, siehe
+    // `import::ensure_folder`). Ein rekursiver Durchlauf würde die
+    // Dateien der Unterordner hier als „neu" melden, obwohl sie längst
+    // unter ihrem eigenen Ordnereintrag im Katalog stehen.
+    let mut disk_files: Vec<crate::folder_sync::DiskFile> = Vec::new();
+    let read_dir = std::fs::read_dir(&folder.path)
+        .map_err(|err| format!("Ordner '{}' nicht lesbar: {err}", folder.path.display()))?;
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if !path.is_file() || !apx_raw::is_supported_extension(&path) {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|dur| dur.as_secs() as i64)
+            .unwrap_or(0);
+        let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        disk_files.push(crate::folder_sync::DiskFile {
+            filename: filename.to_string(),
+            file_size: meta.len(),
+            file_mtime: mtime,
+        });
+    }
+
+    Ok(crate::folder_sync::plan_folder_sync(
+        &catalog_files,
+        &disk_files,
+    ))
+}
+
+#[tauri::command]
+pub fn preview_folder_sync(
+    state: State<'_, AppState>,
+    folder_id: String,
+) -> Result<FolderSyncPlanDto, String> {
+    use crate::folder_sync::SyncChange;
+    let folder_id: apx_core::FolderId = folder_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    let plan = build_folder_sync_plan(&state, folder_id)?;
+    Ok(FolderSyncPlanDto {
+        new_count: plan.count(&SyncChange::New),
+        vanished_count: plan.count(&SyncChange::Vanished),
+        modified_count: plan.count(&SyncChange::Modified),
+        returned_count: plan.count(&SyncChange::Returned),
+        entries: plan
+            .entries
+            .iter()
+            .map(|entry| SyncEntryDto {
+                filename: entry.filename.clone(),
+                change: change_key(&entry.change).to_string(),
+                photo_id: entry.photo_id.map(|id| id.to_string()),
+            })
+            .collect(),
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FolderSyncResultDto {
+    /// Zurückgekehrte Dateien, deren `missing`-Markierung aufgehoben wurde.
+    pub returned: usize,
+    /// Verschwundene Fotos, die markiert oder weggeworfen wurden.
+    pub handled_vanished: usize,
+    /// Ob ein Import für die neuen/geänderten Dateien angestoßen wurde.
+    /// Der läuft im Hintergrund weiter und meldet sich über dieselben
+    /// Fortschritts-Ereignisse wie ein normaler Import.
+    pub import_started: bool,
+}
+
+/// Wendet den Abgleich an.
+///
+/// Für die neuen und geänderten Dateien wird bewusst **der normale
+/// Import** angestoßen statt eines eigenen Pfades: er kennt bereits
+/// Metadaten-Lesen, Vorschau-Erzeugung, Hashing und das Upsert, das eine
+/// geänderte Datei aktualisiert statt zu verdoppeln. Ein zweiter, nur
+/// hier verwendeter Weg dorthin wäre eine zweite Stelle, an der das
+/// falsch sein kann.
+///
+/// `trash_vanished` entscheidet, was mit Verschwundenem passiert:
+/// `false` markiert es nur als fehlend (der bisherige, jederzeit
+/// umkehrbare Zustand), `true` wirft es in den Papierkorb (Phase 33 F1)
+/// — auch das bleibt umkehrbar, ist aber die Ansage „das kommt nicht
+/// wieder".
+#[tauri::command]
+pub async fn apply_folder_sync(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    folder_id: String,
+    import_new: bool,
+    trash_vanished: bool,
+) -> Result<FolderSyncResultDto, String> {
+    use crate::folder_sync::SyncChange;
+    let parsed: apx_core::FolderId = folder_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    let plan = build_folder_sync_plan(&state, parsed)?;
+    if plan.is_clean() {
+        // Nichts zu tun — und vor allem kein Import anstoßen, der dann
+        // jede Datei einzeln als unverändert wieder verwirft.
+        return Ok(FolderSyncResultDto {
+            returned: 0,
+            handled_vanished: 0,
+            import_started: false,
+        });
+    }
+    let folder = state
+        .catalog
+        .get_folder(parsed)
+        .map_err(|err| err.to_string())?;
+
+    let mut returned = 0usize;
+    let mut handled_vanished = 0usize;
+    let mut vanished_ids: Vec<apx_core::PhotoId> = Vec::new();
+
+    for entry in &plan.entries {
+        let Some(photo_id) = entry.photo_id else {
+            continue;
+        };
+        match entry.change {
+            SyncChange::Returned => {
+                state
+                    .catalog
+                    .set_photo_missing(photo_id, false)
+                    .map_err(|err| err.to_string())?;
+                returned += 1;
+            }
+            SyncChange::Vanished => {
+                if trash_vanished {
+                    vanished_ids.push(photo_id);
+                } else {
+                    state
+                        .catalog
+                        .set_photo_missing(photo_id, true)
+                        .map_err(|err| err.to_string())?;
+                }
+                handled_vanished += 1;
+            }
+            _ => {}
+        }
+    }
+
+    if !vanished_ids.is_empty() {
+        state
+            .catalog
+            .trash_photos(
+                &vanished_ids,
+                apx_catalog::TrashReason::Missing,
+                time::OffsetDateTime::now_utc(),
+            )
+            .map_err(|err| err.to_string())?;
+    }
+
+    let needs_import = plan.count(&SyncChange::New) > 0 || plan.count(&SyncChange::Modified) > 0;
+    let import_started = import_new && needs_import;
+    if import_started {
+        start_import(
+            app,
+            state,
+            folder.path.to_string_lossy().to_string(),
+            crate::import::ImportMode::AddInPlace,
+            None,
+        )
+        .await?;
+    }
+
+    Ok(FolderSyncResultDto {
+        returned,
+        handled_vanished,
+        import_started,
+    })
+}
+
+// ---- Schärfe-Bewertung (Phase 33 F3) ---------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SharpnessResultDto {
+    pub photo_id: String,
+    pub filename: String,
+    /// Vergleichswert (hohes Perzentil über die Kachelwerte).
+    pub score: f32,
+    /// Mittelwert über alle Kacheln — niedrig bei selektiver Schärfe.
+    pub mean: f32,
+    /// `score` relativ zum besten Wert der Gruppe, 0..1. Die Rohwerte
+    /// sind zwischen verschiedenen Motiven bedeutungslos; dieser Anteil
+    /// ist das, was sich in der Oberfläche sinnvoll als Balken zeigen
+    /// lässt.
+    pub relative: f32,
+    /// Platz in der Rangfolge, 1 = schärfste Aufnahme.
+    pub rank: usize,
+}
+
+/// Bewertet die Schärfe mehrerer Fotos und gibt sie sortiert zurück
+/// (schärfste zuerst).
+///
+/// **Gemessen wird auf der Standardvorschau (2048 px), nicht auf dem
+/// Original.** Das ist eine bewusste Grenze: zwanzig RAWs in voller
+/// Auflösung zu dekodieren dauert Minuten, und die Frage hier ist nicht
+/// „wie scharf ist dieses Foto absolut", sondern „welches dieser Fotos
+/// ist das schärfste". Für den Vergleich reicht die Vorschau, weil alle
+/// Aufnahmen dieselbe Skalierung durchlaufen — eine unschärfere Aufnahme
+/// bleibt auch verkleinert die unschärfere.
+///
+/// Fotos ohne erzeugte Vorschau werden übersprungen statt erzwungen
+/// dekodiert — dieselbe Linie wie bei der Perceptual-Hash-Duplikatsuche.
+#[tauri::command]
+pub fn score_photo_sharpness(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+) -> Result<Vec<SharpnessResultDto>, String> {
+    let ids = parse_photo_ids(photo_ids)?;
+
+    let mut scored: Vec<(
+        apx_core::PhotoId,
+        String,
+        apx_stacking::sharpness::SharpnessScore,
+    )> = Vec::new();
+    for id in ids {
+        let Ok(photo) = state.catalog.get_photo(id) else {
+            continue;
+        };
+        let Ok(Some(preview)) = state
+            .catalog
+            .get_preview(id, apx_catalog::PreviewLevel::Standard)
+        else {
+            continue;
+        };
+        let Ok(img) = image::open(&preview.path) else {
+            continue;
+        };
+        let rgba = img.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        let Ok(score) = apx_stacking::sharpness::score_rgba8(rgba.as_raw(), width, height) else {
+            continue;
+        };
+        scored.push((id, photo.filename, score));
+    }
+
+    let scores: Vec<apx_stacking::sharpness::SharpnessScore> =
+        scored.iter().map(|(_, _, score)| *score).collect();
+    let order = apx_stacking::sharpness::rank_best_first(&scores);
+    let best = order
+        .first()
+        .map(|&index| scores[index].score)
+        .unwrap_or(0.0);
+
+    Ok(order
+        .into_iter()
+        .enumerate()
+        .map(|(rank, index)| {
+            let (id, filename, score) = &scored[index];
+            SharpnessResultDto {
+                photo_id: id.to_string(),
+                filename: filename.clone(),
+                score: score.score,
+                mean: score.mean,
+                relative: if best > 0.0 { score.score / best } else { 0.0 },
+                rank: rank + 1,
+            }
+        })
+        .collect())
+}
+
+// ---- Metadaten-Vorgaben (Phase 33 F4) --------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MetadataPresetApplyResultDto {
+    pub photos: usize,
+    /// Wie oft ein Stichwort neu vergeben wurde (nicht wie viele
+    /// verschiedene) — bei zehn Fotos und zwei Stichwörtern sind das 20.
+    pub keywords_set: usize,
+    pub keywords_removed: usize,
+}
+
+/// Wendet eine Metadaten-Vorgabe auf Fotos an.
+///
+/// Die Vorgabe kommt als JSON herein statt als Vorlagen-ID: dieselbe
+/// Funktion bedient damit sowohl „gespeicherte Vorgabe anwenden" als
+/// auch „diese Eingaben einmalig anwenden, ohne sie zu speichern" —
+/// letzteres ist der häufigere Fall und bräuchte sonst eine
+/// Wegwerf-Vorlage im Katalog.
+#[tauri::command]
+pub fn apply_metadata_preset(
+    state: State<'_, AppState>,
+    photo_ids: Vec<String>,
+    preset_json: String,
+) -> Result<MetadataPresetApplyResultDto, String> {
+    let preset: crate::metadata_preset::MetadataPreset = serde_json::from_str(&preset_json)
+        .map_err(|err| format!("Vorgabe ist kein gültiges JSON: {err}"))?;
+    let ids = parse_photo_ids(photo_ids)?;
+
+    let mut keywords_set = 0usize;
+    let mut keywords_removed = 0usize;
+
+    for id in &ids {
+        let photo = state
+            .catalog
+            .get_photo(*id)
+            .map_err(|err| err.to_string())?;
+        let ctx = crate::metadata_preset::PhotoContext {
+            filename: photo.filename.clone(),
+            year: photo.captured_at.map(|dt| dt.year()),
+            camera_model: photo.camera_model.clone(),
+            lens: photo.lens.clone(),
+        };
+        let resolved = crate::metadata_preset::resolve(&preset, &ctx);
+
+        // `set_photo_metadata` schreibt alle vier Felder auf einmal —
+        // die nicht gesetzten müssen deshalb mit ihrem bisherigen Wert
+        // durchgereicht werden, sonst wäre „nicht Teil der Vorgabe"
+        // faktisch doch ein Löschauftrag.
+        let pick = |from_preset: &Option<String>, current: &Option<String>| -> Option<String> {
+            match from_preset {
+                Some(value) if value.is_empty() => None,
+                Some(value) => Some(value.clone()),
+                None => current.clone(),
+            }
+        };
+        state
+            .catalog
+            .set_photo_metadata(
+                *id,
+                pick(&resolved.title, &photo.title).as_deref(),
+                pick(&resolved.caption, &photo.caption).as_deref(),
+                pick(&resolved.copyright, &photo.copyright).as_deref(),
+                pick(&resolved.creator, &photo.creator).as_deref(),
+            )
+            .map_err(|err| err.to_string())?;
+
+        if !resolved.custom.is_empty() {
+            let merged =
+                crate::metadata_preset::merge_custom(&photo.custom_metadata, &resolved.custom);
+            state
+                .catalog
+                .set_photo_custom_metadata(*id, &merged)
+                .map_err(|err| err.to_string())?;
+        }
+
+        if resolved.replace_keywords || !resolved.keywords_to_add.is_empty() {
+            let existing = state
+                .catalog
+                .list_keywords_for_photo(*id)
+                .map_err(|err| err.to_string())?;
+            if resolved.replace_keywords {
+                for keyword in &existing {
+                    if !resolved.keywords_to_add.contains(&keyword.name) {
+                        state
+                            .catalog
+                            .remove_keyword(*id, keyword.id)
+                            .map_err(|err| err.to_string())?;
+                        keywords_removed += 1;
+                    }
+                }
+            }
+            for keyword in &resolved.keywords_to_add {
+                if existing.iter().any(|existing| &existing.name == keyword) {
+                    continue;
+                }
+                state
+                    .catalog
+                    .add_keyword(*id, keyword)
+                    .map_err(|err| err.to_string())?;
+                keywords_set += 1;
+            }
+        }
+    }
+
+    Ok(MetadataPresetApplyResultDto {
+        photos: ids.len(),
+        keywords_set,
+        keywords_removed,
+    })
+}
+
+// ---- Manuelle Reihenfolge in einer Sammlung (Phase 33 F8) ------------------
+
+/// Verschiebt ein Foto innerhalb einer Sammlung an `target_index` und
+/// gibt die neue Reihenfolge zurück.
+///
+/// `target_index` zählt in der Liste **vor** dem Verschieben — so wie
+/// eine Oberfläche es beim Ziehen natürlicherweise liefert („zwischen
+/// das dritte und das vierte Element"). Die Umrechnung auf die Liste
+/// danach passiert in `apx_catalog` und hat dort eigene Tests; genau an
+/// dieser Stelle greift so eine Funktion sonst um eins daneben.
+#[tauri::command]
+pub fn reorder_collection_photo(
+    state: State<'_, AppState>,
+    collection_id: String,
+    photo_id: String,
+    target_index: usize,
+) -> Result<Vec<String>, String> {
+    let collection_id: apx_core::CollectionId = collection_id
+        .parse()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    let photo_id = parse_photo_id(photo_id)?;
+    let order = state
+        .catalog
+        .reorder_collection_photo(collection_id, photo_id, target_index)
+        .map_err(|err| err.to_string())?;
+    Ok(order.into_iter().map(|id| id.to_string()).collect())
+}
+
+// ---- Ähnliche Fotos zu einem Referenzfoto (Phase 33 F9) -------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SimilarPhotoDto {
+    pub photo: PhotoDto,
+    /// `0.0..=1.0`, 1 = gleich.
+    pub similarity: f32,
+}
+
+/// Sucht die Fotos, die `photo_id` am ähnlichsten sind.
+///
+/// `color_weight` mischt zwischen Motiv (0) und Farbe (1) — siehe
+/// `similarity.rs`s Moduldoku dazu, warum beides gebraucht wird.
+/// `min_similarity` schneidet die Trefferliste ab, `limit` begrenzt sie.
+///
+/// Gerechnet wird auf den bereits erzeugten Miniaturansichten, wie bei
+/// der Duplikatsuche: Fotos ohne Vorschau werden übersprungen statt
+/// erzwungen dekodiert. Das Referenzfoto selbst taucht nie in den
+/// Treffern auf — es ist sich selbst trivialerweise am ähnlichsten und
+/// würde nur den ersten Platz besetzen.
+#[tauri::command]
+pub fn find_similar_photos(
+    state: State<'_, AppState>,
+    photo_id: String,
+    color_weight: f32,
+    min_similarity: f32,
+    limit: usize,
+) -> Result<Vec<SimilarPhotoDto>, String> {
+    let reference_id = parse_photo_id(photo_id)?;
+    let hasher = image_hasher::HasherConfig::new().to_hasher();
+
+    let fingerprint_of = |id: apx_core::PhotoId| -> Option<crate::similarity::Fingerprint> {
+        let preview = state
+            .catalog
+            .get_preview(id, apx_catalog::PreviewLevel::Thumbnail)
+            .ok()??;
+        let img = image::open(&preview.path).ok()?;
+        let hash = hasher.hash_image(&img);
+        Some(crate::similarity::Fingerprint {
+            hash_bits: hash.as_bytes().to_vec(),
+            color: crate::similarity::color_histogram(img.to_rgba8().as_raw()),
+        })
+    };
+
+    let reference = fingerprint_of(reference_id)
+        .ok_or_else(|| "Für dieses Foto gibt es noch keine Miniaturansicht".to_string())?;
+
+    let photos = state
+        .catalog
+        .search_and_filter_photos(None, &apx_catalog::FilterCriteria::default())
+        .map_err(|err| err.to_string())?;
+
+    let mut scored: Vec<SimilarPhotoDto> = Vec::new();
+    for photo in photos {
+        if photo.id == reference_id {
+            continue;
+        }
+        let Some(fingerprint) = fingerprint_of(photo.id) else {
+            continue;
+        };
+        let score = crate::similarity::similarity(&reference, &fingerprint, color_weight);
+        if score < min_similarity {
+            continue;
+        }
+        scored.push(SimilarPhotoDto {
+            photo: PhotoDto::from(photo),
+            similarity: score,
+        });
+    }
+
+    scored.sort_by(|a, b| {
+        b.similarity
+            .partial_cmp(&a.similarity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            // Bei gleichem Wert der Dateiname, damit die Liste zwischen
+            // zwei Durchläufen nicht springt.
+            .then_with(|| a.photo.filename.cmp(&b.photo.filename))
+    });
+    scored.truncate(limit.max(1));
+    Ok(scored)
 }

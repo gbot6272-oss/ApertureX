@@ -7,8 +7,8 @@ use rusqlite::types::ToSql;
 use rusqlite::Connection;
 
 use crate::error::map_sqlite_err;
-use crate::models::FilterCriteria;
-use crate::repository::photos::{raw_to_photo, row_to_raw, SELECT_COLUMNS};
+use crate::models::{Aspect, FilterCriteria};
+use crate::repository::photos::{raw_to_photo, row_to_raw, NOT_TRASHED, SELECT_COLUMNS};
 use crate::Photo;
 
 /// Volltextsuche über Dateiname, Kamerahersteller/-modell und Objektiv.
@@ -19,7 +19,7 @@ pub(crate) fn search_photos(conn: &Connection, query: &str) -> Result<Vec<Photo>
     let sql = format!(
         "SELECT {SELECT_COLUMNS} FROM photos_fts \
          JOIN photos ON photos.rowid = photos_fts.rowid \
-         WHERE photos_fts MATCH ?1 ORDER BY rank"
+         WHERE photos_fts MATCH ?1 AND {NOT_TRASHED} ORDER BY rank"
     );
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
     let rows = stmt
@@ -42,7 +42,10 @@ fn build_filter_clause(
     criteria: &FilterCriteria,
     start_index: usize,
 ) -> (Vec<String>, Vec<Box<dyn ToSql>>) {
-    let mut clauses: Vec<String> = Vec::new();
+    // Immer mitgeführt, nie abschaltbar: Fotos im Papierkorb (Phase 33 F1)
+    // gehören in keine Filter- oder Suchtrefferliste. Hier statt in den
+    // beiden Aufrufern, damit es nicht an einer Stelle fehlen kann.
+    let mut clauses: Vec<String> = vec![NOT_TRASHED.to_string()];
     let mut values: Vec<Box<dyn ToSql>> = Vec::new();
 
     if let Some(min) = criteria.rating_at_least {
@@ -64,6 +67,65 @@ fn build_filter_clause(
         values.push(Box::new(model.clone()));
         clauses.push(format!(
             "photos.camera_model = ?{}",
+            start_index + values.len()
+        ));
+    }
+
+    if let Some(lens) = &criteria.lens {
+        values.push(Box::new(lens.clone()));
+        clauses.push(format!("photos.lens = ?{}", start_index + values.len()));
+    }
+    if let Some(min) = criteria.iso_min {
+        values.push(Box::new(min as i64));
+        clauses.push(format!(
+            "photos.iso IS NOT NULL AND photos.iso >= ?{}",
+            start_index + values.len()
+        ));
+    }
+    if let Some(max) = criteria.iso_max {
+        values.push(Box::new(max as i64));
+        clauses.push(format!(
+            "photos.iso IS NOT NULL AND photos.iso <= ?{}",
+            start_index + values.len()
+        ));
+    }
+    if let Some(from) = criteria.captured_from {
+        values.push(Box::new(from));
+        clauses.push(format!(
+            "photos.captured_at IS NOT NULL AND photos.captured_at >= ?{}",
+            start_index + values.len()
+        ));
+    }
+    if let Some(to) = criteria.captured_to {
+        values.push(Box::new(to));
+        clauses.push(format!(
+            "photos.captured_at IS NOT NULL AND photos.captured_at <= ?{}",
+            start_index + values.len()
+        ));
+    }
+    if let Some(aspect) = criteria.aspect {
+        // Die *angezeigten* Kanten, nicht die gespeicherten: bei den
+        // EXIF-Orientierungen 5..8 ist das Bild in der Datei gedreht
+        // abgelegt, und wer nach „Hochformat" filtert, meint das Bild auf
+        // dem Schirm. Siehe `Aspect`s Doku.
+        let displayed_w = "(CASE WHEN photos.orientation IN (5,6,7,8) THEN photos.height \
+                            ELSE photos.width END)";
+        let displayed_h = "(CASE WHEN photos.orientation IN (5,6,7,8) THEN photos.width \
+                            ELSE photos.height END)";
+        let comparison = match aspect {
+            Aspect::Landscape => ">",
+            Aspect::Portrait => "<",
+            Aspect::Square => "=",
+        };
+        clauses.push(format!(
+            "photos.width IS NOT NULL AND photos.height IS NOT NULL \
+             AND {displayed_w} {comparison} {displayed_h}"
+        ));
+    }
+    if let Some(kind) = &criteria.media_kind {
+        values.push(Box::new(kind.clone()));
+        clauses.push(format!(
+            "photos.media_kind = ?{}",
             start_index + values.len()
         ));
     }
@@ -93,11 +155,7 @@ fn run_filtered_query(
 /// Dateiname — konsistent mit [`crate::repository::photos::list_by_folder`].
 pub(crate) fn filter_photos(conn: &Connection, criteria: &FilterCriteria) -> Result<Vec<Photo>> {
     let (clauses, values) = build_filter_clause(criteria, 0);
-    let where_clause = if clauses.is_empty() {
-        "1 = 1".to_string()
-    } else {
-        clauses.join(" AND ")
-    };
+    let where_clause = clauses.join(" AND ");
     let sql = format!("SELECT {SELECT_COLUMNS} FROM photos WHERE {where_clause} ORDER BY filename");
     run_filtered_query(conn, &sql, &values)
 }
@@ -319,5 +377,380 @@ mod tests {
         let results =
             search_and_filter_photos(&conn, Some("   "), &FilterCriteria::default()).expect("ok");
         assert_eq!(results.len(), 2, "leerer Suchtext zählt wie kein Suchtext");
+    }
+
+    // ---- Erweiterte Katalogfilter (Phase 33 F7) --------------------------
+
+    /// Legt ein Foto mit den Feldern an, um die es in diesem Abschnitt
+    /// geht — `insert_photo` oben deckt nur Dateiname und Kameramodell ab.
+    #[allow(clippy::too_many_arguments)]
+    fn insert_detailed(
+        conn: &Connection,
+        filename: &str,
+        lens: Option<&str>,
+        iso: Option<u32>,
+        captured_at: Option<i64>,
+        width: Option<u32>,
+        height: Option<u32>,
+        orientation: u16,
+        media_kind: &str,
+    ) -> apx_core::PhotoId {
+        let folder_id =
+            folders::find_or_create(conn, Path::new("/fotos"), None, OffsetDateTime::now_utc())
+                .expect("Ordner");
+        let photo = NewPhoto {
+            media_kind: media_kind.to_string(),
+            duration_ms: None,
+            video_codec: None,
+            has_audio: None,
+            frame_rate: None,
+            folder_id,
+            filename: filename.to_string(),
+            file_size: 100,
+            file_mtime: OffsetDateTime::now_utc()
+                .replace_nanosecond(0)
+                .expect("gültig"),
+            content_hash: None,
+            width,
+            height,
+            orientation,
+            camera_make: None,
+            camera_model: None,
+            lens: lens.map(|s| s.to_string()),
+            iso,
+            shutter: None,
+            aperture: None,
+            focal_length: None,
+            captured_at: captured_at.map(|t| OffsetDateTime::from_unix_timestamp(t).unwrap()),
+            gps_lat: None,
+            gps_lon: None,
+        };
+        photos::upsert(conn, &photo, OffsetDateTime::now_utc())
+            .expect("Foto anlegen")
+            .0
+    }
+
+    #[test]
+    fn der_objektivfilter_trennt_zwei_objektive() {
+        let conn = setup();
+        let fifty = insert_detailed(
+            &conn,
+            "a.cr2",
+            Some("RF 50mm"),
+            None,
+            None,
+            None,
+            None,
+            1,
+            "photo",
+        );
+        insert_detailed(
+            &conn,
+            "b.cr2",
+            Some("RF 85mm"),
+            None,
+            None,
+            None,
+            None,
+            1,
+            "photo",
+        );
+
+        let criteria = FilterCriteria {
+            lens: Some("RF 50mm".to_string()),
+            ..Default::default()
+        };
+        let results = filter_photos(&conn, &criteria).expect("ok");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, fifty);
+    }
+
+    #[test]
+    fn der_iso_bereich_schliesst_beide_grenzen_ein() {
+        let conn = setup();
+        insert_detailed(
+            &conn,
+            "a.cr2",
+            None,
+            Some(100),
+            None,
+            None,
+            None,
+            1,
+            "photo",
+        );
+        insert_detailed(
+            &conn,
+            "b.cr2",
+            None,
+            Some(800),
+            None,
+            None,
+            None,
+            1,
+            "photo",
+        );
+        insert_detailed(
+            &conn,
+            "c.cr2",
+            None,
+            Some(6400),
+            None,
+            None,
+            None,
+            1,
+            "photo",
+        );
+
+        let criteria = FilterCriteria {
+            iso_min: Some(100),
+            iso_max: Some(800),
+            ..Default::default()
+        };
+        assert_eq!(filter_photos(&conn, &criteria).expect("ok").len(), 2);
+    }
+
+    #[test]
+    fn ein_foto_ohne_iso_faellt_aus_einem_iso_filter_heraus() {
+        let conn = setup();
+        insert_detailed(&conn, "ohne.cr2", None, None, None, None, None, 1, "photo");
+        let criteria = FilterCriteria {
+            iso_min: Some(100),
+            ..Default::default()
+        };
+        assert!(filter_photos(&conn, &criteria).expect("ok").is_empty());
+    }
+
+    #[test]
+    fn der_zeitraum_filtert_beide_grenzen_einschliesslich() {
+        let conn = setup();
+        insert_detailed(
+            &conn,
+            "frueh.cr2",
+            None,
+            None,
+            Some(1_000),
+            None,
+            None,
+            1,
+            "photo",
+        );
+        insert_detailed(
+            &conn,
+            "mitte.cr2",
+            None,
+            None,
+            Some(2_000),
+            None,
+            None,
+            1,
+            "photo",
+        );
+        insert_detailed(
+            &conn,
+            "spaet.cr2",
+            None,
+            None,
+            Some(3_000),
+            None,
+            None,
+            1,
+            "photo",
+        );
+
+        let criteria = FilterCriteria {
+            captured_from: Some(1_000),
+            captured_to: Some(2_000),
+            ..Default::default()
+        };
+        assert_eq!(filter_photos(&conn, &criteria).expect("ok").len(), 2);
+    }
+
+    #[test]
+    fn ein_foto_ohne_datum_faellt_aus_einem_zeitraumfilter_heraus() {
+        let conn = setup();
+        insert_detailed(&conn, "ohne.cr2", None, None, None, None, None, 1, "photo");
+        let criteria = FilterCriteria {
+            captured_from: Some(0),
+            ..Default::default()
+        };
+        assert!(filter_photos(&conn, &criteria).expect("ok").is_empty());
+    }
+
+    #[test]
+    fn das_seitenverhaeltnis_richtet_sich_nach_der_exif_drehung() {
+        let conn = setup();
+        // Beide Fotos liegen mit 6000x4000 in der Datei. Das zweite trägt
+        // EXIF-Orientierung 6 — es steht auf dem Schirm hochkant.
+        let quer = insert_detailed(
+            &conn,
+            "quer.cr2",
+            None,
+            None,
+            None,
+            Some(6000),
+            Some(4000),
+            1,
+            "photo",
+        );
+        let hoch = insert_detailed(
+            &conn,
+            "hoch.cr2",
+            None,
+            None,
+            None,
+            Some(6000),
+            Some(4000),
+            6,
+            "photo",
+        );
+
+        let landscape = FilterCriteria {
+            aspect: Some(Aspect::Landscape),
+            ..Default::default()
+        };
+        let portrait = FilterCriteria {
+            aspect: Some(Aspect::Portrait),
+            ..Default::default()
+        };
+        assert_eq!(filter_photos(&conn, &landscape).expect("ok")[0].id, quer);
+        assert_eq!(filter_photos(&conn, &portrait).expect("ok")[0].id, hoch);
+    }
+
+    #[test]
+    fn ein_quadrat_ist_weder_quer_noch_hoch() {
+        let conn = setup();
+        let quadrat = insert_detailed(
+            &conn,
+            "q.cr2",
+            None,
+            None,
+            None,
+            Some(4000),
+            Some(4000),
+            1,
+            "photo",
+        );
+        let square = FilterCriteria {
+            aspect: Some(Aspect::Square),
+            ..Default::default()
+        };
+        assert_eq!(filter_photos(&conn, &square).expect("ok")[0].id, quadrat);
+        for aspect in [Aspect::Landscape, Aspect::Portrait] {
+            let criteria = FilterCriteria {
+                aspect: Some(aspect),
+                ..Default::default()
+            };
+            assert!(filter_photos(&conn, &criteria).expect("ok").is_empty());
+        }
+    }
+
+    #[test]
+    fn ein_foto_ohne_abmessungen_faellt_aus_jedem_seitenverhaeltnis_heraus() {
+        let conn = setup();
+        insert_detailed(&conn, "ohne.cr2", None, None, None, None, None, 1, "photo");
+        let criteria = FilterCriteria {
+            aspect: Some(Aspect::Landscape),
+            ..Default::default()
+        };
+        assert!(filter_photos(&conn, &criteria).expect("ok").is_empty());
+    }
+
+    #[test]
+    fn die_medienart_trennt_foto_und_video() {
+        let conn = setup();
+        insert_detailed(&conn, "a.cr2", None, None, None, None, None, 1, "photo");
+        let video = insert_detailed(&conn, "b.mp4", None, None, None, None, None, 1, "video");
+        let criteria = FilterCriteria {
+            media_kind: Some("video".to_string()),
+            ..Default::default()
+        };
+        let results = filter_photos(&conn, &criteria).expect("ok");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, video);
+    }
+
+    #[test]
+    fn mehrere_neue_kriterien_werden_per_und_verknuepft() {
+        let conn = setup();
+        let treffer = insert_detailed(
+            &conn,
+            "a.cr2",
+            Some("RF 50mm"),
+            Some(400),
+            None,
+            None,
+            None,
+            1,
+            "photo",
+        );
+        // Richtiges Objektiv, falsches ISO.
+        insert_detailed(
+            &conn,
+            "b.cr2",
+            Some("RF 50mm"),
+            Some(6400),
+            None,
+            None,
+            None,
+            1,
+            "photo",
+        );
+        // Richtiges ISO, falsches Objektiv.
+        insert_detailed(
+            &conn,
+            "c.cr2",
+            Some("RF 85mm"),
+            Some(400),
+            None,
+            None,
+            None,
+            1,
+            "photo",
+        );
+
+        let criteria = FilterCriteria {
+            lens: Some("RF 50mm".to_string()),
+            iso_max: Some(800),
+            ..Default::default()
+        };
+        let results = filter_photos(&conn, &criteria).expect("ok");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, treffer);
+    }
+
+    #[test]
+    fn die_neuen_kriterien_wirken_auch_zusammen_mit_der_volltextsuche() {
+        let conn = setup();
+        insert_detailed(
+            &conn,
+            "sonnenuntergang_a.cr2",
+            Some("RF 50mm"),
+            None,
+            None,
+            None,
+            None,
+            1,
+            "photo",
+        );
+        insert_detailed(
+            &conn,
+            "sonnenuntergang_b.cr2",
+            Some("RF 85mm"),
+            None,
+            None,
+            None,
+            None,
+            1,
+            "photo",
+        );
+
+        let criteria = FilterCriteria {
+            lens: Some("RF 50mm".to_string()),
+            ..Default::default()
+        };
+        let results =
+            search_and_filter_photos(&conn, Some("sonnenuntergang*"), &criteria).expect("ok");
+        assert_eq!(results.len(), 1);
     }
 }

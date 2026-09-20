@@ -21,6 +21,11 @@ pub enum StackingError {
     /// Bilder gleicher Größe voraussetzt.
     #[error("Quellbilder haben unterschiedliche Abmessungen: {message}")]
     DimensionMismatch { message: String },
+
+    /// Ein Puffer passt nicht zu den angegebenen Abmessungen, oder ein
+    /// Bild hat keine Ausdehnung (Phase 33 F3, Schärfe-Bewertung).
+    #[error("Ungeeignete Eingabe: {0}")]
+    InvalidInput(String),
 }
 
 impl From<StackingError> for AppError {

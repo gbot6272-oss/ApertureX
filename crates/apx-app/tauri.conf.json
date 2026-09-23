@@ -3,8 +3,8 @@
   "productName": "Aperture X",
   "identifier": "dev.aperturex.desktop",
   "build": {
-    "beforeDevCommand": "pnpm --dir ../../frontend dev",
-    "beforeBuildCommand": "pnpm --dir ../../frontend build",
+    "beforeDevCommand": "pnpm --dir ../frontend dev || pnpm --dir frontend dev || pnpm dev",
+    "beforeBuildCommand": "pnpm --dir ../frontend build || pnpm --dir frontend build || pnpm build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../../frontend/dist"
   },

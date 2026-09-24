@@ -37,6 +37,32 @@ pub struct Folder {
     pub added_at: OffsetDateTime,
 }
 
+/// Die aus der Bilddatei gelesenen technischen Metadaten — genau die
+/// Felder, die beim Import aus EXIF stammen.
+///
+/// Eigener Typ statt [`NewPhoto`], weil das Nachlesen der Metadaten
+/// (siehe `Catalog::set_photo_technical_metadata`) bewusst NUR diese
+/// Spalten anfasst: Dateigroesse, Aenderungszeit, Inhalts-Hash,
+/// Bewertung, Flagge, Farbmarkierung und die selbst gepflegten
+/// IPTC-Felder gehoeren dem Nutzer bzw. dem Import und duerfen von
+/// einem Metadaten-Abgleich nicht ueberschrieben werden.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TechnicalMetadata {
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub orientation: u16,
+    pub camera_make: Option<String>,
+    pub camera_model: Option<String>,
+    pub lens: Option<String>,
+    pub iso: Option<u32>,
+    pub shutter: Option<f32>,
+    pub aperture: Option<f32>,
+    pub focal_length: Option<f32>,
+    pub captured_at: Option<OffsetDateTime>,
+    pub gps_lat: Option<f64>,
+    pub gps_lon: Option<f64>,
+}
+
 /// Felder, die beim Anlegen eines Fotos bekannt sind. `id` und
 /// `imported_at` werden von [`crate::Catalog::insert_photo`] selbst
 /// erzeugt, deshalb sind sie hier nicht enthalten.

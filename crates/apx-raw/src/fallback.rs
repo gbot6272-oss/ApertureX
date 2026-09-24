@@ -8,6 +8,7 @@ use std::path::Path;
 
 use apx_core::{AppError, Result};
 use image::ImageReader;
+use time::{OffsetDateTime, UtcOffset};
 
 use crate::orientation::Orientation;
 use crate::pipeline::DecodedImage;
@@ -39,10 +40,16 @@ pub fn read_metadata(path: &Path) -> Result<RawMetadata> {
         shutter: exif.as_ref().and_then(|e| e.shutter),
         aperture: exif.as_ref().and_then(|e| e.aperture),
         focal_length: exif.as_ref().and_then(|e| e.focal_length),
-        captured_at: None, // Datum/Zeit-Parsing für den Fallback-Pfad ist in Phase 1 nicht
-        // erforderlich (JPEG/PNG/TIFF sind hier nur ein Auffangnetz für
-        // Nicht-RAW-Importe); die Timestamp-Logik lebt zentral in
-        // `metadata.rs` für den RAW-Pfad.
+        // Bis Phase 34 stand hier hart `None` mit der Begruendung, JPEG/
+        // PNG/TIFF seien "nur ein Auffangnetz". Das stimmte nie: jeder
+        // Import einer Kamera-JPEG-Datei landete damit ohne
+        // Aufnahmedatum im Katalog, und alles, was am Datum haengt
+        // (Kalenderansicht, Sortierung nach Aufnahmezeit, Serien-
+        // Erkennung, Import-Umbenennung mit Datumsplatzhaltern), blieb
+        // fuer diese Fotos leer. Geparst wird mit denselben beiden
+        // Funktionen wie im RAW-Pfad (`metadata.rs`), damit beide Wege
+        // dieselbe Zeitzonen-Auslegung haben.
+        captured_at: exif.as_ref().and_then(|e| e.captured_at),
         orientation: exif
             .as_ref()
             .and_then(|e| e.orientation)
@@ -94,6 +101,7 @@ struct FallbackExif {
     focal_length: Option<f32>,
     orientation: Option<u16>,
     gps: Option<(f64, f64)>,
+    captured_at: Option<OffsetDateTime>,
 }
 
 fn read_exif(path: &Path) -> Option<FallbackExif> {
@@ -142,6 +150,24 @@ fn read_exif(path: &Path) -> Option<FallbackExif> {
         ))
     })();
 
+    // `DateTimeOriginal` ist der Aufnahmezeitpunkt; `DateTimeDigitized`
+    // (EXIF-Name `CreateDate`) ist der dokumentierte Ersatz, wenn die
+    // Kamera ersteren nicht schreibt — dieselbe Reihenfolge wie im
+    // RAW-Pfad. Ohne Offset-Tag gilt die Kamera-Uhrzeit als UTC (siehe
+    // `RawMetadata::captured_at`).
+    let captured_at = ascii(exif::Tag::DateTimeOriginal)
+        .or_else(|| ascii(exif::Tag::DateTimeDigitized))
+        .as_deref()
+        .and_then(crate::metadata::parse_exif_datetime)
+        .map(|naive| {
+            let offset = ascii(exif::Tag::OffsetTimeOriginal)
+                .or_else(|| ascii(exif::Tag::OffsetTime))
+                .as_deref()
+                .and_then(crate::metadata::parse_exif_offset)
+                .unwrap_or(UtcOffset::UTC);
+            naive.assume_offset(offset)
+        });
+
     Some(FallbackExif {
         make: ascii(exif::Tag::Make),
         model: ascii(exif::Tag::Model),
@@ -152,6 +178,7 @@ fn read_exif(path: &Path) -> Option<FallbackExif> {
         focal_length: rational(exif::Tag::FocalLength),
         orientation: uint(exif::Tag::Orientation).map(|v| v as u16),
         gps,
+        captured_at,
     })
 }
 
@@ -186,6 +213,20 @@ mod exif_orientation_tests {
     /// 4×2 Bild, oben links rot, alles andere schwarz, damit sich jede der
     /// acht Orientierungen am Ort des roten Pixels ablesen lässt.
     fn build_jpeg_with_orientation(orientation: u16) -> Vec<u8> {
+        build_jpeg_with_exif(orientation, None, None)
+    }
+
+    /// Wie [`build_jpeg_with_orientation`], schreibt aber zusaetzlich eine
+    /// echte Exif-Sub-IFD (Tag 0x8769) mit `DateTimeOriginal` (0x9003) und
+    /// `OffsetTimeOriginal` (0x9011). Die Datumstags leben laut
+    /// EXIF-Standard NICHT in der IFD0, sondern in dieser Sub-IFD —
+    /// `kamadak-exif` findet sie sonst unter `Tag::DateTimeOriginal`
+    /// nicht. Genau diesen Weg deckt der Regressionstest unten ab.
+    fn build_jpeg_with_exif(
+        orientation: u16,
+        date_time_original: Option<&str>,
+        offset_time_original: Option<&str>,
+    ) -> Vec<u8> {
         let mut img = image::RgbImage::from_pixel(4, 2, image::Rgb([0, 0, 0]));
         img.put_pixel(0, 0, image::Rgb([255, 0, 0]));
         let dynamic = image::DynamicImage::ImageRgb8(img);
@@ -194,18 +235,66 @@ mod exif_orientation_tests {
             .write_to(&mut Cursor::new(&mut jpeg_bytes), image::ImageFormat::Jpeg)
             .expect("jpeg-Kodierung sollte klappen");
 
+        // Ein ASCII-Wert wird laut TIFF nullterminiert gespeichert; `count`
+        // zaehlt das Nullbyte mit.
+        let ascii_bytes = |text: &str| {
+            let mut bytes = text.as_bytes().to_vec();
+            bytes.push(0);
+            bytes
+        };
+
+        let sub_entries: Vec<(u16, Vec<u8>)> = [
+            date_time_original.map(|v| (0x9003u16, ascii_bytes(v))),
+            offset_time_original.map(|v| (0x9011u16, ascii_bytes(v))),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
         let mut tiff = Vec::new();
         tiff.extend_from_slice(b"II"); // little-endian
         tiff.extend_from_slice(&0x002Au16.to_le_bytes());
         tiff.extend_from_slice(&8u32.to_le_bytes()); // Offset IFD0
-        tiff.extend_from_slice(&1u16.to_le_bytes()); // 1 Eintrag
+
+        let ifd0_entries = if sub_entries.is_empty() { 1u16 } else { 2u16 };
+        // Alle Offsets zaehlen ab dem Anfang des TIFF-Headers.
+        let ifd0_size = 2 + 12 * u32::from(ifd0_entries) + 4;
+        let sub_ifd_offset = 8 + ifd0_size;
+        let sub_ifd_size = 2 + 12 * sub_entries.len() as u32 + 4;
+        let mut data_offset = sub_ifd_offset + sub_ifd_size;
+
+        tiff.extend_from_slice(&ifd0_entries.to_le_bytes());
         tiff.extend_from_slice(&0x0112u16.to_le_bytes()); // Tag: Orientation
         tiff.extend_from_slice(&3u16.to_le_bytes()); // Typ: SHORT
         tiff.extend_from_slice(&1u32.to_le_bytes()); // Anzahl Werte
         let mut value_field = [0u8; 4];
         value_field[0..2].copy_from_slice(&orientation.to_le_bytes());
         tiff.extend_from_slice(&value_field);
-        tiff.extend_from_slice(&0u32.to_le_bytes()); // nächstes IFD: keins
+        if !sub_entries.is_empty() {
+            tiff.extend_from_slice(&0x8769u16.to_le_bytes()); // Tag: ExifIFDPointer
+            tiff.extend_from_slice(&4u16.to_le_bytes()); // Typ: LONG
+            tiff.extend_from_slice(&1u32.to_le_bytes());
+            tiff.extend_from_slice(&sub_ifd_offset.to_le_bytes());
+        }
+        tiff.extend_from_slice(&0u32.to_le_bytes()); // naechstes IFD: keins
+
+        if !sub_entries.is_empty() {
+            tiff.extend_from_slice(&(sub_entries.len() as u16).to_le_bytes());
+            let mut payload = Vec::new();
+            for (tag, bytes) in &sub_entries {
+                tiff.extend_from_slice(&tag.to_le_bytes());
+                tiff.extend_from_slice(&2u16.to_le_bytes()); // Typ: ASCII
+                tiff.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+                // Werte ueber vier Byte liegen ausgelagert, davor inline —
+                // hier sind alle Datumsstrings laenger als vier Byte.
+                assert!(bytes.len() > 4, "kurze ASCII-Werte laegen inline");
+                tiff.extend_from_slice(&data_offset.to_le_bytes());
+                data_offset += bytes.len() as u32;
+                payload.extend_from_slice(bytes);
+            }
+            tiff.extend_from_slice(&0u32.to_le_bytes()); // naechstes IFD
+            tiff.extend_from_slice(&payload);
+        }
 
         let mut app1 = Vec::new();
         app1.extend_from_slice(b"Exif\0\0");
@@ -227,6 +316,64 @@ mod exif_orientation_tests {
         let path = std::env::temp_dir().join(name);
         std::fs::write(&path, &bytes).expect("Test-JPEG sollte sich schreiben lassen");
         path
+    }
+
+    /// Regressionstest zum Kalender-Fund: `read_metadata` lieferte fuer
+    /// JPEG/PNG/TIFF hart `captured_at: None`. Jedes importierte
+    /// Kamera-JPEG landete damit ohne Aufnahmedatum im Katalog, und die
+    /// Kalenderansicht (Phase 32 F3) blieb fuer genau diese Fotos leer —
+    /// fuer den Nutzer "der Kalender funktioniert fuer kein Foto".
+    /// Geprueft wird hier der volle Weg ueber einen echten APP1/EXIF-Block
+    /// mit Exif-Sub-IFD, nicht nur der String-Parser.
+    #[test]
+    fn read_metadata_reads_the_capture_date_from_a_real_jpeg() {
+        let bytes = build_jpeg_with_exif(1, Some("2024:07:15 08:30:12"), None);
+        let path = std::env::temp_dir().join("apx_fallback_captured_at_test.jpg");
+        std::fs::write(&path, &bytes).expect("Test-JPEG sollte sich schreiben lassen");
+
+        let meta = read_metadata(&path).expect("read_metadata sollte klappen");
+        let captured = meta
+            .captured_at
+            .expect("Aufnahmedatum sollte gelesen werden");
+        assert_eq!(captured.year(), 2024);
+        assert_eq!(u8::from(captured.month()), 7);
+        assert_eq!(captured.day(), 15);
+        assert_eq!(captured.hour(), 8);
+        assert_eq!(captured.minute(), 30);
+        // Ohne Offset-Tag gilt die Kamera-Uhrzeit als UTC — dieselbe
+        // Annahme wie im RAW-Pfad.
+        assert_eq!(captured.offset(), time::UtcOffset::UTC);
+    }
+
+    /// Mit `OffsetTimeOriginal` muss derselbe Wandzeit-Zeitpunkt heraus-
+    /// kommen, nur mit der angegebenen Zone — sonst landete eine
+    /// Abendaufnahme im Kalender am Folgetag.
+    #[test]
+    fn read_metadata_honours_the_exif_utc_offset() {
+        let bytes = build_jpeg_with_exif(1, Some("2024:07:15 23:30:00"), Some("+02:00"));
+        let path = std::env::temp_dir().join("apx_fallback_captured_at_offset_test.jpg");
+        std::fs::write(&path, &bytes).expect("Test-JPEG sollte sich schreiben lassen");
+
+        let captured = read_metadata(&path)
+            .expect("read_metadata sollte klappen")
+            .captured_at
+            .expect("Aufnahmedatum sollte gelesen werden");
+        assert_eq!(captured.hour(), 23);
+        assert_eq!(captured.day(), 15);
+        assert_eq!(
+            captured.offset(),
+            time::UtcOffset::from_hms(2, 0, 0).unwrap()
+        );
+    }
+
+    /// Ein JPEG ohne Datumstags darf weiterhin `None` liefern statt zu
+    /// raten — ein erfundenes Datum waere im Kalender nicht als solches
+    /// erkennbar (siehe `lib/calendarGrid.ts`s `countByDay`).
+    #[test]
+    fn read_metadata_leaves_the_capture_date_empty_without_exif_date() {
+        let path = write_temp_jpeg("apx_fallback_no_date_test.jpg", 1);
+        let meta = read_metadata(&path).expect("read_metadata sollte klappen");
+        assert!(meta.captured_at.is_none());
     }
 
     #[test]

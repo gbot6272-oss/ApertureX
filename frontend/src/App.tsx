@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { CommandPalette } from "./components/CommandPalette";
 import { CompareGridView } from "./components/CompareGridView";
 import { HistoryTimelineDialog } from "./components/HistoryTimelineDialog";
@@ -414,6 +415,13 @@ export default function App() {
             (siehe ADR-0055: ein unnötig gesetzter `z-index` hat hier
             schon einmal das Overflow-Menü verdeckt). */}
         <div key={centerView} className={`apx-view-fade-in flex flex-1 overflow-hidden ${lightsOut === "off" ? "" : "relative z-[25]"}`}>
+          {/* Eigene Fehlergrenze je Bereich (ADR-0068): stuerzt eine
+              Ansicht ab, bleiben Kopfleiste, Seitenleiste und Paletten
+              bedienbar — statt dass React den ganzen Baum abhaengt und ein
+              weisses Fenster ohne Ausweg zurueckbleibt. Der `key` sorgt
+              nebenbei dafuer, dass ein Ansichtswechsel die Grenze
+              zuruecksetzt. */}
+          <ErrorBoundary scope="region" label="Diese Ansicht">
           {centerView === "grid" ? (
             <GridView />
           ) : centerView === "overview" ? (
@@ -431,6 +439,7 @@ export default function App() {
           ) : (
             <Viewer />
           )}
+          </ErrorBoundary>
         </div>
         {!focusMode && <MetadataPanel />}
         {/* Rechte Werkzeug-Palette (Phase 10 Schritt 2): Entwickeln- und
@@ -441,8 +450,12 @@ export default function App() {
             zweier lose nebeneinanderstehender <aside>s. */}
         {!focusMode && (
           <div className="flex shrink-0">
-            <DevelopPanel />
-            <MasksPanel />
+            <ErrorBoundary scope="region" label="Das Entwickeln-Panel">
+              <DevelopPanel />
+            </ErrorBoundary>
+            <ErrorBoundary scope="region" label="Das Masken-Panel">
+              <MasksPanel />
+            </ErrorBoundary>
           </div>
         )}
       </div>

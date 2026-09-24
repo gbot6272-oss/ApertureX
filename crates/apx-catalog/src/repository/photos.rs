@@ -5,7 +5,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use time::OffsetDateTime;
 
 use crate::error::map_sqlite_err;
-use crate::models::{from_unix, from_unix_opt, to_unix, to_unix_opt, NewPhoto, Photo};
+use crate::models::{
+    from_unix, from_unix_opt, to_unix, to_unix_opt, NewPhoto, Photo, TechnicalMetadata,
+};
 
 /// Qualifiziert mit `photos.`, damit dieselbe Spaltenliste auch in
 /// `repository::search`s Joins mit `photos_fts` verwendbar ist, ohne dass
@@ -539,6 +541,56 @@ pub(crate) fn set_color_label(
         .execute(
             "UPDATE photos SET color_label = ?2 WHERE id = ?1",
             params![id.to_string(), color_label],
+        )
+        .map_err(map_sqlite_err)?;
+    if changed == 0 {
+        return Err(AppError::not_found("Foto", id.to_string()));
+    }
+    Ok(())
+}
+
+/// Schreibt die aus der Datei gelesenen technischen Metadaten neu —
+/// und NUR die.
+///
+/// Gedacht fuer das nachtraegliche Einlesen bereits importierter Fotos
+/// (siehe `DECISIONS.md` ADR-0068): bis dahin importierte JPEG/PNG/TIFF
+/// haben kein `captured_at`, weil der Fallback-Pfad in `apx-raw` es nie
+/// gelesen hat. `upsert`s `update_row` waere dafuer das falsche
+/// Werkzeug — es ueberschreibt auch Dateigroesse, Aenderungszeit und
+/// Inhalts-Hash, die hier gar nicht neu berechnet werden, und wuerde den
+/// Katalog damit gegenueber der Platte verfaelschen.
+///
+/// Bewertung, Flagge, Farbmarkierung, die selbst gepflegten IPTC-Felder
+/// und der Papierkorb-Status bleiben unberuehrt.
+pub(crate) fn set_technical_metadata(
+    conn: &Connection,
+    id: PhotoId,
+    meta: &TechnicalMetadata,
+) -> Result<()> {
+    let changed = conn
+        .execute(
+            "UPDATE photos SET
+                width = ?2, height = ?3, orientation = ?4,
+                camera_make = ?5, camera_model = ?6, lens = ?7, iso = ?8,
+                shutter = ?9, aperture = ?10, focal_length = ?11,
+                captured_at = ?12, gps_lat = ?13, gps_lon = ?14
+             WHERE id = ?1",
+            params![
+                id.to_string(),
+                meta.width.map(|v| v as i64),
+                meta.height.map(|v| v as i64),
+                meta.orientation as i64,
+                meta.camera_make,
+                meta.camera_model,
+                meta.lens,
+                meta.iso.map(|v| v as i64),
+                meta.shutter.map(|v| v as f64),
+                meta.aperture.map(|v| v as f64),
+                meta.focal_length.map(|v| v as f64),
+                to_unix_opt(meta.captured_at),
+                meta.gps_lat,
+                meta.gps_lon,
+            ],
         )
         .map_err(map_sqlite_err)?;
     if changed == 0 {

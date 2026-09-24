@@ -1901,6 +1901,28 @@ export function runCatalogOptimize(): Promise<void> {
   return invoke<void>("run_catalog_optimize");
 }
 
+/** Ergebnis von {@link rescanPhotoMetadata}. */
+export interface MetadataRescanResultDto {
+  scanned: number;
+  updated: number;
+  /** Fotos, die vorher kein Aufnahmedatum hatten und jetzt eins haben. */
+  dates_added: number;
+  unreadable: number;
+  skipped: number;
+}
+
+/**
+ * Liest die technischen (EXIF-)Metadaten bereits importierter Fotos neu
+ * von der Platte ein — ohne `folderId` für den ganzen Katalog.
+ *
+ * Nötig, weil bis Phase 34 kein JPEG/PNG/TIFF ein Aufnahmedatum bekam
+ * (siehe `DECISIONS.md` ADR-0068): der Import-Fix wirkt nur auf neue
+ * Importe, dieser Befehl zieht den vorhandenen Bestand nach.
+ */
+export function rescanPhotoMetadata(folderId?: string): Promise<MetadataRescanResultDto> {
+  return invoke<MetadataRescanResultDto>("rescan_photo_metadata", { folderId: folderId ?? null });
+}
+
 /** Sichert den aktuell geöffneten Katalog nach `destinationPath` (per
  * {@link pickSaveFilePath} ausgewählt). */
 export function runCatalogBackup(destinationPath: string): Promise<void> {

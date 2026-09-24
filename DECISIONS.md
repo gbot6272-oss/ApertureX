@@ -7365,3 +7365,73 @@ Inhaltsvergleich, und ein falsch geratenes „dieselbe Datei" würde
 Bearbeitungen dem falschen Foto zuschlagen); die Schärfe-Bewertung auf
 dem Original statt auf der Vorschau; eine Vorschau der echten Schrift im
 Wasserzeichen-Dialog. Jede dieser Lücken steht an ihrer Stelle im Code.
+
+## ADR-0067: `beforeDevCommand`/`beforeBuildCommand` verzeichnisunabhängig
+
+**Status:** Akzeptiert
+
+**Kontext.** `pnpm tauri dev` bzw. `npx --prefix ../../frontend tauri dev`
+brach reproduzierbar ab:
+
+```
+Running BeforeDevCommand (`pnpm --dir ../../frontend dev`)
+[ERROR] ENOENT: no such file or directory, lstat 'C:\Users\nikla\frontend'
+Error The "beforeDevCommand" terminated with a non-zero status code.
+```
+
+Ursache ist nicht der Aufrufer, sondern eine Fehlannahme in der Konfiguration.
+Die Tauri-CLI führt die Hooks **nicht** im Verzeichnis der `tauri.conf.json`
+aus, sondern in ihrem sogenannten *app dir*. Das ermittelt sie, indem sie vom
+aktuellen Arbeitsverzeichnis aus nach oben nach einer `package.json` sucht und
+— wenn sie keine findet — auf das **Elternverzeichnis** des Tauri-Verzeichnisses
+zurückfällt. In diesem Projekt liegt `tauri.conf.json` bewusst in
+`crates/apx-app/` (kein `src-tauri/`-Unterordner), und es gibt keine
+`package.json` im Repository-Wurzelverzeichnis. Daraus folgt:
+
+| Aufruf aus        | app dir der CLI | `../../frontend` zeigt auf |
+| ----------------- | --------------- | -------------------------- |
+| `crates/apx-app/` | `crates/`       | *außerhalb* des Repos      |
+| `frontend/`       | `frontend/`     | *außerhalb* des Repos      |
+| Repo-Wurzel       | `crates/`       | *außerhalb* des Repos      |
+
+Der bisherige Pfad `../../frontend` war damit in **keinem** Startverzeichnis
+richtig — der Hook konnte nie funktionieren. Aufgefallen ist es bisher nicht,
+weil der einzige Job, der ihn auslöst (`release` in `.github/workflows/ci.yml`),
+nur bei Tag-Push oder `workflow_dispatch` läuft, und weil die übrigen CI-Jobs
+das Frontend vorher separat mit `pnpm build` in `frontend/` erzeugen.
+
+**Entscheidung.** Beide Hooks probieren die möglichen Lagen der Reihe nach
+durch, statt eine davon anzunehmen:
+
+```
+pnpm --dir ../frontend dev || pnpm --dir frontend dev || pnpm dev
+```
+
+Das deckt alle drei app dirs ab, die die CLI in diesem Repository wählen kann,
+und trifft in den beiden realistischen Fällen schon beim ersten Versuch:
+aus `crates/` ist `../frontend` das Frontend, aus `frontend/` ist
+`frontend/../frontend` wieder dasselbe Verzeichnis. Nur beim (unüblichen)
+Start aus der Repo-Wurzel greift der zweite Zweig, nach einer Fehlzeile von
+`pnpm`. `pnpm` beendet sich bei falschem `--dir` mit Status 1 (verifiziert),
+die Kette schaltet also zuverlässig weiter.
+
+**Verworfene Alternativen.**
+
+- **`beforeDevCommand` in Objektform mit `cwd`.** Die CLI benutzt ein relatives
+  `cwd` direkt als Arbeitsverzeichnis des Kindprozesses, also relativ zum
+  Aufrufer — damit wandert das Problem nur, statt zu verschwinden.
+- **`node -e` mit Aufwärtssuche nach `frontend/package.json`.** Sauber im
+  Verhalten und real getestet, aber die Hooks laufen durch `sh -c` bzw.
+  `cmd /S /C`: unquotiert scheitert jede Klammer an `sh`
+  (`Syntax error: "(" unexpected`), quotiert kollidieren die inneren
+  Anführungszeichen mit der Argument-Maskierung unter `cmd`. Eine
+  Ein-Zeilen-Lösung ohne Anführungszeichen, Leerzeichen und Klammern ist
+  möglich, aber unlesbar — für zwei Zeilen Konfiguration ein schlechter Tausch.
+- **`package.json` in der Repo-Wurzel**, damit das app dir deterministisch wird.
+  Löst den Fall „Start aus `frontend/`" nicht und zieht Werkzeugketten-Folgen
+  (Lockfile-Ort, Workspace-Erkennung) nach sich, die in keinem Verhältnis stehen.
+
+**Nicht geändert.** `frontendDist: "../../frontend/dist"` bleibt, wie es ist:
+diesen Pfad löst `tauri-build` relativ zur `tauri.conf.json` auf, dort ist
+`../../frontend` korrekt. Der Unterschied zwischen beiden Auflösungsbasen ist
+genau die Falle, in die die alte Fassung gelaufen ist.

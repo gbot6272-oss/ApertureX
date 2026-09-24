@@ -307,12 +307,17 @@ jobs:
           echo "TAURI_WINDOWS_CONFIG=$configOverridePath" >> $env:GITHUB_ENV
 
       # `tauri.conf.json` liegt in `crates/apx-app/` (kein `src-tauri`-
-      # Unterordner, siehe dessen `build.beforeBuildCommand`, die relativ
-      # von dort aus `../../frontend` referenziert) — die `@tauri-apps/cli`
-      # ist aber als Frontend-DevDependency installiert. `npx --prefix`
-      # löst die lokal installierte Binary unabhängig vom Arbeitsverzeichnis
-      # auf, ohne dass `pnpm exec`s eigene Verzeichnis-Heuristik hier
-      # fehlschlägt — funktioniert identisch auf allen drei Plattformen.
+      # Unterordner) — die `@tauri-apps/cli` ist aber als Frontend-
+      # DevDependency installiert. `npx --prefix` löst die lokal
+      # installierte Binary unabhängig vom Arbeitsverzeichnis auf, ohne
+      # dass `pnpm exec`s eigene Verzeichnis-Heuristik hier fehlschlägt —
+      # funktioniert identisch auf allen drei Plattformen.
+      #
+      # `working-directory` ist hier NICHT entscheidend für den
+      # `beforeBuildCommand`-Hook: den führt die Tauri-CLI in ihrem
+      # eigenen „app dir" aus (siehe DECISIONS.md ADR-0067), nicht in
+      # diesem Verzeichnis. Der Hook findet `frontend/` seit ADR-0067
+      # selbst, egal von wo aus gestartet wird.
       - name: tauri build (Linux/macOS)
         if: runner.os != 'Windows'
         working-directory: crates/apx-app

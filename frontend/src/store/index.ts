@@ -69,6 +69,7 @@ import type {
   CollectionDto,
   ExportOutcomeDto,
   ExportPhotoOptions,
+  MetadataRescanResultDto,
   FaceDetectionDto,
   DetectedSeriesDto,
   PhotoNoteDto,
@@ -366,6 +367,21 @@ interface CatalogSlice {
    * lädt Ordnerliste sowie (falls gerade geöffnet) dessen Fotos danach
    * neu — siehe `FolderDto.missing`. */
   relinkFolder: (folderId: string, newPath: string) => Promise<void>;
+  /** Läuft gerade ein Metadaten-Abgleich? */
+  metadataRescanBusy: boolean;
+  /** Ergebnis des letzten Abgleichs, für die Rückmeldung in der
+   * Kalenderansicht. */
+  metadataRescanResult: MetadataRescanResultDto | null;
+  /**
+   * Liest die technischen (EXIF-)Metadaten neu von der Platte ein —
+   * ohne `folderId` für den ganzen Katalog.
+   *
+   * Die Kalenderansicht bietet das dort an, wo der Mangel sichtbar
+   * wird ("N ohne Aufnahmedatum"): bis Phase 34 bekam kein importiertes
+   * JPEG/PNG/TIFF ein Aufnahmedatum (siehe `DECISIONS.md` ADR-0068),
+   * und der Import-Fix allein hilft dem vorhandenen Bestand nicht.
+   */
+  rescanMetadata: (folderId?: string) => Promise<void>;
 }
 
 // ---- Selection-Slice ---------------------------------------------------
@@ -2460,6 +2476,34 @@ export const useAppStore = create<AppStore>()(
       } catch (err) {
         set((state) => {
           state.catalogError = String(err);
+        });
+      }
+    },
+
+    metadataRescanBusy: false,
+    metadataRescanResult: null,
+    rescanMetadata: async (folderId) => {
+      set((state) => {
+        state.metadataRescanBusy = true;
+        state.metadataRescanResult = null;
+      });
+      try {
+        const result = await api.rescanPhotoMetadata(folderId);
+        set((state) => {
+          state.metadataRescanResult = result;
+        });
+        // Die Fotoliste traegt `captured_at` selbst — ohne Neuladen
+        // zeigte der Kalender weiter den alten, datumslosen Stand.
+        const target = folderId ?? get().selectedFolderId;
+        if (target) await get().loadPhotosForFolder(target);
+        else await get().refreshFolders();
+      } catch (err) {
+        set((state) => {
+          state.catalogError = String(err);
+        });
+      } finally {
+        set((state) => {
+          state.metadataRescanBusy = false;
         });
       }
     },

@@ -1,4 +1,4 @@
-import { CalendarDays, CheckSquare, ChevronLeft, ChevronRight, ImageOff, X } from "lucide-react";
+import { CalendarDays, CheckSquare, ChevronLeft, ChevronRight, ImageOff, RefreshCw, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
@@ -57,6 +57,10 @@ export function CalendarView() {
   const selectPhoto = useAppStore((s) => s.selectPhoto);
   const setMultiSelection = useAppStore((s) => s.setMultiSelection);
   const setCenterView = useAppStore((s) => s.setCenterView);
+  const selectedFolderId = useAppStore((s) => s.selectedFolderId);
+  const rescanMetadata = useAppStore((s) => s.rescanMetadata);
+  const metadataRescanBusy = useAppStore((s) => s.metadataRescanBusy);
+  const metadataRescanResult = useAppStore((s) => s.metadataRescanResult);
 
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [hideEmptyMonths, setHideEmptyMonths] = useState(false);
@@ -169,9 +173,41 @@ export function CalendarView() {
             {busiestDay ? ` · stärkster Tag: ${formatDayLabel(busiestDay.day)} (${busiestDay.count})` : ""}
           </p>
           {undated > 0 && (
-            <p className="mt-0.5 flex items-center gap-1 text-xs text-text-muted">
-              <ImageOff aria-hidden="true" className="size-3" />
-              {undated} ohne Aufnahmedatum — im Kalender nicht darstellbar
+            // Bis Phase 34 las der JPEG/PNG/TIFF-Pfad gar kein
+            // `DateTimeOriginal` (siehe `DECISIONS.md` ADR-0068) — fuer
+            // einen so aufgebauten Katalog stand hier "alle ohne
+            // Aufnahmedatum" ohne jeden Hinweis, was dagegen zu tun
+            // waere. Das Nachlesen gehoert genau hierhin, wo der Mangel
+            // sichtbar wird, nicht in einen Wartungsdialog, den man erst
+            // suchen muss.
+            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-text-muted">
+              <span className="flex items-center gap-1">
+                <ImageOff aria-hidden="true" className="size-3" />
+                {undated} ohne Aufnahmedatum — im Kalender nicht darstellbar
+              </span>
+              <button
+                type="button"
+                data-testid="calendar-rescan"
+                disabled={metadataRescanBusy}
+                onClick={() => {
+                  playCue("press");
+                  void rescanMetadata(selectedFolderId ?? undefined);
+                }}
+                className="apx-btn-liquid rounded border border-border px-2 py-0.5 text-[11px] text-text-secondary transition-colors duration-[var(--duration-fast)] hover:border-accent hover:text-text-primary disabled:opacity-50"
+              >
+                <RefreshCw aria-hidden="true" className={`mr-1 inline size-3 ${metadataRescanBusy ? "animate-spin" : ""}`} />
+                {metadataRescanBusy ? "Liest Metadaten…" : "Aufnahmedaten nachlesen"}
+              </button>
+            </div>
+          )}
+          {metadataRescanResult && (
+            <p data-testid="calendar-rescan-result" className="mt-0.5 text-xs text-text-secondary">
+              {metadataRescanResult.dates_added > 0
+                ? `${metadataRescanResult.dates_added} ${metadataRescanResult.dates_added === 1 ? "Foto hat" : "Fotos haben"} jetzt ein Aufnahmedatum.`
+                : "Kein zusätzliches Aufnahmedatum gefunden — diese Dateien haben keins im EXIF."}
+              {metadataRescanResult.unreadable > 0
+                ? ` ${metadataRescanResult.unreadable} Datei(en) nicht lesbar.`
+                : ""}
             </p>
           )}
         </div>

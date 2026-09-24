@@ -8767,6 +8767,118 @@ pub fn run_catalog_integrity_check(state: State<'_, AppState>) -> Result<Vec<Str
         .map_err(|err| err.to_string())
 }
 
+/// Ergebnis eines Metadaten-Abgleichs (siehe [`rescan_photo_metadata`]).
+#[derive(Debug, Clone, Serialize)]
+pub struct MetadataRescanResultDto {
+    /// Wie viele Katalogfotos betrachtet wurden.
+    pub scanned: u32,
+    /// Wie viele Zeilen neu geschrieben wurden.
+    pub updated: u32,
+    /// Wie viele davon vorher kein Aufnahmedatum hatten und jetzt eins
+    /// haben — die Zahl, die die Kalenderansicht interessiert.
+    pub dates_added: u32,
+    /// Übersprungen, weil die Datei nicht lesbar war (verschoben,
+    /// gelöscht, externes Laufwerk nicht eingehängt).
+    pub unreadable: u32,
+    /// Übersprungen, weil es kein eigenes Bild auf der Platte gibt
+    /// (virtuelle Kopien) oder weil Videos keine EXIF-Metadaten liefern.
+    pub skipped: u32,
+}
+
+/// Liest die technischen Metadaten bereits importierter Fotos neu von
+/// der Platte ein.
+///
+/// **Warum es das gibt.** Bis Phase 34 las `apx-raw`s Fallback-Pfad
+/// (JPEG/PNG/TIFF) kein `DateTimeOriginal` — jedes so importierte Foto
+/// steht ohne Aufnahmedatum im Katalog. Der Fix in `fallback.rs` wirkt
+/// nur auf NEUE Importe; ohne diesen Befehl bliebe die Kalenderansicht
+/// für den vorhandenen Bestand dauerhaft leer, und der Nutzer müsste
+/// seine Bibliothek neu aufbauen.
+///
+/// `folder_id = None` nimmt den ganzen Katalog, sonst genau einen
+/// Ordner. Virtuelle Kopien und Videos werden übersprungen (erstere
+/// haben keine eigene Datei, letztere kein EXIF); ein nicht lesbares
+/// Original wird gezählt, nicht als Fehler geworfen — ein einzelnes
+/// ausgehängtes Laufwerk darf den ganzen Durchlauf nicht abbrechen.
+#[tauri::command]
+pub fn rescan_photo_metadata(
+    state: State<'_, AppState>,
+    folder_id: Option<String>,
+) -> Result<MetadataRescanResultDto, String> {
+    let folders = match folder_id {
+        Some(id) => {
+            let folder_id: apx_core::FolderId = id
+                .parse()
+                .map_err(|err: apx_core::AppError| err.to_string())?;
+            vec![state
+                .catalog
+                .get_folder(folder_id)
+                .map_err(|err| err.to_string())?]
+        }
+        None => state
+            .catalog
+            .list_folders()
+            .map_err(|err| err.to_string())?,
+    };
+
+    let mut result = MetadataRescanResultDto {
+        scanned: 0,
+        updated: 0,
+        dates_added: 0,
+        unreadable: 0,
+        skipped: 0,
+    };
+
+    for folder in folders {
+        let photos = state
+            .catalog
+            .list_photos_by_folder(folder.id)
+            .map_err(|err| err.to_string())?;
+        for photo in photos {
+            result.scanned += 1;
+            if photo.source_photo_id.is_some() || photo.media_kind == "video" {
+                result.skipped += 1;
+                continue;
+            }
+            let path = folder.path.join(&photo.filename);
+            let Ok(raw_meta) = apx_raw::read_metadata(&path) else {
+                result.unreadable += 1;
+                continue;
+            };
+            let had_date = photo.captured_at.is_some();
+            let meta = apx_catalog::TechnicalMetadata {
+                width: Some(raw_meta.width),
+                height: Some(raw_meta.height),
+                orientation: crate::import::orientation_to_exif_code(raw_meta.orientation),
+                camera_make: crate::import::non_empty(raw_meta.camera_make),
+                camera_model: crate::import::non_empty(raw_meta.camera_model),
+                lens: raw_meta.lens,
+                iso: raw_meta.iso,
+                shutter: raw_meta.shutter,
+                aperture: raw_meta.aperture,
+                focal_length: raw_meta.focal_length,
+                captured_at: raw_meta.captured_at,
+                // Ein vorhandener, von Hand gesetzter Ort darf nicht
+                // verloren gehen, nur weil die Datei selbst keinen hat
+                // (`set_photo_gps` schreibt ausschliesslich in den
+                // Katalog, nicht in die Datei zurueck).
+                gps_lat: raw_meta.gps.map(|(lat, _)| lat).or(photo.gps_lat),
+                gps_lon: raw_meta.gps.map(|(_, lon)| lon).or(photo.gps_lon),
+            };
+            state
+                .catalog
+                .set_photo_technical_metadata(photo.id, &meta)
+                .map_err(|err| err.to_string())?;
+            result.updated += 1;
+            if !had_date && meta.captured_at.is_some() {
+                result.dates_added += 1;
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 /// Führt `VACUUM` auf dem aktuell geöffneten Katalog aus (siehe
 /// `apx_catalog::Catalog::vacuum`s Doku) — gibt durch Löschungen
 /// freigewordenen Speicherplatz zurück und defragmentiert die Datei.

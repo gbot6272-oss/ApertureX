@@ -375,6 +375,7 @@ fn main() {
             commands::switch_active_catalog,
             commands::run_catalog_integrity_check,
             commands::run_catalog_optimize,
+            commands::rescan_photo_metadata,
             commands::run_catalog_backup,
             commands::preview_cache_stats,
             commands::clear_preview_cache,

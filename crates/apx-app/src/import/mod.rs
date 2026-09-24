@@ -470,7 +470,7 @@ fn import_single_file(
     })
 }
 
-fn non_empty(value: String) -> Option<String> {
+pub(crate) fn non_empty(value: String) -> Option<String> {
     if value.trim().is_empty() {
         None
     } else {
@@ -482,7 +482,7 @@ fn non_empty(value: String) -> Option<String> {
 /// (1–8), wie er in der `photos.orientation`-Spalte gespeichert wird.
 /// Muss zur Umkehrung von `rawler::decoders::Orientation::from_u16`
 /// passen (siehe `apx-raw`s `orientation`-Modul).
-fn orientation_to_exif_code(orientation: apx_raw::Orientation) -> u16 {
+pub(crate) fn orientation_to_exif_code(orientation: apx_raw::Orientation) -> u16 {
     use apx_raw::Orientation;
     match orientation {
         Orientation::Normal => 1,

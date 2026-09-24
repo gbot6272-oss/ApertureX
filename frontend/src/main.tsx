@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { SecondaryDisplay } from "./SecondaryDisplay";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./index.css";
 
 const rootElement = document.getElementById("root");
@@ -15,6 +16,14 @@ if (!rootElement) {
 // diesen einen zusätzlichen Fall.
 const secondaryPhotoId = new URLSearchParams(window.location.search).get("secondaryPhoto");
 
+// Die aeussere Fehlergrenze ist das letzte Netz: ohne sie haengt React
+// bei jedem Render-Fehler den ganzen Baum ab und zurueck bleibt ein
+// leeres weisses Fenster ohne Bedienelemente (siehe
+// `components/ErrorBoundary.tsx` und `DECISIONS.md` ADR-0068).
 ReactDOM.createRoot(rootElement).render(
-  <React.StrictMode>{secondaryPhotoId ? <SecondaryDisplay photoId={secondaryPhotoId} /> : <App />}</React.StrictMode>,
+  <React.StrictMode>
+    <ErrorBoundary scope="app">
+      {secondaryPhotoId ? <SecondaryDisplay photoId={secondaryPhotoId} /> : <App />}
+    </ErrorBoundary>
+  </React.StrictMode>,
 );

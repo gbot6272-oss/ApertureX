@@ -75,4 +75,19 @@ test.describe("Kalenderansicht (Phase 32 F3)", () => {
     await page.getByRole("tab", { name: "Verlauf & Werkzeuge" }).click();
     await expect(page.getByRole("button", { name: "Auf 2 weitere ausgewählte Fotos synchronisieren" })).toBeEnabled();
   });
+
+  /**
+   * Regressionstest zu ADR-0068: bis Phase 34 bekam kein importiertes
+   * JPEG/PNG/TIFF ein Aufnahmedatum, der Kalender blieb fuer solche
+   * Kataloge komplett leer — und die Ansicht sagte zwar, wie viele
+   * Fotos betroffen sind, aber nicht, was man dagegen tun kann.
+   */
+  test("laesst die Aufnahmedaten der undatierten Fotos nachlesen", async ({ page }) => {
+    await expect(page.getByTestId("calendar-summary")).toContainText("4 Aufnahmen an 2 Tagen");
+    await page.getByTestId("calendar-rescan").click();
+
+    await expect(page.getByTestId("calendar-rescan-result")).toContainText("1 Foto hat jetzt ein Aufnahmedatum");
+    // Und der Kalender zeigt es danach wirklich an, statt es nur zu melden.
+    await expect(page.getByTestId("calendar-summary")).toContainText("5 Aufnahmen an 2 Tagen");
+  });
 });

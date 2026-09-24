@@ -46,7 +46,7 @@ pub use models::{
     FaceDetection, FaceRect, FilterCondition, FilterCriteria, FilterField, FilterNode,
     FilterOperator, Folder, GearStatistics, HistoryPosition, Keyword, NewPhoto, Person, Photo,
     PhotoNote, Preset, PresetFolder, PresetVersion, Preview, PreviewLevel, Snapshot, Stack,
-    TagRule, Template, TrashEntry, TrashReason, SAME_PERSON_EMBEDDING_THRESHOLD,
+    TagRule, TechnicalMetadata, Template, TrashEntry, TrashReason, SAME_PERSON_EMBEDDING_THRESHOLD,
 };
 pub use repository::batch::BatchAction;
 pub use repository::share::ShareDiff;
@@ -199,6 +199,18 @@ impl Catalog {
     pub fn upsert_photo(&self, new_photo: &NewPhoto) -> Result<(PhotoId, bool)> {
         let conn = self.lock()?;
         repository::photos::upsert(&conn, new_photo, OffsetDateTime::now_utc())
+    }
+
+    /// Liest die technischen (EXIF-)Metadaten eines Fotos neu ein —
+    /// siehe [`repository::photos::set_technical_metadata`] fuer die
+    /// Abgrenzung, was dabei bewusst NICHT angefasst wird.
+    pub fn set_photo_technical_metadata(
+        &self,
+        id: PhotoId,
+        meta: &TechnicalMetadata,
+    ) -> Result<()> {
+        let conn = self.lock()?;
+        repository::photos::set_technical_metadata(&conn, id, meta)
     }
 
     pub fn get_photo(&self, id: PhotoId) -> Result<Photo> {

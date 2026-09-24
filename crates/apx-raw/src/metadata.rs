@@ -146,7 +146,12 @@ fn extract_captured_at(exif: &Exif) -> Option<OffsetDateTime> {
 }
 
 /// Parst EXIF-Datumsangaben im Format `"YYYY:MM:DD HH:MM:SS"`.
-fn parse_exif_datetime(text: &str) -> Option<PrimitiveDateTime> {
+///
+/// `pub(crate)`, weil der Fallback-Pfad (`fallback.rs`, JPEG/PNG/TIFF)
+/// dieselben Strings aus `kamadak-exif` liest und dieselbe Auslegung
+/// braucht — zwei Parser fuer dasselbe Format waeren genau die Art
+/// Doppelpflege, die den Fehler erst entstehen liess.
+pub(crate) fn parse_exif_datetime(text: &str) -> Option<PrimitiveDateTime> {
     let (date_part, time_part) = text.split_once(' ')?;
     let mut date_fields = date_part.splitn(3, ':');
     let year: i32 = date_fields.next()?.parse().ok()?;
@@ -165,7 +170,8 @@ fn parse_exif_datetime(text: &str) -> Option<PrimitiveDateTime> {
 }
 
 /// Parst EXIF-Offset-Angaben im Format `"+HH:MM"` / `"-HH:MM"`.
-fn parse_exif_offset(text: &str) -> Option<UtcOffset> {
+/// `pub(crate)` aus demselben Grund wie [`parse_exif_datetime`].
+pub(crate) fn parse_exif_offset(text: &str) -> Option<UtcOffset> {
     let text = text.trim();
     let (sign, rest) = match text.chars().next()? {
         '+' => (1_i8, &text[1..]),

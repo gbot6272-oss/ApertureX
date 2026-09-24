@@ -7435,3 +7435,97 @@ die Kette schaltet also zuverlässig weiter.
 diesen Pfad löst `tauri-build` relativ zur `tauri.conf.json` auf, dort ist
 `../../frontend` korrekt. Der Unterschied zwischen beiden Auflösungsbasen ist
 genau die Falle, in die die alte Fassung gelaufen ist.
+
+## ADR-0068: Aufnahmedatum für Nicht-RAW-Dateien, und eine Fehlergrenze
+
+**Status:** Akzeptiert
+
+Zwei Meldungen aus der Benutzung, beide mit derselben Eigenschaft: der
+Code sah unverdächtig aus, die Tests waren grün, und trotzdem war die
+Funktion für den Nutzer nicht vorhanden.
+
+### Befund 1 — der Kalender blieb für jedes Foto leer
+
+`crates/apx-raw/src/fallback.rs` (der Pfad für JPEG/PNG/TIFF, also für
+fast jeden realen Import) setzte `captured_at` hart auf `None`, mit dem
+Kommentar, Datum/Zeit-Parsing sei „für den Fallback-Pfad in Phase 1 nicht
+erforderlich" — JPEG/PNG/TIFF seien „nur ein Auffangnetz". Diese Annahme
+war schon bei ihrer Niederschrift falsch und ist es über 30 Phasen
+geblieben: jedes so importierte Foto steht ohne Aufnahmedatum im Katalog.
+
+Betroffen war damit alles, was am Datum hängt — die Kalenderansicht
+(Phase 32 F3) am sichtbarsten, aber auch Sortierung nach Aufnahmezeit,
+Serien-/Belichtungsreihen-Erkennung (Phase 32 F7) und die
+Datumsplatzhalter beim Import-Umbenennen. Die Kalender-Tests waren
+grün, weil sie mit gesetztem `captured_at` arbeiten; getestet war die
+Ansicht, nie der Weg von der Datei dorthin.
+
+**Entscheidung.** Der Fallback-Pfad liest `DateTimeOriginal` (ersatzweise
+`DateTimeDigitized`) und `OffsetTimeOriginal`/`OffsetTime` und benutzt
+dafür **dieselben** beiden Parser wie der RAW-Pfad
+(`metadata.rs::parse_exif_datetime`/`parse_exif_offset`, jetzt
+`pub(crate)`). Zwei Parser für dasselbe Format wären genau die
+Doppelpflege, aus der der Fehler entstanden ist. Ohne Offset-Tag gilt
+weiterhin die Kamera-Uhrzeit als UTC — dieselbe Auslegung wie bisher im
+RAW-Pfad, nicht eine zweite daneben.
+
+Getestet wird über einen echten APP1/EXIF-Block mit **Exif-Sub-IFD**
+(Tag `0x8769`), nicht über den String-Parser allein: die Datumstags
+liegen laut Standard nicht in der IFD0, und `kamadak-exif` findet sie
+ohne diese Sub-IFD nicht. Der Testhelfer aus Phase 18 wurde dafür
+verallgemeinert statt ein zweiter danebengestellt.
+
+**Der Fix allein hätte dem Nutzer nichts genützt.** Er wirkt nur auf
+neue Importe; ein über Monate aufgebauter Katalog bliebe dauerhaft ohne
+Datum. Deshalb zusätzlich:
+
+- `apx_catalog::TechnicalMetadata` + `photos::set_technical_metadata` —
+  schreibt **nur** die aus der Datei gelesenen Spalten. `upsert`s
+  `update_row` wäre das falsche Werkzeug: es überschreibt auch
+  Dateigröße, Änderungszeit und Inhalts-Hash, die beim Metadaten-Abgleich
+  gar nicht neu berechnet werden, und würde den Katalog damit gegenüber
+  der Platte verfälschen. Bewertung, Flagge, Farbmarkierung, die selbst
+  gepflegten IPTC-Felder und ein von Hand gesetzter Ort bleiben
+  unberührt.
+- Befehl `rescan_photo_metadata(folder_id?)`. Virtuelle Kopien (keine
+  eigene Datei) und Videos (kein EXIF) werden übersprungen, ein nicht
+  lesbares Original wird gezählt statt geworfen — ein einzelnes
+  ausgehängtes Laufwerk darf den Durchlauf nicht abbrechen.
+- Der Knopf sitzt **in der Kalenderansicht**, direkt an der Zeile
+  „N ohne Aufnahmedatum", nicht in einem Wartungsdialog. Die Stelle, an
+  der ein Mangel sichtbar wird, ist die Stelle, an der seine Behebung
+  angeboten gehört; dieselbe Linie wie ADR-0046 Entwurfsentscheidung 4
+  (eine Funktion, die man erst suchen muss, ist für die meisten nicht
+  vorhanden).
+
+### Befund 2 — ein weißer Bildschirm ohne Ausweg
+
+Gemeldet als „weißer Bildschirm und keine Möglichkeit es wegzumachen".
+Die Ursache dafür, dass daraus ein *unentrinnbarer* Zustand wird, ist
+unabhängig davon, was genau abgestürzt ist: im gesamten Frontend gab es
+keine einzige Fehlergrenze (`componentDidCatch`/
+`getDerivedStateFromError` kamen nirgends vor). React hängt bei einem
+Render-Fehler den kompletten Baum ab — übrig bleibt ein leeres Fenster,
+ohne Kopfleiste, ohne Escape, ohne Hinweis, was passiert ist.
+
+**Entscheidung.** `components/ErrorBoundary.tsx` mit zwei Ebenen:
+
+- `scope="app"` in `main.tsx` als letztes Netz — ganzseitige Meldung mit
+  „Neu laden", „Weiter ohne Neuladen" und „Details kopieren".
+- `scope="region"` um die Mittelansicht, das Entwickeln- und das
+  Masken-Panel. Stürzt eines davon ab, wird nur dieser Bereich ersetzt;
+  Kopfleiste, Seitenleiste und die übrigen Paletten bleiben bedienbar.
+
+Die Fehlermeldung steht bewusst im Klartext in der Oberfläche und ist
+kopierbar. Ein Absturz, dessen einzige Spur ein weißes Fenster ist,
+lässt sich aus einem Fehlerbericht heraus nicht nachvollziehen — genau
+daran ist die Untersuchung von Befund 2 aufgelaufen: die gemeldete
+Registerkarte („Am Bild") ließ sich im Browserlauf gegen den e2e-Mock
+nicht zum Absturz bringen, der Auslöser liegt also in den echten Daten.
+Mit der Fehlergrenze benennt der nächste Absturz sich selbst, statt die
+App zu verschlucken.
+
+**Nicht gemacht.** Keine Testing-Library als neue Abhängigkeit für den
+Komponententest der Fehlergrenze — `react-dom/client` liegt ohnehin vor
+und reicht für genau diesen Zweck (siehe
+`components/ErrorBoundary.test.tsx`).

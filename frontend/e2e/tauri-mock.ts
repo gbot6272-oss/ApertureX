@@ -1072,6 +1072,32 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return null;
       case "run_catalog_integrity_check":
         return [];
+      // Metadaten-Abgleich (ADR-0068): traegt im Mock das Aufnahmedatum
+      // der undatierten Fotos nach, damit der Weg durch die Oberflaeche
+      // (Knopf -> Rueckmeldung -> neu geladene Liste) echt durchlaeuft
+      // statt nur eine Zahl zu behaupten.
+      case "rescan_photo_metadata": {
+        const folderId = (args as { folderId?: string | null }).folderId;
+        const targets = folderId
+          ? [folderId]
+          : Object.keys(fixtures.photosByFolder);
+        let datesAdded = 0;
+        for (const id of targets) {
+          for (const photo of fixtures.photosByFolder[id] ?? []) {
+            if (!photo.captured_at) {
+              photo.captured_at = "2024-05-06T18:00:00+02:00";
+              datesAdded += 1;
+            }
+          }
+        }
+        return {
+          scanned: targets.reduce((sum, id) => sum + (fixtures.photosByFolder[id]?.length ?? 0), 0),
+          updated: datesAdded,
+          dates_added: datesAdded,
+          unreadable: 0,
+          skipped: 0,
+        };
+      }
       case "preview_cache_stats":
         return fixtures.previewCacheStats;
       case "clear_preview_cache":

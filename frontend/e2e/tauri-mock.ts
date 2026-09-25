@@ -2210,6 +2210,41 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
             };
           });
       }
+      // Geotagging aus GPX-Track (Phase 34 F4). Der Mock rechnet die
+      // Zuordnung nicht nach — das tun `gpx_match.rs`s neun Tests —,
+      // sondern liefert vorgegebene Treffer. Geprueft wird hier der Weg
+      // durch die Oberflaeche inklusive Versatz: der Fixture-Schluessel
+      // enthaelt den uebergebenen Versatz, ein falscher Versatz liefert
+      // also keinen Treffer.
+      case "preview_gpx_geotag": {
+        const ids = args.photoIds as string[];
+        const offset = args.offsetSeconds as number;
+        const hits = (fixtures.gpxHits ?? {}) as Record<string, { lat: number; lon: number }>;
+        return ids.map((id) => {
+          const photo = findPhoto(id);
+          const hit = hits[`${id}@${offset}`];
+          return {
+            photo_id: id,
+            filename: photo?.filename ?? "unbekannt",
+            captured_at: (photo?.captured_at as string | null) ?? null,
+            lat: hit?.lat ?? null,
+            lon: hit?.lon ?? null,
+            reason: hit ? null : "Keine Trackposition in der Zeitspanne",
+            had_position: photo?.gps_lat !== null && photo?.gps_lat !== undefined,
+          };
+        });
+      }
+      case "apply_gpx_geotag": {
+        const positions = args.positions as { photo_id: string; lat: number; lon: number }[];
+        for (const entry of positions) {
+          const photo = findPhoto(entry.photo_id);
+          if (photo) {
+            photo.gps_lat = entry.lat;
+            photo.gps_lon = entry.lon;
+          }
+        }
+        return positions.length;
+      }
       case "score_photo_sharpness": {
         const ids = args.photoIds as string[];
         const scores = (fixtures.sharpnessScores ?? {}) as Record<string, number>;

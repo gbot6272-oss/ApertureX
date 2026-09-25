@@ -62,6 +62,7 @@ export const de = {
   "header.folderSync": "Ordner abgleichen…",
   "header.sharpness": "Schärfe bewerten…",
   "header.exposureMatch": "Belichtung angleichen…",
+  "header.gpxGeotag": "Aus GPX-Track verorten…",
   "header.metadataPresets": "Metadaten-Vorgaben…",
   "header.watermarkTemplates": "Wasserzeichen…",
   "header.similarPhotos": "Ähnliche Fotos finden…",

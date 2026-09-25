@@ -205,6 +205,13 @@ export function useCommandRegistry(): CommandEntry[] {
         run: () => requestCommand("sharpness"),
       },
       {
+        id: "fn:gpx-geotag",
+        label: t("header.gpxGeotag"),
+        category: "advanced",
+        disabled: exportPhotoIds.length === 0,
+        run: () => requestCommand("gpx-geotag"),
+      },
+      {
         // Phase 34 F2 — sitzt in "Fortgeschritten", nicht in "Analyse":
         // das hier misst nicht nur, es SCHREIBT ins EDL der Zielfotos.
         id: "fn:exposure-match",

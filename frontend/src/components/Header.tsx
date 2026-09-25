@@ -18,6 +18,7 @@ import { SeriesDialog } from "./SeriesDialog";
 import { TrashDialog } from "./TrashDialog";
 import { FolderSyncDialog } from "./FolderSyncDialog";
 import { ExposureMatchDialog } from "./ExposureMatchDialog";
+import { GpxGeotagDialog } from "./GpxGeotagDialog";
 import { SharpnessDialog } from "./SharpnessDialog";
 import { MetadataPresetDialog } from "./MetadataPresetDialog";
 import { WatermarkTemplateDialog } from "./WatermarkTemplateDialog";
@@ -86,6 +87,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
   const [folderSyncDialogOpen, setFolderSyncDialogOpen] = useState(false);
   const [sharpnessDialogOpen, setSharpnessDialogOpen] = useState(false);
   const [exposureMatchDialogOpen, setExposureMatchDialogOpen] = useState(false);
+  const [gpxGeotagDialogOpen, setGpxGeotagDialogOpen] = useState(false);
   const [metadataPresetDialogOpen, setMetadataPresetDialogOpen] = useState(false);
   const [watermarkTemplateDialogOpen, setWatermarkTemplateDialogOpen] = useState(false);
   const [similarPhotosDialogOpen, setSimilarPhotosDialogOpen] = useState(false);
@@ -173,6 +175,9 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
         break;
       case "folder-sync":
         setFolderSyncDialogOpen(true);
+        break;
+      case "gpx-geotag":
+        setGpxGeotagDialogOpen(true);
         break;
       case "exposure-match":
         setExposureMatchDialogOpen(true);
@@ -435,6 +440,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
       <FolderSyncDialog open={folderSyncDialogOpen} onClose={() => setFolderSyncDialogOpen(false)} />
       <SharpnessDialog open={sharpnessDialogOpen} onClose={() => setSharpnessDialogOpen(false)} />
       <ExposureMatchDialog open={exposureMatchDialogOpen} onClose={() => setExposureMatchDialogOpen(false)} />
+      <GpxGeotagDialog open={gpxGeotagDialogOpen} onClose={() => setGpxGeotagDialogOpen(false)} />
       <MetadataPresetDialog open={metadataPresetDialogOpen} onClose={() => setMetadataPresetDialogOpen(false)} />
       <WatermarkTemplateDialog open={watermarkTemplateDialogOpen} onClose={() => setWatermarkTemplateDialogOpen(false)} />
       <SimilarPhotosDialog open={similarPhotosDialogOpen} onClose={() => setSimilarPhotosDialogOpen(false)} />

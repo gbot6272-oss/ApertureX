@@ -8328,6 +8328,126 @@ pub fn import_gpx_track(path: String) -> Result<Vec<GpxTrackPointDto>, String> {
         .collect())
 }
 
+/// Ein Foto und die aus dem Track ermittelte Position (siehe
+/// [`preview_gpx_geotag`]).
+#[derive(Debug, Clone, Serialize)]
+pub struct GpxMatchDto {
+    pub photo_id: String,
+    pub filename: String,
+    /// RFC-3339-Aufnahmezeit, oder `null` wenn das Foto keine hat.
+    pub captured_at: Option<String>,
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
+    /// Warum es keinen Treffer gab — leer bei Erfolg.
+    pub reason: Option<String>,
+    /// Hatte das Foto schon eine Position? Die würde überschrieben.
+    pub had_position: bool,
+}
+
+/// Ordnet Fotos einem GPX-Track zu, ohne etwas zu schreiben (Phase 34
+/// F4, siehe `gpx_match.rs` und `DECISIONS.md` ADR-0070).
+///
+/// **Erst zeigen, dann schreiben** — dieselbe Trennung wie beim
+/// Ordner-Abgleich (Phase 33 F2): der Nutzer sieht, welches Foto wo
+/// landen würde, bevor irgendetwas am Katalog geändert wird. Gerade
+/// beim Kamerauhr-Versatz ist der erste Versuch fast nie der richtige.
+///
+/// `offset_seconds` wird auf die AUFNAHMEZEIT addiert: geht die
+/// Kamerauhr eine Stunde nach, gleicht `+3600` das aus.
+#[tauri::command]
+pub fn preview_gpx_geotag(
+    state: State<'_, AppState>,
+    gpx_path: String,
+    photo_ids: Vec<String>,
+    offset_seconds: i64,
+    tolerance_seconds: i64,
+) -> Result<Vec<GpxMatchDto>, String> {
+    let ids = parse_photo_ids(photo_ids)?;
+    let xml = std::fs::read_to_string(&gpx_path)
+        .map_err(|err| format!("GPX-Datei nicht lesbar: {err}"))?;
+    // Gelesen wird mit demselben Parser wie fuer die Reiserouten-Anzeige
+    // der Kartenansicht (`import_gpx_track` oben) — ein zweiter Leser
+    // daneben waere Doppelpflege.
+    let raw = apx_export::map::parse_gpx(&xml).map_err(|err| err.to_string())?;
+    let points = crate::gpx_match::timed_points(&raw);
+    if points.is_empty() {
+        return Err(
+            "Der Track enthält keinen Punkt mit Zeitangabe — ohne Zeit lässt sich nichts zuordnen"
+                .to_string(),
+        );
+    }
+
+    let mut results = Vec::new();
+    for id in ids {
+        let Ok(photo) = state.catalog.get_photo(id) else {
+            continue;
+        };
+        let had_position = photo.gps_lat.is_some() && photo.gps_lon.is_some();
+        let Some(captured) = photo.captured_at else {
+            results.push(GpxMatchDto {
+                photo_id: id.to_string(),
+                filename: photo.filename,
+                captured_at: None,
+                lat: None,
+                lon: None,
+                reason: Some("Kein Aufnahmedatum".to_string()),
+                had_position,
+            });
+            continue;
+        };
+        let shifted = captured + time::Duration::seconds(offset_seconds);
+        let hit = crate::gpx_match::match_position(&points, shifted, tolerance_seconds);
+        results.push(GpxMatchDto {
+            photo_id: id.to_string(),
+            filename: photo.filename,
+            captured_at: captured
+                .format(&time::format_description::well_known::Rfc3339)
+                .ok(),
+            lat: hit.map(|(lat, _)| lat),
+            lon: hit.map(|(_, lon)| lon),
+            reason: hit
+                .is_none()
+                .then(|| "Keine Trackposition in der Zeitspanne".to_string()),
+            had_position,
+        });
+    }
+    Ok(results)
+}
+
+/// Schreibt die Positionen aus [`preview_gpx_geotag`] in den Katalog.
+///
+/// Übergeben wird genau das, was die Vorschau gezeigt hat — der Befehl
+/// rechnet NICHT neu. Andernfalls könnte zwischen Ansehen und Anwenden
+/// etwas anderes herauskommen als das, was der Nutzer bestätigt hat.
+///
+/// Fotos mit bereits vorhandener Position können ausgenommen werden;
+/// eine von Hand gesetzte Koordinate ist eine Entscheidung und soll
+/// nicht stillschweigend von einem Track überschrieben werden.
+#[tauri::command]
+pub fn apply_gpx_geotag(
+    state: State<'_, AppState>,
+    positions: Vec<GpxPositionInput>,
+) -> Result<u32, String> {
+    let mut written = 0_u32;
+    for entry in positions {
+        let id = parse_photo_id(entry.photo_id)?;
+        state
+            .catalog
+            .set_photo_gps(id, Some((entry.lat, entry.lon)))
+            .map_err(|err| err.to_string())?;
+        written += 1;
+    }
+    Ok(written)
+}
+
+/// Eine zu schreibende Position (siehe [`apply_gpx_geotag`]).
+#[derive(Debug, Clone, Deserialize)]
+pub struct GpxPositionInput {
+    pub photo_id: String,
+    pub lat: f64,
+    pub lon: f64,
+}
+
 /// Setzt oder löscht (`lat`/`lon` beide `None`) die GPS-Koordinaten eines
 /// Fotos von Hand — z. B. per Klick auf die Kartenansicht platziert, weil
 /// das Foto keine EXIF-GPS-Daten trug.

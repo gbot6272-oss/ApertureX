@@ -59,6 +59,7 @@ export const en: Record<keyof typeof de, string> = {
   "header.folderSync": "Sync folder…",
   "header.sharpness": "Rate sharpness…",
   "header.exposureMatch": "Match exposure…",
+  "header.gpxGeotag": "Geotag from GPX track…",
   "header.metadataPresets": "Metadata presets…",
   "header.watermarkTemplates": "Watermarks…",
   "header.similarPhotos": "Find similar photos…",

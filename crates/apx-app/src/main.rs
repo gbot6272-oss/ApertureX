@@ -11,6 +11,7 @@ mod batch_rename;
 mod commands;
 mod exposure_match;
 mod folder_sync;
+mod gpx_match;
 mod import;
 mod metadata_preset;
 mod protocol;
@@ -533,6 +534,8 @@ fn main() {
             commands::reverse_geocode_location,
             commands::import_gpx_track,
             commands::set_photo_gps,
+            commands::preview_gpx_geotag,
+            commands::apply_gpx_geotag,
             commands::save_template,
             commands::list_templates,
             commands::delete_template,

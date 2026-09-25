@@ -2117,6 +2117,49 @@ export function importGpxTrack(path: string): Promise<GpxTrackPointDto[]> {
   return invoke<GpxTrackPointDto[]>("import_gpx_track", { path });
 }
 
+// ---- Geotagging aus einem GPX-Track (Phase 34 F4) --------------------------
+
+/** Ein Foto und die aus dem Track ermittelte Position. */
+export interface GpxMatchDto {
+  photo_id: string;
+  filename: string;
+  captured_at: string | null;
+  lat: number | null;
+  lon: number | null;
+  /** Warum es keinen Treffer gab — `null` bei Erfolg. */
+  reason: string | null;
+  /** Hatte das Foto schon eine Position? Die würde überschrieben. */
+  had_position: boolean;
+}
+
+/**
+ * Ordnet Fotos einem GPX-Track zu, ohne etwas zu schreiben.
+ *
+ * `offsetSeconds` wird auf die Aufnahmezeit addiert und gleicht damit
+ * eine falsch gehende Kamerauhr aus — bei Zeitzonen der Normalfall,
+ * nicht der Randfall.
+ */
+export function previewGpxGeotag(
+  gpxPath: string,
+  photoIds: string[],
+  offsetSeconds: number,
+  toleranceSeconds: number,
+): Promise<GpxMatchDto[]> {
+  return invoke<GpxMatchDto[]>("preview_gpx_geotag", {
+    gpxPath,
+    photoIds,
+    offsetSeconds,
+    toleranceSeconds,
+  });
+}
+
+/** Schreibt genau die Positionen, die die Vorschau gezeigt hat. */
+export function applyGpxGeotag(
+  positions: { photo_id: string; lat: number; lon: number }[],
+): Promise<number> {
+  return invoke<number>("apply_gpx_geotag", { positions });
+}
+
 /** Setzt oder löscht (beide `null`) die GPS-Koordinaten eines Fotos von
  * Hand — z. B. per Klick auf die Kartenansicht platziert. */
 export function setPhotoGps(photoId: string, lat: number | null, lon: number | null): Promise<void> {

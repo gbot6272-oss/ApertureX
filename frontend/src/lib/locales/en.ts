@@ -58,6 +58,7 @@ export const en: Record<keyof typeof de, string> = {
   "header.trash": "Trash…",
   "header.folderSync": "Sync folder…",
   "header.sharpness": "Rate sharpness…",
+  "header.exposureMatch": "Match exposure…",
   "header.metadataPresets": "Metadata presets…",
   "header.watermarkTemplates": "Watermarks…",
   "header.similarPhotos": "Find similar photos…",

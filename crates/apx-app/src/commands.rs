@@ -10977,6 +10977,83 @@ pub struct SharpnessResultDto {
     pub rank: usize,
 }
 
+/// Ergebnis je Zielfoto (siehe [`measure_exposure_match`]).
+#[derive(Debug, Clone, Serialize)]
+pub struct ExposureMatchDto {
+    pub photo_id: String,
+    pub filename: String,
+    /// Um wie viele EV die Belichtung verschoben werden müsste.
+    pub delta_ev: f32,
+    /// `false`, wenn das Foto keine verwertbaren Pixel hat (vollständig
+    /// beschnittene Vorschau) oder keine Vorschau existiert — dann ist
+    /// `delta_ev` 0 und das Foto wird nicht angefasst.
+    pub measurable: bool,
+}
+
+/// Misst, um wie viele EV die Belichtung jedes Fotos aus `photo_ids`
+/// verschoben werden müsste, damit seine mittlere Helligkeit der des
+/// Referenzfotos entspricht (Phase 34 F2, siehe `DECISIONS.md`
+/// ADR-0070 und `exposure_match.rs` für die Mathematik).
+///
+/// **Nur messen, nicht schreiben.** Dieselbe Aufteilung wie bei der
+/// Schärfe-Bewertung (Phase 33 F3): Rust liefert die Zahl, das Frontend
+/// entscheidet und schreibt sie über den bestehenden
+/// `apply_develop_edit`-Weg ins EDL. Damit laufen Validierung,
+/// Verlaufseintrag und Beschriftung durch genau eine Stelle, statt hier
+/// ein zweites Mal nachgebaut zu werden.
+///
+/// Gemessen wird auf `PreviewLevel::Standard` — dieselbe Stufe wie bei
+/// der Schärfe. Die Vorschau trägt bereits den aktuellen
+/// Bearbeitungsstand, das Ergebnis ist also die Differenz der
+/// ANGEZEIGTEN Bilder, nicht die der Rohdaten. Genau das ist gemeint:
+/// angeglichen werden soll, was man sieht.
+#[tauri::command]
+pub fn measure_exposure_match(
+    state: State<'_, AppState>,
+    reference_photo_id: String,
+    photo_ids: Vec<String>,
+) -> Result<Vec<ExposureMatchDto>, String> {
+    let reference_id = parse_photo_id(reference_photo_id)?;
+    let ids = parse_photo_ids(photo_ids)?;
+
+    let pixels_of = |id: apx_core::PhotoId| -> Option<Vec<u8>> {
+        let preview = state
+            .catalog
+            .get_preview(id, apx_catalog::PreviewLevel::Standard)
+            .ok()??;
+        let img = image::open(&preview.path).ok()?;
+        Some(img.to_rgba8().into_raw())
+    };
+
+    let reference = pixels_of(reference_id)
+        .ok_or_else(|| "Für das Referenzfoto gibt es noch keine Vorschau".to_string())?;
+    if crate::exposure_match::mean_log_luminance(&reference).is_none() {
+        return Err(
+            "Das Referenzfoto ist vollständig über- oder unterbelichtet — daran lässt sich nichts messen"
+                .to_string(),
+        );
+    }
+
+    let mut results = Vec::new();
+    for id in ids {
+        if id == reference_id {
+            continue;
+        }
+        let Ok(photo) = state.catalog.get_photo(id) else {
+            continue;
+        };
+        let delta = pixels_of(id)
+            .and_then(|target| crate::exposure_match::exposure_delta_ev(&reference, &target));
+        results.push(ExposureMatchDto {
+            photo_id: id.to_string(),
+            filename: photo.filename,
+            delta_ev: delta.unwrap_or(0.0),
+            measurable: delta.is_some(),
+        });
+    }
+    Ok(results)
+}
+
 /// Bewertet die Schärfe mehrerer Fotos und gibt sie sortiert zurück
 /// (schärfste zuerst).
 ///

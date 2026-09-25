@@ -9,6 +9,7 @@
 
 mod batch_rename;
 mod commands;
+mod exposure_match;
 mod folder_sync;
 mod import;
 mod metadata_preset;
@@ -427,6 +428,7 @@ fn main() {
             commands::preview_folder_sync,
             commands::apply_folder_sync,
             commands::score_photo_sharpness,
+            commands::measure_exposure_match,
             commands::apply_metadata_preset,
             commands::reorder_collection_photo,
             commands::find_similar_photos,

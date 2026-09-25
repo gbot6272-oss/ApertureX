@@ -205,6 +205,15 @@ export function useCommandRegistry(): CommandEntry[] {
         run: () => requestCommand("sharpness"),
       },
       {
+        // Phase 34 F2 — sitzt in "Fortgeschritten", nicht in "Analyse":
+        // das hier misst nicht nur, es SCHREIBT ins EDL der Zielfotos.
+        id: "fn:exposure-match",
+        label: t("header.exposureMatch"),
+        category: "advanced",
+        disabled: multiSelectedIds.length < 2,
+        run: () => requestCommand("exposure-match"),
+      },
+      {
         id: "fn:trash-selection",
         label: t("commands.trashSelection"),
         category: "advanced",

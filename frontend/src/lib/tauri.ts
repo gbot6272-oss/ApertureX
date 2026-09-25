@@ -2581,6 +2581,34 @@ export function scorePhotoSharpness(photoIds: string[]): Promise<SharpnessResult
   return invoke<SharpnessResultDto[]>("score_photo_sharpness", { photoIds });
 }
 
+// ---- Belichtung angleichen (Phase 34 F2) -----------------------------------
+
+/** Ein Zielfoto und die für den Abgleich nötige Belichtungskorrektur. */
+export interface ExposureMatchDto {
+  photo_id: string;
+  filename: string;
+  /** Um wie viele EV die Belichtung verschoben werden müsste. */
+  delta_ev: number;
+  /** `false` = keine Vorschau oder vollständig beschnitten; das Foto
+   * wird dann nicht angefasst. */
+  measurable: boolean;
+}
+
+/**
+ * Misst, wie weit jedes Foto aus `photoIds` vom Referenzfoto abweicht
+ * (siehe `DECISIONS.md` ADR-0070).
+ *
+ * Rust misst nur; geschrieben wird die Korrektur vom Store über den
+ * bestehenden {@link applyDevelopEdit}-Weg, damit Validierung und
+ * Verlaufseintrag durch genau eine Stelle laufen.
+ */
+export function measureExposureMatch(
+  referencePhotoId: string,
+  photoIds: string[],
+): Promise<ExposureMatchDto[]> {
+  return invoke<ExposureMatchDto[]>("measure_exposure_match", { referencePhotoId, photoIds });
+}
+
 // ---- Metadaten-Vorgaben (Phase 33 F4) --------------------------------------
 
 /** Was mit den Stichwörtern der Vorgabe passiert. */

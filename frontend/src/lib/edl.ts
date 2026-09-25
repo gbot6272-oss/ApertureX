@@ -2256,6 +2256,21 @@ export function neutralEdlPayload(): EdlPayload {
 /** Baut die JSON-Serialisierung eines `EdlEnvelope` (siehe
  * `apx_core::EdlEnvelope`), wie sie sowohl die `develop/...`-Protokoll-
  * Route als auch `apply_develop_edit` erwarten. */
+/**
+ * Begrenzt einen Belichtungswert auf den Bereich, den der
+ * Belichtungsregler hergibt (Phase 34 F2).
+ *
+ * Die Grenzen werden aus `BASIC_SLIDER_SPECS` gelesen, nicht danebengelegt:
+ * ein zweiter Satz Zahlen würde beim nächsten Ändern des Reglerbereichs
+ * auseinanderlaufen, und ein Wert außerhalb wäre danach im Panel nicht
+ * mehr korrigierbar.
+ */
+export function clampExposureEv(value: number): number {
+  const spec = BASIC_SLIDER_SPECS.find((entry) => entry.key === "exposure_ev");
+  if (!spec) return value;
+  return Math.min(spec.max, Math.max(spec.min, value));
+}
+
 export function buildEdlEnvelopeJson(payload: EdlPayload): string {
   return JSON.stringify({
     schema_version: EDL_SCHEMA_VERSION,

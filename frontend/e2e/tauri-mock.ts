@@ -2187,6 +2187,29 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       // Perzentil) ist in `apx-stacking`s Rust-Tests abgedeckt. Hier
       // liefert die Fixture die Rangfolge, die der Dialog darstellen
       // soll — ein Browser-Mock hat keine Vorschaubilder zum Messen.
+      // Belichtung angleichen (Phase 34 F2): die Fixtures geben die
+      // mittlere Helligkeit je Foto vor, der Mock rechnet daraus dieselbe
+      // EV-Differenz wie `exposure_match.rs` — log2 des Verhaeltnisses.
+      case "measure_exposure_match": {
+        const referenceId = args.referencePhotoId as string;
+        const ids = args.photoIds as string[];
+        const levels = (fixtures.exposureLevels ?? {}) as Record<string, number>;
+        const referenceLevel = levels[referenceId];
+        if (referenceLevel === undefined) {
+          throw new Error("Für das Referenzfoto gibt es noch keine Vorschau");
+        }
+        return ids
+          .filter((id) => id !== referenceId)
+          .map((id) => {
+            const level = levels[id];
+            return {
+              photo_id: id,
+              filename: findPhoto(id)?.filename ?? "unbekannt",
+              delta_ev: level === undefined ? 0 : Math.log2(referenceLevel / level),
+              measurable: level !== undefined,
+            };
+          });
+      }
       case "score_photo_sharpness": {
         const ids = args.photoIds as string[];
         const scores = (fixtures.sharpnessScores ?? {}) as Record<string, number>;

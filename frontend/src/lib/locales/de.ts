@@ -61,6 +61,7 @@ export const de = {
   "header.trash": "Papierkorb…",
   "header.folderSync": "Ordner abgleichen…",
   "header.sharpness": "Schärfe bewerten…",
+  "header.exposureMatch": "Belichtung angleichen…",
   "header.metadataPresets": "Metadaten-Vorgaben…",
   "header.watermarkTemplates": "Wasserzeichen…",
   "header.similarPhotos": "Ähnliche Fotos finden…",

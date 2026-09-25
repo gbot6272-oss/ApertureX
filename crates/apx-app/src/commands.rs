@@ -8377,6 +8377,7 @@ pub fn preview_gpx_geotag(
         );
     }
 
+    let tolerance = crate::gpx_match::effective_tolerance(tolerance_seconds);
     let mut results = Vec::new();
     for id in ids {
         let Ok(photo) = state.catalog.get_photo(id) else {
@@ -8396,7 +8397,7 @@ pub fn preview_gpx_geotag(
             continue;
         };
         let shifted = captured + time::Duration::seconds(offset_seconds);
-        let hit = crate::gpx_match::match_position(&points, shifted, tolerance_seconds);
+        let hit = crate::gpx_match::match_position(&points, shifted, tolerance);
         results.push(GpxMatchDto {
             photo_id: id.to_string(),
             filename: photo.filename,

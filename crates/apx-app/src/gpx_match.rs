@@ -38,10 +38,26 @@ pub struct TrackPoint {
     pub lon: f64,
 }
 
-/// Standardmäßige Höchstabweichung zwischen Aufnahmezeit und Track.
-/// Zehn Minuten: großzügig genug für eine Pause ohne Empfang,
-/// eng genug, dass ein Foto vom Vortag nicht am Ort von heute landet.
+/// Höchstabweichung zwischen Aufnahmezeit und Track, wenn der Aufrufer
+/// keine sinnvolle angibt.
+///
+/// Zehn Minuten: großzügig genug für eine Pause ohne Empfang, eng
+/// genug, dass ein Foto vom Vortag nicht am Ort von heute landet.
 pub const DEFAULT_TOLERANCE_SECONDS: i64 = 600;
+
+/// Legt eine vom Aufrufer übergebene Toleranz aus.
+///
+/// Null oder negativ heißt nicht „keine Toleranz", sondern „nichts
+/// Sinnvolles angegeben" — eine Toleranz von 0 träfe nur bei
+/// millisekundengenauer Übereinstimmung, also praktisch nie, und das
+/// Ergebnis wäre eine leere Liste ohne erkennbaren Grund.
+pub fn effective_tolerance(seconds: i64) -> i64 {
+    if seconds > 0 {
+        seconds
+    } else {
+        DEFAULT_TOLERANCE_SECONDS
+    }
+}
 
 /// Wandelt die Punkte aus [`apx_export::map::parse_gpx`] in eine nach
 /// Zeit sortierte Liste um.
@@ -233,6 +249,13 @@ mod tests {
         assert_eq!(match_position(&sparse, t(3600), 600), None);
         // Nah am ersten Punkt gilt dieser aber weiterhin.
         assert_eq!(match_position(&sparse, t(60), 600), Some((50.0, 8.0)));
+    }
+
+    #[test]
+    fn a_nonsensical_tolerance_falls_back_to_the_default() {
+        assert_eq!(effective_tolerance(120), 120);
+        assert_eq!(effective_tolerance(0), DEFAULT_TOLERANCE_SECONDS);
+        assert_eq!(effective_tolerance(-5), DEFAULT_TOLERANCE_SECONDS);
     }
 
     #[test]

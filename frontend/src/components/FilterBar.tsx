@@ -12,7 +12,9 @@ import { COLOR_LABELS, COLOR_SWATCH } from "./RatingFlagColor";
 
 /**
  * Filterleiste (Phase 3, Schritt 6, erweitert in Schritt 8): Suchfeld
- * (`search_and_filter_photos`, FTS5 über Dateiname/Kamera/Objektiv) plus
+ * (`search_and_filter_photos`, FTS5 über Dateiname/Kamera/Objektiv/Titel/
+ * Beschriftung/Urheber/Copyright plus Schlagworte und Bildnotizen, siehe
+ * `DECISIONS.md` ADR-0070) plus
  * Attribut-Chips (Bewertung/Flagge/Farbe/Kameramodell) — beide sind
  * kombinierbar (per UND, siehe `store/index.ts`s
  * `runLibrarySearchAndFilter`/`setLibraryFilterChip` sowie `DECISIONS.md`
@@ -114,8 +116,14 @@ export function FilterBar() {
         onKeyDown={(event) => {
           if (event.key === "Enter") void runLibrarySearchAndFilter();
         }}
-        placeholder="Suche (Dateiname, Kamera, Objektiv)…"
-        className="w-64 rounded border border-border bg-bg-panel px-2 py-1 text-sm"
+        // Der Platzhalter nennt seit Phase 34 F1 nicht mehr nur drei
+        // Felder: die Suche deckt jetzt auch die selbst gepflegten
+        // Textfelder, Schlagworte und Bildnotizen ab. Ein Suchfeld, das
+        // weniger verspricht als es kann, wird für das Gefundene nicht
+        // benutzt — dieselbe Auffindbarkeits-Linie wie ADR-0046.
+        placeholder="Suche (Dateiname, Kamera, Titel, Schlagwort, Notiz…)"
+        title="Durchsucht Dateiname, Kamerahersteller und -modell, Objektiv, Titel, Beschriftung, Urheber, Copyright, Schlagworte und Bildnotizen"
+        className="w-72 rounded border border-border bg-bg-panel px-2 py-1 text-sm"
       />
 
       <div className="flex items-center gap-1" role="group" aria-label="Nach Bewertung filtern">

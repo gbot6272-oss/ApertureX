@@ -11,19 +11,100 @@ use crate::models::{Aspect, FilterCriteria};
 use crate::repository::photos::{raw_to_photo, row_to_raw, NOT_TRASHED, SELECT_COLUMNS};
 use crate::Photo;
 
-/// Volltextsuche über Dateiname, Kamerahersteller/-modell und Objektiv.
+/// Trifft ein Foto über ein Schlagwort oder eine Bildnotiz?
+///
+/// Beides liegt in eigenen Tabellen (`photo_keywords`, `photo_notes`) und
+/// kann deshalb nicht in `photos_fts` stehen: das ist eine
+/// External-Content-Tabelle über `photos` und indiziert ausschliesslich
+/// Spalten DIESER Tabelle (siehe `migrations/0015_search_all_text.sql`
+/// und `DECISIONS.md` ADR-0070). Gesucht wird hier deshalb per
+/// EXISTS-Unterabfrage mit `LIKE`.
+///
+/// `?N` ist der Platzhalter fuer den bereits als `%wort%` aufbereiteten
+/// Suchbegriff.
+fn sidecar_text_clause(index: usize) -> String {
+    format!(
+        "(EXISTS (SELECT 1 FROM photo_keywords pk \
+                  JOIN keywords k ON k.id = pk.keyword_id \
+                  WHERE pk.photo_id = photos.id AND k.name LIKE ?{index}) \
+          OR EXISTS (SELECT 1 FROM photo_notes pn \
+                     WHERE pn.photo_id = photos.id AND pn.body LIKE ?{index}))"
+    )
+}
+
+/// Baut aus der Nutzereingabe das `LIKE`-Muster fuer
+/// [`sidecar_text_clause`].
+///
+/// FTS5-Syntax (`titel:abend*`, Anfuehrungszeichen, `AND`/`OR`) ergibt
+/// fuer ein `LIKE` keinen Sinn; uebrig bleibt der Text ohne diese
+/// Sonderzeichen. Ein Suchausdruck, von dem dabei nichts uebrig bleibt,
+/// liefert `None` — dann greift nur der FTS5-Teil.
+fn like_pattern(query: &str) -> Option<String> {
+    let cleaned: String = query
+        .chars()
+        .map(|c| match c {
+            '"' | '*' | ':' | '(' | ')' | '^' | '-' => ' ',
+            // `%` und `_` sind LIKE-Platzhalter — sonst wuerde eine
+            // Eingabe mit `%` alles treffen.
+            '%' | '_' => ' ',
+            other => other,
+        })
+        .collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(format!("%{trimmed}%"))
+}
+
+/// Volltextsuche über alle Textfelder eines Fotos: Dateiname,
+/// Kamerahersteller/-modell, Objektiv, Titel, Beschriftung, Urheber und
+/// Copyright (FTS5, `photos_fts`) sowie Schlagworte und Bildnotizen
+/// (EXISTS, siehe [`sidecar_text_clause`]).
+///
 /// `query` wird unverändert als FTS5-Match-Ausdruck durchgereicht (erlaubt
 /// also z. B. `filename:sonnenuntergang*` oder mehrere Wörter per UND) —
-/// Ergebnisse nach FTS5-Relevanz (`rank`) sortiert.
+/// Ergebnisse nach FTS5-Relevanz (`rank`) sortiert. Treffer, die NUR über
+/// ein Schlagwort oder eine Notiz kommen, haben keinen FTS5-Rang und
+/// stehen deshalb hinter den Volltexttreffern.
 pub(crate) fn search_photos(conn: &Connection, query: &str) -> Result<Vec<Photo>> {
-    let sql = format!(
-        "SELECT {SELECT_COLUMNS} FROM photos_fts \
+    let fts_sql = format!(
+        "SELECT {SELECT_COLUMNS}, rank AS ordering FROM photos_fts \
          JOIN photos ON photos.rowid = photos_fts.rowid \
-         WHERE photos_fts MATCH ?1 AND {NOT_TRASHED} ORDER BY rank"
+         WHERE photos_fts MATCH ?1 AND {NOT_TRASHED}"
     );
-    let mut stmt = conn.prepare(&sql).map_err(map_sqlite_err)?;
+    let Some(pattern) = like_pattern(query) else {
+        let sql = format!("{fts_sql} ORDER BY ordering");
+        return run_photo_query(conn, &sql, &[&query as &dyn ToSql]);
+    };
+
+    // Die konstante 1.0 sortiert die reinen Schlagwort-/Notiz-Treffer
+    // hinter die FTS5-Treffer, deren `rank` negativ ist (je kleiner,
+    // desto relevanter).
+    //
+    // `UNION` allein entfernt hier KEINE Dubletten: die beiden Zweige
+    // liefern fuer dasselbe Foto verschiedene `ordering`-Werte, die
+    // Zeilen sind damit nicht identisch. Deshalb schliesst der zweite
+    // Zweig ausdruecklich aus, was der Volltext ohnehin schon trifft —
+    // das ist auch semantisch richtig, weil ein Foto dann seinen
+    // echten Relevanzrang behaelt statt hinten einsortiert zu werden.
+    let sidecar = sidecar_text_clause(2);
+    let sql = format!(
+        "{fts_sql} \
+         UNION ALL \
+         SELECT {SELECT_COLUMNS}, 1.0 AS ordering FROM photos \
+         WHERE {sidecar} AND {NOT_TRASHED} \
+           AND photos.rowid NOT IN (SELECT rowid FROM photos_fts WHERE photos_fts MATCH ?1) \
+         ORDER BY ordering"
+    );
+    run_photo_query(conn, &sql, &[&query as &dyn ToSql, &pattern as &dyn ToSql])
+}
+
+/// Fuehrt eine `SELECT {SELECT_COLUMNS}`-Abfrage aus und baut `Photo`s.
+fn run_photo_query(conn: &Connection, sql: &str, values: &[&dyn ToSql]) -> Result<Vec<Photo>> {
+    let mut stmt = conn.prepare(sql).map_err(map_sqlite_err)?;
     let rows = stmt
-        .query_map(rusqlite::params![query], row_to_raw)
+        .query_map(rusqlite::params_from_iter(values.iter()), row_to_raw)
         .map_err(map_sqlite_err)?;
     let mut result = Vec::new();
     for row in rows {
@@ -175,18 +256,50 @@ pub(crate) fn search_and_filter_photos(
         return filter_photos(conn, criteria);
     };
 
-    let (filter_clauses, filter_values) = build_filter_clause(criteria, 1);
-    let mut clauses = vec!["photos_fts MATCH ?1".to_string()];
-    clauses.extend(filter_clauses);
-    let where_clause = clauses.join(" AND ");
-    let sql = format!(
-        "SELECT {SELECT_COLUMNS} FROM photos_fts \
-         JOIN photos ON photos.rowid = photos_fts.rowid \
-         WHERE {where_clause} ORDER BY rank"
-    );
+    let pattern = like_pattern(query);
+
+    // Die Attributfilter zaehlen ab ?2 (ohne Schlagwort-/Notiz-Zweig)
+    // bzw. ab ?3 (mit ihm, weil ?2 dann das LIKE-Muster ist). Beide
+    // Zweige der UNION benutzen DIESELBEN `?N` — positionsgebundene
+    // Platzhalter duerfen mehrfach vorkommen, die Werte werden also nur
+    // einmal gebunden.
+    let filter_offset = if pattern.is_some() { 2 } else { 1 };
+    let (filter_clauses, filter_values) = build_filter_clause(criteria, filter_offset);
+    let filter_sql = if filter_clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {}", filter_clauses.join(" AND "))
+    };
 
     let mut values: Vec<Box<dyn ToSql>> = vec![Box::new(query.to_string())];
+    if let Some(pattern) = &pattern {
+        values.push(Box::new(pattern.clone()));
+    }
     values.extend(filter_values);
+
+    let fts_sql = format!(
+        "SELECT {SELECT_COLUMNS}, rank AS ordering FROM photos_fts \
+         JOIN photos ON photos.rowid = photos_fts.rowid \
+         WHERE photos_fts MATCH ?1{filter_sql}"
+    );
+    let sql = match &pattern {
+        None => format!("{fts_sql} ORDER BY ordering"),
+        Some(_) => {
+            // Siehe `search_photos`: der zweite Zweig schliesst die
+            // FTS5-Treffer aus, sonst erschiene ein Foto, das ueber
+            // beide Wege trifft, doppelt.
+            let sidecar = sidecar_text_clause(2);
+            format!(
+                "{fts_sql} \
+                 UNION ALL \
+                 SELECT {SELECT_COLUMNS}, 1.0 AS ordering FROM photos \
+                 WHERE {sidecar} AND {NOT_TRASHED}{filter_sql} \
+                   AND photos.rowid NOT IN \
+                       (SELECT rowid FROM photos_fts WHERE photos_fts MATCH ?1) \
+                 ORDER BY ordering"
+            )
+        }
+    };
     run_filtered_query(conn, &sql, &values)
 }
 
@@ -752,5 +865,193 @@ mod tests {
         let results =
             search_and_filter_photos(&conn, Some("sonnenuntergang*"), &criteria).expect("ok");
         assert_eq!(results.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod all_text_search_tests {
+    use super::*;
+    use crate::migrations;
+    use crate::models::NewPhoto;
+    use crate::repository::{folders, keywords, notes, photos};
+    use std::path::Path;
+    use time::OffsetDateTime;
+
+    /// Phase 34 F1 (siehe `DECISIONS.md` ADR-0070): die Suche deckte bis
+    /// dahin nur Dateiname, Kamera und Objektiv ab. Genau die Felder, die
+    /// der Nutzer selbst pflegt — Titel, Beschriftung, Urheber,
+    /// Copyright, Schlagworte, Notizen — waren nicht auffindbar.
+    fn setup() -> Connection {
+        let conn = Connection::open_in_memory().expect("In-Memory-DB");
+        migrations::apply(&conn).expect("Migration");
+        conn
+    }
+
+    fn add_photo(conn: &Connection, filename: &str) -> apx_core::PhotoId {
+        let folder_id =
+            folders::find_or_create(conn, Path::new("/fotos"), None, OffsetDateTime::now_utc())
+                .expect("Ordner");
+        let photo = NewPhoto {
+            media_kind: "photo".to_string(),
+            duration_ms: None,
+            video_codec: None,
+            has_audio: None,
+            frame_rate: None,
+            folder_id,
+            filename: filename.to_string(),
+            file_size: 100,
+            file_mtime: OffsetDateTime::now_utc()
+                .replace_nanosecond(0)
+                .expect("gültig"),
+            content_hash: None,
+            width: None,
+            height: None,
+            orientation: 1,
+            camera_make: None,
+            camera_model: None,
+            lens: None,
+            iso: None,
+            shutter: None,
+            aperture: None,
+            focal_length: None,
+            captured_at: None,
+            gps_lat: None,
+            gps_lon: None,
+        };
+        photos::upsert(conn, &photo, OffsetDateTime::now_utc())
+            .expect("Foto")
+            .0
+    }
+
+    #[test]
+    fn finds_a_photo_by_its_caption() {
+        let conn = setup();
+        let id = add_photo(&conn, "IMG_1.CR3");
+        add_photo(&conn, "IMG_2.CR3");
+        photos::set_metadata(&conn, id, None, Some("Abendrot über dem See"), None, None)
+            .expect("Metadaten");
+
+        let hits = search_photos(&conn, "Abendrot").expect("Suche");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, id);
+    }
+
+    #[test]
+    fn finds_a_photo_by_title_creator_and_copyright() {
+        let conn = setup();
+        let id = add_photo(&conn, "IMG_1.CR3");
+        photos::set_metadata(
+            &conn,
+            id,
+            Some("Hafenpanorama"),
+            None,
+            Some("Musterlizenz"),
+            Some("Nikla"),
+        )
+        .expect("Metadaten");
+
+        for term in ["Hafenpanorama", "Musterlizenz", "Nikla"] {
+            let hits = search_photos(&conn, term).expect("Suche");
+            assert_eq!(hits.len(), 1, "'{term}' sollte genau ein Foto finden");
+        }
+    }
+
+    #[test]
+    fn finds_a_photo_by_keyword_although_the_index_only_covers_photos() {
+        let conn = setup();
+        let id = add_photo(&conn, "IMG_1.CR3");
+        add_photo(&conn, "IMG_2.CR3");
+        keywords::add(&conn, id, "Leuchtturm").expect("Schlagwort");
+
+        let hits = search_photos(&conn, "Leuchtturm").expect("Suche");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, id);
+    }
+
+    #[test]
+    fn finds_a_photo_by_the_body_of_a_note() {
+        let conn = setup();
+        let id = add_photo(&conn, "IMG_1.CR3");
+        notes::create(
+            &conn,
+            id,
+            0.5,
+            0.5,
+            "Staubfleck oben links retuschieren",
+            OffsetDateTime::now_utc(),
+        )
+        .expect("Notiz");
+
+        let hits = search_photos(&conn, "Staubfleck").expect("Suche");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, id);
+    }
+
+    #[test]
+    fn returns_a_photo_only_once_when_it_matches_both_ways() {
+        // Dasselbe Wort als Beschriftung UND als Schlagwort: die UNION
+        // darf das Foto nicht doppelt liefern.
+        let conn = setup();
+        let id = add_photo(&conn, "IMG_1.CR3");
+        photos::set_metadata(&conn, id, None, Some("Leuchtturm bei Nacht"), None, None)
+            .expect("Metadaten");
+        keywords::add(&conn, id, "Leuchtturm").expect("Schlagwort");
+
+        let hits = search_photos(&conn, "Leuchtturm").expect("Suche");
+        assert_eq!(hits.len(), 1);
+    }
+
+    #[test]
+    fn keyword_hits_still_respect_the_attribute_filter() {
+        // Der Schlagwort-Zweig der UNION muss dieselben Attributfilter
+        // bekommen wie der Volltext-Zweig — sonst schmuggelte ein
+        // Schlagworttreffer an jedem Filter vorbei.
+        let conn = setup();
+        let id = add_photo(&conn, "IMG_1.CR3");
+        keywords::add(&conn, id, "Leuchtturm").expect("Schlagwort");
+        photos::set_rating(&conn, id, 2).expect("Bewertung");
+
+        let mut criteria = FilterCriteria::default();
+        criteria.rating_at_least = Some(4);
+        let hits = search_and_filter_photos(&conn, Some("Leuchtturm"), &criteria).expect("Suche");
+        assert!(
+            hits.is_empty(),
+            "Bewertung 2 darf den Filter >=4 nicht passieren"
+        );
+
+        criteria.rating_at_least = Some(2);
+        let hits = search_and_filter_photos(&conn, Some("Leuchtturm"), &criteria).expect("Suche");
+        assert_eq!(hits.len(), 1);
+    }
+
+    #[test]
+    fn a_trashed_photo_stays_out_of_both_branches() {
+        let conn = setup();
+        let id = add_photo(&conn, "IMG_1.CR3");
+        keywords::add(&conn, id, "Leuchtturm").expect("Schlagwort");
+        crate::repository::trash::trash_photos(
+            &conn,
+            &[id],
+            crate::models::TrashReason::Manual,
+            OffsetDateTime::now_utc(),
+        )
+        .expect("Papierkorb");
+
+        assert!(search_photos(&conn, "Leuchtturm")
+            .expect("Suche")
+            .is_empty());
+    }
+
+    #[test]
+    fn like_pattern_strips_fts_syntax_and_wildcards() {
+        // `%`/`_` sind LIKE-Platzhalter: bliebe `%` stehen, traefe die
+        // Schlagwortsuche jedes Foto.
+        assert_eq!(like_pattern("abend*"), Some("%abend%".to_string()));
+        assert_eq!(
+            like_pattern("titel:abend"),
+            Some("%titel abend%".to_string())
+        );
+        assert_eq!(like_pattern("%"), None);
+        assert_eq!(like_pattern("   "), None);
     }
 }

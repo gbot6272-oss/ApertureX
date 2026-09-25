@@ -378,7 +378,13 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     { name: "blue", display_name: "Blau", hex: "#3182ce", position: 3 },
     { name: "purple", display_name: "Lila", hex: "#805ad5", position: 4 },
   ];
-  const photoKeywords: Record<string, { id: string; name: string }[]> = {};
+  // Ueber die Fixtures vorbelegbar (`keywordsByPhoto`), damit ein Test
+  // die Schlagwortsuche (Phase 34 F1) pruefen kann, ohne die Schlagworte
+  // erst ueber die Oberflaeche zu vergeben.
+  const photoKeywords: Record<string, { id: string; name: string }[]> = {
+    ...((w.__mockFixtures as { keywordsByPhoto?: Record<string, { id: string; name: string }[]> })
+      .keywordsByPhoto ?? {}),
+  };
   let nextCollectionId = 1;
   let nextKeywordId = 1;
   let nextFaceId = 1;
@@ -1321,8 +1327,34 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "search_and_filter_photos": {
         const query = (args.query as string | null)?.trim().toLowerCase();
         const criteria = args.criteria as MockFilterCriteria;
+        // Seit Phase 34 F1 (ADR-0070) durchsucht das Backend alle
+        // Textfelder plus Schlagworte und Bildnotizen — der Mock bildet
+        // denselben Umfang nach, sonst pruefte der e2e-Test eine engere
+        // Suche als die echte.
+        const matchesQuery = (p: MockPhoto): boolean => {
+          if (!query) return true;
+          const fields = [
+            p.filename,
+            p.camera_make,
+            p.camera_model,
+            p.lens,
+            p.title,
+            p.caption,
+            p.creator,
+            p.copyright,
+          ];
+          if (fields.some((v) => typeof v === "string" && v.toLowerCase().includes(query))) {
+            return true;
+          }
+          if ((photoKeywords[p.id] ?? []).some((k) => k.name.toLowerCase().includes(query))) {
+            return true;
+          }
+          return photoNotes.some(
+            (n) => n.photo_id === p.id && n.body.toLowerCase().includes(query),
+          );
+        };
         return allPhotos()
-          .filter((p) => (!query ? true : p.filename.toLowerCase().includes(query)))
+          .filter(matchesQuery)
           .filter((p) => matchesFilterCriteria(p, criteria))
           .map(clonePhoto);
       }

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
+import { DEFAULT_AMPLIFY, MAX_AMPLIFY, type DifferenceMode } from "../lib/differenceImage";
 import { previewUrl } from "../lib/media";
+import { DifferenceCanvas } from "./DifferenceCanvas";
 import { useAppStore } from "../store";
 import { FlagToggle, RatingStars } from "./RatingFlagColor";
 
@@ -33,6 +35,13 @@ const ZOOM_LEVELS = [1, 1.5, 2, 3] as const;
  * spätere Erweiterung.
  */
 export function CompareGridView() {
+  // Differenz-Ansicht (Phase 34 F3): nur sinnvoll fuer GENAU zwei
+  // Fotos — bei dreien gaebe es drei Paare, und welches gemeint ist,
+  // koennte die Ansicht nicht beantworten, ohne eine zweite Auswahl
+  // einzufuehren.
+  const [differenceOpen, setDifferenceOpen] = useState(false);
+  const [amplify, setAmplify] = useState(DEFAULT_AMPLIFY);
+  const [differenceMode, setDifferenceMode] = useState<DifferenceMode>("channels");
   const photoIds = useAppStore((s) => s.compareViewPhotoIds);
   const selectedFolderId = useAppStore((s) => s.selectedFolderId);
   const photosInFolder = useAppStore((s) => (selectedFolderId ? s.photosByFolder[selectedFolderId] : undefined));
@@ -142,11 +151,67 @@ export function CompareGridView() {
               </button>
             ))}
           </div>
+          {photos.length === 2 && (
+            <button
+              type="button"
+              data-testid="compare-difference-toggle"
+              aria-pressed={differenceOpen}
+              onClick={() => setDifferenceOpen((open) => !open)}
+              className={`rounded border px-2 py-1 text-xs ${differenceOpen ? "border-accent bg-accent/10 text-accent" : "border-border text-text-secondary hover:border-accent"}`}
+            >
+              Differenz
+            </button>
+          )}
           <button type="button" onClick={closeCompareView} className="rounded border border-border px-2 py-1 text-xs hover:border-accent">
             Schließen
           </button>
         </div>
       </div>
+      {differenceOpen && photos.length === 2 && (
+        <div className="flex shrink-0 flex-col gap-2 border-b border-border p-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex gap-1" role="group" aria-label="Betriebsart des Differenzbilds">
+              {(
+                [
+                  ["channels", "Kanalweise"],
+                  ["luma", "Helligkeit"],
+                ] as [DifferenceMode, string][]
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={differenceMode === value}
+                  onClick={() => setDifferenceMode(value)}
+                  className={`rounded border px-2 py-0.5 text-xs ${differenceMode === value ? "border-accent bg-accent/10 text-accent" : "border-border text-text-secondary hover:border-accent"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 text-xs text-text-secondary">
+              Verstärkung
+              <input
+                type="range"
+                min={1}
+                max={MAX_AMPLIFY}
+                step={1}
+                value={amplify}
+                onChange={(event) => setAmplify(Number(event.target.value))}
+                className="w-40 accent-accent"
+              />
+              <span className="w-8 tabular-nums">{amplify}×</span>
+            </label>
+          </div>
+          <div className="flex h-64 justify-center">
+            <DifferenceCanvas
+              photoIdA={photos[0]!.id}
+              photoIdB={photos[1]!.id}
+              amplify={amplify}
+              mode={differenceMode}
+            />
+          </div>
+        </div>
+      )}
       <div className="grid flex-1 gap-2 overflow-auto p-2" style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}>
         {photos.map((photo, index) => (
           <div

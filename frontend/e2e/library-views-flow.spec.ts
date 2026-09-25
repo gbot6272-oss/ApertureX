@@ -69,6 +69,43 @@ test.describe("Bibliotheks-Ansichten (Phase 9 Schritt 3)", () => {
   });
 
   /**
+   * Phase 34 F3 (`DECISIONS.md` ADR-0070): zwei Aufnahmen nebeneinander
+   * beantworten nicht, WAS sich zwischen ihnen unterscheidet. Die
+   * Mathematik liegt in `differenceImage.test.ts`s elf Tests — hier
+   * laeuft der Weg durch die Oberflaeche.
+   */
+  test("Differenz-Ansicht erscheint nur bei genau zwei Fotos", async ({ page }) => {
+    await installTauriMock(page, {
+      folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 2 }],
+      photosByFolder: { [FOLDER_ID]: [PHOTO_A, PHOTO_B] },
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Urlaub/ }).click();
+    await page.getByRole("img", { name: PHOTO_A.filename }).click();
+    await page.getByRole("img", { name: PHOTO_B.filename }).click({ modifiers: ["Control"] });
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: "Vergleichen", exact: true }).click();
+
+    const toggle = page.getByTestId("compare-difference-toggle");
+    await expect(toggle).toBeVisible();
+    await expect(page.getByTestId("difference-canvas")).toHaveCount(0);
+
+    await toggle.click();
+    await expect(page.getByTestId("difference-canvas")).toBeVisible();
+    // Beide Mock-Vorschauen sind dasselbe Bild — die Ansicht sagt das
+    // auch, statt ein schwarzes Rechteck ohne Erklaerung zu zeigen.
+    await expect(page.getByTestId("difference-amount")).toContainText("Kein messbarer Unterschied");
+
+    // Bleibt nur noch ein Foto im Vergleich, gibt es nichts mehr zu
+    // vergleichen — der Schalter verschwindet, statt auf ein Bild zu
+    // zeigen, das es nicht gibt. ("Entf" nimmt aus dem Vergleich, es
+    // loescht nichts.)
+    await page.keyboard.press("Delete");
+    await expect(page.getByTestId("compare-difference-toggle")).toHaveCount(0);
+    await expect(page.getByTestId("difference-canvas")).toHaveCount(0);
+  });
+
+  /**
    * Phase 31 Schritt 8: Sichten per Tastatur. Die Vergleichsansicht gibt
    * es seit Phase 9, sie konnte bis hierher aber gar nichts mit der
    * Tastatur — bei neun Fotos hiess das neun Mal zielen und klicken.

@@ -1011,8 +1011,10 @@ mod all_text_search_tests {
         keywords::add(&conn, id, "Leuchtturm").expect("Schlagwort");
         photos::set_rating(&conn, id, 2).expect("Bewertung");
 
-        let mut criteria = FilterCriteria::default();
-        criteria.rating_at_least = Some(4);
+        let mut criteria = FilterCriteria {
+            rating_at_least: Some(4),
+            ..Default::default()
+        };
         let hits = search_and_filter_photos(&conn, Some("Leuchtturm"), &criteria).expect("Suche");
         assert!(
             hits.is_empty(),

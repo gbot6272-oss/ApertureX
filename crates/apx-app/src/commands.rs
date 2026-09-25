@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::state::AppState;
@@ -4687,6 +4687,228 @@ fn perceptual_duplicate_groups(
         .filter(|group| group.len() >= 2)
         .map(|group| group.into_iter().map(|i| hashed[i].0.clone()).collect())
         .collect())
+}
+
+// ---- Vorschauen vorbereiten (Phase 34 F10) ---------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PreviewWarmPlanDto {
+    /// Fotos, für die noch gerechnet werden müsste.
+    pub pending: usize,
+    /// Fotos, deren Vorschau schon im Cache liegt.
+    pub already: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PreviewWarmProgressPayload {
+    pub done: usize,
+    pub total: usize,
+    pub current_file: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PreviewWarmFinishedPayload {
+    pub prepared: usize,
+    pub failed: usize,
+    pub cancelled: bool,
+}
+
+/// Sammelt die Fotos eines Ordners (oder des ganzen Katalogs) und
+/// trennt, was schon vorbereitet ist.
+///
+/// Übersprungen werden virtuelle Kopien (teilen sich die Datei mit dem
+/// Quellfoto, dessen Vorschau also schon gilt), fehlende Dateien und
+/// Videos (deren Vorschau ist ein extrahiertes Frame, kein dekodiertes
+/// RAW — dafür ist `import::thumbnails` zuständig).
+fn collect_warm_candidates(
+    state: &State<'_, AppState>,
+    folder_id: Option<apx_core::FolderId>,
+) -> Result<Vec<crate::preview_warm::WarmCandidate>, String> {
+    let folders = state
+        .catalog
+        .list_folders()
+        .map_err(|err| err.to_string())?;
+    let mut out = Vec::new();
+    for folder in folders {
+        if let Some(only) = folder_id {
+            if folder.id != only {
+                continue;
+            }
+        }
+        for photo in state
+            .catalog
+            .list_photos_by_folder(folder.id)
+            .map_err(|err| err.to_string())?
+        {
+            if photo.source_photo_id.is_some() || photo.missing {
+                continue;
+            }
+            let source_path = folder.path.join(&photo.filename);
+            if crate::import::video::is_video_extension(&source_path) {
+                continue;
+            }
+            let cached = state
+                .catalog
+                .get_preview(photo.id, apx_catalog::PreviewLevel::Standard)
+                .map_err(|err| err.to_string())?
+                .is_some_and(|preview| preview.path.exists());
+            out.push(crate::preview_warm::WarmCandidate {
+                photo_id: photo.id,
+                source_path,
+                cached,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Sagt, wie viel Arbeit das Vorbereiten machen würde — ohne sie zu tun.
+#[tauri::command]
+pub fn preview_warm_plan(
+    state: State<'_, AppState>,
+    folder_id: Option<String>,
+    force: bool,
+) -> Result<PreviewWarmPlanDto, String> {
+    let parsed = folder_id
+        .map(|id| id.parse::<apx_core::FolderId>())
+        .transpose()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    let plan = crate::preview_warm::plan_warm(collect_warm_candidates(&state, parsed)?, force);
+    Ok(PreviewWarmPlanDto {
+        pending: plan.pending.len(),
+        already: plan.already,
+    })
+}
+
+/// Bereitet die Vorschauen vor.
+///
+/// Läuft im Hintergrund (derselbe `spawn_blocking`-Aufbau wie der
+/// Import) und meldet sich über `preview-warm:progress` und
+/// `preview-warm:finished` — ein Ordner mit tausend RAWs beschäftigt die
+/// Maschine minutenlang, und eine Oberfläche, die dabei einfriert, wäre
+/// schlimmer als gar keine Vorbereitung.
+///
+/// Ein Fehler betrifft nur ein Foto: die übrigen laufen weiter, und die
+/// Zahl steht am Ende in `failed`. Eine einzelne kaputte Datei darf
+/// nicht die Vorbereitung eines ganzen Ordners abbrechen.
+#[tauri::command]
+pub fn start_preview_warm(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    folder_id: Option<String>,
+    force: bool,
+) -> Result<usize, String> {
+    let parsed = folder_id
+        .map(|id| id.parse::<apx_core::FolderId>())
+        .transpose()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    let plan = crate::preview_warm::plan_warm(collect_warm_candidates(&state, parsed)?, force);
+    if plan.pending.is_empty() {
+        return Ok(0);
+    }
+
+    let cancel = {
+        let mut guard = state
+            .active_preview_warm
+            .lock()
+            .map_err(|_| "Vorschau-Status ist blockiert (vergiftete Sperre)".to_string())?;
+        if guard.is_some() {
+            return Err("Es werden bereits Vorschauen vorbereitet".to_string());
+        }
+        let token = tokio_util::sync::CancellationToken::new();
+        *guard = Some(token.clone());
+        token
+    };
+
+    let total = plan.pending.len();
+    let targets = plan.pending;
+    let catalog = state.catalog.clone();
+    let cache_root = state.paths.preview_cache_dir();
+    let active = state.active_preview_warm.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let app_for_blocking = app.clone();
+        let cancel_for_blocking = cancel.clone();
+        let join_result = tokio::task::spawn_blocking(move || {
+            use rayon::prelude::*;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+
+            // Derselbe Zuschnitt wie bei den Import-Thumbnails: ein Kern
+            // bleibt frei, damit die Oberfläche bedienbar bleibt,
+            // während im Hintergrund dekodiert wird.
+            let workers = num_cpus::get_physical().saturating_sub(1).max(1);
+            let pool = match rayon::ThreadPoolBuilder::new().num_threads(workers).build() {
+                Ok(pool) => pool,
+                Err(err) => {
+                    tracing::error!(%err, "Worker-Pool für das Vorschau-Vorwärmen nicht erstellbar");
+                    return (0usize, total);
+                }
+            };
+
+            let done = AtomicUsize::new(0);
+            let failed = AtomicUsize::new(0);
+            pool.install(|| {
+                targets.par_iter().for_each(|(photo_id, source_path)| {
+                    if cancel_for_blocking.is_cancelled() {
+                        return;
+                    }
+                    let current = done.fetch_add(1, Ordering::SeqCst) + 1;
+                    let _ = app_for_blocking.emit(
+                        "preview-warm:progress",
+                        PreviewWarmProgressPayload {
+                            done: current,
+                            total,
+                            current_file: Some(source_path.to_string_lossy().to_string()),
+                        },
+                    );
+                    if let Err(err) =
+                        crate::preview_warm::warm_one(&catalog, &cache_root, *photo_id, source_path)
+                    {
+                        tracing::warn!(path = %source_path.display(), %err, "Vorschau nicht vorbereitbar");
+                        failed.fetch_add(1, Ordering::SeqCst);
+                    }
+                });
+            });
+            (done.into_inner() - failed.load(Ordering::SeqCst), failed.into_inner())
+        })
+        .await;
+
+        if let Ok(mut guard) = active.lock() {
+            *guard = None;
+        }
+
+        let (prepared, failed) = match join_result {
+            Ok(counts) => counts,
+            Err(join_err) => {
+                tracing::error!(error = %join_err, "Vorschau-Vorwärmen ist abgestürzt");
+                (0, total)
+            }
+        };
+        let _ = app.emit(
+            "preview-warm:finished",
+            PreviewWarmFinishedPayload {
+                prepared,
+                failed,
+                cancelled: cancel.is_cancelled(),
+            },
+        );
+    });
+
+    Ok(total)
+}
+
+/// Bricht das Vorbereiten ab. Kein Fehler, wenn gerade keines läuft —
+/// derselbe harmlose Wettlauf wie bei [`cancel_import`].
+#[tauri::command]
+pub fn cancel_preview_warm(state: State<'_, AppState>) -> Result<(), String> {
+    let guard = state
+        .active_preview_warm
+        .lock()
+        .map_err(|_| "Vorschau-Status ist blockiert (vergiftete Sperre)".to_string())?;
+    if let Some(token) = guard.as_ref() {
+        token.cancel();
+    }
+    Ok(())
 }
 
 // ---- Duplikat-Assistent (Phase 34 F9) --------------------------------------

@@ -61,4 +61,10 @@ pub struct AppState {
     /// damit Kameraverbindung und Aufnahmezähler zwischen "erkennen" und
     /// mehreren "auslösen"-Aufrufen bestehen bleiben.
     pub tether: Arc<Mutex<Option<Box<dyn apx_tether::TetherBackend>>>>,
+    /// Abbruch-Token des laufenden Vorschau-Vorwärmens (Phase 34 F10),
+    /// falls eines läuft. Eigenes Feld statt `active_import`
+    /// mitzubenutzen: beides darf gleichzeitig laufen (das Vorwärmen
+    /// eines alten Ordners blockiert keinen neuen Import), und ein
+    /// gemeinsames Token bräche genau das.
+    pub active_preview_warm: Arc<Mutex<Option<CancellationToken>>>,
 }

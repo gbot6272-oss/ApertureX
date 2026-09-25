@@ -235,6 +235,14 @@ export function useCommandRegistry(): CommandEntry[] {
         run: () => requestCommand("duplicate-cleanup"),
       },
       {
+        // Phase 34 F10 — "Fortgeschritten": rechnet lange und im
+        // Hintergrund, auch wenn es nur den Cache fuellt.
+        id: "fn:preview-warm",
+        label: t("header.previewWarm"),
+        category: "advanced",
+        run: () => requestCommand("preview-warm"),
+      },
+      {
         id: "fn:gpx-geotag",
         label: t("header.gpxGeotag"),
         category: "advanced",

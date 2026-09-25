@@ -623,6 +623,11 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     return { ...photo };
   }
 
+  /** Fotos, deren 2048px-Vorschau in diesem Lauf vorbereitet wurde
+   * (Phase 34 F10). Eigener Zustand statt einer Aenderung an den
+   * Fixtures, weil die nicht erweiterbar sind. */
+  const warmedPreviews = new Set<string>();
+
   /** Kameraoriginal, nicht Ableger — siehe `duplicate_keeper`s eigene
    * Liste, die bewusst enger ist als "kann die App das lesen". */
   function isRawFilename(filename: string): boolean {
@@ -1527,6 +1532,37 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       // ---- Bibliothek: Duplikaterkennung (ab Phase 3, Schritt 8.2) ---------
       case "list_duplicate_photo_groups":
         return duplicateGroupsForMode("exact").map((group) => group.map(clonePhoto));
+
+      // ---- Vorschauen vorbereiten (Phase 34 F10) ---------------------------
+      // Der Mock dekodiert nichts — er zaehlt nur, welche Fotos eine
+      // vorbereitete Vorschau haetten. Welche das sind, sagt die
+      // Fixture `warmedPreviewIds`; was der Lauf danach vorbereitet
+      // hat, merkt sich der Mock selbst.
+      case "preview_warm_plan":
+      case "start_preview_warm": {
+        const fixtures = w.__mockFixtures as {
+          folders: { id: string; path: string }[];
+          photosByFolder: Record<string, MockPhoto[]>;
+          warmedPreviewIds?: string[];
+        };
+        const onlyFolder = args.folderId as string | null;
+        const force = Boolean(args.force);
+        const pending: string[] = [];
+        let already = 0;
+        for (const folder of fixtures.folders) {
+          if (onlyFolder && folder.id !== onlyFolder) continue;
+          for (const photo of fixtures.photosByFolder[folder.id] ?? []) {
+            const warmed = warmedPreviews.has(photo.id) || (fixtures.warmedPreviewIds ?? []).includes(photo.id);
+            if (warmed && !force) already += 1;
+            else pending.push(photo.id);
+          }
+        }
+        if (cmd === "preview_warm_plan") return { pending: pending.length, already };
+        for (const id of pending) warmedPreviews.add(id);
+        return pending.length;
+      }
+      case "cancel_preview_warm":
+        return null;
 
       // ---- Duplikat-Assistent (Phase 34 F9) --------------------------------
       // Derselbe Auswahlweg wie `apx-app`s `duplicate_keeper`: geordnete

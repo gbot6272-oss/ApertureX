@@ -63,6 +63,7 @@ export const en: Record<keyof typeof de, string> = {
   "header.catalogHealth": "Catalog health…",
   "header.dateSort": "Sort into date folders…",
   "header.duplicateCleanup": "Clean up duplicates…",
+  "header.previewWarm": "Prepare previews…",
   "header.cameraDefaults": "Per-camera defaults…",
   "header.metadataPresets": "Metadata presets…",
   "header.watermarkTemplates": "Watermarks…",

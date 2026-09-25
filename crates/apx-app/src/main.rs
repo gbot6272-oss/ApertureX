@@ -17,6 +17,7 @@ mod folder_sync;
 mod gpx_match;
 mod import;
 mod metadata_preset;
+mod preview_warm;
 mod protocol;
 mod reconcile;
 mod similarity;
@@ -308,6 +309,7 @@ fn main() {
             lut_table_cache: Arc::new(apx_pipeline::lut_table_cache::LutTableCache::new()),
             export_queue,
             tether: Arc::new(Mutex::new(None)),
+            active_preview_warm: Arc::new(Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
             commands::select_folder,
@@ -440,6 +442,9 @@ fn main() {
             commands::apply_date_sort,
             commands::plan_duplicate_cleanup,
             commands::apply_duplicate_cleanup,
+            commands::preview_warm_plan,
+            commands::start_preview_warm,
+            commands::cancel_preview_warm,
             commands::score_photo_sharpness,
             commands::measure_exposure_match,
             commands::apply_metadata_preset,

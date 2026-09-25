@@ -66,6 +66,7 @@ export const de = {
   "header.catalogHealth": "Katalog-Gesundheit…",
   "header.dateSort": "Nach Aufnahmedatum einsortieren…",
   "header.duplicateCleanup": "Duplikate aufräumen…",
+  "header.previewWarm": "Vorschauen vorbereiten…",
   "header.cameraDefaults": "Standardentwicklung je Kamera…",
   "header.metadataPresets": "Metadaten-Vorgaben…",
   "header.watermarkTemplates": "Wasserzeichen…",

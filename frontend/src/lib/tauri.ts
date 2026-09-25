@@ -2607,6 +2607,39 @@ export function applyFolderSync(
   return invoke<FolderSyncResultDto>("apply_folder_sync", { folderId, importNew, trashVanished });
 }
 
+// ---- Vorschauen vorbereiten (Phase 34 F10) ---------------------------------
+
+export interface PreviewWarmPlanDto {
+  pending: number;
+  already: number;
+}
+
+export interface PreviewWarmProgressEvent {
+  done: number;
+  total: number;
+  current_file: string | null;
+}
+
+export interface PreviewWarmFinishedEvent {
+  prepared: number;
+  failed: number;
+  cancelled: boolean;
+}
+
+export function previewWarmPlan(folderId: string | null, force: boolean): Promise<PreviewWarmPlanDto> {
+  return invoke<PreviewWarmPlanDto>("preview_warm_plan", { folderId, force });
+}
+
+/** Gibt zurück, wie viele Fotos vorbereitet werden — der Fortschritt
+ * kommt danach über `preview-warm:progress`/`:finished`. */
+export function startPreviewWarm(folderId: string | null, force: boolean): Promise<number> {
+  return invoke<number>("start_preview_warm", { folderId, force });
+}
+
+export function cancelPreviewWarm(): Promise<void> {
+  return invoke<void>("cancel_preview_warm");
+}
+
 // ---- Duplikat-Assistent (Phase 34 F9) --------------------------------------
 
 /** Welches Kriterium den Vorschlag entschieden hat. Schlüssel statt

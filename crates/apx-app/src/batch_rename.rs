@@ -245,7 +245,7 @@ fn rollback(staged: &[(PathBuf, PathBuf, PathBuf)]) {
 /// keine. Ein Fehler beim Sidecar bricht die Umbenennung bewusst nicht
 /// ab: das Foto ist die Hauptsache, eine zurückgebliebene
 /// Metadatendatei ist ärgerlich, aber kein Datenverlust.
-fn move_sidecar(from: &Path, to: &Path) {
+pub(crate) fn move_sidecar(from: &Path, to: &Path) {
     let from_sidecar = from.with_extension("xmp");
     if from_sidecar.exists() {
         let _ = std::fs::rename(&from_sidecar, to.with_extension("xmp"));

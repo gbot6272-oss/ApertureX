@@ -10,6 +10,7 @@
 mod batch_rename;
 mod camera_default;
 mod commands;
+mod date_sort;
 mod exposure_match;
 mod folder_sync;
 mod gpx_match;
@@ -434,6 +435,8 @@ fn main() {
             commands::empty_trash,
             commands::preview_folder_sync,
             commands::apply_folder_sync,
+            commands::preview_date_sort,
+            commands::apply_date_sort,
             commands::score_photo_sharpness,
             commands::measure_exposure_match,
             commands::apply_metadata_preset,

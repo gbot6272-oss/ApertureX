@@ -219,6 +219,14 @@ export function useCommandRegistry(): CommandEntry[] {
         run: () => requestCommand("catalog-health"),
       },
       {
+        // Phase 34 F8 — "Fortgeschritten", nicht "Analyse": das hier
+        // verschiebt echte Dateien auf der Platte.
+        id: "fn:date-sort",
+        label: t("header.dateSort"),
+        category: "advanced",
+        run: () => requestCommand("date-sort"),
+      },
+      {
         id: "fn:gpx-geotag",
         label: t("header.gpxGeotag"),
         category: "advanced",

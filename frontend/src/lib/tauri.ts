@@ -2607,6 +2607,56 @@ export function applyFolderSync(
   return invoke<FolderSyncResultDto>("apply_folder_sync", { folderId, importNew, trashVanished });
 }
 
+// ---- Nach Aufnahmedatum einsortieren (Phase 34 F8) -------------------------
+
+/** Was mit einem Foto passieren würde. Schlüssel statt Text, wie beim
+ * Ordner-Abgleich — die Beschriftung bleibt im Frontend. */
+export type DateSortOutcome = "move" | "already" | "no_date" | "collision";
+
+export interface DateSortEntryDto {
+  photo_id: string;
+  filename: string;
+  current_dir: string;
+  /** Leer bei `no_date`. */
+  target_dir: string;
+  outcome: DateSortOutcome;
+  /** Das Datum kam aus der Dateizeit, nicht aus EXIF. */
+  used_mtime: boolean;
+}
+
+export interface DateSortPlanDto {
+  entries: DateSortEntryDto[];
+  move_count: number;
+  already_count: number;
+  no_date_count: number;
+  collision_count: number;
+}
+
+export interface DateSortResultDto {
+  moved: number;
+  folders_created: number;
+  failures: string[];
+}
+
+export interface DateSortOptions {
+  /** `null` = der ganze Katalog; dann ist `root` Pflicht. */
+  folderId: string | null;
+  /** Zielwurzel; leer = der gewählte Ordner selbst. */
+  root: string | null;
+  /** Ordnermuster, leer = `{year}/{year}-{month}-{day}`. */
+  pattern: string | null;
+  /** Fotos ohne EXIF-Datum nach der Dateizeit einsortieren. */
+  useMtimeFallback: boolean;
+}
+
+export function previewDateSort(options: DateSortOptions): Promise<DateSortPlanDto> {
+  return invoke<DateSortPlanDto>("preview_date_sort", { ...options });
+}
+
+export function applyDateSort(options: DateSortOptions): Promise<DateSortResultDto> {
+  return invoke<DateSortResultDto>("apply_date_sort", { ...options });
+}
+
 // ---- Schärfe-Bewertung (Phase 33 F3) ---------------------------------------
 
 export interface SharpnessResultDto {

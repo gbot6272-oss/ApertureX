@@ -335,6 +335,13 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   const collections: MockCollection[] = [];
   const collectionPhotoIds: Record<string, string[]> = {};
 
+  // Nach Aufnahmedatum einsortieren (Phase 34 F8): wohin ein Foto durch
+  // ein früheres `apply_date_sort` gewandert ist. Eigener Zustand statt
+  // einer Änderung an `fixtures.photosByFolder`, weil die Fixtures nicht
+  // erweiterbar sind — und weil das Einsortieren im Raster nichts
+  // verändern soll: die Fotos bleiben dieselben, nur ihr Ordner nicht.
+  const dateSortCurrentDir: Record<string, string> = {};
+
   // Bibliotheks-Backlog (Phase 9 Schritt 1) — einfache In-Memory-
   // Nachbildung von Sammlungssätzen/Stapeln/virtuellen Kopien/
   // Farbmarkierungs-Definitionen.
@@ -2354,6 +2361,104 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         // dieselben Abweichungen noch einmal.
         fixtures.folderSyncPlan = [];
         return { returned, handled_vanished: vanished.length, import_started: importStarted };
+      }
+
+      // ---- Nach Aufnahmedatum einsortieren (Phase 34 F8) ---------------
+      // Hier rechnet der Mock wirklich — dieselbe Regel wie
+      // `apx-app`s `date_sort::plan_date_sort`: Datumsordner aus dem
+      // Muster, erster Anspruch auf einen Zielpfad gewinnt, jeder
+      // weitere ist ein Namenskonflikt. Ein Dateisystem hat der Mock
+      // nicht, das Anwenden hängt deshalb nur die Fotos um.
+      case "preview_date_sort":
+      case "apply_date_sort": {
+        const fixtures = w.__mockFixtures as {
+          folders: { id: string; path: string }[];
+          photosByFolder: Record<string, MockPhoto[]>;
+        };
+        const pattern = (args.pattern as string | null) ?? "{year}/{year}-{month}-{day}";
+        const useMtime = Boolean(args.useMtimeFallback);
+        const onlyFolder = args.folderId as string | null;
+        const root =
+          (args.root as string | null) ??
+          fixtures.folders.find((folder) => folder.id === onlyFolder)?.path ??
+          "";
+
+        const claimed = new Set<string>();
+        const entries: {
+          photo_id: string;
+          filename: string;
+          current_dir: string;
+          target_dir: string;
+          outcome: string;
+          used_mtime: boolean;
+        }[] = [];
+
+        for (const folder of fixtures.folders) {
+          if (onlyFolder && folder.id !== onlyFolder) continue;
+          for (const photo of fixtures.photosByFolder[folder.id] ?? []) {
+            const currentDir = dateSortCurrentDir[photo.id] ?? folder.path;
+            const raw = photo.captured_at ?? (useMtime ? "2030-01-01T12:00:00Z" : null);
+            if (!raw) {
+              entries.push({
+                photo_id: photo.id,
+                filename: photo.filename,
+                current_dir: currentDir,
+                target_dir: "",
+                outcome: "no_date",
+                used_mtime: false,
+              });
+              continue;
+            }
+            const date = new Date(raw);
+            const segments = pattern
+              .split("/")
+              .map((segment) =>
+                segment
+                  .replace("{year}", String(date.getFullYear()))
+                  .replace("{month}", String(date.getMonth() + 1).padStart(2, "0"))
+                  .replace("{day}", String(date.getDate()).padStart(2, "0")),
+              )
+              .filter((segment) => segment !== "");
+            const targetDir = [root, ...segments].join("/");
+            const targetPath = `${targetDir}/${photo.filename}`;
+            const outcome = claimed.has(targetPath)
+              ? "collision"
+              : targetDir === currentDir
+                ? "already"
+                : "move";
+            if (outcome !== "collision") claimed.add(targetPath);
+            entries.push({
+              photo_id: photo.id,
+              filename: photo.filename,
+              current_dir: currentDir,
+              target_dir: targetDir,
+              outcome,
+              used_mtime: !photo.captured_at,
+            });
+          }
+        }
+
+        const count = (outcome: string) => entries.filter((entry) => entry.outcome === outcome).length;
+        if (cmd === "preview_date_sort") {
+          return {
+            entries,
+            move_count: count("move"),
+            already_count: count("already"),
+            no_date_count: count("no_date"),
+            collision_count: count("collision"),
+          };
+        }
+
+        // Anwenden: die Fotos merken sich ihren neuen Ordner. Danach
+        // meldet eine zweite Vorschau sie folgerichtig als „liegt schon
+        // richtig".
+        const created = new Set<string>();
+        for (const entry of entries) {
+          if (entry.outcome !== "move") continue;
+          if (!fixtures.folders.some((folder) => folder.path === entry.target_dir)) created.add(entry.target_dir);
+          dateSortCurrentDir[entry.photo_id] = entry.target_dir;
+        }
+        return { moved: count("move"), folders_created: created.size, failures: [] };
       }
 
       // ---- Papierkorb (Phase 33 F1) -----------------------------------

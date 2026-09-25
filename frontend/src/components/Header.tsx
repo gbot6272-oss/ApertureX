@@ -20,6 +20,7 @@ import { FolderSyncDialog } from "./FolderSyncDialog";
 import { ExposureMatchDialog } from "./ExposureMatchDialog";
 import { CameraDefaultsDialog } from "./CameraDefaultsDialog";
 import { CatalogHealthDialog } from "./CatalogHealthDialog";
+import { DateSortDialog } from "./DateSortDialog";
 import { GpxGeotagDialog } from "./GpxGeotagDialog";
 import { SharpnessDialog } from "./SharpnessDialog";
 import { MetadataPresetDialog } from "./MetadataPresetDialog";
@@ -91,6 +92,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
   const [exposureMatchDialogOpen, setExposureMatchDialogOpen] = useState(false);
   const [gpxGeotagDialogOpen, setGpxGeotagDialogOpen] = useState(false);
   const [catalogHealthDialogOpen, setCatalogHealthDialogOpen] = useState(false);
+  const [dateSortDialogOpen, setDateSortDialogOpen] = useState(false);
   const [cameraDefaultsDialogOpen, setCameraDefaultsDialogOpen] = useState(false);
   const [metadataPresetDialogOpen, setMetadataPresetDialogOpen] = useState(false);
   const [watermarkTemplateDialogOpen, setWatermarkTemplateDialogOpen] = useState(false);
@@ -185,6 +187,9 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
         break;
       case "catalog-health":
         setCatalogHealthDialogOpen(true);
+        break;
+      case "date-sort":
+        setDateSortDialogOpen(true);
         break;
       case "gpx-geotag":
         setGpxGeotagDialogOpen(true);
@@ -452,6 +457,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
       <ExposureMatchDialog open={exposureMatchDialogOpen} onClose={() => setExposureMatchDialogOpen(false)} />
       <GpxGeotagDialog open={gpxGeotagDialogOpen} onClose={() => setGpxGeotagDialogOpen(false)} />
       <CatalogHealthDialog open={catalogHealthDialogOpen} onClose={() => setCatalogHealthDialogOpen(false)} />
+      <DateSortDialog open={dateSortDialogOpen} onClose={() => setDateSortDialogOpen(false)} />
       <CameraDefaultsDialog open={cameraDefaultsDialogOpen} onClose={() => setCameraDefaultsDialogOpen(false)} />
       <MetadataPresetDialog open={metadataPresetDialogOpen} onClose={() => setMetadataPresetDialogOpen(false)} />
       <WatermarkTemplateDialog open={watermarkTemplateDialogOpen} onClose={() => setWatermarkTemplateDialogOpen(false)} />

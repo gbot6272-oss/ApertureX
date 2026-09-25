@@ -10410,6 +10410,45 @@ mod tests {
     // die private Umwandlungsfunktion getestet, die diese Datei selbst
     // beisteuert.
 
+    /// Phase 34 F8: der Verschiebeschritt selbst ist keine reine
+    /// Funktion und gehört deshalb nicht nach `date_sort.rs` — getestet
+    /// wird er trotzdem, denn hier geht es um Dateien, die es danach
+    /// noch geben muss.
+    mod date_sort_moving {
+        use super::*;
+
+        #[test]
+        fn verschiebt_die_datei_und_laesst_die_quelle_nicht_stehen() {
+            let dir = tempfile::tempdir().expect("Temp-Ordner");
+            let source = dir.path().join("IMG_0001.CR3");
+            let target_dir = dir.path().join("2024/2024-05-07");
+            std::fs::write(&source, b"RAW").expect("Quelle schreibbar");
+            std::fs::create_dir_all(&target_dir).expect("Zielordner anlegbar");
+            let target = target_dir.join("IMG_0001.CR3");
+
+            move_file_across_devices(&source, &target).expect("sollte gelingen");
+
+            assert!(!source.exists(), "die Quelle darf nicht liegen bleiben");
+            assert_eq!(
+                std::fs::read(&target).expect("Ziel lesbar"),
+                b"RAW".to_vec()
+            );
+        }
+
+        #[test]
+        fn meldet_einen_fehler_statt_stillschweigend_nichts_zu_tun() {
+            let dir = tempfile::tempdir().expect("Temp-Ordner");
+            let source = dir.path().join("gibt-es-nicht.CR3");
+            let target = dir.path().join("ziel.CR3");
+
+            let err = move_file_across_devices(&source, &target)
+                .expect_err("eine fehlende Quelle darf nicht als Erfolg durchgehen");
+
+            assert!(err.contains("kopierbar"), "unerwartete Meldung: {err}");
+            assert!(!target.exists(), "es darf keine leere Zieldatei entstehen");
+        }
+    }
+
     fn sample_envelope(marker: f32) -> apx_core::EdlEnvelope {
         let edl = apx_pipeline::edl::EdlV4 {
             basic: apx_pipeline::edl::BasicAdjustments {
@@ -11214,6 +11253,331 @@ pub async fn apply_folder_sync(
         handled_vanished,
         import_started,
     })
+}
+
+// ---- Nach Aufnahmedatum einsortieren (Phase 34 F8) -------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DateSortEntryDto {
+    pub photo_id: String,
+    pub filename: String,
+    pub current_dir: String,
+    pub target_dir: String,
+    /// `"move"`, `"already"`, `"no_date"` oder `"collision"`.
+    pub outcome: String,
+    pub used_mtime: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DateSortPlanDto {
+    pub entries: Vec<DateSortEntryDto>,
+    pub move_count: usize,
+    pub already_count: usize,
+    pub no_date_count: usize,
+    pub collision_count: usize,
+}
+
+fn date_sort_outcome_key(outcome: crate::date_sort::SortOutcome) -> &'static str {
+    use crate::date_sort::SortOutcome;
+    match outcome {
+        SortOutcome::Move => "move",
+        SortOutcome::AlreadyInPlace => "already",
+        SortOutcome::NoDate => "no_date",
+        SortOutcome::Collision => "collision",
+    }
+}
+
+/// Sammelt die Kandidaten und rechnet den Plan.
+///
+/// `folder_id = None` nimmt den ganzen Katalog. Virtuelle Kopien bleiben
+/// außen vor: sie haben keine eigene Datei, es gäbe also nichts zu
+/// verschieben — und der Katalogeintrag muss beim Quellfoto bleiben.
+/// Fehlende Dateien ebenfalls: was nicht da ist, kann man nicht umlegen.
+fn build_date_sort_plan(
+    state: &State<'_, AppState>,
+    folder_id: Option<apx_core::FolderId>,
+    root: &std::path::Path,
+    pattern: &str,
+    use_mtime_fallback: bool,
+) -> Result<crate::date_sort::DateSortPlan, String> {
+    let folders = state
+        .catalog
+        .list_folders()
+        .map_err(|err| err.to_string())?;
+    let mut candidates: Vec<crate::date_sort::SortCandidate> = Vec::new();
+
+    for folder in folders {
+        if let Some(only) = folder_id {
+            if folder.id != only {
+                continue;
+            }
+        }
+        let photos = state
+            .catalog
+            .list_photos_by_folder(folder.id)
+            .map_err(|err| err.to_string())?;
+        for photo in photos {
+            if photo.source_photo_id.is_some() || photo.missing {
+                continue;
+            }
+            candidates.push(crate::date_sort::SortCandidate {
+                photo_id: photo.id,
+                filename: photo.filename,
+                current_dir: folder.path.clone(),
+                captured_at: photo.captured_at,
+                file_mtime: photo.file_mtime,
+            });
+        }
+    }
+
+    Ok(crate::date_sort::plan_date_sort(
+        root,
+        pattern,
+        &candidates,
+        use_mtime_fallback,
+    ))
+}
+
+fn parse_date_sort_args(
+    state: &State<'_, AppState>,
+    folder_id: Option<String>,
+    root: Option<String>,
+) -> Result<(Option<apx_core::FolderId>, std::path::PathBuf), String> {
+    let parsed = folder_id
+        .map(|id| id.parse::<apx_core::FolderId>())
+        .transpose()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+
+    // Ohne ausdrückliches Ziel ist der gewählte Ordner selbst die Wurzel
+    // — der übliche Fall: ein voller Kartenordner soll in sich selbst
+    // aufgeräumt werden. Für den ganzen Katalog gibt es kein sinnvolles
+    // Ziel zu raten, das muss der Aufrufer sagen.
+    let root = match (root, parsed) {
+        (Some(path), _) if !path.trim().is_empty() => std::path::PathBuf::from(path.trim()),
+        (_, Some(id)) => {
+            state
+                .catalog
+                .get_folder(id)
+                .map_err(|err| err.to_string())?
+                .path
+        }
+        (_, None) => {
+            return Err("Ohne Zielordner lässt sich der ganze Katalog nicht einsortieren.".into())
+        }
+    };
+    Ok((parsed, root))
+}
+
+/// Zeigt, was das Einsortieren täte — ohne eine Datei anzufassen.
+#[tauri::command]
+pub fn preview_date_sort(
+    state: State<'_, AppState>,
+    folder_id: Option<String>,
+    root: Option<String>,
+    pattern: Option<String>,
+    use_mtime_fallback: bool,
+) -> Result<DateSortPlanDto, String> {
+    use crate::date_sort::SortOutcome;
+    let (parsed, root) = parse_date_sort_args(&state, folder_id, root)?;
+    let pattern = pattern.unwrap_or_else(|| crate::date_sort::DEFAULT_DATE_PATTERN.to_string());
+    let plan = build_date_sort_plan(&state, parsed, &root, &pattern, use_mtime_fallback)?;
+
+    Ok(DateSortPlanDto {
+        move_count: plan.count(SortOutcome::Move),
+        already_count: plan.count(SortOutcome::AlreadyInPlace),
+        no_date_count: plan.count(SortOutcome::NoDate),
+        collision_count: plan.count(SortOutcome::Collision),
+        entries: plan
+            .entries
+            .iter()
+            .map(|entry| DateSortEntryDto {
+                photo_id: entry.photo_id.to_string(),
+                filename: entry.filename.clone(),
+                current_dir: entry.current_dir.to_string_lossy().to_string(),
+                target_dir: entry.target_dir.to_string_lossy().to_string(),
+                outcome: date_sort_outcome_key(entry.outcome).to_string(),
+                used_mtime: entry.used_mtime,
+            })
+            .collect(),
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DateSortResultDto {
+    /// Tatsächlich verschobene Fotos.
+    pub moved: usize,
+    /// Neu angelegte Zielordner.
+    pub folders_created: usize,
+    /// Einträge, die liegen blieben — samt Grund, einer je Zeile.
+    pub failures: Vec<String>,
+}
+
+/// Verschiebt die Dateien und hängt die Katalogzeilen um.
+///
+/// Der Plan wird hier **neu gerechnet**, nicht vom Aufrufer
+/// entgegengenommen: sonst gäbe es zwei Stellen, an denen ein Zielpfad
+/// entsteht, und die Oberfläche könnte einen Plan anwenden, den die
+/// Kollisionsprüfung nie gesehen hat.
+///
+/// Je Foto: Zielordner anlegen, prüfen ob dort schon etwas liegt,
+/// Datei verschieben (samt `.xmp`-Sidecar), dann die Katalogzeile.
+/// Reihenfolge Datei-vor-Katalog wie bei der Stapel-Umbenennung, siehe
+/// `apx_catalog::repository::photos::set_folder`. Ein Fehler betrifft
+/// nur dieses eine Foto — die übrigen laufen weiter, und was schiefging,
+/// steht am Ende in `failures`.
+#[tauri::command]
+pub fn apply_date_sort(
+    state: State<'_, AppState>,
+    folder_id: Option<String>,
+    root: Option<String>,
+    pattern: Option<String>,
+    use_mtime_fallback: bool,
+) -> Result<DateSortResultDto, String> {
+    use crate::date_sort::SortOutcome;
+    let (parsed, root) = parse_date_sort_args(&state, folder_id, root)?;
+    let pattern = pattern.unwrap_or_else(|| crate::date_sort::DEFAULT_DATE_PATTERN.to_string());
+    let plan = build_date_sort_plan(&state, parsed, &root, &pattern, use_mtime_fallback)?;
+    if plan.is_clean() {
+        // Nichts zu verschieben — und vor allem kein leerer Datumsbaum,
+        // der nur aus angelegten Ordnern besteht.
+        return Ok(DateSortResultDto {
+            moved: 0,
+            folders_created: 0,
+            failures: Vec::new(),
+        });
+    }
+
+    let mut moved = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+    let mut folder_cache: std::collections::HashMap<std::path::PathBuf, apx_core::FolderId> =
+        std::collections::HashMap::new();
+    let mut created_dirs: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
+
+    for entry in &plan.entries {
+        if entry.outcome != SortOutcome::Move {
+            continue;
+        }
+        let source = entry.current_dir.join(&entry.filename);
+        let target = entry.target_dir.join(&entry.filename);
+
+        if target.exists() {
+            failures.push(format!(
+                "{}: im Zielordner liegt bereits eine Datei dieses Namens",
+                entry.filename
+            ));
+            continue;
+        }
+        if !entry.target_dir.exists() {
+            if let Err(err) = std::fs::create_dir_all(&entry.target_dir) {
+                failures.push(format!(
+                    "{}: Zielordner {} nicht anlegbar ({err})",
+                    entry.filename,
+                    entry.target_dir.display()
+                ));
+                continue;
+            }
+            created_dirs.insert(entry.target_dir.clone());
+        }
+
+        if let Err(err) = move_file_across_devices(&source, &target) {
+            failures.push(format!("{}: {err}", entry.filename));
+            continue;
+        }
+        crate::batch_rename::move_sidecar(&source, &target);
+
+        let target_folder = match ensure_date_sort_folder(
+            &state,
+            &entry.target_dir,
+            &root,
+            &mut folder_cache,
+        ) {
+            Ok(id) => id,
+            Err(err) => {
+                // Die Datei liegt schon am neuen Ort. Zurückschieben
+                // wäre der sauberste Ausgang, aber ein zweiter
+                // Dateisystem-Schritt, der ebenfalls scheitern kann;
+                // stattdessen bleibt der Katalog auf dem alten Pfad
+                // stehen und der `missing`-Abgleich meldet es.
+                failures.push(format!(
+                        "{}: verschoben, aber Katalog-Ordner nicht anlegbar ({err}) — der Abgleich meldet die Datei als fehlend",
+                        entry.filename
+                    ));
+                continue;
+            }
+        };
+        if let Err(err) = state
+            .catalog
+            .set_photo_folder(entry.photo_id, target_folder)
+        {
+            failures.push(format!(
+                "{}: verschoben, aber Katalogzeile nicht umgehängt ({err})",
+                entry.filename
+            ));
+            continue;
+        }
+        moved += 1;
+    }
+
+    Ok(DateSortResultDto {
+        moved,
+        folders_created: created_dirs.len(),
+        failures,
+    })
+}
+
+/// Legt den Katalog-Ordnereintrag für `dir` an, samt Elternkette bis
+/// `root` — dieselbe Regel wie `import::ensure_folder`, nur gegen die
+/// Katalog-Fassade statt gegen die Import-interne Signatur.
+fn ensure_date_sort_folder(
+    state: &State<'_, AppState>,
+    dir: &std::path::Path,
+    root: &std::path::Path,
+    cache: &mut std::collections::HashMap<std::path::PathBuf, apx_core::FolderId>,
+) -> Result<apx_core::FolderId, String> {
+    if let Some(id) = cache.get(dir) {
+        return Ok(*id);
+    }
+    let parent_id = if dir != root && dir.starts_with(root) {
+        dir.parent()
+            .map(|parent| ensure_date_sort_folder(state, parent, root, cache))
+            .transpose()?
+    } else {
+        None
+    };
+    let id = state
+        .catalog
+        .find_or_create_folder(dir, parent_id)
+        .map_err(|err| err.to_string())?;
+    cache.insert(dir.to_path_buf(), id);
+    Ok(id)
+}
+
+/// Verschiebt eine Datei, auch über Dateisystemgrenzen hinweg.
+///
+/// `std::fs::rename` ist der schnelle Weg und scheitert, wenn Quelle und
+/// Ziel auf verschiedenen Laufwerken liegen — ein Datumsbaum auf einer
+/// externen Platte, gefüttert aus einem Ordner auf der internen, ist
+/// genau dieser Fall. Dann wird kopiert und das Original erst gelöscht,
+/// wenn die Kopie steht.
+fn move_file_across_devices(
+    source: &std::path::Path,
+    target: &std::path::Path,
+) -> Result<(), String> {
+    if std::fs::rename(source, target).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(source, target).map_err(|err| format!("nicht kopierbar ({err})"))?;
+    if let Err(err) = std::fs::remove_file(source) {
+        // Die Kopie steht — das Original zu behalten ist ärgerlich, aber
+        // kein Verlust. Trotzdem gemeldet, sonst wundert man sich über
+        // die doppelte Datei.
+        let _ = std::fs::remove_file(target);
+        return Err(format!(
+            "kopiert, aber Original nicht entfernbar ({err}) — nichts verändert"
+        ));
+    }
+    Ok(())
 }
 
 // ---- Schärfe-Bewertung (Phase 33 F3) ---------------------------------------

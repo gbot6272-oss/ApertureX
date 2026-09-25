@@ -7595,3 +7595,144 @@ sonst vollständigen EDL ohne `interactive` verschwindet das
 Entwickeln-Panel ohne den Fix genau wie beim Nutzer; mit dem Fix
 rendert es, und die Fehlergrenze greift gar nicht erst. Die Gegenprobe
 wurde real gefahren, nicht behauptet.
+
+---
+
+## ADR-0070: Phase 34 — zehn Funktionen, und was das Bauen über den Bestand verriet
+
+**Kontext.** Nach Phase 33 war die Frage wieder, was fehlt. Die
+Auswahl dieser zehn folgte einer Linie: nicht „was hat eine andere App
+noch", sondern „wo hört die App auf halbem Weg auf". Sieben der zehn
+knüpfen an etwas an, das schon da war und ohne Fortsetzung nutzlos
+blieb — Duplikatgruppen ohne Aufräumen, ein Kalender ohne Daten, ein
+Cache ohne Füllung.
+
+Zwei Befunde aus dem Bauen stehen am Anfang, weil sie über die Funktion
+hinausgehen, zu der sie gehören:
+
+**Der Cache-Befund (F10).** Der Vorschau-Cache hat drei Stufen. Der
+Import schrieb immer nur die erste (256px Miniaturansicht).
+`protocol::compute_preview` liest die zweite (2048px), findet nichts
+und dekodiert die RAW-Datei — jedes Mal, für jedes Foto, beim ersten
+Ansehen. Die Stufe existierte im Schema, in der Enum, im Leseweg, und
+wurde nie geschrieben. Das ist keine fehlende Funktion, das ist eine
+gebaute Funktion ohne Zulieferung.
+
+**Der zweite-Antwort-Befund (F9).** Für „welches Duplikat behalte ich"
+gab es bereits eine Antwort: `frontend/src/lib/duplicates.ts`, Auflösung
+vor Dateigröße vor Bewertung, als Sternchen im Organisieren-Dialog. Die
+neue Regel im Backend entscheidet anders (siehe unten). Zwei Antworten
+auf dieselbe Frage sind schlimmer als eine unvollständige, deshalb ist
+die alte Datei gelöscht und nicht zusätzlich stehengelassen.
+
+**Die zehn Funktionen und ihre jeweils entscheidende Wahl:**
+
+**F1 — Suche über alles.** Die Volltextsuche (FTS5) indizierte nur
+Spalten der `photos`-Tabelle; Schlagworte und Notizen liegen in eigenen
+Tabellen und waren damit unauffindbar. FTS5-Tabellen mit externem
+Inhalt lassen sich nicht um Spalten erweitern — die Tabelle musste neu
+gebaut und ihre Trigger neu angelegt werden (Migration 15). Die
+Erweiterung selbst ist kein zweiter Index, sondern ein zweiter
+`UNION ALL`-Zweig mit `LIKE` über die verbundenen Tabellen. `UNION`
+allein hätte nicht dedupliziert, weil die Zweige eine unterschiedliche
+`ordering`-Spalte tragen; der zweite Zweig schließt deshalb ausdrücklich
+aus, was der erste schon gefunden hat.
+
+**F2 — Belichtung angleichen.** Ein Stopp ist eine Verdoppelung des
+*linearen* Lichts, also muss sRGB linearisiert werden, bevor `log2`
+darauf angewandt wird. Geklippte Pixel (unter 4, über 251) tragen keine
+Belichtungsinformation mehr und werden verworfen statt mitgemittelt.
+Gemessen wird in Rust, geschrieben aus dem Frontend über
+`apply_develop_edit` — dieselbe Trennung wie bei der Schärfe-Bewertung
+aus Phase 33 F3, damit EDL-Validierung, Verlauf und Beschriftung durch
+eine Stelle laufen.
+
+**F3 — Differenzbild.** Zwei Fotos übereinander, Pixel gegen Pixel. Die
+Berechnung läuft auf einem festen 512er-Raster statt auf der vollen
+Auflösung: zwei Aufnahmen desselben Motivs haben selten exakt dieselben
+Maße, und ein Vergleich, der daran scheitert, hilft niemandem.
+
+**F4 — GPX-Geotagging.** Nach einem selbstgeschriebenen XML-Scanner
+stellte sich heraus, dass `apx_export::map::parse_gpx` (quick_xml)
+längst existierte. Der eigene Scanner ist gelöscht; geblieben sind die
+beiden Teile, die es wirklich noch nicht gab: die Zuordnung Zeit →
+Position mit Interpolation, und die Regel, dass über eine Lücke im Track
+hinweg **nicht** interpoliert wird — zwischen zwei Punkten im Abstand
+von drei Stunden liegt keine Gerade, sondern eine Pause.
+
+**F5 — Katalog-Gesundheit.** Sechs Lücken, die einzeln über Filter
+auffindbar waren — wenn man auf die Idee kam, danach zu suchen. Die
+Reihenfolge der sechs ist eine Aussage über Dringlichkeit (fehlende
+Dateien zuerst, Bewertungslücken zuletzt) und gehört deshalb in die
+Katalogschicht, nicht in die Darstellung. Jede Zeile führt zur Arbeit,
+nicht nur zur Zahl: „Anzeigen" legt die Fotos in dieselbe
+Mehrfachauswahl, mit der Stapel-Bewertung und Export ohnehin arbeiten.
+
+**F6 — Verlaufs-Vergleich über das ganze EDL.** Verglichen wurde bis
+dahin nur der preset-fähige Sektionsumfang. Für Presets ist diese
+Auswahl richtig (nicht alles lässt sich sinnvoll übertragen), für die
+Frage „was hat dieser Schritt geändert" ist sie falsch: ein Schritt, der
+eine Maske verschoben hat, wurde als „keine Unterschiede" gemeldet. Der
+erste Entwurf verglich Arrays über `JSON.stringify` und brachte den
+Renderer zum Absturz — 3D-LUT-Tabellen und eingebettete Maskendaten
+ergeben mehrere Megabyte pro Vergleich. Ersetzt durch ein `deepEqual`
+mit frühem Ausstieg.
+
+**F7 — Standardentwicklung je Kamera.** Beim Import bekommt ein Foto
+automatisch das EDL, das für sein Kameramodell hinterlegt ist. Die
+Vorgaben werden einmal pro Importlauf geladen, nicht pro Datei; dafür
+wurde aus den acht Einzelparametern von `import_single_file` ein
+`ImportRun`-Struct — nicht um clippy zu beruhigen, sondern weil acht
+Parameter, von denen vier für den ganzen Lauf konstant sind, ohnehin
+falsch geschnitten waren.
+
+**F8 — Nach Aufnahmedatum einsortieren.** Der Import legt Fotos dort
+ab, wo sie herkommen, und das war auf der Speicherkarte ein einziges
+Verzeichnis. Plan und Anwenden getrennt wie beim Ordner-Abgleich (F2 der
+Vorphase) — hier noch wichtiger, weil echte Dateien verschoben werden.
+Der Kern ist die Kollisionsprüfung: zwei Fotos vom selben Tag mit
+demselben Dateinamen landen im selben Zielordner, und ohne Prüfung
+überschriebe das zweite das erste unwiederbringlich. Der erste Anspruch
+auf einen Zielpfad gewinnt, jeder weitere wird gemeldet und bleibt
+liegen; ein bereits richtig liegendes Foto belegt seinen Platz dabei
+ebenfalls. Der Rückfall auf die Dateizeit ist abgeschaltet vorgegeben:
+sie sagt, wann zuletzt geschrieben wurde, und ein Kopiervorgang setzt
+sie auf heute.
+
+**F9 — Duplikat-Assistent.** Geordnete Kriterien statt einer
+Punktesumme, und jedes kann sagen, warum es entschieden hat. Die
+Reihenfolge ist die eigentliche Aussage: zuerst, was ein Mensch
+ausdrücklich entschieden hat (Pick-Flagge, Bewertung) — eine Messung
+darf eine Entscheidung nicht überstimmen —, dann was Arbeit wäre zu
+verlieren (vorhandene Bearbeitungen), dann das Original vor dem Ableger
+(RAW vor JPEG, weil aus einem RAW ein JPEG wird und nicht umgekehrt),
+erst danach Auflösung und Dateigröße. Ein Gleichstand entscheidet
+nicht, aber er verkleinert das Feld: wer bei der Bewertung hinten liegt,
+ist raus, auch wenn er die größere Datei hat. Ein Reject-markiertes Foto
+bleibt nie, solange es eine Alternative gibt. Der Vorschlag ist
+umstellbar; die eine harte Grenze ist, dass aus keiner Gruppe jede
+Version verschwinden darf, und die wird beim Anwenden neu gerechnet
+statt der Auswahl geglaubt.
+
+**F10 — Vorschauen vorbereiten.** Siehe den Cache-Befund oben. Die
+Lösung erfindet keinen zweiten Cache, sie füllt den vorhandenen: gleiches
+Pfadschema wie `import::thumbnails`, nur mit der Stufennummer 1 statt 0,
+und `WARM_EDGE` **ist** `protocol::STANDARD_EDGE` statt einer
+gespiegelten Zahl — eine Kopie wäre irgendwann abgedriftet, und dann
+bereitete das Modul etwas vor, das niemand abruft. Eigenes
+Abbruch-Token statt `active_import` mitzubenutzen, weil das Vorwärmen
+eines alten Ordners keinen neuen Import blockieren soll.
+
+**Verworfen: die Vorbereitung automatisch an den Import hängen.** Das
+hätte jeden Import um ein Vielfaches verlängert, und zwar auch für die
+Fotos, die niemand je im Einzelbild ansieht. Der Nutzer entscheidet,
+wann sich die Wartezeit lohnt; deshalb steht vor dem Start die Zahl, wie
+viel Arbeit anfällt.
+
+**Verifikation.** Jede der zehn Funktionen hat Rust-Unit-Tests für ihre
+Rechenregel und einen Playwright-Test für den Weg durch die Oberfläche;
+die e2e-Mocks rechnen dieselbe Regel wirklich nach, statt ein Ergebnis
+zu behaupten. Zwei Fehler in dieser Phase wurden von den eigenen Tests
+gefunden, nicht vom Nutzer: das fehlende Deduplizieren in F1 und die
+gemeinsam genutzten Referenzen in `neutralEdlPayload`, die zwei
+„unabhängige" Neutral-EDLs aneinander koppelten.

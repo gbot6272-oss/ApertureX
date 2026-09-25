@@ -567,3 +567,28 @@ vergrößert die Bildfläche nicht, sondern wird hineingezeichnet.
 | Manuelle Reihenfolge | Fotos einer Sammlung per Ziehen umordnen | Sortierung „Manuell (Sammlung)" |
 | Ähnliche Fotos | Treffer zu einem Referenzfoto, Regler zwischen Motiv und Farbe | Menü „Ähnliche Fotos finden…" |
 | Stapel im Raster | Stapel als eine Kachel mit Zähler, einzeln oder gesammelt aufklappbar | Abzeichen auf der Kachel, Schalter in der Filterleiste |
+
+## Phase 34 — Zehn Funktionen, die Angefangenes zu Ende bringen
+
+| Funktion | Was sie kann | Wo |
+| --- | --- | --- |
+| Suche über alles | Findet auch über Schlagworte, Notizen, Titel und Beschreibung, nicht nur über Dateiname und Kamera | Suchfeld in der Filterleiste |
+| Belichtung angleichen | Misst, um wie viele EV ein Foto von einer Referenz abweicht, und schreibt die Korrektur | Menü „Belichtung angleichen…" (zwei oder mehr Fotos ausgewählt) |
+| Differenzbild | Zwei Fotos Pixel gegen Pixel, Unterschiede eingefärbt | Vergleichsraster, Schalter „Differenz" bei genau zwei Fotos |
+| GPX-Geotagging | Ordnet Fotos Positionen aus einer GPX-Aufzeichnung zu, mit Zeitversatz und Toleranz | Menü „GPX-Geotagging…" |
+| Katalog-Gesundheit | Sechs Lücken auf einen Blick, jede Zeile legt die betroffenen Fotos in die Auswahl | Menü „Katalog-Gesundheit…" |
+| Verlaufs-Vergleich | Zeigt jedes geänderte Feld zwischen zwei Bearbeitungsschritten, lesbar beschriftet | Entwickeln → „Verlauf" |
+| Standardentwicklung je Kamera | Hinterlegte Entwicklung, die beim Import automatisch auf Fotos dieses Modells kommt | Menü „Standardentwicklung je Kamera…" |
+| Nach Aufnahmedatum einsortieren | Baut aus einem vollen Ordner einen Datumsbaum, mit Vorschau und Konfliktmeldung | Menü „Nach Aufnahmedatum einsortieren…" |
+| Duplikate aufräumen | Schlägt je Gruppe mit Begründung vor, was bleibt, und legt den Rest in den Papierkorb | Menü „Duplikate aufräumen…" |
+| Vorschauen vorbereiten | Rechnet die großen Vorschauen eines Ordners vorab, damit das Durchblättern flüssig ist | Menü „Vorschauen vorbereiten…" |
+
+**Ehrliche Grenzen:** Die Suche über Schlagworte und Notizen läuft über
+`LIKE`, nicht über den Volltextindex — sie findet Teilwörter, ist aber
+bei sehr großen Katalogen langsamer als die Suche über Dateiname und
+Kamera. Das Differenzbild rechnet auf einem festen Raster, nicht in
+voller Auflösung. GPX-Positionen werden über Lücken im Track hinweg
+nicht interpoliert; für diese Fotos bleibt der Ort leer. Beim
+Einsortieren nach Datum bleiben Fotos liegen, deren Zielname schon
+belegt ist — sie werden gemeldet, nicht umbenannt. Der Duplikat-Vorschlag
+ist eine Regel über Metadaten, keine Bildanalyse.

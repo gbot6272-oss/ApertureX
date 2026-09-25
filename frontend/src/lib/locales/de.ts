@@ -63,6 +63,7 @@ export const de = {
   "header.sharpness": "Schärfe bewerten…",
   "header.exposureMatch": "Belichtung angleichen…",
   "header.gpxGeotag": "Aus GPX-Track verorten…",
+  "header.catalogHealth": "Katalog-Gesundheit…",
   "header.metadataPresets": "Metadaten-Vorgaben…",
   "header.watermarkTemplates": "Wasserzeichen…",
   "header.similarPhotos": "Ähnliche Fotos finden…",

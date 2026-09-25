@@ -1096,6 +1096,48 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "run_catalog_optimize":
       case "run_catalog_backup":
         return null;
+      // Katalog-Gesundheit (Phase 34 F5). Der Mock rechnet dieselben
+      // Bedingungen nach wie `repository::health` — Papierkorb und
+      // virtuelle Kopien bleiben aussen vor.
+      case "catalog_health":
+      case "list_health_photos": {
+        const relevant = (kind: string) =>
+          allPhotos().filter((p) => {
+            if (p.source_photo_id) return false;
+            switch (kind) {
+              case "missing":
+                return p.missing === true;
+              case "with_open_notes":
+                return photoNotes.some((n) => n.photo_id === p.id && !n.done);
+              case "without_capture_date":
+                return !p.captured_at;
+              case "without_keywords":
+                return (photoKeywords[p.id] ?? []).length === 0;
+              case "without_rating":
+                return (p.rating ?? 0) === 0;
+              case "without_position":
+                return p.gps_lat === null || p.gps_lat === undefined;
+              default:
+                return false;
+            }
+          });
+        const kinds = [
+          "missing",
+          "with_open_notes",
+          "without_capture_date",
+          "without_keywords",
+          "without_rating",
+          "without_position",
+        ];
+        if (cmd === "catalog_health") {
+          return kinds.map((kind) => ({ kind, count: relevant(kind).length }));
+        }
+        const kind = args.kind as string;
+        if (!kinds.includes(kind)) throw new Error(`Unbekannte Kategorie: ${kind}`);
+        return relevant(kind)
+          .slice(0, args.limit as number)
+          .map(clonePhoto);
+      }
       case "run_catalog_integrity_check":
         return [];
       // Metadaten-Abgleich (ADR-0068): traegt im Mock das Aufnahmedatum

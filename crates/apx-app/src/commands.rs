@@ -8877,6 +8877,53 @@ pub fn switch_active_catalog(
     persist_catalog_choice_and_restart(&app, &state, &path)
 }
 
+/// Eine Gesundheits-Kategorie mit ihrer Anzahl (siehe
+/// [`catalog_health`]).
+#[derive(Debug, Clone, Serialize)]
+pub struct CatalogHealthEntryDto {
+    /// Bezeichner der Kategorie, z. B. `"without_rating"`.
+    pub kind: String,
+    pub count: u64,
+}
+
+/// Was im Bestand noch Arbeit braucht (Phase 34 F5, siehe
+/// `apx-catalog`s `repository::health` und `DECISIONS.md` ADR-0070).
+///
+/// Die Reihenfolge ist die Anzeigereihenfolge und kommt aus dem Katalog
+/// (`HealthKind::ALL`), nicht aus dem Frontend: sie ist eine Aussage
+/// über die Dringlichkeit, keine Darstellungsfrage.
+#[tauri::command]
+pub fn catalog_health(state: State<'_, AppState>) -> Result<Vec<CatalogHealthEntryDto>, String> {
+    let rows = state.catalog.catalog_health().map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|(kind, count)| CatalogHealthEntryDto {
+            kind: kind.as_str().to_string(),
+            count,
+        })
+        .collect())
+}
+
+/// Die Fotos einer Gesundheits-Kategorie.
+///
+/// Ein unbekannter `kind` ist ein Fehler, keine leere Liste: eine leere
+/// Liste sähe aus wie „hier ist alles in Ordnung" und würde einen
+/// Tippfehler im Aufrufer als gute Nachricht ausgeben.
+#[tauri::command]
+pub fn list_health_photos(
+    state: State<'_, AppState>,
+    kind: String,
+    limit: usize,
+) -> Result<Vec<PhotoDto>, String> {
+    let parsed = apx_catalog::HealthKind::from_str_opt(&kind)
+        .ok_or_else(|| format!("Unbekannte Kategorie: {kind}"))?;
+    let photos = state
+        .catalog
+        .list_health_photos(parsed, limit)
+        .map_err(|e| e.to_string())?;
+    Ok(photos.into_iter().map(PhotoDto::from).collect())
+}
+
 /// Führt `PRAGMA integrity_check` auf dem aktuell geöffneten Katalog aus
 /// (siehe `apx_catalog::Catalog::integrity_check`s Doku) — leere Liste =
 /// keine Probleme gefunden.

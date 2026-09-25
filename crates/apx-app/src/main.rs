@@ -376,6 +376,8 @@ fn main() {
             commands::create_new_catalog,
             commands::switch_active_catalog,
             commands::run_catalog_integrity_check,
+            commands::catalog_health,
+            commands::list_health_photos,
             commands::run_catalog_optimize,
             commands::rescan_photo_metadata,
             commands::run_catalog_backup,

@@ -2624,6 +2624,34 @@ export function scorePhotoSharpness(photoIds: string[]): Promise<SharpnessResult
   return invoke<SharpnessResultDto[]>("score_photo_sharpness", { photoIds });
 }
 
+// ---- Katalog-Gesundheit (Phase 34 F5) --------------------------------------
+
+/** Bezeichner der Kategorien — dieselben Zeichenketten wie
+ * `apx-catalog`s `HealthKind::as_str`. */
+export type CatalogHealthKind =
+  | "missing"
+  | "with_open_notes"
+  | "without_capture_date"
+  | "without_keywords"
+  | "without_rating"
+  | "without_position";
+
+export interface CatalogHealthEntryDto {
+  kind: CatalogHealthKind;
+  count: number;
+}
+
+/** Zähler aller Kategorien, in der Dringlichkeitsreihenfolge des
+ * Katalogs. */
+export function catalogHealth(): Promise<CatalogHealthEntryDto[]> {
+  return invoke<CatalogHealthEntryDto[]>("catalog_health");
+}
+
+/** Die Fotos einer Kategorie, höchstens `limit` Stück. */
+export function listHealthPhotos(kind: CatalogHealthKind, limit: number): Promise<PhotoDto[]> {
+  return invoke<PhotoDto[]>("list_health_photos", { kind, limit });
+}
+
 // ---- Belichtung angleichen (Phase 34 F2) -----------------------------------
 
 /** Ein Zielfoto und die für den Abgleich nötige Belichtungskorrektur. */

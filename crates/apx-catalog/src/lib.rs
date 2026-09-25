@@ -49,6 +49,7 @@ pub use models::{
     TagRule, TechnicalMetadata, Template, TrashEntry, TrashReason, SAME_PERSON_EMBEDDING_THRESHOLD,
 };
 pub use repository::batch::BatchAction;
+pub use repository::health::HealthKind;
 pub use repository::share::ShareDiff;
 
 pub struct Catalog {
@@ -211,6 +212,23 @@ impl Catalog {
     ) -> Result<()> {
         let conn = self.lock()?;
         repository::photos::set_technical_metadata(&conn, id, meta)
+    }
+
+    /// Zähler aller Gesundheits-Kategorien (Phase 34 F5, siehe
+    /// [`repository::health`]).
+    pub fn catalog_health(&self) -> Result<Vec<(repository::health::HealthKind, u64)>> {
+        let conn = self.lock()?;
+        repository::health::summary(&conn)
+    }
+
+    /// Die Fotos einer Gesundheits-Kategorie, höchstens `limit` Stück.
+    pub fn list_health_photos(
+        &self,
+        kind: repository::health::HealthKind,
+        limit: usize,
+    ) -> Result<Vec<Photo>> {
+        let conn = self.lock()?;
+        repository::health::list(&conn, kind, limit)
     }
 
     pub fn get_photo(&self, id: PhotoId) -> Result<Photo> {

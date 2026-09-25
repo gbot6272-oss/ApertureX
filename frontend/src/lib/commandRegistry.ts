@@ -205,6 +205,14 @@ export function useCommandRegistry(): CommandEntry[] {
         run: () => requestCommand("sharpness"),
       },
       {
+        // Gehoert in "Analyse": der Dialog misst den Katalog, er
+        // veraendert ihn nicht — er legt nur eine Auswahl an.
+        id: "fn:catalog-health",
+        label: t("header.catalogHealth"),
+        category: "analysis",
+        run: () => requestCommand("catalog-health"),
+      },
+      {
         id: "fn:gpx-geotag",
         label: t("header.gpxGeotag"),
         category: "advanced",

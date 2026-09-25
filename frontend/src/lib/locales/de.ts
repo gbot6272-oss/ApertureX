@@ -64,6 +64,7 @@ export const de = {
   "header.exposureMatch": "Belichtung angleichen…",
   "header.gpxGeotag": "Aus GPX-Track verorten…",
   "header.catalogHealth": "Katalog-Gesundheit…",
+  "header.cameraDefaults": "Standardentwicklung je Kamera…",
   "header.metadataPresets": "Metadaten-Vorgaben…",
   "header.watermarkTemplates": "Wasserzeichen…",
   "header.similarPhotos": "Ähnliche Fotos finden…",

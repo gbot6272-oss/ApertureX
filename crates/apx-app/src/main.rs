@@ -8,6 +8,7 @@
 #![deny(clippy::unwrap_used)]
 
 mod batch_rename;
+mod camera_default;
 mod commands;
 mod exposure_match;
 mod folder_sync;
@@ -377,6 +378,9 @@ fn main() {
             commands::switch_active_catalog,
             commands::run_catalog_integrity_check,
             commands::catalog_health,
+            commands::list_camera_defaults,
+            commands::set_camera_default,
+            commands::delete_camera_default,
             commands::list_health_photos,
             commands::run_catalog_optimize,
             commands::rescan_photo_metadata,

@@ -2624,6 +2624,33 @@ export function scorePhotoSharpness(photoIds: string[]): Promise<SharpnessResult
   return invoke<SharpnessResultDto[]>("score_photo_sharpness", { photoIds });
 }
 
+// ---- Standardentwicklung je Kamera (Phase 34 F7) ---------------------------
+
+export interface CameraDefaultDto {
+  camera_model: string;
+  edl_json: string;
+}
+
+export function listCameraDefaults(): Promise<CameraDefaultDto[]> {
+  return invoke<CameraDefaultDto[]>("list_camera_defaults");
+}
+
+/**
+ * Legt die Standardentwicklung für ein Kameramodell fest — neu
+ * importierte Fotos dieser Kamera starten damit statt neutral.
+ *
+ * Das EDL wird im Backend geprüft, bevor es gespeichert wird: eine
+ * kaputte Nutzlast fiele sonst erst beim nächsten Import auf, wo sie
+ * stillschweigend übersprungen würde.
+ */
+export function setCameraDefault(cameraModel: string, edlJson: string): Promise<void> {
+  return invoke<void>("set_camera_default", { cameraModel, edlJson });
+}
+
+export function deleteCameraDefault(cameraModel: string): Promise<void> {
+  return invoke<void>("delete_camera_default", { cameraModel });
+}
+
 // ---- Katalog-Gesundheit (Phase 34 F5) --------------------------------------
 
 /** Bezeichner der Kategorien — dieselben Zeichenketten wie

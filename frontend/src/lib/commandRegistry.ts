@@ -205,6 +205,12 @@ export function useCommandRegistry(): CommandEntry[] {
         run: () => requestCommand("sharpness"),
       },
       {
+        id: "fn:camera-defaults",
+        label: t("header.cameraDefaults"),
+        category: "templates",
+        run: () => requestCommand("camera-defaults"),
+      },
+      {
         // Gehoert in "Analyse": der Dialog misst den Katalog, er
         // veraendert ihn nicht — er legt nur eine Auswahl an.
         id: "fn:catalog-health",

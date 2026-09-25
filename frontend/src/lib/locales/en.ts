@@ -61,6 +61,7 @@ export const en: Record<keyof typeof de, string> = {
   "header.exposureMatch": "Match exposure…",
   "header.gpxGeotag": "Geotag from GPX track…",
   "header.catalogHealth": "Catalog health…",
+  "header.cameraDefaults": "Per-camera defaults…",
   "header.metadataPresets": "Metadata presets…",
   "header.watermarkTemplates": "Watermarks…",
   "header.similarPhotos": "Find similar photos…",

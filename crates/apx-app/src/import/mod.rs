@@ -160,6 +160,14 @@ pub(super) fn run_with_mode(
         ImportMode::Copy(dir) | ImportMode::Move(dir) => dir,
     };
 
+    // Die Kamera-Vorgaben werden EINMAL je Importlauf gelesen, nicht je
+    // Datei: bei tausend Fotos waeren das tausend Katalogabfragen fuer
+    // eine Liste, die sich waehrend des Laufs nicht aendert.
+    let camera_defaults: Vec<(String, String)> = catalog
+        .list_templates(crate::camera_default::CAMERA_DEFAULT_KIND)
+        .map(|rows| rows.into_iter().map(|t| (t.name, t.payload_json)).collect())
+        .unwrap_or_default();
+
     let mut folder_cache: HashMap<PathBuf, FolderId> = HashMap::new();
     let mut imported = 0usize;
     let mut skipped = 0usize;
@@ -178,9 +186,12 @@ pub(super) fn run_with_mode(
             catalog,
             &mut folder_cache,
             file_path,
-            hierarchy_root,
-            mode,
-            rename_pattern,
+            &ImportRun {
+                hierarchy_root,
+                mode,
+                rename_pattern,
+                camera_defaults: &camera_defaults,
+            },
             index + 1,
         ) {
             Ok(SingleFileOutcome::Imported(photo_id, staged_path)) => {
@@ -344,15 +355,33 @@ struct FileMeta {
     frame_rate: Option<f32>,
 }
 
+/// Was für einen ganzen Importlauf gleich bleibt.
+///
+/// Gebündelt, weil `import_single_file` sonst acht Parameter hätte, von
+/// denen sich sechs nie ändern — an der Aufrufstelle war schon beim
+/// Hinzufügen des siebten nicht mehr zu sehen, welcher Pfad welcher ist.
+struct ImportRun<'a> {
+    hierarchy_root: &'a Path,
+    mode: &'a ImportMode,
+    rename_pattern: Option<&'a str>,
+    /// Standardentwicklung je Kamera (Phase 34 F7) — einmal je Lauf
+    /// gelesen, siehe Aufrufstelle.
+    camera_defaults: &'a [(String, String)],
+}
+
 fn import_single_file(
     catalog: &Catalog,
     folder_cache: &mut HashMap<PathBuf, FolderId>,
     path: &Path,
-    hierarchy_root: &Path,
-    mode: &ImportMode,
-    rename_pattern: Option<&str>,
+    run: &ImportRun<'_>,
     seq: usize,
 ) -> Result<SingleFileOutcome, String> {
+    let ImportRun {
+        hierarchy_root,
+        mode,
+        rename_pattern,
+        camera_defaults,
+    } = *run;
     // Metadaten werden immer vom *ursprünglichen* Pfad gelesen: bei
     // ImportMode::Move existiert die Quelldatei nach dem Staging unten
     // nicht mehr, ein zweiter Lesezugriff wäre also ohnehin unmöglich —
@@ -460,9 +489,33 @@ fn import_single_file(
         frame_rate: meta.frame_rate,
     };
 
+    let camera_model = new_photo.camera_model.clone();
     let (photo_id, changed) = catalog
         .upsert_photo(&new_photo)
         .map_err(|err| err.to_string())?;
+
+    if changed {
+        // Standardentwicklung je Kamera (Phase 34 F7): nur fuer
+        // tatsaechlich NEU angelegte oder geaenderte Fotos, und nur,
+        // wenn es fuer dieses Modell eine Vorgabe gibt. Ein
+        // fehlerhaftes gespeichertes EDL darf den Import nicht
+        // abbrechen — der Import ist der teure Vorgang, die Vorgabe der
+        // Zusatznutzen; im Zweifel startet das Foto eben neutral.
+        if let Some(edl_json) =
+            crate::camera_default::find_for(camera_defaults, camera_model.as_deref())
+        {
+            if let Ok(envelope) = apx_core::EdlEnvelope::from_json_str(edl_json) {
+                if apx_pipeline::edl::from_envelope(&envelope).is_ok() {
+                    let _ = catalog.commit_edit(
+                        photo_id,
+                        &envelope,
+                        Some("Standardentwicklung der Kamera"),
+                    );
+                }
+            }
+        }
+    }
+
     Ok(if changed {
         SingleFileOutcome::Imported(photo_id, staged_path)
     } else {
@@ -555,9 +608,12 @@ mod tests {
             &catalog,
             &mut cache,
             &broken,
-            tmp.path(),
-            &ImportMode::AddInPlace,
-            None,
+            &ImportRun {
+                hierarchy_root: tmp.path(),
+                mode: &ImportMode::AddInPlace,
+                rename_pattern: None,
+                camera_defaults: &[],
+            },
             1,
         );
         assert!(

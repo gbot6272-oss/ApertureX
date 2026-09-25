@@ -636,6 +636,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     updated_at: string;
   }
   const photoNotes: MockPhotoNote[] = [];
+  // Standardentwicklung je Kamera (Phase 34 F7).
+  const cameraDefaults: { camera_model: string; edl_json: string }[] = [];
   let nextNoteId = 1;
 
   // `editHistories` laesst sich ueber die Fixtures vorbelegen
@@ -1137,6 +1139,26 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         return relevant(kind)
           .slice(0, args.limit as number)
           .map(clonePhoto);
+      }
+      // Standardentwicklung je Kamera (Phase 34 F7). Verglichen wird
+      // wie im Backend ueber den normalisierten Modellnamen.
+      case "list_camera_defaults":
+        return cameraDefaults.map((entry) => ({ ...entry }));
+      case "set_camera_default": {
+        const model = (args.cameraModel as string).trim();
+        if (!model) throw new Error("Ohne Kameramodell lässt sich keine Vorgabe zuordnen");
+        const key = model.toLowerCase();
+        const index = cameraDefaults.findIndex((e) => e.camera_model.trim().toLowerCase() === key);
+        const entry = { camera_model: model, edl_json: args.edlJson as string };
+        if (index >= 0) cameraDefaults[index] = entry;
+        else cameraDefaults.push(entry);
+        return null;
+      }
+      case "delete_camera_default": {
+        const key = (args.cameraModel as string).trim().toLowerCase();
+        const index = cameraDefaults.findIndex((e) => e.camera_model.trim().toLowerCase() === key);
+        if (index >= 0) cameraDefaults.splice(index, 1);
+        return null;
       }
       case "run_catalog_integrity_check":
         return [];

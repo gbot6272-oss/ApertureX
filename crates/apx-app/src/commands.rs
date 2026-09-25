@@ -8886,6 +8886,96 @@ pub struct CatalogHealthEntryDto {
     pub count: u64,
 }
 
+/// Eine Standardentwicklung je Kamera (Phase 34 F7).
+#[derive(Debug, Clone, Serialize)]
+pub struct CameraDefaultDto {
+    /// Kameramodell, wie es im EXIF steht.
+    pub camera_model: String,
+    /// Das hinterlegte EDL als Umschlag-JSON.
+    pub edl_json: String,
+}
+
+/// Alle hinterlegten Standardentwicklungen.
+#[tauri::command]
+pub fn list_camera_defaults(state: State<'_, AppState>) -> Result<Vec<CameraDefaultDto>, String> {
+    let rows = state
+        .catalog
+        .list_templates(crate::camera_default::CAMERA_DEFAULT_KIND)
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|t| CameraDefaultDto {
+            camera_model: t.name,
+            edl_json: t.payload_json,
+        })
+        .collect())
+}
+
+/// Legt die Standardentwicklung für ein Kameramodell fest.
+///
+/// Ein bereits vorhandener Eintrag für dasselbe Modell wird ersetzt —
+/// zwei Vorgaben für dieselbe Kamera wären nicht auflösbar, und welche
+/// gälte, könnte der Nutzer nicht sehen. Verglichen wird dabei über
+/// `camera_default::model_key`, damit „Canon EOS R5" und
+/// „canon eos r5 " nicht als zwei Kameras durchgehen.
+///
+/// Das EDL wird vor dem Speichern geprüft: eine kaputte Nutzlast würde
+/// sonst erst beim nächsten Import auffallen, wo sie stillschweigend
+/// übersprungen wird und der Nutzer nie erführe, warum seine Vorgabe
+/// nicht greift.
+#[tauri::command]
+pub fn set_camera_default(
+    state: State<'_, AppState>,
+    camera_model: String,
+    edl_json: String,
+) -> Result<(), String> {
+    let model = camera_model.trim().to_string();
+    if model.is_empty() {
+        return Err("Ohne Kameramodell lässt sich keine Vorgabe zuordnen".to_string());
+    }
+    let envelope =
+        apx_core::EdlEnvelope::from_json_str(&edl_json).map_err(|err| err.to_string())?;
+    apx_pipeline::edl::from_envelope(&envelope).map_err(|err| err.to_string())?;
+
+    delete_camera_default_rows(&state, &model)?;
+    state
+        .catalog
+        .create_template(
+            crate::camera_default::CAMERA_DEFAULT_KIND,
+            &model,
+            &edl_json,
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Entfernt die Standardentwicklung eines Kameramodells.
+#[tauri::command]
+pub fn delete_camera_default(
+    state: State<'_, AppState>,
+    camera_model: String,
+) -> Result<(), String> {
+    delete_camera_default_rows(&state, camera_model.trim())
+}
+
+/// Löscht alle Vorlagenzeilen, deren Name auf dasselbe Modell zeigt.
+fn delete_camera_default_rows(state: &State<'_, AppState>, model: &str) -> Result<(), String> {
+    let key = crate::camera_default::model_key(model);
+    let rows = state
+        .catalog
+        .list_templates(crate::camera_default::CAMERA_DEFAULT_KIND)
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        if crate::camera_default::model_key(&row.name) == key {
+            state
+                .catalog
+                .delete_template(row.id)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 /// Was im Bestand noch Arbeit braucht (Phase 34 F5, siehe
 /// `apx-catalog`s `repository::health` und `DECISIONS.md` ADR-0070).
 ///

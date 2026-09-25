@@ -2298,6 +2298,58 @@ export function buildDevelopPreviewEdlJson(payload: EdlPayload): string {
  * bei unbekannter Schema-Version oder unlesbarer Nutzlast `null` zurück,
  * statt einen Absturz zu riskieren — der Aufrufer entscheidet dann, ob er
  * auf `neutralEdlPayload()` zurückfällt. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Legt ein gespeichertes EDL über die neutrale Fassung und füllt dabei
+ * jedes fehlende Feld mit dessen Neutralwert.
+ *
+ * **Warum das nötig ist.** `apx-core`s `EdlEnvelope.payload` ist ein
+ * opakes `serde_json::Value`: das Backend speichert das EDL-JSON
+ * wortwörtlich und gibt es wortwörtlich zurück, ohne es je durch
+ * `EdlV4` zu schicken. Ein EDL, das eine ältere Version der App
+ * geschrieben hat, enthält deshalb genau die Felder von damals — alles,
+ * was seither additiv dazugekommen ist (`creative` in Phase 15,
+ * `light_optics` in Phase 28, `interactive` in Phase 30, `frame` in
+ * Phase 32 …), fehlt darin schlicht.
+ *
+ * Die Rust-Seite fängt das seit jeher mit `#[serde(default)]` an jedem
+ * dieser Felder ab und rendert solche Altstände korrekt. Das Frontend
+ * dagegen castete den geparsten Wert bis Phase 34 blind
+ * (`payload as EdlPayload`) und bekam damit `undefined`, sobald es ein
+ * solches Feld las. Gemeldet wurde das als weißer Bildschirm beim
+ * Öffnen der Registerkarte „Am Bild":
+ *
+ *     TypeError: Cannot read properties of undefined (reading 'point_lights')
+ *         at ImageToolsPanel
+ *
+ * Der Cast war also nicht bloß ungeprüft, er war falsch — und zwar für
+ * JEDES seit Phase 15 hinzugekommene Feld, nicht nur für `interactive`.
+ * Diese Funktion ist die Frontend-Entsprechung von `#[serde(default)]`
+ * und schließt die Lücke ein für alle Mal, statt sie Feld für Feld
+ * nachzupflegen.
+ *
+ * **Arrays ersetzen, Objekte verschmelzen.** Gespeicherte Listen
+ * (Masken, Reparaturstriche, Kurvenstützstellen, gesetzte Lichter)
+ * müssen den Neutralwert vollständig ersetzen — elementweises
+ * Verschmelzen würde eine geleerte Liste aus den Neutralwerten wieder
+ * auffüllen. Nur Objekte werden rekursiv gemischt.
+ */
+export function normalizeEdlPayload(raw: unknown): EdlPayload {
+  const merge = (base: unknown, override: unknown): unknown => {
+    if (override === undefined) return base;
+    if (!isPlainObject(base) || !isPlainObject(override)) return override;
+    const result: Record<string, unknown> = { ...base };
+    for (const key of Object.keys(override)) {
+      result[key] = merge(base[key], override[key]);
+    }
+    return result;
+  };
+  return merge(neutralEdlPayload(), raw) as EdlPayload;
+}
+
 export function parseEdlEnvelopeJson(json: string): EdlPayload | null {
   try {
     const parsed: unknown = JSON.parse(json);
@@ -2306,11 +2358,15 @@ export function parseEdlEnvelopeJson(json: string): EdlPayload | null {
     if (envelope.schema_version !== EDL_SCHEMA_VERSION) return null;
     const payload = envelope.payload;
     if (typeof payload !== "object" || payload === null) return null;
-    // Keine tiefe Struktur-Validierung (Feld für Feld) — anders als die
-    // Rust-Seite (die `serde` strukturell prüfen lässt) reicht hier ein
-    // grober Plausibilitätscheck, da diese Funktion nur auf Antworten
-    // angewendet wird, die dasselbe Backend gerade erst geschrieben hat.
-    return payload as EdlPayload;
+    // Keine tiefe Struktur-Validierung Feld für Feld — aber sehr wohl
+    // ein Auffüllen fehlender Felder mit ihrem Neutralwert, siehe
+    // `normalizeEdlPayload`. Die frühere Annahme, es reiche ein grober
+    // Plausibilitätscheck, „da diese Funktion nur auf Antworten
+    // angewendet wird, die dasselbe Backend gerade erst geschrieben
+    // hat", war falsch: geschrieben hat es womöglich eine ältere
+    // Version der App, und das Backend reicht solche Altstände
+    // unverändert durch.
+    return normalizeEdlPayload(payload);
   } catch {
     return null;
   }

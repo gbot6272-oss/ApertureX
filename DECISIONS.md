@@ -7529,3 +7529,69 @@ App zu verschlucken.
 Komponententest der Fehlergrenze — `react-dom/client` liegt ohnehin vor
 und reicht für genau diesen Zweck (siehe
 `components/ErrorBoundary.test.tsx`).
+
+## ADR-0069: EDL-Altstände auffüllen statt blind casten
+
+**Status:** Akzeptiert
+
+Nachtrag zu ADR-0068, Befund 2. Dessen Fehlergrenze hat beim ersten
+Auftreten genau das geliefert, wofür sie gebaut wurde — den Absturz im
+Klartext statt eines weißen Fensters:
+
+```
+TypeError: Cannot read properties of undefined (reading 'point_lights')
+    at ImageToolsPanel (src/components/ImageToolsPanel.tsx:159:37)
+    at DevelopPanel
+    at ErrorBoundary
+```
+
+**Befund.** `apx-core`s `EdlEnvelope.payload` ist ein opakes
+`serde_json::Value`. Der Katalog speichert das EDL-JSON wortwörtlich und
+gibt es wortwörtlich zurück; es läuft nie durch `EdlV4`. Ein EDL, das
+eine ältere Version der App geschrieben hat, enthält deshalb genau die
+Felder von damals — alles, was seither **additiv** dazugekommen ist
+(`creative` Phase 15, `light_optics` Phase 28, `interactive` Phase 30,
+`frame` Phase 32 …), fehlt darin schlicht.
+
+Die Rust-Seite fängt das seit jeher ab: jedes dieser Felder trägt
+`#[serde(default)]`, weshalb alte EDLs korrekt gerendert werden und am
+Bild nie etwas auffiel. Das Frontend dagegen castete blind:
+
+```ts
+// Keine tiefe Struktur-Validierung (Feld für Feld) … reicht hier ein
+// grober Plausibilitätscheck, da diese Funktion nur auf Antworten
+// angewendet wird, die dasselbe Backend gerade erst geschrieben hat.
+return payload as EdlPayload;
+```
+
+Die Begründung im Kommentar war der Fehler. Geschrieben hat das EDL
+womöglich eine **ältere Version** der App, und das Backend reicht solche
+Altstände unverändert durch. Der Cast war damit nicht bloß ungeprüft,
+sondern falsch — und zwar für **jedes** seit Phase 15 hinzugekommene
+Feld, nicht nur für das gemeldete `interactive`.
+
+**Entscheidung.** `normalizeEdlPayload` legt das geparste EDL über
+`neutralEdlPayload()` und füllt dabei jedes fehlende Feld mit seinem
+Neutralwert — rekursiv, damit auch ein Unterfeld aufgefüllt wird, das
+innerhalb einer bereits bekannten Gruppe fehlt (der häufigere Fall).
+Das ist die Frontend-Entsprechung von `#[serde(default)]` und schließt
+die Lücke ein für alle Mal, statt sie Feld für Feld nachzupflegen.
+
+**Arrays ersetzen, Objekte verschmelzen.** Gespeicherte Listen (Masken,
+Reparaturstriche, Kurvenstützstellen, gesetzte Lichter) ersetzen den
+Neutralwert vollständig; elementweises Verschmelzen würde eine bewusst
+geleerte Liste aus den Neutralwerten wieder auffüllen.
+
+**Verworfen: `interactive` einzeln absichern.** Hätte genau diesen
+Absturz behoben und alle übrigen Felder mit derselben Lücke
+stehengelassen — dieselbe Doppelpflege, aus der ADR-0068s Befund 1
+entstanden ist.
+
+**Verifikation mit Gegenprobe.** Der e2e-Test belegt den Fund
+deckungsgleich: der Mock lässt sich jetzt über `editHistoryByPhoto` mit
+einem echten Altstand vorbelegen (im Browser sonst nicht herstellbar,
+weil das Frontend eigene EDLs immer vollständig schreibt). Mit einem
+sonst vollständigen EDL ohne `interactive` verschwindet das
+Entwickeln-Panel ohne den Fix genau wie beim Nutzer; mit dem Fix
+rendert es, und die Fehlergrenze greift gar nicht erst. Die Gegenprobe
+wurde real gefahren, nicht behauptet.

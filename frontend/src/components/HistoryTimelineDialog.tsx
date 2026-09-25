@@ -1,16 +1,11 @@
 import { useEffect, useState } from "react";
 
-import { buildPresetEdlSubset, diffEdlSubsets, PRESET_SECTION_KEYS } from "../lib/presets";
 import { listDevelopHistory } from "../lib/tauri";
 import type { EditHistoryEntryDto } from "../lib/tauri";
 import { parseEdlEnvelopeJson } from "../lib/edl";
+import { diffEdlPayloads } from "../lib/edlDiff";
 import { useAppStore } from "../store";
 import { Dialog } from "./ui/Dialog";
-
-function formatValue(value: unknown): string {
-  if (value === undefined) return "(nicht gesetzt)";
-  return JSON.stringify(value);
-}
 
 /**
  * Zeitleisten-Ansicht + Verlaufs-Vergleich (Phase 9 Schritt 7, siehe
@@ -23,12 +18,19 @@ function formatValue(value: unknown): string {
  * diesem Stand (`gotoDevelopHistory`, `apx_catalog::repository::edits::
  * goto`), ohne über Einzelschritte zu gehen.
  *
- * Der Verlaufs-Vergleich darunter ist dasselbe Diff-Muster wie
- * `PresetVersionsDialog.tsx` (Phase 5 Schritt 8): zwei Verlaufsschritte
- * wählen, `diffEdlSubsets` zeigt jedes geänderte Feld. **Bewusste
- * Vereinfachung**: derselbe Sektionsumfang wie das Presets-System
- * (`PRESET_SECTION_KEYS` — ohne Reparatur/Masken/Behandlung/SW-Mixer/
- * Node-Editor-Stufen), nicht das komplette EDL.
+ * Der Verlaufs-Vergleich darunter zeigt jedes geänderte Feld: zwei
+ * Verlaufsschritte wählen, `diffEdlPayloads` (Phase 34 F6) listet die
+ * Unterschiede mit lesbarer Beschriftung.
+ *
+ * **Die frühere Einschränkung ist aufgehoben.** Bis Phase 34 verglich
+ * diese Ansicht nur den Sektionsumfang des Presets-Systems
+ * (`PRESET_SECTION_KEYS`) — ohne Reparatur, Masken, Behandlung,
+ * SW-Mixer, die am Bild bedienten Werkzeuge, Rahmen, Himmelsaustausch
+ * und Verflüssigen. Das war für Presets die richtige Auswahl (nicht
+ * alles lässt sich sinnvoll auf ein anderes Foto übertragen), hier aber
+ * die falsche: wer wissen will, was ein Schritt geändert hat, meint
+ * alles, was er geändert haben könnte. Ein Schritt, der nur eine Maske
+ * verschoben hat, wurde vorher als „keine Unterschiede" gemeldet.
  */
 export function HistoryTimelineDialog() {
   const open = useAppStore((s) => s.historyDialogOpen);
@@ -72,7 +74,15 @@ export function HistoryTimelineDialog() {
   const entryB = entries.find((e) => e.sequence === sequenceB);
   const edlA = entryA ? parseEdlEnvelopeJson(entryA.edl_json) : null;
   const edlB = entryB ? parseEdlEnvelopeJson(entryB.edl_json) : null;
-  const diff = edlA && edlB ? diffEdlSubsets(buildPresetEdlSubset(edlA, PRESET_SECTION_KEYS), buildPresetEdlSubset(edlB, PRESET_SECTION_KEYS)) : [];
+  // Phase 34 F6: verglichen wird jetzt das GANZE EDL, nicht mehr nur
+  // die preset-faehigen Abschnitte (`PRESET_SECTION_KEYS`). Die alte
+  // Auswahl war die der Presets und passte hier nie richtig: Masken,
+  // Reparaturstriche, die am Bild bedienten Werkzeuge, Rahmen,
+  // Himmelsaustausch und Verfluessigen sind bewusst NICHT
+  // preset-faehig — und waren damit im Verlaufsvergleich unsichtbar.
+  // Wer wissen will, was ein Schritt geaendert hat, meint aber alles,
+  // was er geaendert haben koennte.
+  const diff = edlA && edlB ? diffEdlPayloads(edlA, edlB) : [];
 
   return (
     <Dialog open={open} onClose={toggleHistoryDialog} label="Verlauf" className="max-w-2xl p-4">
@@ -150,9 +160,19 @@ export function HistoryTimelineDialog() {
                 <tbody>
                   {diff.map((entry) => (
                     <tr key={entry.path} className="border-b border-border last:border-0">
-                      <td className="p-1.5 font-mono text-text-primary">{entry.path}</td>
-                      <td className="p-1.5 text-text-secondary">{formatValue(entry.a)}</td>
-                      <td className="p-1.5 text-text-secondary">{formatValue(entry.b)}</td>
+                      <td className="p-1.5 text-text-primary">
+                        {entry.label}
+                        {entry.label !== entry.path && (
+                          // Der Pfad bleibt daneben stehen: die
+                          // Beschriftung sagt WAS, der Pfad sagt WO —
+                          // bei gleichnamigen Reglern in mehreren
+                          // Gruppen (etwa "Staerke") ist das der
+                          // Unterschied zwischen Hinweis und Ratespiel.
+                          <span className="ml-2 font-mono text-[10px] text-text-muted">{entry.path}</span>
+                        )}
+                      </td>
+                      <td className="p-1.5 text-text-secondary">{entry.before}</td>
+                      <td className="p-1.5 text-text-secondary">{entry.after}</td>
                     </tr>
                   ))}
                 </tbody>

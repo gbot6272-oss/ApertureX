@@ -2222,7 +2222,18 @@ export const NEUTRAL_FRAME: FrameAdjustment = {
 };
 
 export function neutralEdlPayload(): EdlPayload {
-  return {
+  // Durchgehend geklont. Vorher gaben einige Felder die
+  // modulweiten Neutral-Konstanten als REFERENZ zurueck (`basic`,
+  // `details`, `effects`, `virtual_aperture` und weitere), nur vier
+  // waren geklont. Wer ein so gebautes EDL an einer dieser Stellen
+  // direkt veraenderte, veraenderte damit den Neutralwert fuer jedes
+  // spaeter gebaute EDL derselben Sitzung — ein Fehler, der sich
+  // beliebig weit von seiner Ursache entfernt zeigt. Im Betrieb blieb
+  // er bisher verdeckt, weil der Store ueber immer schreibt und dabei
+  // ohnehin kopiert; aufgefallen ist er beim Schreiben der Tests zu
+  // `edlDiff` (Phase 34 F6), wo zwei "unabhaengige" Neutralstaende
+  // sich gegenseitig mitveraendert haben.
+  return structuredClone({
     basic: NEUTRAL_BASIC_ADJUSTMENTS,
     curves: neutralCurves(),
     hsl: NEUTRAL_HSL,
@@ -2246,11 +2257,11 @@ export function neutralEdlPayload(): EdlPayload {
     sky_replace: null,
     lut_filter: NEUTRAL_LUT_FILTER,
     liquify_strokes: [],
-    creative: structuredClone(NEUTRAL_CREATIVE),
-    light_optics: structuredClone(NEUTRAL_LIGHT_OPTICS),
-    interactive: structuredClone(NEUTRAL_INTERACTIVE),
-    frame: structuredClone(NEUTRAL_FRAME),
-  };
+    creative: NEUTRAL_CREATIVE,
+    light_optics: NEUTRAL_LIGHT_OPTICS,
+    interactive: NEUTRAL_INTERACTIVE,
+    frame: NEUTRAL_FRAME,
+  });
 }
 
 /** Baut die JSON-Serialisierung eines `EdlEnvelope` (siehe
@@ -2714,3 +2725,43 @@ export const CREATIVE_TOOL_SPECS: readonly CreativeToolSpec[] = [
     ],
   },
 ];
+
+/**
+ * Alle Regler-Angaben, nach ihrem Schlüssel greifbar (Phase 34 F6).
+ *
+ * Gebaut aus genau den Sätzen, die das Entwickeln-Panel selbst benutzt —
+ * eine zweite, danebengelegte Beschriftungsliste würde beim nächsten
+ * Umbenennen auseinanderlaufen. Kommt ein Schlüssel in mehreren Sätzen
+ * vor (etwa `amount` in Schärfen und Entrauschen), gewinnt der erste:
+ * für eine Beschriftung ist das gut genug, und der Pfad daneben sagt
+ * ohnehin, welche Gruppe gemeint ist.
+ */
+export const ALL_SLIDER_SPECS_BY_KEY: ReadonlyMap<string, SliderSpec> = (() => {
+  const map = new Map<string, SliderSpec>();
+  for (const specs of [
+    PARAMETRIC_CURVE_SLIDER_SPECS,
+    HSL_BAND_SLIDER_SPECS,
+    COLOR_MIXER_REGION_SLIDER_SPECS,
+    SHARPEN_SLIDER_SPECS,
+    LUMINANCE_NR_SLIDER_SPECS,
+    COLOR_NR_SLIDER_SPECS,
+    LENS_CA_SLIDER_SPECS,
+    LENS_SLIDER_SPECS,
+    MANUAL_TRANSFORM_SLIDER_SPECS,
+    POST_VIGNETTE_SLIDER_SPECS,
+    GRAIN_SLIDER_SPECS,
+    HALATION_SLIDER_SPECS,
+    VIRTUAL_APERTURE_SLIDER_SPECS,
+    STYLE_TRANSFER_SLIDER_SPECS,
+    SKIN_SMOOTHING_SLIDER_SPECS,
+    LUT_FILTER_SLIDER_SPECS,
+    MASK_SLIDER_SPECS,
+    FRAME_SLIDER_SPECS,
+    BASIC_SLIDER_SPECS,
+  ]) {
+    for (const spec of specs) {
+      if (!map.has(spec.key)) map.set(spec.key, spec);
+    }
+  }
+  return map;
+})();

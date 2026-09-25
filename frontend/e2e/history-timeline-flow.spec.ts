@@ -49,4 +49,40 @@ test.describe("Verlauf: Zeitleiste & Vergleich (Phase 9 Schritt 7)", () => {
     await diffDialog.getByLabel("Verlaufsschritt B").selectOption("1");
     await expect(diffDialog.getByText("basic.exposure_ev")).toBeVisible();
   });
+
+  /**
+   * Phase 34 F6 (`DECISIONS.md` ADR-0070): der Vergleich deckte nur die
+   * preset-faehigen Abschnitte ab. Ein Schritt, der eine Maske oder ein
+   * am Bild bedientes Werkzeug geaendert hat, wurde als "keine
+   * Unterschiede" gemeldet — und die Zeilen zeigten nur Rohpfade.
+   */
+  test("beschriftet die geaenderten Felder lesbar statt nur mit dem Rohpfad", async ({ page }) => {
+    await installTauriMock(page, {
+      folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }],
+      photosByFolder: { [FOLDER_ID]: [PHOTO] },
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Urlaub/ }).click();
+    await page.getByRole("img", { name: PHOTO.filename }).click();
+    await page.getByRole("button", { name: "Entwickeln" }).click();
+
+    const exposureInput = page.getByRole("spinbutton", { name: "Belichtung (Zahlenwert)" });
+    await exposureInput.fill("1");
+    await exposureInput.blur();
+    await expect(exposureInput).toHaveValue("1");
+    await exposureInput.fill("2");
+    await exposureInput.blur();
+    await expect(exposureInput).toHaveValue("2");
+
+    await page.getByRole("button", { name: "Verlauf", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Verlauf" });
+    await dialog.getByLabel("Verlaufsschritt A").selectOption("0");
+    await dialog.getByLabel("Verlaufsschritt B").selectOption("1");
+
+    const table = dialog.getByRole("table");
+    // Beschriftung UND Pfad: die eine sagt was, der andere wo.
+    await expect(table).toContainText("Belichtung");
+    await expect(table).toContainText("basic.exposure_ev");
+    await expect(table).toContainText("2");
+  });
 });

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { EDL_SCHEMA_VERSION, neutralEdlPayload } from "../src/lib/edl";
 import { getMockInvokeLog, installTauriMock } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000601";
@@ -173,5 +174,51 @@ test.describe("Am Bild (Phase 30)", () => {
     await expect
       .poll(async () => ((await lastCommit(page)).light_optics.zone_system.zones as number[])[7])
       .toBeCloseTo(0.6, 5);
+  });
+
+  /**
+   * Regressionstest zum gemeldeten Absturz (siehe `DECISIONS.md`
+   * ADR-0069). Die Registerkarte stuerzte mit
+   *
+   *     TypeError: Cannot read properties of undefined (reading 'point_lights')
+   *
+   * ab, sobald das gespeicherte EDL des Fotos von einer App-Version vor
+   * Phase 30 stammte — `apx-core`s `EdlEnvelope.payload` ist ein opakes
+   * `serde_json::Value`, das Backend reicht solche Altstaende
+   * wortwoertlich durch, und das Frontend castete sie blind.
+   *
+   * Der Verlauf wird deshalb mit einem EDL vorbelegt, dem `interactive`
+   * (und die anderen seither dazugekommenen Felder) fehlt — im Browser
+   * sonst nicht herstellbar, weil das Frontend eigene EDLs immer
+   * vollstaendig schreibt.
+   */
+  test("oeffnet auch ein vor Phase 30 gespeichertes EDL, statt abzustuerzen", async ({ page }) => {
+    // Deckungsgleich mit dem gemeldeten Fall: ein sonst vollstaendiges
+    // EDL, dem genau das in Phase 30 dazugekommene `interactive` fehlt.
+    // Ohne den Fix scheitert der Test mit exakt
+    // "Cannot read properties of undefined (reading 'point_lights')".
+    const legacyPayload = neutralEdlPayload() as unknown as Record<string, unknown>;
+    delete legacyPayload.interactive;
+    const errors: string[] = [];
+    page.on("pageerror", (err) => errors.push(err.message));
+
+    await installTauriMock(page, {
+      folders: [{ id: FOLDER_ID, path: "/home/user/Fotos/Serie", photo_count: 1, parent_id: null, missing: false }],
+      photosByFolder: { [FOLDER_ID]: [PHOTO] },
+      editHistoryByPhoto: {
+        [PHOTO.id]: [JSON.stringify({ schema_version: EDL_SCHEMA_VERSION, payload: legacyPayload })],
+      },
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Serie/ }).click();
+    await page.getByRole("img", { name: PHOTO.filename }).click();
+    await page.getByRole("button", { name: "Entwickeln", exact: true }).click();
+    await page.getByRole("tab", { name: "Am Bild" }).click();
+
+    await expect(page.getByTestId("image-tools-panel")).toBeVisible();
+    await expect(page.getByText("Lichtquellen")).toBeVisible();
+    // Die Fehlergrenze aus ADR-0068 darf gar nicht erst greifen.
+    await expect(page.getByTestId("error-boundary-region")).toHaveCount(0);
+    expect(errors).toEqual([]);
   });
 });

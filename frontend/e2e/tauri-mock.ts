@@ -632,7 +632,27 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   const photoNotes: MockPhotoNote[] = [];
   let nextNoteId = 1;
 
+  // `editHistories` laesst sich ueber die Fixtures vorbelegen
+  // (`editHistoryByPhoto`): so kann ein Test einen ECHTEN Altstand
+  // setzen — ein EDL, wie es eine aeltere App-Version geschrieben hat,
+  // dem also seither dazugekommene Felder fehlen. Genau daran ist das
+  // Entwickeln-Panel abgestuerzt (siehe `DECISIONS.md` ADR-0069); ohne
+  // diesen Weg liesse sich der Fall im Browser gar nicht herstellen,
+  // weil das Frontend seine eigenen EDLs immer vollstaendig schreibt.
+  const seededHistories = (w.__mockFixtures as {
+    editHistoryByPhoto?: Record<string, string[]>;
+  }).editHistoryByPhoto;
   const editHistories: Record<string, EditHistoryState> = {};
+  for (const [photoId, jsonList] of Object.entries(seededHistories ?? {})) {
+    editHistories[photoId] = {
+      entries: jsonList.map((edl_json, index) => ({
+        edl_json,
+        created_at: new Date(1700000000000 + index).toISOString(),
+        label: "Altstand",
+      })),
+      currentIndex: jsonList.length - 1,
+    };
+  }
   let historyCounter = Date.now();
 
   function historyPositionAt(history: EditHistoryState): unknown {

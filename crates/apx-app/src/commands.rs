@@ -4632,6 +4632,20 @@ pub fn list_perceptual_duplicate_groups(
     state: State<'_, AppState>,
     max_distance: u32,
 ) -> Result<Vec<Vec<PhotoDto>>, String> {
+    Ok(perceptual_duplicate_groups(&state, max_distance)?
+        .into_iter()
+        .map(|group| group.into_iter().map(PhotoDto::from).collect())
+        .collect())
+}
+
+/// Die Gruppierung hinter [`list_perceptual_duplicate_groups`], mit den
+/// Katalogzeilen statt der DTOs — der Duplikat-Assistent (Phase 34 F9)
+/// braucht mehr Felder als das DTO trägt, und zwei Wege zu denselben
+/// Gruppen wären zwei Stellen, an denen sie auseinanderlaufen können.
+fn perceptual_duplicate_groups(
+    state: &State<'_, AppState>,
+    max_distance: u32,
+) -> Result<Vec<Vec<apx_catalog::Photo>>, String> {
     let photos = state
         .catalog
         .search_and_filter_photos(None, &apx_catalog::FilterCriteria::default())
@@ -4671,13 +4685,165 @@ pub fn list_perceptual_duplicate_groups(
     Ok(groups
         .into_iter()
         .filter(|group| group.len() >= 2)
-        .map(|group| {
-            group
-                .into_iter()
-                .map(|i| PhotoDto::from(hashed[i].0.clone()))
-                .collect()
-        })
+        .map(|group| group.into_iter().map(|i| hashed[i].0.clone()).collect())
         .collect())
+}
+
+// ---- Duplikat-Assistent (Phase 34 F9) --------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DuplicateCandidateDto {
+    pub photo: PhotoDto,
+    /// Ob an diesem Foto schon gearbeitet wurde — der teuerste Grund,
+    /// eine Version nicht wegzuwerfen, und einer, den man dem
+    /// Dateinamen nicht ansieht.
+    pub has_edits: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DuplicateGroupDto {
+    pub photos: Vec<DuplicateCandidateDto>,
+    /// Vorschlag, welches Foto bleibt.
+    pub keeper_id: String,
+    /// Warum dieses — Schlüssel, die Beschriftung bleibt im Frontend.
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DuplicateCleanupPlanDto {
+    pub groups: Vec<DuplicateGroupDto>,
+    /// Wie viele Fotos der Vorschlag wegwerfen würde.
+    pub discard_count: usize,
+}
+
+/// Sammelt die Duplikatgruppen und schlägt je Gruppe vor, was bleibt.
+///
+/// `mode`: `"exact"` nimmt die byte-identischen Gruppen (Inhalts-Hash),
+/// alles andere die ähnlichen (Wahrnehmungs-Hash, `max_distance`). Beide
+/// Wege sind die vorhandenen — dieser Command gruppiert nicht selbst,
+/// er beantwortet nur die Frage danach.
+///
+/// Rein lesend. Der Papierkorb kommt erst in [`apply_duplicate_cleanup`].
+#[tauri::command]
+pub fn plan_duplicate_cleanup(
+    state: State<'_, AppState>,
+    mode: String,
+    max_distance: u32,
+) -> Result<DuplicateCleanupPlanDto, String> {
+    let groups = if mode == "exact" {
+        state
+            .catalog
+            .list_duplicate_photo_groups()
+            .map_err(|err| err.to_string())?
+    } else {
+        perceptual_duplicate_groups(&state, max_distance)?
+    };
+
+    let mut out = Vec::new();
+    let mut discard_count = 0usize;
+    for group in groups {
+        if group.len() < 2 {
+            continue;
+        }
+        let mut candidates = Vec::with_capacity(group.len());
+        let mut dtos = Vec::with_capacity(group.len());
+        for photo in group {
+            let has_edits = !state
+                .catalog
+                .list_edit_history(photo.id)
+                .map_err(|err| err.to_string())?
+                .is_empty();
+            candidates.push(crate::duplicate_keeper::KeeperCandidate {
+                photo_id: photo.id,
+                filename: photo.filename.clone(),
+                width: photo.width,
+                height: photo.height,
+                file_size: photo.file_size,
+                rating: photo.rating,
+                flag: photo.flag,
+                has_edits,
+            });
+            dtos.push(DuplicateCandidateDto {
+                photo: PhotoDto::from(photo),
+                has_edits,
+            });
+        }
+
+        let Some(choice) = crate::duplicate_keeper::choose_keeper(&candidates) else {
+            continue;
+        };
+        discard_count += dtos.len() - 1;
+        out.push(DuplicateGroupDto {
+            photos: dtos,
+            keeper_id: choice.keeper.to_string(),
+            reason: choice.reason.as_str().to_string(),
+        });
+    }
+
+    Ok(DuplicateCleanupPlanDto {
+        groups: out,
+        discard_count,
+    })
+}
+
+/// Wirft die ausgewählten Duplikate in den Papierkorb.
+///
+/// Der Aufrufer sagt, was weg soll — nicht der Command: der Vorschlag
+/// ist ein Vorschlag, und wer in einer Gruppe eine andere Version
+/// behalten will, muss das dürfen.
+///
+/// **Eine Grenze bleibt aber hart:** aus keiner Duplikatgruppe darf
+/// alles verschwinden. Ein Klickfehler in einer Liste mit hundert
+/// Gruppen ist zu leicht gemacht, und „alle Versionen dieses Motivs weg"
+/// ist nie das, was jemand wollte. Dafür wird der Plan hier neu
+/// gerechnet und geprüft, statt der Auswahl zu glauben.
+///
+/// Papierkorb statt Löschen: umkehrbar (Phase 33 F1), mit dem Grund
+/// `Duplicate`, damit im Papierkorb nachvollziehbar bleibt, warum.
+#[tauri::command]
+pub fn apply_duplicate_cleanup(
+    state: State<'_, AppState>,
+    mode: String,
+    max_distance: u32,
+    discard_ids: Vec<String>,
+) -> Result<usize, String> {
+    let discard: std::collections::HashSet<apx_core::PhotoId> = discard_ids
+        .iter()
+        .map(|id| id.parse::<apx_core::PhotoId>())
+        .collect::<Result<_, apx_core::AppError>>()
+        .map_err(|err| err.to_string())?;
+    if discard.is_empty() {
+        return Ok(0);
+    }
+
+    let plan = plan_duplicate_cleanup(state.clone(), mode, max_distance)?;
+    for group in &plan.groups {
+        let survives = group.photos.iter().any(|candidate| {
+            candidate
+                .photo
+                .id
+                .parse::<apx_core::PhotoId>()
+                .map(|id| !discard.contains(&id))
+                .unwrap_or(true)
+        });
+        if !survives {
+            return Err(
+                "Aus einer Duplikatgruppe würde jede Version verschwinden — nichts verändert."
+                    .into(),
+            );
+        }
+    }
+
+    let ids: Vec<apx_core::PhotoId> = discard.into_iter().collect();
+    state
+        .catalog
+        .trash_photos(
+            &ids,
+            apx_catalog::TrashReason::Duplicate,
+            time::OffsetDateTime::now_utc(),
+        )
+        .map_err(|err| err.to_string())?;
+    Ok(ids.len())
 }
 
 /// Ähnliche Videos finden (Phase 16 Schritt 10, siehe `DECISIONS.md`

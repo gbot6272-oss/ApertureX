@@ -65,6 +65,7 @@ export const de = {
   "header.gpxGeotag": "Aus GPX-Track verorten…",
   "header.catalogHealth": "Katalog-Gesundheit…",
   "header.dateSort": "Nach Aufnahmedatum einsortieren…",
+  "header.duplicateCleanup": "Duplikate aufräumen…",
   "header.cameraDefaults": "Standardentwicklung je Kamera…",
   "header.metadataPresets": "Metadaten-Vorgaben…",
   "header.watermarkTemplates": "Wasserzeichen…",
@@ -510,7 +511,8 @@ export const de = {
   "libraryOrganizeDialog.searchDuplicates": "Duplikate suchen",
   "libraryOrganizeDialog.noGroupsFound": "Keine Gruppen gefunden (oder noch nicht gesucht)",
   "libraryOrganizeDialog.groupLabel": "Gruppe {index} ({count} Fotos)",
-  "libraryOrganizeDialog.suggestionSuffix": "— Vorschlag",
+  "libraryOrganizeDialog.duplicateAssistantHint":
+    "Was behalten werden soll, schlägt der Duplikat-Assistent vor — mit Begründung und mit dem Papierkorb am Ende.",
   "libraryOrganizeDialog.smartPreviewsTitle": "Erzeugt verkleinerte Zwischendateien für die aktuelle Auswahl, damit sie später auch ohne erreichbares Original angezeigt werden können (z. B. externe Festplatte getrennt)",
   "libraryOrganizeDialog.generating": "Erzeugt…",
   "libraryOrganizeDialog.generateSmartPreviews": "Smart Previews erzeugen",

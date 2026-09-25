@@ -227,6 +227,14 @@ export function useCommandRegistry(): CommandEntry[] {
         run: () => requestCommand("date-sort"),
       },
       {
+        // Phase 34 F9 — "Fortgeschritten": der Assistent schlaegt nicht
+        // nur vor, er legt auf Wunsch Fotos in den Papierkorb.
+        id: "fn:duplicate-cleanup",
+        label: t("header.duplicateCleanup"),
+        category: "advanced",
+        run: () => requestCommand("duplicate-cleanup"),
+      },
+      {
         id: "fn:gpx-geotag",
         label: t("header.gpxGeotag"),
         category: "advanced",

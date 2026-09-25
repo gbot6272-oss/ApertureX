@@ -62,6 +62,7 @@ export const en: Record<keyof typeof de, string> = {
   "header.gpxGeotag": "Geotag from GPX track…",
   "header.catalogHealth": "Catalog health…",
   "header.dateSort": "Sort into date folders…",
+  "header.duplicateCleanup": "Clean up duplicates…",
   "header.cameraDefaults": "Per-camera defaults…",
   "header.metadataPresets": "Metadata presets…",
   "header.watermarkTemplates": "Watermarks…",
@@ -494,7 +495,8 @@ export const en: Record<keyof typeof de, string> = {
   "libraryOrganizeDialog.searchDuplicates": "Search duplicates",
   "libraryOrganizeDialog.noGroupsFound": "No groups found (or not searched yet)",
   "libraryOrganizeDialog.groupLabel": "Group {index} ({count} photos)",
-  "libraryOrganizeDialog.suggestionSuffix": "— suggestion",
+  "libraryOrganizeDialog.duplicateAssistantHint":
+    "The duplicate assistant suggests what to keep — with a reason, and with the trash at the end.",
   "libraryOrganizeDialog.smartPreviewsTitle": "Generates downsized intermediate files for the current selection so they can be shown later even without a reachable original (e.g. an external drive disconnected)",
   "libraryOrganizeDialog.generating": "Generating…",
   "libraryOrganizeDialog.generateSmartPreviews": "Generate smart previews",

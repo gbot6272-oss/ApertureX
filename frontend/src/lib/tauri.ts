@@ -2607,6 +2607,50 @@ export function applyFolderSync(
   return invoke<FolderSyncResultDto>("apply_folder_sync", { folderId, importNew, trashVanished });
 }
 
+// ---- Duplikat-Assistent (Phase 34 F9) --------------------------------------
+
+/** Welches Kriterium den Vorschlag entschieden hat. Schlüssel statt
+ * Text — die Beschriftung bleibt im Frontend. */
+export type KeeperReason =
+  | "picked"
+  | "higher_rating"
+  | "has_edits"
+  | "raw"
+  | "higher_resolution"
+  | "larger_file"
+  | "indistinguishable";
+
+export interface DuplicateCandidateDto {
+  photo: PhotoDto;
+  has_edits: boolean;
+}
+
+export interface DuplicateGroupDto {
+  photos: DuplicateCandidateDto[];
+  keeper_id: string;
+  reason: KeeperReason;
+}
+
+export interface DuplicateCleanupPlanDto {
+  groups: DuplicateGroupDto[];
+  discard_count: number;
+}
+
+/** `"exact"` = byte-identisch, sonst ähnlich per Wahrnehmungs-Hash. */
+export type DuplicateMode = "exact" | "similar";
+
+export function planDuplicateCleanup(mode: DuplicateMode, maxDistance: number): Promise<DuplicateCleanupPlanDto> {
+  return invoke<DuplicateCleanupPlanDto>("plan_duplicate_cleanup", { mode, maxDistance });
+}
+
+export function applyDuplicateCleanup(
+  mode: DuplicateMode,
+  maxDistance: number,
+  discardIds: string[],
+): Promise<number> {
+  return invoke<number>("apply_duplicate_cleanup", { mode, maxDistance, discardIds });
+}
+
 // ---- Nach Aufnahmedatum einsortieren (Phase 34 F8) -------------------------
 
 /** Was mit einem Foto passieren würde. Schlüssel statt Text, wie beim

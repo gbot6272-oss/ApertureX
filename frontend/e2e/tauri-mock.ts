@@ -623,6 +623,32 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     return { ...photo };
   }
 
+  /** Kameraoriginal, nicht Ableger — siehe `duplicate_keeper`s eigene
+   * Liste, die bewusst enger ist als "kann die App das lesen". */
+  function isRawFilename(filename: string): boolean {
+    const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+    return ["cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "raf", "orf", "rw2", "pef", "dng", "3fr", "iiq", "erf", "mos", "mrw", "x3f"].includes(ext);
+  }
+
+  /** Die Gruppen, auf denen der Duplikat-Assistent (Phase 34 F9)
+   * arbeitet: exakt über `content_hash`, ähnlich über die vorbelegten
+   * `perceptualDuplicateGroups`. */
+  function duplicateGroupsForMode(mode: string): MockPhoto[][] {
+    if (mode !== "exact") {
+      const seeded = (w.__mockFixtures as { perceptualDuplicateGroups?: MockPhoto[][] }).perceptualDuplicateGroups;
+      return seeded ?? [];
+    }
+    const byHash = new Map<string, MockPhoto[]>();
+    for (const photo of allPhotos()) {
+      const hash = photo.content_hash as string | null | undefined;
+      if (!hash) continue;
+      const group = byHash.get(hash) ?? [];
+      group.push(photo);
+      byHash.set(hash, group);
+    }
+    return [...byHash.values()].filter((group) => group.length > 1);
+  }
+
   // Simuliertes `edit_history`/`edit_current` fürs Entwickeln-Panel (ab
   // Phase 2, siehe `crates/apx-catalog`s `repository::edits` und
   // `crates/apx-app/src/commands.rs`) — dieselbe lineare
@@ -1499,16 +1525,67 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       }
 
       // ---- Bibliothek: Duplikaterkennung (ab Phase 3, Schritt 8.2) ---------
-      case "list_duplicate_photo_groups": {
-        const byHash = new Map<string, MockPhoto[]>();
-        for (const p of allPhotos()) {
-          const hash = p.content_hash as string | null | undefined;
-          if (!hash) continue;
-          const group = byHash.get(hash) ?? [];
-          group.push(p);
-          byHash.set(hash, group);
+      case "list_duplicate_photo_groups":
+        return duplicateGroupsForMode("exact").map((group) => group.map(clonePhoto));
+
+      // ---- Duplikat-Assistent (Phase 34 F9) --------------------------------
+      // Derselbe Auswahlweg wie `apx-app`s `duplicate_keeper`: geordnete
+      // Kriterien, das erste mit eindeutigem Spitzenreiter entscheidet,
+      // und ein Gleichstand verkleinert nur das Feld.
+      case "plan_duplicate_cleanup": {
+        const groups = duplicateGroupsForMode(args.mode as string);
+        const planned = groups
+          .filter((group) => group.length >= 2)
+          .map((group) => {
+            const pool = group.some((photo) => (photo.flag ?? 0) !== -1)
+              ? group.filter((photo) => (photo.flag ?? 0) !== -1)
+              : group;
+            const criteria: { score: (photo: MockPhoto) => number; reason: string }[] = [
+              { score: (photo) => ((photo.flag ?? 0) === 1 ? 1 : 0), reason: "picked" },
+              { score: (photo) => photo.rating ?? 0, reason: "higher_rating" },
+              { score: (photo) => (editHistories[photo.id]?.entries.length ? 1 : 0), reason: "has_edits" },
+              { score: (photo) => (isRawFilename(photo.filename) ? 1 : 0), reason: "raw" },
+              { score: (photo) => (photo.width ?? 0) * (photo.height ?? 0), reason: "higher_resolution" },
+              { score: (photo) => Number(photo.file_size ?? 0), reason: "larger_file" },
+            ];
+            let remaining = pool;
+            let keeper = pool[0];
+            let reason = "indistinguishable";
+            for (const criterion of criteria) {
+              const best = Math.max(...remaining.map(criterion.score));
+              const leaders = remaining.filter((photo) => criterion.score(photo) === best);
+              if (leaders.length === 1) {
+                keeper = leaders[0];
+                reason = criterion.reason;
+                break;
+              }
+              remaining = leaders;
+            }
+            if (reason === "indistinguishable") keeper = remaining[0];
+            return {
+              photos: group.map((photo) => ({
+                photo: clonePhoto(photo),
+                has_edits: Boolean(editHistories[photo.id]?.entries.length),
+              })),
+              keeper_id: keeper.id,
+              reason,
+            };
+          });
+        return {
+          groups: planned,
+          discard_count: planned.reduce((sum, group) => sum + group.photos.length - 1, 0),
+        };
+      }
+      case "apply_duplicate_cleanup": {
+        const ids = args.discardIds as string[];
+        // Dieselbe harte Grenze wie im Backend: aus keiner Gruppe darf
+        // jede Version verschwinden.
+        for (const group of duplicateGroupsForMode(args.mode as string)) {
+          if (group.length >= 2 && group.every((photo) => ids.includes(photo.id))) {
+            throw new Error("Aus einer Duplikatgruppe würde jede Version verschwinden — nichts verändert.");
+          }
         }
-        return [...byHash.values()].filter((group) => group.length > 1).map((group) => group.map(clonePhoto));
+        return ids.filter((id) => trashPhoto(id, "duplicate")).length;
       }
 
       // ---- Presets (ab Phase 5) ---------------------------------------------

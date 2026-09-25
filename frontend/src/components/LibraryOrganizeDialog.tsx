@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 
 import { useT } from "../lib/i18n";
-import { suggestBestPhoto } from "../lib/duplicates";
 import { SMART_COLLECTION_FIELD_OPTIONS, SMART_COLLECTION_OPERATOR_OPTIONS } from "../lib/tauri";
 import type { SmartCollectionLeaf } from "../lib/tauri";
 import { conditionNode, groupNode } from "../lib/ruleTree";
@@ -347,25 +346,29 @@ export function LibraryOrganizeDialog({ open, onClose }: LibraryOrganizeDialogPr
               </button>
             </div>
             {perceptualDuplicateGroups.length === 0 && !perceptualDuplicatesRunning && <p className="text-xs text-text-muted">{t("libraryOrganizeDialog.noGroupsFound")}</p>}
+            {/* Phase 34 F9: der Vorschlag, was bleibt, steht jetzt im
+                Duplikat-Assistenten — mit Begruendung, umstellbar, und
+                mit dem Papierkorb am Ende. Hier stand vorher eine
+                zweite, eigene Heuristik (`lib/duplicates.ts`), die
+                anders entschied als die im Backend. Zwei Antworten auf
+                dieselbe Frage sind schlimmer als eine unvollstaendige. */}
+            {perceptualDuplicateGroups.length > 0 && (
+              <p className="text-[11px] text-text-muted">{t("libraryOrganizeDialog.duplicateAssistantHint")}</p>
+            )}
             <ul className="flex flex-col gap-2">
-              {perceptualDuplicateGroups.map((group, index) => {
-                const best = suggestBestPhoto(group);
-                return (
-                  <li key={index} className="rounded border border-border p-2 text-xs">
-                    <p className="mb-1 text-text-muted">{t("libraryOrganizeDialog.groupLabel", { index: index + 1, count: group.length })}</p>
-                    {group.map((photo) => (
-                      <div key={photo.id} className="flex items-center justify-between py-0.5">
-                        <span>
-                          {photo.filename} {best?.id === photo.id && <span className="text-accent">{t("libraryOrganizeDialog.suggestionSuffix")}</span>}
-                        </span>
-                        <button type="button" onClick={() => selectPhoto(photo.id)} className="rounded border border-border px-1.5 py-0.5 hover:border-accent">
-                          {t("libraryOrganizeDialog.open")}
-                        </button>
-                      </div>
-                    ))}
-                  </li>
-                );
-              })}
+              {perceptualDuplicateGroups.map((group, index) => (
+                <li key={index} className="rounded border border-border p-2 text-xs">
+                  <p className="mb-1 text-text-muted">{t("libraryOrganizeDialog.groupLabel", { index: index + 1, count: group.length })}</p>
+                  {group.map((photo) => (
+                    <div key={photo.id} className="flex items-center justify-between py-0.5">
+                      <span>{photo.filename}</span>
+                      <button type="button" onClick={() => selectPhoto(photo.id)} className="rounded border border-border px-1.5 py-0.5 hover:border-accent">
+                        {t("libraryOrganizeDialog.open")}
+                      </button>
+                    </div>
+                  ))}
+                </li>
+              ))}
             </ul>
           </div>
         )}

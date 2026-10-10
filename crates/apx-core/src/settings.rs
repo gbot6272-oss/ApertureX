@@ -12,8 +12,18 @@ use crate::error::{AppError, Result};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
-    // Dark-First laut SPEC.md Abschnitt 4.
+    /// Geburtstagsausgabe (siehe `DECISIONS.md` ADR-0071) — warme,
+    /// festliche Palette, Vorgabe dieser Fassung.
+    ///
+    /// Dass hier der Standard steht und nicht `Dark`, ist der Zweck
+    /// dieser Fassung: sie ist ein Geschenk, nicht eine Variante, die
+    /// man erst suchen muss. `Dark` und `Light` bleiben vollständig
+    /// erhalten und auswählbar — wer das Arbeitsgerät braucht, bekommt
+    /// es mit einem Klick zurück.
     #[default]
+    Birthday,
+    // Dark-First laut SPEC.md Abschnitt 4 — bis zur Geburtstagsausgabe
+    // die Vorgabe, weiterhin unverändert verfügbar.
     Dark,
     Light,
 }
@@ -52,6 +62,20 @@ pub struct UiSettings {
     /// Rust-seitige Änderung nutzbar ist; ungültige Werte fängt das
     /// Frontend beim Aufbau des Players ab (Fallback auf "glass").
     pub sound_pack: String,
+    /// Geburtstags-Deko (Konfetti, Luftballons, Begrüßung beim Öffnen)
+    /// an/aus — siehe `DECISIONS.md` ADR-0071.
+    ///
+    /// Bewusst ein eigener Schalter und nicht an `theme == Birthday`
+    /// gekoppelt: die Farben sind eine Geschmacksfrage, fliegendes
+    /// Konfetti ist eine Konzentrationsfrage. Wer am Abend des
+    /// Geburtstags noch zwei Stunden Fotos sortiert, soll die festliche
+    /// Palette behalten und die Bewegung abschalten können, ohne das
+    /// ganze Thema zu verlieren.
+    ///
+    /// `reduced_motion` schaltet die Bewegung zusätzlich und unabhängig
+    /// ab (Barrierefreiheit geht vor Deko) — dieser Schalter ist die
+    /// Geschmacks-, jener die Zugänglichkeitsentscheidung.
+    pub birthday_decorations: bool,
 }
 
 impl Default for UiSettings {
@@ -71,7 +95,12 @@ impl Default for UiSettings {
             // leise, um gegen normale Systemlautstärke/Umgebungsgeräusche
             // wahrgenommen zu werden.
             sound_volume_percent: 85,
-            sound_pack: "glass".to_string(),
+            // "cinematic" statt "glass" (ADR-0071): diese Fassung soll
+            // beim Öffnen einen Moment haben, und `cinematic` ist laut
+            // `uisfx`s eigener Beschreibung genau dafür gedacht
+            // ("satte Wirkung, gut für Start-/Export-Momente").
+            sound_pack: "cinematic".to_string(),
+            birthday_decorations: true,
         }
     }
 }
@@ -258,7 +287,33 @@ mod tests {
 
         let settings = Settings::load_or_default(&path).expect("Defaults dürfen nicht scheitern");
         assert_eq!(settings, Settings::default());
-        assert_eq!(settings.ui.theme, Theme::Dark);
+        // Geburtstagsausgabe (ADR-0071): die Vorgabe ist jetzt `Birthday`
+        // statt `Dark`. Der Test prüft weiter den konkreten Wert und
+        // nicht nur `Theme::default()` — sonst würde er jede künftige
+        // Änderung der Vorgabe stillschweigend mitgehen und hätte
+        // aufgehört, etwas zu behaupten.
+        assert_eq!(settings.ui.theme, Theme::Birthday);
+        assert!(
+            settings.ui.birthday_decorations,
+            "die Deko ist in dieser Fassung standardmäßig an"
+        );
+    }
+
+    /// Die beiden Arbeits-Themes müssen nach wie vor wählbar und
+    /// speicherbar sein — die Geburtstagsausgabe nimmt nichts weg.
+    #[test]
+    fn dark_and_light_survive_a_roundtrip() {
+        let tmp = tempfile::tempdir().expect("Temp-Verzeichnis");
+        for theme in [Theme::Dark, Theme::Light, Theme::Birthday] {
+            let path = tmp.path().join(format!("settings-{theme:?}.toml"));
+            let mut settings = Settings::default();
+            settings.ui.theme = theme;
+            settings
+                .save(&path)
+                .expect("Speichern darf nicht scheitern");
+            let loaded = Settings::load_or_default(&path).expect("Laden darf nicht scheitern");
+            assert_eq!(loaded.ui.theme, theme);
+        }
     }
 
     #[test]

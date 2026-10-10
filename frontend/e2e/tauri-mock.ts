@@ -138,7 +138,10 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // e2e-Test ungefragt aufpoppt — ein Test, der das Onboarding gezielt
     // prüfen will, überschreibt das per `setMockFixtures`.
     uiSettings: {
-      theme: "dark" as "dark" | "light",
+      // Geburtstagsausgabe (ADR-0071): dieselbe Vorgabe wie das echte
+      // Backend, damit die Palette in der ganzen e2e-Suite mitlaeuft
+      // und nicht nur in den dafuer geschriebenen Tests.
+      theme: "birthday" as "birthday" | "dark" | "light",
       accent_color: null as string | null,
       locale: "de",
       ui_scale_percent: 100,
@@ -152,6 +155,12 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       sound_enabled: false,
       sound_volume_percent: 70,
       sound_pack: "glass",
+      // Deko in Tests standardmaessig AUS — aus demselben Grund wie
+      // `sound_enabled: false`: 240 Tests sollen keine Partikel-
+      // Animation starten. Die Geburtstags-Tests schalten sie gezielt
+      // ein, darunter einer, der genau prueft, dass die Bedienung bei
+      // laufender Deko nicht blockiert ist.
+      birthday_decorations: false,
     },
     // Beobachteter Ordner (Phase 12 Schritt 7) — derselbe Aus-Default wie
     // im echten Backend (`apx_core::settings::WatchedFolderSettings`).
@@ -790,7 +799,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         rect_bottom: number;
       }>;
       uiSettings: {
-        theme: "dark" | "light";
+        theme: "birthday" | "dark" | "light";
         accent_color: string | null;
         locale: string;
         ui_scale_percent: number;
@@ -800,6 +809,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         sound_enabled: boolean;
         sound_volume_percent: number;
         sound_pack: string;
+        birthday_decorations: boolean;
       };
       watchedFolderSettings: {
         path: string | null;

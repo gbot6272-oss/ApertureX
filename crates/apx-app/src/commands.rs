@@ -7148,6 +7148,8 @@ pub struct UiSettingsDto {
     pub sound_enabled: bool,
     pub sound_volume_percent: u16,
     pub sound_pack: String,
+    /// Geburtstags-Deko an/aus (siehe `DECISIONS.md` ADR-0071).
+    pub birthday_decorations: bool,
 }
 
 impl From<apx_core::UiSettings> for UiSettingsDto {
@@ -7163,6 +7165,7 @@ impl From<apx_core::UiSettings> for UiSettingsDto {
             sound_enabled: ui.sound_enabled,
             sound_volume_percent: ui.sound_volume_percent,
             sound_pack: ui.sound_pack,
+            birthday_decorations: ui.birthday_decorations,
         }
     }
 }
@@ -7197,6 +7200,7 @@ pub fn set_ui_settings(state: State<'_, AppState>, settings: UiSettingsDto) -> R
         } else {
             settings.sound_pack
         },
+        birthday_decorations: settings.birthday_decorations,
     };
     all.save(&path).map_err(|err| err.to_string())
 }

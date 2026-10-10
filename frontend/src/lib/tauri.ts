@@ -1637,7 +1637,9 @@ export function prepareCompositeLayerSource(photoId: string | null, texturePath:
 
 // ---- UI-Einstellungen (Phase 10 Schritt 1) --------------------------------
 
-export type Theme = "dark" | "light";
+/** `"birthday"` ist die Vorgabe dieser Fassung (siehe `DECISIONS.md`
+ * ADR-0071); `"dark"`/`"light"` bleiben unverändert wählbar. */
+export type Theme = "birthday" | "dark" | "light";
 
 export interface UiSettingsDto {
   theme: Theme;
@@ -1653,6 +1655,9 @@ export interface UiSettingsDto {
   sound_volume_percent: number;
   /** `uisfx`-Klangwelt, siehe `lib/sound.ts`s `SOUND_PACKS`. */
   sound_pack: string;
+  /** Geburtstags-Deko (Konfetti, Luftballons, Begrüßung) an/aus —
+   * unabhängig vom Theme, siehe `DECISIONS.md` ADR-0071. */
+  birthday_decorations: boolean;
 }
 
 export function getUiSettings(): Promise<UiSettingsDto> {

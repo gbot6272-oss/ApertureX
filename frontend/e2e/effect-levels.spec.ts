@@ -74,6 +74,54 @@ async function boot(page: import("@playwright/test").Page, level: "full" | "redu
   await expect(page.locator("html")).toHaveAttribute("data-effects", level);
 }
 
+/**
+ * Der Fehler, den dieser Test gefangen hätte (ADR-0076).
+ *
+ * Die Automatik setzte ihr „schon gemessen"-Flag, BEVOR sie mass. Jede
+ * Änderung an den Einstellungen in den 2,5 Sekunden davor räumte den
+ * Timer ab, der Effekt lief erneut und stieg sofort wieder aus — die
+ * Messung lief nie, und die App blieb auf der teuersten Stufe stehen.
+ * Beim Nutzer zeigte die Diagnose daraufhin 83 ms je Bild, also 12
+ * Bilder je Sekunde, und Klicks wurden spürbar zu spät angenommen.
+ *
+ * Geprüft wird deshalb nicht, OB gemessen wurde, sondern was dabei
+ * herauskommen muss: bei `auto` darf nie die volle Stufe stehen
+ * bleiben.
+ */
+test("Stufe „automatisch“ lässt nie die teuerste Stufe stehen", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await installTauriMock(page, {
+    folders: [{ id: FOLDER_ID, path: "/home/user/Fotos/Urlaub", photo_count: 1 }],
+    photosByFolder: { [FOLDER_ID]: [PHOTO] },
+    uiSettings: {
+      theme: "birthday" as const,
+      accent_color: null,
+      locale: "de",
+      ui_scale_percent: 100,
+      high_contrast: false,
+      reduced_motion: false,
+      onboarding_seen: true,
+      sound_enabled: false,
+      sound_volume_percent: 70,
+      sound_pack: "cinematic",
+      birthday_decorations: true,
+      effect_level: "auto" as const,
+    },
+  });
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: /Urlaub/ })).toBeVisible();
+
+  const level = await page.locator("html").getAttribute("data-effects");
+  expect(level).not.toBe("full");
+  expect(["reduced", "plain"]).toContain(level);
+
+  // Und die teuerste Zutat darf dann auch wirklich weg sein — sonst
+  // stünde nur ein anderes Wort im Attribut.
+  const cost = await glassCost(page);
+  expect(cost.mitVerzerrung).toBe(0);
+  expect(cost.sichtbareBallons).toBe(0);
+});
+
 test("Stufe „voll“: alle Glasflächen tragen Weichzeichner und Verzerrung", async ({ page }) => {
   await boot(page, "full");
   const cost = await glassCost(page);

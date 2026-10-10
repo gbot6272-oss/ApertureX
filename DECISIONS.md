@@ -8227,3 +8227,252 @@ Sekunden den grösseren Posten stellt; das Rendern lag bei 0,2 bis 0,8
 Sekunden. Die Dekodierung ist von dieser Änderung unberührt — sie
 profitiert von `[profile.dev.package."*"] opt-level = 3` (ADR-0073)
 und von einem Release-Build, nicht von der GPU.
+
+## ADR-0075: Jeder Stufenaufruf baute die halbe GPU neu auf
+
+**Anlass.** Nach ADR-0074 lief der GPU-Pfad endlich — und war trotzdem
+kaum schneller. Die Leistungs-Diagnose auf dem Gerät des Nutzers:
+
+> Entwickeln, neutral: 939 ms für 12 Megapixel · **Entwickeln auf der
+> Grafikkarte: 784 ms (1,2× schneller als die CPU)**
+
+Eine GeForce MX350 rechnet zwölf Megapixel pro Pixel-Operation in
+einstelligen Millisekunden. 784 ms heisst: die Zeit geht fast
+vollständig woanders hin.
+
+**Gemessen, nicht vermutet.** Aufschlüsselung eines einzelnen
+Stufenaufrufs bei 11,2 Megapixeln:
+
+| Posten | Zeit |
+| --- | --- |
+| Shader übersetzen | 0,2–0,6 ms |
+| Pipeline bauen | 110 ms erstmalig, danach 0,4 ms |
+| **Puffer anlegen + hochladen** | **1,5–2,8 s** |
+| Absenden | 106–211 ms |
+| Zurücklesen | 87–110 ms |
+
+`run_compute_f32` legte bei **jedem** Aufruf alles neu an: WGSL neu
+übersetzen, Compute-Pipeline neu bauen, vier Puffer frisch belegen,
+drei davon in voller Bildgröße. Bei vierzehn Stufen und jedem
+Regler-Tick.
+
+**Die Entscheidung.** Ein Arbeitsbereich (`gpu/workspace.rs`) im
+`GpuContext` hält Pipelines, Bind-Groups und Puffer über den einzelnen
+Aufruf hinaus. Puffer wachsen bei Bedarf und schrumpfen nie —
+Vorschaugrößen wechseln im Betrieb ständig (Ziehen 1280, Loslassen
+volle Anzeigegröße), und bei jedem Wechsel neu zu belegen wäre genau
+der Aufwand zurück. Hinter einem Mutex, weil zwei gleichzeitige
+Renderläufe sich sonst dieselben Puffer teilen würden; das ist ein
+Datenfehler, kein Tempoproblem, und serialisieren kostet nichts, was
+auf einem einzelnen Gerät nicht ohnehin verloren wäre.
+
+**Warum genau diese Stufe und nicht gleich mehr.** Drei Varianten
+wurden bei 2 Megapixeln gegeneinander gemessen, eine Stufe, bester von
+drei Läufen:
+
+| Weg | Zeit |
+| --- | --- |
+| alles pro Aufruf neu (vorher) | 228 ms |
+| **Pipeline + Puffer wiederverwendet** | **33 ms** |
+| zusätzlich das Bild GPU-resident | 13 ms |
+
+Die mittlere Zeile bringt den Löwenanteil und berührt weder die
+vierzehn Stufen noch den Renderpfad — die untere verlangt, dass
+Zwischenergebnisse gar nicht erst zur CPU zurückwandern, und das ist
+ein Umbau des Kernpfads eines Bildeditors. Die zweieinhalbfache
+Differenz dazwischen rechtfertigt diesen Umbau nicht am Ende einer
+Sitzung.
+
+**Am echten Renderpfad nachgemessen**, gleicher Adapter, 2 Megapixel:
+
+| | vorher | nachher |
+| --- | --- | --- |
+| GPU, neutral | 136,6 ms | **80,9 ms** |
+| GPU, mit Reglern | 366,0 ms | **256,2 ms** |
+| CPU (Kontrolle) | 72,3 / 241,8 ms | 67,6 / 248,9 ms |
+
+Die CPU-Werte bewegen sich nicht — die Änderung betrifft nur den
+GPU-Pfad, und genau das soll die Kontrollzeile zeigen.
+
+**Was den Fehler festhält.** Eine Zeitmessung wäre hier der
+naheliegende, aber falsche Test: sie hängt an der Maschine und würde
+mal grün, mal rot. `repeated_calls_reuse_pipeline_and_buffers` prüft
+stattdessen die Tatsache dahinter — fünf Aufrufe derselben Stufe
+erzeugen genau eine Pipeline und genau eine Pufferbelegung.
+Gegenkontrolliert: mit abgeschalteter Wiederverwendung schlägt er fehl.
+
+Dazu `a_stage_name_reused_with_another_shader_gets_a_new_pipeline`: der
+Zwischenspeicher ist nach dem Stufennamen geschlüsselt, und ein Name,
+der später mit anderem Shader aufgerufen wird, darf nicht die alte
+Pipeline bekommen. Das wäre der unangenehmste Fehler überhaupt, weil
+das Ergebnis plausibel aussähe.
+
+**Nebenbei gelernt:** bei `layout: None` leitet wgpu das
+Bind-Group-Layout aus dem Quelltext ab und **streicht eine Bindung,
+die der Shader nie liest**. Ein Teststufen-Shader ohne `params`-Zugriff
+scheiterte deshalb mit „3 Bindungen gegen ein Layout mit 2". Alle
+echten Stufen lesen ihre Parameter; der Test tut es jetzt auch.
+
+**Was offen bleibt.** Die dritte Zeile der Tabelle oben: das Bild
+einmal hochladen, alle Stufen darauf laufen lassen, einmal
+herunterladen — und es zwischen den Regler-Ticks oben lassen, denn
+beim Ziehen ändert sich die Quelle nicht. Das ist der Unterschied
+zwischen 33 und 13 Millisekunden je Stufe, und bei mehreren aktiven
+Stufen deutlich mehr, weil jede Stufe heute noch das ganze Bild
+hin- und herschiebt. Es verlangt einen `GpuChain`-Typ, eine
+Buffer-Variante jeder der vierzehn Stufen und einen Paritätstest
+GPU-Kette gegen CPU — eigenständige Arbeit, nicht ein Anhängsel.
+
+## ADR-0076: Die Effekt-Automatik lief nie — und die Vorgabe war die teuerste Stufe
+
+**Anlass.** Nutzer-Rückmeldung nach ADR-0075, unmissverständlich: „DAS
+KANN NICHT DER HAUPTGRUND SEIN, ES IST IMMER NOCH LANGSAM." Zu Recht.
+Die Pufferwiederverwendung brachte 136 → 81 ms je Vorschau; das
+erklärt weder „4216 ms" noch verspätet angenommene Klicks.
+
+**Die Zahl, die ich zu schnell abgehakt hatte.** Im Diagnose-Screenshot
+stand, rot:
+
+> Bildzeit der Oberfläche: **83 ms (12 Bilder/s)**
+
+Zwölf Bilder je Sekunde **ist** „Klicks werden spät registriert". Ein
+Klick wartet im schlechtesten Fall 83 Millisekunden allein auf den
+Bildtakt. Das ist kein Durchsatz-, sondern ein Reaktionsproblem, und es
+hat mit der Bildrechnung nichts zu tun.
+
+**Der Fehler, und er war meiner.** Die Automatik aus ADR-0073 setzte
+ihr „schon gemessen"-Flag, bevor sie mass:
+
+```ts
+effectProbeDone.current = true;            // sofort
+const timer = setTimeout(…, 2500);         // misst erst in 2,5 s
+return () => clearTimeout(timer);          // Abhängigkeit [uiSettings]
+```
+
+Ändert sich `uiSettings` in diesen 2,5 Sekunden — beim Start der
+Regelfall —, räumt die Aufräumfunktion den Timer ab, der Effekt läuft
+erneut und steigt in der ersten Zeile sofort wieder aus. **Die Messung
+lief nie**, für den Rest der Sitzung. Die App blieb auf der vollen
+Stufe stehen.
+
+Behoben an beiden Enden: das Flag wird erst gesetzt, wenn wirklich
+gemessen wird, und die Abhängigkeitsliste enthält nur noch das eine
+Feld, auf das es ankommt, statt des ganzen Einstellungsobjekts.
+
+**Die zweite Hälfte: die Vorgabe war falsch herum.** Selbst mit
+laufender Automatik startete sie bei `full`. Und `full` ist, gemessen
+(ADR-0073), die teuerste denkbare Konfiguration dieser App:
+
+- acht Glasflächen mit `backdrop-filter` **und**
+  SVG-`feDisplacementMap` über 1,08 Millionen Bildpunkten,
+- und dahinter, als Vorgabe eingeschaltet, dauerhaft steigende
+  Luftballons, die den Zwischenspeicher dieser acht Filter bei **jedem
+  Bild** ungültig machen.
+
+Das war die Auslieferungs-Vorgabe. Niemand hat sie gewählt; sie war
+einfach da.
+
+`auto` beginnt deshalb jetzt bei `reduced` und geht von dort nur noch
+weiter herunter. Die Verzerrung ist ein dekorativer Feinschliff, der
+mehr kostet als alles andere in der Oberfläche zusammen, und der
+Unterschied zur reduzierten Stufe ist im Betrieb kaum zu sehen. Wer ihn
+trotzdem will, wählt „Voll" — bewusst, und mit der Kostenangabe in der
+Beschriftung.
+
+**Was das festhält.** `Stufe „automatisch" lässt nie die teuerste Stufe
+stehen` prüft nicht, OB gemessen wurde, sondern was dabei herauskommen
+muss: bei `auto` darf `data-effects` nie `full` sein, und die
+Verzerrung und die Ballons müssen dann auch wirklich weg sein — sonst
+stünde nur ein anderes Wort im Attribut. Gegenkontrolliert: mit dem
+alten Startwert schlägt der Test fehl.
+
+Dazu zeigt die Leistungs-Diagnose jetzt die **tatsächlich gezeichnete**
+Stufe, aus dem DOM gelesen statt aus der Einstellung abgeleitet. Genau
+diese Unterscheidung fehlte: die Einstellung sagte „automatisch", und
+niemand konnte sehen, dass trotzdem alles an war.
+
+**Selbstkritik.** Ich hatte in ADR-0075 eine echte, gemessene
+Verbesserung gefunden und sie für die Antwort gehalten. Sie war eine
+Teilantwort auf die falsche Frage: ich habe den Durchsatz der
+Bildrechnung optimiert, während die Beschwerde die Reaktionszeit der
+Oberfläche betraf — und die Zahl dafür stand die ganze Zeit rot im
+selben Screenshot. Eine gemessene Verbesserung ist kein Beleg dafür,
+dass man das richtige Problem gemessen hat.
+
+**Was weiterhin offen ist.** Die 939 ms für zwölf Megapixel auf der CPU
+und 784 ms auf der GPU sind damit nicht erklärt — dafür steht die
+GPU-Residenz aus (ADR-0075, „Was offen bleibt"). Und der Debug-Build
+bleibt der Faktor, gegen den alles andere ankämpft.
+
+## ADR-0077: Beim Reglerziehen rechneten dutzende überholte Läufe zu Ende
+
+**Anlass.** Dieselbe Rückmeldung wie bei ADR-0076, und der Teil, den
+ADR-0076 nicht erklärt: „letztes Rendering 4216 ms". Die Oberfläche war
+nach der Effekt-Korrektur flüssig, das Rendern blieb zäh.
+
+**Der Fund.** Der `apx://`-Handler startet pro Anfrage einen eigenen
+Betriebssystem-Thread:
+
+```rust
+std::thread::spawn(move || {
+    let response = handle(&app_handle, &request, &cache);
+    responder.respond(response);
+});
+```
+
+Unbegrenzt viele, ohne Warteschlange, ohne Abbruch. Das Frontend
+entprellt zwar auf einen Frame und bricht die vorige Anfrage per
+`AbortController` ab — aber das beendet nur die `fetch` im Webview.
+**Der Thread in Rust rechnet weiter bis zum Ende.**
+
+Nach einer Sekunde Ziehen laufen also dutzende vollständige Renderläufe
+gleichzeitig. Sie kämpfen um dieselben Kerne und dieselbe einzelne
+Grafikkarte; seit ADR-0075 stehen sie dort zusätzlich hintereinander am
+selben Puffersatz. Das Ergebnis, auf das der Nutzer wartet, ist das
+letzte in der Schlange.
+
+**Der Mechanismus war entworfen und nie gebaut.**
+`PipelineError::Cancelled` trägt seit jeher den Kommentar „Eine
+Rendering-Operation wurde abgebrochen (z. B. weil eine neuere Anfrage
+für dasselbe Foto sie überholt hat)" — und wird in der gesamten
+Codebasis **nirgends erzeugt**. Eine Fehlervariante ohne Erzeuger ist
+eine Absichtserklärung, keine Funktion.
+
+**Die Entscheidung.** Jede Entwickeln-Anfrage zieht eine Ticketnummer
+für ihr Foto. Die eigentliche Rechenarbeit ist serialisiert; wer
+drankommt, prüft zuerst, ob inzwischen eine neuere Anfrage für dasselbe
+Foto gezogen hat, und steigt dann aus, ohne ein einziges Pixel zu
+rechnen. Aus sechzig Anfragen während eines Ziehvorgangs rechnet genau
+eine.
+
+**Warum je Foto und nicht global.** Der Filmstreifen fordert Vorschauen
+für mehrere Fotos gleichzeitig an. Ein globales Ticket würde die alle
+gegenseitig verhungern lassen; je Foto bleibt jede dieser Anfragen die
+neueste für ihr eigenes Foto.
+
+**Warum serialisiert.** Es gibt eine Grafikkarte. Parallele Läufe haben
+sich dort bisher nur gegenseitig ausgebremst — und seit ADR-0075 teilen
+sie sich sogar dieselben Puffer, was ohne Serialisierung ein Datenfehler
+wäre, kein Tempoproblem.
+
+**Nur Entwickeln-Anfragen.** Miniaturbilder und Vorschauen sind viele
+unabhängige Anfragen, die einander nicht überholen; sie gehen an der
+Schranke vorbei.
+
+**Die Antwort für einen überholten Lauf** ist `409 Conflict`, kein
+Fehler: fachlich ist nichts schiefgegangen, das Ergebnis ist nur nicht
+mehr gefragt. Das Frontend verwirft sie still, statt sie als
+Rendering-Fehler zu protokollieren.
+
+**Was das festhält.** `a_burst_lets_only_the_newest_through` bildet den
+Ziehvorgang nach: aus sechzig Tickets für dasselbe Foto darf genau
+eines durchkommen. `requests_for_different_photos_do_not_supersede_each_other`
+hält den Filmstreifen-Fall fest, und `the_turn_is_exclusive` lässt zwei
+Threads fünfzig Runden gegeneinander laufen und prüft, dass nie zwei
+gleichzeitig in der Rechenphase sind.
+
+**Was damit NICHT behauptet wird.** Ein einzelner Renderlauf wird davon
+nicht schneller. Was wegfällt, ist die Schlange davor — und die war der
+Unterschied zwischen „das Bild kommt gleich" und „4216 ms". Die Dauer
+eines einzelnen Laufs bleibt die Sache von ADR-0075s offenem Punkt (das
+Bild zwischen den Stufen auf der GPU lassen) und des Release-Builds.

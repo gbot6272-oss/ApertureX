@@ -27,6 +27,9 @@ function parseFrame(buffer: ArrayBuffer): DevelopFrame {
  * Entprellungslogik, nur der optionale `onLatency`-Callback
  * unterscheidet sie (siehe `useDevelopRender`s Moduldoku für die
  * Begründung der `requestAnimationFrame`-Entprellung). */
+/** HTTP 409 — siehe `protocol::gate` auf der Rust-Seite. */
+const SUPERSEDED = 409;
+
 function useDevelopFrameInternal(
   photoId: string | null,
   edlJson: string | null,
@@ -55,6 +58,14 @@ function useDevelopFrameInternal(
       void (async () => {
         try {
           const response = await fetch(url, { signal: controller.signal });
+          // 409 heisst: eine neuere Anfrage für dasselbe Foto hat diese
+          // überholt, und das Backend hat die Rechnung gar nicht erst
+          // angefangen (siehe `protocol::gate`s Moduldoku). Fachlich ist
+          // nichts schiefgegangen — das Ergebnis ist nur nicht mehr
+          // gefragt, und die neuere Antwort kommt ohnehin gleich.
+          if (response.status === SUPERSEDED) {
+            return;
+          }
           if (!response.ok) {
             throw new Error(`HTTP ${response.status} für ${url}`);
           }

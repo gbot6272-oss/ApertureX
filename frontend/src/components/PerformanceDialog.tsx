@@ -79,6 +79,12 @@ export function PerformanceDialog({ open, onClose }: PerformanceDialogProps) {
   }
 
   const uiSlow = frameMs !== null && frameMs > FRAME_BUDGET_MS;
+  /** Was gerade wirklich gezeichnet wird — aus dem DOM gelesen, nicht
+   * aus der Einstellung abgeleitet. */
+  const appliedLevel =
+    typeof document === "undefined"
+      ? "unbekannt"
+      : (document.documentElement.getAttribute("data-effects") ?? "unbekannt");
 
   return (
     <Dialog
@@ -171,6 +177,16 @@ export function PerformanceDialog({ open, onClose }: PerformanceDialogProps) {
 
               <dt className="text-text-muted">Kerne</dt>
               <dd className="text-text-primary">{report.threads}</dd>
+
+              {/* Die tatsächlich gezeichnete Stufe, nicht die
+                  Einstellung. Genau diese Unterscheidung fehlte, als
+                  die Automatik still nie lief und niemand es sehen
+                  konnte (ADR-0076). */}
+              <dt className="text-text-muted">Effektstufe</dt>
+              <dd className="text-text-primary" data-testid="performance-effects">
+                {appliedLevel}
+                {uiSettings?.effect_level === "auto" ? " (automatisch ermittelt)" : " (fest gewählt)"}
+              </dd>
 
               <dt className="text-text-muted">Bildzeit der Oberfläche</dt>
               <dd className={uiSlow ? "text-danger" : "text-text-primary"} data-testid="performance-frame">

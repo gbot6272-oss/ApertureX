@@ -130,9 +130,9 @@ export const de = {
   "settings.birthdayDecorationsHint": "Konfetti, Luftballons und die Begrüßung beim Öffnen",
   "settings.effectLevel": "Oberflächen-Effekte",
   "settings.effectLevelHint":
-    "Glas, Weichzeichner und Verzerrung kosten Rechenzeit. „Automatisch“ misst beim Start, was dieses Gerät trägt.",
-  "settings.effectLevelAuto": "Automatisch (empfohlen)",
-  "settings.effectLevelFull": "Voll — alle Effekte",
+    "Glas, Weichzeichner und Verzerrung kosten Rechenzeit. „Automatisch“ beginnt bei „Reduziert“ und stuft weiter herunter, wenn dieses Gerät auch das nicht trägt.",
+  "settings.effectLevelAuto": "Automatisch — beginnt reduziert (empfohlen)",
+  "settings.effectLevelFull": "Voll — alle Effekte (teuerste Stufe)",
   "settings.effectLevelReduced": "Reduziert — ohne Verzerrung und Deko",
   "settings.effectLevelPlain": "Schlicht — ohne Glaseffekt, am schnellsten",
   "settings.themeDark": "Dunkel",

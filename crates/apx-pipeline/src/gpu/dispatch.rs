@@ -33,11 +33,9 @@
 //! `stages/` — ein neuer Shader kann den Fehler also nicht still
 //! wieder einführen.
 
-use bytemuck::Pod;
-use wgpu::util::DeviceExt;
-
 use super::GpuContext;
 use crate::error::{PipelineError, Result};
+use bytemuck::Pod;
 
 /// Verteilt die nötigen Workgroups auf X und Y.
 ///
@@ -57,7 +55,11 @@ use crate::error::{PipelineError, Result};
 /// Die Aufteilung füllt X bis zum Limit und legt den Rest in Y. Die
 /// letzte Zeile ist dann meist nur teilweise belegt; das fängt die
 /// `arrayLength`-Schranke ab, die ohnehin in jedem Shader steht.
-fn workgroup_grid(element_count: u32, workgroup_size: u32, max_per_dim: u32) -> (u32, u32) {
+pub(super) fn workgroup_grid(
+    element_count: u32,
+    workgroup_size: u32,
+    max_per_dim: u32,
+) -> (u32, u32) {
     // Ein Gerät, das 0 meldet, gäbe es nicht; eine Division durch null
     // hier wäre aber ein Absturz statt eines Fallbacks, und das ist den
     // einen `max(1)` wert.
@@ -84,128 +86,28 @@ pub fn run_compute_f32<Params: Pod>(
     input: &[f32],
     workgroup_size: u32,
 ) -> Result<Vec<f32>> {
-    let device = &ctx.device;
-    let queue = &ctx.queue;
-
-    device.push_error_scope(wgpu::ErrorFilter::Validation);
-
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("apx-pipeline-stage-shader"),
-        source: wgpu::ShaderSource::Wgsl(shader_source.into()),
-    });
-
-    let byte_len = std::mem::size_of_val(input) as u64;
-
-    let input_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("apx-pipeline-stage-input"),
-        contents: bytemuck::cast_slice(input),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-    let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("apx-pipeline-stage-output"),
-        size: byte_len,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-    let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("apx-pipeline-stage-params"),
-        contents: bytemuck::bytes_of(&params),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-    let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("apx-pipeline-stage-staging"),
-        size: byte_len,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("apx-pipeline-stage-pipeline"),
-        layout: None,
-        module: &shader,
-        entry_point,
-        compilation_options: wgpu::PipelineCompilationOptions::default(),
-        cache: None,
-    });
-
-    let bind_group_layout = pipeline.get_bind_group_layout(0);
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("apx-pipeline-stage-bindgroup"),
-        layout: &bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: params_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: input_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: output_buffer.as_entire_binding(),
-            },
-        ],
-    });
-
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("apx-pipeline-stage-encoder"),
-    });
-    {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("apx-pipeline-stage-pass"),
-            timestamp_writes: None,
-        });
-        pass.set_pipeline(&pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
-        let element_count = input.len() as u32;
-        let (groups_x, groups_y) = workgroup_grid(
-            element_count,
-            workgroup_size,
-            device.limits().max_compute_workgroups_per_dimension,
-        );
-        pass.dispatch_workgroups(groups_x, groups_y, 1);
-    }
-    encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, byte_len);
-    queue.submit(Some(encoder.finish()));
-
-    // `GpuExecution` und nicht `ShaderCompile`: in diesem Fehlerbereich
-    // landet ALLES, was die Validierung beanstandet — auch Fehler, die
-    // mit dem Shader-Quelltext nichts zu tun haben. Genau das hat die
-    // Diagnose des Dispatch-Fehlers oben zwei Monate lang in die falsche
-    // Richtung geschickt: das Log meldete „Shader konnte nicht
-    // kompiliert werden", während der Shader tadellos übersetzt war und
-    // erst der Aufruf am Gruppenlimit scheiterte (ADR-0074).
-    if let Some(error) = pollster::block_on(device.pop_error_scope()) {
-        return Err(PipelineError::GpuExecution {
-            stage: stage_name,
-            message: error.to_string(),
-        });
-    }
-
-    let slice = staging_buffer.slice(..);
-    let (tx, rx) = std::sync::mpsc::channel();
-    slice.map_async(wgpu::MapMode::Read, move |result| {
-        // Kanal kann bereits geschlossen sein, wenn der Aufrufer schon
-        // aufgegeben hat (z. B. Timeout) — send()-Fehler hier sind kein
-        // Programmfehler, nur nichts mehr zu tun.
-        let _ = tx.send(result);
-    });
-    device.poll(wgpu::Maintain::Wait);
-    rx.recv()
+    // Der eigentliche Ablauf steht in `super::workspace`: dort leben
+    // die Pipelines und die Puffer, die den einzelnen Aufruf
+    // überleben. Bis ADR-0075 legte DIESE Funktion bei jedem Aufruf
+    // alles neu an — Shader übersetzen, Pipeline bauen, vier Puffer
+    // belegen —, was bei zwei Megapixeln gemessene 228 statt 33
+    // Millisekunden je Stufe kostete.
+    let mut workspace = ctx
+        .workspace
+        .lock()
         .map_err(|_| PipelineError::GpuUnavailable {
-            message: "GPU-Antwortkanal wurde geschlossen, bevor eine Antwort ankam".to_string(),
-        })?
-        .map_err(|source| PipelineError::GpuUnavailable {
-            message: format!("Rücklesen des Ergebnispuffers fehlgeschlagen: {source}"),
+            message: "GPU-Arbeitsbereich ist nicht mehr benutzbar (vergifteter Mutex)".to_string(),
         })?;
-
-    let mapped = slice.get_mapped_range();
-    let result = bytemuck::cast_slice(&mapped).to_vec();
-    drop(mapped);
-    staging_buffer.unmap();
-
-    Ok(result)
+    workspace.run(
+        &ctx.device,
+        &ctx.queue,
+        stage_name,
+        shader_source,
+        entry_point,
+        bytemuck::bytes_of(&params),
+        input,
+        workgroup_size,
+    )
 }
 
 #[cfg(test)]

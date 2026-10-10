@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 
+import { fireCannons } from "../lib/celebrate";
 import { usePrefersReducedMotion } from "../lib/motion";
 import { playCue } from "../lib/sound";
 import { useAppStore } from "../store";
-import { fireCannons } from "./ConfettiLayer";
+
 
 /**
  * Die Begrüßung beim Öffnen (Geburtstagsausgabe, siehe `DECISIONS.md`

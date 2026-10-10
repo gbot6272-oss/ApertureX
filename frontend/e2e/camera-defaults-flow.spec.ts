@@ -37,14 +37,23 @@ test.describe("Standardentwicklung je Kamera (Phase 34 F7)", () => {
     await openOverflowMenu(page);
     await page.getByRole("menuitem", { name: "Standardentwicklung je Kamera…" }).click();
 
-    await expect(page.getByTestId("camera-defaults-list")).toContainText("Noch keine Vorgabe");
+    const list = page.getByTestId("camera-defaults-list");
+    // Seit der Geburtstagsausgabe (ADR-0071) bringt die App eine
+    // Vorgabe fuer "Canon EOS" mit — die Liste startet also nicht
+    // mehr leer. Der Test prueft deshalb genau das, was er immer
+    // geprueft hat (eine EIGENE Vorgabe anlegen und wieder
+    // entfernen), nur ohne die Annahme, vorher sei nichts da.
+    await expect(list).toContainText("Canon EOS");
+    await expect(list).not.toContainText("Canon EOS R5");
     await page.getByTestId("camera-defaults-save").click();
 
     await expect(page.getByRole("status")).toContainText("Canon EOS R5");
-    await expect(page.getByTestId("camera-defaults-list")).toContainText("Canon EOS R5");
+    await expect(list).toContainText("Canon EOS R5");
 
     await page.getByRole("button", { name: "Vorgabe für Canon EOS R5 entfernen" }).click();
-    await expect(page.getByTestId("camera-defaults-list")).toContainText("Noch keine Vorgabe");
+    await expect(list).not.toContainText("Canon EOS R5");
+    // Die mitgelieferte Vorgabe bleibt dabei unberuehrt.
+    await expect(list).toContainText("Canon EOS");
   });
 
   test("ohne geoeffnetes Foto laesst sich keine Vorgabe setzen", async ({ page }) => {

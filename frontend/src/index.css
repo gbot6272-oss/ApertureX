@@ -337,6 +337,33 @@ header.apx-glass {
   position: fixed;
 }
 
+/* **Vierter Fall derselben Kaskaden-Falle** (ADR-0071; die drei
+   vorherigen stehen im Kommentar oben: `z-index` beim Überlauf-Menü,
+   `fixed` bei der Kopfzeile, `absolute` bei der Zoom-Steuerung).
+   Gefunden beim Ausbau der Einführungstour, und zwar nur, weil die
+   längeren Texte die Karte hoch genug machten, dass ihr
+   „Weiter"-Knopf aus dem Fenster rutschte — gemessen:
+   `getComputedStyle(card).position` ergab `"relative"` statt
+   `"fixed"`.
+
+   Die Folge war größer als der sichtbare Anlass: die vier
+   Abdunkel-Rechtecke des Scheinwerfers sind ebenfalls `.apx-glass-strong
+   fixed` und lagen damit seit Phase 21 **im Textfluss** statt über dem
+   Bildschirm. Der Scheinwerfer hat nie einen Ausschnitt gezeigt; er
+   hat vier graue Blöcke untereinander gestapelt und die Karte um
+   deren Gesamthöhe nach unten geschoben. Aufgefallen ist es nicht,
+   weil kein Test die Geometrie gemessen hat — nur Textsichtbarkeit,
+   und die stimmte.
+
+   Lösung wie bei `header.apx-glass`: über Spezifität statt über
+   Reihenfolge. Zwei Klassen schlagen eine. Bewusst eine eigene
+   Marker-Klasse und nicht `div.apx-glass-strong` — das würde jede
+   andere Glasfläche treffen, die zu Recht `relative` sein will. */
+.apx-glass-strong.apx-spotlight,
+.apx-glass.apx-spotlight {
+  position: fixed;
+}
+
 /* "Liquid"-Knopf-Mechanik (Phase 25 Nachtrag, siehe DECISIONS.md,
    aktuelles ADR + PROMPTS.md Prompt 2s `LiquidButton`) — für die
    Hauptmenü-Fläche (Kopfzeile: Ansicht-Segmentgruppe, Import-Knopf):
@@ -640,14 +667,19 @@ body {
 }
 
 /* Konfetti-Leinwand (ADR-0071) — eine einzige `<canvas>` für die ganze
-   App, über allem, ohne Zeigerereignisse. `z-index` liegt über den
-   Dialogen (`z-50`) und unter dem Start-Ladeschirm (`z-200`): Konfetti
-   soll auch über einem offenen Dialog sichtbar sein, aber den Start
-   nicht überlagern. */
+   App, ohne Zeigerereignisse.
+   
+   **Die Stapelreihenfolge ist durchgerechnet, nicht geschätzt:**
+   Dialoge liegen bei `z-50`, die Einführungstour bei `z-150`, die
+   Geburtstags-Begrüßung bei `z-160`, der Start-Ladeschirm bei `z-200`.
+   Konfetti steht mit `149` bewusst ÜBER den Dialogen (es soll auch
+   über einem offenen Export-Dialog fliegen) und UNTER der Tour — die
+   lag im ersten Versuch bei derselben Zahl, und damit entschied die
+   DOM-Reihenfolge über die Überdeckung statt der Absicht. */
 .apx-confetti-layer {
   position: fixed;
   inset: 0;
-  z-index: 150;
+  z-index: 149;
   pointer-events: none;
 }
 

@@ -1,12 +1,12 @@
 import { useEffect, useRef } from "react";
 
+import { registerConfettiSink } from "../lib/celebrate";
 import {
   cannonBursts,
   particleOpacity,
   partyColors,
   spawnBurst,
   stepParticles,
-  type BurstOptions,
   type ConfettiParticle,
 } from "../lib/confetti";
 import { usePrefersReducedMotion } from "../lib/motion";
@@ -18,9 +18,9 @@ import { useAppStore } from "../store";
  * hier wird nur gezeichnet.
  *
  * **Eine Leinwand, eine Schleife, app-weit.** Dieselbe Entscheidung wie
- * bei `lib/sound.ts`s Player-Singleton: jede Komponente, die feiern
- * will, ruft [`fireConfetti`]/[`fireCannons`] auf und braucht weder
- * eine eigene Leinwand noch ein eigenes
+ * bei `lib/sound.ts`s Player-Singleton: wer feiern will, ruft
+ * `lib/celebrate.ts`s `celebrate`/`burstAt`/`fireCannons` auf und
+ * braucht weder eine eigene Leinwand noch ein eigenes
  * `requestAnimationFrame`. Mehrere Leinwände würden sich um
  * Compositor-Schichten streiten, mehrere Schleifen würden das
  * Teilchenbudget je Schleife statt app-weit auslegen — und genau das
@@ -41,46 +41,6 @@ import { useAppStore } from "../store";
  * irgendwann nicht mehr.
  */
 
-interface Subscriber {
-  (bursts: BurstOptions[]): void;
-}
-
-let subscriber: Subscriber | null = null;
-
-/** `true`, solange eine montierte [`ConfettiLayer`] zuhört — Aufrufer
- * können damit eine Alternative wählen (oder es bleiben lassen), statt
- * ins Leere zu rufen. */
-export function confettiAvailable(): boolean {
-  return subscriber !== null;
-}
-
-/**
- * Ein Ausbruch an einer Bildschirmposition. Ohne montierte Leinwand
- * (Deko aus, reduzierte Bewegung, Tests) ein folgenloser No-op — eine
- * Dekoration darf nie der Grund sein, dass eine echte Aktion scheitert.
- */
-export function fireConfetti(x: number, y: number, count = 70): void {
-  subscriber?.([
-    {
-      x,
-      y,
-      // Nach oben, weit geöffnet: ein Ausbruch an einem Knopf soll von
-      // dort aufblühen, nicht in eine Richtung schießen.
-      angle: -Math.PI / 2,
-      spread: Math.PI / 2.4,
-      velocity: 620,
-      count,
-      colors: [],
-      life: 2.2,
-    },
-  ]);
-}
-
-/** Die beiden Kanonen der Begrüßung (siehe `cannonBursts`). */
-export function fireCannons(): void {
-  subscriber?.([]);
-}
-
 export function ConfettiLayer() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const particlesRef = useRef<ConfettiParticle[]>([]);
@@ -91,10 +51,7 @@ export function ConfettiLayer() {
   const enabled = decorations && !reducedMotion;
 
   useEffect(() => {
-    if (!enabled) {
-      subscriber = null;
-      return;
-    }
+    if (!enabled) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -151,7 +108,7 @@ export function ConfettiLayer() {
       frameRef.current = window.requestAnimationFrame(tick);
     }
 
-    subscriber = (bursts) => {
+    const unregister = registerConfettiSink((bursts) => {
       const colors = partyColors();
       // Leere Liste = Kanonen-Begrüßung (siehe `fireCannons`): die
       // Geometrie hängt an der Fenstergröße und gehört deshalb hierher,
@@ -167,10 +124,10 @@ export function ConfettiLayer() {
         );
       }
       if (particlesRef.current.length > 0) start();
-    };
+    });
 
     return () => {
-      subscriber = null;
+      unregister();
       window.removeEventListener("resize", resize);
       if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current);
       frameRef.current = null;

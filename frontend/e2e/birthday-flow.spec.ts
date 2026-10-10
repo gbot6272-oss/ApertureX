@@ -192,3 +192,95 @@ test.describe("Kamera-Standard der Geburtstagsausgabe", () => {
     await expect(list.getByTestId("camera-illustration")).toHaveCount(1);
   });
 });
+
+/**
+ * Das Tutorial (ADR-0071 B6). Die alte Tour hatte sieben Schritte und
+ * hörte dort auf, wo die Arbeit anfängt — jetzt sind es fünfzehn, dem
+ * Arbeitsweg nach geordnet. Geprüft wird, dass sie wirklich
+ * durchläuft: ein Schritt mit fehlendem Übersetzungsschlüssel oder
+ * einem Ziel, das abstürzt, würde hier auffallen.
+ */
+test.describe("Einführungstour der Geburtstagsausgabe", () => {
+  const FIRST_RUN = {
+    folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }],
+    photosByFolder: { [FOLDER_ID]: [PHOTO] },
+    uiSettings: { ...WITH_DECORATIONS.uiSettings, onboarding_seen: false, birthday_decorations: false },
+  };
+
+  test("startet beim ersten Start von selbst und hat fünfzehn Schritte", async ({ page }) => {
+    await installTauriMock(page, FIRST_RUN);
+    await page.goto("/");
+
+    await expect(page.getByText("Schritt 1 von 15")).toBeVisible();
+    await expect(page.getByText("Alles Gute, Papa!")).toBeVisible();
+  });
+
+  test("läuft von Anfang bis Ende durch, ohne an einem Schritt hängenzubleiben", async ({ page }) => {
+    await installTauriMock(page, FIRST_RUN);
+    await page.goto("/");
+
+    for (let step = 1; step <= 15; step += 1) {
+      await expect(page.getByText(`Schritt ${step} von 15`)).toBeVisible();
+      // Jeder Schritt muss einen echten Text haben — ein fehlender
+      // Übersetzungsschlüssel würde den Schlüssel selbst anzeigen.
+      const body = page.getByTestId("onboarding-tour-body");
+      await expect(body).not.toContainText("onboarding.tour.");
+      if (step < 15) {
+        await page.getByRole("button", { name: "Weiter", exact: true }).click();
+      }
+    }
+    await page.getByRole("button", { name: "Fertig", exact: true }).click();
+    await expect(page.getByText(/Schritt \d+ von 15/)).toHaveCount(0);
+  });
+
+  /**
+   * **Dieser Test deckt einen Altfehler ab, den der Tour-Ausbau
+   * aufgedeckt hat** (siehe `index.css`s Kommentar zu
+   * `.apx-spotlight`): `.apx-glass-strong` setzt unlayered
+   * `position: relative`, und Tailwinds `fixed`-Utility ist in
+   * Tailwind v4 nachrangig. Die vier Abdunkel-Rechtecke des
+   * Scheinwerfers und die Karte lagen deshalb seit Phase 21 im
+   * Textfluss statt über dem Bildschirm — der Scheinwerfer hat nie
+   * einen Ausschnitt gezeigt. Aufgefallen ist es nie, weil kein Test
+   * die Geometrie gemessen hat, sondern nur Textsichtbarkeit.
+   *
+   * Also wird hier gemessen: `position` muss `fixed` sein, und die
+   * Karte muss in JEDEM Schritt vollständig im Fenster liegen.
+   */
+  test("die Karte liegt in jedem Schritt vollständig im Fenster", async ({ page }) => {
+    await installTauriMock(page, FIRST_RUN);
+    await page.goto("/");
+
+    const card = page.getByRole("dialog").filter({ hasText: "Schritt" }).first();
+    const viewport = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }));
+
+    for (let step = 1; step <= 15; step += 1) {
+      await expect(page.getByText(`Schritt ${step} von 15`)).toBeVisible();
+      // Die Karte wird per GSAP an ihren Platz bewegt — erst messen,
+      // wenn sie dort ist.
+      await expect(card).toHaveCSS("position", "fixed");
+      await page.waitForTimeout(650);
+      const box = await card.boundingBox();
+      expect(box, `Schritt ${step}: keine Kartenfläche`).not.toBeNull();
+      expect(box!.y, `Schritt ${step}: Karte oben außerhalb`).toBeGreaterThanOrEqual(0);
+      expect(box!.x, `Schritt ${step}: Karte links außerhalb`).toBeGreaterThanOrEqual(0);
+      expect(box!.y + box!.height, `Schritt ${step}: Karte unten außerhalb`).toBeLessThanOrEqual(viewport.h);
+      expect(box!.x + box!.width, `Schritt ${step}: Karte rechts außerhalb`).toBeLessThanOrEqual(viewport.w);
+      if (step < 15) await page.getByRole("button", { name: "Weiter", exact: true }).click();
+    }
+  });
+
+  test("der Schritt zu den drei Looks nennt sie beim Namen", async ({ page }) => {
+    await installTauriMock(page, FIRST_RUN);
+    await page.goto("/");
+
+    // Zum Presets-Schritt (8 von 15) vorklicken.
+    for (let step = 1; step < 8; step += 1) {
+      await page.getByRole("button", { name: "Weiter", exact: true }).click();
+    }
+    const body = page.getByTestId("onboarding-tour-body");
+    await expect(body).toContainText("Goldene Stunde");
+    await expect(body).toContainText("Familienfoto");
+    await expect(body).toContainText("Erinnerung");
+  });
+});

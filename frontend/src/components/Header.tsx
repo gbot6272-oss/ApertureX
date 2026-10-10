@@ -432,6 +432,13 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
         </button>
       </nav>
 
+      {/* Kein `data-tour`-Anker hier: `Menu`s Auslöser trägt schon
+          `aria-label={label}`, und die Einführungstour (ADR-0071 B6)
+          greift ihn darüber — dieselbe Technik, mit der der
+          Seitenleisten-Schritt sein Ziel findet. Ein Wrapper mit
+          `display: contents` hätte zwar das Attribut getragen, aber
+          ein leeres `getBoundingClientRect()` geliefert und damit den
+          Scheinwerfer ins Nichts gesetzt. */}
       <Menu
         label={t("header.overflowMenu")}
         trigger={<span aria-hidden>⋯</span>}
@@ -440,6 +447,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
 
       <button
         type="button"
+        data-tour="settings"
         onClick={() => setSettingsDialogOpen(true)}
         title={t("header.settingsTitle")}
         className="shrink-0 rounded border border-border bg-bg-panel px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] hover:border-accent"

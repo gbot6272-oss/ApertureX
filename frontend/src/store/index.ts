@@ -59,6 +59,7 @@ import type { PresetCondition, PresetConditionPhotoMeta, PresetEdlSubset, Preset
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
 import type { SoftProofIntent, SoftProofProfile } from "../lib/softProof";
+import { celebrate } from "../lib/celebrate";
 import { playCue } from "../lib/sound";
 import * as api from "../lib/tauri";
 import type {
@@ -2733,6 +2734,11 @@ export const useAppStore = create<AppStore>()(
 
     finishImport: (result) => {
       playCue(result.errorCount > 0 ? "error" : "success");
+      // Geburtstagsausgabe (ADR-0071): ein fertiger Import ist einer
+      // der wenigen Momente, die ein Fest verdienen — er dauert
+      // Minuten und kommt ein paar Mal am Tag vor. Bei Fehlern wird
+      // nicht gefeiert. Ohne Deko/montierte Leinwand ein No-op.
+      if (result.errorCount === 0) celebrate();
       set((state) => {
         state.importRunning = false;
         state.importResult = result;
@@ -6583,7 +6589,10 @@ export const useAppStore = create<AppStore>()(
         state.exportRunning = false;
         state.exportError = firstError;
       });
-      playCue(firstError || progress.failed > 0 ? "error" : "success");
+      const exportFailed = Boolean(firstError) || progress.failed > 0;
+      playCue(exportFailed ? "error" : "success");
+      // Siehe `finishImport` oben — dieselbe Zurückhaltung.
+      if (!exportFailed) celebrate();
       await api.clearFinishedExportJobs();
     },
 

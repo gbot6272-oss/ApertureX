@@ -8093,3 +8093,137 @@ Glasflächen in Zahlen, dass die Stufen sie nachweislich entfernen
 (`e2e/effect-levels.spec.ts` misst die errechneten Eigenschaften, mit
 der vollen Stufe als Gegenkontrolle), und dass der Diagnose-Dialog einen
 Debug-Build als solchen benennt.
+
+## ADR-0074: Die GPU-Beschleunigung hat nie funktioniert
+
+**Anlass.** Nutzer-Log aus einem echten Lauf unter Windows, eingereicht
+mit der Bitte, es auszuwerten. Darin, bei **jedem einzelnen** Rendern:
+
+```
+WARN apx_pipeline::develop: GPU-Rendering fehlgeschlagen, nutze CPU-Fallback
+  In a dispatch command: Each current dispatch group size dimension
+  ([107337, 1, 1]) must be less or equal to 65535
+```
+
+Nicht einmal hat die GPU durchgerechnet.
+
+**Die Ursache.** `gpu/dispatch.rs` legte alle Workgroups in die
+X-Dimension:
+
+```rust
+let workgroup_count = element_count.div_ceil(workgroup_size).max(1);
+pass.dispatch_workgroups(workgroup_count, 1, 1);
+```
+
+WebGPU begrenzt jede Dimension auf
+`max_compute_workgroups_per_dimension`, in aller Regel 65535. Bei 64
+Elementen je Gruppe und drei Kanälen je Pixel liegt die Obergrenze
+damit bei
+
+> 65535 × 64 ÷ 3 = 1.398.080 Pixel, also knapp **1,4 Megapixel**.
+
+Die Zahlen aus dem Log gehen exakt auf: 1911×860 → 77.038 Gruppen;
+2256×1015 → 107.337; 3456×1555 → 251.910; 1361×3024 → 192.922. Jede
+über dem Limit, jede Validierung abgelehnt, jedes Mal CPU-Fallback.
+
+Betroffen waren **alle 14 Shader-Stufen**, weil alle durch denselben
+Helfer laufen. Und betroffen war nicht nur das Exportieren grosser
+Bilder: schon die verkleinerten Live-Vorschauen beginnen bei rund 1,6
+Megapixeln. Die GPU-Beschleunigung dieser App hat damit für kein
+einziges realistisches Foto je gearbeitet.
+
+**Warum es niemandem auffiel.** Drei Dinge haben zusammengewirkt, und
+jedes einzelne hätte den Fund verhindert:
+
+1. **Die Fehlermeldung zeigte in die falsche Richtung.** Jeder
+   Validierungsfehler im `push_error_scope`-Bereich wurde als
+   `PipelineError::ShaderCompile` gemeldet — „Shader 'basic_fused'
+   konnte nicht kompiliert werden". Der Shader war tadellos übersetzt;
+   erst der Aufruf scheiterte. Wer das las, suchte im WGSL-Quelltext,
+   wo nichts zu finden war.
+2. **Der Fallback war still.** Er griff, das Foto erschien, nur eben
+   langsamer. Für den Nutzer gab es nichts zu sehen — nur eine App,
+   die „irgendwie zäh" war.
+3. **Kein Test ging je über 1,4 Megapixel.** `add_offset_roundtrip…`
+   arbeitete mit 256 Elementen, die Stufen-Tests mit winzigen
+   Bildern. Alle grün, alle unterhalb der Grenze.
+
+**Die Entscheidung.** Der Dispatch füllt X bis zum **vom Gerät
+gemeldeten** Limit und legt den Rest in Y. Jeder Shader nimmt
+`@builtin(num_workgroups)` entgegen und bildet den Index als
+`gid.x + gid.y * groups.x * 64u`. Die Aufteilung ist lückenlos: Zeile
+`y` deckt `[y·gx·64, (y+1)·gx·64)` ab, also genau anschliessend an die
+vorige. Die letzte Zeile ist meist nur teilweise belegt; das fängt die
+`arrayLength`-Schranke ab, die ohnehin in jedem Shader steht.
+
+Das Gerätelimit wird abgefragt statt 65535 anzunehmen — auf einem
+Adapter, der mehr kann, bleibt der Dispatch dann eindimensional.
+
+**Was dafür sorgt, dass es nicht wiederkommt.** Vier Ebenen, weil eine
+nicht gereicht hat:
+
+- `workgroup_grid_stays_within_the_per_dimension_limit` rechnet mit
+  **genau den Gruppenzahlen aus dem Nutzer-Log** und prüft vorab, dass
+  die eigene Rechnung dieselbe ist wie die des Geräts — sonst prüfte
+  der Test einen anderen Fall als den gemeldeten.
+- `a_buffer_past_the_old_limit_round_trips_through_the_gpu` schickt
+  einen Puffer über der Grenze wirklich durch die GPU und prüft das
+  **letzte** Element, das in der zweiten Dispatch-Zeile liegt. Die
+  Grösse leitet sich aus dem echten Gerätelimit ab, damit der Test auf
+  jedem Adapter den zweidimensionalen Pfad trifft. Gegenkontrolliert:
+  mit zurückgedrehtem Shader-Index schlägt er fehl mit „Element
+  4194302 von 4194304 wurde nicht berechnet".
+- `shader_contract_tests` liest alle `.wgsl`-Dateien als Text und
+  verlangt `@builtin(num_workgroups)`, die Zweidimensionalität und
+  dass die Zeilenbreite zur `@workgroup_size`-Deklaration passt. Ein
+  neuer Shader kann den Fehler nicht still wieder einführen. Unelegant,
+  aber die einzige Stelle, an der sich der Vertrag ohne vierzehn
+  GPU-Läufe prüfen lässt.
+- Die Leistungs-Diagnose (ADR-0073) misst jetzt **beide** Pfade. Sie
+  führt dafür zuerst eine Stufe direkt auf der GPU aus, denn
+  `render_rgba8` fängt einen gescheiterten GPU-Aufruf selbst ab — eine
+  Diagnose, die das nicht umgeht, meldete CPU-Zeiten als GPU-Zeiten
+  und hätte denselben Befund ein zweites Mal verfehlt. Der Probelauf
+  nimmt das volle Messbild und keine kleine Probe, denn genau eine
+  kleine Probe hätte „GPU geht" gemeldet.
+
+**Die zweite Decke, direkt dahinter.** Beim Absichern der eigenen
+Korrektur fiel auf, dass unmittelbar hinter dem Gruppenlimit das
+nächste wartete: `wgpu::Limits::default()` deckelt
+`max_storage_buffer_binding_size` auf **128 MiB**. Bei drei `f32` je
+Pixel sind das
+
+> 134.217.728 ÷ 12 = 11.184.810 Pixel, also gut **11 Megapixel**.
+
+Jedes größere Foto wäre am GPU-Pfad vorbeigelaufen — diesmal an der
+Puffergröße statt an der Gruppenzahl, und mit demselben stillen
+Fallback. Im Nutzer-Log steht dieser Fall nicht, weil dort nur
+Vorschauen bis 7,2 Megapixel vorkamen; bei einem Export in voller
+Auflösung wäre er sofort aufgetreten.
+
+Den Fund hier liegen zu lassen, hätte geheissen, eine halbe Korrektur
+auszuliefern und den nächsten Bericht abzuwarten. Deshalb fordert der
+Kontext jetzt `adapter.limits()` an statt der Vorgabewerte. Die
+Vorgabewerte sind auf den kleinsten gemeinsamen Nenner inklusive
+Mobilgeräten ausgelegt; was ein Adapter wirklich kann, meldet er
+selbst, und mehr als das lässt sich per Definition nicht anfordern.
+`the_context_requests_what_the_adapter_can_do` hält fest, dass hier
+nicht wieder nach unten gedeckelt wird. Die Diagnose prüft die
+Puffergröße zusätzlich vorab und nennt sie im Klartext, statt einen
+kryptischen Validierungsfehler durchzureichen.
+
+**Und die Fehlermeldung.** Neue Variante `PipelineError::GpuExecution`
+für abgelehnte Aufrufe, getrennt von `ShaderCompile` für echte
+Übersetzungsfehler. Ein Test hält fest, dass ein Ausführungsfehler
+nicht nach einem Übersetzungsfehler klingen darf. Eine Meldung, die in
+die falsche Richtung zeigt, ist schlechter als eine vage.
+
+**Was das für das Tempo heisst — und was nicht.** Dass der GPU-Pfad
+nun greift, ist belegt. Um wie viel das auf dem Gerät des Nutzers
+schneller ist, ist es nicht: das misst nur sein Rechner, und genau
+dafür steht der Vergleich jetzt im Diagnose-Dialog. Aus demselben Log
+geht ausserdem hervor, dass die **Dekodierung** mit 1,2 bis 1,9
+Sekunden den grösseren Posten stellt; das Rendern lag bei 0,2 bis 0,8
+Sekunden. Die Dekodierung ist von dieser Änderung unberührt — sie
+profitiert von `[profile.dev.package."*"] opt-level = 3` (ADR-0073)
+und von einem Release-Build, nicht von der GPU.

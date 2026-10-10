@@ -143,6 +143,26 @@ export function PerformanceDialog({ open, onClose }: PerformanceDialogProps) {
               </div>
             )}
 
+            {/* Der zweitwichtigste Befund nach dem Build-Profil
+                (ADR-0074): ein GPU-Pfad, der nicht greift. Genau das
+                war monatelang der Fall — ein Dispatch-Fehler ließ
+                jeden GPU-Aufruf scheitern, das Rendern fiel still auf
+                die CPU zurück, und nach außen war die App nur
+                „irgendwie langsam". Deshalb steht der Fall hier als
+                eigener Befund und nicht als fehlende Zahl in der
+                Tabelle. */}
+            {report.develop_gpu_ms === null && (
+              <div
+                className="rounded border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger"
+                role="alert"
+                data-testid="performance-gpu-warning"
+              >
+                <strong className="block text-sm">Die Grafikkarte wird nicht benutzt.</strong>
+                Jedes Rendern läuft auf dem Hauptprozessor — das kostet ein Vielfaches.
+                {report.gpu_fallback_reason ? ` Grund: ${report.gpu_fallback_reason}` : ""}
+              </div>
+            )}
+
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
               <dt className="text-text-muted">Build</dt>
               <dd className="text-text-primary" data-testid="performance-build">
@@ -167,6 +187,23 @@ export function PerformanceDialog({ open, onClose }: PerformanceDialogProps) {
 
               <dt className="text-text-muted">Durchsatz</dt>
               <dd className="text-text-primary">{round1(report.megapixels_per_second)} Megapixel/s</dd>
+
+              <dt className="text-text-muted">Entwickeln auf der Grafikkarte</dt>
+              <dd
+                className={report.develop_gpu_ms === null ? "text-danger" : "text-success"}
+                data-testid="performance-gpu"
+              >
+                {report.develop_gpu_ms === null ? (
+                  "wird nicht benutzt — alles läuft auf dem Hauptprozessor"
+                ) : (
+                  <>
+                    {report.develop_gpu_ms} ms
+                    {report.develop_neutral_ms > 0 && report.develop_gpu_ms > 0
+                      ? ` (${round1(report.develop_neutral_ms / report.develop_gpu_ms)}× schneller als die CPU)`
+                      : ""}
+                  </>
+                )}
+              </dd>
             </dl>
 
             {/* Die Oberflächen-Diagnose mit dem Schalter direkt daneben:
@@ -203,7 +240,7 @@ export function PerformanceDialog({ open, onClose }: PerformanceDialogProps) {
               </div>
             )}
 
-            {!report.debug_build && !uiSlow && (
+            {!report.debug_build && !uiSlow && report.develop_gpu_ms !== null && (
               <p className="rounded border border-success/40 bg-success/10 px-3 py-2 text-xs text-success" role="status">
                 Kein Engpass gefunden: optimierter Build, und die Oberfläche hält ihr Bildbudget.
               </p>

@@ -8,6 +8,7 @@
 #![deny(clippy::unwrap_used)]
 
 mod batch_rename;
+mod birthday;
 mod camera_default;
 mod commands;
 mod date_sort;
@@ -251,6 +252,25 @@ fn main() {
             panic!("Katalog konnte nicht geöffnet/angelegt werden: {err}");
         }
     });
+
+    // Geschenk-Inhalte der Geburtstagsausgabe (siehe `DECISIONS.md`
+    // ADR-0071): drei Presets und die Standardentwicklung für die
+    // Kamera, einmalig und idempotent in den gerade geöffneten Katalog
+    // gelegt. Bewusst KEIN `expect()` und kein Abbruch — ein fehlendes
+    // Geschenk-Preset ist ärgerlich, ein nicht startender Fotoeditor
+    // ein Ausfall. Läuft hier und nicht im Frontend, weil die Presets
+    // im Katalog liegen müssen, damit das Panel sie findet.
+    match birthday::seed(&catalog) {
+        Ok(report) if report.presets_created > 0 || report.camera_default_created => {
+            tracing::info!(
+                presets = report.presets_created,
+                camera_default = report.camera_default_created,
+                "Geburtstags-Inhalte angelegt"
+            );
+        }
+        Ok(_) => tracing::debug!("Geburtstags-Inhalte waren bereits vorhanden"),
+        Err(err) => tracing::warn!(%err, "Geburtstags-Inhalte konnten nicht angelegt werden"),
+    }
 
     // Siehe DECISIONS.md ADR-0012: schlägt sowohl der bevorzugte
     // Hardware- als auch der Software-Fallback-Adapter fehl, gibt es

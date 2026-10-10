@@ -9,6 +9,7 @@ import {
   type CameraDefaultDto,
 } from "../lib/tauri";
 import { useAppStore } from "../store";
+import { CameraIllustration } from "./CameraIllustration";
 import { Dialog } from "./ui/Dialog";
 
 /**
@@ -144,8 +145,13 @@ export function CameraDefaultsDialog({ open, onClose }: CameraDefaultsDialogProp
           {defaults.map((entry) => (
             <li
               key={entry.camera_model}
-              className="flex items-center gap-3 border-b border-border py-1.5 text-xs last:border-b-0"
+              className="flex items-center gap-3 border-b border-border py-2 text-xs last:border-b-0"
             >
+              {/* Geburtstagsausgabe (ADR-0071): die Abbildung macht aus
+                  einer Textzeile einen erkennbaren Eintrag. Sie ist
+                  eine Bauform-Silhouette, kein Markenzeichen — das
+                  Modell steht als Text daneben, wo es hingehört. */}
+              <CameraIllustration className="h-7 w-10 shrink-0 text-text-secondary" />
               <span className="min-w-0 flex-1 truncate text-text-primary">{entry.camera_model}</span>
               <button
                 type="button"

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installTauriMock } from "./tauri-mock";
+import { installTauriMock, openOverflowMenu } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -168,5 +168,27 @@ test.describe("Geburtstagsausgabe (ADR-0071)", () => {
     const dialog = page.getByRole("dialog", { name: "Einstellungen" });
     await dialog.getByLabel("Theme").selectOption("dark");
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  });
+});
+
+/** Die Kamera-Vorgabe (ADR-0071 B4) — dass sie inhaltlich stimmt,
+ * prüft `apx-app`s `birthday.rs` am echten Rendern; hier geht es nur
+ * darum, dass sie in der Oberfläche ankommt, mit Abbildung. */
+test.describe("Kamera-Standard der Geburtstagsausgabe", () => {
+  test("zeigt „Canon EOS“ mit einer Kamera-Abbildung", async ({ page }) => {
+    await installTauriMock(page, {
+      folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 1 }],
+      photosByFolder: { [FOLDER_ID]: [PHOTO] },
+    });
+    await page.goto("/");
+
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: /Standardentwicklung je Kamera/ }).click();
+    const dialog = page.getByRole("dialog", { name: "Standardentwicklung je Kamera" });
+
+    const list = dialog.getByTestId("camera-defaults-list");
+    await expect(list).toContainText("Canon EOS");
+    // Die Abbildung ist Teil der Anforderung, nicht Beiwerk.
+    await expect(list.getByTestId("camera-illustration")).toHaveCount(1);
   });
 });

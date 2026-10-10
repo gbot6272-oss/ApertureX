@@ -684,7 +684,14 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   }
   const photoNotes: MockPhotoNote[] = [];
   // Standardentwicklung je Kamera (Phase 34 F7).
-  const cameraDefaults: { camera_model: string; edl_json: string }[] = [];
+  // Geburtstagsausgabe (ADR-0071): dieselbe Vorgabe, die
+  // `apx-app`s `birthday::seed` beim ersten Start in den echten
+  // Katalog legt — sonst zeigte die e2e-Suite einen leeren Dialog, wo
+  // die App einen gefuellten hat. Das EDL ist hier nur ein Platzhalter;
+  // seinen Inhalt prueft `birthday.rs`s Rust-Test am echten Rendern.
+  const cameraDefaults: { camera_model: string; edl_json: string }[] = [
+    { camera_model: "Canon EOS", edl_json: '{"schema_version":4,"payload":{}}' },
+  ];
   let nextNoteId = 1;
 
   // `editHistories` laesst sich ueber die Fixtures vorbelegen

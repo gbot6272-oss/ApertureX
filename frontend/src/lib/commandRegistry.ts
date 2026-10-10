@@ -240,6 +240,13 @@ export function useCommandRegistry(): CommandEntry[] {
         run: () => requestCommand("camera-defaults"),
       },
       {
+        // "Analyse": misst, veraendert nichts (ADR-0073).
+        id: "fn:performance",
+        label: t("header.performance"),
+        category: "analysis",
+        run: () => requestCommand("performance"),
+      },
+      {
         // Gehoert in "Analyse": der Dialog misst den Katalog, er
         // veraendert ihn nicht — er legt nur eine Auswahl an.
         id: "fn:catalog-health",

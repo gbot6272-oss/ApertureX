@@ -305,6 +305,19 @@ export function MapView() {
           </button>
         </div>
         <span className="text-text-muted">{showPins ? "einzelne Fotos" : "Dichte-Heatmap"} (Zoom {zoomLevel})</span>
+        {/* Leerzustand (ADR-0073): ohne ein einziges verortetes Foto
+            sagte die Karte nur „0 Fotos mit GPS" und ließ offen, ob
+            etwas kaputt ist. Ist es meist nicht — die wenigsten
+            Kameras haben einen GPS-Empfänger. Die beiden Knoepfe
+            darunter sind genau die Abhilfe, deshalb steht der Hinweis
+            direkt darüber statt irgendwo über der Karte. */}
+        {geotaggedPhotos.length === 0 && (
+          <p className="max-w-[16rem] text-text-muted" role="status" data-testid="map-empty">
+            Noch kein Foto hat Koordinaten. Die wenigsten Kameras haben einen GPS-Empfänger; vorhandene
+            Koordinaten liest Aperture X beim Import aus. Nachtragen geht hier — über einen GPX-Track oder
+            von Hand.
+          </p>
+        )}
         <button type="button" onClick={() => void handleImportGpx()} className="rounded border border-border px-2 py-1 hover:border-accent">
           GPX-Track importieren…
         </button>

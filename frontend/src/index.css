@@ -694,6 +694,71 @@ body {
   display: none;
 }
 
+/* ---- Effektstufen (ADR-0073) -------------------------------------------
+
+   Gemessen im Entwickeln-Modus bei 1600×900: acht Glasflächen, jede
+   mit `backdrop-filter` UND dem SVG-Verzerrungsfilter, zusammen 1,08
+   Millionen Bildpunkte — drei Viertel des Fensters. Ein geteiltes
+   `<filter id>` spart daran nichts: geteilt wird die Definition,
+   gerechnet wird pro Element.
+
+   Solange dahinter nichts passiert, ist das Ergebnis
+   zwischenspeicherbar. Die Luftballons bewegen sich aber dauerhaft und
+   liegen hinter allem — damit ist der Zwischenspeicher bei jedem Bild
+   ungültig und acht Verzerrungsfilter werden sechzig Mal je Sekunde
+   neu gerechnet. Auf WebKitGTK ohne Hardwarebeschleunigung (Tauri unter
+   Linux, der Regelfall) reicht das, um die ganze App zäh zu machen.
+
+   `lib/effects.ts` misst beim Start die echte Bildzeit und setzt
+   `data-effects`. Die Stufen sind so geschnitten, dass die erste schon
+   fast alles bringt: `reduced` nimmt nur die Verzerrung und die
+   Dauerbewegung, lässt aber den Weichzeichner — die Oberfläche sieht
+   fast gleich aus und kostet einen Bruchteil. */
+
+/* Reduziert: keine SVG-Verzerrung, keine dauerhaft laufende Deko. */
+:root[data-effects="reduced"] {
+  --glass-distortion: none;
+}
+
+:root[data-effects="reduced"] .apx-balloon-layer {
+  display: none;
+}
+
+/* Schlicht: zusätzlich kein `backdrop-filter`. Damit fällt die
+   Durchsicht weg, und die Tönung allein wäre zu durchsichtig, um Text
+   davor lesbar zu halten — deshalb bekommen die Flächen hier deckende
+   Hintergründe aus den regulären Farb-Token statt der Glas-Tönung.
+   Schlicht heißt nicht unlesbar. */
+:root[data-effects="plain"] {
+  --glass-distortion: none;
+}
+
+:root[data-effects="plain"] .apx-balloon-layer {
+  display: none;
+}
+
+:root[data-effects="plain"] .apx-glass::before,
+:root[data-effects="plain"] .apx-glass-strong::before {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  filter: none;
+}
+
+:root[data-effects="plain"] .apx-glass::after {
+  background-color: var(--color-bg-panel);
+}
+
+:root[data-effects="plain"] .apx-glass-strong::after {
+  /* `--color-bg-raised` und nicht `--color-bg-base`: `.apx-glass-strong`
+     trägt die schwebenden Flächen — Dialoge, Menüs, Paletten — und
+     `raised` ist genau das Token, das die übrigen schwebenden Elemente
+     dieser App ohne Glas verwenden (`MapView.tsx`s Bedienfeld,
+     `GlobeView.tsx`s Anzeige). `base` wäre die Farbe des Untergrunds
+     und hätte einen Dialog mit seinem eigenen Hintergrund
+     verschmelzen lassen. */
+  background-color: var(--color-bg-raised);
+}
+
 /* Konfetti-Leinwand (ADR-0071) — eine einzige `<canvas>` für die ganze
    App, ohne Zeigerereignisse.
    

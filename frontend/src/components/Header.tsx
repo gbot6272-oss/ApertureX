@@ -20,6 +20,7 @@ import { FolderSyncDialog } from "./FolderSyncDialog";
 import { ExposureMatchDialog } from "./ExposureMatchDialog";
 import { CameraDefaultsDialog } from "./CameraDefaultsDialog";
 import { CatalogHealthDialog } from "./CatalogHealthDialog";
+import { PerformanceDialog } from "./PerformanceDialog";
 import { DateSortDialog } from "./DateSortDialog";
 import { DuplicateCleanupDialog } from "./DuplicateCleanupDialog";
 import { PreviewWarmDialog } from "./PreviewWarmDialog";
@@ -94,6 +95,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
   const [exposureMatchDialogOpen, setExposureMatchDialogOpen] = useState(false);
   const [gpxGeotagDialogOpen, setGpxGeotagDialogOpen] = useState(false);
   const [catalogHealthDialogOpen, setCatalogHealthDialogOpen] = useState(false);
+  const [performanceDialogOpen, setPerformanceDialogOpen] = useState(false);
   const [dateSortDialogOpen, setDateSortDialogOpen] = useState(false);
   const [duplicateCleanupDialogOpen, setDuplicateCleanupDialogOpen] = useState(false);
   const [previewWarmDialogOpen, setPreviewWarmDialogOpen] = useState(false);
@@ -191,6 +193,9 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
         break;
       case "catalog-health":
         setCatalogHealthDialogOpen(true);
+        break;
+      case "performance":
+        setPerformanceDialogOpen(true);
         break;
       case "date-sort":
         setDateSortDialogOpen(true);
@@ -507,6 +512,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
       <ExposureMatchDialog open={exposureMatchDialogOpen} onClose={() => setExposureMatchDialogOpen(false)} />
       <GpxGeotagDialog open={gpxGeotagDialogOpen} onClose={() => setGpxGeotagDialogOpen(false)} />
       <CatalogHealthDialog open={catalogHealthDialogOpen} onClose={() => setCatalogHealthDialogOpen(false)} />
+      <PerformanceDialog open={performanceDialogOpen} onClose={() => setPerformanceDialogOpen(false)} />
       <DateSortDialog open={dateSortDialogOpen} onClose={() => setDateSortDialogOpen(false)} />
       <DuplicateCleanupDialog open={duplicateCleanupDialogOpen} onClose={() => setDuplicateCleanupDialogOpen(false)} />
       <PreviewWarmDialog open={previewWarmDialogOpen} onClose={() => setPreviewWarmDialogOpen(false)} />

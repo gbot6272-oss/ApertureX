@@ -112,6 +112,20 @@ test("keine Glasfläche verliert ihre Positionierungs-Utility an die Kaskade", a
   expect(await positionTrapViolations(page), "Entwickeln-Panel offen").toEqual([]);
 });
 
+/**
+ * Nach wie vielen Einträgen eine frische Seite geöffnet wird.
+ *
+ * Der Test startet die App pro Eintrag neu — anders liesse sich eine
+ * Wirkung nicht sauber messen, weil ein geöffneter Dialog das Menü des
+ * nächsten Eintrags verdeckt. Siebenundvierzig Neustarts auf
+ * **derselben** Seite häufen im Renderer aber so viel an, dass er im
+ * Gesamtlauf (zwei Arbeiter parallel) abstürzte: „Target crashed",
+ * während derselbe Test allein grün war. Eine neue Seite gibt den
+ * Speicher des Renderers wirklich frei; `page.goto` tut das nicht
+ * zuverlässig.
+ */
+const PAGE_RECYCLE_AFTER = 10;
+
 test("jeder Eintrag des Überlaufmenüs wirkt messbar oder ist gesperrt", async ({ page }) => {
   test.setTimeout(300_000);
 
@@ -123,14 +137,25 @@ test("jeder Eintrag des Überlaufmenüs wirkt messbar oder ist gesperrt", async 
   expect(total).toBeGreaterThanOrEqual(40);
 
   const dead: string[] = [];
+  const context = page.context();
+  let current = page;
 
   for (let index = 0; index < total; index += 1) {
+    if (index > 0 && index % PAGE_RECYCLE_AFTER === 0) {
+      const fresh = await context.newPage();
+      // Die Fixture-Seite selbst bleibt bestehen; Playwright räumt sie
+      // am Testende auf. Geschlossen wird nur, was dieser Test
+      // zusätzlich geöffnet hat.
+      if (current !== page) await current.close();
+      current = fresh;
+    }
+
     // Frischer Start pro Eintrag: ein geöffneter Dialog oder eine
     // gewechselte Ansicht würde sonst das Menü des nächsten Eintrags
     // verdecken und eine Wirkung vortäuschen.
-    await bootWithPhoto(page);
+    await bootWithPhoto(current);
 
-    await page.evaluate(() => {
+    await current.evaluate(() => {
       const internals = (window as unknown as { __TAURI_INTERNALS__: { invoke: (...args: unknown[]) => unknown } })
         .__TAURI_INTERNALS__;
       const log: string[] = [];
@@ -142,8 +167,8 @@ test("jeder Eintrag des Überlaufmenüs wirkt messbar oder ist gesperrt", async 
       };
     });
 
-    await openOverflowMenu(page);
-    const item = page.getByRole("menuitem").nth(index);
+    await openOverflowMenu(current);
+    const item = current.getByRole("menuitem").nth(index);
     const label = ((await item.textContent()) ?? "").trim().replace(/\s+/g, " ");
 
     // Gesperrt ist eine gültige Antwort — der Eintrag sagt dann selbst,
@@ -151,7 +176,7 @@ test("jeder Eintrag des Überlaufmenüs wirkt messbar oder ist gesperrt", async 
     if (await item.isDisabled()) continue;
 
     const snapshot = () =>
-      page.evaluate(() => ({
+      current.evaluate(() => ({
         dialogs: Array.from(document.querySelectorAll('[role="dialog"]'))
           .map((element) => element.getAttribute("aria-label") ?? "?")
           .sort()
@@ -175,12 +200,12 @@ test("jeder Eintrag des Überlaufmenüs wirkt messbar oder ist gesperrt", async 
     // Grundlinie aus einem gleich langen Ruhefenster: alles, was hier
     // schon von allein über den IPC geht, ist Hintergrundrauschen.
     const idle = await snapshot();
-    await page.waitForTimeout(SETTLE_MS);
+    await current.waitForTimeout(SETTLE_MS);
     const before = await snapshot();
     const noise = new Set([...idle.invokes, ...before.invokes]);
 
     await item.click();
-    await page.waitForTimeout(SETTLE_MS);
+    await current.waitForTimeout(SETTLE_MS);
     const after = await snapshot();
 
     const acted =

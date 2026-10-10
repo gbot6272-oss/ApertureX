@@ -69,6 +69,19 @@ sha1 = "0.11"
 # Debug-Modus quälend langsam (Demosaicing über Megapixel-Arrays).
 opt-level = 1
 
+# Abhängigkeiten auch im Entwicklungsbuild VOLL optimieren (ADR-0073).
+# `opt-level = 1` oben gilt nur für den eigenen Code — die eigentliche
+# Rechenarbeit dieser App steckt aber in fremden Kisten: `rawler`
+# (Demosaicing), `image` (Skalierung), `zune-jpeg`, `rustfft`, `ndarray`.
+# Die liefen im Entwicklungsbuild bisher ebenfalls nur auf Stufe 1 und
+# damit um ein Vielfaches langsamer als nötig; genau das ist der
+# Unterschied zwischen "die Vorschau ist da" und "die Vorschau kommt
+# gleich". Abhängigkeiten werden einmal übersetzt und danach aus dem
+# Zwischenspeicher gezogen, die Übersetzungszeit des eigenen Codes
+# ändert sich dadurch nicht — nur der erste Build dauert länger.
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 opt-level = 3
 lto = "thin"

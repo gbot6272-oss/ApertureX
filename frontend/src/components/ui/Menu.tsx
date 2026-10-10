@@ -86,6 +86,15 @@ export function Menu({ label, trigger, sections, align = "end" }: { label: strin
                   type="button"
                   role="menuitem"
                   disabled={item.disabled}
+                  // Ohne das lief der zugaengliche Name der KI-Eintraege
+                  // zusammen: Beschriftung und Statusabzeichen stehen in
+                  // zwei Geschwister-`<span>`s, und die Namensberechnung
+                  // haengt die ohne Trennung aneinander
+                  // („HautglaettenBereit“). Fuer Screenreader war das
+                  // schlicht ein Wort, und fuer Tests ein Name, der weder
+                  // zur Beschriftung noch zum Abzeichen passte
+                  // (ADR-0072).
+                  aria-label={item.hint ? `${item.label} — ${item.hint}` : undefined}
                   onClick={() => {
                     playCue("select");
                     item.onSelect();

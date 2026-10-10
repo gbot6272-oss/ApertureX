@@ -129,7 +129,9 @@ export function CompareGridView() {
     <div className="fixed inset-0 z-50 flex flex-col bg-bg-base" aria-label="Vergleichsansicht">
       <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
         <div className="flex items-baseline gap-3">
-          <h2 className="text-sm font-semibold text-text-primary">Vergleichsansicht — {photos.length} Fotos</h2>
+          <h2 className="text-sm font-semibold text-text-primary">
+            Vergleichsansicht — {photos.length} {photos.length === 1 ? "Foto" : "Fotos"}
+          </h2>
           <span className="text-xs text-text-muted">
             ←/→ wählen · P behalten · X ablehnen · 0–5 bewerten · Entf aus dem Vergleich nehmen
           </span>
@@ -211,6 +213,24 @@ export function CompareGridView() {
             />
           </div>
         </div>
+      )}
+      {/* Ein Vergleich mit einem einzigen Foto vergleicht nichts. Bis
+          hierher sah genau das wie ein Fehler aus: „Versionen
+          vergleichen“ öffnete bei einem Foto ohne virtuelle Kopien eine
+          Ansicht, die sich von der Lupe kaum unterschied und keinen
+          Grund nannte (ADR-0072). Der Menüeintrag sperrt sich, sobald
+          der Kopien-Stand bekannt ist — beim allerersten Klick ist er
+          das noch nicht, und dann sagt die Ansicht es hier selbst. */}
+      {photos.length < 2 && (
+        <p
+          role="status"
+          data-testid="compare-nothing-to-compare"
+          className="shrink-0 border-b border-border bg-bg-panel px-3 py-2 text-xs text-text-secondary"
+        >
+          Nichts zu vergleichen — dieses Foto hat keine weiteren Versionen. Über „Bibliothek organisieren“ →
+          „Virtuelle Kopie vom ausgewählten Foto erstellen“ entsteht eine zweite Version, die hier daneben
+          erscheint.
+        </p>
       )}
       <div className="grid flex-1 gap-2 overflow-auto p-2" style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}>
         {photos.map((photo, index) => (

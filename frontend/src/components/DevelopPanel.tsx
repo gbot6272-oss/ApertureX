@@ -230,6 +230,20 @@ type DevelopTabId =
   | "imageTools"
   | "history";
 
+/** Zur Laufzeit prüfbare Liste derselben Reiter — der Store führt den
+ * angeforderten Reiter als freie Zeichenkette (er kennt diesen Typ
+ * nicht), und ein unbekannter Wert soll den Reiter nicht auf etwas
+ * Ungültiges setzen. */
+const DEVELOP_TAB_IDS: readonly DevelopTabId[] = [
+  "light",
+  "color",
+  "details",
+  "creative",
+  "lightOptics",
+  "imageTools",
+  "history",
+];
+
 /** Die vier numerischen Objektivkorrektur-Regler (Phase 4 Schritt 9,
  * ohne `manual_transform`, `profile_id`, `auto_ca`, `upright_mode`,
  * `guided_lines`). */
@@ -260,6 +274,20 @@ const GUIDED_LINE_FIELDS: ReadonlyArray<keyof GuidedLine> = ["x1", "y1", "x2", "
 export function DevelopPanel() {
   const t = useT();
   const [activeTab, setActiveTab] = useState<DevelopTabId>("light");
+  // Von außen angeforderter Reiter (ADR-0072): das Kommando-Register
+  // bittet, der Reiter wird gesetzt und die Bitte sofort abgeräumt.
+  // Ohne das landete man bei „Hautglätten"/„Himmelsaustausch" im
+  // Entwickeln-Panel, aber im Reiter „Licht" — das Werkzeug lag einen
+  // nicht angesagten Klick entfernt.
+  const developRequestedTab = useAppStore((s) => s.developRequestedTab);
+  const clearDevelopRequestedTab = useAppStore((s) => s.clearDevelopRequestedTab);
+  useEffect(() => {
+    if (!developRequestedTab) return;
+    if (DEVELOP_TAB_IDS.includes(developRequestedTab as DevelopTabId)) {
+      setActiveTab(developRequestedTab as DevelopTabId);
+    }
+    clearDevelopRequestedTab();
+  }, [developRequestedTab, clearDevelopRequestedTab]);
   const open = useAppStore((s) => s.developPanelOpen);
   const basic = useAppStore((s) => s.developEdl.basic);
   const setBasicField = useAppStore((s) => s.setBasicField);

@@ -236,21 +236,49 @@
    Inhalt). `border-radius: inherit` hält beide Ebenen deckungsgleich
    mit abgerundeten Aufrufern (Dialog/Sheet/Menü), ohne dass jede
    Aufrufstelle den Radius doppelt pflegen müsste. */
-/* ACHTUNG fuer Aufrufer: diese Klasse setzt `position: relative` (die
+/* HINWEIS fuer Aufrufer: diese Klasse setzt `position: relative` (die
    `::before`/`::after`-Ebenen unten brauchen einen positionierten
-   Vorfahren) — und unlayered CSS wie diese Datei schlaegt Tailwinds
-   `@layer utilities` in der Kaskade grundsaetzlich. Eine Positionierungs-
-   Utility (`absolute`/`fixed`/`sticky`) direkt AUF demselben Element ist
-   deshalb wirkungslos; stattdessen einen aeusseren, ungestylten
-   Positionierungs-Rahmen um die Glasflaeche legen (so macht es
-   `Viewer.tsx`s Zoom-Steuerung). Diese Falle ist in dieser Sitzung
-   dreimal real zugeschlagen: `z-index` beim Ueberlauf-Menue (ADR-0055),
-   `fixed` bei der Kopfzeile (ADR-0055-Nachtrag III, dort gezielt per
-   `header.apx-glass` ueberschrieben) und `absolute` bei der
-   Zoom-Steuerung (ADR-0056). */
+   Vorfahren), aber seit ADR-0072 aus `@layer components` heraus — eine
+   Positionierungs-Utility (`absolute`/`fixed`/`sticky`) direkt AUF
+   demselben Element gewinnt also und wirkt wie erwartet. Bis dahin
+   verlor sie still, weil unlayered CSS Tailwinds `@layer utilities` in
+   der Kaskade grundsaetzlich schlaegt; die Begruendung und die fuenf
+   daraus entstandenen Fehler stehen im Block direkt darunter. Die
+   aelteren Spezifitaets-Gegenregeln dieser Datei (`header.apx-glass`,
+   `.apx-spotlight`) bleiben als Gurt neben dem Hosentraeger stehen.
+   `e2e/ui-invariants.spec.ts` haelt die Invariante fest: keine
+   Glasflaeche, deren errechnete Position ihrer Utility widerspricht. */
+/* **Die Ursache der Kaskaden-Falle, allgemein behoben** (ADR-0072).
+   Der Grund, aus dem `.apx-glass` überhaupt `position: relative`
+   braucht, sind die beiden Pseudoelemente unten (`::before`/`::after`,
+   beide `position: absolute`): sie brauchen einen Bezugsrahmen. Der
+   Nebeneffekt war, dass JEDE Tailwind-Positionierungs-Utility auf
+   einer Glasfläche ins Leere lief, weil unlayered CSS in Tailwind v4
+   gegenüber `@layer utilities` grundsätzlich gewinnt.
+
+   Das hat in diesem Projekt FÜNFMAL zugeschlagen (ADR-0055 z-index,
+   ADR-0055-Nachtrag III Kopfzeile, ADR-0056 Zoom-Steuerung, ADR-0071
+   Einführungstour, und zuletzt das Überlauf-Menü, dessen erste sechs
+   Einträge dadurch 210 Pixel über dem Fensterrand lagen und per Maus
+   unerreichbar waren). Jedes Mal wurde der Einzelfall per
+   Spezifitäts-Gegenregel geflickt.
+
+   Jetzt die Ursache: diese eine Eigenschaft steht in `@layer
+   components`. Tailwind v4 deklariert die Ebenenfolge
+   `theme, base, components, utilities` — `components` verliert damit
+   gegen jede Utility, und `relative` wirkt nur noch dort, wo die
+   Aufrufstelle nichts anderes sagt. Alle übrigen Eigenschaften der
+   Glasflächen bleiben unlayered: sie kollidieren mit keiner Utility,
+   und ein Ebenenwechsel für sie wäre unnötiges Risiko. */
+@layer components {
+  .apx-glass,
+  .apx-glass-strong {
+    position: relative;
+  }
+}
+
 .apx-glass,
 .apx-glass-strong {
-  position: relative;
   text-shadow: var(--glass-text-shadow);
   /* `isolation: isolate` statt eines hart gesetzten `z-index: 0` —
      mehrere Aufrufstellen (u. a. `ui/Menu.tsx`s Dropdown) setzen ihr

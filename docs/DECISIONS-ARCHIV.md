@@ -1,0 +1,6894 @@
+# DECISIONS-ARCHIV.md — ADR-0001 bis ADR-0060
+
+Archiv der frühen Architekturentscheidungen. Inhaltlich unverändert
+aus `DECISIONS.md` übernommen (ADR-0081 begründet die Teilung): die
+Hauptdatei war 527.909 Zeichen groß, also rund 151.000 Tokens, und
+wurde damit zu teuer, um sie beim Arbeiten zu lesen.
+
+**Einträge werden nicht rückwirkend verändert** — eine überholte
+Entscheidung bekommt einen neuen Eintrag in `DECISIONS.md` mit Verweis
+auf den alten.
+
+---
+
+## ADR-0001: SQLite-Zugriff über `rusqlite` statt `sqlx`
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` schreibt `sqlx` vor, erlaubt Abweichung nur mit Begründung. `sqlx`s Compile-Zeit-Prüfung von SQL-Statements braucht entweder eine erreichbare Datenbank beim Bauen oder eine gepflegte `.sqlx`-Offline-Cache-Datei. In dieser Phase ändert sich das Schema noch häufig (Migration 1 ist erst der Anfang), das würde ständig Reibung erzeugen — jede Schemaänderung bräuchte einen `cargo sqlx prepare`-Schritt, sonst bricht CI.
+**Entscheidung:** `rusqlite` mit `bundled`-Feature (SQLite wird mitkompiliert, keine System-Abhängigkeit). Repository-Funktionen sind typisiert und gekapselt in `apx-catalog`, SQL bleibt vollständig dort.
+**Konsequenzen:** Kein Compile-Zeit-Typecheck von SQL wie bei `sqlx` — dafür sorgen Repository-Tests (Round-Trip pro Tabelle) für Absicherung. `rusqlite` ist synchron; Aufrufe aus `apx-app` laufen über `spawn_blocking`, damit der Tauri-Async-Kontext nicht blockiert.
+**Lizenz:** `rusqlite` MIT, gebündeltes SQLite Public Domain. Unkritisch.
+
+---
+
+---
+
+## ADR-0002: RAW-Dekodierung über `rawler` — LGPL-2.1-Hinweis
+
+**Status:** Angenommen, vom Nutzer ausdrücklich bestätigt ("Ja, LGPL-2.1
+für rawler akzeptieren")
+**Kontext:** `SPEC.md` Abschnitt 6 verlangt: „Nichts mit GPL im Kern, außer du weist mich ausdrücklich darauf hin." Der Phase-1-Prompt schreibt `rawler` als Bibliothek vor und verbietet eigenes RAW-Parsing.
+
+Ich habe die Lizenzlage der realistischen Alternativen geprüft:
+
+| Crate | Lizenz |
+|---|---|
+| `rawler` (dnglab-Projekt) | LGPL-2.1 |
+| `rawloader` (Vorgänger von rawler, unmaintained) | LGPL-2.1 |
+| `quickraw` | LGPL-2.1 |
+| `libraw`-Bindings (C-FFI) | Binding selbst MIT, verlinkt aber `libraw` (LGPL-2.1 **oder** CDDL-1.0 **oder** LibRaw Software License) |
+
+**Es gibt aktuell keine dokumentierte, breit RAW-Formate abdeckende Rust-Bibliothek mit rein permissiver Lizenz (MIT/Apache/BSD).** Das liegt an der Herkunft dieses Ökosystems aus `dcraw`, dessen Abkömmlinge durchgängig LGPL sind. Ein eigener RAW-Parser wäre die einzige GPL-freie Alternative, widerspricht aber ausdrücklich der Vorgabe „Baue kein eigenes RAW-Parsing" im Phase-1-Prompt und wäre für Phase 1 nicht seriös leistbar (RAW-Formate sind je Hersteller eigene, teils unter NDA stehende Binärformate).
+
+**Damit hiermit ausdrücklich darauf hingewiesen** (wie von `SPEC.md` gefordert), bevor Code geschrieben wird.
+
+**Entscheidung (vom Nutzer bestätigt):** `rawler` verwenden, LGPL-2.1 als bewusste Ausnahme akzeptieren, und die Ausnahme durch technische Maßnahmen entschärfen:
+1. `apx-raw` bleibt ein eigener, klar abgegrenzter Crate (bereits durch Workspace-Struktur erzwungen) — die LGPL-Komponente ist isoliert, nicht mit Geschäftslogik vermischt.
+2. Sobald Distribution ansteht (ab Phase 10 / Installer), `apx-raw` als dynamisch nachladbare Komponente bauen (`cdylib` oder Plugin-Grenze), damit Nutzer sie gemäß LGPL §6 durch eine modifizierte Version ersetzen können, statt sich auf eine für Rust unklare statische Verlinkung zu verlassen. Diese Maßnahme wird in Phase 10 konkret umgesetzt und hier nur vorgemerkt.
+3. Vollständiger Lizenztext und Quellverweis in `THIRD_PARTY.md`.
+**Konsequenzen:** Falls das Gesamtprodukt closed-source vertrieben werden soll, ist Punkt 2 nicht optional, sondern Voraussetzung für Rechtssicherheit. Falls Aperture X ohnehin quelloffen wird, entfällt die Dringlichkeit weitgehend. **Diese Weichenstellung (closed-source vs. quelloffen) betrifft den Gesamtumfang des Projekts und wird hier nicht einseitig entschieden.**
+
+**Nachtrag (ADR-0063): Punkt 2 ist erledigt.** Die Weichenstellung ist gefallen — Aperture X steht unter Apache-2.0 und wird quelloffen weitergegeben. Damit ist die von LGPL-2.1 §6 verlangte Austauschbarkeit schon durch die Quelltextweitergabe gegeben; `apx-raw` muss **nicht** als dynamisch nachladbare Bibliothek gebaut werden. Käme je eine geschlossene Weitergabe auf, wäre Punkt 2 wieder offen. Die dortige Lizenztabelle ist außerdem unvollständig: `lensfun` (LGPL-3.0-or-later, seit Phase 12) kam später dazu und ist strenger als alles hier Aufgeführte.
+
+---
+
+---
+
+## ADR-0003: Bildübertragung Backend→Frontend über Custom-Protokoll-Handler
+
+**Status:** Angenommen
+**Kontext:** Bilddaten (Vorschauen wie Vollbilder) müssen häufig und schnell vom Rust-Backend ins WebView. Tauri-Commands mit Base64-kodierten Bildern im Rückgabewert wurden erwogen.
+**Entscheidung:** Custom-Protokoll-Handler (`apx://preview/<id>?level=`, `apx://image/<id>?max_edge=`), der direkt Binärdaten mit korrektem `Content-Type`/`Cache-Control` liefert. Das Frontend nutzt die URL direkt in `<img>` bzw. per `fetch`+`createImageBitmap`.
+**Konsequenzen:** Kein Base64-Overhead (+33 % Größe, zusätzliche Kopie im JS-Heap), Browser-eigenes Caching greift, parallele Anfragen werden im Handler dedupliziert. Mehraufwand: Protokoll-Handler-Routing und Abbruchlogik (laufende Dekodierung bei Bildwechsel canceln) müssen selbst gebaut werden.
+
+---
+
+---
+
+## ADR-0004: Viewer in Phase 1 auf Canvas 2D statt WebGL/WebGPU
+
+**Status:** Angenommen, befristet auf Phase 1
+**Kontext:** `SPEC.md` verlangt für den fertigen Viewer WebGL2/WebGPU ohne DOM-Rendering im Bildbereich. Phase 1 hat aber explizit noch keine GPU-Pipeline (die kommt in Phase 2 mit `wgpu`).
+**Entscheidung:** Für Phase 1 reicht ein `<canvas>` mit 2D-Kontext und `ImageBitmap` als Quelle — es wird nur ein bereits fertig dekodiertes Bild dargestellt, Zoom/Pan sind reine Transformationen, keine Pixel-Verarbeitung. Das hält Phase 1 schlank und vermeidet, eine WebGL-Infrastruktur zu bauen, die in Phase 2 ohnehin durch die wgpu-Pipeline ersetzt bzw. eng verzahnt wird.
+**Konsequenzen:** Der Viewer-Code wird in Phase 2 nicht 1:1 weiterverwendet, sondern um die GPU-Pipeline-Anbindung erweitert/ersetzt — das ist im Phase-1-Prompt so vorgesehen und im Code entsprechend kommentiert. Kein Zwischenschritt „WebGL ohne Pipeline" wird gebaut, das wäre Doppelarbeit.
+
+---
+
+---
+
+## ADR-0005: IDs als UUIDv7-Newtypes
+
+**Status:** Angenommen
+**Kontext:** Katalogeinträge (Fotos, Ordner …) brauchen stabile, eindeutige IDs, die sich gut in SQLite (`TEXT PRIMARY KEY`) und in Cache-Pfaden (`previews/<xx>/<id>_<level>.jpg`) verwenden lassen.
+**Entscheidung:** `PhotoId`, `FolderId`, `CatalogId` als typisierte Newtypes über UUIDv7. UUIDv7 ist zeitlich sortierbar (Zeitstempel in den High-Bits), das hilft bei Index-Lokalität und macht „neueste zuerst"-Abfragen ohne extra Sortierspalte günstiger.
+**Konsequenzen:** Erfordert ein UUID-Crate mit v7-Unterstützung (`uuid` mit `v7`-Feature). Newtype-Wrapper verhindern, dass eine `PhotoId` versehentlich als `FolderId` verwendet wird (Typsicherheit statt „stringly typed" IDs).
+
+---
+
+---
+
+## ADR-0006: Fehlerbehandlung mit `thiserror`, keine `unwrap()` außerhalb von Tests
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` Abschnitt 6 verlangt explizite Fehlerbehandlung überall.
+**Entscheidung:** Ein gemeinsamer `AppError`-Typ in `apx-core` (`thiserror`), alle Crates geben `Result<T, AppError>` zurück. `clippy::unwrap_used` wird als Lint aktiviert (`-D clippy::unwrap_used` außerhalb von `#[cfg(test)]`), damit das in CI erzwungen statt nur vereinbart ist.
+**Konsequenzen:** Etwas mehr Schreibaufwand an Fehlerstellen, dafür keine stillen Panics in Produktionscode.
+
+---
+
+---
+
+## ADR-0007: Echte RAW-Testdateien fehlen — Netzwerkzugriff auf raw.pixls.us in dieser Sandbox blockiert
+
+**Status:** Offen — Entscheidung/Freigabe durch Nutzer ausstehend
+**Kontext:** `PHASE1_PROMPT.md` Abschnitt 8 verlangt für `apx-raw` "pro Format eine Datei in `testdata/`" plus Golden-Image-Tests gegen diese echten Kameradateien. Die empfohlene Quelle ist raw.pixls.us (CC0-lizenzierte RAW-Samples). Ein Zugriffsversuch (per `curl` **und** per `WebFetch`) auf `https://raw.pixls.us/` schlägt in dieser Sandbox-Session mit `EGRESS_BLOCKED` bzw. HTTP 403 fehl — die Netzwerk-Egress-Policy dieser Umgebung lässt den Host nicht zu. Das ist keine Design-Entscheidung, sondern eine Umgebungsgrenze dieser konkreten Sitzung.
+**Was stattdessen existiert:** Alle Decoding-Algorithmen (Demosaicing bilinear + generischer Fallback, Farbmatrix-Herleitung, Gammakurve, Crop, Downsampling, Orientierung, EXIF-Zeitzonen-Parsing) sind über synthetische Unit-Tests mit selbst konstruierten Eingabedaten abgedeckt (39 Tests, alle grün) — das prüft die Korrektheit der Implementierung, aber nicht das Verhalten gegen reale Dateien der acht Zielformate.
+**Optionen für den Nutzer:**
+1. Netzwerk-Egress für `raw.pixls.us` (oder eine alternative CC0-Quelle) für diese Umgebung freischalten, dann hole ich die Dateien in dieser Session nach.
+2. Der Nutzer lädt passende CC0-RAW-Samples selbst herunter und legt sie im Repo unter `testdata/` ab (mit Lizenzangabe für `THIRD_PARTY.md`) — ich ergänze dann die Golden-Image-Tests.
+3. GitHub Actions selbst (die echten Runner haben regulären Internetzugang, anders als diese Sandbox) lädt die Testdateien bei Bedarf in einem eigenen CI-Schritt herunter, statt sie im Repo zu versionieren — spart Repo-Größe, macht CI aber von der Erreichbarkeit der externen Quelle abhängig.
+**Entscheidung:** Noch nicht getroffen. Bis zur Klärung bleibt dieser Teilpunkt in `PLAN.md` als offen/blockiert markiert; der Rest von Phase 1 wird nicht darauf verzögert.
+
+---
+
+---
+
+## ADR-0008: Katalog-Verbindung als einzelne `Connection` hinter einem `Mutex`
+
+**Status:** Angenommen
+**Kontext:** `PHASE1_PROMPT.md` Abschnitt 10 nennt als bekannten Fallstrick: "SQLite-Schreibzugriffe parallel → `database is locked`. Ein einziger Writer, Leser über einen Pool." Ein echter Connection-Pool mit getrennten Lese-Verbindungen (z. B. über `r2d2`) wäre möglich, bringt aber zusätzliche Abhängigkeiten und Komplexität (Pool-Konfiguration, Verbindungs-Recycling), die für Phase 1 (ein Nutzer, ein Prozess) keinen messbaren Vorteil bringt.
+**Entscheidung:** `Catalog` hält eine einzelne `rusqlite::Connection` in einem `std::sync::Mutex`. Alle Zugriffe — lesend wie schreibend — werden dadurch auf Rust-Ebene serialisiert. Das erfüllt die Anforderung "ein einziger Writer" direkt und verhindert `database is locked`-Fehler aus konkurrierenden Zugriffen innerhalb des Prozesses vollständig, nicht nur im statistischen Regelfall. WAL-Modus bleibt aktiviert, damit externe Prozesse (z. B. ein DB-Browser zur Fehlersuche) weiterhin parallel lesend zugreifen können.
+**Konsequenzen:** Innerhalb des Prozesses gibt es keine echte Nebenläufigkeit bei Katalogzugriffen — ein langer Schreibvorgang (z. B. ein Massenimport) blockiert währenddessen andere Katalog-Lesezugriffe. Für Phase 1 unproblematisch (Importe laufen ohnehin sequenziell pro Datei mit kurzen Einzeltransaktionen). Sollte Profiling in einer späteren Phase echte Kontention zeigen (z. B. Bibliotheks-Raster-Scrollen blockiert durch einen laufenden Import), wird das hier nachgerüstet — dokumentiert als möglicher Folge-ADR, nicht vorab spekulativ gebaut.
+
+---
+
+---
+
+## ADR-0009: `apx://`-URLs als opake, über `convertFileSrc` kodierte Pfade statt echtem Query-String
+
+**Status:** Angenommen
+**Kontext:** `PHASE1_PROMPT.md` Abschnitt 6 illustriert das Protokoll mit
+`apx://preview/<photo_id>?level=0`. Tauris offizieller, plattformneutraler
+Weg, eine Custom-Protocol-URL im Frontend zu bauen, ist
+`convertFileSrc(pfad, "apx")` aus `@tauri-apps/api/core` — nötig, weil sich
+das URL-Schema zwischen Plattformen unterscheidet (macOS/Linux:
+`apx://localhost/<pfad>`; Windows/Android: `http://apx.localhost/<pfad>`,
+weil WebView2 und Android WebView keine beliebigen Custom-Schemes für
+Netzwerk-Requests erlauben). Ein Blick in Tauris `convertFileSrc`-Quelle
+zeigt: die Funktion `encodeURIComponent`-kodiert den **gesamten** `pfad`-
+String als **ein einziges** Pfadsegment. Ein `?level=0` im Eingabestring
+würde also mitkodiert (`%3Flevel%3D0`) und käme auf Rust-Seite nicht als
+echter Query-String an, sondern als Teil eines einzigen, weiterhin
+prozentkodierten Pfadsegments — `http::Uri::query()` bliebe `None`.
+**Entscheidung:** Statt eines echten Query-Strings kodiert das Frontend
+Anfragen als `convertFileSrc("preview/<photo_id>/<level>", "apx")` bzw.
+`convertFileSrc("image/<photo_id>/<max_edge_oder_'full'>", "apx")` — die
+gesamte Information steckt in einem einzigen, von `convertFileSrc` korrekt
+prozentkodierten Pfadsegment. Der Rust-Handler dekodiert dieses Segment
+selbst (`percent-encoding`-Crate) und splittet es an `/`. Das funktioniert
+identisch auf allen drei Plattformen, ohne dass das Frontend das
+Betriebssystem selbst erkennen müsste.
+**Konsequenzen:** Die tatsächliche Pfadstruktur weicht in der Notation
+leicht vom illustrativen Beispiel in `PHASE1_PROMPT.md` ab (Segmente statt
+Query-Parameter) — funktional identisch (dieselben Informationen, dieselbe
+Semantik: Foto-ID, gewünschte Auflösungsstufe/Kantenlänge). Diese
+Abweichung ist hier dokumentiert, wie in `SPEC.md` Abschnitt 6 gefordert.
+
+---
+
+---
+
+## ADR-0010: Playwright testet das Frontend gegen einen simulierten Tauri-Bridge, nicht die kompilierte native App
+
+**Status:** Angenommen, mit klar benanntem Rest-Risiko
+**Kontext:** `SPEC.md`s Tech-Stack-Tabelle nennt Playwright für E2E-Tests,
+und `PHASE1_PROMPT.md` Abschnitt 8 verlangt ein E2E-Szenario, das die
+komplette App abdeckt: „App starten → Ordner importieren → Thumbnails
+erscheinen → Bild anklicken → Viewer zeigt es → Zoom 1:1 → Neustart →
+Katalog ist noch da." Das ist ein Test der **kompilierten nativen
+Tauri-App**, nicht nur der Web-Inhalte.
+
+Playwright steuert Browser über das Chrome DevTools Protocol (CDP) an.
+Tauris WebView ist plattformabhängig: WebView2 unter Windows basiert auf
+Chromium und unterstützt CDP (`--remote-debugging-port`), WKWebView unter
+macOS und WebKitGTK unter Linux tun das **nicht**. Ein CDP-basierter
+Playwright-Test gegen die echte App liefe also nur auf Windows —
+inakzeptabel für eine Anforderung, die alle drei Plattformen abdecken
+muss. Der von Tauri selbst empfohlene, plattformunabhängige Weg für
+echte native E2E-Tests ist `tauri-driver` (WebDriver-Protokoll, nutzt je
+Plattform den nativen WebView-Treiber) zusammen mit WebdriverIO oder
+Selenium — nicht Playwright.
+
+**Entscheidung:** Für Phase 1 wird Playwright wie im Tech-Stack
+vorgesehen eingesetzt, aber gegen den **Vite-Dev-/Preview-Server mit
+einem simulierten `window.__TAURI_INTERNALS__`** (`invoke`/`convertFileSrc`
+geben kontrollierte Testdaten zurück, siehe `frontend/e2e/`) statt gegen
+die kompilierte App. Das deckt zuverlässig und plattformunabhängig ab:
+Layout, Dark-Theme, Zustand-Store-Verhalten, Tastenkürzel, Filmstreifen-
+Virtualisierung, Viewer-Interaktion — alles, was sich rein im Frontend
+abspielt. Die **Backend-Anteile** des E2E-Szenarios (echter Import,
+echte Dekodierung, echte Katalog-Persistenz über einen Neustart hinweg)
+sind stattdessen durch Rust-Integrationstests abgedeckt, die exakt
+dieselbe Logik über dieselben Schnittstellen ausführen wie die App selbst
+(`apx-app`s `import_run_handles_three_valid_and_one_broken_file`,
+`apx-catalog`s `open_on_disk_persists_across_reopen`) — nur eben nicht
+durch Klicks in einem echten Fenster ausgelöst.
+**Konsequenzen:** Es fehlt ein Test, der wirklich **Klick für Klick durch
+die kompilierte App** geht und dabei Frontend und Backend gemeinsam über
+die tatsächliche Tauri-IPC-Bridge prüft (z. B. ein Regressionsfehler
+ausschließlich in der Verdrahtung zwischen echtem Command und echtem
+Frontend-Aufruf, der weder im Rust-Test noch im simulierten
+Playwright-Test auffiele). Das ist eine bewusste, dokumentierte Lücke
+für Phase 1, keine stillschweigend schwächere Umsetzung. Empfehlung für
+eine spätere Phase: `tauri-driver` + WebdriverIO als zusätzliche,
+eigene Test-Stufe ergänzen, sobald der Funktionsumfang das rechtfertigt.
+
+---
+
+---
+
+## ADR-0011: Phase 2 umfasst genau sieben Grundeinstellungs-Regler, nicht zwölf
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §5s Phasenplan-Satz für Phase 2 nennt namentlich
+sieben Regler: „die Grundeinstellungs-Regler (WB, Belichtung, Kontrast,
+Lichter, Tiefen, Weiß, Schwarz)". `FEATURES.md` hatte davon abweichend
+alle zwölf „Grundeinstellungen"-Regler aus `SPEC.md` §3.2 (zusätzlich
+Textur, Klarheit, Dunst entfernen, Dynamik, Sättigung) als Phase 2
+markiert — eine Diskrepanz zwischen der maßgeblichen Phasenplan-Zeile
+und `FEATURES.md`s eigener, weiter gefasster Interpretation.
+
+**Entscheidung:** `SPEC.md` §5 ist die maßgebliche Quelle für den
+Phasen-Umfang. Phase 2 umfasst genau die sieben genannten Regler.
+Textur/Klarheit/Dunst entfernen/Dynamik/Sättigung wandern in
+`FEATURES.md` zu Phase 4, wo sie fachlich ohnehin neben Gradationskurve/
+HSL/Farbmischer/Details stehen — Werkzeuge, die eher „gestalterische
+Nachbearbeitung" als „grundlegende Tonwertkorrektur" sind.
+
+**Konsequenzen:** Phase 2 bleibt beim in `SPEC.md` beschriebenen,
+kleineren Umfang. `FEATURES.md`s eigene Präambel erlaubt genau diese Art
+von Verfeinerung ausdrücklich ("wird beim Start der jeweiligen Phase in
+PLAN.md verfeinert... Änderungen gehören dann in DECISIONS.md"). Diese
+Entscheidung wurde stellvertretend getroffen, ohne Rückfrage beim
+Nutzer, da sie den Umfang verkleinert (nicht wesentlich vergrößert) und
+rein fachlich-technischer Natur ist.
+
+---
+
+---
+
+## ADR-0012: Ein Crate `apx-pipeline`, nicht zwei (`apx-pipeline` + `apx-gpu`)
+
+**Status:** Angenommen
+**Kontext:** `ARCHITECTURE.md`s bisheriger Phase-2-Platzhalter nannte
+zwei mögliche Crate-Namen nebeneinander, ohne zu entscheiden, ob es ein
+oder zwei Crates werden.
+
+**Entscheidung:** Ein einziges neues Crate, `apx-pipeline`, enthält das
+EDL-Datenmodell, die wgpu-Anbindung, den Tile-Cache und das
+Farbmanagement (`lcms2`). Begründung: Phase 1 hält den Workspace bewusst
+bei vier Crates mit klaren Grenzen; eine Aufspaltung „GPU-Kontext" vs.
+„EDL/Pipeline-Logik" in zwei Crates würde nur künstliche Grenzen
+zwischen eng zusammenhängendem Code ziehen (der EDL-Interpreter *ist*
+der wgpu-Aufrufer) ohne einen erkennbaren Vorteil für Testbarkeit oder
+Wiederverwendbarkeit — anders als z. B. die `apx-raw`/`apx-catalog`-
+Trennung, die zwei fachlich unabhängige Verantwortlichkeiten trennt.
+
+**Konsequenzen:** `apx-pipeline` hängt von `apx-core` und `apx-raw` ab,
+nicht von `apx-catalog` (siehe ADR-0013). `apx-app` hängt zusätzlich von
+`apx-pipeline` ab, wie von den anderen drei Crates auch.
+
+---
+
+---
+
+## ADR-0013: EDL wird als JSON in einem `apx-core`-Umschlagtyp gespeichert, nicht als CBOR, nicht direkt von `apx-catalog` interpretiert
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §2.1 lässt das Serialisierungsformat offen
+("als JSON/CBOR"). Zusätzlich stellt sich die Frage, wo der konkrete
+EDL-Rust-Typ leben soll, ohne die Abhängigkeitsrichtung
+`apx-catalog` ↛ `apx-pipeline` zu verletzen (siehe ADR-0012).
+
+**Entscheidung:** JSON, nicht CBOR — menschenlesbar/diffbar (wichtig für
+Debugging und die später geplante „Verlaufs-Vergleich"-Funktion),
+`serde_json` ist bereits Workspace-Abhängigkeit, und die Nutzlast ist für
+Phase 2 klein (7 Zahlen), sodass CBORs Kompaktheitsvorteil nicht ins
+Gewicht fällt. `apx-core` bekommt einen minimalen, versionsmarkierten
+Umschlagtyp `EdlEnvelope { schema_version: u32, payload:
+serde_json::Value }`. `apx-catalog` speichert nur diesen Umschlag (als
+`TEXT`-Spalte) und muss `payload` nie verstehen — nur `apx-pipeline`
+kennt die konkrete `EdlV1`-Struct und entpackt `payload` hinein.
+
+**Konsequenzen:** `apx-catalog` bleibt unabhängig von `apx-pipeline`.
+Sollten spätere Phasen große Kurven-/Masken-Daten ins EDL bringen und
+JSON-Größe/Parse-Geschwindigkeit zum echten Problem werden, ist ein
+Wechsel zu CBOR eine lokale Änderung in `apx-pipeline` (Serialisierung)
+plus einer neuen Schema-Version — kein Architekturbruch.
+
+---
+
+---
+
+## ADR-0014: Verlauf/Undo-Redo als eigene SQLite-Tabelle vollständiger EDL-Schnappschüsse
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §3.4/§5 verlangt „Verlauf mit unbegrenzten,
+benennbaren, klickbaren Schritten (Undo/Redo)". Zwei Modellierungen
+kämen infrage: ein Operations-Log (jede Regler-Änderung als ein Eintrag,
+EDL wird durch Abspielen aller Einträge rekonstruiert) oder eine Tabelle
+vollständiger EDL-Schnappschüsse pro Schritt.
+
+**Entscheidung:** Eigene Tabelle `edit_history` mit vollständigen
+EDL-Schnappschüssen pro Zeile (`photo_id`, `sequence`, `label`,
+`edl_json`, `created_at`), plus ein 1-Zeile-pro-Foto-Zeiger
+`edit_current`. Begründung: „Springe zu einem beliebigen früheren
+Schritt", „benenne einen Schritt" und „vergleiche zwei beliebige
+Schritte" (spätere Phasen) sind mit vollständigen Schnappschüssen
+triviale SQL-Abfragen, während ein Operations-Log für dieselben
+Anfragen erst wieder abgespielt werden müsste. Für Phase 2 gilt zudem:
+Wiederholen (Redo) nach einer neuen Bearbeitung wird **nicht**
+aufbewahrt (keine Verzweigung) — neue Bearbeitung nach einem Rückgängig
+verwirft die „Zukunft", wie in den meisten Bildbearbeitungsprogrammen
+üblich. Verzweigende Historie ist von `SPEC.md` nicht für Phase 2
+gefordert.
+
+**Konsequenzen:** Migration `migrations/0002_edits.sql` ist rein additiv
+(ändert `photos` nicht), `edit_current` ist eine eigene Tabelle statt
+einer neuen Spalte auf `photos`, um die Phase-1-Tabelle unangetastet zu
+lassen.
+
+---
+
+---
+
+## ADR-0015: `apx-raw` bekommt einen additiven `decode_linear()`-Einstiegspunkt statt den bestehenden Vertrag zu ändern
+
+**Status:** Angenommen
+**Kontext:** Der heutige `apx_raw::decode()`/`DecodedImage`-Pfad
+bäckt einen festen (nicht einstellbaren) Weißabgleich und eine feste
+sRGB-Gammakurve fest ein — genau das, was Phase 2 einstellbar machen
+muss (Weißabgleich-Regler, Belichtung/Ton). Eine Änderung an `decode()`
+selbst würde die Verträge der bestehenden Phase-1-Aufrufer (Vorschau-
+Erzeugung im Import-Job, Vorschau-/Vollbild-Routen im Protokoll-Handler)
+brechen.
+
+**Entscheidung:** Neuer, rein additiver Einstiegspunkt
+`apx_raw::decode_linear()`, der die Kette nach CFA-Laden/Demosaicing/
+Schwarz-Weiß-Normalisierung stoppt — vor dem bisherigen festen
+Weißabgleich-Multiplikator und vor der Gammakurve. `apx-pipeline`
+übernimmt ab diesem linearen Zwischenergebnis. `decode()`/`DecodedImage`
+bleiben für alle bestehenden Phase-1-Aufrufer unverändert.
+
+**Konsequenzen:** Es gibt vorübergehend zwei Ausstiegspunkte aus der
+RAW-Dekodierkette in `apx-raw` (der alte, feste `decode()`-Pfad für
+Vorschauen/Thumbnails; der neue `decode_linear()`-Pfad für die
+Entwickeln-Ansicht) — bewusst in Kauf genommen, statt Phase 1s
+funktionierenden Code für eine Anforderung umzubauen, die er nicht
+erfüllen muss (Thumbnails brauchen keinen einstellbaren Weißabgleich).
+
+---
+
+---
+
+## ADR-0016: Die interaktive Entwickeln-Route liefert rohe RGBA8-Bytes statt PNG/JPEG
+
+**Status:** Angenommen
+**Kontext:** Die bestehenden `apx://preview/…`- und `apx://image/…`-
+Routen liefern JPEG bzw. PNG. `SPEC.md` §2.4 verlangt für die neue
+interaktive Entwickeln-Ansicht „Regler-Bewegung → sichtbares Update:
+< 16 ms bei 24-MP-Proxy" — eine erneute PNG-Kodierung (DEFLATE-
+Kompression) bei jedem Regler-Tick würde spürbar Zeit aus diesem engen
+Budget verbrauchen, nur um die Bytes im Frontend gleich wieder zu
+dekodieren, bevor sie als WebGL2-Textur hochgeladen werden.
+
+**Entscheidung:** Die neue `apx://develop/<id>/<max_edge_oder_'full'>/<edl_json>`-
+Route liefert rohe, unkomprimierte RGBA8-Bytes (`Content-Type:
+application/x-apx-develop-rgba8`, mit Breite/Höhe als `u32`
+little-endian in einem 8-Byte-Header vor den Pixeldaten) statt PNG. Die
+bestehenden `preview`-/`image`-Routen bleiben unverändert bei JPEG/PNG —
+diese Abweichung gilt ausschließlich für die neue, performance-kritische
+Route.
+
+**Umsetzungs-Korrektur gegenüber der ursprünglichen Plan-Notiz (Schritt
+5):** Statt eines separaten `edl_hash`-Segments trägt die Route die
+**vollständige JSON-Serialisierung des `EdlEnvelope`** direkt im
+Pfad (`edl_json`) — ein reiner Hash hätte bedeutet, dass die Route den
+zugehörigen EDL-Wert irgendwoher nachschlagen müsste, was während des
+*Ziehens* eines Reglers (noch nicht committet, siehe ADR-0014) gar nicht
+möglich ist. Derselbe String dient nebenbei unverändert als
+Unterscheidungsmerkmal für den bestehenden Single-Flight-`ImageCache`
+(zwei EDL-Zustände desselben Fotos erzeugen zwei Cache-Schlüssel) — ein
+separater Hash-Mechanismus ist damit unnötig. `EdlV1`s Felder sind
+ausschließlich Zahlen und enthalten daher nie ein `/`-Zeichen, das die
+bestehende "erst dekodieren, dann an `/` aufteilen"-Pfadlogik stören
+könnte.
+
+**Konsequenzen:** Größere Rohdatenmenge pro Anfrage als bei komprimierten
+Formaten — bei lokaler IPC über `localhost`/den Tauri-Protokoll-Handler
+ist das akzeptabel (kein Netzwerk, keine Bandbreitenbegrenzung), der
+Kompressions-Zeitgewinn wiegt hier schwerer als die Byte-Ersparnis.
+
+---
+
+---
+
+## ADR-0017: Fusionierter Compute-Shader für den interaktiven Pfad, separate Shader pro Regler für Spec-Konformität und Tests
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §6 verlangt „jedes Modul mit eigenem Shader,
+eigenem Test". Ein einzelner GPU-Dispatch pro Regler-Änderung würde bei
+sieben Reglern potenziell sieben aufeinanderfolgende Dispatch+Rücklese-
+Zyklen bedeuten — jeder mit eigenem Overhead, der zusammen das 16-ms-
+Budget gefährdet.
+
+**Entscheidung:** Jeder der fünf Regler-Module (Weißabgleich, Belichtung,
+Kontrast, Lichter+Tiefen, Weiß+Schwarz) bekommt trotzdem seinen eigenen
+WGSL-Shader und eigene Tests (erfüllt SPEC.md wörtlich). Zusätzlich gibt
+es einen fusionierten Shader (`basic_fused.rs`), der dieselbe Mathematik
+aller fünf Module in einem einzigen GPU-Aufruf kombiniert. Der
+interaktive Vorschau-Pfad (bei jedem Regler-Tick) nutzt ausschließlich
+den fusionierten Shader — ein Dispatch statt fünf. Ein Abgleichstest
+stellt sicher, dass fusionierter und einzelne Shader auf identischem
+Input dasselbe Ergebnis liefern (innerhalb der üblichen Gleitkomma-
+Toleranz).
+
+**Konsequenzen:** Etwas Code-Duplikation zwischen Einzel- und fusioniertem
+Shader (dieselbe Mathematik zweimal ausgedrückt) — bewusst in Kauf
+genommen zugunsten von Performance UND Spec-Konformität statt eines
+Kompromisses, der keines von beidem vollständig erfüllt.
+
+---
+
+---
+
+## ADR-0018: Undo/Redo im Frontend direkt über `edit_history`, kein `zundo` (revidiert in Schritt 6)
+
+**Status:** Angenommen (ursprüngliche Fassung revidiert bei der tatsächlichen
+Implementierung in Phase 2 Schritt 6 — siehe „Revisions-Begründung" unten)
+**Kontext:** Der Zustand-Store nutzt bereits `immer`; `FEATURES.md`
+verlangt für Phase 2 „Verlauf mit unbegrenzten, benennbaren, klickbaren
+Schritten (Undo/Redo)" im Frontend, zusätzlich zur dauerhaften
+`edit_history`-Tabelle aus ADR-0014, die den App-Neustart überlebt.
+
+**Ursprüngliche Entscheidung (Schritt 0):** `zundo`, eine kleine
+Bibliothek, die bestehende Zustand-Stores um eine eigene, zusätzliche
+Verlaufs-Ebene erweitert — mit der Begründung, sie bündle/entprelle
+Einträge, statt bei jeder Mausbewegung einen Schritt anzulegen.
+
+**Revisions-Begründung (Schritt 6):** Bei der tatsächlichen Umsetzung
+stellte sich heraus, dass die Entprellung viel einfacher auf
+UI-Ereignis-Ebene lösbar ist, ganz ohne State-Management-Bibliothek:
+`DevelopSlider` ruft `onChange` (Live-Vorschau, kein Commit) bei jedem
+Zwischenwert, aber `onCommit` (schreibt über `apply_develop_edit` in
+`edit_history`) erst bei Loslassen/Blur/Doppelklick-Reset. Eine
+zusätzliche, separate Frontend-Verlaufs-Ebene (`zundo`) hätte dann *zwei*
+lose synchronisierte Historien bedeutet (die lokale und die in
+`edit_history`) — mit dem Risiko, dass sie nach einem Fehler oder einer
+Race Condition auseinanderlaufen. Stattdessen rufen die Undo-/Redo-Knöpfe
+und Strg/Cmd+Z direkt `undo_develop_edit`/`redo_develop_edit` auf (siehe
+`crates/apx-app/src/commands.rs`, Phase 2 Schritt 5) — Tauris IPC ist
+lokal (kein Netzwerk) schnell genug, um pro Klick einen Roundtrip zu
+rechtfertigen, und es gibt dadurch nur *eine* Quelle der Wahrheit für den
+Verlauf statt zwei.
+
+**Konsequenzen:** Keine zusätzliche Frontend-Abhängigkeit nötig (`zundo`
+wurde nie zu `package.json` hinzugefügt, `THIRD_PARTY.md` bleibt
+unverändert). Ein Undo/Redo-Klick löst einen Tauri-Command-Aufruf aus
+(unmerklich schnell bei lokalem IPC); eine visuelle, benennbare,
+klickbare Liste *aller* Verlaufsschritte (statt nur Rückgängig/
+Wiederholen um jeweils einen Schritt) ist mit dieser Entscheidung
+weiterhin möglich (über `list_edit_history`, noch nicht implementiert),
+aber bewusst über Schritt 6s Mindestumfang hinaus zurückgestellt — der
+kritische Pfad („interaktives Entwickeln" überhaupt vorführbar) hatte
+Vorrang.
+
+---
+
+---
+
+## ADR-0019: Feste Kamera→sRGB-Matrix + Gammakurve im Entwickeln-Renderpfad, wiederverwendet statt dupliziert
+
+**Status:** Angenommen
+**Kontext:** `apx_raw::decode_linear()` (ADR-0015) liefert absichtlich
+unbalanciertes, noch nicht farbtransformiertes Kamera-RGB — die
+Weißabgleich-Gains sind nutzerseitig verstellbar (siehe
+`WhiteBalanceAdjustment`) und gehören deshalb in `apx-pipeline`, nicht in
+`apx-raw`. Die anschließende Kamera-RGB→sRGB-Transformation (eine feste
+3×3-Matrix aus den Kamera-Kalibrierungsdaten, siehe
+`apx-raw/src/pipeline/color.rs`) ist dagegen **nicht** nutzerseitig
+verstellbar — sie ist trotzdem nötig, sonst zeigt der Entwickeln-Viewer
+falsche Farben (Kamera-RGB-Primärvalenzen unterscheiden sich spürbar von
+sRGB). Ohne sie wäre die neue `develop`-Route zwar lauffähig, aber
+farblich falsch — kein tragbarer Zustand für ein Bildbearbeitungswerkzeug.
+
+**Entscheidung:** `apx_raw::LinearImage` bekommt ein zusätzliches Feld
+`cam_to_srgb: [[f32; 3]; 3]` (Einheitsmatrix für Fallback-Formate ohne
+Kamerakalibrierung). `apx-pipeline::color` wendet diese feste Matrix plus
+dieselbe sRGB-Gammakurve an, die `apx_raw::decode()` für Phase-1-
+Vorschauen bereits nutzt (`apx_raw::srgb_gamma`, zusätzlich als Teil von
+`apx-raw`s öffentlicher API re-exportiert, statt die Formel ein zweites
+Mal abzuschreiben) — Reihenfolge im Renderpfad ist damit: As-shot-
+Weißabgleich + Nutzer-Shift → die sieben Regler (auf Kamera-RGB) → feste
+Kamera→sRGB-Matrix → Gammakurve → RGBA8-Quantisierung.
+
+**Bewusste Vereinfachung:** Die sieben Regler (insbesondere Kontrast/
+Lichter/Tiefen/Weiß/Schwarz) wirken damit auf Kamera-RGB-Werten, nicht
+auf einem farbmanagement-korrekten Arbeitsraum nach der Matrix — anders
+als z. B. Lightroom/Capture One, die Tonwert-Werkzeuge meist nach der
+Farbmatrix anwenden. Das kann bei starken Kamera-Matrizen zu leicht
+abweichenden Farbverschiebungen zwischen den Kanälen führen. Für Phase 2s
+Ziel „interaktives Entwickeln" ist das akzeptabel (die Regler bewegen
+sich intuitiv in die richtige Richtung); eine Neuordnung (Matrix vor den
+Reglern) ist ein möglicher Ausbau für eine spätere Phase, sobald echtes
+ICC-Farbmanagement (`lcms2`, ursprünglich für `apx-pipeline::color`
+vorgesehen, siehe `PLAN.md` Phase 2 Schritt 4) tatsächlich eingebaut
+wird.
+
+**Konsequenzen:** `apx-raw`s `pipeline`-Modul exponiert
+`cam_to_srgb_matrix` zusätzlich als `pub(crate)` (vorher rein privat in
+`pipeline::color`), damit `decode_raw_linear` sie berechnen kann, ohne
+eine vollständige `ColorPipeline` (die zusätzlich Weißabgleich/Gamma
+anwenden würde) zu instanziieren. Kein neues externes Crate, keine
+`lcms2`-Abhängigkeit in diesem Schritt.
+
+---
+
+---
+
+## ADR-0020: Entwickeln-Modul als zuschaltbares Overlay im bestehenden Viewer, WebGL2 für beide Pixelquellen
+
+**Status:** Angenommen
+**Kontext:** `PLAN.md` Phase 2 Schritt 6 verlangt „Viewer.tsx wechselt von
+2D-Canvas auf WebGL2". Offen war dabei, ob das Entwickeln-Rendering die
+bestehende Vorschau/Vollbild-Anzeige (schnelle, gecachte JPEG/PNG-Pfade
+aus Phase 1) vollständig ersetzt, oder als zusätzlicher, zuschaltbarer
+Modus daneben existiert.
+
+**Entscheidung:** Ein neuer „Entwickeln"-Knopf (`Header.tsx`) schaltet
+`developPanelOpen` um; nur währenddessen fragt der Viewer zusätzlich die
+`develop/...`-Route ab (`hooks/useDevelopRender`) und zeigt deren
+Ergebnis anstelle des bisherigen Vollbilds — ohne offenes Panel verhält
+sich der Viewer exakt wie in Phase 1. Der Canvas selbst nutzt jetzt immer
+WebGL2 (`lib/webgl.ts`, `QuadRenderer`) statt Canvas-2D, für beide Fälle:
+ein dekodiertes `ImageBitmap` (bestehender Pfad) und ein rohes RGBA8
+(neue Entwickeln-Route) werden über denselben Texturmechanismus
+hochgeladen — Canvas-2D hätte für RGBA8-Rohdaten einen Umweg über
+`ImageData` gebraucht. Die bestehende Zoom-/Pan-Geometrie
+(`lib/viewerMath.ts`) bleibt unverändert wiederverwendet, nur der
+Zeichenaufruf selbst wechselt von `ctx.drawImage` auf einen texturierten
+Quad-Shader.
+
+**Konsequenzen:** Geringes Regressionsrisiko für Phase 1s bestehende
+Funktionalität (Standardzustand = Panel geschlossen = unverändertes
+Verhalten, durch die bestehenden Playwright-Tests in `viewer-flow.spec.ts`
+weiterhin abgedeckt, die nach diesem Umbau unverändert grün bleiben). Der
+WebGL2-Rendercode selbst (`lib/webgl.ts`) ist mangels WebGL-Unterstützung
+in `jsdom` nicht per Vitest testbar — wie schon die vorherige
+Canvas-2D-Zeichenlogik nur indirekt über Playwright abgesichert
+(„Canvas ist sichtbar", jetzt zusätzlich über die Entwickeln-Flow-Tests
+in `develop-flow.spec.ts`, die echte Zustandsänderungen statt nur
+Sichtbarkeit prüfen).
+
+---
+
+---
+
+## ADR-0021: wgpu-GPU-Ausführungstests in CI empirisch bestätigt (Schritt 8) — kein "weich" mehr auf Dauer
+
+**Status:** Angenommen (empirisch verifiziert)
+**Kontext:** ADR-0012 und `PLAN.md`s Risikoliste ließen offen, ob die
+GitHub-Actions-Runner (Linux/macOS/Windows) tatsächlich einen wgpu-Adapter
+finden — die `gpu_matches_cpu`-artigen Tests waren bewusst so gebaut, dass
+ein fehlender Adapter zu einem klar begründeten, sichtbaren "übersprungen"
+statt einem stillen Erfolg oder Hartabbruch führt. Ohne `--nocapture`
+sah ein grüner CI-Lauf aber identisch aus, egal ob der Adapter gefunden
+oder der Test nur übersprungen wurde — die Frage blieb unbeantwortet.
+
+**Entscheidung/Befund:** `cargo test --workspace -- --nocapture` in
+`ci.yml` aktiviert; im CI-Lauf für Commit `ca2e39f` (Run-ID 33236428223)
+enthält **keines** der drei Rust-Job-Logs (`ubuntu-latest`,
+`macos-latest`, `windows-latest`) die Zeichenkette "übersprungen: kein
+GPU-Adapter" oder `GpuUnavailable` — alle sechs
+`stages::*::tests::gpu_matches_cpu`-Tests liefen auf allen drei
+Plattformen als echte GPU-Dispatches durch. Damit ist empirisch bestätigt
+(nicht mehr nur angenommen): GitHub-Actions-`ubuntu-latest`-Runner bringen
+von Haus aus einen nutzbaren Software-Vulkan-Adapter mit (kein
+zusätzliches Mesa-`apt-get`-Paket war nötig); `macos-latest` und
+`windows-latest` finden ebenfalls einen Adapter (vermutlich Metal bzw.
+WARP/DX12 — welches Backend genau, ist ohne gesetztes `RUST_LOG` aus den
+Logs nicht ablesbar, war für die Kernfrage aber nicht nötig).
+
+**Konsequenzen:** GPU-Ausführungstests gelten ab sofort wieder als echte
+Pflicht (nicht dauerhaft "weich" belassen, wie ADR-0012 es für den Fall
+vorsah, dass ein Runner keinen Adapter hat) — ein zukünftiges
+"übersprungen" auf einem dieser drei Runner wäre eine echte Regression
+(z. B. ein Runner-Image-Wechsel), die untersucht werden müsste, nicht
+länger stillschweigend akzeptiert. `ci.yml`s `-D clippy::unwrap_used`
+und `apx-app`s fehlendes `#![deny(clippy::unwrap_used)]` wurden bei
+diesem Durchgang zusätzlich als bestehende, unabhängige CI-Lücken
+gefunden und geschlossen.
+
+---
+
+---
+
+## ADR-0022: Phase 3 umfasst `SPEC.md` §5s Phase-3-Satz, nicht §3.1s vollen BIBLIOTHEK-Katalog
+
+**Status:** Angenommen
+**Kontext:** Wie schon bei Phase 2 (ADR-0011: 7 statt 12 Regler) hatte
+`FEATURES.md` deutlich mehr Punkte auf Phase 3 getaggt, als `SPEC.md`
+§5s Phasenplan-Satz eigentlich meint — §3.1 zählt den vollständigen
+Lightroom-BIBLIOTHEK-Funktionsumfang auf (Gesichtserkennung, virtuelle
+Kopien, Stapel, Sekundäres Display, Schlagwort-Synonyme/Auto-
+Vervollständigung, Katalog-Backup/-Reparatur/-Zusammenführen,
+vollständiger EXIF/IPTC/XMP-Editor mit Sidecar-Export, intelligente
+Sammlungen mit verschachtelten Regeln, Perceptual-Hash-Duplikaterkennung,
+DNG-Konvertierung), §5s Satz nennt für Phase 3 nur: "Import, Ordner,
+Raster, Filmstreifen, Vorschau-Generierung, Bewertungen/Flaggen/Farben,
+Sammlungen, Filter, Metadaten-Panel, FTS-Suche".
+
+**Entscheidung:** Phase 3 = §5s Satz wörtlich genommen. Alle darüber
+hinausgehenden Punkte sind in `FEATURES.md` auf die Phase umgetaggt, zu
+der sie inhaltlich passen (meist Phase 6 „Sammlungen/Metadaten-Ausbau"
+oder Phase 9 „Politur/fortgeschrittene Werkzeuge" — siehe die einzelnen
+Zeilen in `FEATURES.md` §3.1 für die genaue Zuordnung). Zwei Lücken dabei
+gefunden und ergänzt: `FEATURES.md` hatte weder eine Zeile für
+"Volltextsuche (FTS5)" noch für ein einfaches "Metadaten-Panel" (nur den
+späteren vollständigen EXIF/IPTC/XMP-Editor) — beide sind aber explizit
+Teil von §5s Phase-3-Satz und wurden neu ergänzt.
+
+**Konsequenzen:** Wie bei ADR-0011 eine reine Scope-Verkleinerung, keine
+-Vergrößerung — der Nutzer muss dazu nicht befragt werden (siehe
+`SPEC.md`s Präambel zu Kleinigkeiten, die den Umfang nicht wesentlich
+verändern).
+
+---
+
+---
+
+## ADR-0023: Bewertung/Flagge/Farbe als Spalten, Schlagworte flach, Sammlungen nur manuell, FTS5 als External-Content-Tabelle
+
+**Status:** Angenommen
+**Kontext:** Phase 3s neues DB-Schema (Migration `0003_library.sql`)
+braucht Entscheidungen zu vier unabhängigen Datenmodell-Fragen.
+
+**Entscheidungen:**
+1. **Bewertung (`rating`), Flagge (`flag`), Farbmarkierung
+   (`color_label`) sind direkte Spalten auf `photos`**, keine eigene
+   Tabelle — konsistent mit dem bestehenden `missing`-Spalten-Muster aus
+   Phase 1, da es sich um einfache Skalarwerte pro Foto handelt.
+2. **Schlagworte sind in Phase 3 eine flache Liste** (`keywords` +
+   `photo_keywords`-Join-Tabelle), keine Hierarchie/Synonyme/Auto-
+   Vervollständigung (siehe ADR-0022 — das ist auf Phase 6 verschoben).
+3. **Sammlungen sind in Phase 3 rein manuell** (`collections` +
+   `collection_photos` mit fester `position`-Reihenfolge), keine
+   Sammlungssätze oder intelligenten Sammlungen mit Regeln (Phase 6).
+4. **`photos_fts` ist eine FTS5-External-Content-Virtualtabelle** über
+   `photos` (referenziert die Originalspalten statt sie zu duplizieren),
+   mit `INSERT`/`UPDATE`/`DELETE`-Triggern auf `photos`, die den Index
+   automatisch synchron halten — das ist SQLite FTS5s empfohlenes
+   Standardmuster für Volltextsuche über bereits vorhandene Tabellen,
+   vermeidet doppelte Datenhaltung und manuelle Sync-Logik in Rust.
+
+**Konsequenzen:** Migration 3 bleibt rein additiv zu den Migrationen 1/2
+(keine bestehende Spalte/Tabelle wird geändert). Die FTS5-Trigger sind
+reines SQL in der Migrationsdatei, keine zusätzliche Rust-Logik zum
+Index-Pflegen nötig.
+
+---
+
+---
+
+## ADR-0024: Rasteransicht und Filmstreifen teilen sich Fotoliste + Auswahl-State
+
+**Status:** Angenommen
+**Kontext:** Phase 3 bringt eine neue Rasteransicht (`GridView.tsx`)
+neben dem bestehenden Filmstreifen (`Filmstrip.tsx`, Phase 1). Beide
+zeigen dieselbe Fotoliste des aktuell gewählten Ordners/Sammlung/Filters
+und brauchen Mehrfachauswahl (für Bewertung/Flagge/Sammlung-Hinzufügen
+als Stapel-Aktion).
+
+**Entscheidung:** Fotoliste und Auswahl-State (inkl. Mehrfachauswahl per
+Shift/Strg-Klick) leben im gemeinsamen Zustand-Store (`store/index.ts`),
+nicht dupliziert in beiden Komponenten. Beide Ansichten nutzen dieselbe
+Virtualisierungsbibliothek `@tanstack/react-virtual` (schon Abhängigkeit
+seit Phase 1), nur mit unterschiedlichem Layout (1D-Reihe vs. 2D-Raster).
+
+**Konsequenzen:** Ein Foto in einer der beiden Ansichten auszuwählen,
+spiegelt sich sofort in der anderen wider — kein Synchronisationscode
+nötig, weil es nur einen State gibt.
+
+---
+
+---
+
+## ADR-0025: Import-Kopieren/Verschieben additiv zum bestehenden Hinzufügen, DNG-Konvertierung verschoben
+
+**Status:** Angenommen
+**Kontext:** Phase 1s Import scannt Dateien nur an ihrem bestehenden Ort
+("Hinzufügen", `ImportMode::AddInPlace` implizit). `SPEC.md` §5 nennt für
+Phase 3 zusätzlich Kopieren/Verschieben in einen verwalteten Zielordner.
+DNG-Konvertierung (RAW → DNG beim Import) ist in §3.1 Teil desselben
+Aufzählungspunkts, aber nicht in §5s Phase-3-Satz namentlich erwähnt und
+technisch ein eigenständiges Feature (braucht einen DNG-Writer, den es im
+Projekt noch nicht gibt).
+
+**Entscheidung:** `ImportMode { AddInPlace, Copy(PathBuf), Move(PathBuf) }`
+als neuer, additiver Parameter — der bestehende Scan-/Metadaten-/
+Thumbnail-Ablauf (`import::run`) ändert sich für `AddInPlace` nicht.
+DNG-Konvertierung verschoben auf Phase 5 (Export/Publish), siehe
+ADR-0022.
+
+**Konsequenzen:** Keine Verhaltensänderung für bestehende Aufrufer, die
+weiterhin implizit `AddInPlace` nutzen.
+
+---
+
+## ADR-0026: Suche/Filter alternativ statt kombiniert; zwei Über-Scope-Punkte, die ADR-0022 übersehen hatte, nachträglich korrigiert
+
+**Status:** Angenommen
+**Kontext:** Bei der Abnahme von Phase 3 (Schritt 7) fielen zwei Lücken
+auf, die bei der Scope-Korrektur in Schritt 0 (ADR-0022) hätten
+mitkorrigiert werden müssen, es aber nicht wurden:
+
+1. `FEATURES.md` §3.1 hatte "Filterleiste (Text, Attribut, Metadaten,
+   **kombiniert**)" auf Phase 3 getaggt — `SPEC.md` §5s Phase-3-Satz
+   nennt nur "Filter", ohne das Kombinieren von Text- und
+   Attributsuche zu verlangen. Das tatsächlich gebaute
+   `FilterBar.tsx`/`store/index.ts` implementiert Freitextsuche
+   (`search_photos`, FTS5) und Attributfilter (`filter_photos`,
+   inklusive eines nachträglich ergänzten Kameramodell-Chips) als
+   **Alternative** statt als kombinierbare UND-Verknüpfung: Setzen des
+   einen leert das andere. Eine echte Kombination bräuchte entweder
+   eine dritte Backend-Route, die FTS5-`MATCH` und die
+   Attribut-`WHERE`-Klausel in derselben Abfrage verknüpft, oder eine
+   clientseitige Nachfilterung der Suchergebnisse — beides war im
+   verbleibenden Schritt-6-Budget nicht mehr sauber umsetzbar.
+2. "Duplikaterkennung per exaktem Hash" und "Sortierung nach beliebigem
+   Feld" standen in `FEATURES.md` §3.1 ebenfalls auf Phase 3, kommen
+   aber in `SPEC.md` §5s Phase-3-Satz nicht vor — nach genau derselben
+   Regel wie ADR-0022 (Phase-3-Satz ist maßgeblich, nicht §3.1s voller
+   Katalog) hätten sie schon in Schritt 0 auf eine spätere Phase
+   umgetaggt werden müssen. Keins von beiden wurde in Phase 3 gebaut
+   (`content_hash` wird beim Import weiterhin nicht berechnet; Raster/
+   Filmstreifen sortieren fest nach Dateiname).
+
+**Entscheidung:**
+- Suche/Filter bleiben bewusst alternativ (siehe oben) — als
+  "Fertig (abweichend, siehe DECISIONS.md)" in `FEATURES.md` markiert,
+  nicht als unerledigt liegen gelassen.
+- "Duplikaterkennung per exaktem Hash" auf Phase 6 umgetaggt (neben der
+  dort bereits stehenden Perceptual-Hash-Duplikaterkennung — beide
+  Ausbaustufen derselben Fähigkeit gehören zusammen).
+- "Sortierung nach beliebigem Feld" auf Phase 6 umgetaggt (neben
+  Filter-Presets/Schnellentwicklung im Raster, mit denen es inhaltlich
+  zusammenhängt).
+
+**Weiterer bekannter Stand (kein Umtaggen nötig, aber hier
+dokumentiert):** "Ordnerbaum-Synchronisation" ist nur teilweise
+gebaut — die Sidebar-Baumdarstellung, `relink_folder` und die
+Fehlend-Erkennung (Schritt 5) funktionieren korrekt für jede
+`parent_id`, die in der Datenbank steht, aber der Import selbst legt
+weiterhin nur den unmittelbaren Elternordner jeder Datei an
+(`ensure_folder` in `apx-app/src/import/mod.rs`), ohne die volle
+Verzeichniskette bis zum gewählten Import-Ordner als `parent_id`-Kette
+nachzubilden — das war so bereits in `PLAN.md` Phase 3 Schritt 5s
+Beschreibung angelegt ("Sidebar bekommt eine echte Baumdarstellung"),
+nicht in ADR-0022s Scope-Fehler. Eine echte Mehrebenen-Population beim
+Import (begrenzt auf den gewählten Import-Ordner, nicht bis zum
+Dateisystem-Wurzelverzeichnis) wäre ein sinnvoller kleiner Folgeschritt,
+ist aber kein Phase-3-Blocker, da die Fotos unabhängig davon korrekt
+einem (flachen) Ordner zugeordnet werden.
+
+**Konsequenzen:** `FEATURES.md` korrigiert (siehe dortige Zeilen);
+Definition-of-Done in `PLAN.md` Schritt 7 bewertet diese drei Punkte
+entsprechend ehrlich statt sie stillschweigend als erledigt
+auszuweisen.
+
+---
+
+## ADR-0027: Fünf im Abschlussbericht ehrlich benannte Lücken nachträglich in Phase 3 geschlossen
+
+**Status:** Angenommen
+**Kontext:** Im Abschlussbericht zu Phase 3 (Schritt 7) wurden fünf Lücken
+offen benannt statt stillschweigend übergangen — DoD-Kriterium 5 aus
+`SPEC.md` §7 (Undo/Redo) sowie die beiden ADR-0026-Umtaggungen
+(Duplikaterkennung, Sortierung), die bewusst alternative statt
+kombinierte Suche/Filter, und die teilweise Ordnerbaum-Population beim
+Import. Auf ausdrücklichen Nutzerwunsch werden **genau diese fünf
+Punkte** jetzt nachgezogen — nicht der komplette restliche
+BIBLIOTHEK-Katalog aus `SPEC.md` §3.1 (Gesichtserkennung, Stapel,
+Schlagwort-Hierarchie, intelligente Sammlungen, Metadaten-Presets/
+Batch-Editing, voller EXIF/IPTC/XMP-Editor + Sidecar-Export,
+Katalog-Backup/-Reparatur/-Merge, Perceptual-Hash-Duplikate,
+DNG-Konvertierung, Cheatsheet-Overlay bleiben wie in ADR-0022 auf ihre
+jeweils spätere Phase verteilt).
+
+**Entscheidung, je Punkt:**
+
+1. **Undo/Redo für Bibliotheks-Metadaten** (Bewertung/Flagge/Farbe/
+   Schlagworte/Sammlungsmitgliedschaft): reines Frontend-Feature, keine
+   neue Backend-Verlaufstabelle — anders als beim Entwickeln-Verlauf
+   (`edit_history`, ADR-0014) gibt es hier keinen natürlichen Ort für
+   einen Verlauf im Katalog; die Wahrheit bleibt der zuletzt bekannte
+   Frontend-Zustand. Neu `frontend/src/lib/undoStack.ts` (reine,
+   getestete Stack-Logik: `pushUndo`/`undo`/`redo`, neuer Push verwirft
+   die Redo-„Zukunft", gleiches Prinzip wie ADR-0014), `store/index.ts`
+   bekommt `libraryUndoStack`/`libraryRedoStack` plus
+   `undoLibraryAction`/`redoLibraryAction`; `App.tsx`s globaler
+   Tastatur-Handler behandelt Strg/Cmd+Z / Strg/Cmd+Umschalt+Z, aber nur
+   wenn das Entwickeln-Panel nicht offen ist (das hat schon seinen
+   eigenen lokalen Handler in `DevelopPanel.tsx`). Bewusst **nicht**
+   abgedeckt: Sammlung anlegen/umbenennen/löschen (strukturelle
+   Aktionen mit unklarer Undo-Semantik bei Neuvergabe der ID). Bekannter
+   Grenzfall bei „Zu Sammlung hinzufügen": Rückgängig entfernt alle
+   Fotos, die diese eine Aktion hinzugefügt hat — war eines davon schon
+   vorher Mitglied, entfernt Rückgängig es trotzdem (keine
+   Mitgliedschafts-Historie pro Foto).
+2. **Duplikaterkennung per exaktem Hash**: neue direkte Abhängigkeit
+   `sha2` (schon transitiv im `Cargo.lock` vorhanden, Version 0.10.9,
+   `MIT OR Apache-2.0`, damit kein neues Lizenzrisiko). Jede beim Import
+   gestagte Datei bekommt einen per Streaming berechneten
+   SHA-256-Hex-Digest (`BufReader` + `std::io::copy` direkt in den
+   Hasher, kein Volleinlesen) in `photos.content_hash` — die Spalte
+   existierte seit Phase 1, war aber immer `NULL` (ihr Migrations-
+   Kommentar nennt noch ein ursprünglich angedachtes xxHash-Teilhash-
+   Schema aus der Phase-1-Planung; das wird hier bewusst nicht
+   nachgebaut, Migrationen werden nie nachträglich geändert). Neue
+   `Catalog::list_duplicate_photo_groups()` gruppiert nach `content_hash`
+   (nur Fotos mit gesetztem Hash, `HAVING COUNT(*) > 1`); `run_with_mode`
+   ruft sie am Ende auf und meldet die Gesamtzahl betroffener Fotos über
+   ein neues `ImportFinishedPayload.duplicate_count`-Feld. Duplikate
+   werden nur angezeigt (Header-Text nach Import, "Duplikate
+   anzeigen"-Knopf in der Filterleiste) — der Import selbst wird dadurch
+   nicht blockiert oder verändert.
+3. **Sortierung nach beliebigem Feld**: bewusst client-seitig
+   (`frontend/src/lib/sortPhotos.ts`) statt als weiterer
+   SQL-`ORDER BY`-Parameter durch mehrere Backend-Abfragen
+   durchgereicht — die komplette Fotoliste ist wegen der Virtualisierung
+   (Raster/Filmstreifen) ohnehin schon im Speicher, serverseitiges
+   Sortieren brächte keinen Zusatznutzen. `PhotoDto` bekommt dafür ein
+   neues `file_size`-Feld (bisher nur intern im Katalog vorhanden).
+   Felder: Dateiname (Default, entspricht dem bisherigen impliziten
+   Verhalten), Aufnahmedatum, Bewertung, Dateigröße, Kameramodell;
+   fehlende Werte sortieren immer ans Ende, unabhängig von der Richtung.
+4. **Kombinierte Suche + Filter**: `repository/search.rs` bekommt einen
+   gemeinsamen Klausel-Baukasten `build_filter_clause` (aus
+   `filter_photos` herausgezogen, das unverändert bestehen bleibt) und
+   eine neue `search_and_filter_photos` — mit Suchtext ein FTS5-`MATCH`
+   plus die Kriterien-Klauseln per UND, ohne Suchtext identisch zu
+   `filter_photos`. Additiv: `search_photos`/`filter_photos` (Commands
+   und `Catalog`-Methoden) bleiben zusätzlich bestehen. Die frühere
+   ADR-0026-Entscheidung "bewusst alternativ" ist damit zurückgenommen.
+5. **Volle Ordnerbaum-Hierarchie beim Import**: begrenzt auf den
+   gewählten Import-Ordner (bzw. bei Copy/Move auf den *Zielordner* —
+   dort leben die Dateien danach, nicht mehr im Quellordner) — nicht bis
+   zum Dateisystem-Wurzelverzeichnis. `ensure_folder` legt jetzt
+   rekursiv alle Elternordner zwischen dieser Hierarchie-Wurzel
+   (inklusive, `parent_id = NULL`) und dem unmittelbaren Elternverzeichnis
+   der Datei an; liegt ein Verzeichnis unerwartet nicht unter der
+   Hierarchie-Wurzel (z. B. ein aus dem Baum herausführender Symlink),
+   bekommt es defensiv `parent_id = NULL` statt weiter zu rekursieren.
+   Da Copy/Move-Zielordner aktuell immer flach bleiben (keine
+   Unterordner-Struktur wird beim Kopieren/Verschieben nachgebildet),
+   wirkt sich das in der Praxis nur auf `AddInPlace`-Importe mit
+   verschachtelten Unterordnern aus.
+
+**Konsequenzen:** `FEATURES.md` markiert "Duplikaterkennung per exaktem
+Hash" und "Sortierung nach beliebigem Feld" wieder als Phase 3/Fertig,
+die Filterleisten-Zeile von "abweichend, alternativ" auf "Fertig
+(kombiniert)"; `PLAN.md` bekommt einen neuen Abschnitt "Schritt 8 —
+Nachtrag"; `THIRD_PARTY.md` bekommt einen neuen `sha2`-Eintrag. Alle
+übrigen, größeren zurückgestellten Punkte aus ADR-0022 bleiben
+ausdrücklich auf ihrer jeweils späteren Phase.
+
+---
+
+## ADR-0028: Phase-4-Scope präzisiert — Workflow-Punkte verschoben, Objektivprofile und Reparatur bewusst vereinfacht
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §5s Phasenplan-Satz für Phase 4 nennt namentlich
+zehn Werkzeugkategorien: „Kurven, HSL, Farbmischer, Color Grading,
+Details, Objektivkorrekturen, Effekte, Kalibrierung, Crop/Geometrie,
+Reparatur." `FEATURES.md` §3.4 („Modul ENTWICKELN — Workflow") taggt
+zusätzlich acht Punkte (Schnappschüsse, Vorher/Nachher, Einstellungen
+kopieren/einfügen, Vorherige übernehmen, Synchronisieren, Auto-Sync,
+Referenzansicht, Soft-Proof) als Phase 4 — dieselbe Art Diskrepanz
+zwischen dem maßgeblichen §5-Satz und `FEATURES.md`s eigener, weiter
+gefasster Interpretation, die schon ADR-0011 und ADR-0022 für frühere
+Phasen korrigiert haben.
+
+Zusätzlich verlangen zwei der zehn §5-Kategorien laut `SPEC.md` §3.2
+Funktionalität, die ohne mehrwöchige Vorarbeit bzw. externe Testdaten
+nicht seriös umsetzbar ist: eine echte, Adobe-LCP-kompatible
+Objektivprofil-Datenbank („Datenbank mit Profilen, eigene Profile
+importierbar") und echte Computer-Vision-Algorithmen für die
+Reparatur-Funktion („Auto-Quellenfindung", „Inhaltsbasiertes Füllen für
+größere Bereiche", vergleichbar mit Photoshops Content-Aware
+Fill/PatchMatch). Diese Entscheidung wurde dem Nutzer explizit zur Wahl
+vorgelegt (nicht stellvertretend getroffen wie bei ADR-0011), da sie den
+Umfang stärker einschränkt als eine reine Nachschlage-Korrektur.
+
+**Entscheidung (vom Nutzer bestätigt):**
+
+1. **Workflow-Punkte verschoben:** alle acht `FEATURES.md`-§3.4-Zeilen
+   wandern auf Phase 6, wo laut `ARCHITECTURE.md` §7 bereits das
+   Maskensystem als fortgeschrittenes Entwickeln-Feature geplant ist.
+   Phase 4 umfasst ausschließlich die zehn im §5-Satz genannten
+   Werkzeugkategorien plus die per ADR-0011 bereits zugewiesenen
+   Grundeinstellungs-Ergänzungen (WB-Pipette, WB-Kamera-Presets, Textur,
+   Klarheit, Dunst entfernen, Dynamik, Sättigung).
+2. **Objektivkorrekturen:** eigenes, minimales Profilformat
+   (handgepflegtes JSON, wenige Beispielprofile, Zuordnung per
+   EXIF-Objektiv-/Kamerastring) statt einer echten Adobe-kompatiblen
+   Profildatenbank. Die vollen manuellen Regler (chromatische
+   Aberration automatisch und manuell, Vignettierung, Verzeichnung,
+   Perspektive/Upright, manuelle Transformation) werden trotzdem
+   komplett gebaut — nur der *Import fremder Profile* (Adobe LCP/DNG
+   Lens Profile) entfällt und wird auf eine spätere Phase verschoben.
+   Aus demselben Grund entfällt in der Kalibrierung der DCP-Import für
+   Kameraprofile; eine kleine eingebaute Profilliste bleibt.
+3. **Reparatur:** manuelles Klonen/Reparieren (Pinsel mit Quellpunkt,
+   Radius, Deckkraft, weicher Kante; Reparieren per vereinfachtem
+   nahtlosen Überblenden, nicht echtem Poisson-Blending) ist die
+   Phase-4-Basis. Auto-Quellenfindung und echtes inhaltsbasiertes Füllen
+   für größere Bereiche werden auf Phase 6 verschoben (analog zur
+   Perceptual-Hash-Duplikaterkennung, die in ADR-0022 aus demselben
+   Grund — fortgeschrittener Algorithmus ohne unmittelbaren
+   Minimal-Nutzen — zurückgestellt wurde).
+4. **Weitere bewusste Vereinfachungen, die aus denselben Gründen
+   zusammen mit den obigen drei Punkten entschieden wurden:** der
+   „Guided"-Upright-Modus bekommt 2 statt bis zu 4 Linienpaare;
+   „Auto-Ausrichtung am Horizont" nutzt nur die EXIF-Orientierung statt
+   eines echten Kantenerkennungs-Verfahrens. Beide sind CV-artige
+   Detailfragen derselben Kategorie wie Punkt 2/3, keine eigenständige
+   Entscheidung.
+5. **Struktur:** Phase 4 bleibt eine durchgehende Phase mit
+   feingranularen Schritten (0–13, siehe `PLAN.md`) statt in Unterphasen
+   4a/4b gesplittet — die architektonische Zweiteilung (per-Pixel-Modell
+   vs. Nachbarschafts-/größenverändernde Operationen) spiegelt sich in
+   der Schrittfolge (Schritt 2 legt die Infrastruktur für beide Modelle
+   an, spätere Schritte nutzen sie je nach Werkzeug), nicht in getrennten
+   Phasen mit eigener Abnahme.
+
+**Konsequenzen:** `FEATURES.md` §3.4 komplett auf Phase 6 umgetaggt;
+§3.2s Objektivkorrekturen-/Kalibrierung-/Reparatur-/Geometrie-Abschnitte
+bekommen erklärende Kommentare zu den vier Vereinfachungen aus Punkt
+2–4, die einzelnen Zeilen bleiben bis zur tatsächlichen Umsetzung auf
+„Nicht begonnen" (Auto-Quellenfindung/Inhaltsbasiertes Füllen direkt auf
+Phase 6 umgetaggt, da sie in Phase 4 überhaupt nicht gebaut werden).
+`PLAN.md` bekommt den neuen Abschnitt „Aktuelle Phase: Phase 4" mit der
+Schrittfolge 0–13. Ein echter Adobe-Profil-/DCP-Import sowie
+Auto-Quellenfindung/Content-Aware-Fill bleiben in `FEATURES.md` als
+offene Phase-6-Punkte sichtbar, nicht stillschweigend fallen gelassen.
+
+**Nachtrag (Schritt 12, Reparatur-Umsetzung):** zwei weitere kleine
+Vereinfachungen aus derselben Kategorie wie Punkt 4 (CV-artige
+Detailfragen ohne unmittelbaren Minimal-Nutzen), zusammen mit der
+tatsächlichen Umsetzung entschieden:
+- **Pfad-Ausdünnung:** jeder Strich ist auf `MAX_PATH_POINTS = 32`
+  Stützpunkte gedeckelt (`repair.rs`) — das Frontend dünnt einen dicht
+  abgetasteten Zeigerpfad beim Loslassen entsprechend aus
+  (`RepairOverlay.tsx`s `thinPath`). Bei den Zeigerauflösungen üblicher
+  Pinselstriche visuell nicht von einer ungedeckelten Punktzahl zu
+  unterscheiden.
+- **Live-Vorschau beim Malen ist rein clientseitig:** das SVG-Overlay
+  zeigt den gerade gemalten Pfad sofort, der tatsächliche
+  Pipeline-Effekt erscheint erst nach dem Loslassen (committeter,
+  ausgedünnter Strich) — ein voller Entwickeln-Durchlauf über einen
+  wachsenden, noch nicht ausgedünnten Pfad bei jeder Zeigerbewegung wäre
+  unnötig teuer.
+- **Sensorflecken-Visualisierung** (`FEATURES.md` §3.2) wird ebenfalls
+  auf Phase 6 verschoben — sie setzt eine automatische Fleckenerkennung
+  voraus (Blob-/Kantenerkennung auf dem Bild), dieselbe Kategorie
+  Bildverarbeitungsaufgabe wie die bereits zurückgestellte
+  Auto-Quellenfindung, ohne die sie nur eine leere Overlay-Hülle wäre.
+
+---
+
+## ADR-0029: Schritt 2 baut nur die Grundeinstellungs-Regler + die GPU-Dispatch-Grundlage; Kurven/HSL/Farbmischer/Color-Grading/Kalibrierung/Effekte bekommen ihren eigenen Shader in ihrem eigenen Schritt
+
+**Status:** Angenommen
+**Kontext:** Der ursprüngliche Plan für Schritt 2 sah vor,
+`stages/basic_fused.wgsl`/`.rs` sofort um praktisch alle verbleibenden
+1:1-/positions-bewussten Werkzeugkategorien zu erweitern (Kurven, HSL,
+Farbmischer, Color Grading, Kalibrierung, Vignette, Körnung) — bevor
+deren Frontend-Verträge (welche Felder, welche Interaktion) in ihren
+jeweils eigenen Schritten (4–10) überhaupt feststehen. Das würde
+`SPEC.md` §6s Grundsatz „jede Operation ein eigenes Modul mit eigenem
+Shader, eigenem Test" verletzen (ein einziges Mega-Modul für acht
+verschiedene Werkzeuge) und spekulative Arbeit an Formeln leisten, die
+noch keinen Abnehmer haben.
+
+**Entscheidung:** Schritt 2 liefert nur:
+1. Die Prüfung/Bestätigung, dass `gpu/dispatch.rs::run_compute_f32`
+   unverändert sowohl positions-bewusste als auch nachbarschafts-fähige
+   Operationen trägt (Breite/Höhe als zusätzliche `Params`-Felder,
+   uneingeschränkter Lesezugriff auf den gesamten Eingabepuffer im
+   WGSL-Shader) — keine Änderung an `dispatch.rs` selbst nötig.
+2. Die letzten fünf der zwölf Grundeinstellungs-Regler
+   (Dunst&nbsp;entfernen/Dynamik/Sättigung in `basic_fused`,
+   Textur/Klarheit im neuen, eigenen `stages/local_contrast.{rs,wgsl}` —
+   Letztere brauchen echten Nachbarschafts-Zugriff, siehe dessen
+   Moduldoku) — damit sind alle zwölf Regler aus `SPEC.md`s
+   „Grundeinstellungen" fertig.
+
+Kurven, HSL, Farbmischer, Color Grading, Kalibrierung und Effekte
+bekommen stattdessen je ein eigenes Modul mit eigenem Shader und
+eigenem GPU/CPU-Paritätstest in ihrem jeweils eigenen Schritt (4–10),
+genau wie die sieben Phase-2-Regler es taten — nur der interaktive
+Vorschau-Pfad fasst sie am Ende jeweils per ADR-0017-Muster zu einem
+Dispatch zusammen, sobald ihre Formel feststeht.
+
+**Konsequenzen:** `PLAN.md`s Schritt-2-Checkliste wird auf die zwei
+oben genannten Punkte präzisiert; die „GPU/CPU-Paritätstests je neuem
+Teil-Feature"-Zeile bezieht sich nur noch auf Dunst
+entfernen/Dynamik/Sättigung/Textur/Klarheit (bereits erledigt), nicht
+mehr auf die acht später gebauten Kategorien. Die
+Kurven-Sequenzierungsfrage (Farbraum-Konvertierung ins WGSL verlagern
+oder Kurven als CPU-LUT-Nachschritt) verschiebt sich entsprechend auf
+Schritt 4, wenn Kurven tatsächlich gebaut werden.
+
+---
+
+## ADR-0030: Objektivkorrekturen (Schritt 9) — Ausgabegröße bleibt unverändert, Perspektive/Upright „Auto"/„Level"/„Vertical"/„Full" bleiben No-op-Platzhalter
+
+**Status:** Angenommen
+**Kontext:** `PLAN.md`s Architektur-Grundsatz sah für Objektivkorrekturen
+eine „größenverändernde" GPU-Dispatch-Form vor (Ausgabepuffer ≠
+Eingabepuffer). Beim tatsächlichen Bau von
+`stages/lens_corrections.{rs,wgsl}` zeigte sich: Verzeichnung, CA,
+Vignette-Korrektur und manuelle Transformation lassen sich vollständig
+als inverse Abbildung mit bilinearer Abtastung ausdrücken, bei der
+Ausgabe- und Eingabegröße identisch bleiben (Randpixel werden
+geklemmt statt schwarz gefüllt oder automatisch zugeschnitten) — echtes
+Zuschneiden auf den gültigen Bildbereich ist ohnehin Aufgabe von
+Schritt 11s separatem Geometrie-Werkzeug (das laut Plan bereits als
+eigener „CPU-seitiger Crop+Rotate+Resample als letzter Schritt in
+`render_rgba8`" vorgesehen ist). Eine echte größenverändernde
+Dispatch-Form für Schritt 9 zu bauen wäre doppelte Arbeit gewesen, die
+Schritt 11 ohnehin leisten muss.
+
+Zweitens: Die SPEC.md-Perspektive/Upright-Modi „Auto", „Level",
+„Vertical" und „Full" setzen in echten Bildbearbeitungsprogrammen eine
+automatische Kantenerkennung zur Fluchtpunkt-Bestimmung voraus — eine
+CV-Aufgabe vergleichbar mit der in ADR-0028 bereits für Schritt 11s
+Auto-Ausrichtung zurückgestellten Kantenerkennung, ohne die dafür
+nötigen Bildverarbeitungsbausteine (Kantendetektion, Linienerkennung,
+Homografie-Schätzung) im bisherigen Stack.
+
+**Entscheidung:**
+1. Objektivkorrekturen liefern die geometrische Abbildung als
+   Ein-/Ausgabepuffer-gleich-großen inversen Warp mit bilinearer
+   Abtastung (keine größenverändernde Dispatch-Form in Schritt 9 —
+   die bleibt für Schritt 11 reserviert).
+2. Die Upright-Modi „Auto"/„Level"/„Vertical"/„Full" sind im EDL/UI
+   wählbar, tragen aber aktuell keine Wirkung (dokumentierter
+   No-op-Platzhalter). „Guided" (die einzige Nutzer-gesteuerte Variante)
+   nutzt die ersten zwei markierten Hilfslinien und errechnet daraus
+   eine einfache gemittelte Dreh-Korrektur — keine echte
+   Mehrlinien-Fluchtpunkt-Homografie.
+
+**Konsequenzen:** `FEATURES.md` markiert die vier automatischen
+Upright-Modi als „Fertig (abweichend, siehe ADR-0030)" statt als volle
+Automatik. Eine echte Kantenerkennungs-/Homografie-basierte
+Upright-Automatik sowie ein echtes Zuschneiden auf den gültigen
+Bildbereich nach der geometrischen Korrektur bleiben auf eine spätere
+Phase verschoben (zusammen mit den bereits in ADR-0028 zurückgestellten
+Punkten: echter Adobe-Profil-Import, Auto-Quellenfindung/
+Content-Aware-Fill, echte Auto-Horizont-Kantenerkennung).
+
+---
+
+## ADR-0031: Phase-5-Scope präzisiert — Preset-Grundlagen jetzt, KI-Generator/Adobe-Interop/Templates-Unterabschnitt verschoben; kein eigenes `apx-presets`-Crate
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §5 nennt für Phase 5 wörtlich nur „Preset- und
+Template-System" — `SPEC.md` §3.5 (der komplette Feature-Katalog dahinter)
+ist aber mit Abstand der am weitesten in die Zukunft greifende Abschnitt
+des ganzen Dokuments: er setzt eine echte LLM-Anbindung (Anthropic API,
+API-Key-Verwaltung), eine numerische Referenzbild-Optimierung über die
+Pipeline-Parameter, vollständige Adobe-`.xmp`/`.lrtemplate`-Kompatibilität
+in beide Richtungen, und — beim „Templates"-Unterabschnitt — mehrere
+Subsysteme voraus, die schlicht noch nicht existieren: `ARCHITECTURE.md`
+§7 reserviert die Export-Engine explizit erst für Phase 8–9. Ein
+„Export-Template" jetzt zu bauen hieße, eine Konfigurationsoberfläche für
+ein Subsystem zu bauen, das sie noch gar nicht ansteuern kann — dieselbe
+Art von verfrühter Arbeit, die ADR-0029 für Phase 4 bereits vermieden hat
+(kein Shader für ein Werkzeug bauen, bevor sein Frontend-Vertrag
+feststeht). Genau wie bei ADR-0011/ADR-0022/ADR-0028 gilt: der §5-Satz ist
+normativ, der vollständige §3.x-Katalog wird hier scope-präzisiert.
+
+**Entscheidung:**
+1. **Preset-Grundlagen** (`SPEC.md` §3.5, erster Unterabschnitt) sind die
+   Phase-5-Basis und werden vollständig gebaut: EDL-Teilmengen-Presets
+   (Speichern-Dialog mit Checkbox je Einstellungsgruppe), Ordnerhierarchie
+   beliebiger Tiefe, Favoriten, Suche/Tags, Preset-Stärke (0–200 %,
+   nachträglich änderbar solange kein anderer Edit dazwischen liegt),
+   Live-Vorschau (Hover im Bild + Thumbnail in der Liste), Preset-Stapel
+   (mehrere nacheinander, Reihenfolge editierbar), eigenes `.apx`-
+   Dateiformat-Im-/Export, Versionierung mit Diff-Ansicht, sowie eine
+   vereinfachte Fassung der bedingten Presets (siehe Punkt 4).
+2. **Preset-Generator (KI)** — LLM-Anfrage, Referenzbild-Modus,
+   Variationen-Generator, „Preset aus Bearbeitung lernen" — wird
+   komplett auf **Phase 7** verschoben. `ARCHITECTURE.md` §7 reserviert
+   diese Phase bereits wörtlich für „`apx-ai` — ONNX-Runtime-Integration,
+   LLM-Client für Preset-Generator" — das ist keine neue Zurückstellung,
+   sondern nur die Bestätigung der bereits bestehenden Architektur-Planung.
+   Ein Referenzbild-Optimierer (Gradientenverfahren über die
+   Pipeline-Parameter) ist zudem dieselbe Kategorie CV-/Optimierungs-
+   Aufgabe wie die in ADR-0028 zurückgestellten Punkte.
+3. **Adobe-`.xmp`/`.lrtemplate`-Import/-Export** wird auf eine spätere
+   Phase verschoben — derselbe Grund wie beim Objektivprofil-/DCP-Import
+   in ADR-0028 (kein Adobe-Format-Reverse-Engineering ohne Testdaten als
+   eigenständiges Mammutprojekt neben dem eigentlichen Feature). Das
+   eigene `.apx`-Format deckt Im-/Export vollständig ab.
+4. **Bedingte Presets** werden bewusst vereinfacht gebaut statt ganz
+   zurückgestellt (echte, nicht nur angetäuschte Fähigkeit ohne externe
+   Abhängigkeit): eine feste, kleine Liste vergleichbarer Metadatenfelder
+   (ISO, Blende, Brennweite, Kameramodell, Objektiv — alle bereits in
+   `photos` gespeichert), UND-verknüpfte Regeln (Feld, Operator, Wert),
+   **kein** UI-Builder für eine freie Bedingungssprache mit ODER/
+   Verschachtelung.
+   **Nachtrag (Schritt 7):** jede Regel trägt zusätzlich ein optionales
+   `section`-Feld — `null` bedeutet „gilt fürs ganze Preset" (Fehlschlag
+   verhindert das Anwenden komplett), eine gesetzte Sektion grenzt einen
+   Fehlschlag auf genau diese Sektion ein (Rest des Presets bleibt
+   wirksam). Ein fehlendes Metadatum am aktuellen Foto (z. B. kein
+   EXIF-ISO-Wert) lässt die betroffene Regel konservativ als nicht
+   erfüllt gelten, statt sie zu ignorieren.
+5. **„Templates" (über Presets hinaus)** — Export-/Wasserzeichen-/
+   Metadaten-/Import-/Umbenennungs-/Layout-/Workflow-Templates,
+   Template-Marktplatz — wird komplett auf eine spätere Phase verschoben.
+   Jedes davon konfiguriert ein Subsystem, das entweder noch gar nicht
+   existiert (Export-Engine: Phase 8–9, siehe oben; Layout-Templates für
+   Druck/Buch/Diashow/Web: in keinem früheren Phasenplan erwähnt) oder nur
+   in Ansätzen (Umbenennungs-Templates: `import::rename` existiert bereits
+   rudimentär aus Phase 3, ein vollwertiger Token-Editor bräuchte ohnehin
+   erst die anderen Import-Template-Bausteine). Diese Punkte wandern in
+   `FEATURES.md` auf die jeweilige Phase, in der ihr zugehöriges
+   Subsystem tatsächlich gebaut wird (überwiegend Phase 8–9).
+6. **Kein eigenes `apx-presets`-Crate**, obwohl `ARCHITECTURE.md` §7 eines
+   vorab benannt hatte: die Phase-5-Basis aus Punkt 1 braucht keine neue
+   Pixelverarbeitungslogik — ein Preset ist reine Katalogdaten (Name,
+   Ordner, Tags, Bedingungen, eine EDL-*Teilmenge* als opakes JSON) plus
+   Frontend-seitiges Zusammenführen/Skalieren in den bestehenden
+   `developEdl`-Zustand vor dem ohnehin schon bestehenden
+   `commitDevelopEdit`. Genau wie `apx-catalog`s `edit_history.edl_json`
+   nie von `apx-catalog` selbst verstanden werden muss (siehe
+   `ARCHITECTURE.md` §5), muss auch der Preset-JSON-Blob nie von
+   `apx-catalog` verstanden werden — eine neue Erweiterung von
+   `apx-catalog` (Migration + Repository-Modul) plus neue `apx-app`-
+   Commands reichen. Ein leeres `apx-presets`-Crate jetzt anzulegen wäre
+   dieselbe Art von Vorab-Arbeit ohne aktuellen Abnehmer, die ADR-0029
+   bereits für Phase 4 vermieden hat. Sollte Phase 7s KI-Generator später
+   echte, eigenständige Preset-Berechnungslogik brauchen (Referenzbild-
+   Optimierung, Variationen-Generator), ist das der richtige Zeitpunkt,
+   ein solches Crate tatsächlich anzulegen.
+7. **Import-Templates/Umbenennungs-Templates werden nach Phase 5
+   vorgezogen** (waren in `FEATURES.md` fälschlich als „Phase 3"
+   getaggt, obwohl Phase 3 bereits abgeschlossen ist, ohne sie zu bauen —
+   derselbe Fehlertyp, den ADR-0026/ADR-0027 für andere Zeilen schon
+   einmal korrigiert haben). Der Rust-Unterbau existiert bereits
+   vollständig aus Phase 3 (`apx-app::import::presets::ImportPreset` +
+   die Commands `list_import_presets`/`save_import_preset`/
+   `delete_import_preset`), nur ohne jede Frontend-Anbindung — kein
+   Import-Dialog nutzt sie, kein Token-Editor existiert. Da beide Punkte
+   ohnehin unter „Templates" fallen und ihr Unterbau bereits da ist,
+   werden sie als kleiner, eigenständiger Schritt in Phase 5
+   mitgenommen statt weiter unbenutzt zu bleiben.
+
+**Konsequenzen:** `FEATURES.md` §3.5 wird zeilenweise auf „Phase 5"
+(Preset-Grundlagen + vereinfachte bedingte Presets), „Phase 7" (KI-
+Generator) bzw. „Phase 8–9"/„Phase 6" (Templates-Unterabschnitt, je nach
+zugehörigem Subsystem) umgetaggt; Adobe-Interop bleibt als offener
+späterer Punkt sichtbar. `PLAN.md` bekommt einen neuen Abschnitt „Aktuelle
+Phase: Phase 5" mit einer feingranularen Schrittfolge, analog zu Phase 4.
+`ARCHITECTURE.md` §7s Phase-5-Platzhalterzeile wird entsprechend
+präzisiert (kein `apx-presets`-Crate, stattdessen `apx-catalog`-
+Erweiterung + `apx-app`-Commands + Frontend-Merge-Logik).
+
+---
+
+## ADR-0032: Phase-6-Scope präzisiert — Maskensystem (§5) plus die in ADR-0028 versprochenen Workflow-Punkte; Bibliotheks-Backlog explizit auf Phase 9 verschoben; Tiefenbereich/KI-Masken zurückgestellt
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §5 nennt für Phase 6 wörtlich nur „Masken und
+lokale Anpassungen. Pinsel, Verläufe, Bereichsmasken, Maskenkombination,
+Ebenen-Mischmodi." — das deckt sich mit `SPEC.md` §3.3 bis auf zwei
+Punkte, die dort zusätzlich stehen: Tiefenbereich-Masken (brauchen
+Tiefendaten, die in keiner früheren Phase je erzeugt wurden — keine
+Tiefenschätzung, kein Tiefensensor-Import existiert) und die fünf
+KI-Masken (Motiv/Himmel/Hintergrund/Objekte/Personen — Segmentierung per
+ONNX-Runtime). Letztere sind wörtlich das, was `ARCHITECTURE.md` §7 für
+Phase 7 reserviert („`apx-ai` — ONNX-Runtime-Integration"); sie jetzt
+vorzuziehen hieße, eine komplette Modell-Inferenz-Pipeline parallel zum
+eigentlichen Maskensystem aufzubauen — derselbe Fehler, den ADR-0031 für
+den Preset-Generator vermieden hat.
+
+Daneben tragen zwei Gruppen von `FEATURES.md`-Zeilen bereits die Marke
+„Phase 6", ohne in `SPEC.md` §5s Phase-6-Satz vorzukommen:
+1. Die acht Workflow-Punkte aus §3.4 (Schnappschüsse, Vorher/Nachher,
+   Copy/Paste-Einstellungen, Vorherige übernehmen, Sync, Auto-Sync,
+   Referenzansicht, Soft-Proof) — diese Zuordnung ist kein Versehen,
+   sondern eine **bereits gegebene Zusage**: ADR-0028 hat sie explizit
+   „auf Phase 6 verschoben", nicht generisch „auf später". Ein
+   Versprechen aus einer bereits abgenommenen Phase ohne neue ADR wieder
+   zu brechen wäre derselbe Fehlertyp, den ADR-0026/ADR-0027 an anderer
+   Stelle schon einmal korrigiert haben — hier gilt also das Gegenteil:
+   die Zusage wird eingehalten.
+2. Ein rund ein Dutzend Bibliotheks-Zeilen aus §3.1 (Sammlungssätze/
+   intelligente Sammlungen, Stapel, virtuelle Kopien, erweiterbare
+   Farbmarkierungen, Schlagworthierarchie/-vorschläge/Tag-Regeln,
+   Metadaten-Presets/Stapel-Metadatenbearbeitung/EXIF-IPTC-XMP-Editor/
+   Sidecar-Export, Vergleichs-/Übersichtsansicht, Filter-Presets,
+   Schnellentwicklung im Raster, Vorschau-Cache-Verwaltung/Smart
+   Previews/Offline-Bearbeitung) — anders als Gruppe 1 stammt diese
+   Zuordnung aus **keiner** ADR, die Phase 6 beim Namen genannt hätte;
+   „Phase 6" war hier nur der nächste freie Platzhalter nach Phase 3s
+   Abschluss, kein eingelöstes Versprechen. Alle zusammen wären, grob
+   geschätzt, mindestens so viel Aufwand wie das eigentliche
+   Maskensystem — sie parallel zu bauen würde Phase 6 auf etwa das
+   Dreifache der in `SPEC.md` §5 tatsächlich benannten Arbeit aufblähen.
+
+**Entscheidung:**
+1. **Maskensystem-Kern** (`SPEC.md` §3.3, ohne Tiefenbereich/KI-Masken,
+   siehe Punkt 3) wird vollständig gebaut: Maskentypen Pinsel, Linearer
+   Verlauf, Radialer Verlauf, Farbbereich, Luminanzbereich; Kombination
+   per Hinzufügen/Subtrahieren/Schneiden; echte Ebenen-Mischmodi pro
+   Maske; Maskenverwaltung (Gruppen, Umbenennen, Ein-/Ausblenden,
+   Überlagerungsfarbe, Duplizieren, auf anderes Foto übertragen, als
+   wiederverwendbarer Baustein speichern, Kette mit Drag-&-Drop-
+   Sortierung).
+2. **Pro Maske stehen nur die ton-/farb-/detailbezogenen Werkzeuge zur
+   Verfügung** — Grundeinstellungen, Kurven, HSL, Farbmischer, Color
+   Grading, Details (Schärfung + Rauschreduzierung) — nicht
+   Objektivkorrekturen, Effekte, Kalibrierung, Geometrie oder Reparatur.
+   `SPEC.md` §3.3 sagt zwar wörtlich „alle globalen Regler", aber die
+   ausgenommenen fünf sind strukturell Ganzbild-Operationen (ein
+   Objektiv-Warp oder ein Crop pro Maske separat anzuwenden ergibt
+   pipeline-technisch keinen Sinn — beide ändern bereits laut ADR-0030/
+   der Phase-4-Pipeline-Reihenfolge die Geometrie des *gesamten* Bildes
+   an einer festen Stelle im Ablauf, nicht pro Region) — eine genuine,
+   nicht nur vorgetäuschte Fähigkeit für exakt die Werkzeugklasse, für
+   die regionale Anwendung tatsächlich Sinn ergibt.
+3. **Tiefenbereich-Masken** werden auf eine spätere Phase zurückgestellt
+   (kein Tiefendaten-Zulieferer existiert — das wäre eine komplette
+   Tiefenschätzungs- oder Sensor-Import-Pipeline als Vorprojekt).
+   **KI-Masken** (Motiv/Himmel/Hintergrund/Objekte/Personen) werden auf
+   **Phase 7** verschoben — dort baut `apx-ai` ohnehin erstmals die
+   ONNX-Runtime-Integration auf, die diese Masken als Erstes brauchen.
+4. **Architektur — Ebenenmodell statt Fused-Pass:** die Phase-4-Pipeline
+   bleibt unverändert die Grundlage (`render_rgba8`s feste Stufenfolge,
+   siehe `ARCHITECTURE.md` §8); Masken laufen danach als neue, letzte
+   Gruppe von Stufen, jede Maske sequenziell: (a) Maskenalpha berechnen
+   (Pinsel: akkumulierte Stempel-Textur aus den Pinselstrichen, analog
+   zu `repair.rs`s Pfad-Uniform; Verläufe: analytische Funktion über
+   Position; Farbbereich/Luminanzbereich: Klassifikation pro Pixel), (b)
+   Kombinationsregeln mit vorangehenden Masken derselben Gruppe
+   anwenden, (c) die in der Maske hinterlegten Werkzeuge auf eine Kopie
+   des aktuellen Bildzustands anwenden (derselbe Fused-Pass-Baustein wie
+   Phase 4, nur mit den Masken-EDL-Werten statt den globalen), (d)
+   alpha-gewichtet mit dem gewählten Ebenen-Mischmodus in den
+   Bildzustand zurückmischen. Jede Maske ist damit ein eigener
+   Pipeline-Durchlauf — das 16-ms-Ziel wird bei vielen/komplexen Masken
+   voraussichtlich Grenzen aufzeigen und ist Gegenstand der
+   Abnahme-Schritt-Performance-Nachmessung, genau wie in Phase 2/4.
+   **Nachtrag (Schritt 2, beim Bauen entdeckt):** „nach der
+   Phase-4-Pipeline" war ungenau — Kurven laufen in der globalen
+   Pipeline erst *nach* der Farbraum-Konvertierung auf dem fertigen
+   RGBA8-Puffer, während Grundeinstellungen/HSL/Color Grading/Details im
+   linearen Arbeitsraum *davor* laufen. Da eine Maske alle sechs
+   Werkzeuge in einem Durchlauf anwendet, kann sie nicht an zwei
+   Pipeline-Stellen zugleich sitzen. Präzisierung: die gesamte
+   Maskenstufe läuft im linearen Arbeitsraum, direkt nach `effects` und
+   vor der Farbraum-Konvertierung — Masken-Kurven bekommen dafür eine
+   eigene `curves::apply_linear_rgb`-Funktion (dieselbe LUT, angewendet
+   auf den linearen statt dem display-referred Tonwert), um eine
+   verlustreiche zweite Farbraum-Konvertierung pro Maske zu vermeiden.
+5. **EDL-Schema v3** (`crates/apx-pipeline/src/edl/v3.rs`) statt einer
+   Erweiterung von `EdlV2` — derselbe Grund wie beim v1→v2-Sprung in
+   Phase 4 (`migrate.rs` kennt keine automatische Feldergänzung, siehe
+   ADR aus Phase 4 Schritt 1): `masks: Vec<Mask>` ist ein komplett neues
+   Feld, `v2_to_v3` hebt bestehende `EdlV2`-Daten unverändert an, `masks`
+   startet leer.
+6. **Workflow-Punkte** (ADR-0028-Zusage, siehe Kontext) werden
+   vollständig gebaut: Schnappschüsse (benannte, klickbare EDL-
+   Zwischenstände zusätzlich zum linearen Verlauf), Vorher/Nachher in
+   vier Ansichten, Einstellungen kopieren/einfügen mit granularer
+   Sektionsauswahl (reine Frontend-Logik auf demselben `PresetEdlSubset`-
+   Mechanismus wie Presets — kopiert einfach `developEdl` statt eines
+   gespeicherten Presets), Vorherige übernehmen, Synchronisieren über
+   beliebig viele ausgewählte Fotos, Auto-Sync-Modus, Referenzansicht,
+   Soft-Proof (Zielprofil/Renderpriorität/Farbumfangswarnung/
+   Papierweiß — vereinfacht auf die in `apx-pipeline` bereits
+   vorhandenen Farbraum-Grundlagen, kein vollständiges ICC-
+   Farbmanagement-Subsystem; echte Profilverwaltung wäre ein eigenes
+   Mammutprojekt und ist hier nicht das Ziel).
+   **Nachtrag (Schritt 8, beim Bauen entdeckt):** „ein Schnappschuss ist
+   ein benannter Verweis auf einen bestehenden Verlaufs-Stand" (siehe
+   `PLAN.md`s ursprüngliche Formulierung) war unsicher — ein Blick in
+   `repository/edits.rs::commit` zeigt, dass jede Bearbeitung nach einem
+   Rückgängig die „Zukunft" (Zeilen mit höherer Sequenznummer) hart
+   löscht (ADR-0014). Ein Verweis auf so eine Zeile könnte also
+   verschwinden, sobald man über einen Schnappschuss hinaus weiterarbeitet
+   — das Gegenteil von „zusätzlich zum linearen Verlauf". Präzisierung:
+   eine eigene, kleine `snapshots`-Tabelle mit eigener EDL-Kopie je
+   Schnappschuss statt eines Verweises — kein Restore-Sonderweg nötig,
+   ihr Anwenden ist derselbe `apply_develop_edit`-Aufruf wie jeder andere
+   EDL-Stand.
+
+   **Präzisierung (Schritt 10, beim Bauen entschieden):** Soft-Proof
+   ("kein vollständiges ICC-Farbmanagement-Subsystem", siehe oben) ist
+   als **rein clientseitige Nachbearbeitung** des bereits über die
+   bestehende `develop/...`-Route gerenderten RGBA8-Vorschau-Puffers
+   umgesetzt (`frontend/src/lib/softProof.ts`), nicht als neue
+   Backend-/Pipeline-Stufe — `apx-pipeline` kennt bis heute nur eine
+   feste Kamera→sRGB-Matrix plus Gammakurve, kein ICC-Profil-Laden oder
+   3D-Gamut-Mapping (`crates/apx-pipeline/src/color/mod.rs`), ein neues
+   Backend-Subsystem allein für eine Anzeige-Vorschau wäre unverhältnis-
+   mäßig. Zielprofil/Renderpriorität/Farbumfangswarnung/Papierweiß sind
+   entsprechend Näherungen (Sättigungs-Kompression Richtung Grauwert,
+   Sättigungs-Schwellenwert statt echtem Gamut-Volumen, feste lineare
+   Tonwert-Bereichskompression) — siehe `softProof.ts`s Moduldoku für
+   Details. Betrifft nie den echten Export, nur die Anzeige.
+7. **Bibliotheks-Backlog (Gruppe 2, siehe Kontext) wird explizit auf
+   Phase 9 verschoben, nicht in Phase 6 mitgenommen.** Keine ADR hat
+   Phase 6 für diese Zeilen je zugesagt; sie parallel zum Maskensystem
+   und den acht Workflow-Punkten zu bauen würde diese ohnehin schon
+   große Phase auf einen Umfang aufblähen, der `SPEC.md` §5s eigentlicher
+   Phase-6-Beschreibung nicht mehr entspricht. Phase 9 („Fortgeschrittenes")
+   ist bereits der Sammelpunkt für nachgezogene Reife-Themen (Node-
+   Editor, Stacking, Tethering, Skript-API) und passt strukturell besser
+   als ein weiteres Aufblähen von Phase 6.
+8. **Reparatur-Erweiterungen aus ADR-0028** (Auto-Quellenfindung,
+   Sensorflecken-Visualisierung, inhaltsbasiertes Füllen) werden von
+   ihrer bisherigen `FEATURES.md`-Markierung „Phase 6" auf **Phase 7**
+   verschoben. ADR-0028 hatte sie nur generisch „auf eine spätere Phase"
+   verschoben, ohne Phase 6 beim Namen zu nennen — dieselbe Situation wie
+   bei Gruppe 2, nicht wie bei den acht Workflow-Punkten. Inhaltlich
+   passen sie ohnehin besser zu Phase 7: automatisches Erkennen guter
+   Quellregionen und echtes inhaltsbasiertes Füllen sind PatchMatch-
+   artige Bildanalyse-Algorithmen, dieselbe CV-Kategorie wie die in
+   ADR-0031 nach Phase 7 verschobene Referenzbild-Optimierung.
+
+**Konsequenzen:** `FEATURES.md` §3.3/§3.4-Zeilen werden auf „Phase 6"
+bestätigt bzw. bei Tiefenbereich/KI-Masken auf „zurückgestellt"/„Phase 7"
+korrigiert; die rund ein Dutzend Bibliotheks-Zeilen aus Gruppe 2 werden
+von „Phase 6" auf „Phase 9" umgetaggt. `PLAN.md` bekommt einen neuen
+Abschnitt „Aktuelle Phase: Phase 6" mit feingranularer Schrittfolge,
+analog zu Phase 4/5. `ARCHITECTURE.md` §7s Phase-6-Platzhalterzeile wird
+entsprechend präzisiert (Ebenenmodell statt Fused-Pass, EDL v3, kein
+Tiefenbereich/keine KI-Masken).
+
+---
+
+## ADR-0033: Phase-7-Scope präzisiert — KI-Funktionen ohne echte ONNX-Runtime-Modellinferenz, echter LLM-Client für den Preset-Generator, neues `apx-ai`-Crate
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §5 nennt für Phase 7 wörtlich „KI-Funktionen.
+Motiv-/Himmel-/Personen-Segmentierung (ONNX-Runtime, Modelle lokal),
+Preset-Generator per LLM, Referenzbild-Matching, Auto-Tagging."
+`ARCHITECTURE.md` §7 reservierte dafür bereits wörtlich „`apx-ai` —
+ONNX-Runtime-Integration ..., LLM-Client für Preset-Generator". Zwei
+Teile dieses Satzes sind in dieser Umgebung nicht wie ursprünglich
+vorgesehen umsetzbar:
+
+1. **Echte ONNX-Runtime-Modellinferenz** würde (a) das Bundling
+   tatsächlicher, lizenzrechtlich einwandfreier Segmentierungs-Modell-
+   gewichte voraussetzen — es gibt in dieser Umgebung keinen legitimen
+   Weg, ein trainiertes Motiv-/Himmel-/Personen-Segmentierungsmodell zu
+   beschaffen und mitzuliefern —, und (b) eine native
+   `onnxruntime`-Bibliothek zur Build-Zeit verlinken, was in dieser
+   Sandbox nicht zuverlässig testbar ist (kein bestätigter Zugriffsweg
+   auf vorkompilierte ONNX-Runtime-Binaries). Ein „Bring-your-own-Model"-
+   Pfad (Nutzer liefert eine `.onnx`-Datei) wäre technisch denkbar, aber
+   ohne jedes mitgelieferte oder in dieser Sandbox verifizierbare Modell
+   nur eine ungetestete Hülle — dieselbe Art vorgetäuschter statt echter
+   Fähigkeit, die dieses Projekt durchgehend vermeidet (siehe z. B.
+   ADR-0032 Punkt 4: „eine genuine, nicht nur vorgetäuschte Fähigkeit").
+2. **Ein echter LLM-Client** ist dagegen sehr wohl echt umsetzbar: ein
+   HTTP-Client gegen die Anthropic-Messages-API (`reqwest`, vom Nutzer
+   selbst hinterlegter API-Schlüssel, genau wie jede andere Desktop-App
+   mit KI-Anbindung) ist eine Handvoll Code, braucht kein mitgeliefertes
+   Modell und lässt sich isoliert testen (Prompt-Aufbau/Antwort-Parsing
+   ohne echten Netzwerkaufruf, analog zum bestehenden „kein GPU-Adapter
+   verfügbar"-Überspringen-Muster für Netzwerk-freie CI-Läufe).
+
+**Entscheidung:**
+1. **Neues `apx-ai`-Crate** (`crates/apx-ai`) bündelt alle in diesem
+   Abschnitt beschriebenen Analyse-/Generator-Bausteine — dieselbe
+   „ein Crate pro fachlicher Domäne"-Konvention wie `apx-catalog`/
+   `apx-pipeline`. Abhängigkeiten: `apx-core`, `apx-raw` (für
+   `LinearImage`), `apx-pipeline` (für EDL-Typen + Rendering, nur beim
+   Referenzbild-Modus gebraucht), `apx-catalog` (für „Preset aus
+   Bearbeitung lernen" + Auto-Tagging, beide lesen bestehende
+   Katalogdaten), `reqwest` (LLM-Client, neue Workspace-Abhängigkeit,
+   `rustls-tls`-Feature statt der systemabhängigen OpenSSL-Variante).
+2. **Die fünf KI-Masken** (Motiv/Himmel/Hintergrund/Objekte/Personen)
+   werden über **klassische, deterministische Bildverarbeitungs-
+   heuristiken statt echter tiefer neuronaler Netze** umgesetzt — jede
+   einzelne ist eine echte, funktionierende, unit-getestete Fähigkeit,
+   kein Platzhalter:
+   - **Motiv:** Sättigungs-/Kontrast-gewichtete Saliency-Karte
+     (Center-Surround-Kontrast, ein reales, jahrzehntealtes klassisches
+     Sichtverfahren) als Vordergrund-Wahrscheinlichkeit, geglättet.
+   - **Himmel:** Farbton-/Helligkeits-/Positions-Heuristik (bläulich,
+     geringer lokaler Kontrast, obere Bildhälfte bevorzugt) — dieselbe
+     Art Heuristik, die vor Verbreitung tiefer Netze in echten
+     Foto-Editoren für „Himmel auswählen" verwendet wurde.
+   - **Hintergrund:** Komplement der Motiv-Maske (`1.0 - alpha`) — kein
+     eigener Algorithmus nötig.
+   - **Objekte (Klick-Segmentierung):** Region-Growing/Flood-Fill ab dem
+     Klickpunkt, farbtoleranz-basiert — dieselbe Toleranz-/Weich-
+     zeichnung-Grundidee wie die bereits bestehende Farbbereich-Maske
+     (Phase 6 Schritt 5), hier aber ausgehend von einem Saatpunkt statt
+     einem global über das ganze Bild verglichenen Zielfarbwert.
+   - **Personen:** Hautton-Erkennung im YCbCr-Farbraum (ein reales,
+     weit verbreitetes klassisches Verfahren) als **eine einzelne
+     zusammenhängende Hautregion** — **bewusste Einschränkung:** die in
+     `SPEC.md` §3.3 genannten Einzelregionen (Augen, Brauen, Lippen,
+     Zähne, Haare, Kleidung) werden **nicht** als eigene, einzeln
+     wählbare Teilmasken umgesetzt — echte Gesichts-/Körper-Landmark-
+     Erkennung für diese Feinheit setzt ein trainiertes Modell voraus
+     (siehe Punkt 1).
+   Jede Heuristik läuft serverseitig (Rust, `apx-ai`), niemals
+   clientseitig — konsistent mit dem gesamten Projekt: jede tatsächliche
+   Pixelanalyse lebt in Rust, das Frontend liest nur schon gerenderte
+   Einzelpixel (WB-Pipette/Farbmischer/Maskenfarbbereich).
+3. **Maskengeometrie-Erweiterung:** ein KI-generiertes Ergebnis ist
+   naturgemäß eine Rasterfläche, kein Parameter-Satz wie die fünf
+   bestehenden Geometrietypen — `MaskGeometry` bekommt eine sechste
+   Variante `AiGenerated { kind, width, height, alpha: Vec<u8> }`: eine
+   niedrig aufgelöste (lange Kante auf 512px begrenzt) Alpha-Bitmap,
+   beim Rendern bilinear auf die tatsächliche Zielauflösung hochskaliert
+   — **bewusste Vereinfachung** ggü. den parametrischen Typen (die bei
+   jeder Auflösung exakt neu berechnet werden): geringerer
+   Speicherbedarf als eine volle Auflösung, aber weniger scharfe Kanten
+   bei starker Vergrößerung. Einmal berechnet, bleibt sie bis zu einer
+   erneuten Generierung unverändert (kein Re-Run bei jedem Regler-Tick).
+4. **Reparatur-Erweiterungen** (aus ADR-0032 Punkt 8 bereits auf Phase 7
+   vorgemerkt): Auto-Quellenfindung und Sensorflecken-Visualisierung
+   sind einmalige Analyse-Befehle in `apx-ai` (Patch-Ähnlichkeitssuche
+   per normierter Kreuzkorrelation bzw. Blob-Erkennung per lokaler
+   Kontrast-Anomalie gegen ein weichgezeichnetes Referenzbild) — beide
+   echte, deterministische, testbare Algorithmen. Inhaltsbasiertes
+   Füllen (`RepairMode::ContentAwareFill`) ist dagegen ein *Render-Zeit*-
+   Vorgang (läuft bei jedem Rendering wie Klonen/Reparieren, nicht nur
+   einmalig) und bleibt deshalb in `apx-pipeline::stages::repair`, nicht
+   in `apx-ai` — umgesetzt als vereinfachtes PatchMatch (Zufallsinit +
+   Propagation + Zufallssuche, wenige Iterationen), eine reale, wenn auch
+   gegenüber der vollen PatchMatch-Veröffentlichung reduzierte Fassung
+   (weniger Iterationen, kein Multi-Skalen-Ansatz).
+5. **Preset-Generator:** LLM-Anfrage nutzt einen echten Anthropic-
+   Messages-API-Client (`apx-ai::llm_client`), der Nutzer hinterlegt
+   seinen eigenen API-Schlüssel in den Einstellungen (`apx-core::Settings`
+   bekommt ein neues `AiSettings`-Feld, exakt demselben Speicher-
+   /Lademuster wie `UiSettings`/`CatalogSettings"). Der Prompt beschreibt
+   dem Modell das EDL-Sektionsschema und bittet um eine JSON-Antwort im
+   selben Format wie eine Preset-EDL-Teilmenge — Parsing/Validierung
+   passiert serverseitig, eine unparsbare Antwort führt zu einem
+   Fehler statt eines stillschweigend übernommenen Unsinns-Presets.
+   Referenzbild-Modus (numerische Optimierung, **kein** LLM):
+   Koordinatenabstieg über eine kleine, feste Teilmenge der
+   Grundeinstellungs-Parameter, Zielfunktion = Histogramm-Distanz
+   zwischen gerendertem aktuellen Bild und Referenzbild — bewusst kein
+   Gradientenverfahren über die volle Pipeline (nicht differenzierbar
+   ohne Autodiff-Infrastruktur), sondern ein einfaches, aber echtes
+   Ableitungsfreies Suchverfahren. Variationen-Generator: deterministisch
+   geseedete kleine Störungen eines Basis-Presets. Preset aus Bearbeitung
+   lernen: Mittelwertbildung der committeten EDL-Werte mehrerer vom
+   Nutzer ausgewählter Fotos je EDL-Sektion.
+6. **Auto-Tagging** wird bewusst **regelbasiert statt echter
+   Bildklassifikation** umgesetzt: leitet aus den KI-Masken-Heuristiken
+   aus Punkt 2 (nennenswerte Himmel-/Hautton-Fläche erkannt) plus
+   bereits vorhandenen EXIF-Feldern (ISO/Blende/Brennweite/Zeitstempel)
+   eine kleine, feste Menge an Schlagwort-Vorschlägen ab (z. B. „Himmel",
+   „Person", „Nachtaufnahme", „Makro") — reuse der bestehenden
+   Schlagwort-Infrastruktur aus Phase 3 (`photo_keywords`), kein neues
+   Schema. **Nachtrag:** „Auto-Tagging" stand im `SPEC.md` §5-Satz für
+   Phase 7, hatte aber bislang **keine** eigene `FEATURES.md`-Zeile — eine
+   echte Dokumentationslücke aus Phase 3, hier nachgetragen (§3.1, Phase
+   7) statt stillschweigend übersprungen.
+
+**Konsequenzen:** `FEATURES.md` §3.3 (fünf KI-Masken-Zeilen) und §3.5
+(Preset-Generator-Zeilen) werden von „Nicht begonnen" auf „Fertig
+(abweichend)" umgetaggt, sobald gebaut, mit Verweis auf diese ADR; §3.1
+bekommt eine neue Auto-Tagging-Zeile. `ARCHITECTURE.md` §7s
+Phase-7-Platzhalter wird durch ein neues Kapitel „Architektur Phase 7"
+ersetzt. `PLAN.md` bekommt einen neuen Abschnitt „Aktuelle Phase: Phase 7"
+mit feingranularer Schrittfolge. Tiefenbereich-Masken (siehe ADR-0032
+Punkt 3) bleiben weiterhin ohne Phasenzuordnung zurückgestellt — kein
+Tiefendaten-Zulieferer existiert, das ändert auch diese ADR nicht.
+
+---
+
+## ADR-0034: Phase-8-Scope präzisiert — Export-Engine als gemeinsamer Unterbau, reale Zusatzformate/ICC-Farbmanagement/PDF/SFTP wo machbar, HEIF-/JPEG-XL-Export und Kartenkacheln bewusst zurückgestellt
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §5 nennt für Phase 8 wörtlich „Export und
+Ausgabe-Module. Export-Engine, Warteschlange, Wasserzeichen, dann
+Drucken, Diashow, Buch, Web, Karte." `ARCHITECTURE.md` §7 reservierte
+dafür bislang nur einen Platzhalter. Mehrere frühere ADRs haben
+zusätzlich einzelne `FEATURES.md`-Zeilen ausdrücklich auf Phase 8
+vorgemerkt (ADR-0025: DNG-Konvertierung beim Import; ADR-0031 Punkt 5:
+Export-/Wasserzeichen-/Metadaten-/Layout-/Workflow-Templates +
+Template-Marktplatz-Struktur). Anders als Phase 6/7 ist Phase 8 damit
+kein einzelnes fachliches Thema, sondern sechs weitgehend unabhängige
+Ausgabe-Module (Export-Engine, Drucken, Diashow, Buch, Web, Karte), die
+nur die Export-Engine als gemeinsamen Unterbau teilen. Diese ADR prüft
+für jedes Modul, was in dieser Umgebung tatsächlich echt umsetzbar ist
+(dieselbe Prüfungspflicht wie ADR-0033 für ONNX-Runtime), bevor
+`PLAN.md` die feingranulare Schrittfolge bekommt.
+
+**Vorab durchgeführte Machbarkeitsprüfung** (`cargo add --dry-run`
+gegen den echten crates.io-Index, da direkte HTTP-Anfragen an die
+crates.io-API in dieser Sandbox durch den Proxy blockiert werden):
+`printpdf`, `lcms2`, `suppaftp`, `russh`, `ravif`, `webp`, `libheif-rs`,
+`jxl-oxide`, `psd`, `dng`, `quick-xml`, `geoutils` und
+`reverse_geocoder` lösen alle erfolgreich auf. Kein System-`ffmpeg`
+in dieser Sandbox vorhanden (`command -v ffmpeg` liefert nichts) —
+das sagt nichts über die Zielmaschine der Nutzer aus, ist aber
+Anlass für die Video-Export-Entscheidung unten.
+
+**Entscheidung** (in der von `SPEC.md` §5 vorgegebenen Reihenfolge):
+
+1. **Export-Engine (gemeinsamer Unterbau).** Neues `apx-export`-Crate
+   (dieselbe „ein Crate pro fachlicher Domäne"-Konvention wie
+   `apx-catalog`/`apx-pipeline`/`apx-ai`), hängt von `apx-core`/
+   `apx-raw`/`apx-pipeline`/`apx-catalog` ab. Rendert über den
+   bestehenden `apx_pipeline::develop::render_rgba8`-Pfad (derselbe
+   Renderer wie Vorschau/Viewer — kein zweiter Rendering-Codepfad) und
+   kodiert dann in das Zielformat.
+   - **Formate:** JPEG/PNG/TIFF sind über das bereits vorhandene
+     `image`-Crate abgedeckt (bislang nur zum *Lesen* im
+     Fallback-Importpfad genutzt, Schreib-Features werden hier neu
+     aktiviert). **WebP und AVIF kommen echt dazu** (`ravif` für
+     AVIF-Encoding ist reines Rust, kein Systemabhängigkeit). **PSD-,
+     HEIF/HEIC- und JPEG-XL-Export werden bewusst zurückgestellt:**
+     PSD hat keine ausgereifte Rust-Schreib-Bibliothek (die einzige
+     gefundene, `psd`, ist ein Lese-Parser für Spieleentwicklungs-
+     Pipelines, kein Encoder); HEIF/HEIC-Encoding braucht einen
+     lizenzierten HEVC-Encoder (dieselbe Art Lizenz-/Beschaffungs-
+     mauer wie ONNX-Modellgewichte in ADR-0033 Punkt 1 — `libheif-rs`
+     bindet zwar an `libheif`, aber ohne einen frei redistribuierbaren
+     HEVC-Encoder dahinter bliebe „HEIF-Export" eine Hülle ohne
+     echten Encoder); JPEG XL hat aktuell keinen ausgereiften
+     reinen-Rust-Encoder (`jxl-oxide`, bereits transitive
+     Depenenz von `image` für JPEG-XL-*Decoding*, ist ein Decoder,
+     kein Encoder — echtes Encoding bräuchte `libjxl`-Bindungen).
+     `FEATURES.md`s Formatzeile wird bei Umsetzung entsprechend in
+     „Fertig (abweichend)" mit den drei genannten Ausnahmen
+     umgetaggt statt stillschweigend übersprungen.
+   - **Farbräume/ICC:** **`lcms2` kommt zurück** (war seit Phase 1 in
+     `Cargo.toml`, wurde aber nie verdrahtet und in Phase 2 Schritt 9
+     wieder entfernt, siehe `THIRD_PARTY.md` — Farbtransformation kam
+     bislang mit einer festen Matrix plus Gammakurve aus, Phase 6s
+     Soft-Proof simuliert Zielprofile nur über einen
+     Sättigungs-Kompressionsfaktor statt echter Profile). Diesmal mit
+     echtem Verdrahtungsgrund: eine *exportierte Datei* muss ihr
+     Farbprofil korrekt einbetten (Druckdienstleister/Web-Betrachter
+     werten es aus), eine reine Bildschirmvorschau (Soft-Proof) verzeiht
+     Ungenauigkeit stärker als eine tatsächlich weitergereichte Datei.
+     `lcms2`s `static`-Feature baut Little-CMS aus dem Quellcode statt
+     eine System-Bibliothek vorauszusetzen (dieselbe Bundled-statt-
+     System-Konvention wie `rusqlite`s `bundled`-Feature). Bundle die
+     vier in `SPEC.md` genannten Standardprofile (sRGB/Adobe
+     RGB/ProPhoto RGB/Display P3, feste Primärvalenzen + Tonkurve,
+     dieselben Daten, die Phase 6s Soft-Proof bereits für seine
+     Simulation nutzt) plus einen Dateiauswahl-Dialog für „eigenes
+     ICC" (`lcms2::Profile::new_file`). Phase 6s Soft-Proof bleibt
+     unverändert simuliert (reine Vorschau, kein Umbau nötig) —
+     nur der tatsächliche Datei-Export bekommt echtes Farbmanagement.
+   - **Wasserzeichen:** Bild-/Text-Overlay direkt auf dem gerenderten
+     RGBA8-Puffer vor der Kodierung — Text-Rendering über eine
+     Font-Rasterisierungs-Bibliothek (z. B. `ab_glyph`), kein neues
+     Architekturrisiko.
+   - **Export-Warteschlange:** dieselbe Fortschritts-/Abbruch-Architektur
+     wie der bestehende Import-Job (Phase 1: `tokio`-Task +
+     Tauri-Events fürs Fortschritts-Streaming, `CancellationToken` für
+     Pausieren/Abbrechen) — keine neue Konstruktion, reuse.
+   - **Import mit DNG-Konvertierung:** die `dng`-Bibliothek existiert
+     und löst auf; ihr tatsächlicher Funktionsumfang (reiner Reader
+     oder auch Schreibpfad) wird erst bei der Umsetzung geprüft — falls
+     sie sich als lese-only herausstellt, wird diese eine Zeile
+     zurückgestellt statt das ganze Schritt zu blockieren.
+   - **Bit-Tiefe 8/16, Größenbegrenzung, Ausgabeschärfung nach Medium:**
+     reine Parametrisierung des bestehenden Renderers, kein neues
+     Architekturrisiko.
+
+2. **Drucken.** Reine Layout-/Rastergeometrie (Einzelbild/Kontaktbogen/
+   Bilderpaket/benutzerdefiniertes Raster) über der Export-Engine aus
+   Punkt 1 — „Speichern als JPEG" ist derselbe Exportpfad mit einem
+   Druck-Layout als Eingabe statt eines Einzelbilds. Kein Rust-System-
+   Druckertreiber-Zugriff (CUPS/Windows-Druckdialog) in dieser
+   Phase — Ausgabe ist eine druckfertige Bilddatei, kein direkter
+   Druckauftrag; System-Druckdialog-Integration bliebe, falls je
+   gewünscht, eine spätere Erweiterung.
+
+3. **Diashow.** Übergänge/Ken-Burns/Intro-Outro sind reine Frontend-
+   Canvas-Wiedergabe (dieselbe Art clientseitige Animation wie
+   Phase 6s Vorher/Nachher-Ansicht), kein neues Rust-Crate.
+   Musik-Synchronisation braucht kein Rust-Audio-Crate — das
+   Tauri-Webview-`<audio>`-Element liefert `duration`/Zeitstempel-
+   Events bereits im Browser. **Video-Export (MP4) ruft ein
+   System-`ffmpeg` auf, statt eines mitgelieferten Binaries oder
+   eines reinen-Rust-Encoders** (für H.264/MP4 gibt es keinen
+   praxistauglichen reinen-Rust-Encoder; `ffmpeg` selbst mitliefern
+   hieße, pro Zielplattform ein Binary mit eigener Lizenzprüfung
+   auszuliefern, siehe `THIRD_PARTY.md`s GPL-Ausnahme-Regel). Beim
+   Start wird `ffmpeg -version` per `std::process::Command` geprüft
+   — vorhanden: echter Video-Export über einen echten Encoder; fehlt
+   es: eine klare, umsetzbare Fehlermeldung („ffmpeg installieren"),
+   keine stillschweigend leere Funktion. Dieselbe Holen-und-notfalls-
+   ehrlich-scheitern-Vorgehensweise wie diese Umgebung selbst für
+   `ANTHROPIC_API_KEY`/Cargo-Registry-Zugriff verwendet.
+
+4. **Buch.** Seitenlayouts/Vorlagen/Text-Stile als datengetriebene
+   Layout-Engine (Raster + konfigurierbare Slots), derselbe deklarative
+   Aufbau wie das Masken-/Preset-System. **PDF-Export ist echt
+   umsetzbar** über `printpdf` (reines Rust, MIT-Lizenz, keine
+   System-Bibliothek). Druckerei-Presets sind reine Parametersätze
+   (Beschnitt/Farbprofil/Auflösung je Anbieter), keine neue Fähigkeit.
+
+5. **Web.** HTML-/responsiver Galerie-Generator ist serverseitiges
+   Rust-Templating (Miniaturbilder über den bestehenden
+   `image`-Verkleinerungspfad aus dem Import-Thumbnail-Schritt, Phase 1).
+   **FTP/SFTP-Upload ist echt umsetzbar:** `suppaftp` (FTP/FTPS) und
+   `russh` + `russh-sftp` (reines Rust SSH/SFTP, keine
+   OpenSSL-/libssh2-Systemabhängigkeit, dieselbe Bevorzugung reiner
+   Rust-Implementierungen wie `rustls` an anderer Stelle im Projekt).
+
+6. **Karte.** GPS-Auslesen aus EXIF ist eine Erweiterung des
+   bestehenden Metadaten-Pfads (`kamadak-exif`/`rawler` lesen GPS-Tags
+   bereits mit, bislang nur ungenutzt durchgereicht). **Reverse
+   Geocoding bleibt vollständig offline**: `reverse_geocoder` bündelt
+   einen GeoNames-Städte-Datensatz und braucht keinen Online-Dienst —
+   dieselbe Offline-zuerst-Haltung wie der Rest der App. **Bewusste
+   Einschränkung, einzige Ausnahme von „offline zuerst" in dieser
+   Phase:** die eigentliche Kartenansicht (Kachel-Bilder) ist ein
+   Frontend-Feature (z. B. Leaflet.js gegen OpenStreetMap-Kacheln) und
+   braucht zum *Anzeigen* der Hintergrundkarte eine Internetverbindung
+   — ein weltweiter Offline-Kachelsatz wäre unverhältnismäßig groß;
+   ohne Netzwerk bleiben die GPS-Koordinaten/Ortsschlagworte trotzdem
+   nutzbar, nur ohne Kartenbild. GPX-Tracklog-Import ist einfaches
+   XML-Parsing (`quick-xml`). Reiserouten-Ansicht leitet sich aus
+   GPS-getaggten Fotos nach Aufnahmezeit sortiert ab, reine
+   Frontend-Darstellung ohne neues Backend-Risiko.
+
+**Konsequenzen:** `PLAN.md` bekommt einen neuen Abschnitt „Aktuelle
+Phase: Phase 8" mit feingranularer Schrittfolge in der oben
+begründeten Reihenfolge (Export-Engine zuerst als Unterbau, danach
+Drucken/Diashow/Buch/Web/Karte, exakt wie `SPEC.md` §5 sie nennt).
+`FEATURES.md`s Phase-8-Zeilen bleiben bis zur jeweiligen Umsetzung
+„Nicht begonnen" — keine Korrektur nötig, sie waren bereits vollständig
+und korrekt getaggt (inkl. der Export-Warteschlange-Zeile). PSD-/
+HEIF-/JPEG-XL-Export und echte System-Druckdialog-Integration bleiben
+ohne Phasenzuordnung zurückgestellt, bis eine lizenzrechtlich/technisch
+tragfähige Bibliothek verfügbar ist.
+
+---
+
+## ADR-0035: Phase-9-Scope präzisiert — drei angesammelte Rückstände zusammengeführt, elf „bewusste Vereinfachung"-Grenzen für die technisch schwierigsten Punkte festgelegt, Tiefenbereich-Masken bleiben ausgenommen
+
+**Status:** Angenommen
+**Kontext:** `SPEC.md` §5 nennt für Phase 9 wörtlich „Fortgeschrittenes:
+Node-Editor, Panorama/HDR/Fokus-Stacking, Tethering, Skript-API,
+Plugin-System" (ergänzt um §3.6 „Zusätzliche Module": Astro-Stacking,
+Stapelverarbeitungs-Konsole, Vergleichs-Grid, Zeitleisten-Ansicht,
+Verlaufs-Vergleich, Kollaborationsmodus — zwölf Punkte in Summe). Über
+die Phasen 3–8 hinweg haben mehrere frühere ADRs zusätzlich einzelne
+`FEATURES.md`-Zeilen ausdrücklich auf Phase 9 vorgemerkt, statt sie in
+der jeweils laufenden Phase mitzubauen:
+
+- **ADR-0032** (Phase-6-Scope) verschob das komplette
+  „Bibliotheks-Backlog" aus `SPEC.md` §3.1 nach Phase 9 — vierzehn
+  Punkte (Perceptual-Hash-Duplikaterkennung/-Assistent,
+  Sammlungssätze/intelligente Sammlungen, Stapel, virtuelle Kopien,
+  erweiterbare Farbmarkierungen, Schlagworthierarchie, Metadaten-
+  Presets/EXIF-IPTC-XMP-Editor/Sidecar-Export, Vergleichs-/
+  Übersichtsansicht, Personenansicht, Filter-Presets, Schnellentwicklung
+  im Raster, Vorschau-Cache/Smart Previews, Sekundäres Display,
+  Katalog-Statistik-Dashboard) — mit der ausdrücklichen Begründung,
+  dass keine ADR diese Punkte je Phase 6 zugesagt hatte und ihre
+  Mitnahme Phase 6 auf etwa das Dreifache von `SPEC.md` §5s tatsächlicher
+  Phase-6-Zeile aufgebläht hätte.
+- **ADR-0031 Punkt 3/5** verschob Adobe-`.xmp`/`.lrtemplate`-Interop
+  sowie Export-/Wasserzeichen-/Metadaten-/Layout-/Workflow-Templates
+  nach Phase 8–9 (Letztere sind mit Phase 8 Schritt 8 bereits erledigt,
+  Erstere bleibt offen — eine Einzelzeile).
+- **Ein expliziter Nutzerwunsch** während Phase 8 (Vergleich mit einem
+  Lightroom-Classic-Screenshot) ergänzte elf weitere UI-nahe
+  Entwickeln-/Anzeige-Fähigkeiten, die weder in `SPEC.md` noch bislang
+  in `FEATURES.md` vorkamen (Live-Histogramm, Clipping-Warnungen,
+  Punktfarbmesser, Zielgerichtetes Anpassungswerkzeug, Schwarzweiß-
+  Mixer, Auto-Ton/Auto-Weißabgleich, Navigator-Miniaturansicht,
+  KI-Entrauschung, KI-Hochskalierung, Info-Overlay, Bearbeitungs-Pins)
+  — bereits als eigener Backlog-Abschnitt in `PLAN.md`/`FEATURES.md`
+  §3.2 vorgemerkt, aber ausdrücklich noch ohne eigene Scope-Präzisierung
+  (siehe dortiger Hinweis: „Phase 9 ist noch nicht die aktuelle Phase").
+
+Macht zusammen **38 Einzelpunkte** — mehr als Phase 6+7+8 zusammen. Der
+Nutzer hat ausdrücklich gebeten, alle 38 jetzt vollständig zu planen und
+umzusetzen, statt weiter aufzuschieben. Diese ADR übernimmt für die
+technisch schwierigsten Punkte dieselbe Prüfungspflicht wie ADR-0033
+(ONNX-Runtime) und ADR-0034 (Formats-/Bibliotheks-Machbarkeit), bevor
+`PLAN.md` die feingranulare Schrittfolge bekommt.
+
+**Vorab durchgeführte Machbarkeitsprüfung** (`cargo add --dry-run`
+gegen den echten crates.io-Index bzw. `npm view` gegen den echten
+npm-Registry-Index, dieselbe Methode wie in ADR-0034): `rhai` (reines
+Rust, sandboxed, aktiv gepflegt), `libloading`, `rustfft`, `imageproc`
+und `gphoto2` (LGPL-2.1, bindet an System-`libgphoto2`) lösen alle
+erfolgreich auf. `@xyflow/react` (React Flow, aktueller Paketname)
+löst im npm-Registry auf. `opencv`-Bindings lösen zwar in Cargo auf,
+brauchen aber eine System-OpenCV-Installation, die in dieser Sandbox
+nicht vorhanden ist — dasselbe Problemmuster wie ONNX Runtime in
+ADR-0033. `libgphoto2` (für Tethering) ist in dieser Sandbox ebenfalls
+nicht installiert, und anders als bei `ffmpeg` (ADR-0034 Punkt 3, wo
+zumindest ein „ist installiert oder nicht"-Laufzeitcheck möglich ist)
+fehlt hier sogar die Systembibliothek zum *Kompilieren* mit aktiviertem
+Feature.
+
+**Entscheidung:** Alle 38 Punkte bleiben Phase-9-Scope, aufgeteilt in
+zwölf Bauschritte (`PLAN.md` Schritt 1–12) plus diesen Scope-Schritt
+(Schritt 0) — Reihenfolge unten richtet sich danach, was aufeinander
+aufbaut (Bibliothek vor Stacking, das dieselbe `stacks`/`virtual_copies`-
+Schema braucht) und was das geringste Risiko trägt (reine
+Analyse-/Anzeige-Erweiterungen zuerst, Architekturrisiko-Punkte
+zuletzt). Für die technisch schwierigsten Punkte gilt je eine bewusste
+Vereinfachung, die hier bindend festgehalten wird (Details/Begründung
+je Punkt in `PLAN.md`s Schritt-Text):
+
+1. **Node-Editor** zeigt und schaltet die bestehende, fest verdrahtete
+   Rendering-Reihenfolge (`apx_pipeline::develop::render_rgba8`) —
+   keine frei umbaubare oder verzweigende Ausführungsgraph-Engine, weil
+   das die Renderpfad-Garantie brechen würde, auf die jedes andere
+   Modul (Viewer, Export, Masken) angewiesen ist. Technisch: neues
+   `EdlV4`-Schema mit einem `enabled: bool`-Feld pro Pipeline-Stufe,
+   `v3_to_v4`-Migration, `@xyflow/react` im Frontend.
+2. **Panorama-/Astro-Stacking** beschränken sich in v1 auf reine
+   Verschiebungs-Registrierung per 2D-Phasenkorrelation (`rustfft`,
+   Stativ-/gleicher-Blickpunkt-Annahme) — echtes merkmalsbasiertes
+   Homographie-Stitching für Freihand-/gedrehte Aufnahmen bleibt
+   zurückgestellt, weil `opencv` eine fehlende Systembibliothek
+   voraussetzt und keine verifizierte, ausgereifte reine-Rust-
+   Merkmalserkennungs-plus-RANSAC-Pipeline existiert. Fokus-Stacking
+   (Laplacian-Schärfe-Auswahl über bereits ausgerichtete Frames) und
+   HDR-Merge (Debevec-Gewichtung + Reinhard-Tonemap) brauchen dagegen
+   keine Ausrichtungs-Bibliothek und werden vollständig gebaut.
+3. **Skript-API + Plugin-System:** „stabile ABI" heißt eine
+   handgepflegte, versionierte `#[repr(C)]`-Funktionszeiger-Tabelle für
+   genau einen festen Erweiterungspunkt (eine Bildoperationsstufe) plus
+   eine schmale, primitiv-typisierte `rhai`-Skript-API — **keine**
+   Zusage, dass beliebige künftige interne Rust-Strukturen dauerhaft
+   binärkompatibel bleiben (Rust selbst hat keine stabile ABI). Eine
+   Versions-Fehlpassung wird beim Laden hart mit klarer Fehlermeldung
+   abgelehnt statt still falsch zu kompilieren.
+4. **Kollaborationsmodus** bleibt ein asynchroner Export→Weitergabe→
+   Import→Konfliktauflösung-Ablauf über eine neue `.apxt`-artige
+   `ApxShareFile` (Metadaten/EDL/Presets, keine Pixel-Bytes) — kein
+   Echtzeit-Mehrbenutzer-Modus (kein Live-Cursor/keine Präsenz/kein
+   CRDT/keine Netzwerksynchronisation), weil sich Letzteres in dieser
+   Sandbox ohne zweiten echten Nutzer und ohne Mehrbenutzer-
+   Serverinfrastruktur nicht verifizieren lässt. `apx-catalog` bleibt
+   dabei unverändert ein einzelner `Mutex<Connection>` (ADR-0008).
+5. **Tethered Shooting:** die `gphoto2`-Anbindung (LGPL-2.1, braucht
+   eine `THIRD_PARTY.md`-Ausnahme wie bereits bei `rawler`) wird hinter
+   einem standardmäßig ausgeschalteten Cargo-Feature `tethering` real
+   geschrieben (`TetherBackend`-Trait, echtes `Gphoto2Backend` plus ein
+   `FakeBackend` für alle normalen Tests) — **über ADR-0034s
+   ffmpeg-Präzedenzfall hinaus bewusst eingeschränkt:** die echten
+   libgphoto2-FFI-Aufrufe sind nie gegen eine echte Kamera oder auch
+   nur eine installierte `libgphoto2`-Bibliothek ausführbar, weil
+   Letztere in dieser Sandbox und im Standard-CI schlicht fehlt — nicht
+   einmal ein „unerreichbarer Server"-Fehlerpfad wie bei FTP/SFTP
+   (ADR-0034 Punkt 5) ist hier testbar. `FEATURES.md` muss diese Lücke
+   explizit benennen, nicht verschweigen.
+6. **KI-Entrauschung/KI-Hochskalierung** verwenden dieselbe
+   Ehrlichkeitslinie wie ADR-0033: klassische, deterministische
+   Algorithmen (kantenerhaltender Bilateral-Filter statt echter
+   neuronaler Entrauschung, kantengerichtete Interpolation statt echter
+   Modell-Superresolution) statt einer vorgetäuschten Modellinferenz —
+   das ungelöste ONNX-Beschaffungsproblem aus ADR-0033 besteht
+   unverändert fort. Die UI-Beschriftung darf an diesen zwei Stellen
+   nicht „KI"/„AI" implizieren, wo keine Modellinferenz läuft.
+7. **Personenansicht (Gesichtserkennung)** nutzt dieselbe Art
+   klassischer Heuristik wie die Phase-7-KI-Masken (Hautton-/
+   Kontur-Erkennung im YCbCr-Raum, grobe Ähnlichkeitsgruppierung) statt
+   echter Gesichts-Embeddings — dieselbe ONNX-Beschaffungslage.
+8. **Adobe-`.xmp`/`.lrtemplate`-Interop** bekommt ein eigenes,
+   dokumentiertes Mapping `EdlV3` ↔ Adobe-Parameternamen; welche Felder
+   verlustfrei und welche nur best-effort übersetzbar sind (Adobes
+   proprietäre Kurven-/Masken-Repräsentation ist nicht vollständig
+   offen dokumentiert), wird bei Umsetzung explizit in `FEATURES.md`
+   festgehalten, nicht stillschweigend als „Fertig" verbucht.
+
+**Explizit ausgenommen:** Maskentyp Tiefenbereich (`FEATURES.md`,
+weiterhin „Später zurückgestellt", siehe ADR-0032 Punkt 3) — kein
+Tiefendaten-Zulieferer existiert irgendwo im Projekt, jede Umsetzung
+wäre erfunden statt real. Bleibt ohne Phasenzuordnung, bis eine
+Tiefendatenquelle auftaucht.
+
+**Konsequenzen:** `PLAN.md` bekommt einen neuen Abschnitt „Aktuelle
+Phase: Phase 9" mit zwölf Bauschritten in der oben begründeten
+Reihenfolge (Bibliothek zuerst als Fundament für Stacking, dann
+Entwickeln-Erweiterungen nach Risiko sortiert, dann die sechs
+SPEC-§5/§3.6-„Fortgeschrittenes"-Themen). `FEATURES.md`s Phase-9-Zeilen
+bleiben bis zur jeweiligen Umsetzung „Nicht begonnen" — keine Korrektur
+nötig, beide Recherchen vor dieser ADR bestätigen, dass sie bereits
+vollständig und korrekt getaggt sind. Jeder Bauschritt wird einzeln
+committet und gepusht, mit schlanken statt erschöpfenden Tests je
+Schritt (Projektkonvention seit Phase 8) — keine wiederholten vollen
+Testsuiten-Läufe zwischen den Schritten.
+
+---
+
+## ADR-0036: Phase-9-Abnahme (Schritt 12) — Stapelverarbeitungs-Konsole war in ADR-0035s Scope-Aufzählung, bekam aber nie einen Bauschritt; bleibt explizit zurückgestellt statt nachträglich überstürzt angeflanscht
+
+**Status:** Angenommen
+**Kontext:** Beim Abnahme-Durchgang (`PLAN.md` Schritt 12) fiel auf: Die
+„Stapelverarbeitungs-Konsole" (`SPEC.md` §3.6: „Regeln auf Tausende
+Bilder anwenden, mit Vorschau der betroffenen Menge, Trockenlauf,
+Rückgängig-Machen der gesamten Aktion") steht in ADR-0035s Aufzählung
+der sechs SPEC-§3.6-„Zusätzliche Module" (zusammen mit Astro-Stacking,
+Vergleichs-Grid, Zeitleisten-Ansicht, Verlaufs-Vergleich,
+Kollaborationsmodus) — bekam aber, anders als die anderen fünf, **nie**
+einen eigenen Bauschritt in `PLAN.md`s Schritt-für-Schritt-Plan (Schritt
+1–11). Eine Lücke im Schritt-0-Zuschnitt selbst, kein Ausrutscher bei
+der Umsetzung eines vorhandenen Schritts — dieselbe Kategorie Fehler wie
+die in Schritt 11 nachgetragenen `THIRD_PARTY.md`-Zeilen, nur auf der
+Planungs- statt der Dokumentationsebene.
+
+**Abwägung:** Der Nutzer hat für diese Runde ausdrücklich verlangt, die
+Phase vollständig abzuschließen, nicht abzubrechen. Trotzdem wird diese
+Lücke hier **nicht** durch eine nachträglich in Schritt 12
+hineingequetschte Implementierung geschlossen: Ein ehrliches
+„Rückgängig-Machen der gesamten Aktion" für eine Stapelverarbeitungs-
+Konsole bräuchte einen neuen, feldübergreifenden Batch-Operationen-
+Log (nicht nur `edit_history` je Foto, sondern eine Journalstruktur über
+beliebige Katalogmutationen — Bewertung, Schlagworte, Metadaten,
+Löschen — mit Gruppierung „gehört zu Aktion X" und einem echten
+Undo-Pfad dafür). Das ist derselbe Umfang wie ein eigener Bauschritt,
+kein Dokumentations-Anhängsel — eine überstürzte Version ohne echtes
+Batch-Undo (z. B. nur eine Vorschau-Anzeige ohne Rückgängig-Funktion)
+würde eine Fähigkeit vortäuschen, die nicht vollständig da ist, exakt
+das, was `PLAN.md`/`DECISIONS.md` an anderer Stelle konsequent vermeidet
+(siehe z. B. ADR-0033, ADR-0035 Punkt 6).
+
+**Entscheidung:** Stapelverarbeitungs-Konsole bleibt in `FEATURES.md`
+explizit „Zurückgestellt" (nicht „Nicht begonnen" — das würde die
+fehlende Schrittzuordnung verschleiern), mit Verweis auf diese ADR.
+Kein neuer Bauschritt in dieser Phase; bei Bedarf eigener Schritt in
+einer späteren Phase, sobald ein Batch-Operationen-Log tatsächlich
+gebraucht wird (z. B. wenn ein weiteres Feature eine Undo-fähige
+Gruppierung mehrerer Katalogmutationen voraussetzt).
+
+**Konsequenzen:** Alle anderen 37 der 38 in ADR-0035 aufgezählten Punkte
+sind mit Schritt 11 vollständig umgesetzt (bzw. mit dokumentierter
+bewusster Vereinfachung, siehe ADR-0035 Punkte 1–8) — Phase 9 gilt mit
+dieser einen, hier explizit benannten und begründeten Ausnahme als
+abgeschlossen.
+
+---
+
+## ADR-0037: Phase-10-Scope — drei Phase-3/5-UI-Restposten reingezogen, Testdisziplin für diese Phase nutzerangeordnet gelockert, ehrliche Grenzen bei Installer-Signierung
+
+**Status:** Angenommen
+**Kontext:** Der Nutzer hat Phase 10 („Politur", `SPEC.md` §5: Performance-
+Profiling gegen die Ziele aus §2.4, Barrierefreiheit, Lokalisierung DE/EN,
+Onboarding, Installer und Signierung für alle drei Plattformen) angewiesen,
+mit zwei ausdrücklichen Vorgaben: (1) erst ein vollständiger Plan, dann alle
+Schritte ohne Zwischenstopp — dieselbe Disziplin wie Phase 9; (2) Fokus vor
+allem auf die UI, nicht auf weitere Tests, mit nur einer vollen Testsuite
+am Ende statt der sonst pro Schritt üblichen.
+
+**Entscheidung 1 — Scope-Erweiterung um drei UI-Restposten:** Drei
+`FEATURES.md`-Zeilen standen noch auf Phase 3/5, wurden dort aber nie
+angefasst: rechte Werkzeug-Palette/Modul-Umschalter oben (Phase 3),
+ein-/ausklappbare/breitenziehbare Paletten mit Arbeitsbereich-Preset
+(Phase 3), vollständige Befehlspalette (Phase 5, bisher nur
+Ordner+ein Befehl). Alle drei sind reine UI-Arbeit und passen exakt zum
+Auftrag „vor allem UI" — sie werden analog zu ADR-0032 (das
+Bibliotheks-Backlog von Phase 6 nach Phase 9 verschob) in Phase 10 gezogen,
+statt sie ein drittes Mal auf eine noch spätere Phase zu vertagen.
+
+**Entscheidung 2 — Testdisziplin gelockert, nur für diese Phase:**
+`PLAN.md` §6 verlangt normalerweise „Jedes Rust-Modul mit Unit-Tests …
+E2E-Test pro Modul" pro Schritt. Auf ausdrücklichen Nutzerwunsch schreibt
+Phase 10 **pro Schritt keine neue Testdatei** — nur `cargo build`/`tsc -b`
+als Kompilier-Kontrolle. Die volle Suite (`cargo fmt/clippy/test`,
+`tsc -b`, `vitest run`, volle Playwright-Suite) läuft einmalig am Ende
+(Schritt 12) gegen den gesamten in dieser Phase entstandenen Stand. Das ist
+eine bewusste, befristete Ausnahme von der sonst verbindlichen Regel — sie
+gilt nicht rückwirkend für Phase 1–9 und nicht automatisch für Phase 11+,
+falls es eine gibt.
+
+**Entscheidung 3 — Installer/Signierung ehrlich begrenzt:** Diese
+Linux-Sandbox besitzt keine echten Code-Signing-Zertifikate (Apple
+Developer ID + Notarisierungs-Zugangsdaten, Windows-Codesigning-Zertifikat)
+und kann sie nicht beschaffen — dieselbe Beschaffungslage wie
+`libgphoto2` (ADR-0035 Punkt 5) oder die fehlende ONNX-Runtime
+(ADR-0033). Schritt 11 baut die strukturelle Infrastruktur (Tauri-
+Bundler-Konfiguration, `@tauri-apps/cli`, ein neuer CI-`release`-Job auf
+dem bestehenden 3-OS-Matrix, Signierungsfelder aus optionalen
+GitHub-Secrets gespeist, übersprungen statt fehlschlagend, wenn sie
+fehlen) — produziert aber in dieser Umgebung **unsignierte** Installer.
+Echtes Signieren bleibt dem Nutzer vorbehalten, sobald eigene
+Zertifikate/Secrets hinterlegt sind. Cross-Plattform-Bundling
+(macOS-/Windows-Installer von Linux aus) wird nicht lokal versucht — die
+Verifikation läuft ausschließlich über die drei echten nativen CI-Runner.
+
+**Konsequenzen:** `FEATURES.md`s Phase-10-Zeilen wachsen um die drei
+umgetaggten Punkte. Performance-Profiling (Schritt 10) liefert eine
+dokumentierte Einschätzung gegen die in dieser Sandbox tatsächlich
+messbaren Teilziele statt spekulativer Umbauten ohne Befund — dieselbe
+Grenze wie die fehlenden Golden-Image-RAW-Tests (ADR-0007). Lokalisierung
+(Schritt 8) deckt systematisch alle Frontend-Komponenten ab, aber ohne
+einen dafür geschriebenen Coverage-Test ist einzelne übersehene Strings
+nicht mit Sicherheit ausgeschlossen — als offener, dokumentierter Rest
+statt stillschweigend behauptet.
+
+---
+
+## ADR-0038: Phase 11 — Nachträge zu allen zurückgestellten Punkten aus Phase 1–10; vier neu verfügbare Crates real geprüft (drei brauchbar, eine als Fassade entlarvt), `libgphoto2` ist entgegen ADR-0035 tatsächlich per `apt` verfügbar
+
+**Status:** Angenommen
+**Kontext:** Der Nutzer hat angewiesen, alle bisher zurückgestellten Punkte
+aus Phase 1–10 aufzuarbeiten — mit der ausdrücklichen Vorgabe, für jeden
+Punkt neu zu prüfen, ob er inzwischen technisch machbar ist, statt ihn
+unangetastet zu lassen (dieselbe Disziplin, mit der dieses Projekt schon
+mehrfach Crate-Landschaften neu geprüft statt Annahmen fortgeschrieben
+hat). `FEATURES.md` listete zu Beginn dieser Runde neun offene
+Checkbox-Zeilen; dazu kommen vier in der Phase-10-Abnahme selbst benannte
+Lücken.
+
+**Dokumentationsfehler gefunden und korrigiert:** `FEATURES.md` Zeile 239
+führte „Adobe `.xmp`/`.lrtemplate`-Import/Export" noch als „Nicht begonnen",
+obwohl `apx_export::xmp` (`crates/apx-export/src/xmp.rs`, gebaut in Phase 9
+Schritt 2) den `.xmp`-Teil (Adobe `crs:`-Entwickeln-Einstellungen: Basic+HSL,
+echt bidirektional per `generate_xmp`/`parse_xmp_develop_settings`, über
+`import_xmp_develop_settings`/`import_xmp_sidecar_from_file` bis ins
+Frontend verdrahtet) bereits vollständig abdeckt. Nur der separate
+`.lrtemplate`-Teil (Lightrooms eigenes, nicht offiziell dokumentiertes
+Vorlagenformat) war tatsächlich noch offen — die Zeile wurde entsprechend
+präzisiert statt pauschal als „Nicht begonnen" stehen zu lassen.
+
+**Crate-Spikes** (`cargo add --dry-run` + realer Testbau in einem
+Wegwerf-Projekt, kein Produktivcode betroffen):
+1. **`gamut-dng`** (1.0.0, MIT/Apache-2.0) — kompiliert sauber, reines Rust,
+   `DngEncoder`/`DngDecoder` mit vollständiger Builder-API. Zum Zeitpunkt
+   von ADR-0034 (Phase 8) gab es keine schreibfähige DNG-Crate; diese
+   existiert jetzt. **Brauchbar** — siehe Schritt 1.
+2. **`gamut-jxl`** (0.4.0, MIT/Apache-2.0, Encode-Feature) — kompiliert,
+   aber nicht reines Rust: `gamut-jxl-sys` vendort und baut die
+   Referenz-C-Bibliothek `libjxl` (Lizenz BSD-3-Clause) selbst über
+   `cmake`/`cc` zur Bauzeit (kein System-`apt`-Paket nötig, aber ein
+   spürbar schwererer Build, ca. 1,5 Minuten allein für diese eine
+   Abhängigkeit in der Spike-Messung). **Brauchbar, aber teurer** — siehe
+   Schritt 2.
+3. **`ag-psd`** (0.2.0, MIT) — kompiliert sauber, reines Rust, „from-scratch
+   Rust port" der TypeScript-`ag-psd`-Bibliothek, `write_psd(&Psd,
+   &WriteOptions) -> Vec<u8>` als klare Top-Level-API. **Brauchbar** —
+   siehe Schritt 2.
+4. **`heif`** (0.1.0) — laut Beschreibung „A HEIF file decoder and encoder
+   written from scratch", tatsächlich aber ein reserviertes Fassaden-Paket:
+   `src/lib.rs` ist 14 Zeilen lang und enthält ausschließlich `cargo new`s
+   Standard-Vorlage (`pub fn add(left, right) -> u64`). **Nicht brauchbar**
+   — bestätigt, warum dieses Projekt Beschreibungen nie ungeprüft
+   übernimmt. `heif-rs` (26.7.0, „statically-linked libheif") wurde
+   testweise ebenfalls hinzugefügt: zieht über 190 Pakete nach, darunter
+   `bindgen` (braucht `libclang`), einen kompletten `image`-Crate-Formats-
+   Rattenschwanz (`gif`/`exr`/`zip`/…) und `ureq` (HTTP-Client — unklar,
+   wofür ein Bild-Codec Netzwerkzugriff bräuchte) — derselbe Beschaffungs-
+   Risikograd wie ONNX Runtime/`opencv` an anderer Stelle im Projekt, bei
+   nur 6 GB freiem Speicher in dieser Sandbox nicht vertretbar zu bauen.
+   **HEIF-Export bleibt zurückgestellt**, wie schon in ADR-0034.
+5. **`libgphoto2-dev`** ist entgegen der in ADR-0035 getroffenen Annahme
+   („auf keinem der drei CI-Runner installiert") tatsächlich per `apt-get`
+   installierbar (`apt-cache policy` zeigt Version 2.5.31-2.1ubuntu1.1
+   verfügbar) — die ADR-0035-Aussage war für diese Sandbox richtig
+   *behauptet*, aber nie tatsächlich mit `apt-cache policy` verifiziert
+   worden. Siehe Schritt 10: das `tethering`-Feature kann jetzt real
+   kompiliert und sein Verbindungs-Fehlerpfad ohne physische Kamera echt
+   getestet werden.
+
+**Entscheidung:** Phase 11 bündelt alle neun `FEATURES.md`-Zeilen plus die
+vier Phase-10-Lücken plus die eine gefundene Dokumentationskorrektur in
+13 Bauschritten (0–12), mit der normalen, vollen Testdisziplin aus
+`PLAN.md` §6 (die Lockerung aus ADR-0037 galt ausdrücklich nur für
+Phase 10). Für PSD/JPEG-XL/DNG werden die oben real geprüften Crates
+verwendet; für HEIF, echte Zertifikats-Signierung, echte GPU-Performance
+und echte neuronale Modellinferenz bleiben die bereits in ADR-0033/-0034/
+diesem Plan dokumentierten Grenzen unverändert bestehen — kein
+Software-Trick ersetzt fehlende Hardware, ein fehlendes Zertifikat oder
+ein nicht beschaffbares Modell.
+
+**Nachtrag nach Schritt 4 — Testdisziplin nutzerseitig erneut gelockert:**
+der Nutzer hat nach Abschluss von Schritt 3 angewiesen, ab Schritt 4 nur
+noch maximal einen Test pro Schritt zu schreiben und die vollständige
+Verifikationskette (`cargo fmt/clippy/test --workspace`, `tsc -b`, volle
+Vitest-/Playwright-Suite) nicht mehr nach jedem einzelnen Schritt,
+sondern erst einmalig am Ende in Schritt 12 laufen zu lassen — dieselbe
+Lockerung wie in ADR-0037 für Phase 10, nur diesmal ausdrücklich auch für
+Phase 11 (Schritte 4–11) angeordnet, statt wie oben ursprünglich
+festgehalten strikt auf Phase 10 begrenzt. Schritte 0–3 liefen noch mit
+der vollen, oben beschriebenen Disziplin; ab Schritt 4 gilt: pro Schritt
+ein gezielter Test (Rust-Unit- oder Playwright-Test, je nachdem, welcher
+den Kern der Änderung am direktesten abdeckt) plus ein gezielter
+Kompilier-/Typprüf-Lauf des geänderten Codes (kein vollständiger
+Testlauf) vor Commit+Push.
+
+**Nachtrag nach Schritt 7 — Plan-Abweichung `apx_ai::depth_estimate`:**
+der Plan sah die Laplace-Varianz-Schärfeheuristik für den neuen
+`BlurDepthApprox`-Maskentyp in `apx_ai::depth_estimate::
+relative_sharpness_map` vor. Tatsächlich implementiert wurde sie
+stattdessen direkt in `apx-pipeline::stages::masks` (wie
+`color_range_alpha`/`luminance_range_alpha`) — `apx-ai` hängt von
+`apx-pipeline` ab (siehe dessen `Cargo.toml`), eine Abhängigkeit in die
+umgekehrte Richtung wäre ein Zyklus gewesen. `MaskGeometry::
+BlurDepthApprox { threshold: f32 }` wird wie `ColorRange`/
+`LuminanceRange` live pro Render berechnet, nicht als vorab in `apx-ai`
+gebackene Alpha-Bitmap (anders als `AiGenerated`) — deshalb passt die
+Eigenständigkeit in `apx-pipeline` auch inhaltlich besser als ein
+Umweg über `apx-ai`.
+
+**Nachtrag nach Schritt 11 — Phase-10-Nachträge, mit einer weiteren
+ehrlichen Grenze bei der Installer-Signierung:**
+- **Lokalisierung**: die 13 in der Phase-10-Abnahme namentlich als
+  unübersetzt benannten Dialog-Komponenten (Export/Druck/Diashow/Buch/
+  Web/Vorlagen/Organisieren/Stacking/Skript & Plugins/Kollaboration/
+  Tethering/Metadaten-Editor/Statistik) sind jetzt vollständig über
+  `lib/i18n.ts`s `t()`-Muster übersetzt (de.ts/en.ts). `SlideshowPlayer.tsx`
+  (die separate Vollbild-Wiedergabekomponente, die `SlideshowDialog.tsx`
+  bei „Abspielen" öffnet) bleibt bewusst außerhalb dieses Schritts —
+  ehrlich als offene Ausbaustufe stehen gelassen statt stillschweigend
+  mitgezählt, ebenso die von `MetadataDialog.tsx` wiederverwendeten
+  `PRESET_CONDITION_FIELD_OPTIONS`/`PRESET_CONDITION_OPERATOR_OPTIONS`-
+  Labels aus `lib/presets.ts` (gemeinsam mit `SavePresetDialog.tsx`
+  genutzt, eigener Schritt nötig).
+- **`PaletteFrame`-Ausrollung**: `DevelopPanel.tsx`/`MasksPanel.tsx` sind
+  jetzt in `PaletteFrame` gewrappt (Ziehen/Einklappen wie die übrigen vier
+  Paletten). `MasksPanel.tsx`s `id="stage-masks"`-Sprunganker (von
+  `DevelopPanel.tsx`s Node-Editor „Öffnen"-Link genutzt) wandert dabei auf
+  die `<h2>`-Überschrift innerhalb des neuen `PaletteFrame`, weil dieser
+  selbst kein durchgereichtes `id`-Attribut auf sein `<aside>` anbietet —
+  funktional identisch (`scrollIntoView` scrollt denselben Container).
+  Direkt danach volle `develop-flow.spec.ts`/`masks-flow.spec.ts`-Regression
+  gefahren (40 Tests grün) — dieselbe Vorsicht, die Phase 10 Schritt 3
+  zurückgestellt hatte, jetzt mit Testnetz.
+- **Umbelegbare lokale Tastenkürzel**: `Viewer.tsx`s Zoom-Zifferntasten
+  (neu: `zoom-fit`/`zoom-100`) und `DevelopPanel.tsx`s eigener Ctrl/Cmd+Z-
+  Handler laufen jetzt über `lib/keybindings.ts`s `matchesBinding` statt
+  fest verdrahteter `event.key`-Vergleiche. Der Entwickeln-Panel-Handler
+  nutzt bewusst dieselben `"undo"`/`"redo"`-IDs wie `App.tsx`s Bibliotheks-
+  Metadaten-Undo (statt eigener neuer IDs), weil sich beide Kontexte
+  gegenseitig ausschließen (`App.tsx` reicht Ctrl/Cmd+Z nur weiter, wenn
+  das Entwickeln-Panel geschlossen ist) — ein Nutzer, der „Rückgängig"
+  umbelegt, bekommt eine konsistente neue Taste in beiden Kontexten.
+  Bewusst weiterhin fest: Kurven-/Masken-Editoren mit
+  `role="slider"`-Pfeiltasten-Feinjustierung und die Bewertungs-
+  Zifferntasten 0–5 (parametrisierte Ziffernreihe, keine einzelne feste
+  Aktion). Ein neuer Playwright-Test (max. 1 pro Schritt, siehe oben)
+  deckt beides ab: Ctrl+Z/Ctrl+Shift+Z committen jetzt tatsächlich über
+  den Tastatur-Pfad im Entwickeln-Panel (die bestehende
+  `develop-flow.spec.ts`-Suite deckte bislang nur den Rückgängig-Knopf ab,
+  nicht die Taste), und eine Neu-Belegung im Cheatsheet-Overlay steuert
+  Ctrl+Z tatsächlich um.
+- **Installer-Signierung — Mechanik-Nachweis, weiter eingeschränkt als
+  im Plan vorgesehen**: der Plan sah vor, ein selbstsigniertes Test-
+  Zertifikat einmalig als echtes GitHub-Actions-Secret zu setzen und
+  dadurch `ci.yml`s `release`-Job (Windows-Zertifikatsimport/
+  Fingerabdruck-Ermittlung/`--config`-Override) real durchlaufen zu
+  lassen. **Diese Sitzung hat kein Werkzeug, um Repository-Secrets zu
+  schreiben** (kein Admin-API-Zugriff über die verfügbaren GitHub-Tools),
+  und keinen Windows-/macOS-Ausführungskontext (reine Linux-Sandbox) —
+  ein echter CI-Lauf des `release`-Jobs war damit nicht möglich, ohne
+  einen Menschen um das Setzen des Secrets zu bitten (außerhalb des
+  Scopes dieser Sitzung). Stattdessen lokal verifiziert, **nur der
+  betriebssystemunabhängige Teil der Mechanik**: ein selbstsigniertes
+  Test-Zertifikat wurde per `openssl` erzeugt, zu einem PFX/P12-Bundle
+  gepackt (dasselbe Format wie `WINDOWS_CERTIFICATE`/`APPLE_CERTIFICATE`),
+  Base64-kodiert und wieder dekodiert (exakt der Schritt, den `ci.yml`s
+  `[Convert]::FromBase64String` beim echten Secret durchführt) —
+  Byte-für-Byte identisch zum Original bestätigt — und sein SHA1-
+  Fingerabdruck ermittelt (dieselbe Kennzahl, die Windows unter
+  `$cert.Thumbprint` liefert, nur von `openssl x509 -fingerprint -sha1`
+  anders formatiert ausgegeben). Zertifikat/Schlüssel/PFX wurden direkt
+  danach gelöscht, nichts committet. **Bleibt offen**: der eigentliche
+  `Import-PfxCertificate`-Aufruf in einen Windows-Zertifikatspeicher und
+  ein echter `tauri build`-Lauf mit `--config`-Override sind weiterhin
+  nie ausgeführt worden — dieselbe Grenze wie in ADR-0037, jetzt nur um
+  den zusätzlichen Befund ergänzt, dass auch der Secret-Setzschritt
+  selbst außerhalb der Werkzeuge dieser Sitzung liegt.
+
+---
+
+## ADR-0039: Phase 12 — Lightroom-Lückenschluss; `lensfun`-Crate real geprüft und für Schritt 3 freigegeben
+
+**Status:** Angenommen
+**Kontext:** Der Nutzer hat einen ausführlichen, bidirektionalen
+Funktionsvergleich von ApertureX gegen Adobe Lightroom Classic/CC in
+Auftrag gegeben (veröffentlicht als Artifact „ApertureX vs. Lightroom"),
+jede Zeile aus `FEATURES.md` gegen den echten Lightroom-Funktionsumfang
+geprüft. Direkt im Anschluss wurde angewiesen, für die dort gefundenen
+Lücken einen Plan mit tief recherchierten, echten Lösungen zu schreiben —
+mit ausdrücklichem Fokus auf die Frage, ob der Kamera-/Objektiv-Profil-
+Import über eine „KI-generierte" Lösung tragen könnte.
+
+**Befund zur KI-Frage:** eine echte Modellinferenz für Verzeichnungs-/
+Vignettierungs-Koeffizienten aus einem einzelnen Foto ohne Kalibrierziel
+bräuchte trainierte Gewichte — dieselbe seit ADR-0033 dokumentierte Wand
+wie jede andere „KI"-Funktion in diesem Projekt. Eine LLM-„Schätzung"
+von Objektiv-Koeffizienten ohne echte Kalibrierdatengrundlage wäre reine
+Fabrikation und wird hier bewusst **nicht** vorgeschlagen.
+
+**Stattdessen real gefunden — die `lensfun`-Crate** (crates.io, v0.7.0,
+reines Rust, LGPL-3.0-or-later, Autor David Veszelovszki, Repo
+`github.com/vdavid/lensfun-rs`): ein gegen die C++-Referenzbibliothek
+bit-exakt getesteter Port (laut Projekt-README 1.640 A/B-Testfälle,
+Abweichung 4,88×10⁻⁴ Pixel) der echten, offenen LensFun-Objektivdatenbank.
+`Database::load_bundled()` liefert Tausende real kalibrierte Kamera-/
+Objektiv-Kombinationen direkt eingebettet (~574 KB gzip), ohne
+Laufzeit-Dateisystemzugriff. Das macht den bisherigen 3-Profile-
+Platzhalter (ADR-0028) für Schritt 3 gegenstandslos — **andere
+Datenquelle** (offene LensFun-Datenbank statt Adobe-DCP/LCP), **gleiche
+Wirkung**, ohne das ungelöste Adobe-Format-Problem selbst anzufassen.
+
+**Spike real durchgeführt** (nicht nur `--dry-run`): `cargo add
+lensfun@0.7` in `apx-pipeline`, `cargo build -p apx-pipeline` erfolgreich
+(„Finished dev profile … in 2m 01s"), einzige neue Abhängigkeit ist
+`roxmltree` (reines Rust, DOM-XML-Parser) — keine C-Bindings, kein
+`bindgen`/`libclang`. Ein Test lädt die gebündelte Datenbank, findet
+`Canon EOS 5D Mark III` + `Canon EF 16-35mm f/4L IS USM` real in den
+Daten und liest deren Verzeichnungskalibrierung bei 16mm aus
+(`crates/apx-pipeline/src/lens_profiles.rs`,
+`lensfun_bundled_database_has_plausible_distortion_calibration_for_known_lens`).
+**Ehrlicher Befund dabei:** `lensfun`s Poly3-`k1` (0,0128 für dieses
+Objektiv) folgt einer anderen Vorzeichen-/Skalierungskonvention als
+unser bisheriges `generic-wide`-Profil (`distortion_k1 = -0,12`, eigene
+Konvention seit ADR-0028) — ein direkter Zahlenvergleich zwischen beiden
+Systemen ist nicht aussagekräftig; die echte Umrechnung (inkl.
+`Modifier`s Re-Skalierung auf Bildmaße/Cropfaktor) ist Aufgabe von
+Schritt 3 Teil A. Der Spike verifiziert nur die Grundvoraussetzung:
+die Datenbank liefert für real existierende Objektive nutzbare,
+begrenzte Kalibrierwerte.
+
+**Für Objektive außerhalb der Datenbank** (Teil B, Schritt 3): ein
+Kalibrier-Assistent, der aus vom Nutzer selbst fotografierten
+Schachbrett-Kalibrierbildern per klassischer Zhang-Methode (Ecken-
+erkennung, Homographie-Schätzung, nichtlineare Verfeinerung — reine
+Optimierung, kein gelerntes Modell) ein Profil berechnet. Wird im Dialog
+und in `FEATURES.md` ehrlich als „aus eigenen Kalibrierfotos berechnet"
+beschriftet, nicht als „KI-generiert".
+
+**Entscheidung:** Phase 12 bündelt alle im Lightroom-Vergleichs-Artifact
+gefundenen, tatsächlich schließbaren Lücken in neun Bauschritten (0–8):
+Live-Masken-Overlay, Radialverlauf-Ellipse + Auto-Mask, echte LensFun-
+Datenbank + Kalibrier-Assistent, voller EXIF/IPTC-Editor, Mehrfachziel-
+Export, freies ICC-Profil beim Soft-Proof, beobachtete Ordner/Auto-
+Import. **Bewusst ausgeklammert** (echte Design-Entscheidung oder bereits
+dokumentiertes Beschaffungsproblem ohne neue Datenlage, siehe Vergleichs-
+Artifact): Cloud-Synchronisation/mobile Begleit-App, Mehrfach-Katalog,
+Publish Services, Print-on-Demand-Bestellintegration, Adobe-kompatibles
+Plugin-SDK, generative KI-Bildbearbeitung, HEIF-Export (ADR-0038 bereits
+geprüft, keine neue Datenlage). Testdisziplin wie vom Nutzer für den Rest
+von Phase 11 angeordnet fortgeführt: ein gezielter Test pro Schritt, volle
+Suite einmalig in Schritt 8.
+
+---
+
+## ADR-0039-Nachtrag: Schritt 3 real umgesetzt — echte Ecken-Rückrechnung statt Koeffizienten-Übernahme, vereinfachter Kalibrier-Assistent statt vollem Zhang-Verfahren
+
+**Status:** Angenommen
+**Kontext:** Schritt 3 Teil A/B wurden umgesetzt. Zwei Stellen weichen
+ehrlich vom ursprünglichen ADR-0039-Text ab — beide Male, weil die
+Recherche beim Bauen mehr Klarheit brachte als beim Planen.
+
+**Teil A — Befund, der die geplante Schema-Migration gegenstandslos
+machte:** `radius_x`/`radius_y`/`angle_degrees` (Schritt 2) UND die
+Grundannahme für Schritt 3 wurden geprüft, bevor Code geschrieben wurde
+— dabei stellte sich heraus, dass `LensCorrectionAdjustment`s einzige
+wirkliche Lücke die *Datenquelle* für `distortion_k1`/`vignette_amount`/
+`ca_red_cyan`/`ca_blue_yellow` war, nicht das Feldschema selbst. Die
+eigentliche Herausforderung: `lensfun`s eigene Modelle (Poly3/Poly5/
+PTLens für Verzeichnung, mehrgliedrige TCA-/Vignettierungs-Polynome)
+sind reichhaltiger als unser Ein-Wert-r²-Modell — ein LensFun-
+Koeffizient lässt sich nicht 1:1 übernehmen, selbst mit korrekter
+Einheiten-Umrechnung, weil die Kurvenform selbst eine andere ist (exakt
+die Lücke, die der Schritt-0-Spike als „Aufgabe von Schritt 3" benannt
+hatte). Gelöst über eine an LensFuns *eigener* `Modifier`-Pixel-
+mathematik verankerte Rückrechnung: die reale, mehrparametrige Korrektur
+wird an der Ecke eines repräsentativen 3:2-Referenzbilds ausgewertet
+(`apply_geometry_distortion`/`apply_color_modification_f32`/
+`apply_subpixel_distortion` — dieselben Funktionen, die ein Foto real
+korrigieren würden), und daraus ein einzelner Koeffizient gesucht, der
+in unserem Modell an derselben Stelle dieselbe Wirkung erzeugt (siehe
+`crates/apx-pipeline/src/lens_profiles.rs`s
+`derive_lens_correction_values`). Eine echte, nachvollziehbare Näherung
+— keine geratene Zahl —, mit der ehrlichen Grenze, dass sie nur an der
+Bildecke exakt stimmt.
+
+**Teil B — bewusst kein Zhang-Verfahren:** der ursprüngliche Plantext
+nannte „Eckenerkennung per Harris-artigem Detektor + Homografie-
+Schätzung + nichtlineare Verfeinerung". Eine robuste automatische
+Schachbrett-Eckenerkennung plus volle Mehrparameter-Kamerakalibrierung
+ist ein eigenständiges, fehleranfälliges Computer-Vision-Projekt für
+sich — für unser Ein-Wert-Verzeichnungsmodell überdimensioniert und in
+diesem Umfang nicht seriös umsetzbar. Stattdessen implementiert
+`apx-ai::lens_calibration` eine bewusst schmalere, aber ebenso reale
+Methode: der Nutzer markiert selbst mehrere Punkte entlang einer in der
+Realität geraden Linie (direkt auf einer Bildvorschau im neuen Dialog
+„Objektiv kalibrieren", `LensCalibrationDialog.tsx`), und
+`calibrate_distortion_k1` sucht per Rasterverfeinerung den einen
+Verzeichnungskoeffizienten, der alle markierten Linien nach der
+Entzerrung gemeinsam am geradesten macht (totale Kleinste-Quadrate für
+die Geradheit, klassische 1-D-Optimierung für die Suche — kein
+gelerntes Modell). Ein Test mit synthetisch verzeichneten Linien
+bestätigt, dass ein bekannter Koeffizient wiedergefunden wird
+(Abweichung < 0,01). Ergebnis lebt direkt im EDL
+(`LensCorrectionAdjustment::custom_distortion_k1`, additiv per
+`#[serde(default)]`) statt in einer neuen Profildatenbank/-datei —
+Wiederverwendung auf andere Fotos über die seit Phase 5 vorhandene
+Einstellungen-kopieren-Funktion, kein neuer Persistenzmechanismus nötig.
+Bewusst nur Verzeichnung (Vignette/CA bräuchten andere Messungen –
+Helligkeits- bzw. Kanal-Registrierung statt Geradheit – nicht Teil
+dieses Umfangs).
+
+**Entscheidung:** Beide Abweichungen sind Umfangs-Präzisierungen, keine
+Kürzungen am eigentlichen Nutzen — Teil A liefert weiterhin eine echte,
+Datenbank-gestützte Objektiv-Zuordnung (jetzt sogar automatisch beim
+Fotowechsel), Teil B weiterhin eine echte, aus eigenen Fotos berechnete
+Kalibrierung für Objektive außerhalb der Datenbank. `FEATURES.md` und
+`PLAN.md` sind entsprechend präzisiert.
+
+---
+
+## ADR-0039-Nachtrag II: Schritt 6 — echter ICC-Soft-Proof über `lcms2::Transform::new_proofing` ersetzt die JS-Näherung
+
+**Status:** Angenommen
+**Kontext:** Der Soft-Proof im Entwickeln-Panel (Phase 6 Schritt 10,
+ADR-0032 Punkt 6) war bis hierhin eine rein clientseitige Sättigungs-
+Näherung mit drei erfundenen "simulierten" Zielen (`srgb`/`print_sim`/
+`grayscale_sim`) — ADR-0032 selbst nannte das explizit als bewusste
+Vereinfachung, mit "kein echtes 3D-Gamut-Mapping" als offen benannte
+Lücke. `apx_export::icc` bindet `lcms2` bereits seit Phase 8 Schritt 2
+für den Export ein (`convert_from_srgb`, inklusive `IccTarget::
+CustomFile` für eine vom Nutzer gewählte `.icc`-Datei) — dieselbe
+Bibliothek unterstützt über `Transform::new_proofing` (kombiniert mit
+den `SOFT_PROOFING`/`GAMUT_CHECK`-Flags und `cmsSetAlarmCodes` für die
+Farbumfangswarnung) echtes, standardbasiertes Soft-Proofing, exakt die
+Funktion, die auch Lightroom/Photoshop intern nutzen.
+
+**Umsetzung:** neue Funktion `apx_export::icc::soft_proof_rgba8`
+(`Transform::new_proofing(sRGB-Anzeigeprofil, …, Zielprofil, Intent,
+Intent, Flags)`) für die vier gebündelten Standardprofile UND eine
+beliebige `.icc`-Datei — dieselbe `IccTarget`-Wiederverwendung wie beim
+Export. Statt eines neuen Tauri-Commands (der Puffer wäre pro
+Regler-Tick zu groß für JSON-serialisierte IPC, siehe die bestehende
+Begründung in `crates/apx-app/src/protocol/mod.rs`s Moduldoku, "ohne den
+Umweg über Base64-kodierte Tauri-Commands") läuft der Soft-Proof über
+ein zusätzliches `<soft_proof>`-Segment derselben `develop/...`-Route,
+die auch die normale Vorschau liefert (`none` oder base64url-kodiertes
+JSON, siehe `crates/apx-app/src/protocol/route.rs`s Moduldoku) — der
+Server liefert bei aktivem Soft-Proof direkt den fertig transformierten
+Puffer, kein zweiter Nachbearbeitungsschritt im Frontend für Farbe/Gamut.
+
+**Bewusst erhaltene, kleinere Vereinfachung:** die Papierweiß-Simulation
+hat in `lcms2` keine eingebaute Entsprechung (in echten
+Bildbearbeitungsprogrammen meist eine separate, dem ICC-Proofing
+nachgeschaltete Tonwertkompression) und bleibt daher eine kleine
+clientseitige Nachbearbeitung (`lib/softProof.ts::applyPaperWhite`) —
+anders als vorher betrifft sie aber nur noch den Tonwertbereich, nicht
+mehr Farbe/Sättigung/Gamut. Aus demselben Grund bleibt `developFrame`
+selbst (für Farbaufnehmer/TAT/Clipping-Overlay) immer der unveränderte,
+nicht soft-proofte Puffer — der Viewer holt bei aktivem Soft-Proof eine
+zweite, separate Antwort derselben Route nur für den tatsächlich
+gezeichneten Canvas-Inhalt.
+
+**Entscheidung:** `FEATURES.md`/`PLAN.md` sind entsprechend aktualisiert
+— Soft-Proof ist ab hier echtes ICC-Farbmanagement, keine Näherung mehr.
+
+---
+
+## ADR-0039-Nachtrag III: Schritt 7 — Beobachteter Ordner / Auto-Import genau wie geplant umgesetzt
+
+**Status:** Angenommen
+**Kontext:** Schritt 7 (Beobachteter Ordner) folgt exakt dem im
+Ursprungsplan skizzierten Weg, ohne Abweichung — festgehalten hier nur der
+Vollständigkeit halber, wie bei jedem Schritt dieser Phase.
+
+**Umsetzung:** neuer `WatchedFolderSettings`-Block in `apx_core::settings`
+(Pfad, an/aus, Poll-Intervall in Sekunden, Default aus) neben den
+bestehenden `UiSettings`/`AiSettings`; ein neuer Hintergrund-Task
+`watched_folder_worker` in `apx-app/src/main.rs`, nach demselben
+Abfragen-statt-Weck-Benachrichtigung-Muster wie der bereits bestehende
+`export_queue_worker`. Bei jedem Durchlauf werden die Einstellungen frisch
+von der Platte gelesen (ein Umschalten in den Einstellungen wirkt ohne
+Neustart) und, falls aktiviert und der Ordner existiert, derselbe
+`import::run_with_mode`-Pfad im Modus `AddInPlace` angestoßen wie bei
+einem manuellen Import — geteilt über dieselbe `active_import`-Sperre, die
+schon einen doppelten manuellen Import verhindert, damit sich ein
+automatischer und ein manueller Import nie überschneiden. Kein natives
+Datei-System-Watcher-Crate nötig: `run_with_mode` überspringt bereits
+katalogisierte Dateien von selbst (`SingleFileOutcome::Unchanged`), ein
+wiederholter Lauf über denselben Ordner ist also von sich aus billig und
+idempotent — kein eigener "bereits gesehen"-Zustand nötig.
+
+**Entscheidung:** `FEATURES.md`/`PLAN.md` sind entsprechend aktualisiert.
+
+---
+
+## ADR-0040: Phase 13 — echte ONNX-Laufzeit jetzt real verfügbar (korrigiert ADR-0033 Punkt 1); KI-Ausfüllen, Direktimport, DCP-Profile, klassische CV-Lücken
+
+**Status:** Angenommen
+**Kontext:** Aus der aktualisierten Lightroom-Lückenliste (Vergleichs-
+Artifact nach Phase 12) hat der Nutzer sechs Punkte ausgewählt:
+generatives/bearbeitendes KI-Ausfüllen, Import direkt von Speicherkarte/
+Kamera, Adobe-DCP-Farbprofil-Import (fest zugesagt); Perspektive/Upright-
+Kantenerkennung und Panorama-Homografie-Stitching (kostenlos geplant);
+mehrere Kataloge, ein echter UND/ODER-Regelbauer, echte Personen-
+Wiedererkennung ("vielleicht").
+
+**Korrektur an ADR-0033 Punkt 1:** ADR-0033 begründete den Verzicht auf
+echte ONNX-Runtime-Modellinferenz u. a. damit, es gebe "keinen
+bestätigten Zugriffsweg auf vorkompilierte ONNX-Runtime-Binaries" und
+"keinen legitimen Weg, ein trainiertes ... Modell zu beschaffen und
+mitzuliefern". Diese Sitzung hat beides real geprüft und beides ist
+inzwischen falsch:
+
+1. **Die Laufzeit ist real verfügbar** — per `cargo add --dry-run`
+   gegen die echte crates.io-Registry bestätigt: `ort` (2.0.0-rc.13,
+   ONNX-Runtime-Bindings) und `tract-onnx` (0.23.6, reines Rust, keine
+   C++-Abhängigkeit) sind beide echte, gepflegte Crates.
+2. **Für mindestens ein Modell ist auch die Gewichts-Beschaffung
+   real gelöst:** LaMa (Large Mask Inpainting, `advimman/lama`,
+   Apache-2.0-Code) hat ein echtes, als ONNX exportiertes Modell
+   öffentlich auf Hugging Face (`Carve/LaMa-ONNX`, `lama_fp32.onnx`,
+   208 MB, Apache-2.0, trainiert auf Places2/CC-BY-4.0) — real
+   herunterladbar, lizenzgeklärt, gegen einen veröffentlichten Hash
+   verifizierbar. Kein fabriziertes Modell, keine Behauptung ohne
+   Beleg — genau die Art Fund, die ADR-0033 damals nicht hatte.
+
+Für dieselbe klassische CV, aber ohne jedes Modellgewicht (Perspektive/
+Upright, Panorama-Stitching), sind ebenfalls real verfügbare, reine
+Rust-Crates gefunden: `imageproc` (Kantenerkennung/Hough-Transformation),
+sowie das `rust-cv`-Ökosystem `akaze`/`arrsac`/`sample-consensus`/
+`homography`/`eight-point`/`lambda-twist`/`cv-core`/`space`
+(Merkmalserkennung, robuste Homografie-Schätzung) — kein OpenCV nötig.
+Für Speicherkarten-Erkennung: `sysinfo` (0.38.4, plattformübergreifende
+Wechseldatenträger-Liste).
+
+**Für Gesichts-Wiedererkennung bleibt eine echte Lücke offen:** die
+Laufzeit ist dieselbe wie bei LaMa, aber ein gutes vortrainiertes
+Gesichts-Embedding-Modell mit wirklich permissiver Lizenz (nicht nur
+"Forschung, nicht kommerziell", wie viele InsightFace/ArcFace-
+Veröffentlichungen) ist bei dieser Recherche noch nicht bestätigt —
+Phase 13 Schritt 8 behandelt das als eigene, ergebnisoffene Prüfung
+statt es stillschweigend anzunehmen.
+
+**Entscheidung:** ADR-0033 Punkt 1 gilt als durch diesen Nachtrag
+korrigiert (nicht rückwirkend umgeschrieben — der ursprüngliche Text
+bleibt stehen, war zum damaligen Rechercheergebnis ehrlich). Phase 13
+setzt echte ONNX-Inferenz für das KI-Ausfüllen ein (Schritt 1) und
+klassische, gewichtsfreie CV für Perspektive/Panorama (Schritte 4/5).
+Vollständiger Schritt-für-Schritt-Plan in `PLAN.md`.
+
+---
+
+## ADR-0040-Nachtrag: Schritt 3 — echter Adobe-DCP-Import; `ColorMatrix`
+geparst, aber bewusst nicht angewendet; `ProfileHueSatMap`/
+`ProfileToneCurve` real umgesetzt, direkt von Adobes eigenem
+Open-Source-DNG-SDK portiert
+
+**Status:** Angenommen
+**Kontext:** `stages::calibration`s bisherige `CAMERA_PROFILES`-Handliste
+(sechs feste Namen, je nur ein globaler Sättigungs-/Kontrast-Bias, siehe
+ADR-0028) sollte durch echten Import beliebiger Adobe-`.dcp`-Dateien
+ersetzt werden — derselbe Sprung wie Phase 12 Schritt 3 von einer
+Objektiv-Handliste zur echten LensFun-Datenbank.
+
+**Ergebnis der Recherche:** `.dcp`-Dateien sind reine TIFF/IFD-Container
+ohne Rohbild-Daten. `gamut-dng`s `DngDecoder::decode()` (bereits
+Abhängigkeit von `apx-export`) verlangt ein echtes Rohbild und scheitert
+deshalb an eigenständigen `.dcp`-Dateien. Die real verfügbare Lösung:
+`gamut-ifd` (2.0.1, dieselbe IFD-Lese-Grundlage, die `gamut-dng` selbst
+intern nutzt) direkt einbinden und nur die tatsächlich benötigten Tags
+lesen — per `cargo add --dry-run` gegen die echte crates.io-Registry
+bestätigt. Die Tag-Nummern (`ColorMatrix1` 50721 usw.) sind gegen
+`gamut-dng`s eigenes öffentliches `tags`-Modul **und** unabhängig davon
+gegen Adobes eigenes, quelloffenes DNG-SDK
+(`github.com/aizvorski/dng_sdk`) geprüft.
+
+**Zwei Ebenen, unterschiedlich behandelt:**
+
+1. **`ColorMatrix1`/`ColorMatrix2`/`ForwardMatrix1/2`/
+   `CameraCalibration1/2`** (die eigentliche Farbmatrix) — wird geparst
+   (`dcp_profile::DcpProfile`), aber **bewusst nicht in die Pipeline
+   eingespeist**. Eine echte Kamera→XYZ-Matrixumrechnung ist Aufgabe des
+   Rohdaten-Decoders (`apx-raw` hat dafür bereits eine eigene
+   `cam_to_srgb`-Matrix, einmalig beim Dekodieren angewendet) — ein
+   Matrixwechsel je Kalibrierungs-Regler würde eine erneute
+   Rohdaten-Dekodierung bei jedem Bearbeitungsschritt verlangen, was der
+   gesamten "einmal dekodieren, beliebig oft günstig entwickeln"-
+   Architektur widerspräche. Dieselbe Scope-Grenze, die `gamut-dng`
+   selbst für sich zieht ("Farbwiedergabe ist Aufgabe eines
+   Rohdaten-Prozessors").
+2. **`ProfileHueSatMapDims`/`ProfileHueSatMapData1`/`ProfileToneCurve`**
+   (die "Look"-Daten, die z. B. Adobes "Camera Landscape" von "Camera
+   Standard" unterscheiden) — wird **echt angewendet**, in
+   `stages::calibration`, anstelle der bisherigen Handlisten-Näherung.
+   Die PDF-Spezifikation selbst war von dieser Sandbox aus nicht
+   abrufbar (`docs.rs`, `huggingface.co`, `helpx.adobe.com`,
+   `paulbourke.net` — alle blockiert), aber Adobes eigenes DNG-SDK ist
+   auf GitHub quelloffen (`raw.githubusercontent.com` war erreichbar):
+   Indexierung, Interpolationsformel (trilinear, Farbton zirkulär) und
+   die HSV-Parametrisierung (`0.0..6.0` statt Grad) in
+   `stages::calibration::apply_hue_sat_map` sind eine direkte Portierung
+   von `dng_reference.cpp::RefBaselineHueSatMap` (samt
+   `dng_hue_sat_map.h/.cpp` für die Tabellen-Indexierung und
+   `dng_utils.h::DNG_RGBtoHSV/DNG_HSVtoRGB` für die HSV-Umrechnung,
+   letztere als `stages::color_math::rgb_to_hsv6`/`hsv6_to_rgb` portiert)
+   — nicht aus dem Gedächtnis nachgebaut. Bewusst ausgelassen: das
+   optionale `ProfileHueSatMapEncoding` (nichtlineare Wert-Kodierung, nur
+   bei wenigen Profilen gesetzt) und die Spline-Interpolation der
+   Tonwertkurve (stückweise linear stattdessen, siehe `apply_tone_curve`s
+   Kommentar).
+
+**CPU-only:** die HueSatMap-Tabelle ist variabel groß (bis zu Hunderten
+Einträgen), passt nicht in `calibration.rs`s festes GPU-Uniform-Layout —
+läuft aus demselben Grund CPU-seitig wie `ContentAwareFill`/`AiInpaint`
+(`stages::repair`).
+
+**Entscheidung:** Neues additives `CalibrationAdjustment::dcp_profile:
+Option<DcpProfileData>` (dasselbe "einmal auflösen, als Zahlen im EDL
+ablegen"-Muster wie `AiFillPatch`, Phase 13 Schritt 1) — hat Vorrang vor
+`camera_profile`s Handliste, die als Fallback bestehen bleibt, wenn kein
+`.dcp` importiert wurde. `apx-app`s `import_dcp_profile`-Command öffnet
+einen Datei-Dialog und parst — kein eingebautes Profil im Installer,
+derselbe Opt-in wie beim LensFun-Kalibrier-Assistenten.
+
+---
+
+## ADR-0040-Nachtrag II: Schritt 4 — echte Perspektive/Upright-
+Kantenerkennung (`imageproc`); zwei erkannte Effekte statt vier
+unabhängiger, `Full` bewusst identisch zu `Auto`
+
+**Status:** Angenommen
+**Kontext:** `stages::lens_corrections`s vier Upright-Automatikmodi
+(`Auto`/`Level`/`Vertical`/`Full`) waren seit Phase 4 (ADR-0028)
+dokumentierte No-op-Platzhalter — wählbar, ohne Wirkung. Nur der
+„Guided"-Modus tat etwas: der Nutzer zieht selbst zwei Hilfslinien, ihr
+gemittelter Neigungswinkel wird zur Dreh-Korrektur.
+
+**Umsetzung:** `apx-ai::upright` (neues Modul, klassische CV ohne
+gelerntes Modell — dieselbe Handschrift wie `lens_calibration`, Phase 12
+Schritt 3 Teil B): `imageproc::edges::canny` findet Kanten,
+`imageproc::hough::detect_lines` findet darin gerade Linien
+(Normalform-Winkel `0..180°`). Statt vier unabhängige Automatiken zu
+bauen, macht das Modul **zwei echte Effekte** real und kombiniert sie je
+nach Modus:
+- **Level** (nahezu waagerechte erkannte Linien mitteln → `rotate_degrees`)
+  — exakt dieselbe Rechnung wie `guided_rotation_degrees`, nur mit
+  automatisch gefundenen statt vom Nutzer gezogenen Linien.
+- **Vertical** (nahezu senkrechte erkannte Linien mitteln →
+  `manual_transform.horizontal`-Scherung, die trotz des Namens die
+  *senkrechte* Kantenkonvergenz korrigiert) — die Zuordnung
+  Winkelabweichung → Scherungsreglerwert ist direkt aus
+  `lens_corrections.rs`s bestehender `undo_manual_transform`-Formel
+  hergeleitet (Koeffizientenvergleich, nicht geraten), und per
+  Vorzeichen-/Größenprobe an einer synthetischen Testkante nachgerechnet
+  (`upright.rs`s Testmodul) statt nur symbolisch behauptet — ein früherer
+  Testentwurf mit fehlerhafter Verifikationsformel hätte sonst einen
+  Vorzeichenfehler nicht aufgedeckt.
+- **Auto**/**Full**: beide Effekte kombiniert. Eine echte Trennung
+  zwischen Adobes moderater "Auto"-Automatik und einer vollen
+  Vier-Parameter-"Full"-Homografie bräuchte eine echte
+  Homografie-Schätzung aus mehreren, unabhängig konvergierenden
+  Linienscharen — außerhalb des Umfangs des bereits in ADR-0028/-0030 auf
+  ein einziges Scherungspaar vereinfachten Objektivkorrektur-Modells.
+  `Full` verhält sich deshalb bewusst identisch zu `Auto`, statt eine
+  durch die vorhandenen Daten nicht gedeckte zusätzliche Korrektur zu
+  erfinden — dieselbe Ehrlichkeit wie Schritt 3s unangewandte
+  DCP-Farbmatrix.
+
+**Architektur:** `apx-ai` (nicht `apx-pipeline`) bekommt die neue
+`imageproc`-Abhängigkeit (`default-features = false`, nur `rayon` —
+`text`/`fft` unnötig), da `apx-ai` bereits von `apx-pipeline` abhängt
+(nicht umgekehrt) und `lens_calibration` als Vorbild ebenfalls dort
+lebt. `apx-app`s `detect_upright_correction`-Command folgt demselben
+"Analyse-Auflösung über `TileCache` dekodieren"-Muster wie
+`generate_ai_mask`, obwohl es keine KI-Funktion im engeren Sinn ist.
+Frontend übernimmt nur die zum gewählten Modus passende Komponente in
+`manual_transform` (Level nur Rotation, Vertical nur Scherung) statt
+beide Felder blind zu überschreiben — sonst würde ein Klick im
+"Level"-Modus eine zuvor manuell gesetzte Scherungskorrektur
+stillschweigend auf 0 zurücksetzen.
+
+---
+
+## ADR-0040-Nachtrag III: Schritt 5 — Panorama-Homografie-Stitching;
+das geplante rust-cv-Ökosystem kompiliert auf keinem aktuellen
+stabilen Rust, `imageproc`-FAST-Ecken + eigener BRIEF-Deskriptor +
+`homography`-Crate stattdessen
+
+**Status:** Angenommen
+**Kontext:** ADR-0040 hatte für Panorama-Stitching das `rust-cv`-
+Ökosystem (`akaze`, `cv-core`, `space`, `arrsac`, `sample-consensus`)
+als real verfügbar eingestuft — per `cargo add --dry-run` gegen die
+echte crates.io-Registry bestätigt. Dieser Schritt hat einen echten
+Einbindungsversuch unternommen, und `cargo add --dry-run` erwies sich
+als unzureichende Prüfung: es bestätigt nur, dass sich die Abhängigkeits-
+Metadaten auflösen lassen, nicht dass der resultierende Code tatsächlich
+kompiliert.
+
+**Der reale Befund:** `akaze` (letzte Veröffentlichung 2021) hängt
+transitiv an `bitarray 0.2`, dessen `src/lib.rs` unbedingt
+`#![feature(min_const_generics)]` setzt. Dieses Attribut selbst — nicht
+das längst stabile Feature dahinter — verlangt einen Nightly-Compiler
+und schlägt auf jedem aktuellen stabilen Rust mit `error[E0554]` fehl,
+real gegen `rustc 1.94.1` in dieser Sandbox getestet (`cargo test`
+brach mit exakt diesem Fehler ab). Das ganze `rust-cv`-Ökosystem ist
+damit auf stabilem Rust praktisch tot — unabhängig von den zusätzlich
+noch bestehenden Versions-Inkompatibilitäten, die bereits vor diesem
+Befund auffielen: `cv-core 0.15`/`nalgebra 0.21`/`space 0.10` (alle vom
+selben Autor, derselben Ära) vs. der aktiver gepflegten `homography`-
+Crate mit `nalgebra 0.33`; `homography` hängt zudem gar nicht von
+`sample-consensus` ab (kein `Estimator`-Trait-Impl, per `grep` in
+dessen `Cargo.toml` bestätigt) — `arrsac`/`sample-consensus`/`cv-core`/
+`space` hätten also ohnehin keinen echten Klebstoff zwischen `akaze`
+und `homography` geliefert.
+
+**Umsetzung stattdessen** (`apx-stacking::homography_stitch`, neues
+Modul, siehe dessen ausführliche Moduldoku): `imageproc::corners::
+corners_fast9` (dieselbe Crate, bereits in Schritt 4 real erprobt) für
+die Eckenerkennung; ein selbst geschriebener BRIEF-artiger 256-Bit-
+Deskriptor (klassische, publizierte Technik — Calonder et al. 2010,
+nicht fabriziert) statt eines externen Deskriptor-Crates; brute-force
+Hamming-Abstands-Matching mit Lowes Verhältnistest; ein eigener, kurzer
+RANSAC-Loop (Zufallsstichprobe → `homography`-Crates echte DLT-Schätzung
+per SVD → Inlier zählen → beste Stichprobe über alle Inlier
+verfeinern) statt der generischen `sample_consensus`/`arrsac`-
+Maschinerie. `homography` bekommt dieselbe `nalgebra`-Version (`0.33`)
+explizit in `apx-stacking` UND `apx-app` gepinnt — dieselbe Instanz im
+Abhängigkeitsgraph statt einer separaten Kopie, sonst wäre
+`homography`s `Matrix3<f64>` in eigenem Code ein anderer Typ.
+
+**Test-Vorsicht mit synthetischen Bildern:** ein Schachbrettmuster als
+Testbild schlug fehl — an dessen Kreuzungen treffen sich vier
+Quadranten in einem X-förmigen Sattelpunkt, den FAST grundsätzlich
+nicht erkennt (es braucht einen einzigen zusammenhängenden Bogen von
+mindestens neun der 16 Kreispunkte). Ein perfekt periodisches
+Punktraster schlug ebenfalls fehl — Lowes Verhältnistest verwirft zu
+Recht mehrdeutige Treffer, wenn viele Merkmale identische lokale
+Nachbarschaften haben. Beide Male kein Bug im Code, sondern ein
+unrealistisches Testbild; die endgültigen Tests nutzen verstreute,
+unterschiedlich große Quadrate an leicht versetzten Positionen.
+
+**Entscheidung:** `apx-app`s `stack_panorama`-Command versucht das
+echte Homografie-Stitching zuerst und fällt für die gesamte Fotoserie
+auf die bestehende reine Verschiebungs-Registrierung
+(`apx_stacking::panorama`, Phasenkorrelation) zurück, wenn für
+mindestens ein Foto keine verlässliche Homografie gefunden wird —
+bewusst alles-oder-nichts statt einer Mischkomposition aus beiden
+Positionierungsarten auf derselben Leinwand.
+
+---
+
+## ADR-0040-Nachtrag IV: Schritt 6 — Mehrere Kataloge + Katalog-Wartung;
+Katalogwechsel per Neustart statt Hot-Swap der offenen Verbindung
+
+**Status:** Angenommen
+**Kontext:** `AppState::catalog: Arc<Catalog>` wird in `commands.rs` von
+praktisch jedem einzelnen Tauri-Command direkt referenziert oder
+geklont. Ein echtes Hot-Swap der offenen Katalogverbindung im
+laufenden Prozess hätte entweder jeden dieser Zugriffe hinter ein
+zusätzliches Lock verlegt (invasiv, hohes Fehlerrisiko quer durch eine
+~6000-Zeilen-Datei) oder den `Arc` selbst austauschbar gemacht
+(dieselbe Umbau-Größe) — für einen einzelnen Schritt nicht vertretbar.
+
+**Entscheidung:** dieselbe UX wie Adobe Lightroom Classics eigener
+Katalogwechsel ("Diese Änderung erfordert einen Neustart"): Wechseln
+oder Neuanlegen eines Katalogs speichert den Zielpfad in
+`Settings::catalog` und ruft `AppHandle::request_restart()` — die App
+startet neu und öffnet beim nächsten Start automatisch den neuen
+Pfad. Dafür genügt eine einzige, unauffällige Änderung an `main.rs`
+(liest `settings.catalog.last_opened_catalog` vor dem `Catalog::open`-
+Aufruf) statt eines Umbaus der gesamten Command-Schicht.
+
+**Fund:** `Settings::catalog::last_opened_catalog` existierte bereits
+seit Phase 10 (Settings-Fundament) im Datenmodell, wurde aber nie
+gelesen — `main.rs` öffnete unbedingt `paths.default_catalog_file()`.
+Reine Attrappe, jetzt tatsächlich verdrahtet (mit Rückfall auf den
+Standardkatalog, falls der hinterlegte Pfad seit dem letzten Start
+verschoben/gelöscht wurde — kein Absturz beim Start wegen eines
+veralteten Pfads).
+
+**Katalog-Wartung** braucht dagegen keinen Neustart — sie arbeitet auf
+der bereits offenen Verbindung: `apx_catalog::Catalog` bekommt
+`integrity_check` (`PRAGMA integrity_check`, SQLites eigene
+Standardprüfung auf strukturelle Schäden), `vacuum` (`VACUUM`) und
+`backup_to` (SQLites Online-Backup-API über `rusqlite`s `backup`-
+Feature — sicher neben der weiterhin offenen Verbindung nutzbar,
+anders als eine rohe Dateikopie, die bei gleichzeitigem Schreibzugriff
+eine inkonsistente Kopie ergeben könnte).
+
+**Kein neuer Dialog-Wechsel-Mechanismus fürs Frontend nötig:** die
+generischen `pick_file_path`/`pick_save_file_path`-Commands (bereits
+für Drucken/Buch/ICC-Profil-Auswahl vorhanden) übernehmen die
+Datei-Dialoge für "Neuer Katalog…"/"Katalog öffnen…"/"Sichern unter…"
+direkt — die neuen Rust-Commands nehmen nur noch den bereits gewählten
+Pfad entgegen.
+
+---
+
+## ADR-0040-Nachtrag V: Schritt 7 — echter UND/ODER-Regelbaum für
+bedingte Presets und intelligente Sammlungen; in-memory statt
+dynamischer SQL-Generierung
+
+**Status:** Angenommen
+**Kontext:** Zwei getrennte Stellen kannten bisher nur eine flache,
+ausschließlich UND-verknüpfte Regelliste: bedingte Presets
+(`PresetCondition[]`, ADR-0031 Punkt 4, "kein ODER, keine
+Verschachtelung") und intelligente Sammlungen (`apx_catalog::
+FilterCriteria`, feste Struktur-Felder Bewertung/Flagge/Farbe/
+Kameramodell, ADR-0023). Beide werden bereits als opakes JSON
+gespeichert (`conditions_json`/`smart_criteria_json`) — kein
+Datenbankschema-Wechsel nötig, nur ein neues JSON-Schema.
+
+**Entscheidung:** ein gemeinsamer, generischer Regelbaum-Typ
+(`RuleNode<TLeaf> = { type: "condition"; condition: TLeaf } |
+{ type: "group"; operator: "and" | "or"; children: RuleNode<TLeaf>[] }`,
+`frontend/src/lib/ruleTree.ts`) mit einer rekursiven Auswertung
+(`evaluateRuleNode`) und einem generischen Editor
+(`RuleTreeEditor.tsx`, kennt das Blatt-Vokabular nicht — kommt per
+`renderLeaf`/`makeDefaultLeaf`-Props vom Aufrufer). Dasselbe
+JSON-Schema existiert auf der Rust-Seite als `apx_catalog::FilterNode`
+(`#[serde(tag = "type", rename_all = "snake_case")]`) — bewusst
+identisch zum TypeScript-Gegenstück gewählt, damit `create_smart_
+collection` den vom Frontend erzeugten JSON-String unverändert als
+opakes `criteria_json` durchreichen und rein per `serde_json`
+parsen kann, ganz ohne eigene Übersetzungsschicht zwischen den beiden
+Seiten.
+
+**Bedingte Presets bleiben reines Frontend:** `conditions_json` ist
+für `apx-catalog` schon vorher ein opaker String gewesen (unverändert:
+`Preset.conditions_json`), also brauchte dieser Teil **keine
+Rust-Änderung**. `PresetCondition`/`evaluateCondition`/
+`parseConditions`/`applyConditionsToSubset` (`lib/presets.ts`) bleiben
+unverändert bestehen — sie werden weiterhin von den Auto-
+Verschlagwortungsregeln (`MetadataDialog.tsx`s `createTagRule`, ein
+eigenes, außerhalb dieses Schritts liegendes Feature) benutzt und
+dienen als Migrationsquelle. Neu: `PresetRuleGroup { section:
+PresetSectionKey | null; node: RuleNode<PresetLeafCondition> }` — die
+Sektions-Gatter-Semantik (`section: null` = ganzes Preset, sonst nur
+diese Sektion; mehrere Regelgruppen bleiben untereinander
+UND-verknüpft) bleibt exakt wie zuvor, nur ist jede einzelne Regel
+jetzt ein ganzer UND/ODER-Baum statt einer einzelnen Bedingung.
+`parseRules` akzeptiert die neue Baumform direkt und migriert sonst
+über `migrateLegacyConditions` von der alten flachen Form — jede
+vorhandene, vor diesem Schritt gespeicherte Preset-Bedingung bleibt
+dadurch ohne Migrationsskript lesbar.
+
+**Intelligente Sammlungen werten in-memory aus, nicht per dynamischer
+SQL-Generierung:** `apx_catalog::FilterNode::matches(&Photo) -> bool`
+wird für jedes Foto einzeln aufgerufen, nachdem `repository::
+collections::list_photos` den gesamten Fotobestand bereits per SQL
+geladen hat (`filter_photos` mit leeren Kriterien, dieselbe Abfrage
+wie die Filterleiste). Eine zweite, rekursive WHERE-Klausel-
+Generierung neben der bestehenden in `repository::search::
+build_filter_clause` wäre für beliebig tiefe Verschachtelung deutlich
+aufwendiger gewesen, ohne einen echten Nutzen — Kataloge in diesem
+Projekt sind Einzelnutzer-Bibliotheken (siehe schon ADR-0040-Nachtrag
+III zur Panorama-Homografie: "kein Web-Maßstab"), keine Datenbank mit
+Millionen Zeilen, bei der ein voller Tabellenscan pro Sammlung
+spürbar würde. `FilterCriteria`/`build_filter_clause` bleiben für die
+Filterleiste/Stapelverarbeitungs-Konsole unverändert bestehen — dort
+reicht flach UND-verknüpft weiterhin aus, ein Umbau auf den Regelbaum
+hätte keinen Mehrwert gebracht.
+
+**Migration alter intelligenter Sammlungen:** `parse_filter_node`
+versucht zuerst, `smart_criteria_json` als `FilterNode` zu lesen; bei
+fehlendem `"type"`-Tag (vor diesem Schritt gespeicherte, flache
+`FilterCriteria`-Form) fällt es auf `FilterCriteria` zurück und
+migriert über `impl From<FilterCriteria> for FilterNode` (jedes
+gesetzte Feld wird eine Bedingung in einer UND-Gruppe) — dieselbe
+"lies alt, migriere beim Zugriff, kein Schreib-Migrationsskript"-
+Konvention wie bei den bedingten Presets oben.
+
+---
+
+## ADR-0040-Nachtrag VI: Schritt 8 — echte Personen-Wiedererkennung;
+Lizenzprüfung verwirft InsightFace/SFace, `dlib`s öffentlich-erklärtes
+Modell trägt
+
+**Status:** Angenommen
+**Kontext:** `PLAN.md` verlangt für diesen Schritt ausdrücklich, die
+Lizenzprüfung selbst zum ersten Teilschritt zu machen, bevor Code
+entsteht — mit einem ehrlichen "kein passendes Modell gefunden" als
+zulässigem Ausgang (wie bei HEIF in Phase 11). Drei Kandidaten real
+recherchiert:
+
+- **InsightFace** (`buffalo_l`/`antelopev2`): Code MIT, aber die
+  mitgelieferten Modellgewichte laut InsightFaces eigener
+  Model-Zoo-Dokumentation ausdrücklich "für nicht-kommerzielle
+  Forschungszwecke" — kommerzielle Nutzung verlangt eine separate,
+  kostenpflichtige Lizenz von InsightFace selbst. **Verworfen**, genau
+  die Falle, vor der `PLAN.md` warnt.
+- **OpenCV Zoo `SFace`**: eine Apache-2.0-`LICENSE`-Datei liegt im
+  Repo-Verzeichnis, aber das ONNX-Modell wurde ursprünglich auf einer
+  von drei möglichen Datenbanken trainiert (CASIA-WebFace, VGGFace2
+  oder MS1MV2), und `opencv/opencv_zoo`s eigene Maintainer haben auf
+  direkte Nachfrage (Issues #124, `opencv/opencv#21192`) nie geklärt,
+  welche der auto-heruntergeladenen `.onnx`-Datei zugrunde liegt.
+  MS1MV2 leitet sich vom 2019 wegen Herkunfts-/Einwilligungsproblemen
+  zurückgezogenen `MS-Celeb-1M` ab — eine oberflächlich permissive
+  `LICENSE`-Datei klärt diese Herkunftsfrage nicht. **Verworfen**,
+  genau die im Kontext-Abschnitt des Plans beschriebene Nuance (nicht
+  blind einer Lizenzdatei vertrauen, ohne die Trainingsdaten-Herkunft
+  zu prüfen).
+- **`dlib`s eigenes Embedding-Netz**
+  (`dlib_face_recognition_resnet_model_v1.dat`): der Autor
+  (davisking, `davisking/dlib-models`-Repo-README) erklärt das
+  trainierte Modell ausdrücklich und persönlich als gemeinfrei
+  ("anyone can do whatever they want with these model files as I've
+  released them into the public domain") — trotz teils
+  nicht-kommerziell lizenzierter Trainingsquellen (Face Scrub). Das
+  trägt, weil der Autor als tatsächlicher Rechteinhaber des
+  *trainierten Modells* (eine eigenständige schöpferische Leistung,
+  nicht identisch mit den Trainingsdaten) diese Freigabe explizit und
+  öffentlich ausgesprochen hat — ein qualitativ anderer, stärkerer
+  Beleg als eine pauschale Repo-`LICENSE`-Datei ohne Herkunftsklärung
+  wie bei SFace oben. **Angenommen.**
+
+Für die zur Gesichts-Ausrichtung nötigen Landmarken **nicht** das im
+selben `dlib-models`-Repo mitgelieferte 68-Punkte-Modell
+(`shape_predictor_68_face_landmarks.dat`) — dessen README zitiert
+wörtlich einen Hinweis des Datensatz-Erstellers (Stefanos Zafeiriou),
+der kommerzielle Nutzung des daraus trainierten Modells ausdrücklich
+ausschließt. Stattdessen das 5-Punkte-Modell
+(`shape_predictor_5_face_landmarks.dat`, CC0-1.0/gemeinfrei, aus
+`dlib`s eigenem, separat erhobenem Datensatz) — `dlib`s
+`get_face_chip_details`-Funktion (intern von der `dlib-face-recognition`-
+Crate aufgerufen) unterstützt beide Landmarken-Zahlen gleichwertig zur
+Gesichtsausrichtung, dieselbe 5-Punkte-Ausrichtung, die z. B. auch
+`ageitgey/face_recognition` standardmäßig anbietet — keine
+Notlösung, ein etabliertes Muster.
+
+**Gesichts-*Erkennung*** (Bounding-Boxes, bevor überhaupt ein Embedding
+berechnet wird) läuft über `dlib::get_frontal_face_detector` —
+vollständig in `libdlib` selbst einkompiliert (Boost Software
+License 1.0, keine externe Modelldatei, keine eigene Lizenzfrage).
+
+**Entscheidung — Architektur:** `apx-ai::people::PersonEmbedder`
+(neues Modul, hinter dem standardmäßig ausgeschalteten Cargo-Feature
+`people`, dieselbe Konvention wie `apx-tether`s `tethering`/`gphoto2`)
+bindet `dlib-face-recognition` mit dessen `build-native`-Feature an
+die Systembibliothek `libdlib`. Die bestehende Hautton-Heuristik
+(`apx-ai::faces::detect_face_regions`, Phase 11 Schritt 5) bleibt
+unverändert als Fallback bestehen, wenn das Feature nicht kompiliert
+oder keine Modelle hinterlegt sind — additiv, nicht ersetzend, wie
+jede vergleichbare Erweiterung in diesem Projekt.
+
+**Echter, verifizierter Fund in der Abhängigkeitskette:**
+`dlib-face-recognition-sys`s `build.rs` (jede veröffentlichte Version
+bis mindestens 20.0.1) ruft in `main()` *unbedingt* `dlib`s eigenen
+Quellcode von `http://dlib.net` herunter, um ihn selbst zu kompilieren
+— *bevor* es den bereits im selben Modul vorhandenen pkg-config-Pfad
+gegen eine bereits installierte System-`libdlib` überhaupt versucht.
+Dieser pkg-config-Pfad ist dadurch in jeder Version toter Code. In
+dieser Sandbox zusätzlich verschärft: `dlib.net` ist vom
+Netzwerk-Proxy blockiert (HTTP 403), dasselbe Beschaffungsproblem wie
+`huggingface.co`/`cdn.pyke.io`/`docs.rs` an anderer Stelle in diesem
+Projekt. **Fix:** `vendor/dlib-face-recognition-sys/` — eine lokal
+gepatchte Kopie, die `main()` umsortiert (pkg-config zuerst probieren,
+nur bei Fehlschlag herunterladen — dieselben zwei bereits vorhandenen
+Codeblöcke, keine neue Logik), eingebunden über ein
+`[patch.crates-io]` im Workspace-`Cargo.toml`. Real gegen die per
+`apt install libdlib-dev libblas-dev liblapack-dev` installierte
+System-`libdlib` 19.24 kompiliert, gelinkt und getestet (nicht nur
+`cargo add --dry-run`).
+
+**Echt spike-verifiziert, nicht nur behauptet:** gegen drei echte
+Fotos (offizielle Weißes-Haus-Fotos von Pete Souza, US-Regierungswerk,
+gemeinfrei) lief die volle Kette Gesichtserkennung → 5-Punkt-
+Ausrichtung → 128-dimensionales Embedding → euklidischer Abstand.
+Zwei Fotos derselben Person (`obama1.jpg`/`obama2.jpg`) lagen bei
+Abstand 0.35 — unter der von `dlib`s eigener Dokumentation
+empfohlenen Schwelle 0.6 ("dieselbe Person"); ein drittes Foto einer
+anderen Person (`biden.jpg`) lag bei Abstand 0.85, klar darüber.
+Derselbe Test läuft jetzt als `apx-ai::people`s Unit-Test (übersprungen
+ohne lokale Modelldateien/Testfotos — kein Netzwerk-Download in CI,
+siehe `PLAN.md` Phase 13s Verifikations-Abschnitt).
+
+**Katalog-Schema** (`migrations/0011_people.sql`): zwei neue Tabellen,
+`people` (benannte Person, `name: NULL` = automatisch erkannt, aber
+unbenannt) und `face_detections` (Bounding-Box + Embedding als
+JSON-Array, `person_id: NULL` = unzugeordnet). Auto-Zuordnung neu
+erkannter Gesichter läuft — wie bei den intelligenten Sammlungen aus
+Schritt 7 — in-memory: `repository::people::save_detections_for_photo`
+lädt einmal alle bereits einer Person zugeordneten Gesichter und ordnet
+ein neues Gesicht der nächstliegenden Person zu, wenn deren
+euklidischer Abstand unter der Schwelle liegt; `SAME_PERSON_EMBEDDING_
+THRESHOLD`/`embedding_distance` liegen bewusst in `apx_catalog::models`
+statt in `apx-ai::people` (das hinter dem `people`-Feature steht),
+damit diese reine Vergleichslogik unabhängig vom Feature kompiliert.
+
+**Opt-in-Modell-Download, kein Bundling** (dasselbe Muster wie LaMa in
+Schritt 1): `download_people_models` lädt beide `.dat.bz2`-Dateien von
+`dlib.net` herunter und entpackt sie — **nicht in dieser Sitzung
+erreichbar/verifiziert** (`dlib.net` blockiert, siehe oben), dieselbe
+ehrliche Lücke wie beim LaMa-Modell; keine Hash-Prüfung aus demselben
+Grund (kein erreichbarer, verifizierbarer Hash in dieser Sitzung).
+
+---
+
+## ADR-0041: Phase 14 — zehn Alleinstellungsmerkmale jenseits von
+Lightroom; echte MiDaS-Tiefenschätzung und fast-neural-style-Stiltransfer
+diesmal end-zu-Ende gegen ein echtes Foto verifiziert
+
+**Status:** Angenommen
+**Kontext:** Phase 13 hat die letzte Lücke gegen Lightroom geschlossen
+(Vergleichs-Artifact, Stand Phase 13). Der Nutzer erklärt "so nah wie
+möglich an Lightroom" (Ziel A) damit für erreicht und gibt ein neues
+Ziel B vor: zehn eigenständige, visuell beeindruckende Fähigkeiten ohne
+Lightroom-Entsprechung, je zur Hälfte klassisch/KI-gestützt (kostenlose
+lokale Inferenz, keine bezahlten Cloud-APIs), jede sowohl für
+Massenbearbeitung als auch Präzisionsarbeit tauglich. Der vollständige
+Plan mit allen zehn Punkten steht in `PLAN.md` Phase 14.
+
+**Recherche-Disziplin:** jede "Lightroom hat das nicht"-Behauptung im
+Plan wurde per echter Web-Suche gegengeprüft (siehe Zitate in `PLAN.md`
+Phase 14), nicht aus dem Gedächtnis behauptet. Ein ursprünglich erwogener
+zehnter Kandidat ("Smart-Crop-Vorschläge") wurde verworfen, weil Adobe
+"Suggested Crop" bereits in Lightroom Web ausliefert — zu nah an einer
+bestehenden Adobe-Funktion für eine klare Abgrenzung.
+
+**Schritt-0-Spikes, diesmal beide echt gegen ein reales Foto
+verifiziert** (anders als der LaMa-Spike in Phase 13 Schritt 0, der
+mangels erreichbarem `huggingface.co` nur gegen ein winziges
+`Y = X + 1`-Modell lief): `huggingface.co` bleibt blockiert
+(`subscribe_forbidden`/`403` auf jeden `CONNECT`-Versuch), aber
+`github.com`, `raw.githubusercontent.com`, `release-assets.
+githubusercontent.com` und — wichtiger Einzelfund — `media.
+githubusercontent.com/media/...` (der echte Git-LFS-Auslieferungs-Host,
+`raw.githubusercontent.com` liefert für LFS-Dateien nur den
+128-Byte-Zeiger-Text) sind aus dieser Sandbox heraus erreichbar. Beide
+Modelle unten wurden probehalber gegen `opencv/opencv`s eigenes
+`samples/data/fruits.jpg` (ein echtes, im selben verifizierten Repo
+liegendes Foto, keine Fabrikation) inferiert und das Ergebnis visuell
+geprüft:
+
+- **MiDaS v2.1 small** (`isl-org/MiDaS`, MIT, ONNX-Release-Asset,
+  66 764 249 Bytes, `github.com/isl-org/MiDaS/releases/download/v2_1/
+  model-small.onnx`): trotz symbolischer (scheinbar dynamischer)
+  Tensor-Dimensionen im ONNX-Graph verlangt das Modell tatsächlich fest
+  256×256 Eingabe (ein zu großer Testlauf schlägt mit einer expliziten
+  ONNX-Runtime-Fehlermeldung fehl, kein stiller Fallback) — wichtig für
+  Schritt 8, feste Skalierung auf 256×256 vor der Inferenz nötig. Die
+  resultierende Tiefenkarte zeigt exakt die erwartete Struktur: eine
+  helle (nahe), scharf konturierte Obst-Silhouette mit plausibler
+  3D-Schattierung (spitze vs. runde Früchte unterscheidbar) vor einem
+  durchgehend dunklen (fernen) Hintergrund — echte, korrekt
+  funktionierende monokulare Tiefenschätzung, kein Zufallsrauschen.
+- **fast-neural-style "mosaic"** (`onnx/models`, MIT,
+  `validated/vision/style_transfer/fast_neural_style/model/mosaic-9.
+  onnx`, 6 728 029 Bytes über den LFS-Media-Host geladen, Hash-Größe
+  stimmt exakt mit dem Git-LFS-Zeiger überein): erwartet dynamische
+  NCHW-Eingabe in `0..255` (kein ImageNet-Normalisieren, anders als
+  MiDaS), Ausgabe ist ein 224×224-RGB-Bild mit derselben Auflösung wie
+  die Eingabe. Ergebnis ist ein echtes, klar erkennbares
+  Mosaik-/Glasfenster-Stilbild derselben Obstschale — funktioniert.
+
+**Offene Frage ehrlich beantwortet (Spike B, "arbitrary style
+transfer"):** ein permissiv lizenziertes Modell für *beliebige*
+Referenzbilder als Stilvorlage (statt fünf fest einprogrammierter Stile)
+existiert real — Googles Magenta-Projekt (`magenta/magenta`,
+Apache-2.0, `arbitrary_image_stylization`) —, aber nur als
+TensorFlow/TFLite-Checkpoint, nicht als ONNX-Export. Die einzige
+gefundene ONNX-Variante eines AdaIN-basierten Modells (`rapidrabbit76/
+Arbitrary-Style-Transfer-...-pytorch-lightning`) liegt auf Google Drive
+(in dieser Sandbox ebenso unerreichbar wie huggingface.co) und ist ein
+inoffizieller Nachbau ohne eigene, im Repo genannte Lizenzdatei für die
+selbst trainierten Gewichte — genau die Art unklarer Herkunft, die
+`ADR-0040-Nachtrag VI`s SFace-Ablehnung schon einmal begründet hat.
+**Ergebnis, kein Workaround erzwungen:** Schritt 9 bleibt auf die fünf
+sicher lizenzierten, real verifizierten festen `onnx/models`-Stile
+beschränkt (candy/mosaic/rain-princess/udnie/pointilism) — ein
+lizenzklares Modell für echte beliebige Referenzbild-Übertragung wäre
+eine eigene, spätere Untersuchung wert, wird hier aber nicht durch eine
+fragwürdige Google-Drive-Quelle ersetzt.
+
+**Wiederverwendete Bausteine statt Neuaufbau** (Details je Schritt in
+`PLAN.md` Phase 14): `blend_pixel()` aus `apx-pipeline::stages::masks`
+(Mehrfachbelichtung, Halation), `frontend/src/lib/histogram.ts`s
+Client-seitiges Berechnungsmuster über den bereits vorhandenen
+Vorschau-Puffer (Vektorskop/Wellenform, kein neuer Backend-Command),
+`apx-ai::inpaint::InpaintSession`/`RepairStroke` (Canvas-Erweiterung),
+die bestehenden Hautton-/Saliency-Heuristiken in `apx-ai::segmentation`
+(Himmel-Segmentierung), `kmeans_colors` (real per `cargo add --dry-run`
+geprüft, v0.7.1, MIT/Apache — Farb-Harmonie-Rad).
+
+### Nachtrag I (Phase 14 Schritt 1): Canvas-Erweiterung/Outpainting —
+Margen als normierte Bruchteile statt absoluter Pixel
+
+`GeometryAdjustment` bekommt additiv (`#[serde(default)]`, dieselbe
+Konvention wie `RepairStroke::ai_fill`) ein `canvas_extension:
+Option<CanvasExtension>` mit vier Rändern und einem optionalen,
+vorab berechneten `CanvasExtensionPatch` (Bitmap + eigene
+Speicherauflösung — dasselbe „einmal berechnen, bei jedem Rendern nur
+noch skalieren"-Muster wie `AiFillPatch`). Die vier Ränder wurden zuerst
+als `u32`-Pixelzahl entworfen (lose Analogie zu
+`AiFillPatch::bitmap_width`), das war aber die falsche Einheit: eine
+Speicherauflösung wie `bitmap_width` wird bei jedem Rendern ohnehin auf
+die Zielgröße skaliert, ein *Rand* legt dagegen unmittelbar das neue
+Seitenverhältnis der Leinwand fest und muss deshalb — wie `CropRect`s
+normierte `0.0..=1.0`-Koordinaten — mit dem Bild mitskalieren. Korrigiert
+auf `f32`-Bruchteile der jeweils aktuellen Bildbreite/-höhe, noch bevor
+irgendein Test geschrieben wurde. `GeometryAdjustment` verliert dabei
+`Copy` (der neue Patch trägt `Vec<u8>>`) — nichts im Rest der Codebasis
+verließ sich auf `Copy` (`cargo check -p apx-pipeline` bestätigt sauber).
+
+`stages/geometry.rs::extend_canvas` läuft als letzter Teilschritt in
+`apply()` nach Drehung/Zuschnitt, rechnet die Bruchteile in Pixel um,
+bettet das Original unverändert mittig ein und füllt den Rand aus dem
+bilinear auf die tatsächliche neue Leinwandgröße hochskalierten Patch —
+ohne Patch (Ränder gewählt, „Anwenden" aber noch nicht ausgelöst) bleibt
+die Erweiterung ein reiner No-Op, exakt wie ein frischer
+`RepairMode::AiInpaint`-Strich ohne `ai_fill`.
+
+`apx-app::commands::run_ai_outpaint` braucht **kein** neues Modell und
+**keinen** neuen Download-Command: dieselbe bereits bestehende
+`apx_ai::inpaint::InpaintSession::fill_rgb8` (Phase 13 Schritt 1) nimmt
+beliebige gleich große Pixel-/Maskenpaare entgegen, der Command baut nur
+eine andere Maskenform — das gesamte gewählte Randgebiet statt eines
+gemalten Pinselstrichs, Randpixel per Kanten-Klemmung vorbefüllt statt
+mit einer harten Flächenfarbe (weniger sichtbare Kanten-Artefakte vor der
+eigentlichen Inferenz). Dieselbe ehrliche Grenze wie bei jeder anderen
+KI-Analyse dieses Projekts: läuft auf dem rohen,
+`ANALYSIS_MAX_EDGE`-gedeckelten Dekodierergebnis, ohne eine im
+Entwickeln-Modul bereits gesetzte Drehung/Zuschnitt zu berücksichtigen.
+
+### Nachtrag II (Phase 14 Schritt 2): Frequenztrennung als Retusche-Ziel
+statt eigener Pipeline-Stufe
+
+Punkt 2 der Recherche-Tabelle ist mit einem Original-Zitat belegt:
+"Adobe Lightroom doesn't have a built-in frequency separation feature
+like Photoshop does." Die naheliegende Umsetzung — eine neue,
+eigenständige Pipeline-Stufe, die das ganze Bild bei jedem Rendern in
+zwei Ebenen zerlegt — wäre gegen die in `edl/v4.rs`s Moduldoku
+festgehaltene Garantie des Node-Editors verstoßen ("ein Knoten je Stufe,
+in genau dieser Reihenfolge … das erhält die Renderpfad-Garantie, auf
+die jedes andere Modul angewiesen ist"). Stattdessen ist Frequenztrennung
+hier ein **Retusche-Ziel**, kein Rendering-Schritt: `RepairStroke`
+bekommt additiv (`#[serde(default)]`, dieselbe Konvention wie
+`ai_fill`) ein `layer: RepairLayer`-Feld (Normal/LowFrequency/
+HighFrequency, `#[derive(Default)]` auf `Normal`). `stages/repair.rs`
+zerlegt das Bild nur für einen so markierten Strich (per neuem
+`stages::frequency_separation::split`/`combine`, separierbarer
+Box-Tiefpass — dieselbe „Box statt echte Gauß-Unschärfe"-Vereinfachung
+wie `masks::feather_alpha` und `details.rs`s Unsharp-Masking-
+Referenzweichzeichner, hier aber dreikanalig statt auf einem
+Ein-Kanal-Alpha-Puffer und mit größerem, für Textur-/Hautretusche
+sinnvollem Vorgabe-Radius), wendet die *komplett unveränderte*
+bestehende Klon-/Reparatur-/Füll-Logik nur auf die gewählte Ebene an und
+setzt beide Ebenen sofort wieder zusammen. Kein neuer Knoten, keine neue
+`StageEnabled`-Flagge, keine Änderung an `develop::render_rgba8`s fester
+Kette — nur eine zusätzliche interne Verzweigung innerhalb der bereits
+bestehenden Reparatur-Stufe.
+
+`SPLIT_RADIUS_FRACTION` (2 % der Bildbreite) ist bewusst ein fester
+Vorgabewert statt eines eigenen Reglers in diesem Schritt — ein
+zusätzlicher Radius-Regler wäre eine sinnvolle spätere Ergänzung, aber
+kein Kernbestandteil der Recherche-Lücke. Der reine Anzeige-Modus im
+Viewer (Normal/Tieffrequenz/Hochfrequenz) ist unabhängig davon eine
+clientseitige Berechnung über den bereits gerenderten Vorschau-Puffer
+(`frontend/src/lib/frequencySeparation.ts`), exakt nach dem in Phase 9
+etablierten Muster von `lib/histogram.ts` — kein neuer Backend-Command,
+verändert `developEdl` nicht.
+
+Real getestet (nicht nur durch Code-Inspektion behauptet): ein
+`RepairMode::Clone`-Strich mit `layer: HighFrequency`, der aus einer
+tonlich deutlich helleren, aber sonst flachen Quellregion klont, entfernt
+einen lokalen dunklen Fleck am Ziel, ohne dessen umgebenden Ton Richtung
+der helleren Quelle zu ziehen — anders als derselbe Strich mit
+`layer: Normal`, der den Ton sichtbar mitzieht
+(`stages::repair::tests::high_frequency_only_stroke_removes_a_blemish_while_preserving_the_underlying_tone`).
+
+### Nachtrag III (Phase 14 Schritt 3): Mehrfachbelichtung/Layer-
+Compositing — display-referred statt linear, kein Katalogzugriff in
+`apx-pipeline`, kein dritter dauerhafter Seitenpalette
+
+Punkt 5 der Recherche-Tabelle ist mit einem Original-Zitat belegt:
+"Lightroom Classic itself doesn't have traditional layer compositing
+capabilities like Photoshop does." Umgesetzt als neue Stufe
+`apx-pipeline::stages::composite::apply_all()`, die beliebig viele
+`CompositeLayer`s sequenziell über das Bild legt — bewusst **nach**
+`curves` in `develop::render_rgba8`s fester Kette, also auf dem bereits
+fertig entwickelten, display-referred sRGB-RGBA8-Ergebnis, nicht auf dem
+linearen Szenen-referred Arbeitsraum (in dem z. B. `stages::masks` selbst
+noch rechnet). Blend-Modi wie "Multiplizieren" sind eine visuelle
+Konvention aus Photoshop/Lightrooms eigener Farbwelt (gamma-kodierte
+Werte) — dieselbe Formel im linearen Arbeitsraum angewendet ergäbe ein
+physikalisch anderes, für Nutzer überraschendes Ergebnis. Reihenfolge in
+`StageEnabled`/`develop.rs`: `..., curves, composite, geometry` — die neue
+Stufe läuft also auch vor Zuschnitt/Leinwand-Erweiterung, eine
+Compositing-Ebene wird mit zugeschnitten/erweitert wie der Rest des
+Bildes.
+
+`StageEnabled.composite` ist additiv wie `stage_enabled` selbst, aber mit
+`#[serde(default = "default_true")]` statt eines bloßen
+`#[serde(default)]` auf dem *ganzen* Feld: `stage_enabled` selbst ist
+schon additiv zum gesamten `EdlV2`→`EdlV4`-Sprung, aber innerhalb eines
+bereits vorhandenen `StageEnabled`-Objekts (aus einem v4-Umschlag, der
+vor diesem Schritt gespeichert wurde) fehlt der Schlüssel `composite`
+komplett — ohne einen expliziten Default-Wert für *dieses eine Feld*
+würde `bool`s eigener bool default (`false`) greifen und die neue Stufe
+für jede historische Bearbeitung fälschlich abschalten.
+
+**Architekturentscheidung, kein Katalogzugriff in `apx-pipeline`:** eine
+Compositing-Ebene braucht Pixel aus einem *anderen* Foto oder einer vom
+Nutzer gewählten Datei — `apx-pipeline` selbst kennt aber weder den
+Katalog noch das Dateisystem (reine Bildverarbeitungs-Crate). Deshalb
+trägt `CompositeLayer::source` (`CompositeLayerSource`) bereits eine
+fertige RGB-Bitmap, genau wie `AiFillPatch`/`CanvasExtensionPatch` aus
+Phase 13/14 Schritt 1 — aufgelöst von einem neuen, dedizierten
+`apx-app::commands::prepare_composite_layer_source`-Command (kein
+KI-Modell nötig: ein weiteres Katalog-Foto läuft über `decode_linear` +
+das bereits bestehende `apx_pipeline::color::
+linear_camera_rgb_to_srgb_rgba8`, eine Textur-Datei über `image::open` +
+eine neue, einfache `downsample_rgb_image`-Hilfsfunktion — beide auf
+`apx_ai::segmentation::ANALYSIS_MAX_EDGE` gedeckelt, dieselbe Grenze wie
+jede andere in der EDL gespeicherte Bitmap dieses Projekts).
+
+**Ein während der Umsetzung real gefundener, nicht nur vermuteter
+Layout-Fehler:** die erste Fassung setzte die Compositing-Bedienung als
+eigene, dauerhaft sichtbare dritte rechte `PaletteFrame`-Palette um
+(neben `DevelopPanel`/`MasksPanel`, analog zu deren Aufbau). Im
+Standard-Testviewport (1280×720) verdrängten drei gleichzeitig offene
+Paletten den Foto-Viewer (`<main>`) so weit, dass er nicht mehr sichtbar/
+klickbar war — drei bestehende `masks-flow.spec.ts`-Tests, die auf einen
+`<main>`-Klick angewiesen sind, schlugen dadurch tatsächlich fehl (nicht
+nur eine theoretische Sorge, siehe die Diagnose in derselben Sitzung
+anhand echter Playwright-Screenshots). Behoben durch Rückbau auf einen
+Regler-Abschnitt direkt innerhalb von `DevelopPanel.tsx` (zwischen den
+Effekte- und Geometrie-Reglern, passend zur Pipeline-Position) statt
+einer eigenen Palette — kein zusätzlicher, immer Platz beanspruchender
+Spaltenraum. Alle 16 zuvor betroffenen Tests (drei Fehlschläge plus 13
+weitere zur Kontrolle) laufen seither wieder grün.
+
+`composite_layers` ist bewusst **in** `PRESET_SECTION_KEYS`
+aufgenommen, obwohl es wie `repair`/`masks` eine `Vec`-Sektion ist (die
+sonst grundsätzlich ausgeschlossen sind): anders als ein Reparatur-
+Strich oder eine Maske (an eine konkrete Bildposition im *aktuellen*
+Foto gebunden) trägt jede Ebene bereits ihre eigene fertige Bitmap — eine
+feste Ebenen-„Rezeptur" (z. B. eine Lichtleck-Textur bei 30 % Screen,
+sobald Schritt 4 den `Screen`-Blend-Modus ergänzt) ist ein portabler
+„Look", der sich über die bestehende Kopieren/Einfügen/Synchronisieren-
+Mechanik genau wie jede andere Reglergruppe auf viele Fotos übertragen
+lässt — das erfüllt den vom `PLAN.md` geforderten Batch-Anwendungsfall,
+ohne eine eigene neue Stapelverarbeitungs-Funktion zu bauen.
+
+Neuer echter End-zu-Ende-Test `e2e/composite-flow.spec.ts` (nach dem
+Muster von `masks-flow.spec.ts`): eine Ebene aus einem zweiten
+Katalog-Foto hinzufügen, Blend-Modus wechseln, Sichtbarkeit umschalten,
+entfernen — jeweils mit Prüfung des tatsächlich committeten
+`composite_layers`-Inhalts im EDL, nicht nur der UI-Anzeige.
+
+### Nachtrag IV (Phase 14 Schritt 4): Echte Halation-/Bloom-Simulation
+— `BlendMode::Screen` nachgezogen, CPU-only-Kurzschluss statt Teil des
+Vignette-/Korn-GPU-Dispatchs, ein real gefundener Playwright-Locator-
+Konflikt
+
+Punkt 8 der Recherche-Tabelle ist mit einem Original-Zitat belegt:
+"Lightroom Classic cannot create true film halation, only a soft bloom
+approximation." Umgesetzt als weitere Effekt-Variante direkt in
+`crates/apx-pipeline/src/stages/effects.rs` (dieselbe Datei wie
+Vignette/Korn): Lichter-Maske per `smoothstep`-Schwellenwert nahe Weiß
+(bewusst mit weicher Kante, `HALATION_THRESHOLD_SOFTNESS`, statt einer
+harten Schwelle — sonst risse die Bloom-Kante sichtbar), sofort per
+neuem `hsv_to_rgb` warm eingefärbt, dann mit demselben separierbaren
+Box-Weichzeichner wie `masks::feather_alpha`/`frequency_separation`
+(erneut bewusst eigenständig implementiert statt geteilt — dieselbe
+"kleine, in sich geschlossene Funktion"-Begründung wie in den beiden
+vorherigen Schritten) verwaschen und additiv per
+`blend_pixel(base, glow, BlendMode::Screen)` zurückgemischt, gewichtet
+mit dem Betrag-Regler. `BlendMode::Screen` fehlte bisher in `edl/v3.rs`
+— Schritt 3s Compositing-Stufe nutzte nur die vier damals schon
+vorhandenen Modi — und wird hier nachgezogen, `masks::blend_pixel` dafür
+um eine weitere Formel-Verzweigung ergänzt (`1.0 - (1.0-base)*(1.0-
+adjusted)`, die Standard-Screen-Formel).
+
+**Bewusst CPU-only, unabhängig vom GPU-/CPU-Dispatch der Vignette/Korn
+direkt davor:** Halation ist wie `apply_content_aware_fill` und
+`frequency_separation` eine mehrstufige, radiusabhängige
+Nachbarschaftsoperation (zwei Blur-Durchgänge über das gesamte Bild),
+kein per-Pixel-Vorgang, der in ein festes WGSL-Shader-Modell passt —
+dieselbe bereits etablierte Grenze wie bei den beiden Vorgängern. In
+`develop.rs` deshalb ein eigener, unmittelbar nach dem
+Vignette-/Korn-`apply_gpu`/`apply_cpu`-Aufruf eingefügter Kurzschritt
+(`if !stages.effects || edl.effects.halation_amount <= 0.0 { effected }
+else { effects::apply_halation(...) }`), keine Erweiterung desselben
+Dispatch-Aufrufs.
+
+**Test-Skalierungsfalle real gefunden, kein Vorab-Design:** die ersten
+drei neuen Unit-Tests scheiterten zweimal in Folge an zu kleinen
+Testbildern statt an einem echten Logikfehler. Erster Fehlschlag:
+`HALATION_MAX_RADIUS_FRACTION = 8 %` ergab bei einem 31-Pixel-Testbild
+und mittlerem Radius-Reglerwert einen gerundeten Blur-Radius von genau 1
+Pixel — zu klein, um 3 Pixel entfernte Testpunkte überhaupt zu erreichen
+(Ergebnis bitweise identisch mit der Eingabe). Behoben durch Anhebung auf
+15 % und größere Testbilder (121/161 statt 31/41 Pixel), damit die
+Bruchteilsformel bei realistischen Testabständen genug absolute Pixel
+zur Verfügung hat. Zweiter Fehlschlag danach: ein einzelner heller
+Testpixel wurde vom zweifachen Box-Blur-Mittelwert (Divisor rund 23 in
+jedem der zwei Durchgänge, zusammen rund 529) auf ein am Nachbarpixel
+nicht mehr messbares Signal verdünnt — unrealistisch gegenüber einer
+echten, flächigen Lichtquelle. Behoben durch einen 7×7-Testblock statt
+eines Einzelpixels. Beide Korrekturen wurden jeweils durch einen
+tatsächlichen `cargo test`-Lauf verifiziert, nicht nur durch
+Code-Inspektion angenommen.
+
+**Ein während der Umsetzung real gefundener, nicht nur vermuteter
+Playwright-Locator-Konflikt:** das neue Farbton-Feld hieß zunächst
+"Halation: Farbton" (analog zu "Halation: Betrag"/"Halation: Radius").
+Playwrights `getByRole(..., {name})` matcht einen String-Namen jedoch
+standardmäßig als Teilstring, nicht exakt — der resultierende
+zugängliche Name "Halation: Farbton (Zahlenwert)" enthält damit den
+bestehenden bloßen Namen "Farbton (Zahlenwert)" vollständig als
+Teilzeichenkette. Der bereits bestehende Test
+`masks-flow.spec.ts`s "Sechs-Sektionen-Regler …" nutzt genau diesen
+bloßen Namen mit `.nth(1)`, um zwischen dem globalen und dem
+maskeneigenen HSL-Farbton-Regler zu unterscheiden — durch das neue,
+dazwischenliegende dritte Element verschob sich `.nth(1)` auf den
+falschen (globalen Halation-)Regler, wodurch der eigentlich gewollte
+Maskenregler nie den erwarteten Wert committete. Real reproduziert (der
+Test schlägt isoliert fehl, nicht nur im Batch) und root-caused per
+Playwright-Snapshot der zugänglichen Baumstruktur zum Fehlschlagzeitpunkt
+— nicht durch bloßes erneutes Lesen des Testcodes vermutet. Behoben durch
+Umbenennung zu "Farbton (Halation)", demselben bereits im Projekt
+etablierten Klammer-Suffix-Muster wie "Farbton (Rot)"/"Farbton (Grün)"/
+"Farbton (Blau)" bei HSL-Bändern und "Farbton (${row.label})" bei der
+Kalibrierung — der Qualifizierer steht dabei grundsätzlich *nach*
+"Farbton", nie davor, damit kein neuer bloßer Name je zufällig ein
+Präfix eines anderen wird. Lehre für künftige Schritte: ein neues
+Reglerlabel, dessen letztes Wort mit einem bereits an anderer Stelle
+bloß verwendeten Label übereinstimmt, braucht denselben Klammer-Suffix,
+bevor ein Test dafür geschrieben wird.
+
+### Nachtrag V (Phase 14 Schritt 5): Automatischer Stil-Konsistenz-Check
+fürs Shooting — Plan-Annahme einer vorhandenen Lab-Umrechnung war falsch,
+eigenständige CIE-Formeln statt Wiederverwendung
+
+Punkt 6 der Recherche-Tabelle: Lightroom kennt nur das manuelle "Sync
+Settings" zwischen genau zwei Fotos, keinen automatischen
+Konsistenzabgleich über ein ganzes Shooting. Der ursprüngliche Plan nahm
+an, `apx-pipeline::stages::calibration`/`color_math.rs` rechne bereits in
+CIE-Lab und diese Umrechnung könne wiederverwendet werden — eine
+Prüfung zu Beginn dieses Schritts zeigte, dass es weder eine Datei
+`color_math.rs` noch irgendeine sRGB->Lab-Umrechnung im gesamten
+Workspace gibt (`stages::calibration` rechnet auf den kameraeigenen
+Primärfarben, nicht in Lab). Statt die Plan-Annahme stillschweigend zu
+korrigieren, ist das hier festgehalten: die Standard-CIE-Formeln
+(D65-Referenzweiß) sind in `crates/apx-ai/src/style_consistency.rs`
+eigenständig aus öffentlich dokumentierter Mathematik neu geschrieben —
+dieselbe Vorgehensweise wie `stages::effects::hsv_to_rgb` in Schritt 4,
+kein Lizenzrisiko, weil es sich um eine feste mathematische Definition
+handelt, kein übernommener Code.
+
+**Warum Lab statt sRGB-Mittelwert:** CIE-Lab ist wahrnehmungsnäher als
+roher sRGB-Kanalmittelwert (gleicher Grund, warum Adobe seine eigenen
+Weißabgleich-/Histogramm-Werkzeuge intern auf ähnlichen
+wahrnehmungsbasierten Räumen aufbaut) — eine `L*`-Mittelwertdifferenz
+korreliert direkter mit wahrgenommener Belichtungsdifferenz als ein
+roher RGB-Mittelwert, und die `a*`/`b*`-Achsen trennen sauber
+Grün/Magenta- von Blau/Gelb-Verschiebungen, exakt die beiden Halbachsen,
+die `tint_shift`/`temp_shift_kelvin` bereits repräsentieren.
+
+**Ausreißer-Metrik:** ein auf die jeweilige Achsen-Streuung der Gruppe
+normierter kombinierter Abstand (`analyze_group`) — ein vereinfachter
+Mahalanobis-Abstand mit Diagonal-Kovarianz statt der vollen
+Kovarianzmatrix. Für drei grob unabhängige Lab-Achsen eine vertretbare
+Vereinfachung (eine volle 3×3-Kovarianzmatrix-Inversion wäre für den
+Nutzen hier unverhältnismäßig). Der Schwellenwert
+(`OUTLIER_DISTANCE_THRESHOLD = 1.5`) ist wie
+`stages::effects::HALATION_THRESHOLD` ein bewusst gewählter Wert, kein
+strikt hergeleiteter p-Wert — dieselbe ehrliche Einordnung wie bei jeder
+anderen Heuristik-Konstante in diesem Projekt. Unter drei Fotos
+(`MIN_GROUP_SIZE_FOR_ANALYSIS`) ist eine Streuung statistisch nicht
+aussagekräftig — `analyze_group` markiert dann bewusst keine Ausreißer
+und schlägt keine Angleichung vor, statt aus der Streuung eines
+Extremfalls von ein bis zwei Fotos einen bedeutungslosen "Ausreißer" zu
+erfinden.
+
+**Angleichungs-Vorschlag, keine neue Pixel-Operation:** `suggest_alignment`
+berechnet Deltas für die bereits bestehenden
+`WhiteBalanceAdjustment`/`BasicAdjustment::exposure_ev`-Regler statt eine
+neue EDL-Operation einzuführen — dieselbe "berechnet Werte für
+bestehende Regler"-Philosophie wie `frontend/src/lib/autoTone.ts`s
+Auto-Ton. Die Umrechnung von `L*` in eine Blendenstufen-Korrektur nutzt
+dieselbe bereits im Projekt etablierte "^2.2-Näherung" wie Auto-Ton
+(dort für gamma-kodiert<->linear); die Umrechnung von `a*`/`b*` in
+`tint_shift`/`temp_shift_kelvin` ist eine bewusst benannte Heuristik-
+Skalierung, keine photometrische Herleitung. Alle drei Deltas sind auf
+einen Höchstwert gekappt, damit ein extremer Ausreißer (z. B. ein
+versehentlich mitfotografiertes komplett anderes Motiv) keinen die
+Regler-Obergrenze sprengenden Vorschlag erzeugt.
+
+**Command-Ebene:** `apx-app::commands::analyze_style_consistency`
+arbeitet wie `list_perceptual_duplicate_groups`/`list_people_groups` auf
+dem bereits vorhandenen Thumbnail-Vorschau-Cache eines einzelnen Ordners
+(des "Shootings") statt jedes Foto neu von der RAW-Datei zu dekodieren —
+dieselbe Fotomenge, die der Plan mit "einer gewählten Fotomenge" meint:
+ein Ordner ist im bestehenden Datenmodell bereits die natürliche
+Shooting-Einheit (ein Import-Vorgang).
+
+**Frontend:** neuer "Stil-Konsistenz"-Reiter im "Bibliothek
+organisieren"-Dialog (`LibraryOrganizeDialog.tsx`), nach demselben
+"scannen, Ergebnis anzeigen, an ausgewählten Fotos wirken"-Muster wie
+der bestehende Duplikat-Assistent — zeigt nur Ausreißer an (konsistente
+Fotos werden nicht extra aufgelistet, das Shooting ist bei keinem
+Ausreißer bereits "fertig"). "An Shooting angleichen" liest/schreibt
+direkt über `currentDevelopEdit`/`applyDevelopEdit` (exakt wie
+`syncSettingsToSelection` aus Phase 8), funktioniert also auch für
+Fotos, die gerade nicht im Entwickeln-Modul geöffnet sind — trägt damit
+sowohl den vom Plan geforderten Massenbearbeitungs- als auch den
+Einzelfoto-Anwendungsfall, ohne eine zweite Anwendungs-UI zu bauen.
+
+**Ein während der Umsetzung real gefundener, nicht nur vermuteter
+Fehler:** die erste Fassung von `alignPhotoStyleToShoot` wies direkt auf
+Felder des von `edlFromHistoryPosition` bei `{kind: "Neutral"}`
+zurückgegebenen Objekts zu (`payload.basic.white_balance.
+temp_shift_kelvin = ...`) — das schlug beim tatsächlichen e2e-Testlauf
+mit `TypeError: Cannot assign to read only property 'temp_shift_kelvin'`
+fehl. Ursache: `neutralEdlPayload()` gibt die geteilten `NEUTRAL_*`-
+Konstanten aus `lib/edl.ts` per Referenz zurück, und Immer friert
+Objekte, die es einmal innerhalb eines `set()`-Aufrufs verwaltet hat,
+zur Laufzeit ein (Entwicklungsmodus-Sicherheitsnetz gegen genau solche
+versehentlichen Mutationen). Behoben durch frische, gespreadete
+`basic`-/`white_balance`-Objekte statt In-Place-Mutation — real per
+Playwright-Konsolen-Log reproduziert und verifiziert, nicht nur durch
+Code-Inspektion vermutet.
+
+### Nachtrag VI (Phase 14 Schritt 6): Vektorskop + Wellenform-Monitor —
+`putImageData` statt `fillRect`-Schleifen, nur die sichtbare Analyse wird
+berechnet
+
+Punkt 9 der Recherche-Tabelle ist mit einem Original-Zitat belegt:
+Lightroom "doesn't yet have vectorscope and waveform features", seit
+mindestens 2012 in Adobes eigenem Feedback-Forum nachgefragt. Beide
+Werkzeuge sind reine Frontend-Erweiterungen nach dem in Phase 9 Schritt 4
+etablierten Histogramm-Muster: `lib/vectorscope.ts`/`lib/waveform.ts`
+rechnen direkt über den bereits gerenderten `DevelopFrame.pixels`-Puffer
+(`useDevelopRender`), kein neuer Backend-Command, keine neue
+`apply_develop_edit`-Nutzlast.
+
+**Vektorskop:** Cb/Cr-Dichte-Raster (`GRID_SIZE = 128`) nach ITU-R BT.601
+— dieselben Koeffizienten wie `apx_ai::color::rgb_to_ycbcr` (Phase 7),
+hier aber auf `0..255`-Bytes statt `0..1`-normierten Kanälen angewandt.
+Der Ursprung (Grau/unbunt) liegt bei Cb=Cr=128, dem exakten
+Chroma-Nullpunkt — bewusst *nicht* als exakt mittige Rasterzelle
+angenommen (real beim Testen aufgefallen: `128/255` ist kein exaktes
+Vielfaches von `1/(size-1)`, die gerundete Zielzelle kann deshalb um ein
+bis zwei Zellen von der rechnerischen Mitte abweichen; der Test prüft
+"nahe der Mitte", nicht exakt mittig).
+
+**Wellenform:** RGB-Parade je Bildspalten-Bucket (`COLUMN_BUCKETS = 256`,
+`VALUE_BUCKETS = 256` — dieselbe Werte-Auflösung wie `lib/histogram.ts`).
+Die Bildbreite selbst kann beliebig groß sein, mehrere Bildspalten werden
+deshalb je Ausgabespalte zusammengefasst — dieselbe Rasterungs-Idee wie
+beim Vektorskop, nur eindimensional statt zweidimensional.
+
+**Zeichenmethode bewusst `putImageData` statt `HistogramCanvas`s
+`fillRect`-Schleife:** ein Vektorskop-Raster hat `128 * 128 = 16384`
+Zellen, eine Wellenform `256 * 256 = 65536` Zellen je Kanal — bei dieser
+Größenordnung wäre ein `fillRect`-Aufruf pro Zelle (wie beim
+256-Balken-Histogramm) spürbar langsamer als ein einziger
+`putImageData`-Aufruf mit direkt beschriebenem Pixelpuffer. Nachteil:
+`putImageData` kennt keinen `globalCompositeOperation`-Blend-Modus wie
+`HistogramCanvas`s `"lighten"` — die Wellenform kombiniert deshalb die
+drei Kanalfarben von Hand per Komponenten-Maximum (jeder Kanal mischt
+seine eigene Grundfarbe additiv über den dunklen Hintergrund, die drei
+Ergebnisse werden anschließend kanalweise maximiert) — eine praktisch
+gleichwertige Näherung an "lighten" für rein additive, nie abdunkelnde
+Overlays.
+
+**Performance-Entscheidung:** `DevelopAnalysisPanel` berechnet wie schon
+`computeHistogram`/`countClipping` unmemoisiert bei jedem Render — aber
+Vektorskop/Wellenform werden nur berechnet, wenn ihr Reiter tatsächlich
+aktiv ist (`analysisTab === "vectorscope" ? computeVectorscope(...) :
+null`), nicht alle drei bei jedem Regler-Tick. Beide sind eine volle
+Bildschleife je Kanal, spürbar teurer als das einfache 256er-Array-Update
+des Histogramms.
+
+Neuer Reiter-Wechsel-Test in `e2e/develop-analysis-flow.spec.ts`
+(Berechnungslogik selbst bereits vollständig in
+`lib/vectorscope.test.ts`/`lib/waveform.test.ts` abgedeckt): die jeweils
+aktive Analyse-Canvas erscheint, die anderen beiden verschwinden.
+
+### Nachtrag VII (Phase 14 Schritt 7): Farb-Harmonie-Rad — `palette` als
+zusätzliche direkte Abhängigkeit nötig, Harmonie-Mathematik bewusst im
+Frontend statt in Rust
+
+Punkt 10 der Recherche-Tabelle: Color-Grading-Räder sind in Lightroom
+rein manuell, keine automatische Paletten-Extraktion mit Harmonie-
+Vorschlag gefunden. `kmeans_colors` (real per `cargo add --dry-run`
+geprüft, v0.7.1, MIT/Apache-2.0) mit
+`--no-default-features --features palette_color` spart die drei CLI-
+Abhängigkeiten (`app`/`structopt`/`image`-Feature) — dieses Projekt
+dekodiert Bilder bereits selbst über seine eigene `image`-Abhängigkeit.
+
+**Ein während der Einbindung real gefundenes Detail, kein Vorab-Design:**
+`kmeans_colors`s `palette_color`-Feature zieht `palette` selbst nur
+*transitiv*. `crates/apx-ai/src/palette.rs` (das neue Modul heißt
+bewusst genauso wie die externe Kiste, siehe unten) benennt aber
+`palette`s eigene Typen (`Lab`/`Lch`/`Srgb`) direkt für die Umrechnung
+Pixel->Lab->Farbton — Rusts Extern-Prelude macht dabei aus Rust-2018-
+Editionsregeln nur *direkte* Abhängigkeiten unter ihrem Cargo-Namen
+sichtbar, keine transitiven. Erster Versuch (`use palette::{...}`)
+schlug mit "unresolved import" fehl, weil das Modul selbst `palette`
+heißt und der Import sich gegen `crate::palette` statt der externen
+Kiste auflöste — auch der absolute Pfad `use ::palette::{...}` half
+zunächst nicht, weil `palette` schlicht noch keine direkte Abhängigkeit
+war. Behoben durch `palette` als zweite, direkte
+`crates/apx-ai/Cargo.toml`-Abhängigkeit (`--no-default-features
+--features std`, kein `named`/`serde`/`approx` — nichts davon wird
+gebraucht) *und* den absoluten `::palette`-Importpfad im Modul selbst
+(nötig, weil das Modul und die Kiste gleich heißen).
+
+**k-means läuft mehrfach mit unterschiedlichem Seed** (`KMEANS_RUNS =
+3`), das Ergebnis mit dem kleinsten `score` gewinnt — k-means++
+initialisiert zufällig und kann sich in einem suboptimalen lokalen
+Minimum verfangen, dieselbe von `kmeans_colors`s eigener Moduldoku
+empfohlene Vorgehensweise.
+
+**Harmonie-Berechnung bewusst im Frontend, nicht in Rust:** anders als
+die k-means-Analyse selbst (braucht echte Pixeldaten, nur in Rust
+sinnvoll) ist die Zuordnung von Komplementär-/Triade-/Split-
+Komplementär-/Analog-Zielfarbtönen zu einer bereits extrahierten Palette
+reine Farbtheorie-Mathematik ohne Bildzugriff — dieselbe Arbeitsteilung
+wie Schritt 6s Vektorskop/Wellenform (Bildanalyse in Rust, reine
+Zahlen-Mathematik im Frontend). `frontend/src/lib/colorHarmony.ts`
+nutzt dabei bewusst das bereits bestehende `nearestHslBand` aus `edl.ts`
+(Phase 11 Schritt 6, zielgerichtetes Anpassungswerkzeug) wieder, statt
+eine zweite Zuordnungslogik von Farbton zu den acht festen HSL-Bändern
+zu schreiben — beide lösen exakt dasselbe Problem (nächstgelegenes Band
+zu einem gegebenen Farbton).
+
+**"Harmonisieren" verschiebt additiv, nicht absolut:** für jede
+hinreichend bunte Palettenfarbe (Buntheit unter `MIN_CHROMA_FOR_HARMONIZE
+= 8` wird ignoriert — praktisch neutrales Grau hat keinen aussagekräftigen
+Farbton) wird das nächstgelegene HSL-Band bestimmt und dessen Farbton-
+Regler um genau das Delta verschoben, das die tatsächliche Bildfarbe auf
+ihren nächstgelegenen Harmonie-Zielfarbton einrasten lässt (auf die
+Regler-Obergrenze `MAX_HUE_SHIFT_DEGREES = 60°` gekappt, siehe
+`hsl_color_mixer.rs`). Additiv auf dem *aktuellen* Reglerwert, nicht
+absolut gesetzt — ein Foto, das in einem Band schon manuell nachjustiert
+wurde, wird nicht stillschweigend überschrieben. Landen zwei
+Palettenfarben im selben Band, gewinnt die mit dem größeren Bildanteil
+(keine Mittelung unterschiedlicher tatsächlicher Farbtöne). Alle
+betroffenen Bänder werden in einem einzigen `set()`-Aufruf verändert und
+mit einem einzigen `commitDevelopEdit()` committet, kein Commit je Band.
+
+**Neues `ColorHarmonyWheel.tsx` bewusst als Reglerabschnitt in
+`DevelopPanel.tsx`, keine eigene dauerhafte Palette** — dieselbe
+Lehre wie Schritt 3s real gefundener Viewport-Kollisions-Fehler
+(ADR-0041 Nachtrag III): platziert direkt nach dem HSL-Fieldset.
+Wiederverwendet `ColorWheel.tsx`s "0° oben, im Uhrzeigersinn"-Konvention
+und dessen `lib/colorWheelMath.ts::hueSaturationToPixelOffset`-Geometrie
+für die Positionierung der Palettenfarb-Punkte (Winkel = Farbton,
+Abstand vom Zentrum = auf `CHROMA_NORMALIZATION = 100` normierte
+Buntheit) und der Harmonie-Zielmarkierungen auf dem Radrand.
+
+Real per Playwright-Testlauf gefunden (nicht nur vermutet): die vier
+Harmonietyp-Knöpfe "Komplementär"/"Triade"/"Split-Komplementär"/"Analog"
+wiederholen exakt dasselbe Teilstring-Muster wie Schritt 4s
+"Farbton"-Kollision — "Komplementär" ist eine Teilzeichenkette von
+"Split-Komplementär", `getByRole("button", { name: "Komplementär" })`
+traf deshalb zunächst beide Knöpfe gleichzeitig. Behoben mit
+`exact: true` statt einer Umbenennung, weil hier (anders als bei Schritt
+4s Regler-Namen) beide Knopfbeschriftungen bereits die inhaltlich
+richtigen, etablierten Farbtheorie-Fachbegriffe sind — eine Umbenennung
+hätte die Benennung verschlechtert, um ein reines Test-Locator-Problem
+zu lösen.
+
+### Nachtrag VIII (Phase 14 Schritt 8): KI-Tiefenschärfe-Simulator
+"Virtuelle Blende" — echtes MiDaS v2.1 small statt der bestehenden
+Laplace-Varianz-Heuristik, precomputed Tiefenkarte als EDL-Patch
+
+Punkt 1 der Recherche-Tabelle: Lightroom hat keine KI-Tiefenschätzung/
+kein synthetisches Bokeh — nur ApertureX' eigene, deutlich gröbere
+Laplace-Varianz-Heuristik (`stages::masks::relative_sharpness_map`,
+Phase 11 Schritt 7, `BlurDepthApprox`-Maskentyp). Die neue "Virtuelle
+Blende" baut eine echte monokulare Tiefenkarte per MiDaS v2.1 small
+(isl-org/MiDaS, MIT) statt einer reinen Schärfe-Heuristik.
+
+**Real heruntergeladen und geprüft, nicht nur aus dem Gedächtnis
+behauptet** (`https://github.com/isl-org/MiDaS/releases/download/v2_1/
+model-small.onnx`): exakt 66.764.249 Byte, SHA-256
+`2d8c6cb8f415229daf1eb041024208e2608c9f98e17c81cc7c6ecb449c56fd58`
+(im Gegensatz zu LaMa, wo `ADR-0040` einen fehlenden veröffentlichten
+Hash ehrlich dokumentiert, ist bei MiDaS ein echter Hash verfügbar —
+`download_depth_model` lehnt einen Download mit falschem Hash deshalb
+hart ab, statt ihn wie bei LaMa nur zu speichern). Ein-/Ausgabe-Form per
+echtem `onnxruntime`-Python-Introspektionslauf gegen die reale Datei
+bestätigt: Eingabe `"0"` fest `[1,3,256,256]` (anders als LaMa keine
+dynamische Auflösung), Ausgabe `"797"` `[1,256,256]` (ein Kanal, kein
+Batch-loser Kanal-Index wie bei LaMas `(1,3,H,W)`-Ausgabe). Die
+Normalisierungskonstanten (`mean=[0.485,0.456,0.406]`,
+`std=[0.229,0.224,0.225]`, erst Skalierung auf `0..1`, dann
+ImageNet-Normalisierung) stammen aus MiDaS' echtem `hubconf.py`/
+`transforms.py` (real von GitHub abgerufen, nicht aus dem Gedächtnis
+rekonstruiert). Ein einmaliger echter Inferenzlauf gegen `opencv/
+opencv`s echtes `fruits.jpg` über den tatsächlichen `depth.rs`-Code
+bestätigte eine plausible Tiefenkarte (helle scharfe Frucht-Silhouetten,
+dunkler weicher Hintergrund) — dieser Testfall wurde vor dem Commit
+wieder entfernt (`PLAN.md`-Regel: Modell-Download nicht Teil des
+CI-Testlaufs, siehe auch `ADR-0040`s LaMa-Präzedenzfall). Die
+eingecheckten `apx-ai::depth`-Rust-Unit-Tests laufen stattdessen gegen
+eine mitgelieferte 153-Byte-ONNX-Testfixture
+(`tests/fixtures/mean_channel_depth.onnx`, per Python `onnx.helper`
+gebaut): dieselbe Ein-/Ausgabe-Topologie wie das echte Modell
+(`ReduceMean` über die Kanalachse statt echter MiDaS-Gewichte).
+
+**`apx-pipeline` darf nicht von `apx-ai` abhängen** (die Abhängigkeit
+verläuft bereits umgekehrt) — genau dieselbe Beschränkung, die schon
+`AiFillPatch`/`CanvasExtensionPatch`/`CompositeLayerSource` gelöst
+haben: die Tiefenkarte wird einmal in `apx-app` (hängt von beiden
+Crates ab) per `estimate_photo_depth`-Command berechnet und als fertige
+Bitmap (`DepthMapPatch { bitmap_width, bitmap_height, depth: Vec<u8> }`)
+im EDL abgelegt — `stages::virtual_aperture` selbst sieht nie ein
+ONNX-Modell, nur eine Graustufen-Bitmap, die es per
+`apx_core::raster::bilinear_resize_u8` auf die tatsächliche
+Bildauflösung skaliert, exakt dasselbe "einmal auflösen, beim Rendern
+nur noch skalieren"-Muster wie bei den drei genannten Vorgängern.
+
+**Blur-Level-Blend statt echter Radius-pro-Pixel-Faltung:** eine
+Gauß-/Box-Unschärfe mit einem *pro Pixel unterschiedlichen* Radius ist
+kein separierbarer Filter mehr (die getrennten horizontalen/vertikalen
+Durchgänge, die jedes andere Unschärfe-Modul dieses Projekts nutzt,
+setzen einen konstanten Radius voraus). Stattdessen: `BLUR_LEVELS = 5`
+zunehmend stärker geweichzeichnete Fassungen des Originalbilds
+vorab berechnen (jede Stufe direkt vom Original aus, nicht kaskadiert),
+pro Pixel aus der Tiefendifferenz zum per Klick gesetzten Fokuspunkt
+einen `defocus`-Bruchteil (`0..1`) bestimmen und zwischen den zwei
+nächstgelegenen Stufen linear interpolieren — eine reale, in
+Bokeh-Simulatoren verwendete Näherung, kein Kompromiss ohne Vorbild.
+`box_blur_1d` in `stages::virtual_aperture` ist erneut eine eigene
+Kopie (kein Wiederverwenden von `effects.rs::halation_box_blur_1d`) —
+dieselbe "jedes Modul reimplementiert seinen eigenen Blur"-Konvention
+wie überall sonst in diesem Projekt (siehe `SPEC.md` §6).
+
+**Testdaten-Skalierungslehre wiederholt sich, wie schon bei Schritt 4s
+Halation-Test:** `a_pixel_far_from_the_focus_depth_gets_visibly_blurred`
+schlug zunächst zweimal real fehl — zuerst bei `size=40`/
+`MAX_BLUR_RADIUS_FRACTION=0.03` mit exakt null Änderung (der berechnete
+Radius rundete auf 1px, zu klein, um den 3px entfernten Nachbarn
+überhaupt zu erreichen), dann nach Anheben der Fraktion auf `0.08`
+erneut mit einer messbaren, aber unter der geforderten Schwelle
+liegenden Änderung (ein einzelner 3×3-Fleck wird vom zweifachen
+Box-Blur-Mittelwert zu stark verdünnt). Behoben wie bei Schritt 4: ein
+größerer 7×7-Testfleck, ein größeres Testbild (`size=80`), ein weiter
+vom Fleck entfernter Messpunkt (`spot_x - 6` statt `spot_x - 3`) — exakt
+dieselbe Lehre, kein neuer Mechanismus.
+
+**Farbraum-Entscheidung: rohe lineare Pixel statt sRGB-Gamma-Wandlung**
+— `estimate_photo_depth` reicht `linear.pixels` direkt (nur `0..1`
+geklemmt und auf `u8` skaliert) an `DepthSession::estimate_rgb8`
+weiter, genau wie `run_ai_inpaint`/`generate_ai_mask`/
+`suggest_repair_source`/`run_ai_outpaint` — bewusst NICHT der
+"korrektere" Gamma-gewandelte Pfad aus
+`prepare_composite_layer_source` (Schritt 3), obwohl MiDaS eigentlich
+auf sRGB-Fotos trainiert wurde. Konsistenz mit der Mehrheit der
+Einzelfoto-KI-Commands wiegt hier schwerer als die letzte
+Genauigkeitsstufe — derselbe ehrlich dokumentierte Kompromiss, den
+`ADR-0040` für `run_ai_inpaint` bereits eingeht.
+
+**Frontend:** Fokuspunkt-Picker (`virtualApertureFocusPickerActive`)
+spiegelt exakt `aiMaskClickPickerActive`s Bildklick-Muster (normierte
+Klickposition, keine Farbe, statischer Knopftext, nur `aria-pressed`/
+Rahmenfarbe ändert sich, dazu ein `"Klicken Sie ins Bild…"`-Hinweistext
+— dieselbe Konvention wie bei allen übrigen Bildklick-Werkzeugen in
+`MasksPanel.tsx`, damit `getByRole("button", { name: … })`-Locator in
+Tests über den ganzen Ablauf stabil bleiben). `depth_map` ist wie
+`repair`/`masks` bewusst NICHT Teil eines Presets (`lib/presets.ts`) —
+eine für ein bestimmtes Foto berechnete Tiefenkarte ist auf ein anderes
+Foto übertragen schlicht falsch, derselbe Grund wie bei einem
+Reparatur-Pinselstrich an einer festen Bildposition.
+
+### Nachtrag IX (Phase 14 Schritt 9): KI-Stiltransfer zwischen Fotos —
+fünf feste `fast_neural_style`-Stile statt beliebiger Referenzbilder,
+Fixgröße 224×224 real widerlegt "dynamische Eingabe"
+
+Punkt 7 der Recherche-Tabelle: Lightroom hat kein Äquivalent. Wie schon
+in Schritt 0 dokumentiert, bleibt ein lizenzklares Modell für *beliebige*
+Referenzbilder als Stilvorlage unerreichbar (Googles Magenta nur als
+TFLite, der einzige ONNX-Nachbau ohne Lizenzangabe auf Google Drive) —
+Schritt 9 bleibt deshalb bewusst auf die fünf real lizenzierten festen
+`onnx/models`-Stile beschränkt (candy/mosaic/rain-princess/udnie/
+pointilism, MIT, `fast_neural_style`).
+
+**Real heruntergeladen und geprüft:** alle fünf `<stil>-9.onnx`-Dateien
+in dieser Sitzung tatsächlich über `media.githubusercontent.com/media/
+onnx/models/main/validated/vision/style_transfer/fast_neural_style/
+model/<stil>-9.onnx` geladen, jede exakt 6 728 029 Byte, mit fünf real
+berechneten, unterschiedlichen SHA-256-Hashes (siehe
+`apx-app::commands::style_transfer_model_sha256`) — wie bei MiDaS ein
+echter Hash statt LaMas dokumentierter Lücke.
+
+**Korrektur-Fund, real per `onnxruntime`-Introspektion gefunden:**
+Schritt 0s Spike vermutete "dynamische NCHW-Eingabe" (der damalige
+Testlauf probierte nur 224×224). Ein echter Introspektionslauf in
+dieser Sitzung zeigt: nur `input1` ist ein echter Laufzeit-Feed (alle
+übrigen ONNX-"Inputs" sind per Initializer belegte Netzgewichte), mit
+FEST codierter Form `[1,3,224,224]`. Ein echter Inferenzlauf mit
+`100×150` schlägt mit einer expliziten ONNX-Runtime-Fehlermeldung fehl
+— dieselbe Lehre wie MiDaS in Schritt 8 (herunterskalieren, inferieren,
+zurückskalieren, siehe `apx_ai::style_transfer`s Moduldoku).
+
+**Architektur wie Schritt 8:** `apx-pipeline` darf nicht von `apx-ai`
+abhängen — das stilisierte Ergebnis wird einmal per
+`apx-app::commands::stylize_photo` berechnet und als fertige Bitmap
+(`StyleTransferPatch`) im EDL abgelegt. `stages::style_transfer::apply`
+blendet dieses Ergebnis linear (`amount`-Deckkraft) über das bereits
+fertig entwickelte sRGB-RGBA8-Bild, direkt nach `composite`, vor
+`geometry` — anders als `virtual_aperture` (linearer Arbeitsraum) im
+selben display-referred Farbraum wie Compositing, weil das Ergebnis
+hier unmittelbar sichtbare Pixel sind.
+
+**Farbraum-Entscheidung bewusst anders als bei Tiefenschätzung:**
+`stylize_photo` konvertiert erst nach sRGB (`linear_camera_rgb_to_srgb_
+rgba8`, dasselbe Muster wie `prepare_composite_layer_source` aus
+Schritt 3), bevor das Bild ins Netz geht — anders als
+`estimate_photo_depth`s bewusst in Kauf genommene lineare Näherung, weil
+ein Tonwert-Fehler hier ein sichtbares Ergebnis verfälscht, nicht nur
+eine Zwischengröße.
+
+**Frontend:** `style_transfer_model_paths` als `BTreeMap`/`Record`
+(einer von fünf Stilen als Schlüssel) statt fünf einzelner
+`Option<String>`-Felder wie bei MiDaS/LaMa — fünf unabhängig
+voneinander herunterladbare Modelle. `patch` ist wie
+`virtual_aperture.depth_map` bewusst NICHT Teil eines Presets
+(`lib/presets.ts`) — für ein bestimmtes Foto berechnet, auf ein anderes
+übertragen schlicht falsch.
+
+### Nachtrag X (Phase 14 Schritt 10): Himmelsaustausch — klassischer
+Algorithmus, minimaler Umsetzungsaufwand auf Nutzerwunsch
+
+Punkt 4 der Recherche-Tabelle. Kein neues KI-Modell: die Himmel-Maske
+kommt aus der bereits bestehenden `apx_ai::segmentation::sky_alpha`-
+Heuristik. `apx_ai::sky_replace::composite()` ersetzt den maskierten
+Bereich durch das vom Nutzer gewählte Foto und skaliert den Vordergrund
+je Kanal grob auf die mittlere Farbe des neuen Himmels (RGB-Mittelwert-
+Verhältnis, geklemmt `0.5..2.0`) statt eines vollen Lab-Transfers —
+bewusst vereinfacht, auf ausdrücklichen Nutzerwunsch mit minimalem
+Aufwand umgesetzt (kein Unit-/e2e-Test, sehr wenige Kommentare). Dieselbe
+Patch-Architektur wie Schritt 8/9: `apx-app::commands::replace_sky`
+berechnet das fertige Vollbild einmal, `stages::sky_replace` ersetzt
+beim Rendern nur noch die RGB-Kanäle (kein Deckkraft-Regler, anders als
+`style_transfer`).
+
+### Nachtrag XI (Phase 14 Schritt 11): Abschluss mit reduziertem Umfang
+auf Nutzervorgabe
+
+Bei knappem verbleibenden Budget bewusst eingeschränkt: nur die beiden
+später öffentlich sichtbaren Dokumente aktualisiert (`FEATURES.md`
+"Alleinstellungsmerkmale"-Rubrik, `THIRD_PARTY.md` Phase-14-Sektion),
+kein Duplikat der bereits in ADR-0041/PLAN.md stehenden Details. Zwei
+gezielte Tests für das bis dahin ungetestete `apx-ai::sky_replace`
+(Schritt 10) nachgezogen — keine volle `cargo fmt/clippy/test
+--workspace`- oder Playwright-Suite, nur `tsc -b`.
+
+---
+
+## ADR-0042: Phase 15 — fünf Photoshop-Funktionen, die es in Lightroom
+nicht gibt
+
+**Status:** Angenommen
+**Kontext:** Phase 14 hat zehn eigenständige Alleinstellungsmerkmale
+ohne Lightroom-Entsprechung geliefert (ADR-0041). Der Nutzer möchte
+jetzt gezielt echte Photoshop-exklusive Fähigkeiten nachziehen — Dinge,
+die es in Lightroom nachweislich nicht gibt, sich aber sauber in die
+bestehende ApertureX-Architektur einfügen und einen spürbaren, visuell
+beeindruckenden Funktionszuwachs bringen. Dieselbe "kostenlos/lokal
+statt bezahlter Cloud-API"-Linie wie Phase 13/14, wo KI zum Einsatz
+kommt.
+
+**Recherche-Disziplin wie in jeder vorherigen Phase:** jede "Lightroom
+hat das nicht"-Behauptung unten wurde per echter Web-Suche gegengeprüft.
+
+| # | Funktion | Befund |
+|---|---|---|
+| 1 | Content-Aware Move | Photoshop-exklusiv, bestätigt per offenem Adobe-Community-Feature-Request "Content Aware Move for Lightroom" — Lightroom hat nur "Content-Aware Remove"/"Generative Remove" (Entfernen), kein Verschieben mit automatischer Neubefüllung der Ausgangsstelle |
+| 2 | Blend-If (Tonwertbereich-Blending) | Photoshop-exklusiv — Adobe-Community-Quelle: "Blend If sliders ... aren't directly replicated in Lightroom's interface" |
+| 3 | Verflüssigen (Liquify) | Photoshop-exklusiv, bestätigt per Adobe-Community-Thread "Come on Adobe, We need liquify in Lightroom already!" |
+| 4 | Inhaltssensitives Skalieren (Content-Aware Scale/Seam Carving) | Photoshop-exklusiv seit CS4 (Adobe lizenzierte die Seam-Carving-Technologie von MERL) — "only Photoshop CS4 supports content aware scaling" |
+| 5 | Automatisches Hautglätten (gesichtsbewusst) | Photoshops "Skin Smoothing"/"Smart Portrait"-Neural-Filter sind Photoshop-exklusiv (teils cloud-pflichtig) — Lightroom hat nur den manuellen Anpassungspinsel, kein automatisches gesichtserkennungsgestütztes Glätten |
+
+**Architektur-Entscheidung — vier von fünf Funktionen ohne jede neue
+Abhängigkeit, durch Wiederverwendung bereits bestehender Bausteine**
+(real in dieser Sitzung gegen den aktuellen Code verifiziert, nicht aus
+Erinnerung an frühere Phasen behauptet):
+
+- `apx_ai::inpaint::InpaintSession::fill_rgb8` (Phase 13 Schritt 1) und
+  `CompositeLayer`/`CompositeLayerSource` (Phase 14 Schritt 3) tragen
+  Schritt 1 (Content-Aware Move) zusammen, ganz ohne neuen EDL-Typ —
+  ein Fill-Patch für die Ausgangsstelle plus eine neue Compositing-
+  Ebene für das verschobene Objekt an der Zielposition.
+- `apx_ai::segmentation::person_alpha` (Hautton-Heuristik, Phase 14
+  Schritt 10 als Vorbild für `sky_alpha`) und
+  `apx_ai::faces::detect_face_regions` (Phase 11 Schritt 5, kein
+  Feature-Gate) plus `stages::frequency_separation::{split,combine}`
+  (Phase 14 Schritt 2, bereits mit frei wählbarem `radius_px`) tragen
+  zusammen Schritt 5 (automatisches Hautglätten) — drei bestehende
+  Bausteine zu einem neuen Automatik-Feature kombiniert.
+- **Real geprüfter Namensunterschied zur ursprünglichen Annahme:** die
+  Hautton-Heuristik heißt `person_alpha`, nicht `skin_alpha`. Das
+  feature-gated `apx_ai::people::PersonEmbedder` liefert Bounding-Box +
+  Embedding, aber **keine Landmark-Koordinaten nach außen** — für
+  Schritt 5 reicht die Bounding-Box aus `faces.rs`, echte Landmarken
+  sind nicht nötig.
+
+**Seam-Carving-Lizenzprüfung (Schritt 4), echter Befund statt
+Annahme:** `seamcarving` (crates.io v0.2.3) existiert und lädt sich per
+`cargo add --dry-run` sauber, ist aber **LGPL-3.0-or-later** lizenziert
+— ein Copyleft mit echten Verlinkungs-/Weitergabepflichten für ein
+statisch gelinktes Rust-Binary, ein Bruch mit der durchgehend
+permissiven Linie (MIT/Apache-2.0/BSD-3-Clause) jeder bisher gewählten
+Abhängigkeit laut `THIRD_PARTY.md`. Kein anderer Treffer auf crates.io.
+**Entscheidung:** Seam Carving selbst implementieren (klassischer, gut
+dokumentierter Algorithmus, Avidan & Shamir, SIGGRAPH 2007) — kein
+Lizenzrisiko, keine neue Abhängigkeit für ganz Phase 15.
+
+**Testdisziplin, explizite Nutzervorgabe für diese Phase:** anders als
+Phase 9–14 kein Test nach den einzelnen Schritten 0–5 (dort nur
+`cargo check`/`tsc -b`-Kompilierprüfung, Commit+Push je Schritt) — die
+komplette Testausführung läuft gebündelt erst einmalig in Schritt 6.
+
+**Nicht Teil dieser Phase:** volle Photoshop-Parität (Vektor-
+Ebenenmasken, Smart Objects, Aktionen/Skript-Recorder, Fluchtpunkt,
+Puppenstock-Verzerrung) — eigene, größere Ausbaustufen.
+
+**Nachtrag (Schritt 6, Abnahme):** alle fünf Funktionen wie geplant
+gebaut, keine Abweichung von der oben skizzierten Architektur. Gezielte
+Unit-Tests je neuem Modul ergänzt (`stages::composite::blend_if_weight`,
+`stages::liquify`, `stages::geometry::apply_content_aware_scale`,
+`stages::skin_smoothing`, `apx_ai::seam_carving` — inklusive eines
+Tests, der belegt, dass eine vollständig geschützte Bildfläche einen
+Breiten-Schrumpf tatsächlich übersteht). `cargo fmt/clippy/test
+--workspace`, `tsc -b`, Vitest und die volle Playwright-Suite laufen
+grün — bis auf einen einzelnen `tat-flow.spec.ts`-Fehlschlag
+(Vektorskop-Panel überlagert per `pointer-events` einen TAT-Knopf), der
+real gegen den Phase-14-Endstand (`e6ec6e1`, per Git-Worktree isoliert
+nachgestellt) identisch reproduziert und damit nachweislich phasenfremd
+ist — keine Regression dieser Phase, nicht behoben (außerhalb des
+Scopes).
+
+Nebenbei bei der vollen Testausführung einen echten, seit Phase 14
+Schritt 9/10 bestehenden Bug gefunden und behoben (kein Ergebnis dieser
+Phase, aber blockierte deren „volle Suite grün"-Abnahmekriterium):
+`StyleTransferPatch`/`SkyReplacePatch.pixels` legten im Frontend den
+rohen Base64-String statt eines dekodierten Byte-Arrays ab — Rusts
+`Vec<u8>` kann eine JSON-Zeichenkette nicht deserialisieren (per
+`serde_json`-Testfall real bestätigt: „invalid type: string ...,
+expected a sequence"). Committen eines Stiltransfer- oder
+Himmelsaustausch-Ergebnisses hätte an dieser Stelle real fehlschlagen
+müssen; der zugehörige Playwright-Test bestand dennoch, weil er
+gegen die gemockte Tauri-IPC-Schicht läuft, nicht gegen echte
+Rust-Deserialisierung. Behoben durch `base64ToByteArray` an beiden
+Store-Stellen, TS-Typen auf `number[]` korrigiert (dieselbe Konvention
+wie `CompositeLayerSource`/`ContentAwareScalePatch`), betroffener
+Playwright-Test entsprechend angepasst.
+
+---
+
+## ADR-0043: Phase 16 — Filter-/LUT-Bibliothek + Video als Katalog-Asset
+mit Basis-Schnitt
+
+**Status:** Angenommen
+**Kontext:** Nutzerwunsch (siehe Sitzungsverlauf): direkt anwendbare
+Foto-Filter/-Effekte aus einer möglichst großen öffentlichen
+Bibliothek, punktuell mit Pinseln einsetzbar, auf viele Fotos auf
+einmal anwendbar mit regelbarer Stärke — dieselben Filter auch für
+Video, dazu Basis-Videoschnitt (Ausschneiden, Länge anpassen,
+automatisches Zuschneiden auf passende Stellen, Geräuschreduktion,
+Musik/Sounds hinzufügen, ähnliche Videos finden) — "eine sehr
+abgespeckte CapCut-Variante". Vor der Umsetzung wurde die bestehende
+Architektur real gegen den aktuellen Code geprüft (nicht aus
+Erinnerung an frühere Phasen behauptet) und öffentlich nach
+lizenzsauberen Filter-/Video-Werkzeugen recherchiert.
+
+**Architektur-Befund (real gegen den Code geprüft):**
+
+- Es gibt **keinen** Lightroom-artigen Modul-Vollbild-Umschalter. Statt
+  dessen zwei getrennte Mechanismen (bewusste Vereinfachung, ADR-0037):
+  `centerView: "viewer" | "grid" | "map" | "overview" | "people"`
+  (`frontend/src/store/index.ts:767`) bekommt echte Leinwandfläche;
+  Drucken/Buch/Web-Galerie/Diashow/Stapelverarbeitung sind dagegen
+  Modal-Dialoge, angestoßen aus `Header.tsx`. Video-Bearbeitung braucht
+  eine dauerhafte, interaktive Zeitleisten-Oberfläche — passt zu
+  keinem der beiden bestehenden Muster exakt, am ehesten zum ersten.
+  **Entscheidung:** neuer `centerView`-Wert `"video"`, strukturell
+  gleichrangig mit `"viewer"`, kein neuer Modal-Dialog und keine neue
+  Kompartment-Sektion im bestehenden Entwickeln-Panel.
+- **Kein Video-Import existiert.** `RAW_EXTENSIONS`/`FALLBACK_EXTENSIONS`
+  (`crates/apx-raw/src/format.rs:8-10`) sind rein bildbasiert, `Photo`
+  (`crates/apx-catalog/src/models.rs`) hat keine Dauer-/Codec-/Audio-
+  Felder. Video als Katalog-Asset ist echtes Neuland, keine Erweiterung
+  eines bestehenden Feldes.
+- **Kein LUT-/3D-Filter-Konzept existiert.** Presets
+  (`frontend/src/lib/presets.ts`) sind laut ADR-0031/ADR-0032 strikt
+  numerische EDL-Teilmengen; "LUT" kommt im Code bisher nur als interne
+  1D-Lookup-Table der Gradationskurven-Stage vor
+  (`stages/curves.rs::build_points_lut`), kein `.cube`-Import.
+- **Masken-System ist direkt wiederverwendbar:** jede Maske
+  (`MaskGeometry` in `crates/apx-pipeline/src/edl/v3.rs` — Pinsel/
+  Linear-/Radialverlauf/KI-Auswahl) wendet in `stages/masks.rs` ein
+  eigenes EDL-Werkzeug-Subset auf ihre Alpha-Region an und blendet
+  zurück. Ein Filter/LUT wird ein weiteres Werkzeug in diesem Muster —
+  punktuelle Pinsel-Anwendung ist damit keine neue Architektur, sondern
+  Wiederverwendung.
+- **Foto-Batch-Anwendung ist direkt wiederverwendbar:**
+  `syncSettingsToSelection` (`frontend/src/store/index.ts:365`) und die
+  bereits mehrfach getestete Preset-Stapel-Anwendung übertragen EDL-
+  Abschnitte auf eine Mehrfachauswahl — ein Filter ist einfach ein
+  Preset mit optionaler LUT-Referenz.
+- **Ähnliche-Fotos-Erkennung ist direkt auf Video übertragbar:**
+  Phase-9-Perceptual-Hashing (`image_hasher`-Crate, gehashter 256px-
+  Thumbnail, Hamming-Distanz-Gruppierung) in
+  `list_perceptual_duplicate_groups`
+  (`crates/apx-app/src/commands.rs:2391-2441`) — für Video genügt
+  derselbe Hash auf einen repräsentativen, per `ffmpeg` extrahierten
+  Keyframe.
+- **ffmpeg-Grundsatzentscheidung (ADR-0034) bleibt tragend:** kein
+  Bündeln, System-Binary vorausgesetzt, `Command`-Subprozess-Aufruf
+  (`crates/apx-export/src/video.rs`), weil kein brauchbarer reiner
+  Rust-H.264-Encoder existiert und Bündeln GPL-Lizenzpflichten nach
+  sich zöge. Alle neuen Video-Fähigkeiten in dieser Phase folgen
+  demselben Muster — **keine neue Rust-Video-Abhängigkeit**.
+
+**LUT-Filter-Engine — real recherchierter Lizenzbefund statt Annahme:**
+eine "öffentliche Bibliothek mit Tausenden einheitlich lizenzierten
+Effekten" existiert real nicht — freie LUT-Pakete sind über Dutzende
+Quellen verstreut mit uneinheitlicher Lizenzlage (CC0, CC-BY, viele nur
+vage "kostenlos nutzbar" ohne echte OSI-Lizenz), dasselbe Muster wie
+beim Stiltransfer in Phase 14 (ADR-0041). Vorhandene Rust-Crates für
+`.cube`-Anwendung (`wagahai_lut`, `lut-cube`) sind kaum verbreitet,
+Wartungsstatus unklar. **Entscheidung, dieselbe Linie wie Seam Carving
+in Phase 15:** die Anwendungs-Engine (trilineare Interpolation über ein
+`.cube`-Raster, gut dokumentierter, einfacher Algorithmus) wird selbst
+implementiert — kein Lizenzrisiko, keine Wartungsabhängigkeit von
+einem kaum genutzten Drittanbieter-Crate. `.cube` ist ein offenes,
+patentfreies Textdateiformat (Industriestandard, u. a. von Lightroom,
+Premiere, DaVinci Resolve, Capture One genutzt) — das Format selbst ist
+nicht schutzfähig. Statt eines großen gebündelten Presets: ein kleines,
+**einzeln lizenzgeprüftes** Starter-Set (nach demselben "Opt-in-
+Download, geprüfte Herkunft"-Muster wie MiDaS/Stiltransfer-Modelle in
+Phase 14, in `THIRD_PARTY.md` je Quelle dokumentiert) **plus** freier
+Import beliebiger eigener `.cube`-Dateien — dadurch wird "Hunderte/
+Tausende Effekte" real erreichbar, ohne dass ApertureX selbst
+fragwürdig lizenzierte Presets bündelt/redistribuiert.
+
+**Video-Werkzeuge — reale ffmpeg-Filter-Verifikation statt Annahme:**
+
+| Funktion | Lösung | Befund |
+|---|---|---|
+| Schneiden/Trimmen, Länge anpassen | `ffmpeg -ss/-to`, bei kompatiblem Codec verlustfreier Stream-Copy (`-c copy`), sonst Re-Encode | dieselbe Subprozess-Technik wie `video.rs` |
+| Automatisches Zuschneiden | nativer ffmpeg-`scdet`-Filter (Szenenwechsel-Metadaten `lavfi.scd.score`, seit ffmpeg 4.3) | echte, verifizierte native Funktion, kein externes Modell |
+| Geräuschreduktion | native ffmpeg-Filter `afftdn` (reine FFT-Entrauschung, kein Modell nötig) als Standard; `arnndn` (RNN-basiert, Modell von `github.com/richardpl/arnndn-models`, aufbauend auf Xiph.org RNNoise, **BSD-3-Clause**) als stärkere Opt-in-Variante | verifiziert; Modell-Lizenz beim tatsächlichen Download-Schritt erneut gegen die dann aktuelle Repo-Lizenzdatei geprüft, nicht nur aus dieser Recherche übernommen |
+| Musik/Sounds hinzufügen | dieselbe Audio-Mix-Technik wie die Diashow-Musikuntermalung (ADR-0034 Punkt 3: Vorschau über `<audio>`, Export-Mix über ffmpeg) | bestehendes Muster |
+
+**Ehrlich benannte Grenze:** "automatisch die besten/interessantesten
+Momente finden" (wie kommerzielle Tools wie CapCut es bewerben) ist ein
+deutlich härteres ML-Problem — keine lizenzklare, fertige Lösung
+gefunden. Schritt 7 liefert Szenenwechsel-Erkennung + einfache
+Heuristiken (statische Passagen, Stille), **nicht** echte KI-
+Highlight-Erkennung; das wird explizit nicht versprochen.
+
+**Performance-Grenze, ebenfalls offen benannt:** die Foto-Pipeline
+(`apx-pipeline`) ist reines CPU-Rust ohne GPU-Shader. Filter framegenau
+auf Video anzuwenden (Schritt 9) ist für kurze Clips bei moderater
+Auflösung machbar, kann bei langen/hochauflösenden Videos spürbar
+langsam werden — Skalierungsgrenzen werden in Schritt 9/11 gemessen
+und dokumentiert statt stillschweigend vorausgesetzt.
+
+**Zuschnitt in elf Schritten** (siehe PLAN.md), in drei unabhängig
+lieferbaren Blöcken: (1) Schritt 1–3 LUT-/Filter-Engine — funktioniert
+komplett unabhängig von Video, liefert sofort Wert für Fotos; (2)
+Schritt 4–5 Video-Fundament (Katalog-Asset, Wiedergabe) — noch ohne
+Bearbeitung; (3) Schritt 6–10 Video-Bearbeitungsfunktionen, bauen auf
+Block 2 auf.
+
+**Testdisziplin (Nachtrag: expliziter als Phase 15 gefasst, Nutzervorgabe
+während Schritt 1):** ausschließlich `cargo check`/`tsc -b` nach den
+einzelnen Schritten 1–10 — kein `cargo test`, kein Vitest, keine
+Playwright-Läufe zwischendurch, auch nicht an einem Zwischen-
+Kontrollpunkt. Unit-Tests werden weiterhin je Modul geschrieben (wie in
+Schritt 1), aber erst in Schritt 11 gesammelt ausgeführt.
+
+**Nicht Teil dieser Phase:** vollwertiger Videoschnitt (Multi-Track,
+Übergänge, Titel-Grafiken jenseits der bestehenden Diashow-Intro-
+Funktion), echte KI-Highlight-Erkennung, Video-Farbverwaltung/HDR,
+GPU-beschleunigte Video-Pipeline.
+
+**Nachtrag (Schritt 2, Starter-LUT-Set):** wie oben real recherchiert
+keine einzelne, sauber lizenzierte "Hunderte/Tausende Filter"-Quelle
+gefunden — die freien LUT-Pakete, die sich fanden (Q-DDL, RocketStock
+u. a.), haben uneinheitliche/unklare Lizenzbedingungen, und ein
+konkreter Download-Versuch scheiterte zusätzlich an der
+Netzwerk-Sandbox dieser Sitzung (mehrere Kandidaten-Domains vom
+Egress-Proxy blockiert, nicht real verifizierbar). Statt eines
+unverifizierten externen Downloads: fünf **selbst erstellte** parametrische
+Farbverläufe (`apx_pipeline::builtin_luts` — Warm/Kühl/Kontrastreich
+S/W/Verblasst/Kino Teal-Orange, reine Mathematik, kein fremdes Werk
+enthalten) — dieselbe Rolle wie Lightrooms eigene mitgelieferte
+"Creative"-Profile, kein Redistributions-/Lizenzrisiko. Der freie
+`.cube`-Import aus Schritt 1 bleibt der Weg zu "Hunderte/Tausende
+Effekte" — dafür bringt der Nutzer eigene Dateien mit, ApertureX selbst
+redistribuiert kein fremdes Preset-Paket.
+
+**Nachtrag (Schritt 3, Pinsel-Integration):** bewusst NICHT über die
+bestehende `Mask`/`MaskAdjustments`-Infrastruktur gelöst, obwohl sie
+strukturell naheliegend wäre. `MaskAdjustments` läuft in
+`stages::masks` noch im **linearen** Arbeitsraum (vor der Farbraum-
+Konvertierung), ein `.cube`-LUT ist aber für gamma-kodierte,
+bildschirmreferenzierte Werte gedacht — eine LUT-Anwendung auf
+Szenen-linearen Werten würde ein anderes (falsches) Ergebnis liefern
+als auf denselben Werten nach sRGB-Kodierung. Denselben Bruch löst das
+Projekt an anderer Stelle bereits nicht durch Farbraum-Hin-und-Her-
+Konvertierung, sondern durch eine eigene, für die jeweilige
+Pipeline-Position passende Implementierung (`curves::apply_linear_rgb`
+für Masken vs. der globalen sRGB-`curves`-Stufe). Konsequent
+übertragen: `LutFilterAdjustment` bekommt eigene `strokes`
+(`LutFilterStroke` — `center_path`/`radius`/`strength`, exakt dieselbe
+Form wie `LiquifyStroke`), angewendet an derselben späten
+sRGB-Pipeline-Position wie die globale `strength`-Anwendung, per
+Abstand-zum-Pfad-Gewichtung (dieselbe `nearest_on_path`+`smoothstep`-
+Idee wie `stages::liquify`). Leere `strokes` bleiben das bisherige
+globale Verhalten (Rückwärtskompatibilität), nicht-leere beschränken
+die Anwendung auf die gemalten Bereiche.
+
+Batch-Anwendung auf viele Fotos brauchte dagegen **keine** neue
+Architektur: `lut_filter` in `PRESET_SECTION_KEYS` aufgenommen (treibt
+sowohl den Preset-Speichern-Dialog als auch "Synchronisieren"/"Vorherige
+übernehmen" — dieselbe eine Liste). Ein wichtiger Unterschied zu
+`lut`/`strength` (fotounabhängig, siehe oben): `strokes` SIND
+bildpositions-spezifisch (dieselbe Begründung, aus der
+`liquify_strokes`/`repair`/`masks` ganz von `PresetSectionKey`
+ausgeschlossen sind) — `buildPresetEdlSubset` schneidet sie deshalb beim
+Sektions-Kopieren explizit heraus (Preset trägt nur die globale
+Filter-Anwendung, nie gemalte Bereiche eines fremden Fotos).
+
+**Nachtrag (Schritt 4, Video als Katalog-Asset):** wie in Schritt 0
+festgelegt, erweitert eine neue Migration (`0012_video.sql`) die
+bestehende `photos`-Tabelle um fünf nullable Spalten
+(`media_kind`/`duration_ms`/`video_codec`/`has_audio`/`frame_rate`)
+statt eine eigene `videos`-Tabelle einzuführen — ein Video bleibt eine
+ganz normale Katalogzeile, Sammlungen/Schlagworte/Sterne/Filter/
+Duplikat-Erkennung/Batch-Verarbeitung funktionieren automatisch weiter,
+ohne dass eine dieser Stellen von Video weiß.
+
+Import verzweigt früh nach Dateiendung
+(`import::video::is_video_extension`, neue `mp4`/`mov`/`m4v`/`avi`/
+`mkv`/`webm`-Liste) — bewusst NICHT über `apx_raw::read_metadata`
+(reiner Bild-Decoder, würde an einem Video-Container schlicht
+scheitern), sondern über `ffprobe -show_format -show_streams`
+(JSON-Ausgabe, geparst über das ohnehin vorhandene `serde_json`, kein
+neues Crate) — dasselbe Subprozess-Muster wie `apx_export::video`s
+`ffmpeg`-Aufrufe (ADR-0034: kein Bündeln, System-Installation
+vorausgesetzt). Thumbnail-Erzeugung entsprechend verzweigt: ein
+einzelnes Frame per `ffmpeg -ss 00:00:01 ... -f image2pipe` direkt auf
+`stdout`, eine Sekunde statt Frame 0 (oft schwarz/unscharf bei vielen
+Kameras), läuft danach durch dieselbe Downscale-/Speicher-Pipeline wie
+ein Foto-Thumbnail.
+
+**Real gegen den Code geprüfter Umfang der Änderung, nicht unterschätzt:**
+`NewPhoto`/`Photo` sind zentrale, überall im Katalog verwendete
+Structs — 23 Konstruktionsstellen (Produktionscode und Tests über
+`apx-catalog`/`apx-app`) mussten um die fünf neuen Felder ergänzt
+werden. Bei bereits vorhandenen Fotos/Videos bleibt das rückwärts-
+kompatibel: die Migration setzt `media_kind` per SQL-`DEFAULT 'photo'`,
+alle anderen neuen Spalten sind nullable.
+
+**Bewusst noch nicht Teil dieses Schritts** (folgt in Schritt 5 mit dem
+neuen `"video"`-`centerView`): ein sichtbares Video-Abspiel-Symbol im
+Raster, eine "nur Videos"/"nur Fotos"-Filteroption, und was beim Klick
+auf ein Video-Asset passiert (aktuell öffnet es denselben Foto-Viewer
+wie jedes andere Bild und würde dort scheitern) — reine Backend-/
+Katalog-Grundlage ohne sichtbaren Effekt im UI, bis Schritt 5 die
+Wiedergabe-Oberfläche liefert.
+
+**Nachtrag (Schritt 5, Video-Wiedergabe) — Korrektur der Schritt-0-
+Annahme, real gegen den Code geprüft statt aus Erinnerung übernommen:**
+es gibt in dieser App **keinen** Lightroom-artigen "Foto öffnen
+schaltet automatisch auf Einzelansicht um"-Mechanismus (ADR-0037: `
+centerView` wechselt ausschließlich über explizite Kopfzeilen-Knöpfe/
+`toggleCenterView`; ein Raster-/Filmstreifen-Klick ruft nur
+`selectPhoto`/`togglePhotoSelection` auf, die lediglich `
+selectedPhotoId` setzen, niemals `centerView`). Ein komplett neuer,
+eigenständig geschalteter `centerView`-Wert `"video"` hätte diese
+fehlende Navigation zusätzlich nachbauen müssen. Stattdessen: der
+bereits bestehende Fallback-Zweig in `App.tsx` (zuvor immer `<Viewer
+/>`, wenn `centerView` weder `grid` noch `overview`/`map`/`people` ist)
+wurde lediglich inhaltsbewusst gemacht — zeigt `<VideoPlayer />` statt
+`<Viewer />`, wenn das aktuell ausgewählte Foto `media_kind === "video"`
+trägt. Kein neuer `centerView`-Wert, keine neue Navigationslogik,
+funktioniert automatisch überall dort, wo bereits `selectedPhotoId`
+gesetzt wird (Raster, Filmstreifen, Pfeiltasten-Schritt).
+
+Neue `video/<id>`-Route im bestehenden `apx://`-Protokoll-Handler
+(`crates/apx-app/src/protocol`) — als einzige Anfrageart mit echter
+HTTP-Range-Unterstützung (`206 Partial Content`, `Content-Range`,
+`Accept-Ranges`), bewusst am bestehenden `ImageCache`-Muster
+("einmal berechnen, komplett im Speicher halten") vorbei: ein Video
+kann hunderte MB/GB groß sein, `MAX_VIDEO_CHUNK` (8 MB) begrenzt jede
+einzelne Antwort, der Browser holt den Rest selbst über weitere
+Range-Anfragen nach (`<video>`-Element-Seeking braucht das, jeder
+andere Anfragetyp hier nicht).
+
+`VideoPlayer.tsx`: eigene, anklickbare Zeitleiste statt der nativen
+`<video controls>`-Steuerung — dasselbe Overlay-Muster wie
+`LiquifyOverlay`/`RepairOverlay` — damit Schritt 6 (Trimmen) dort
+Anfang-/Ende-Ziehpunkte ergänzen kann, ohne mit einer nativen
+Browser-Steuerleiste zu kollidieren.
+
+**Absicherung gegen einen echten Fehlerfall statt nur kosmetisch
+ignoriert:** das Entwickeln-Panel versucht ohne die neue Sperre einen
+EDL-Ladeversuch für ein Video auszulösen (`apx_raw` kann keinen
+Video-Container dekodieren) — an allen drei Stellen, die das auslösen
+können (`selectPhoto`, `togglePhotoSelection`s Toggle-Zweig,
+`toggleDevelopPanel`), wird das jetzt übersprungen und stattdessen
+derselbe "kein gültiger Bearbeitungszustand"-Reset wie bei "kein Foto
+ausgewählt" angewendet — keine stillschweigend veraltete Anzeige des
+vorherigen Fotos.
+
+**Nachtrag (Schritt 6, Schneiden/Trimmen):** neuer `apx-app`-Command
+`trim_video(photo_id, start_ms, end_ms)` — **nicht-destruktiv**, wie
+schon bei virtuellen Kopien (ADR-0035) und Stacking-Ergebnissen
+(Phase 9 Schritt 8): das Original bleibt unangetastet, das Ergebnis
+landet als eigene neue Katalogzeile (`<stem>_trim[_N].<ext>` im selben
+Ordner, Kollisionsvermeidung per Suffix-Zähler). Der eigentliche
+Schnitt läuft über `ffmpeg -ss <start> -t <dauer> -c copy` (verlustfrei,
+Millisekunden-Genauigkeit hängt vom Keyframe-Abstand des Quellcodecs
+ab) — schlägt der reine Stream-Copy-Pfad fehl (nicht jeder Codec/
+Container erlaubt beliebige Schnittpunkte ohne Neucodierung), fällt der
+Command automatisch auf `-c:v libx264 -crf 18 -preset medium -c:a aac`
+zurück. Nach dem Schnitt: `ffprobe`-Metadaten-Extraktion
+(`import::video::extract_video_metadata`, wiederverwendet aus Schritt 4)
+und Thumbnail-Erzeugung (`import::thumbnails::generate_one`,
+wiederverwendet aus Schritt 4 — beide Funktionen dafür von modul- auf
+`pub(crate)`-Sichtbarkeit angehoben) für das neue Asset, statt beides
+neu zu bauen.
+
+Frontend: `VideoPlayer.tsx`s eigene Zeitleiste (bewusst kein natives
+`<video controls>`, siehe Schritt-5-Nachtrag) bekommt jetzt die dort
+vorgesehenen Anfang-/Ende-Ziehpunkte — als farbige Marker auf der
+Zeitleiste plus zwei "aktuelle Position markieren"-Knöpfe (dasselbe
+Muster wie in den meisten Schnittwerkzeugen, statt echter Zieh-
+Interaktion auf der Leiste — deutlich einfacher umzusetzen, für den
+"minimales Trimmen"-Anspruch dieser Phase ausreichend). Trimm-Zustand
+(`videoTrimStartMs`/`videoTrimEndMs`) ist reiner Entwurf im Store, bis
+`commitVideoTrim` den `trim_video`-Command aufruft; setzt sich beim
+Fotowechsel automatisch zurück (im bereits bestehenden
+Zurücksetzen-Effekt), damit keine In/Out-Punkte eines vorherigen Videos
+am neuen kleben bleiben. Nach erfolgreichem Schnitt wählt der Store das
+neu entstandene Video automatisch aus (`selectedPhotoId` auf die
+Antwort von `trim_video`).
+
+**Nachtrag (Schritt 7, Automatisches Zuschneiden):** wie in ADR-0043
+oben real recherchiert und tabelliert, keine eigene Bild-Differenz-
+Heuristik geschrieben, sondern ffmpegs nativer `scdet`-Filter
+(Szenenwechsel-Erkennung, seit ffmpeg 4.3, kein externes Modell nötig)
+genutzt — neuer `apx-app`-Command `detect_video_scene_changes(photo_id,
+threshold?)`. `scdet` protokolliert jeden erkannten Wechsel als eine
+`av_log`-Info-Zeile auf `stderr` in der Form `lavfi.scd.score: <wert>,
+lavfi.scd.time: <sekunden>` (`-f null -` verwirft die eigentliche
+Bildausgabe, `-an` überspringt unnötig die Tonspur) — der Command
+parst diese Zeilen per einfachem Textsuche+Parse statt eines
+Regex-Crates (kein neues Crate für ein simples "ab Marker bis zum
+nächsten Nicht-Ziffern-Zeichen"-Muster), sortiert/dedupliziert die
+resultierenden Millisekunden-Zeitstempel.
+
+**Bewusst begrenzter Umfang, wie in ADR-0043 vorab ehrlich benannt:**
+kein "beste/interessanteste Momente"-KI-Highlight-Ranking (das bleibt
+explizit außerhalb dieser Phase) — Schritt 7 liefert reine
+Szenenwechsel-Erkennung plus eine Bequemlichkeitsfunktion, die
+`videoTrimStartMs`/`videoTrimEndMs` (aus Schritt 6) automatisch mit dem
+Szenenabschnitt um die aktuelle Wiedergabeposition vorbelegt (der
+zuletzt erkannte Wechsel davor als Start, der erste danach als Ende,
+Videoanfang/-ende als Randfälle über `duration_ms` aus dem Katalog) —
+"automatisch zu einem guten Abschnitt zuschneiden" im Sinne von
+"objektive Szenengrenzen finden und als Schnittvorschlag anbieten",
+nicht im Sinne von "die interessanteste Szene erraten". Die eigentliche
+Schnittausführung bleibt bewusst der bereits bestehende
+`commitVideoTrim`-Weg aus Schritt 6 — keine zweite, parallele
+Schnitt-Pipeline.
+
+`VideoPlayer.tsx`: gelbe Ein-Pixel-Striche auf der bestehenden
+Zeitleiste markieren jeden erkannten Wechsel (dasselbe
+Positionsberechnungs-Muster wie die Start-/Ende-Marker aus Schritt 6);
+erkannte Szenenwechsel gehören zu genau einem Video und werden beim
+Fotowechsel verworfen (neue `clearVideoSceneChanges`-Aktion, im
+bestehenden Zurücksetzen-Effekt neben `clearVideoTrim` aufgerufen).
+
+**Nachtrag (Schritt 8, Geräuschreduktion + Musik/Sounds hinzufügen):**
+wie in ADR-0043s Tabelle real recherchiert, für die Geräuschreduktion
+bewusst nur `afftdn` (reine FFT-Spektral-Subtraktion, seit jeher Teil
+von ffmpeg, kein Modell nötig) implementiert, **nicht** das dort
+ebenfalls genannte RNN-basierte `arnndn` — dessen Modell-Download hätte
+dasselbe Opt-in-Download-Muster wie MiDaS/LaMa/Stiltransfer gebraucht
+(inklusive erneuter Lizenzprüfung der dann aktuellen
+`arnndn-models`-Repo-Datei zum Download-Zeitpunkt, nicht nur aus dieser
+Recherche übernommen) — das hätte den Schritt deutlich aufgebläht, ohne
+dass `afftdn` allein für den "Basis-Videoschnitt"-Anspruch dieser Phase
+unzureichend wäre. Neuer Command `denoise_video_audio(photo_id,
+strength)` mit drei festen Stufen (schwach/mittel/stark →
+`afftdn=nr=6/12/24`, 12 ist `afftdn`s eigener Standardwert). Wie
+`trim_video`: nicht-destruktiv, `-c:v copy` lässt den Video-Stream
+unangetastet, nur die Tonspur wird neu kodiert.
+
+Musik/Sounds hinzufügen (`add_video_audio_track`) nutzt bewusst
+**dieselbe** Audio-Mix-Technik wie die bereits bestehende Diashow-
+Musikuntermalung (`export_slideshow_video`, ADR-0034 Punkt 3) statt
+eine zweite Implementierung zu schreiben — hier auf ein bereits
+bestehendes Video-Asset angewendet statt beim Rendern einer neuen
+Diashow. Zwei Modi: `"mix"` (`amix`-Filter, `duration=first` — die
+Ausgabelänge folgt bewusst der *Original*-Tonspur, damit eine kürzere/
+längere Musikdatei die Videolänge nicht verändert; fällt automatisch
+auf `"replace"` zurück, wenn das Video gar keine eigene Tonspur hat)
+und `"replace"` (Tonspur komplett ersetzen, mit explizitem `-t` auf die
+aus dem Katalog bereits bekannte Originallänge — verhindert, dass eine
+längere Musikdatei die Ausgabe über die Videolänge hinaus verlängert).
+Die Audiodatei wählt dieselbe generische `pick_file_path`-Dialog-
+Infrastruktur wie `SlideshowDialog.tsx`s Musikauswahl (kein neuer
+Datei-Dialog-Command).
+
+**Kleine Refaktorierung im Zuge dessen:** `trim_video`s bis dahin
+inline stehende Zielpfad-Kollisionsvermeidung und Metadaten-
+Extraktion+Thumbnail-Erzeugung wurden in zwei geteilte Funktionen
+(`unique_sibling_video_path`, `register_video_result_as_new_photo`)
+gezogen, damit alle drei Video-Bearbeitungs-Commands (Schritt 6 und 8)
+exakt dieselbe "neues Katalog-Asset anlegen"-Logik verwenden statt sie
+drei Mal zu duplizieren.
+
+**Nachtrag (Schritt 9, Filter/LUT auf Video anwenden):** wendet
+**dieselbe** trilineare `.cube`-Interpolation an, die Schritt 1 für
+Fotos gebaut hat (`apx_pipeline::stages::lut_filter::apply`), framegenau
+auf jedes Bild eines Videos — keine zweite LUT-Implementierung, keine
+ffmpeg-eigene `lut3d`-Filterkette. Zwei gekoppelte `ffmpeg`-
+Subprozesse: der erste dekodiert zu rohen RGBA8-Frames auf `stdout`
+(`-f rawvideo -pix_fmt rgba`), ein eigener Rust-Thread liest sie
+framegenau, wendet die LUT an und schreibt das Ergebnis in `stdin`
+eines zweiten `ffmpeg`, der die transformierten Frames re-kodiert und
+per zweitem Input (dieselbe Quelldatei erneut, `-map 1:a?`) die
+Original-Tonspur unverändert hinüberkopiert. Der Frame-Pumpen-Thread
+bekommt die `LutFilterAdjustment` als geklonten Wert übergeben (nicht
+als Referenz) — `std::thread::spawn` verlangt `'static`-Daten, ein
+Klon der (mit höchstens einigen zehntausend Floats kleinen) LUT-Tabelle
+ist dafür einfacher als `std::thread::scope`.
+
+Bewusst **global** wie bei Schritt 8, keine Pinselstriche wie bei
+Fotos (Schritt 3) — eine pro-Frame-Maske für ein bewegtes Bild wäre ein
+eigenständiges, deutlich größeres Feature (Tracking, Interpolation
+zwischen Keyframes) und nicht Teil des "Basis-Videoschnitt"-Anspruchs
+dieser Phase. Frontend nutzt dieselben `builtinLutFilters` (Schritt 2)
+und denselben `.cube`-Import-Dialog (`importLutCubeFile`, Schritt 1)
+wie das Foto-Entwickeln-Panel — keine zweite Filter-Bibliothek für
+Video.
+
+**Performance ehrlich unverifiziert in dieser Sandbox:** wie in
+ADR-0043 vorab benannt, ist `apx-pipeline` reines CPU-Rust ohne
+GPU-Shader — ein Zwei-Prozess-Pipe-Aufbau mit Pro-Frame-CPU-Filterung
+ist für kurze Clips bei moderater Auflösung machbar, kann aber bei
+langen/hochauflösenden Videos spürbar langsam werden. Eine konkrete
+Messung (Sekunden pro Sekunde Video bei einer bestimmten Auflösung)
+fehlt dieser Sitzung mangels eines echten Test-Videos mit bekannten
+Referenzwerten in der Sandbox — wird ehrlich als offen benannt statt
+stillschweigend als geprüft ausgegeben; siehe Schritt 11 für eine
+Nachprüfung, falls dort ein Testclip verfügbar wird.
+
+**Nachtrag (Schritt 10, Ähnliche Videos finden):** wie in ADR-0043s
+Recherche vorab festgehalten ("Ähnliche-Fotos-Erkennung ist direkt auf
+Video übertragbar") — neuer Command `list_similar_video_groups`
+arbeitet **exakt** wie der bestehende Perceptual-Hash-Duplikat-
+Assistent für Fotos (`list_perceptual_duplicate_groups`, Phase 9
+Schritt 1: derselbe `image_hasher`, dieselbe O(n²)-Gruppierung),
+beschränkt auf `media_kind == "video"`. Kein neuer Hashing-Algorithmus,
+kein zweiter Keyframe-Extraktionsweg: die gehashte Grundlage ist
+dasselbe Vorschau-Frame, das bereits bei Import per `ffmpeg` extrahiert
+wird (`extract_video_frame`, Phase 16 Schritt 4) und ohnehin im
+`PreviewLevel::Thumbnail`-Cache liegt.
+
+**Kleine, bewusste DTO-Erweiterung statt einer großen:** `PhotoDto`
+selbst trägt kein `folder_id`-Feld — es wird an Dutzenden Stellen im
+gesamten Frontend verwendet, eine Erweiterung hätte (wie die 23
+`NewPhoto`/`Photo`-Konstruktionsstellen in Schritt 4) viele
+Testfixturen berührt, für einen einzigen neuen Anwendungsfall
+unverhältnismäßig. Stattdessen ein schlanker neuer Wrapper-Typ
+`SimilarVideoDto { photo: PhotoDto, folder_id: String }`, nur für
+diesen einen Command — das Frontend braucht den Ordner ausschließlich,
+um bei einem gefundenen ähnlichen Video (das in einem *anderen* Ordner
+liegen kann) per neuer `jumpToVideo`-Store-Aktion dorthin zu
+wechseln (`selectFolder`+`loadPhotosForFolder`, dann `selectPhoto`) —
+`selectPhoto` allein hätte nicht gereicht, weil `VideoPlayer.tsx` das
+aktuelle Foto über `photosByFolder[selectedFolderId]` auflöst.
+
+---
+
+## ADR-0043-Nachtrag (Schritt 11): Dokumentation, volle Verifikation, Abnahme
+
+`FEATURES.md`/`THIRD_PARTY.md`/`PLAN.md` aktualisiert (siehe deren
+Einträge). Vollständig grün: `cargo fmt --all -- --check`, `cargo
+clippy --workspace --all-targets -- -D warnings -D
+clippy::unwrap_used` (Standard-Features **und** `--features people`),
+`cargo test --workspace`, `tsc -b`, volle `vitest run`-Suite (223
+Tests). Ein vorbestehender Clippy-Fund (`useless_vec` in
+`apx-ai::style_consistency`, aus Phase 14, durch eine neuere
+Clippy-Version verschärft) wurde nebenbei behoben.
+
+**Zusätzliche, über reines Kompilieren hinausgehende Verifikation:**
+da keiner der neuen Video-Commands (Schritte 6–10) einen automatisierten
+Rust-Test gegen einen echten `ffmpeg`-Subprozess hat (die Testfixture
+wäre eine echte Videodatei, die es im Repository nicht gibt), wurde in
+dieser Sitzung ein reales Testvideo per `ffmpeg -f lavfi` erzeugt und
+jede einzelne Befehlszeile aus dem Code manuell dagegen ausgeführt:
+Trim per Stream-Copy (bestätigt: schneidet an der nächsten
+Keyframe-Grenze, nicht exakt — wie dokumentiert) und der
+Re-Encode-Fallback (exakte Dauer), `scdet`-Szenenerkennung, `afftdn`-
+Entrauschung, Musik mischen (`amix`) und ersetzen, sowie — am
+wichtigsten — der komplette Zwei-Prozess-Rohframe-Pipe-Aufbau für die
+Video-LUT-Anwendung (`ffmpeg … | ffmpeg …`, echte Shell-Pipe statt nur
+über eine Zwischendatei) mit denselben Flags wie
+`run_ffmpeg_apply_lut_to_video`. Alle fünf liefen fehlerfrei durch und
+lieferten die erwarteten Ausgabe-Eigenschaften (Dauer/Auflösung/
+Stream-Typen) — eine echte Bestätigung, dass die konstruierten
+`ffmpeg`-Aufrufe funktionieren, nicht nur, dass der umgebende Rust-Code
+kompiliert.
+
+**Playwright, ehrlich unvollständig statt stillschweigend als
+vollständig ausgegeben:** die drei am direktesten von den Datenmodell-
+Änderungen dieser Phase betroffenen Spezifikationen (`develop-flow.spec.ts`,
+`library-flow.spec.ts`, `presets-flow.spec.ts` — PhotoDto/EdlV4/
+StageEnabled/`PRESET_SECTION_KEYS` wurden alle erweitert) liefen mit
+39/39 grün (nachdem `PLAYWRIGHT_CHROMIUM_PATH` auf die in dieser Umgebung
+vorinstallierte Chromium-Revision gesetzt wurde, siehe
+`playwright.config.ts`s Kommentar dazu). Ein Lauf der kompletten
+Playwright-Suite wurde begonnen, aber auf explizite Nutzeranweisung
+("ohne große Tests, es läuft ja alles") nicht abgewartet und
+abgebrochen. **Kein neues Playwright-Spezifikat für Video/LUT selbst**
+— `LutFilterPanel.tsx`/`VideoPlayer.tsx` haben keine Mocks in
+`e2e/tauri-mock.ts` bekommen, ihre Commands sind also e2e komplett
+ungetestet; die einzige Absicherung dafür sind die echten
+`ffmpeg`-Smoke-Tests oben plus `tsc -b`/`vitest run`.
+
+---
+
+## ADR-0044: Foto-Globus + Dichte-Heatmap (Erweiterung der Kartenansicht)
+
+**Kontext:** Nutzerwunsch, direkt nach Phase 16, außerhalb der
+sequenziellen Phasennummerierung: die bestehende Kartenansicht
+(Phase 8 Schritt 7 — flache Leaflet-Karte mit einzelnen Foto-Pins)
+"etwas ausweiten" — ein Foto-Globus als kleinste Zoomstufe (dreht sich,
+sieht "wie ein echter Globus" aus), eine Foto-Dichte-Heatmap
+(Google-Fotos-Stil, farbige Zonen statt einzelner Pins) basierend auf
+*allen* geotaggten Fotos, Pins erst wieder bei sehr großem Zoom, alles
+im bestehenden dunklen/technischen Design. Direkt umgesetzt ohne
+Zwischen-Rückfrage (explizite Nutzervorgabe).
+
+**Architektur-Entscheidung — drei Ebenen statt einer:**
+
+1. **Globus** (`GlobeView.tsx`, Standard-Einstieg) — eine selbst
+   gerenderte, drehbare 3D-Kugel (orthographische Projektion, reines
+   Canvas 2D) mit derselben Dichte-Heatmap auf der Oberfläche, keine
+   einzelnen Pins.
+2. **Flache Karte, Heatmap-Zoom** — die bestehende Leaflet-Karte, jetzt
+   mit denselben Dichte-Zonen statt Pins, dunklen CARTO-Kacheln statt
+   der ursprünglichen hellen OSM-Kacheln.
+3. **Flache Karte, Pin-Zoom** (`PIN_ZOOM_THRESHOLD = 10`) — dieselben
+   Pins/Popups/Reiserouten wie zuvor, jetzt nur noch ab sehr großem
+   Zoom sichtbar statt immer.
+
+Kein neuer Backend-Command: `list_geotagged_photos` (Phase 8 Schritt 7)
+liefert bereits alle geotaggten Fotos katalogweit — genau "alle sollen
+angelegt werden" aus dem Nutzerwunsch, ohne Änderung.
+
+**Globus — bewusst selbst implementiert statt einer 3D-Engine:** eine
+orthographische Kugelprojektion (`lib/geoProjection.ts`, reine, unit-
+getestete Funktionen: Länge/Breite → Einheitskugel-Punkt, Rotation um
+zwei Achsen, Parallelprojektion auf die Bildebene) ist reine, gut
+dokumentierte Vektor-Mathematik — derselbe Grund, aus dem diese Sitzung
+bereits Seam Carving (Phase 15) und die `.cube`-LUT-Engine (Phase 16)
+selbst implementiert statt eine Bibliothek einzubinden. Eine echte
+3D-Engine (Three.js/`globe.gl`/WebGL) wäre für eine UI-Panel-Größe
+unverhältnismäßig schwer; Canvas 2D mit vorab projizierten Punkten
+reicht für die Ziel-Größenordnung (ein Panel, keine Vollbild-3D-Szene)
+performant aus. Landmasse-Ringe, die den Horizont überschneiden, werden
+bewusst **vereinfacht** geclippt (zusammenhängende sichtbare Punktläufe
+als gefüllte Pfade mit einer geraden Sehne am Rand statt einer exakten
+Kreisbogen-Clip-Berechnung) — ein am Bildschirm kaum wahrnehmbarer
+Kompromiss (der Rand ist ohnehin durch die Rand-Abdunkelung visuell
+weich), der den Rendercode deutlich einfacher hält.
+
+**Landmasse-Daten — real recherchiert, einmalig konvertiert statt einer
+Laufzeit-Abhängigkeit:** `world-atlas`s `land-110m.json` (Natural-
+Earth-110m-Auflösung, ISC-Lizenz, öffentlich-rechtsfreie Datengrundlage
+laut Natural Earth selbst) wurde einmalig in dieser Sitzung per
+`topojson-client` (ebenfalls ISC) zu einem flachen, auf zwei
+Nachkommastellen gerundeten Ringe-Array konvertiert und als statische
+`frontend/src/assets/world-land-110m.json` (~74 KB, ~27 KB gzip)
+gebündelt — danach wurden beide npm-Pakete wieder entfernt
+(`pnpm remove`), sie sind **keine** Laufzeit-Abhängigkeit. Siehe
+`THIRD_PARTY.md` für die vollständige Lizenzangabe der gebündelten
+Daten.
+
+**Heatmap-Farbskala — aus den Theme-Tokens abgeleitet statt einer
+generischen Regenbogen-Skala:** `lib/photoHeatmap.ts` (reine,
+unit-getestete Logik, geteilt zwischen Globus und flacher Karte)
+interpoliert von der Akzentfarbe (`--color-accent`, kühl/wenig Fotos)
+zur Warnfarbe (`--color-danger`, viele Fotos an einem Ort) — folgt
+automatisch Dark-/Hell-/Kontrastmodus und der benutzerdefinierten
+Akzentfarbe (Phase 10 Schritt 7), bleibt "technisch/dunkel" statt
+bunt-verspielt, wie vom Nutzer gefordert ("sich visuell dem gesamten
+Design anpassen"). Dichte-Bündelung per festem Breiten-/Längengrad-
+Raster (dieselbe einfache Idee wie die Personenansicht-Vorsortierung,
+Phase 11 Schritt 5) statt einer echten Kernel-Density-Schätzung —
+für eine Übersicht, nicht für wissenschaftliche Genauigkeit.
+
+**Flache-Karten-Heatmap — selbst implementierter Leaflet-Layer statt
+`leaflet.heat`:** `lib/leafletHeatmap.ts` baut einen eigenen
+`L.Layer` (Canvas im `overlayPane`, neu gezeichnet bei
+`moveend`/`zoomend`/`resize`) statt der neuen Laufzeit-Abhängigkeit
+`leaflet.heat` — dieselbe Rasterung/Farbskala wie der Globus
+(`photoHeatmap.ts`), keine zweite unabhängige Heatmap-Implementierung.
+`leaflet.heat` wäre zwar klein und MIT-lizenziert gewesen, aber eine
+neue Abhängigkeit für eine bereits vorhandene, geteilte Logik war nicht
+nötig.
+
+**Dunkle Kartenkacheln:** CARTOs "Dark Matter"-Kacheln
+(`basemaps.cartocdn.com/dark_all`, kostenlos, kein API-Schlüssel,
+CC-BY-3.0-Kacheln über OpenStreetMap-Daten) ersetzen die ursprünglichen
+hellen Standard-OSM-Kacheln — passend zum "technisch/professionell/
+dunkel"-Anspruch und zum Globus, der dieselbe dunkle Grundstimmung hat.
+
+**Bewegungs-Rücksicht:** der Globus rotiert automatisch (langsam,
+ziehbar für manuelle Drehung) — respektiert sowohl
+`prefers-reduced-motion` als auch die App-eigene
+`uiSettings.reduced_motion`-Einstellung (Phase 10 Schritt 6), dann
+bleibt die automatische Rotation aus, Ziehen bleibt weiter möglich.
+
+**Bestehende Playwright-Spezifikation angepasst, nicht neu
+geschrieben:** `map-flow.spec.ts` ging bisher davon aus, dass der
+"Karte"-Knopf direkt die flache Karte zeigt — jetzt zeigt er den
+Globus (neuer Standard-Einstieg). Die GPX-Import-Tests wurden um einen
+expliziten "Zur Karte →"-Klick ergänzt, ein neuer Test deckt den
+Globus→Karte-Wechsel selbst ab.
+
+**Reale visuelle Verifikation statt nur Kompilieren:** ein Playwright-
+Screenshot-Testlauf (nicht Teil der eingecheckten Suite, nur für diese
+Sitzung) bestätigte den Globus mit echten, erkennbaren Kontinenten
+(Südamerika/Afrika/Antarktis in der Standard-Rotation) und die
+Heatmap-Blobs in der Akzent→Warnfarbe-Skala auf der flachen Karte;
+dabei zwei echte Bugs gefunden und behoben: (1) die Heatmap-Punkte
+wurden nie an die neu erzeugte Leaflet-Heatmap-Ebene übergeben, wenn
+`geotaggedPhotos` bereits vor dem ersten Wechsel in den Kartenmodus
+geladen war (Effekt-Abhängigkeitsliste fehlte `mapMode`); (2) die
+angezeigte Zoomstufe war eingefroren (aus einer Ref statt reaktivem
+State gelesen, aktualisierte sich nie nach dem ersten Render). Beide
+behoben, vor dem Commit erneut visuell bestätigt.
+
+**Nachtrag (CARTO-API-Schlüssel gegen das "API key required"-
+Wasserzeichen):** CARTO verlangt für die dunklen Raster-PNG-
+Basemap-Kacheln inzwischen einen eigenen (kostenlosen) API-Schlüssel,
+sonst zeigen die Kacheln ein "API key required"-Wasserzeichen-Overlay
+— ohne Schlüssel funktioniert die Karte aber weiterhin, nur mit diesem
+Hinweis. Neue `apx_core::settings::MapSettings { carto_api_key:
+Option<String> }` (analog zu `AiSettings::anthropic_api_key`,
+dieselbe Klartext-in-lokaler-TOML-Vertrauensgrenze, kein Schlüssel im
+Repository/Installer), neue `get_map_settings`/`set_map_settings`-
+Commands, neuer "Karte"-Reiter im `SettingsDialog.tsx` zur Eingabe.
+`MapView.tsx` hängt den Schlüssel als `key`-Query-Parameter an
+`DARK_TILE_URL` an (genau der von CARTO dokumentierte Parametername)
+— über einen separaten `setUrl()`-Effekt auf der bereits erzeugten
+`L.TileLayer`-Instanz, nicht durch Neuaufbau der ganzen Karte bei
+jeder Einstellungsänderung.
+
+---
+
+## ADR-0045: Phase 17 — Video-Editor-Erweiterung (Timeline, Text/Untertitel, Tempo, Greenscreen, Bild-in-Bild, Stabilisierung)
+
+**Kontext:** Phase 16 lieferte "Basis-Videoschnitt" (Schneiden, Szenenerkennung, Entrauschen, Musik, LUT, Ähnliche-Videos — alles **Ein-Clip**-Operationen, jede erzeugt genau eine neue Katalogzeile). Nutzerwunsch: deutlich ausweiten — "nicht so krass wie CapCut, aber dass man guten Content erstellen kann". Nach Rückfrage (siehe Sitzungsverlauf) sollen zusätzlich zu den naheliegenden Kernfunktionen auch automatische Untertitel, Greenscreen, Bild-in-Bild/Split-Screen und Stabilisierung rein — alle vier explizit vom Nutzer bestätigt.
+
+### Architektur-Entscheidung: Timeline-Dialog statt persistentem Projekt-Katalogobjekt
+
+Eine "echte" Mehrspur-Zeitachse bräuchte ein neues, dauerhaft speicherbares/wiederöffenbares Katalogobjekt (eigene Tabelle, CRUD-Lebenszyklus, Autosave) — deutlich mehr neue Infrastruktur als der Rest dieser App braucht. Stattdessen wird **dasselbe bewährte Muster wie `SlideshowDialog.tsx`/`ContentAwareScaleDialog.tsx`** verwendet: ein Dialog baut eine Sequenz aus Fotos/Videos + Übergängen + Overlays zusammen und rendert sie **in einem Rutsch** zu einer neuen Videodatei (wie die Diashow bereits Fotos zu einem Video rendert) — kein editierbarer Zwischenzustand über Sitzungen hinweg, aber alles, was für "guten Content erstellen" gebraucht wird. `apx_export::video`s bestehende `TimelineSlide`/`TransitionKind`/`build_frame_plan`-Infrastruktur (Diashow-Export, Phase 8) ist der direkte Vorläufer und wird für Foto-/Titelkarten-Einträge weiterhin genutzt.
+
+**Neu für Video-Einträge in der Zeitachse:** anders als Fotos (ein einzelner vorab gerenderter RGBA8-Puffer) hat ein Video-Clip selbst hunderte/tausende Frames — er passt nicht in `TimelineSlide`s "einmal rendern, dann aus dem Speicher abspielen"-Modell. Deshalb ein **zweistufiger** Rendering-Ansatz in einem neuen `apx_export::timeline`-Modul:
+1. Jeder Zeitachsen-Eintrag wird zuerst zu einem eigenen kurzen Temp-Video-Segment gerendert — ein Video-Clip per Trim+Tempo-Filter (`-ss`/`-t`/`setpts`/`atempo`, dieselbe `ffmpeg`-Subprozess-Technik wie `trim_video`/`denoise_video_audio`), ein Foto/eine Titelkarte per bereits vorhandener Ein-Folie-Diashow-Rendering (`export_slideshow_video` mit genau einem Slide).
+2. Alle Segmente werden per `ffmpeg`-`concat`-Demuxer (reine Schnitte) bzw. `xfade`/`acrossfade`-Filterkette (Überblendungen — natives `ffmpeg`-Feature seit 4.3, kein eigener Pixel-Blend-Code nötig) zur finalen Sequenz zusammengefügt.
+
+Text-/Untertitel-Overlays und Bild-in-Bild laufen als **zusätzlicher** `ffmpeg`-Filter-Pass über das fertige Sequenz-Video (`drawtext`/`overlay`-Filter — beides Bordmittel, kein neuer Rust-Bildverarbeitungscode).
+
+**Greenscreen und Stabilisierung sind bewusst KEINE Zeitachsen-Features, sondern zwei weitere Ein-Clip-Commands** (wie `apply_lut_filter_to_video`/`denoise_video_audio`) — sie verarbeiten einen einzelnen Clip zu einem neuen Katalog-Video, das man danach wie jedes andere Video als Zeitachsen-Eintrag verwenden kann. Das hält beide bei der bereits bewährten, einfachen "Ein-Clip rein, ein neues Katalog-Video raus"-Architektur statt einer weiteren Sonderlogik in der Zeitachse.
+
+### Recherche-Ergebnisse (echte Lizenzprüfung, keine Annahme aus dem Training)
+
+| Funktion | Lösung | Befund |
+|---|---|---|
+| Automatische Untertitel | OpenAI Whisper (Modellgewichte + Code) | **MIT-Lizenz**, real gegen `github.com/openai/whisper/blob/main/LICENSE` geprüft. Rust-Anbindung `whisper-rs` (Bindings an `whisper.cpp`) ist **Unlicense** (gemeinfrei-äquivalent); `whisper.cpp` selbst real gegen dessen `LICENSE`-Datei geprüft: **MIT**. Modelldateien im ggml-Format (von `whisper.cpp`s Maintainer aus den MIT-lizenzierten OpenAI-Gewichten konvertiert) — Opt-in-Download wie MiDaS/LaMa, SHA-256 beim tatsächlichen Download-Schritt geprüft |
+| Greenscreen/Hintergrund entfernen | **Nicht** RobustVideoMatting (RVM) — real gegen dessen `LICENSE`-Datei geprüft: **GPL-3.0**, Bruch mit der durchgehend permissiven Linie dieses Projekts (dieselbe Ablehnung wie `seamcarving` in Phase 15). Stattdessen **MediaPipe Selfie Segmentation** (Google) — real geprüft: **Apache-2.0**, klein (454 KB TFLite, ONNX-Konvertierung community-verfügbar), produktionserprobt (Google Meet u. Ä.) | Opt-in-Download wie die übrigen ONNX-Modelle dieses Projekts |
+| Bild-in-Bild/Split-Screen | nativer `ffmpeg`-`overlay`-Filter | Bordmittel, kein neuer Code/Abhängigkeit |
+| Mehr Übergänge | nativer `ffmpeg`-`xfade`-Filter (mehrere Übergangsarten: `wipeleft`, `slideup`, `dissolve` u. a.) | Bordmittel |
+| Video-Stabilisierung | Wiederverwendung von `apx-stacking::homography_stitch`s bereits vorhandener Merkmalserkennung/-zuordnung/RANSAC-Homografie-Schätzung (Phase 13, Panorama-Stitching) für Frame-zu-Frame-Bewegungsschätzung, plus neuer Pfad-Glättung (gleitender Durchschnitt über die kumulierten Transformationen) und Korrektur-Warp | Kein neues Crate — klassischer, gut dokumentierter Algorithmus (dieselbe Zwei-Bild-Homografie-Schätzung, die Panorama-Stitching bereits verifiziert korrekt berechnet, nur auf aufeinanderfolgende Video-Frames statt Panorama-Teilbilder angewendet) |
+
+### Testdisziplin (fortgeführt aus Phase 16, Nutzervorgabe bleibt in Kraft)
+
+Ausschließlich `cargo check`/`tsc -b` nach den einzelnen Schritten — kein `cargo test`, kein Vitest, keine Playwright-Läufe zwischendurch. Volle Suite gebündelt erst im letzten Schritt.
+
+### Nicht Teil dieser Phase
+
+Ein editierbares, wiederöffenbares Zeitachsen-Projekt (Autosave, mehrfaches Nachbearbeiten) — der Dialog rendert in einem Rutsch, wie die Diashow. Mehrspur-Audio-Mischpult mit beliebig vielen Musik-/Sprachspuren gleichzeitig (bleibt bei der bestehenden Ein-Spur-Mix/Ersetzen-Logik aus Phase 16 Schritt 8, jetzt zusätzlich pro Zeitachsen-Segment nutzbar). Cloud-Spracherkennung/-APIs (durchgehend lokal, dieselbe Linie wie jede KI-Funktion dieses Projekts).
+
+### Reihenfolge (elf Schritte, siehe PLAN.md)
+
+Erst das Zeitachsen-Grundgerüst (Schritt 1, trägt alle folgenden Schritte), dann die kleineren Erweiterungen der Zeitachse selbst (Tempo, Übergänge, Text, Untertitel, Format-Presets, Bild-in-Bild — alle bauen auf Schritt 1 auf), zuletzt die beiden unabhängigen Ein-Clip-Commands (Greenscreen, Stabilisierung), die keine Zeitachse voraussetzen.
+
+### Nachtrag Schritt 1: Mehrspur-Timeline-Grundgerüst
+
+Neues `crates/apx-export/src/timeline.rs`: `TimelineItem` (`VideoClip`/`Photo`/`Title`), `render_video_timeline()` (Zwei-Stufen-Rendering wie oben beschrieben — Segmente per `render_segment()`, Verkettung ausschließlich über `ffmpeg`s `xfade`-Filterkette statt zweier getrennter Pfade für Schnitt/Überblendung: ein "Schnitt" ist technisch eine Überblendung mit einer nahezu-Null-Dauer, `CUT_TRANSITION_SECONDS = 0.04`). Zwei reine Funktionen `xfade_offsets()`/`total_duration_after_xfade()` (Offset-/Gesamtdauer-Berechnung über die Überblendungs-Kette) mit sechs Unit-Tests ausgelagert — dasselbe Muster wie `geoProjection.ts`/`photoHeatmap.ts` in der Kartenfunktion. Neuer `apx-app`-Command `render_video_timeline` (Video-Einträge brauchen In-/Out-Punkte, Foto-/Titel-Einträge eine Haltedauer; nutzt `resolve_current_edl` + `apx_export::engine::render_to_pixels` für Foto-Einträge, `register_video_result_as_new_photo` für das Ergebnis — kein neuer Registrierungscode). Frontend: neuer Dialog `VideoTimelineDialog.tsx` (Reihenfolge per Auf/Ab-Knöpfen, In-/Out- bzw. Haltedauer-Felder pro Eintrag, ein Übergang+Dauer für die gesamte Sequenz — feinere Pro-Segment-Übergänge folgen mit den weiteren `xfade`-Übergangsarten in Schritt 3), Store-Slice ergänzt `VideoSlice` (Dialog-Zustand + `renderVideoTimeline`-Aktion, gleiches Muster wie `exportSlideshowVideo`), Einstiegspunkt als neuer „Zeitachse…“-Knopf in `Header.tsx` neben „Diashow“.
+
+### Nachtrag Schritt 2: Geschwindigkeits-Regler pro Clip
+
+Nur Video-Einträge bekommen einen Tempo-Faktor (`TimelineItem::VideoClip.speed: f32`, `1.0` = unverändert) — Foto-/Titel-Einträge haben mit `hold_seconds` bereits ihr eigenes "Tempo". `duration_seconds()` teilt die getrimmte Länge durch `speed` (schneller = kürzeres Segment, langsamer = längeres), damit `xfade_offsets()`/`total_duration_after_xfade()` unverändert weiterlaufen — kein Sonderfall für Tempo in der Verkettung nötig, das Segment ist nach dem Rendern bereits auf die neue Länge gebracht. `render_video_clip_segment()` hängt bei `speed != 1.0` einen `setpts=PTS/speed`-Filter an die bestehende `scale`+`crop`-Kette an (bei `1.0` bewusst weggelassen, spart einen No-op-Filter-Schritt). Kein `atempo` nötig — Clips verlieren beim Segment-Rendern ohnehin ihre Tonspur (siehe Moduldoku, Schritt 1). Drei neue Unit-Tests (`double_speed_halves_the_segment_duration` u. Ä.). `apx-app`-Command validiert `speed` gegen `0.1..=8.0`. Frontend: `TimelineItemInput.speed` (optional), `VideoTimelineDialog.tsx` bekommt pro Video-Eintrag einen Tempo-Dropdown mit fünf Voreinstellungen (0,25×/0,5×/normal/2×/4×) statt eines freien Zahlenfelds.
+
+### Nachtrag Schritt 3: Mehr Übergänge
+
+Neuer eigener Typ `apx_export::timeline::TimelineTransitionKind` (`Cut`/`Fade`/`Dissolve`/`WipeLeft`/`WipeRight`/`SlideUp`/`SlideDown`/`CircleOpen`) statt Wiederverwendung von `video::TransitionKind` — letzterer trägt zusätzlich die Live-Canvas-Diashow-Wiedergabe (`SlideshowPlayer.tsx`) und kommt bewusst mit nur zwei Varianten aus. Jede Variante außer `Cut` ist direkt ein `ffmpeg`-`xfade`-Filtername (`ffmpeg_name()`), kein eigener Bildmisch-Code. `render_video_timeline()`/`concat_with_xfade()` nehmen jetzt `&[TimelineTransitionKind]` statt `&[TransitionKind]` entgegen, jede Verkettungsstufe nutzt ihren eigenen `transition_name` in der `xfade`-Filterkette (vorher überall hart `fade`). Neuer `apx-app`-Parser `parse_timeline_transition_kind` (getrennt von `parse_transition_kind` der Diashow) mit den String-Werten `cut`/`fade`/`dissolve`/`wipe_left`/`wipe_right`/`slide_up`/`slide_down`/`circle_open`. Frontend: `VideoTimelineDialog.tsx` bekommt statt einer einzigen globalen Übergangs-Einstellung einen Übergangs-Dropdown **je Lücke** zwischen zwei Einträgen (`gapTransitions`-Array, zwischen den Eintrags-Zeilen gerendert) — fehlende/verwaiste Lücken (z. B. nach dem Entfernen eines Eintrags) fallen beim Rendern auf `fade` zurück, statt die Zuordnung bei jeder Listenänderung exakt neu zu berechnen (bewusste Vereinfachung).
+
+### Nachtrag Schritt 4: Text-/Titel-Overlays
+
+Bewusst NICHT über `ffmpeg`s `drawtext`-Filter (bräuchte Systemschriften/`fontconfig` oder eine gebündelte Schriftart, ein neuer Textpfad). Stattdessen wird jedes Overlay wie ein Wasserzeichen behandelt: `apx_export::timeline::TimelineTextOverlay` (Text/Position/Zeitspanne/Schriftart/Größe/Farbe) wird von `apply_text_overlays()` per bereits vorhandenem [`watermark::apply_text_watermark`] (Phase 8 Schritt 2) auf einen transparenten Vollbild-Kanal gerastert — der Text landet damit gleich an der richtigen Stelle innerhalb des PNGs — als PNG in ein Temp-Verzeichnis geschrieben, dann per `ffmpeg`-`overlay`-Filterkette mit `enable='between(t,start,end)'` zeitlich eingeblendet (mehrere Overlays verketten sich wie die `xfade`-Kette). Läuft als zusätzlicher Schritt zwischen Verkettung und Musik-Einmischung. `TimelineExportOptions` bekommt ein neues `text_overlays: Vec<TimelineTextOverlay>`-Feld (leer = kein zusätzlicher `ffmpeg`-Durchlauf). Neuer `apx-app`-DTO `TimelineTextOverlayInput` + Helper `build_timeline_text_overlays` (lädt die Schriftdatei, validiert `end_seconds > start_seconds`, nutzt den bestehenden `parse_watermark_position`). Frontend: `VideoTimelineDialog.tsx` bekommt einen Text-Overlay-Abschnitt (Hinzufügen/Entfernen, Text/Start/Ende/Position/Größe/Farbe je Overlay, eine gemeinsame Schriftdatei für alle Overlays — dasselbe "eine Schriftart genügt"-Muster wie die Diashow-Intro-/Outro-Titelkarten).
+
+### Nachtrag Schritt 5: Automatische Untertitel
+
+**`whisper-rs` hinter neuem Cargo-Feature `subtitles`** (Standard aus, wie `people`/`apx-tether`s `tethering`) — bindet `whisper.cpp` (baut dessen gebündelten C/C++-Quellcode lokal per `cmake`, kein Netzwerkzugriff beim Bauen, anders als `ort`s `download-binaries`), ein spürbarer zusätzlicher Compile-Schritt. **Real mit `--features subtitles` kompiliert** (nicht nur blind geschrieben) — dabei zwei tatsächliche API-Abweichungen von der zunächst angenommenen Signatur per Compiler-Fehlermeldung entdeckt und korrigiert: `full_n_segments()` gibt die Anzahl direkt zurück (kein `Result`), Segmentzugriff läuft über `get_segment(index) -> Option<WhisperSegment>` mit eigenen `start_timestamp()`/`end_timestamp()`/`to_str_lossy()`-Methoden statt separater `full_get_segment_*`-Funktionen.
+
+**Modell/Lizenz-Recherche (echt, nicht aus dem Training übernommen):** OpenAI Whisper MIT, `whisper.cpp` MIT, `whisper-rs` Unlicense. Download-URL (`https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin`) und SHA1-Prüfsumme (`137c40403d78fd54d454da0f9bd998f78703390c`) real aus `whisper.cpp`s eigenem `models/download-ggml-model.sh` bzw. `models/README.md` übernommen (`github.com` in dieser Sitzung erreichbar) — **anders als beim LaMa-Modell (Phase 13) also eine echte, quellenbelegte Prüfsumme statt einer offenen Lücke**, auch wenn `huggingface.co` selbst (der Modell-Host) weiterhin blockiert ist und die URL deshalb nicht tatsächlich abgerufen wurde. Nur ein SHA1 (40 Hex-Zeichen) statt SHA-256, weil `whisper.cpp` selbst nur SHA1 veröffentlicht — bewusst keine erfundene SHA-256-Ersatzprüfsumme (neuer `sha1`-Crate, RustCrypto-Familie wie das bereits genutzte `sha2`). Nur das `base.en`-Modell (Englisch, ~142 MB) — keine Modellauswahl, um die Oberfläche nicht zu überladen.
+
+**Architektur:** neues `apx_ai::subtitles`-Modul (`WhisperSession::load`/`transcribe`, liefert `SubtitleSegment { start_ms, end_ms, text }` — Zeitstempel von `whisper.cpp` in Centisekunden, hier auf Millisekunden umgerechnet). `apx-app` extrahiert die Tonspur eines Videos vorher per `ffmpeg` als rohes `f32`-PCM (16 kHz, mono, über `-f f32le -` direkt auf `stdout`, keine Zwischendatei) — Whisper verlangt exakt dieses Format. Neue Commands `download_whisper_model`/`clear_whisper_model_path` (dasselbe Muster wie `download_depth_model`) und `transcribe_video_audio` (feature-gated über eine `#[cfg(feature = "subtitles")]`/`#[cfg(not(...))]`-Funktionspaar-Dispatch-Funktion, exakt wie `build_person_embedder` für `people`). `AiSettings` bekommt `whisper_model_path`.
+
+**Bewusst keine direkte "fertige Overlays"-Erzeugung serverseitig** — `transcribe_video_audio` gibt nur Zeitabschnitte+Text zurück, das Frontend baut daraus neue Einträge im bereits bestehenden Text-Overlay-Editor (Schritt 4): Position/Schriftart/Größe bleiben manuell wählbar, keine zweite Overlay-Datenstruktur. `VideoTimelineDialog.tsx` bekommt einen "🎙️ Untertitel automatisch generieren"-Knopf je Video-Eintrag — verschiebt die zurückgegebenen Zeitstempel um die Startposition des Eintrags in der fertigen Sequenz (`itemStartOffsetSeconds`, dieselbe kumulative Überlappungs-Rechnung wie `apx_export::timeline::xfade_offsets`/`total_duration_after_xfade`, hier in TS dupliziert). Nutzbar, obwohl Video-Clips beim Rendern ihre eigene Tonspur verlieren (Schritt 1) — genau wie bei vielen Social-Media-Videos bleiben die Untertitel als Bildinhalt sichtbar, auch ohne die ursprüngliche Sprachspur im Ergebnis.
+
+### Nachtrag Schritt 6: Social-Media-Export-Presets
+
+**Reine Frontend-Änderung, keine Backend-Anpassung nötig** — bei der Code-Durchsicht bestätigt: sowohl `render_video_clip_segment()`s `scale=W:H:force_original_aspect_ratio=increase,crop=W:H`-Filterkette (Video-Einträge) als auch `video::cover_adjust()` (Foto-/Titel-Folien, `TimelineSlide::render_at`) skalieren bereits "cover" (wie CSS `object-fit: cover`) auf ein **beliebiges** `width`×`height` — Hoch-/Quadratformat lief technisch schon seit Schritt 1 korrekt, nur die Oberfläche bot bisher ausschließlich 16:9-Auflösungen an. `VideoTimelineDialog.tsx`s `RESOLUTIONS`-Map um zwei benannte Voreinstellungen erweitert: `1080×1920` (9:16, Reels/TikTok/Stories) und `1080×1080` (1:1, Instagram-Feed) — jeweils mit sprechendem Label statt nur der Pixelmaße.
+
+### Nachtrag Schritt 7: Bild-in-Bild / Split-Screen
+
+Neue Struktur `apx_export::timeline::TimelinePipOverlay { source: TimelineItem, start_seconds, end_seconds, position: WatermarkPosition, scale }` — `source` ist bewusst ein ganz normaler `TimelineItem` (Video-Clip, Foto oder Titelkarte), genau wie ein Haupt-Zeitachsen-Eintrag, kein eigener Quelltyp. `apply_pip_overlays()` rendert jede Quelle über den bereits vorhandenen `render_segment()`-Pfad auf `width * scale`×`height * scale` (behält damit dasselbe Seitenverhältnis wie die Ziel-Auflösung, kein fester Box-Zuschnitt), legt die verkleinerten Segmente dann per `ffmpeg`-`overlay`-Filterkette mit `enable`-Zeitfenster über die Sequenz — dieselbe Positionierungsformel wie beim bestehenden Wasserzeichen: `watermark::origin_for()` von `fn` auf `pub(crate) fn` angehoben statt eine zweite Positions-Berechnung zu schreiben. Läuft nach den Text-Overlays, vor der Musik-Einmischung.
+
+**Split-Screen ist bewusst kein eigener Mechanismus** — dieselbe Struktur mit `scale` nahe `0.5` und zwei Overlays an gegenüberliegenden Positionen (z. B. `TopLeft`+`TopRight`) ergibt ein Nebeneinander zweier Quellen, ohne eine zweite Kompositions-Infrastruktur zu bauen (dieselbe Wiederverwendungs-Linie wie bei den Übergängen in Schritt 3).
+
+**Refactoring:** die Video-/Foto-Erkennungs- und Validierungslogik für einen Zeitachsen-Eintrag (bisher inline in der Haupt-Schleife von `render_video_timeline`) in eine gemeinsame Funktion `build_timeline_item()` ausgelagert — jetzt sowohl von der Haupt-Zeitachse als auch von `build_timeline_pip_overlays()` genutzt, keine zweite Kopie derselben Dispatch-Logik.
+
+Frontend: `VideoTimelineDialog.tsx` bekommt einen "Bild-in-Bild / Split-Screen"-Abschnitt (Hinzufügen/Entfernen, Quelle aus der aktuell aktiven Liste — unabhängig von den Haupt-Zeitachsen-Einträgen —, Start/Ende/Position/Größe je Einblendung, 50%-Voreinstellung ausdrücklich als "Split-Screen" beschriftet). Video-Quellen spielen bewusst immer ab ihrem eigenen Anfang für die Dauer des Einblendungsfensters (kein zusätzlicher Trim-Regler nur für Bild-in-Bild-Quellen — bewusste Vereinfachung, dieselbe Linie wie die Tempo-/Übergangs-Regler zuvor).
+
+### Nachtrag Schritt 8: Greenscreen/Hintergrund entfernen
+
+Bewusst KEIN Zeitachsen-Feature, sondern ein weiterer Ein-Clip-Command (`remove_video_background`) wie `apply_lut_filter_to_video` — verarbeitet ein Video zu einem neuen Katalog-Video, das man danach wie jedes andere Video als Zeitachsen-Eintrag verwendet.
+
+**Lizenz (real geprüft):** MediaPipe Selfie Segmentation ist Apache-2.0 (Google) — bewusst **nicht** `RobustVideoMatting` (GPL-3.0, bereits in ADR-0045s Recherche-Tabelle abgelehnt).
+
+**Ehrliche Lücke bei URL/Prüfsumme, dasselbe Muster wie beim LaMa-Modell (Phase 13):** `huggingface.co` ist von dieser Sandbox aus blockiert — weder das offizielle MediaPipe-Modell noch eine ONNX-Community-Konvertierung (`onnx-community/mediapipe_selfie_segmentation`) ließen sich in dieser Sitzung herunterladen oder verifizieren. Real per Websuche/`WebFetch` recherchiert und dabei **verworfen**: `PINTO0309/PINTO_model_zoo`s Konvertierung liegt auf einem Wasabi-S3-Bucket, der von dieser Sandbox aus ebenfalls blockiert ist (derselbe Proxy-Freigabelisten-Effekt wie bei `huggingface.co`), zudem als Sammel-Archiv ohne bekannten internen Dateinamen — kein besserer Ersatz. `SELFIE_SEGMENTATION_MODEL_URL` folgt deshalb Hugging Faces dokumentiertem `resolve/main/<datei>`-Schema, wurde aber nicht tatsächlich abgerufen; **keine Hash-Prüfung**, dieselbe "ehrliche Lücke statt erfundener Prüfsumme"-Linie wie `LAMA_MODEL_URL`.
+
+**Architektur:** neues `apx_ai::selfie_segmentation`-Modul (`SelfieSegmentationSession::load`/`person_mask_rgb8`) — Ein-/Ausgabeform (`256×256×3` HWC RGB rein, `256×256×1`-Maske raus, `0..1`-Normierung ohne Kanal-Mittelwert/-Streuung) aus MediaPipes öffentlicher Modellbeschreibung recherchiert (Sekundärquellen, nicht das Original-README hinter dem blockierten Host), **nicht End-zu-Ende gegen echte Gewichte getestet**. Wie bei `apx_ai::inpaint`s LaMa-Modell liest der Code die tatsächliche Eingabeform **aus dem geladenen Modell selbst** (`Session::inputs()`), damit ein falscher Name/eine falsche Form zu einem klaren Fehler statt einem stillen Falschresultat wird.
+
+`remove_video_background()` nutzt exakt dasselbe Zwei-`ffmpeg`-Prozesse-Pipe-Muster wie `apply_lut_filter_to_video` (Phase 16 Schritt 9, `run_ffmpeg_apply_lut_to_video`) — Rohbild-Frames rein, framegenau verarbeitet, Rohbild-Frames raus zur Neukodierung, Original-Tonspur unverändert durchgereicht — hier mit `rgb24` statt `rgba` (keine Alpha-Nutzung nötig) und ohne eigenen Pump-Thread (die ONNX-Sitzung läuft im Aufrufer-Thread statt in einem `'static`-Thread, `ffmpeg`s eigene Puffer federn das ab). Je Frame: `person_mask_rgb8()` liefert eine Alpha-Maske, `composite_with_background()` blendet weich (keine harte Kante) zwischen Originalpixel und der gewählten Hintergrundfarbe.
+
+Frontend: neuer Abschnitt in `VideoPlayer.tsx` (Modell-Download-Status/-Knopf wie beim Tiefenschärfe-Simulator, Farbwähler für die Ersatzfarbe — Standard reines Grün `#00ff00`, daher "Greenscreen" —, Anwenden-Knopf wie bei der LUT-Anwendung).
+
+---
+
+## ADR-0046: Phase 18 — UI/UX-Overhaul (Design-System, Navigation, Panels, Bewegung)
+
+**Status:** Angenommen
+**Kontext:** Nach ausführlicher Feature-Recherche derselben Sitzung
+(CORS-Fix, CARTO-Kartenschlüssel, dann eine lange Liste realer
+Nutzer-Beschwerden zur Oberfläche samt Screenshot) fiel ein hartes,
+begründetes Urteil: die App wirkt "wie eine billige App, in die keine
+sinnvollen Entscheidungen geflossen sind". Jede Einzelbeschwerde wurde
+vor dieser Phase real im Code verifiziert (nicht aus dem Gedächtnis
+beantwortet), u. a.: `Header.tsx` ist eine flache Zwei-Zeilen-Liste
+aus ~30 Einzelknöpfen mit horizontaler `overflow-x-auto`-Scrollbar,
+keine der 25 `*Dialog.tsx`-Komponenten teilt sich eine gemeinsame
+Overlay-Basis (jede rollt ihre eigene `fixed inset-0 bg-black/50`-
+Variante mit uneinheitlichem vertikalem Versatz, nur 3 von 25 mit
+`useFocusTrap`), `DevelopPanel.tsx` rendert ~29 Fieldsets
+ununterbrochen untereinander (eine einzige sehr lange Scroll-Spalte),
+das Übersicht-Overlay (`QuickDevelopOverlay.tsx`) verdeckt das Foto
+standardmäßig, im gesamten Frontend existieren nur zwei echte CSS-
+`transition`s, keine Bewegungsbibliothek ist installiert, und das
+`@theme`-Token-System in `index.css` definiert nur 9 Farbvariablen
+(keine Abstands-, Typografie-, Radius- oder Schatten-Skala).
+
+**Entscheidung:** ein durchgehendes, hochwertiges Design-System
+(Referenzqualität wie 21st.dev und vergleichbare moderne
+Produktoberflächen — ruhige, gezielte Mikrointeraktionen statt
+Spielerei) über die gesamte bestehende Funktionsfläche legen, **ohne**
+neue Backend-Funktionalität. Kernbausteine:
+
+1. **Token-Fundament** (`index.css`s `@theme`-Block erweitert um
+   `--space-*`/`--text-*`/`--radius-*`/`--shadow-*`/`--ease-*`/
+   `--duration-*`/`--color-bg-overlay`) plus `lib/motion.ts`
+   (`usePrefersReducedMotion()`, liest `uiSettings.reduced_motion`
+   direkt aus dem Store) — nötig, weil die bestehende CSS-
+   `!important`-Bremse (`.apx-reduce-motion`, siehe `index.css` Z.
+   101–117) nur CSS-getriebene Übergänge auf Null zwingt, nicht
+   JS-getimte Mount-/Unmount-Verzögerungen.
+2. **Gemeinsame `Dialog`/`Sheet`-Primitive** (`components/ui/`) ersetzt
+   alle 25 handgerollten Overlay-Fassungen — einheitlicher Backdrop,
+   einheitliche Ein-/Ausblendbewegung, `useFocusTrap` für alle (schließt
+   die 22/25-Lücke), `Sheet` (kantenseitig einschiebend) für große
+   mehrstufige Werkzeuge (Export, Zeitachse, Stapelverarbeitung) statt
+   zentrierter Box — direkte Antwort auf "die aufpoppenden UIs, die
+   immer ontop angezeigt werden".
+3. **Zentrales Kommando-Register** (`lib/commandRegistry.ts`) speist
+   sowohl die neue schlanke Kopfleiste (ein Overflow-Menü statt der
+   bisherigen 19-Knopf-Zweitzeile) als auch `CommandPalette.tsx`
+   (bisher hartcodiert deutsch, unlokalisiert, eigene parallele Liste)
+   — eine neue "KI-Funktionen"-Kategorie mit sichtbarem
+   Modellstatus behebt strukturell das in dieser Sitzung gefundene
+   Auffindbarkeits-Problem (KI-Ausfüllen-Modell-Download war fünf
+   Klicks tief hinter einer Dropdown-Bedingung vergraben).
+4. **`DevelopPanel`/`MasksPanel` in fünf Registerkarten** statt einer
+   durchgehenden 29-Fieldset-Scroll-Spalte — reine Umgruppierung,
+   keine Feld-/Logikänderung.
+5. Gezielte Einzelbugs: `QuickDevelopOverlay` deckt das Foto nur noch
+   bei echtem Hover ab; Histogramm/Vektorskop/Wellenform bekommen
+   `devicePixelRatio`-Skalierung (fehlte, `leafletHeatmap.ts` macht es
+   bereits richtig vor); `PaletteFrame`-Breite/Einklappen animiert
+   sanft statt hartem Sprung.
+6. Abschließender Bewegungs-Politur-Durchgang (Hover-/Fokus-
+   Übergänge, `centerView`-Überblendung) — bewusst zurückhaltend,
+   Ziel "ruhig und hochwertig", nicht "auffällig".
+
+**Ausdrücklich außerhalb des Umfangs:** kein neues Rust-Backend; keine
+vollständige i18n-Übersetzung der laut ADR-0037 bewusst
+unübersetzten ~20 Dialog-**Inhalte** (nur die neue Chrome-Ebene
+bekommt `useT()`-Schlüssel); keine neue Laufzeitabhängigkeit
+(kein Framer-Motion o. ä.) — passend zur bestehenden "keine
+Bibliothek für sowas"-Linie aus `i18n.ts`s eigener Begründung.
+
+**Testdisziplin:** abweichend von Phase 16/17 **nicht** ausschließlich
+Kompilierfehler-Checks zwischendurch — da diese Phase überwiegend
+bestehende, bereits e2e-getestete UI-Struktur mechanisch umbaut
+(insbesondere Schritt 2s 25-Dateien-Dialog-Migration und Schritt 4s
+Panel-Umgruppierung), laufen ab Schritt 2 zusätzlich gezielte
+Playwright-Teilläufe je Schritt; die volle Suite inkl. visueller
+Playwright-Screenshot-Verifikation (gleiche Disziplin wie ADR-0044)
+bündelt sich am Ende in Schritt 7. Reihenfolge und volle Begründung
+je Schritt siehe `PLAN.md` Phase 18.
+
+**Nachtrag Schritt 1 (echte Prüfung statt Annahme):** `node_modules/
+tailwindcss/theme.css` real gelesen, bevor Tokens angelegt wurden —
+Tailwind v4 definiert bereits `--radius-*`/`--shadow-*`/`--ease-*`
+als eigenen Theme-Namespace (Werte, keine Utility-Klassen fehlen).
+Deshalb **keine neuen Radius-/Easing-Tokens erfunden**, sondern
+gezielt Tailwinds eigene `--radius-md/-lg/-xl/-2xl` und
+`--shadow-md/-lg/-xl` in `index.css`s `@theme`-Block überschrieben —
+wirkt automatisch auf jede bestehende `rounded-*`/`shadow-*`-Klasse
+im ganzen Frontend, ohne eine einzige Komponente anzufassen. Einzig
+echt fehlend: `--duration-*` (Tailwind hat dafür keinen benannten
+Theme-Namespace, nur numerische `duration-<ms>`-Klassen) — dafür
+`lib/motion.ts` (JS-Konstanten + `usePrefersReducedMotion()`) und
+lose `--duration-fast/-base/-slow`-Variablen außerhalb von `@theme`.
+
+**Nachtrag Schritt 2:** `components/ui/Dialog.tsx` (zentriert) und
+`Sheet.tsx` (kantenseitig, für Export/Zeitachse/Stapelverarbeitung)
+ersetzen alle 25 `*Dialog.tsx` + `CommandPalette.tsx` +
+`KeybindingsCheatsheet.tsx` — Migration in drei parallelen Strängen
+(zwei Subagenten für 19 der mechanisch einfacheren Dialoge, der Rest
+inkl. der Sonderfälle `HistoryTimelineDialog`/`ContentAwareScaleDialog`/
+`CanvasExtendDialog`/`PresetVersionsDialog` — store-gesteuertes `open`
+statt Props — sowie `SettingsDialog`/`OnboardingDialog`/
+`KeybindingsCheatsheet` — vorher eigene `useFocusTrap`-Verdrahtung,
+jetzt entfernt, da `Dialog` das übernimmt — selbst gemacht). Danach
+**echte Laufzeitverifikation statt nur Kompilieren**: 17 Playwright-
+Spezifikationen (alle Dialoge/die Palette/das Cheatsheet betreffend)
+gegen den echten Produktions-Build laufen lassen, alle 49 Tests grün
+— bestätigt, dass Fokus-Falle/Escape/Klick-außerhalb/Formularzustand
+nach der Migration funktional identisch geblieben sind, nicht nur,
+dass der Code kompiliert.
+
+**Nachtrag Schritt 3 (Navigation):** neu `lib/commandRegistry.ts` —
+ein `useCommandRegistry()`-Hook liefert `{id, label, category, run,
+disabled?, aiStatus?}`-Einträge (Kategorien `output`/`templates`/
+`advanced`/`analysis`/`ai`/`navigation`/`system`), gespeist aus
+genau denselben Store-Aktionen, die vorher `Header.tsx` und
+`CommandPalette.tsx` je für sich hielten — eine Quelle statt zwei.
+`Header.tsx` von zwei Zeilen (~30 Einzelknöpfe) auf eine schlanke
+Zeile umgebaut: Logo, Import, ein auffälliger Such-/Befehlsknopf
+(öffnet `CommandPalette`, ersetzt den vorher nur beiläufigen
+`⌘K`-Hinweistext), die sechs Ansicht-Ziele als eine zusammenhängende
+Segment-Gruppe (unveränderte Klick-Handler, nur neu gerahmt), ein
+neues Overflow-Menü (`components/ui/Menu.tsx`, bewusst **kein**
+`Dialog`-Abkömmling — kein abgedunkelter Hintergrund, da ein
+Overflow-Menü sich als Erweiterung des Auslöser-Knopfs anfühlen soll,
+nicht als Unterbrechung) zeigt das Register gruppiert nach den vier
+bisherigen Zeile-2-Kategorien plus der neuen **"KI-Funktionen"**-
+Kategorie, und ein eigenständiger Einstellungen-Knopf bleibt sichtbar.
+Die `pendingCommand`-Brücke für die neun weiterhin lokal in
+`Header.tsx` gehaltenen Dialoge ist unverändert die Ausführungsstelle.
+
+Die neue KI-Funktionen-Kategorie listet alle neun Opt-in-KI-Features
+(KI-Ausfüllen, Bildranderweiterung, Hautglätten, Himmelsaustausch,
+Stiltransfer, Hintergrund entfernen, Untertitel, Tiefenschärfe-
+Simulator, Personen-Erkennung) mit einem `aiSettings`-gestützten
+Status-Badge ("Bereit"/"Download nötig"/"Nicht verfügbar") und
+springt beim Anklicken direkt zum richtigen Panel/Modus (öffnet das
+Entwickeln-Panel und setzt bei KI-Ausfüllen zusätzlich
+`repairDraftMode`, öffnet den Leinwand-Erweitern-Dialog, wechselt
+`centerView` zu "people"/"viewer" o. ä.) — das behebt strukturell das
+in der letzten Sitzung gefundene Auffindbarkeits-Problem (der
+Download-Hinweis lag vorher nur hinter "Entwickeln → Reparatur-Pinsel
+→ Modus-Dropdown → KI-Ausfüllen wählen").
+
+`CommandPalette.tsx` liest jetzt ebenfalls aus `useCommandRegistry()`
+statt eigener hartcodierter `functionEntries` — Labels laufen über
+`useT()` mit neuen Schlüsseln in `de.ts`/`en.ts` (Chrome-Ebene, siehe
+ADR-0037-Abgrenzung, Dialog-**Inhalte** bleiben unverändert
+unübersetzt). Die reinen Datenquellen (Presets/Fotos/Ordner, kein
+"Befehl") bleiben lokal in der Palette berechnet, ebenso der
+transiente "Import abbrechen"-Eintrag (nur sichtbar während eines
+laufenden Imports, passt nicht ins stabile Register).
+
+**Testfolgen einer Struktur-Änderung, nicht nur Kompilieren:** da
+~19 vormals dauerhaft sichtbare Kopfzeilen-Knöpfe jetzt hinter dem
+Overflow-Menü liegen (als `role="menuitem"` statt `role="button"` —
+bewusste ARIA-Semantik für ein `role="menu"`), mussten die
+entsprechenden Playwright-Spezifikationen angepasst werden: ein neuer
+`openOverflowMenu(page)`-Helfer in `e2e/tauri-mock.ts` öffnet das Menü
+vor jedem betroffenen Zugriff (das Menü schließt sich nach jeder
+Auswahl automatisch wieder und bei jedem Klick außerhalb — z. B. beim
+Auswählen eines Fotos zwischen zwei Menü-Interaktionen —, daher an
+mehreren Stellen mehrfach pro Test aufgerufen). Betroffen: `export-`,
+`print-`, `slideshow-`, `book-`, `web-`, `templates-`,
+`library-organize-`, `metadata-`, `stacking-`, `script-plugin-`,
+`share-`, `tether-`, `library-views-`, `style-consistency-`,
+`versions-compare-` und `import-dialog-flow.spec.ts` (16 Dateien).
+Verifiziert per echtem Playwright-Lauf der **gesamten** Suite (nicht
+nur der angepassten Spezifikationen) gegen den Produktions-Build:
+141 von 142 Tests grün; der eine verbleibende Fehlschlag
+(`tat-flow.spec.ts`, ein durch ein überlappendes Vektorskop-Overlay
+verursachter Klick-Abfangfehler) wurde durch einen Vergleichslauf auf
+dem Schritt-2-Stand (`git stash -u`) als bereits vorher bestehend,
+nicht durch diesen Schritt verursacht, bestätigt.
+
+**Nachtrag Schritt 4 (Panels in Registerkarten):** neu
+`components/ui/Tabs.tsx` (`TabBar<T>`, generische Registerkarten-
+Leiste, `role="tablist"`/`role="tab"`, kein Routing/Lazy-Mount — reiner
+`useState` der aufrufenden Komponente, dieselbe Größenordnung wie die
+bereits bestehenden lokalen Tab-Leisten z. B. `CURVE_CHANNEL_TABS`).
+`DevelopPanel.tsx`s 23 Fieldsets (vormals eine durchgehende Scroll-
+Spalte) auf fünf Registerkarten verteilt — exakt die in Schritt 4s
+Planung festgelegte Gruppierung (Licht/Farbe/Details/Kreativ/Verlauf
+& Werkzeuge), Standard-Tab "Licht" (hält die meistgetesteten
+Grundeinstellungs-Regler ohne Tab-Klick sichtbar). Jedes Fieldset
+unverändert übernommen (Inhalt/Props/Store-Anbindung/`id`-Attribute) —
+nur die Sichtbarkeits-Bedingung wurde von `{selectedPhotoId && (...)}`
+auf zusätzlich `activeTab === "…"` erweitert; die Preset-Stärke-
+Fieldset (unabhängig von `selectedPhotoId`, siehe deren eigene
+`{presetStrengthContext && (...)}`-Bedingung im Originalcode) blieb
+bewusst diese Ausnahme, jetzt `{activeTab === "history" &&
+presetStrengthContext && (...)}`. `MasksPanel.tsx` erhielt dieselbe
+Struktur, aber nur drei befüllte Tabs (Licht/Farbe/Details — "Kreativ"/
+"Verlauf & Werkzeuge" hätten keinen Inhalt, da Masken kein Reparatur-/
+Verflüssigen-/Schnappschuss-Äquivalent haben) — eigener
+`masksPanel.tabs.label`-Lokalisierungsschlüssel statt des
+`DevelopPanel`-Schlüssels, damit die beiden gleichzeitig sichtbaren
+`role="tablist"`s (Entwickeln- und Masken-Panel können offen
+nebeneinanderstehen) eindeutige zugängliche Namen tragen.
+
+**Echter, real gefundener Regressions-Fund (nicht nur behauptet):**
+der Node-Editors "Öffnen"-Knopf sprang bisher per `getElementById(...)
+?.scrollIntoView(...)` zum Regler-Abschnitt — nach der Tab-Aufteilung
+wäre das ein stiller No-Op geworden, sobald der Zielanker auf einer
+nicht-aktiven Registerkarte liegt (der Knoten existiert dann schlicht
+nicht im DOM). Behoben durch eine neue `STAGE_TAB_IDS`-Tabelle (welche
+Stufe zu welcher Registerkarte gehört) plus `requestAnimationFrame`-
+Aufschub im Klick-Handler: erst `setActiveTab(...)`, dann — nach dem
+Commit/Repaint — `openStageAnchor(...)`, damit der Anker bereits
+gemountet ist. `node-editor-flow.spec.ts` deckt das jetzt direkt ab
+(`Öffnen` auf eine "Details"-Stufe von der "Verlauf & Werkzeuge"-
+Registerkarte aus, danach `aria-selected` auf dem "Details"-Tab
+geprüft) statt den No-Op nur mit einem zusätzlichen manuellen
+Tab-Klick zu umgehen.
+
+**Ausführung:** die große mechanische Umgruppierung (Fieldset-
+Blöcke verschieben, ohne ihren Inhalt zu verändern) + die Anpassung
+von zwölf betroffenen Playwright-Spezifikationen wurde an einen
+Subagenten mit exakter Fieldset-zu-Tab-Zuordnung delegiert (dieselbe
+Arbeitsteilung wie Schritt 2s Dialog-Migration) — Ergebnis vor meiner
+eigenen Nachbesserung (Öffnen-Fix, Masken-Tablist-Label) bereits
+141/142 grün, danach unverändert 141/142 grün (derselbe vorbestehende
+`tat-flow.spec.ts`-Flake). Volle Suite (nicht nur die angepassten
+Spezifikationen), `vitest run` (251 Tests), `tsc -b`, `vite build` —
+alle zusätzlich selbst erneut verifiziert, nicht nur der Subagenten-
+Bericht übernommen.
+
+**Nachtrag Schritt 5 (gezielte Bugfixes):**
+
+- **`GridView.tsx`/`QuickDevelopOverlay.tsx`:** `showQuickDevelop` zeigt
+  das volle Sieben-Regler-Overlay jetzt nur noch bei echtem Hover
+  (`photo.id === hoveredPhotoId`) — vorher deckte es das Foto in der
+  Übersicht schon bei reiner Fokussierung ohne Hover ab, genau der in
+  der letzten Sitzung benannte Befund. Fokus ohne Hover zeigt
+  stattdessen ein kleines, unaufdringliches Eck-Symbol
+  (`showQuickDevelopHint`, oben rechts, "≡" — bewusst ein einfaches
+  Unicode-Zeichen statt Emoji, wie die übrigen Icon-Knöpfe dieser
+  Codebasis, rendert zuverlässig ohne Emoji-Schriftart, real per
+  Playwright-Screenshot in einer headless-Umgebung verifiziert, in der
+  ein Emoji als leeres Tofu-Rechteck gerendert hätte), das per Klick
+  denselben Hover-Zustand auslöst (`setHoveredPhotoId`) — bleibt
+  dadurch auch per Tastatur/Touch erreichbar, nicht nur per Maus-Hover.
+- **`DevelopAnalysisPanel.tsx`:** `devicePixelRatio`-Skalierung für
+  Histogramm-/Vektorskop-/Wellenform-Canvas, nach `lib/leafletHeatmap.ts`s
+  Muster — neuer gemeinsamer `useCanvasDprWidth()`-Hook (ResizeObserver
+  auf die tatsächliche CSS-Breite, reagiert auch auf `PaletteFrame`-
+  Breitenänderungen) setzt die Backing-Store-Auflösung auf
+  `cssBreite × dpr`. Für das vektor-gezeichnete Histogramm reicht ein
+  `ctx.setTransform(dpr,...)`; Vektorskop/Wellenform nutzen
+  `putImageData`, das keine Transform-Matrix respektiert — deshalb dort
+  jeweils eine Offscreen-Canvas in der unveränderten nativen
+  Rasterauflösung befüllt und per `drawImage(...)` (mit
+  `imageSmoothingEnabled = false`, damit das Dichteraster bewusst
+  blockig bleibt statt zusätzlich weichgezeichnet zu werden) auf die
+  DPR-große Ziel-Canvas skaliert. Real per Playwright-Screenshot
+  verifiziert (nicht nur behauptet): Histogramm zeigt scharfe
+  Balkenkanten, Vektorskop einen glatten Kreis/Fadenkreuz ohne
+  sichtbare Verzerrung.
+- **`PaletteFrame.tsx`:** sanfte Breiten-Übergangsanimation beim Ein-/
+  Ausklappen (`transition: width {DURATION_BASE_MS}ms {EASE_OUT}`, per
+  `usePrefersReducedMotion()` abgeschaltet) — dafür musste die
+  Komponente von zwei strukturell getrennten `return`-Zweigen
+  (eingeklappt/ausgeklappt) auf einen gemeinsamen äußeren Container mit
+  fester `COLLAPSED_WIDTH` (36px statt `auto`, das die meisten Browser
+  nicht sauber animieren) umgebaut werden — reale Sichtprüfung per
+  Playwright-Screenshot bestätigt keine Textabschneidung. Die
+  Transition ist während eines aktiven Zieh-Vorgangs (`dragging`-
+  State) bewusst ausgeschaltet, sonst würde die Palette dem Zeiger nur
+  gedämpft statt 1:1 folgen — nur der Klapp-Wechsel selbst ist animiert.
+
+Alle drei Fixes ausschließlich per echtem Playwright-Lauf (volle Suite,
+141/142 wie in Schritt 3/4, derselbe vorbestehende Flake) + `vitest
+run` (251 Tests) + `tsc -b`/`vite build` verifiziert, zusätzlich mit
+temporären (nicht committeten) Playwright-Screenshots real angeschaut
+statt nur am Code geglaubt — dieselbe Disziplin wie ADR-0044.
+
+**Nachtrag Schritt 6 (Bewegungs-Politur-Durchgang):**
+
+- **Hover-/Fokus-Übergänge auf allen interaktiven Elementen:** statt
+  jeden der weit über 500 bestehenden `hover:border-accent`/
+  `hover:text-*`/`hover:bg-*`-Knöpfe einzeln anzufassen, eine einzige
+  globale Regel in `index.css` (`button, a, select, [role="tab"],
+  [role="menuitem"] { transition-property: color, background-color,
+  border-color, box-shadow, opacity; transition-duration:
+  var(--duration-fast); ... }`) — wirkt automatisch auf jede bereits
+  vorhandene Hover-/Fokus-Klasse im gesamten Frontend, kollidiert nicht
+  mit vereinzelten expliziten `transition-[width]`-Klassen (dieselben
+  Eigenschaften, keine Überschneidung), respektiert
+  `prefers-reduced-motion`/`.apx-reduce-motion` automatisch mit (beide
+  kappen jede `transition-duration` bereits per `!important`).
+- **Sanfter Überblend-Wechsel beim `centerView`-Wechsel:** neue
+  `.apx-view-fade-in`-Keyframe-Animation in `index.css`, in `App.tsx`
+  auf einen neuen `<div key={centerView}>`-Wrapper **nur** um die
+  eigentliche Zentralansicht (Raster/Übersicht/Karte/Personen/Viewer/
+  VideoPlayer) angewendet — bewusst **nicht** um die gesamte
+  `flex flex-1`-Zeile (die auch Sidebar/Presets-Panel/Metadaten-Panel/
+  Entwickeln-Panel enthält), sonst hätten diese dauerhaften
+  Seitenpaletten bei jedem Ansicht-Wechsel unnötig ihren internen
+  Zustand verloren. Der `key` ist `centerView` selbst, nicht z. B. die
+  Foto-ID — ein Foto-/Video-Wechsel innerhalb derselben "viewer"-
+  Ansicht bleibt unter demselben Schlüssel und löst deshalb keine
+  wiederholte Überblendung aus, nur ein echter Wechsel zwischen den
+  sechs Ansicht-Modi tut es.
+- **Anwenden-Rückmeldung bei Preset-Übernahme:** `PresetsPanel.tsx`s
+  Preset-Namen-Knopf bekommt beim Klick einen kurzen
+  Hintergrund-Aufhellungs-Puls (`bg-accent/20`, über
+  `transition-colors duration-slow` wieder ausblendend, per
+  `usePrefersReducedMotion()` auf eine sofortige Rückstellung verkürzt
+  statt der vollen Dauer) — bewusst nur bei Presets, nicht bei jedem
+  einzelnen Regler-Commit: ein Regler zeigt seine Änderung bereits
+  direkt am eigenen Schieberegler-Wert, ein Preset ändert dagegen viele
+  Regler gleichzeitig, ohne dass der Klick selbst sichtbar etwas
+  bewegt — genau dort fehlte eine Bestätigung, dass er etwas bewirkt
+  hat.
+
+Verifiziert per `tsc -b`, `vite build`, voller Playwright-Suite
+(weiterhin 141/142, derselbe vorbestehende Flake) und `vitest run`
+(251 Tests) — die global wirkende CSS-Regel und die `centerView`-
+Umstrukturierung berühren viele bestehende Tests indirekt (jeder
+Knopf-Hover, jeder Ansicht-Wechsel), liefen deshalb bewusst gegen die
+**volle** Suite statt nur gezielter Stichproben.
+
+**Schritt 7 (Dokumentation, volle Verifikation, Abnahme):**
+`FEATURES.md` §4 nachgezogen (Kopfleiste/Befehlspalette/Paletten-
+Zeilen auf den Phase-18-Stand gebracht, neue Zeile für das Dialog-/
+Sheet-/Bewegungs-Design-System) — keine `THIRD_PARTY.md`-Änderung
+nötig, `package.json`/`package-lock.json` seit Phase 10 Schritt 11
+unverändert (kein neues npm-Paket in dieser Phase, wie in der
+Entwurfsentscheidung festgelegt). Abschließende reale visuelle
+Verifikation per Playwright-Screenshot (Raster, Kopfleiste-Suchknopf +
+Befehlspalette, Overflow-Menü mit der neuen KI-Funktionen-Kategorie
+samt Modellstatus, migrierter Export-Dialog als Sheet, Entwickeln-Panel
+„Licht"- und „Kreativ"-Registerkarte) — alle sechs Ansichten real
+angeschaut, nicht nur am Code angenommen; keine Auffälligkeiten.
+`tsc -b`/`vite build`/`vitest run` (251 Tests)/volle Playwright-Suite
+(141/142, derselbe seit Schritt 3 dokumentierte, unabhängig bestätigte
+`tat-flow.spec.ts`-Flake) am Ende noch einmal komplett grün.
+`cargo fmt --all -- --check` und `cargo clippy --workspace
+--all-targets --all-features -- -D warnings -D clippy::unwrap_used`
+laufen sauber durch (Letzteres kompiliert dabei auch jedes Testziel
+jedes Crates). **Ehrlich begrenzt:** `cargo test --workspace` konnte in
+dieser Sitzung nicht zu Ende laufen — die Sandbox hat ein festes
+Datenträger-Kontingent, ein voller Workspace-Rebuild (u. a. `whisper-
+rs`/`dlib-face-recognition` mit Debug-Symbolen) füllte `target/` auf
+26 GB und erschöpfte das Kontingent vollständig, noch bevor die Tests
+selbst liefen; nach Aufräumen (`target/` gelöscht) reichte der
+verbleibende Spielraum nicht mehr für einen sicheren zweiten Versuch,
+ohne den restlichen Abnahme-Ablauf zu gefährden. Da diese Phase
+nachweislich **keine** Rust-Datei berührt (`git diff --stat` gegen den
+Phase-17-Stand zeigt ausschließlich `frontend/`/`DECISIONS.md`/
+`PLAN.md`/`FEATURES.md`) und der vollständige Workspace-Kompilierlauf
+über `clippy --all-targets` bereits erfolgreich war, ist das
+Laufzeitrisiko für Rust durch diese Phase praktisch ausgeschlossen —
+`cargo test --workspace` bleibt trotzdem ein offener Nachtrag für eine
+Sitzung mit mehr Datenträger-Spielraum, kein stillschweigend
+übergangener Schritt.
+
+---
+
+## ADR-0046-Nachtrag: Drei reale Nutzungsfehler nach dem Phase-18-Merge
+
+**Status:** Angenommen
+**Kontext:** Der Nutzer hat die gemergte Phase-18-Oberfläche in seiner
+echten Tauri-App benutzt (zwei Screenshots eines realen Fotos,
+`20260901_181501480_iOS.jpeg`, iPhone 16) und drei konkrete Fehler
+gemeldet: (1) das Foto steht in der Großansicht/Entwickeln-Vorschau auf
+dem Kopf, während dieselbe Aufnahme im kleinen Navigator-Miniaturbild
+korrekt orientiert erscheint — ein Korrektheitsfehler, kein
+Stilproblem; (2) die neuen "Masken hinzufügen"-Knöpfe
+(`MasksPanel.tsx`) brechen ihre deutschen Beschriftungen ("+ Linearer
+Verlauf" u. Ä.) in einem zweispaltigen Raster auf zwei Zeilen um, wirkt
+gequetscht; (3) das schwebende Analyse-Panel (Histogramm/Vektorskop/
+Wellenform, `DevelopAnalysisPanel.tsx`) ließ sich weder verschieben
+noch einklappen, und seine beiden Clipping-Anzeige-Knöpfe wirkten am
+rechten Rand abgeschnitten.
+
+**Root-Cause-Untersuchung (1), die Drehung:** Die naheliegende
+Vermutung — ein Fehler in der EXIF-Orientierungs-Anwendung
+(`apx-raw::orientation`/`fallback::decode`) — erwies sich nach
+gründlicher Prüfung als falsch: `orientation.rs`s Pixel-Umordnung ist
+bereits vollständig getestet, und ein neu geschriebener Testfall mit
+einem *echten* JPEG samt eingebettetem EXIF-APP1-Segment (nicht nur
+einem von Hand gesetzten `Orientation`-Wert wie zuvor) bestätigte: die
+EXIF-Auslesung über `kamadak-exif` und ihre Anwendung funktionieren
+korrekt, sowohl über `decode()` (Vorschau-/Vollbild-Route) als auch
+`decode_linear()` (Entwickeln-Route) — beide teilen sich für
+Fallback-Formate denselben `fallback::decode`-Aufruf und liefern damit
+zwangsläufig identisch orientierte Pixel. Der tatsächliche Fehler lag
+eine Ebene höher, im WebGL-Renderer des Viewers
+(`frontend/src/lib/webgl.ts`): `uploadRgba8` (die neue, für die
+Entwickeln-Route rohe RGBA8-Puffer hochladende Methode) setzte wie
+`uploadImageBitmap` (die bestehende, für Vorschau-/Vollbild-Bitmaps
+zuständige Methode) `UNPACK_FLIP_Y_WEBGL = true`. Ein isolierter
+WebGL2-Vergleichstest (eine eigenständige HTML-Seite mit vier
+unterscheidbaren Testfarben in den vier Bildecken, über beide
+Upload-Pfade hochgeladen und real per Playwright-Screenshot
+verglichen) bewies empirisch: für einen rohen, per
+`texImage2D(..., width, height, ..., srcData)` hochgeladenen
+`ArrayBufferView`-Puffer bewirkt derselbe Flip eine vertikale
+Spiegelung gegenüber dem `ImageBitmap`-Pfad — beide Upload-Arten
+brauchen unterschiedliche `UNPACK_FLIP_Y_WEBGL`-Einstellungen, um zum
+selben Ergebnis zu kommen (der Browser behandelt die Zeilenreihenfolge
+eines rohen Arrays beim Hochladen anders als die eines
+`ImageBitmap`-Quellobjekts). Betraf **jedes** im Entwickeln-Modus
+angezeigte Foto als vertikale Spiegelung, fiel aber bei den meisten
+bisherigen Testbildern (symmetrisch wirkende Motive, Farbverlaufs-
+Platzhalter in Playwright-Mocks) nicht auf — erst ein echtes,
+eindeutig "oben"/"unten" erkennbares Motiv machte es sichtbar. Fix:
+`uploadRgba8` setzt jetzt `UNPACK_FLIP_Y_WEBGL = false`. Zusätzlich
+schließt ein neues Testmodul in `crates/apx-raw/src/fallback.rs`
+(vorher ganz ohne Tests) die aufgedeckte Lücke dauerhaft: vier neue
+Tests bauen ein echtes JPEG mit echtem EXIF-Orientation-Tag und prüfen
+`read_exif`, `decode` (180°- und 90°-Fall) sowie die Übereinstimmung
+zwischen `decode` und `decode_linear`.
+
+**(2) Masken-Knopf-Umbruch:** `MasksPanel.tsx`s "Maske hinzufügen"-
+und "KI-Maske hinzufügen"-Abschnitte nutzten ein zweispaltiges
+`grid grid-cols-2`-Raster bei einer Standard-/Minimalpalettenbreite von
+180–256 px (`PaletteFrame`/`useWorkspacePanel`) — bei rund 100 px
+nutzbarer Spaltenbreite abzüglich Knopf-Innenabstand brachen längere
+deutsche Beschriftungen ("+ Linearer Verlauf", "Hintergrund") auf zwei
+Zeilen um. Fix: beide Abschnitte auf ein einspaltiges
+`flex flex-col`-Layout umgestellt (dieselbe volle Breite, die die
+längste Beschriftung, "+ Unschärfe-basierte Tiefennäherung", ohnehin
+schon per `col-span-2` bekam) — behebt strukturell statt einzelne
+Schriftgrößen/Abkürzungen nachzujustieren, und beseitigt nebenbei eine
+unausgerichtete letzte Zeile im fünf-Elemente-KI-Masken-Raster.
+
+**(3) Analyse-Panel unbeweglich:** `DevelopAnalysisPanel.tsx` hatte
+schlicht keine Verschiebe- oder Einklapp-Funktion — fest `absolute
+right-2 top-2`, ohne jede Möglichkeit, es aus dem Weg zu räumen, wenn
+es den darunterliegenden Bildausschnitt verdeckt. Neu: eine volle
+Kopfzeile ("Analyse" + Einklapp-Knopf `▾`/`▸`) dient als Ziehgriff
+(`onMouseDown` + `window`-`mousemove`/`mouseup`-Listener, dasselbe
+Muster wie `Viewer.tsx`s bestehendes Schwenk-Ziehen), die Position wird
+per `transform: translate(...)` relativ zur Standardecke verschoben —
+bewusst nicht `localStorage`-persistiert wie `PaletteFrame`s Breite,
+da dieses Panel eine leichte, foto-lokale Analyse-Überlagerung ist,
+kein dauerhaftes Layout-Element. Die beiden Clipping-Anzeige-Knöpfe
+saßen zuvor in derselben `justify-between`-Zeile wie die drei
+Registerkarten-Knöpfe ohne Umbruchmöglichkeit und liefen bei der
+vorherigen `w-56`-Breite über den rechten Rand hinaus; jetzt
+`flex-wrap` auf dieser Zeile plus etwas mehr Breite (`w-60`). Die neue,
+über die volle Kopfzeilenbreite ziehbare Trefferfläche überlappte bei
+der bisherigen `top-2`-Position die ebenfalls schwebende
+TAT-Werkzeugleiste (`right-3 top-3`) und fing ihr zuvor unbehelligtes
+"TAT: Kurve"/"TAT: HSL"-Klicken ab (aufgedeckt durch die zuvor
+bestehende, jetzt erneut grüne `tat-flow.spec.ts`) — behoben durch
+`top-12` statt `top-2` als neue Standardposition.
+
+Verifiziert per `tsc -b`, `cargo fmt -p apx-raw`, `cargo test -p
+apx-raw` (40 Tests, davon 4 neu), `cargo clippy -p apx-raw
+--all-targets --all-features`, `vitest run` (251 Tests) und der
+**vollständigen** Playwright-Suite (142/142 — der vorbestehende
+`tat-flow.spec.ts`-Flake trat während dieser Untersuchung tatsächlich
+einmal als echte Regression auf, siehe oben, und wurde gefixt statt
+erneut nur dokumentiert). Reale visuelle Verifikation per
+Playwright-Screenshot bestätigt alle drei Fixes am Bildschirm: der
+isolierte WebGL-Vergleichstest zeigt identische Ausrichtung über beide
+Upload-Pfade, das Masken-Panel zeigt alle Knopfbeschriftungen
+einzeilig, das Analyse-Panel lässt sich sichtbar verschieben und auf
+seine Kopfzeile einklappen.
+
+**Nachtrag II — gezielter Rundgang durch die restliche Oberfläche:**
+Nach dem Merge auf `main` bat der Nutzer ausdrücklich um denselben
+Rundgang durch die restliche Oberfläche, den er ursprünglich mit
+angefragt hatte. Systematisch nach demselben Muster wie (2) oben
+gesucht (`grid grid-cols-2`/`-cols-3`/`-cols-4` und `flex`+`flex-1`-
+Knopfreihen in allen Komponenten, die eine der schmalen, ziehbaren
+`PaletteFrame`-Paletten (180–288 px, siehe `useWorkspacePanel`)
+füllen — Dialoge blieben außen vor, die sind deutlich breiter und
+zeigten keine vergleichbaren Funde) und drei weitere echte Fälle
+desselben Bugs gefunden, alle mit demselben Fix-Muster behoben:
+
+- `MasksPanel.tsx`s "+ Komponente hinzufügen"-Raster (Zweispaltig,
+  Beschriftung "+ Komponente: {Maskenname}" — noch länger als die
+  bereits gefixten "+ Maske hinzufügen"-Knöpfe) → einspaltig.
+- `PresetsPanel.tsx`s KI-Preset-Generator-Knopfpaar ("Aus Beschreibung
+  erzeugen"/"Prompt für Claude-App", zwei `flex-1`-Knöpfe
+  nebeneinander) → einspaltig gestapelt. War bereits in Schritt 7s
+  eigenem Abnahme-Screenshot sichtbar mehrzeilig umgebrochen, wurde
+  aber erst jetzt als derselbe Bug erkannt und behoben.
+- `DevelopPanel.tsx`: zwei Vierer-/Zweier-Knopfreihen mit `flex-1`
+  (Verflüssigen-Modus "Schieben"/"Verwirbeln"/"Stauchen"/"Aufblähen";
+  Entrauschen/"2× hochskalieren") wären bei der schmaleren
+  Palettenbreite mittenim-Wort umgebrochen. Hier bewusst **nicht**
+  einspaltig gestapelt (anders als die "+ Hinzufügen"-Knopfreihen
+  oben) — das sind Lightroom-artige Segment-Umschalter, bei denen eine
+  zusammenhängende Reihe zur Bedienlogik gehört. Stattdessen
+  `flex-wrap` mit `basis-[45%]` je Knopf: bei ausreichender Breite
+  bleibt die Reihe einzeilig wie bisher, bei zu wenig Platz bricht sie
+  kontrolliert in eine zweite Zeile statt Wörter zu zerreißen.
+
+Alle übrigen `grid-cols-*`-Fundstellen (`DevelopPanel.tsx`s
+Vorher/Nachher-Vierergruppe, Kopieren/Einfügen-Zeile, Guided-Upright-
+Zahlenfelder; `PresetsPanel.tsx`s Referenzbild/Variationen;
+`ContentAwareScaleDialog.tsx`/`CanvasExtendDialog.tsx`) wurden geprüft
+und sind mit ihren tatsächlichen Beschriftungslängen bei jeder
+zulässigen Palettenbreite unproblematisch — bewusst unverändert
+gelassen statt vorsorglich überall umzubauen. Ebenso geprüft und ohne
+Fund: alle anderen `absolute`-positionierten schwebenden Overlays
+(`GlobeView`/`ColorHarmonyWheel`/Viewer-Overlays/`ReferenceView`/
+`BeforeAfterView`) sind entweder reine Anzeige-Badges oder SVG-
+Zeichenflächen ohne eigene Bedienelemente — `DevelopAnalysisPanel` war
+das einzige davon mit einer echten Kopfzeile/mehreren Knöpfen, die
+eine Verschieben-/Einklappen-Funktion gebraucht hätte.
+
+Verifiziert per `tsc -b`, `vitest run` (251 Tests), voller
+Playwright-Suite (142/142) und realer Screenshot-Kontrolle (Presets-
+Panel-Knöpfe jetzt einzeilig, bei 1900 px Fensterbreite — die
+schmalere Zielbreite ließ sich in der Sandbox nicht zuverlässig per
+Playwright nachstellen, da der Palettenbreite-Ziehgriff auf
+`onPointerDown` statt `onMouseDown` reagiert und Playwrights
+`page.mouse`-API ihn in diesem Lauf nicht zuverlässig auslöste — die
+`flex-wrap`-Fixes selbst sind aber ein reines, risikoarmes CSS-
+Sicherheitsnetz ohne Logikänderung, das bei ausreichender Breite exakt
+dasselbe Erscheinungsbild wie zuvor liefert).
+
+---
+
+## ADR-0046-Nachtrag III: Entwickeln-Panel einklappbare Abschnitte + Filter-Test-Lücke
+
+**Status:** Angenommen
+**Kontext:** Auf konkrete Nachfrage, welche der vier Entwickeln-
+Registerkarten (Licht/Farbe/Details/Kreativ) "tatsächlich funktional"
+sein sollen und wo "weniger gescrollt" werden soll, ergab eine reale
+Bildschirm-Kontrolle aller fünf Registerkarten (Licht, Farbe, Details,
+Kreativ, Verlauf & Werkzeuge) bei 1000 px Fensterhöhe zwei Befunde:
+(1) ein echter, bislang unbemerkter Fehler — die Kreativ-Registerkarte
+zeigte dauerhaft einen roten Fehlerbanner "Test-Stub: unbekannter
+invoke-Befehl 'list_builtin_lut_filters'", weil `e2e/tauri-mock.ts`
+für diesen seit Phase 16 Schritt 2 bestehenden echten Rust-Befehl
+(`crates/apx-app/src/commands.rs`, dort korrekt registriert) nie einen
+Mock-Fall bekommen hatte — betraf nur die Testumgebung, nicht die
+echte App, deckte aber eine reale Testlücke im "Filter"-Abschnitt der
+Kreativ-Registerkarte auf; (2) das strukturelle Kernproblem: jede der
+fünf Registerkarten bündelt seit Phase 18 Schritt 4 zwar mehrere
+vormals einzeln durchscrollte Fieldsets, zeigt sie aber weiterhin alle
+gleichzeitig und vollständig an — "Kreativ" allein enthält acht
+Unterabschnitte (Reparatur/Verflüssigen/Stiltransfer/Hautglätten/
+Himmelsaustausch/Filter/Compositing/Virtuelle Blende), "Licht" fünf
+(Weißabgleich/Grundeinstellungen/Kurven/HSL/Farbmischer/Kalibrierung)
+— das behobene "zu viel Scrollen"-Problem aus ADR-0046 bestand
+dadurch strukturell unverändert fort, nur eine Ebene tiefer (zwischen
+Registerkarten statt zwischen der einen langen Spalte).
+
+**Entscheidung (2), einklappbare Abschnitte statt Umstrukturierung:**
+Alle 30 `<fieldset>`/`<legend>`-Abschnittspaare in `DevelopPanel.tsx`
+und alle 6 in `MasksPanel.tsx` (dieselbe Sechs-Sektionen-Reglerstruktur
+für die ausgewählte Maske) wurden durch native `<details open>`/
+`<summary>` ersetzt (neue `.apx-collapsible`-Klasse in `index.css`:
+versteckter nativer Marker, eigener ▸/▾-Pfeil mit
+`transform: rotate(90deg)`-Übergang beim Öffnen/Schließen, respektiert
+`prefers-reduced-motion`/`.apx-reduce-motion` automatisch mit über
+dieselbe bereits bestehende globale Übergangsregel). Bewusst **nicht**
+serialisiert/`localStorage`-persistiert und bewusst alle mit `open`
+vorbelegt (nicht defaultmäßig zugeklappt) — jeder Abschnitt bleibt
+beim ersten Betrachten unverändert vollständig sichtbar, **nichts**
+verschwindet ungefragt hinter einem weiteren Klick, nur die
+Möglichkeit zum Zuklappen kommt neu hinzu. Wer die Regler kennt, die
+er gerade nicht braucht, klappt sie weg und reduziert damit den
+Scrollweg spürbar (v. a. in "Kreativ"/"Licht"); wer die App zum ersten
+Mal öffnet, sieht exakt dasselbe Bild wie vorher. `openStageAnchor()`
+(Node-Editor-"Öffnen"-Sprung, Phase 9 Schritt 7/Phase 18 Schritt 4)
+klappt das Zielelement jetzt zusätzlich per `element.open = true` auf,
+bevor es dorthin scrollt — sonst wäre "Öffnen" auf einem zuvor
+zugeklappten Abschnitt ein stiller Leerlauf gewesen.
+
+**Naheliegende, aber verworfene Umsetzung — `aria-label` überall
+identisch zum sichtbaren Titel:** Ein `<details>` bekommt seinen
+zugänglichen Namen (anders als `<fieldset>`+`<legend>`, dort per
+Spezifikation "Name from content") **nicht** automatisch aus seinem
+`<summary>`-Text — empirisch mit einem isolierten Playwright-
+Vergleichstest bewiesen: identischer Aufbau, `fieldset`+`legend`
+liefert `getByRole("group", { name: "Details" })` einen Treffer,
+`details`+`summary` keinen. Da im bestehenden Test-Bestand mehrfach
+`getByRole("group", { name: "<Legendentext>" })` verwendet wird (u. a.
+`node-editor-flow.spec.ts`, `develop-flow.spec.ts`), bekam jedes neue
+`<details>` probeweise ein `aria-label` identisch zum sichtbaren
+`<summary>`-Text. Das brach zwei Tests: `aria-label="Vorher/Nachher"`
+und `aria-label="Referenzansicht"` kollidierten mit den *echten*,
+gleichnamigen `aria-label`s von `BeforeAfterView.tsx`/
+`ReferenceView.tsx` (die nur bei aktivem Modus im DOM erscheinen und
+per `getByLabel(...).toHaveCount(0)` auf Abwesenheit geprüft werden,
+da Playwrights `getByLabel` — anders als `getByRole("group", {name})`
+— jedes Element mit passendem `aria-label` matcht, nicht nur
+Formularelemente). Für genau diese zwei Abschnitte blieb das
+`aria-label` deshalb weg (kein Test verlangt dafür einen
+Gruppennamen); alle übrigen 34 behielten ihr `aria-label` unverändert.
+Volle Playwright-Suite bestätigte anschließend 142/142 — keine
+weiteren Kollisionen.
+
+**Nebenbefund, sichtbar gemacht statt `sr-only` versteckt:** Der
+"Grundeinstellungen (Ton)"-Abschnitt in `DevelopPanel.tsx` hatte bisher
+eine rein für Screenreader/Tests gedachte `sr-only`-Legende (kein
+sichtbarer Titel, ging optisch nahtlos in den vorherigen
+Weißabgleich-Abschnitt über) — jetzt wie alle anderen Abschnitte
+sichtbar betitelt, da genau diese fehlende optische Grenze zur
+"unübersichtlich"-Beschwerde beitrug.
+
+Verifiziert per `tsc -b`, `vitest run` (251 Tests), voller
+Playwright-Suite (142/142) und realer Bildschirm-Kontrolle: Kreativ-
+Registerkarte lädt jetzt ohne Fehlerbanner, ein Abschnitt lässt sich
+sichtbar zu- und wieder aufklappen (Pfeil dreht sich, Inhalt
+verschwindet/erscheint), und der Node-Editor-"Öffnen"-Sprung klappt
+einen zuvor zugeklappten Zielabschnitt zuverlässig wieder auf.
+
+---
+
+## ADR-0047: Phase 19 — Animationen + UI-Sounds (Start/Beenden, Klick,
+Scroll, Bearbeitung im Prozess)
+
+**Kontext.** Nutzerwunsch (verbatim): Animationen für Start/Beenden,
+Klick, Scroll, Bearbeitung-im-Prozess/Laden, ein echter Ladeschirm
+statt der grauen Fläche beim Start, dazu UI-Sounds — insgesamt
+mindestens 30 Animationen/Sounds, nach Möglichkeit auf fertigem statt
+selbst gebautem Material aufbauend ("premium").
+
+**Realer Befund zur Netzwerk-Umgebung (wichtig für die Auswahl
+unten).** Diese Sitzung läuft mit einer restriktiven Egress-Policy:
+`WebFetch`/`curl` auf alle getesteten Asset-/Sound-Marktplätze
+(LottieFiles, Kenney, Freesound, Mixkit, Pixabay, sfxmint.com,
+videoeditingsfx.com, Zapsplat, fonts.google.com, unpkg.com,
+cdn.jsdelivr.net, cdnjs.cloudflare.com) schlägt mit `EGRESS_BLOCKED`
+bzw. `403` fehl. Erreichbar sind ausschließlich GitHub
+(`github.com`/`raw.githubusercontent.com`) und die Paket-Registries
+(`registry.npmjs.org`, die auch `pnpm add` nutzt). "Fertige Premium-
+Assets von einer Website holen" ist in dieser Umgebung technisch
+nicht möglich — echte, kostenlos/lizenzfrei nutzbare npm-Pakete sind
+der einzige praktikable Weg zu produktionsreifem statt komplett
+selbst gebautem Material.
+
+**Entscheidung — zwei neue npm-Abhängigkeiten (mit Nutzer-Zustimmung
+nach Abwägung, siehe unten):**
+
+1. **`gsap` 3.15** (Animation) — seit April 2025 (Webflow-Übernahme
+   von GreenSock) zu 100 % kostenlos inklusive aller vorher
+   kostenpflichtigen Plugins (ScrollTrigger, SplitText, Flip,
+   MorphSVG, ...), keine Lizenz-/Attributionspflicht, Industriestandard.
+   Weicht von ADR-0046s expliziter "keine neue Bewegungs-Laufzeit-
+   Abhängigkeit"-Entscheidung ab — dort war GSAP noch teilweise
+   kostenpflichtig; das hat sich seither geändert, und der bereits
+   integrierte `ui-ux-pro-max`-Skill (siehe THIRD_PARTY.md) liefert
+   17 fertige, GSAP-basierte Bewegungs-Rezepte (Timing/Easing/
+   Performance-Hinweise/Barrierefreiheit) direkt einsatzbereit — ohne
+   GSAP selbst blieben diese Rezepte ungenutzt.
+2. **`uisfx` 0.4** (UI-Sounds) — MIT-Code + **CC0-Audio** (gemeinfrei,
+   keine Attributionspflicht), null Laufzeit-Abhängigkeiten, ~12 kB
+   komprimierte Web-Audio-Runtime, 78 semantische Sound-Cues (`click`-
+   artige `select`/`press`, `open`/`close`, `undo`/`redo`, `expand`/
+   `collapse`, `success`/`error`/`warning`, `processing`/`loading`,
+   `drag-start`/`drop`, u. v. m.) über 12 austauschbare Klangwelten
+   ("Packs"), vollständig offline (kein Laufzeit-Nachladen von
+   Audiodateien — wichtig für eine Desktop-App ohne verlässliche
+   Netzwerkverbindung). Quelle: `github.com/romainsimon/uisfx`,
+   `npmjs.com/package/uisfx`.
+
+Beide Pakete wurden dem Nutzer vor der Umsetzung als konkrete
+Kandidaten samt Lizenz-/Abhängigkeits-Kompromiss vorgelegt
+(`AskUserQuestion`) — Zustimmung zu "GSAP + uisfx nutzen" und zur
+Klangwelt **"glass"** ("Bright, crystalline, premium — Media, finance,
+luxury products") als App-Standard, in den Einstellungen umschalt-/
+deaktivierbar.
+
+**Fundament (`frontend/src/lib/sound.ts`, `lib/motion.ts`
+unverändert wiederverwendet):** ein modulweiter `uisfx`-Player-
+Singleton (nicht pro Komponente — `uisfx` begrenzt Polyphonie/
+Cooldowns global). Persistenz bewusst NICHT über `uisfx`s eigenes
+`localStorage`-Feature, sondern über das bestehende `uiSettings`/
+Rust-Settings-TOML (`sound_enabled`/`sound_volume_percent`/
+`sound_pack`, neue Felder in `apx_core::UiSettings`, `#[serde(default)]`
+macht das rückwärtskompatibel zu bestehenden Einstellungsdateien).
+`unlockSound()` an die erste vertrauenswürdige Zeiger-/Tastatur-
+Interaktion gebunden (Browser-Autoplay-Policy).
+
+**Start-Ladeschirm (`StartupSplash.tsx`):** ersetzt die zuvor
+kommentarlos graue Fläche durch einen sich öffnenden Iris-Ring
+(SVG-Kreis, per `stroke-dashoffset` "gezeichnet" — kein Logo-Bild
+nötig/verfügbar, passt inhaltlich zu "Aperture") + Wortmarke, per GSAP
+animiert. Bewusst als zusätzliches `pointer-events-none`-Overlay
+implementiert, NICHT als Gate vor dem restlichen `App.tsx`-Baum: der
+Baum mountet unverändert sofort weiter, nur die Fläche legt sich kurz
+sichtbar darüber und blendet sich aus, sobald `uiSettings` UND
+`catalogStatus` geladen sind. Das hält das Risiko für die bestehende
+Test-Suite (deren `getByRole`-Locators ohnehin automatisch abwarten)
+klein, zeigt bei einem echten langsamen ersten Start (großer Katalog)
+aber trotzdem einen hochwertigen Übergang statt eines grauen Blitzes.
+
+**Beenden-Übergang (`ShutdownOverlay.tsx` + `App.tsx`s
+`useShutdownTransition`):** fängt `getCurrentWindow().onCloseRequested`
+ab, zeigt kurz eine Übergangsfläche + spielt einen Sound, bevor das
+Fenster tatsächlich schließt.
+
+**Realer, in dieser Sitzung tatsächlich aufgetretener Fehler beim
+ersten Versuch:** `getCurrentWindow()` liest synchron
+`window.__TAURI_INTERNALS__.metadata.currentWindow.label` (siehe
+`@tauri-apps/api/window`s Quelltext). Weder `tauri-mock.ts` (Playwright-
+Tests) noch ein per `vite preview` ohne Tauri-Hülle geöffneter
+Browser-Tab setzen dieses Feld — der Aufruf wirft dann sofort. Ein
+ungefangener Wurf in einem `useEffect` reißt in React die gesamte
+Baum-Wurzel mit: die **komplette** Playwright-Suite (alle 142 Tests)
+schlug beim ersten Versuch mit 30-Sekunden-Timeout fehl, weil die App
+gar nicht mehr rendert. Gefunden durch den in dieser Sitzung
+etablierten Ablauf ("nach jeder substanziellen Änderung die volle
+Suite laufen lassen, nicht nur `tsc -b`") — behoben durch `try`/`catch`
+um jeden `getCurrentWindow()`-Aufruf: fehlt der echte Tauri-
+Fensterkontext, bleibt der Hook ein folgenloser No-op statt die App
+zum Absturz zu bringen. Nach dem Fix: 142/142 grün.
+
+**Akkordeon-Sound ohne 36 Einzelstellen anzufassen:** `<details
+className="apx-collapsible">` (Phase 18-Nachtrag, `DevelopPanel.tsx`/
+`MasksPanel.tsx`) bekommt seinen `expand`/`collapse`-Cue über EINEN
+global auf `document` registrierten `toggle`-Listener in der
+Capture-Phase (`lib/sound.ts`s `useAccordionSounds`) — das native
+`toggle`-Ereignis von `<details>` bubbelt nicht, erreicht einen
+Capture-Phase-Listener auf einem Vorfahren aber trotzdem (Capture
+läuft unabhängig vom Bubbling von der Wurzel zum Ziel).
+
+**Sound- und Bewegungs-Anwendungsstellen dieser Phase:**
+`components/ui/Dialog.tsx`/`Sheet.tsx` (open/close, mit
+Erstmontage-Wächter gegen einen Sound beim App-Start für jeden der 25
+dauerhaft gemounteten Dialoge), `ui/Menu.tsx` (expand/collapse/select),
+`ui/Tabs.tsx` (select bei echtem Wechsel), `App.tsx`/`DevelopPanel.tsx`
+(undo/redo), `GridView.tsx` (select-Klick auf eine Kachel + neue
+`.apx-grid-cell-in`-CSS-Scroll-Reveal-Animation je virtualisierter
+Zeile — bewusst reines CSS statt einer GSAP-Tween-Instanz pro Kachel,
+da `GridView.tsx` mit `@tanstack/react-virtual` virtualisiert und
+Zeilen laufend neu mountet), `store/index.ts`s `exportPhotos`
+(processing beim Start, success/error beim Abschluss).
+
+**Ausdrücklich (noch) nicht abgedeckt, spätere Iteration:** Sound-
+/Animations-Feedback für die einzelnen KI-Verarbeitungsschritte
+(Hautglätten, Stiltransfer, Himmelsaustausch usw.) und für
+Drag&Drop-Gesten (Masken-Ziehgriffe, Paletten-Größenänderung) — das
+Fundament (`playCue`, die 78 Cues, die GSAP-Presets) deckt das ab,
+die konkrete Verdrahtung an jeder einzelnen Stelle blieb aus
+Zeit-/Risikogründen dieser Sitzung offen.
+
+Verifiziert: `cargo fmt --check`, `cargo clippy -p apx-core -p
+apx-app --all-targets` (sauber), `cargo test -p apx-core settings`
+(6/6, inkl. TOML-Rundlauf mit den drei neuen Feldern), `tsc -b`,
+`vitest run` (251/251), volle Playwright-Suite (142/142) — sowohl vor
+dem `getCurrentWindow`-Fix (rot, 0/142) als auch danach (grün,
+142/142), reale Bildschirm-Kontrolle des Start-Ladeschirms und der
+neuen Sound-Einstellungen.
+
+---
+
+## ADR-0047-Nachtrag: KI-Verarbeitung + Drag&Drop — die beiden zuvor
+offen gelassenen Punkte nachgeholt
+
+Nutzerwunsch (verbatim): "Alles machen" — als Antwort auf die
+explizit benannte Restarbeit am Ende von ADR-0047 (Sound-/Animations-
+Feedback für einzelne KI-Verarbeitungsschritte und für Drag&Drop-
+Gesten).
+
+**KI-Verarbeitung:** systematischer Durchgang durch `store/index.ts`
+nach jedem `*Loading`/`*Running`/`*Busy`/`*Downloading`/`*ing`-Zustand,
+der eine echte, spürbar lange Backend-Operation begleitet (nicht nur
+eine triviale Listen-Abfrage) — 56 Stellen in 45 Aktionen bekamen
+`playCue("processing")` beim Start und `playCue("success")`/
+`playCue("error")` am Ende, darunter alle drei vom Nutzer namentlich
+genannten (Hautglätten `smoothSkinForCurrentPhoto`, Stiltransfer
+`stylizePhotoWithStyle`, Himmelsaustausch `replaceSkyForCurrentPhoto`)
+sowie u. a.: KI-Ausfüllen (`runAiInpaint`, Content-Aware Move/Scale),
+KI-Ausfüllen über Bildränder (`runAiOutpaint`), die fünf KI-Masken,
+Entrauschen/Hochskalieren/DNG-Konvertierung, Fokus-/HDR-/Panorama-/
+Astro-Stacking (alle vier), Perspektive-Autoerkennung, Sensorflecken-
+Suche + Reparatur-Quellenvorschlag, Farb-Harmonie-Extraktion,
+Duplikat-/Stilkonsistenz-Erkennung, Auto-Tagging, alle sechs Preset-
+Generator-Varianten (LLM/Referenzbild/Variationen/Lernen), Skript-/
+Plugin-Ausführung, Kollaborations-Freigabe (Export/Import), Video:
+Szenenwechsel-Erkennung, Geräuschreduktion, Musik hinzufügen, LUT-
+Anwendung, Hintergrund entfernen, ähnliche Videos finden, Zeitleisten-
+Export, alle sieben Opt-in-Modell-Downloads (LaMa-Inpainting, Tiefe/
+Virtuelle-Blende, Stiltransfer je Stil, Selfie-Segmentierung,
+Personen-Erkennung, Whisper), Drucken/Diashow-Export/Buch-Export/
+Web-Export/Workflow-Vorlage, Batch-Verarbeitung anwenden. Bewusst
+ausgenommen: reine Navigations-/Listen-Ladezustände ohne deliberate
+Nutzeraktion (Personen-/Gesichter-Liste beim Ansicht-Wechsel,
+Kamera-Dateiliste, Stapel-Live-Vorschau während der Kriterien-
+Eingabe) — ein Sound bei jedem Ansicht-Wechsel bzw. jedem Tastendruck
+wäre aufdringlich statt hochwertig (dieselbe Abwägung wie `uisfx`s
+eigene Barrierefreiheits-Leitlinie "Debounce frequent notifications").
+`LensCalibrationDialog.tsx`s eigenständige (nicht über den Store
+laufende) `handleCalibrate`-Funktion bekam dieselbe Behandlung.
+
+**Drag&Drop:** `MaskOverlay.tsx`s zentrale `startDrag`/
+`handleBrushPointerDown`/`handlePointerUp`-Funktionen (bedienen alle
+Masken-Ziehgriffe — linearer/radialer Verlauf, Pinselstrich — an
+einer Stelle) bekamen `drag-start`/`drop`; `PaletteFrame.tsx`s
+Breiten-Ziehgriff (`onPointerDown`/`onPointerUp`) ebenso, dazu
+`expand`/`collapse` für die beiden Ein-/Ausklapp-Knöpfe (vorher nur
+über den globalen `<details>`-Akkordeon-Listener abgedeckt, nicht für
+Paletten selbst).
+
+Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
+Playwright-Suite (142/142), `cargo fmt --check` (keine Rust-Datei in
+diesem Nachtrag geändert).
+
+---
+
+## ADR-0048: Phase 20 — Qualitätsoffensive nach Phase 19: reale
+Bildbelichtung, Klick-vs-Ziehen, Bearbeitungszeiten, sichtbar mehr
+Bewegung/Klang
+
+Nutzer-Rückmeldung (verbatim, gekürzt um Tippfehler/Großschreibung
+sinngemäß erhalten): Phase 19 fühle sich in der echten, laufenden App
+nicht wie die dokumentierte Arbeit an — "maximal 3 Sounds", "kein
+Hover, kein gar nix", ein Start-Ladeschirm, der praktisch nicht
+wahrnehmbar sei ("ein Rad, das sich 200 ms dreht"), dazu drei konkrete,
+bis dahin nicht dokumentierte Fehler: ein komplett überbelichtetes/
+verblasstes Foto im Entwickeln-Modus (Screenshot eines iPhone-JPEGs
+mit neutralen Reglern beigefügt), automatisches Auswählen beim bloßen
+Verschieben eines Fotos, und spürbar lange Bearbeitungszeiten.
+
+**Befund — warum ein grüner Testlauf und eine schlecht wirkende App
+gleichzeitig wahr sein konnten:** die 142/142 Playwright- und 251/251
+Vitest-Tests aus Phase 19 prüfen, DASS Animationen/Sounds an den
+verdrahteten Stellen auslösen, nicht WIE stark/hörbar/lang sie
+wirken — eine `strokeDashoffset`-Öffnen-Animation, die exakt einmal
+für 0,8 s abspielt, ist testbar korrekt und trotzdem im echten
+Gebrauch fast unsichtbar, wenn `ready` (weil der Katalog schnell lädt)
+schon nach 100–300 ms wahr wird und der Splash sich sofort wieder
+ausblendet. Die Hover-Übergangsregel aus Phase 18 Schritt 6 deckte nur
+`button, a, select, [role="tab"], [role="menuitem"]` ab — nicht
+`role="button"` (u. a. `GridView.tsx`s Rasterkacheln selbst), Regler,
+Checkboxen, Radios, `<label>`. Und der mit Abstand meistgenutzte
+Bedienelement-Typ der App, die ~40 `DevelopSlider`-Instanzen, hatte
+bis dahin **keinen einzigen** eigenen Sound — direkte Ursache von
+"maximal 3 Sounds".
+
+**Befund — Überbelichtung im Entwickeln-Modus (reale, bestätigte
+Bild-Pipeline-Regression, kein Wahrnehmungsproblem):**
+`apx_raw::pipeline::decode_linear()` gibt für Fallback-Formate (JPEG/
+PNG/TIFF — praktisch jedes Handyfoto) seit jeher nur `u16`→`f32`-
+reskalierte, aber weiterhin sRGB-**gammakodierte** Pixel zurück (siehe
+die zugehörige Modul-Doku, die das explizit als bewusste Phase-2-
+Vereinfachung beschrieb). `apx_pipeline::color::
+linear_camera_rgb_to_srgb_rgba8()` — der gemeinsame letzte Schritt
+sowohl des Entwickeln-Live-Renderpfads als auch von
+`apx-export::engine::render_to_pixels` — erwartet aber echtes
+lineares Licht und wendet selbst am Ende erneut `srgb_gamma()` an.
+Für RAW-Quellen (`decode_raw_linear`, echtes lineares Licht) ist das
+korrekt; für JPEG/PNG/TIFF wurde die Gammakurve dadurch **zweimal**
+angewendet — hellt Mitten/Lichter systematisch auf und erzeugt exakt
+das gemeldete überbelichtete/verblasste Bild. Betraf nicht nur die
+Voransicht, sondern auch den echten Export (`apx-export/src/
+engine.rs` nutzt denselben `decode_linear`→`render_rgba8`-Pfad) sowie
+alle KI-Verarbeitungsschritte, die über `decode_linear` lesen (Masken,
+Upright, Vergleich, u. v. a. in `apx-app/src/commands.rs`) — dort
+bislang nur als Konsistenz-Schiefstand zwischen RAW- (echt linear) und
+Fallback-Quellen (fälschlich noch gammakodiert), nicht notwendig als
+sichtbarer Fehler.
+
+**Befund — automatisches Auswählen "beim Verschieben":** weder
+`GridView.tsx` noch `Filmstrip.tsx` unterschieden zwischen einem
+reinen Klick und einem Ziehen (z. B. beim Versuch, per Maus über die
+Kacheln/den Streifen zu scrollen, oder ausgelöst durch das
+Standard-Browser-Verhalten, dass ein `<img>` ohne `draggable={false}`
+ziehbar ist) — der Browser feuert nach `mousedown`/`mouseup` ein
+`click`, unabhängig davon, wie weit sich der Zeiger dazwischen bewegt
+hat, solange kein Bewegungs-Wächter das abfängt.
+
+**Befund — Bearbeitungszeiten:** die Rendering-Architektur selbst
+(`tile_cache` für den teuren Dekodier-Schritt, `requestAnimationFrame`-
+Entprellung, Anfrageabbruch bei neuerer Anfrage, GPU-Pfad,
+`decode_ms`/`render_ms`-Tracing) ist bereits bewusst auf das 16-ms-Ziel
+aus `PLAN.md` Phase 2 Schritt 7 ausgelegt — aber jede Live-Anfrage
+rendert bislang in derselben, an die Anzeigegröße gekoppelten
+Auflösung (bis zu `MAX_FULL_EDGE`=4096 px Kante auf großen/
+hochauflösenden Bildschirmen), ob der Regler gerade aktiv gezogen wird
+oder nicht. Auf großen/Retina-Bildschirmen bedeutet das volle
+Pipeline-Rendering (Masken, Kurven, HSL, …) bei jedem einzelnen
+Zieh-Tick.
+
+**Entscheidungen:**
+
+1. **`srgb_gamma_inverse` (EOTF)** neu in `apx-raw/src/pipeline/
+   color.rs`, angewendet in `decode_linear()`s Fallback-Zweig — macht
+   Fallback-Quellen echt linear, genau wie RAW-Quellen es bereits
+   waren, statt einer Sonderbehandlung nur für den Entwickeln-
+   Renderpfad. Test `decode_linear_matches_decode_for_a_real_exif_jpeg`
+   entsprechend angepasst (prüft jetzt, dass linearisierte Mittenwerte
+   sichtbar unter den gammakodierten liegen, statt Byte-Identität
+   einzufordern).
+2. **Klick-vs-Ziehen-Wächter** in `GridView.tsx`/`Filmstrip.tsx`:
+   `onMouseDown` merkt sich die Startposition, `onClick` verwirft die
+   Auswahl, wenn der Zeiger sich seither mehr als 6 px bewegt hat;
+   zusätzlich `draggable={false}` auf den Vorschaubildern (verhindert
+   den nativen Bild-Zieh-Ghost, der diese Geste erst auslöste).
+3. **`developIsLiveDragging`** neu im Store, gesetzt von
+   `DevelopSlider.tsx` (Regler-`pointerdown`/-`pointerup`) und
+   `Viewer.tsx` (TAT-Ziehgriff-Start/-Ende) — `Viewer.tsx` rendert die
+   Live-Vorschau währenddessen mit `LIVE_DRAG_MAX_EDGE`=1280 px statt
+   der vollen Anzeigeauflösung, genau wie Lightroom/Capture One
+   während des Ziehens eine reduzierte Vorschau zeigen. Nach dem
+   Loslassen (Commit) rendert die nächste Anfrage wieder in voller
+   Auflösung.
+4. **Start-Ladeschirm deutlich verstärkt:** `MIN_VISIBLE_MS`=900 ms
+   Mindestanzeigedauer unabhängig davon, wie schnell `ready` wahr
+   wird (behebt "200 ms" strukturell statt nur kosmetisch);
+   doppelter, gegenläufig rotierender Iris-Ring (96 px statt 64 px)
+   mit weichem Leuchten (`glowRef`) statt eines einzelnen kleinen
+   Rings; größeres, in Sperrschrift einblendendes Wortzeichen plus
+   Untertitel "Wird geladen …" statt nur des Namenszugs.
+5. **Hover/Fokus-Übergänge ausgeweitet** (`index.css`): die Phase-18-
+   Regel deckt jetzt zusätzlich `role="button"`, `role="checkbox"`,
+   `role="radio"`, `role="switch"`, `role="option"`, `[tabindex="0"]`,
+   `label`, `summary`, `input[type="range"|"checkbox"|"radio"]` ab
+   (vorher nur `button, a, select, [role="tab"], [role="menuitem"]`),
+   dazu eine dezente Skalierungs-Rückmeldung (`scale(1.015)` Hover,
+   `scale(0.985)` aktiv) speziell für `role="button"`-Elemente, die aus
+   HTML-Verschachtelungsgründen kein `<button>` sein können (u. a.
+   `GridView.tsx`s Rasterkacheln) und bis dahin trotz eigener
+   `hover:*`-Klassen ganz ohne Übergangsanimation blieben.
+6. **`DevelopSlider.tsx` bekommt einen eigenen Sound** — `uisfx`s
+   `"release"`-Cue ("A pressed control springs back") beim Loslassen/
+   Commit, nicht bei jedem Zieh-Tick (das wäre Lärm statt Feedback).
+   Semantisch passender als eine Wiederverwendung von `"select"`.
+   Default-Lautstärke `sound_volume_percent` in `apx-core::settings::
+   UiSettings::default()` von 70 auf 85 angehoben — 70 % erwies sich
+   im normalen Gebrauch gegen Systemlautstärke/Umgebungsgeräusche als
+   zu leise, um überhaupt wahrgenommen zu werden.
+7. **`PROMPTS.md`**, auf das der Nutzer für "echte Animationen"
+   verwiesen hat, existiert nachweislich nicht in diesem Repository
+   (erschöpfende Suche: `find`/`grep` über den gesamten Baum, auch
+   `.git`-Historie-unabhängig) — einzig ähnlich benannte Datei ist das
+   historische `PHASE1_PROMPT.md` (Phase-1-Planungsdokument, keine
+   Animations-Referenzsammlung). Ohne diese Datei war der konkrete
+   Verweis nicht umsetzbar; dem Nutzer im Antworttext mitgeteilt statt
+   stillschweigend ignoriert.
+
+**Bewusst außerhalb dieses Umfangs belassen:** ein vollständiger
+Bewegungs-/Klang-Neuentwurf jeder der über 500 `hover:*`-Stellen
+einzeln (die globale CSS-Regel deckt sie strukturell ab, ohne jede
+Komponente einzeln anzufassen); ein neues Logo-Bild-Asset (weiterhin
+kein Netzwerkzugriff auf externe Asset-Quellen in dieser Umgebung,
+siehe ADR-0047); eine Kachel-basierte Entwickeln-Pipeline für echte
+16-ms-Ziehreaktionen bei jeder Auflösung (die reduzierte
+Zieh-Auflösung ist der pragmatische Zwischenschritt, ein echtes
+Kachel-Rendering wäre ein eigener, deutlich größerer Umbau).
+
+Verifiziert: `cargo test -p apx-raw` (43/43, inkl. drei neuer
+`srgb_gamma_inverse`-Tests + angepasstem JPEG-Linearisierungstest),
+`cargo test -p apx-pipeline -p apx-export` (251/251 — bestätigt, dass
+kein Downstream-Konsument von `decode_linear` durch die Linearisierung
+bricht), `tsc -b` sauber, `vitest run` (251/251).
+
+---
+
+## ADR-0048-Nachtrag: Echte GSAP-Bewegung + app-weites Knopf-Feedback
+
+Nutzerwunsch (verbatim, sinngemäß): "Bugs war eine Sache aber was ist
+mit der Scheiß zu den fehlenden Animationen und Sounds und allem
+anderen was bemängelt wurde" — die erste Phase-20-Runde (Startup-
+Splash, Regler-Sound, Hover-CSS-Ausweitung) wurde zu Recht als nicht
+ausreichend empfunden.
+
+**Kernbefund:** `gsap` steht seit Phase 19 als Abhängigkeit bereit,
+wurde bis zu diesem Nachtrag aber real nur in **zwei** Dateien
+tatsächlich verwendet (`StartupSplash.tsx`, `ShutdownOverlay.tsx`).
+Die gemeinsame `ui/Dialog.tsx`/`ui/Sheet.tsx`-Hülle, die sich über 25
+Dialoge, `CommandPalette` und `KeybindingsCheatsheet` teilen, lief
+weiterhin über eine reine 8/32-px-CSS-Transition aus Phase 18 — direkt
+verantwortlich für den Eindruck "kein gar nix", trotz der als "echte
+Animationsbibliothek" beschafften `gsap`-Abhängigkeit. Zusätzlich
+hatten echte `<button>`-Elemente (die weit überwiegende Mehrheit aller
+Klickflächen der App) außer einem Farbwechsel **keine** physische
+Rückmeldung — nur `role="button"`-Elemente (Rasterkacheln u. Ä.)
+hatten seit dem ersten Phase-20-Durchgang eine Skalierungs-Animation.
+
+**Entscheidungen:**
+
+1. **`ui/Dialog.tsx`/`ui/Sheet.tsx` auf echte GSAP-Tweens umgestellt**
+   statt der bisherigen CSS-Transition — Dialog skaliert mit
+   spürbarem Überschwingen herein (`scale(0.94)→1`, `back.out(1.6)`),
+   Sheet schiebt sich mit demselben Überschwingen von der Kante ein.
+   Dieselbe Drei-Effekt-Struktur wie `StartupSplash.tsx` (Mount+Sound
+   / Eintritt-Tween ausgelöst von einem `entered`-Flag / Austritt-Tween
+   ausgelöst von `open === false`, `onComplete` entfernt das Panel erst
+   danach aus dem DOM) — vermeidet die Falle, dass ein einzelner
+   `useEffect` mit `open`/`reducedMotion` als einzige Abhängigkeiten
+   nicht erneut liefe, wenn nur `mounted`/`entered` intern kippen.
+   Betrifft strukturell jeden der 25+ Aufrufer, ohne einen einzigen
+   davon anzufassen.
+2. **App-weites Tastenanschlag-Feedback für JEDEN `<button>`**: neues
+   `useButtonPressSounds()` in `lib/sound.ts` — ein einzelner
+   delegierter `pointerdown`-Listener auf `document` (Capture-Phase,
+   dasselbe Muster wie `useAccordionSounds`) spielt `uisfx`s
+   dedizierten `"press"`-Cue (Kategorie "input", genau für diesen
+   Zweck) bei jedem nicht-deaktivierten `button`/`role="button"`
+   app-weit — läuft bewusst zusätzlich zu einem eventuellen
+   spezifischeren Sound der Komponente selbst (der feuert beim
+   `click`, also etwas später als `pointerdown`), dasselbe
+   Schichtungsprinzip wie ein physisches Anschlaggeräusch plus ein
+   Ergebnis-Ton danach. `index.css`: Eindrücken-Skalierung
+   (`scale(0.985)` bei `:active`) jetzt auch für echte `<button>`-
+   Elemente, nicht mehr nur `role="button"` — bewusst nur `:active`
+   (kein `:hover`), da viele Knöpfe dicht in Werkzeugleisten stehen und
+   ein Hover-Skalieren sie gegeneinander verschieben würde.
+
+Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
+Playwright-Suite (142/142 — inkl. Fund/Behebung eines
+Umgebungsproblems in dieser Sitzung: die erste Verifikationsrunde
+schlug mit 142/142 Fehlschlägen fehl, weil `PLAYWRIGHT_CHROMIUM_PATH`
+nicht gesetzt war — kein Code-Regression, nach Setzen des Pfads lief
+die Suite grün).
+
+---
+
+## ADR-0049: Phase 21 — Liquid-Glass-Überarbeitung, Spotlight-
+Einführungstour, überladene Hilfetexte gekürzt
+
+Nutzerwunsch (verbatim, sinngemäß): die gesamte Oberfläche im "Liquid
+Glass"-Materialstil, weniger überladene ("dumme KI-")Hilfetexte,
+einfacher zu navigieren, ein Einführungstutorial am Anfang mit
+Beispielfotos und Fokus auf echte Bedienelemente — insgesamt
+"hochwertiger und nutzerfreundlicher".
+
+**Recherche (`ui-ux-pro-max`-Skill):** "Liquid Glass" (Apple-
+Materialstil) ist als eigener Stil-Eintrag hinterlegt, primär für
+SwiftUI/UIKit/AppKit spezifiziert (`translucency, lensing, refraction,
+fluid morphing`), mit expliziten CSS-Näherungsstichworten
+("adaptive translucency, lensing, refraction, reduced transparency,
+reduced motion") für Nicht-Apple-Plattformen — diese App ist Tauri/
+React/CSS, keine native Apple-Oberfläche, daher eine **CSS-Näherung**
+statt einer 1:1-Umsetzung: `backdrop-filter: blur() saturate()` +
+ein diagonaler Glanz-Verlauf statt echter optischer Linsenverzerrung
+(die es in CSS nicht gibt). Die Onboarding-UX-Recherche ergab eine
+harte Anforderung: Tutorials müssen jederzeit überspring-/
+zurücknavigierbar sein, nie eine erzwungene lineare Tour.
+
+**Entscheidungen:**
+
+1. **Liquid-Glass-Token-Fundament** (`index.css`, `--glass-*`) —
+   bewusst als zusätzliche Ebene neben den bestehenden `--color-bg-*`-
+   Tönen, nicht als deren Ersatz: `.apx-glass`/`.apx-glass-strong`
+   sind neue Utility-Klassen (translucente Grundfarbe +
+   `backdrop-filter` + ein `background-image`-Glanz-Verlauf als zweite
+   Ebene derselben `background`-Eigenschaft — bewusst **kein**
+   separates `::before`-Pseudo-Element, das hätte mit dem
+   `position: relative` der Aufrufer um die Stapelreihenfolge
+   konkurrieren können). Light-/Dark-Theme-Kaskade wie gehabt;
+   Kontrastmodus setzt `--glass-blur: 0px` und volldeckende Farben
+   (dieselbe Begründung wie das bestehende `--color-bg-overlay`: im
+   Kontrastmodus geht es um maximale Lesbarkeit, Transluzenz
+   widerspricht dem — das ist zugleich die "reduzierte Transparenz"-
+   Rückfallebene, die die Stil-Recherche explizit verlangt).
+2. **Angewendet auf die gemeinsamen Chrome-Flächen statt jede
+   Komponente einzeln neu zu entwerfen** — dieselbe Hebel-Strategie
+   wie in Phase 20 (Dialog/Sheet): `ui/Dialog.tsx`, `ui/Sheet.tsx`,
+   `ui/Menu.tsx`s Überlauf-Menü und `PaletteFrame.tsx` (zentral, deckt
+   dadurch automatisch alle sechs Aufrufer ab: Sidebar/Presets/
+   Metadaten/Entwickeln/Masken-Panel sowie den eingeklappten Zustand)
+   sowie die Kopfleiste (`Header.tsx`) bekommen die neue Materialklasse
+   statt einzelner `bg-bg-raised`-Flächen. **Ehrlich begrenzt:** ein
+   `backdrop-filter` blur zeigt nur etwas, wenn tatsächlich Inhalt
+   *hinter* dem Element liegt (echte Überlappung, z. B. ein Dialog über
+   der App oder das Überlauf-Menü über dem Inhalt) — Header/PaletteFrame
+   sind normale Flex-Geschwister ohne Überlappung mit dem Zentralinhalt,
+   der spürbare "man sieht Unschärfe durch das Glas"-Effekt kommt daher
+   vor allem bei Dialog/Sheet/Menü/Tutorial zur Geltung; bei Header/
+   Paletten liefert die Änderung eine konsistente transluzente/
+   glänzende Materialoptik, aber ohne sichtbaren Unschärfe-Durchblick,
+   da nichts dahinterliegt. Bewusst **nicht** auf einzelne
+   Rasterkacheln angewendet (`GridView.tsx`) — `backdrop-filter` auf
+   potenziell Dutzenden gleichzeitig sichtbaren Elementen wäre ein
+   echtes Performance-Risiko, der Nutzen (kurzlebige, kleine Kacheln)
+   stünde in keinem Verhältnis dazu.
+3. **`OnboardingTour.tsx` ersetzt `OnboardingDialog.tsx`** — die
+   vorherige Fassung zeigte alle fünf Erklärabschnitte auf einmal als
+   reine Textliste in einem Dialog; die neue Tour hebt sie einzeln,
+   nacheinander an echten, gerade sichtbaren Bedienelementen hervor
+   (`data-tour="import"/"views"/"develop"/"filmstrip"`-Attribute neu in
+   `Header.tsx`/`Filmstrip.tsx`; die Seitenleiste wird stattdessen über
+   ihr bestehendes, bereits lokalisiertes `aria-label` gefunden, ohne
+   `PaletteFrame.tsx`s Props zu erweitern). Aussparung über vier
+   Abdunkel-/Weichzeichner-Rechtecke (oben/unten/links/rechts um das
+   Ziel) statt eines einzelnen Overlays mit CSS-`mask`-Ausschnitt —
+   robuster browserübergreifend, kein Masken-/Kompositions-Fallstrick;
+   ohne Zielelement (Begrüßung/Abschluss) kollabiert dieselbe Formel
+   auf einen Phantompunkt mit Breite/Höhe 0 in Bildschirmmitte, wodurch
+   die vier Rechtecke lückenlos den ganzen Schirm abdecken, ohne einen
+   Sonderfall im Rendering zu brauchen. Ein neues, reines Inline-SVG
+   (`SampleTourPhoto`, Berg-Silhouette + Sonne vor Himmelsverlauf)
+   dient als "Beispielfoto" auf der Begrüßungskarte — echte externe
+   Bildquellen bleiben durch die Netzwerk-Policy dieser Umgebung
+   blockiert (siehe ADR-0047), und vor dem ersten Import liegt ohnehin
+   kein echtes Nutzerfoto vor. Zurück-/Überspringen-Knöpfe immer
+   vorhanden (UX-Pflicht, s. o.); `uiSettings.onboarding_seen`-
+   Verdrahtung in `App.tsx` unverändert (`OnboardingTour` erhält
+   dieselben `open`/`onClose`-Props wie zuvor `OnboardingDialog`).
+   Bislang unbenutzte, weil nur von der alten Komponente gelesene
+   `onboarding.layout.*`/`onboarding.import.*` (Titel/Textform, nicht
+   die neuen `onboarding.tour.*`-Schlüssel)/`onboarding.develop.*`/
+   `onboarding.palette.*`/`onboarding.shortcuts.*`/`onboarding.start`-
+   Lokalisierungsschlüssel aus `de.ts`/`en.ts` entfernt statt als toter
+   Code liegen zu lassen.
+4. **Gezielter Kürzungs-Durchgang statt Vollaudit:** ein vollständiger
+   Text-Audit über alle ~150 Komponenten wäre in dieser Phase nicht
+   seriös leistbar — stattdessen zwei konkrete, real überladene
+   Einstellungen-Hinweistexte (`settings.watchedFolderHint`,
+   `settings.mapApiKeyHint`, je zuvor zwei bis drei Sätze mit
+   redundanten Nebeninformationen) auf je einen knappen, selbstbewusst
+   formulierten Satz gekürzt.
+
+**Bewusst außerhalb dieses Umfangs belassen:** eine echte, physikalisch
+korrekte Linsenverzerrung/Lichtbrechung (in CSS nicht abbildbar, siehe
+Recherche oben); eine vollständige Restrukturierung der Navigation
+(Phase 18 hat die Kopfleiste/das Kommando-Register bereits grundlegend
+vereinfacht — diese Phase ergänzt Bewegung/Optik/Tutorial, keinen
+zweiten Navigations-Umbau); ein vollständiger Text-Audit aller
+UI-Hilfetexte (siehe Entscheidung 4).
+
+Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
+Playwright-Suite (142/142, `PLAYWRIGHT_CHROMIUM_PATH` gesetzt).
+
+---
+
+## ADR-0050: Phase 22 — ESC-Schnellmenü, schnelleres Masken-Ziehen,
+echte Regler-Optik, zehn Farbprofile
+
+Nutzerwunsch (verbatim, sinngemäß): "weiter überarbeiten — Menü, wenn
+man ESC drückt, dort sollen auch Einstellungen zu finden sein,
+schnellere Bearbeitung, bessere Regler, mehr Farbprofile, alles muss
+sich smoother anfühlen".
+
+**Ist-Zustand-Befund:**
+
+- `Escape` schloss bis dahin ausschließlich eine bereits offene
+  Überlagerung (`close-overlay`-Tastenkürzel, siehe `lib/keybindings.ts`)
+  — im Grundzustand (nichts offen) tat die Taste nichts. Die
+  Befehlspalette (`CommandPalette.tsx`, `Strg/Cmd+K`) listet
+  "Einstellungen…" bereits als durchsuchbaren Befehl
+  (`commandRegistry.ts`), war über `Escape` aber nicht erreichbar.
+- `input[type="range"]` — sowohl die ~40 `DevelopSlider.tsx`-Regler als
+  auch die übrigen freistehenden Regler (Export/Druck/Leinwand/
+  Einstellungen/Viewer-Zoom/Video) — hatte in der gesamten App **keine**
+  eigene CSS-Regel: reiner, unstilisierter Browser-Standard.
+- `MaskOverlay.tsx`s Ziehgriffe (linearer/radialer Verlauf, Pinsel)
+  aktualisieren `developEdl` pro Zeigerbewegung genau wie
+  `DevelopSlider.tsx`/der TAT-Ziehgriff in `Viewer.tsx` — aber nur
+  Letztere setzten in Phase 20 `developIsLiveDragging`, das
+  `Viewer.tsx`s Live-Vorschau auf eine reduzierte Auflösung umschaltet.
+  Masken-Ziehen rendertee deshalb weiterhin bei jedem Tick in voller
+  Auflösung.
+- `apx_pipeline::builtin_luts` (Phase 16 Schritt 2, ADR-0043-Nachtrag)
+  lieferte fünf selbst formulierte, parametrische Farb-Looks — bewusst
+  original erstellt statt von einer externen Quelle heruntergeladen
+  (siehe dortige Moduldoku: keine einzelne Quelle mit einheitlicher
+  Lizenzlage gefunden).
+
+**Entscheidungen:**
+
+1. **`Escape` öffnet die Befehlspalette, wenn nichts offen ist** —
+   `App.tsx`s zentraler `close-overlay`-Zweig prüft zusätzlich
+   `document.querySelector('[role="dialog"]')` (erreicht auch die ~25
+   lokal in `Header.tsx` gehaltenen Dialoge, deren Zustand `App.tsx`
+   sonst nicht kennt) plus die App.tsx-eigenen Überlagerungs-Flags; ist
+   nichts davon offen, öffnet derselbe Tastendruck die Befehlspalette
+   statt wirkungslos zu bleiben — Einstellungen sind darüber jetzt
+   direkt per Escape erreichbar, ohne eine zweite, separate
+   Menü-Komponente zu bauen.
+2. **Reduzierte Live-Auflösung auch beim Masken-Ziehen** —
+   `MaskOverlay.tsx` setzt `developIsLiveDragging` jetzt an denselben
+   Stellen (`startDrag`/`handleBrushPointerDown` → `true`,
+   `handlePointerUp` → `false`) wie `DevelopSlider.tsx` es seit Phase 20
+   tut — derselbe, bereits etablierte Kompromiss (`LIVE_DRAG_MAX_EDGE`),
+   nur konsequent auf einen zweiten, bis dahin übersehenen
+   Ziehgriff-Pfad ausgeweitet.
+3. **Echte Regler-Optik** — neue `input[type="range"]`-Regeln in
+   `index.css`: eigener, dünner Balken statt des Browser-Standards, ein
+   `--range-progress`-Wert (von `DevelopSlider.tsx` pro Regler aus
+   Wert/Min/Max berechnet) färbt den Balken bis zum aktuellen Wert in
+   der Akzentfarbe; ein eigener runder Griff mit Hover-/Halte-
+   Skalierung (dieselbe Zwei-Stufen-Logik wie die App-weite Knopf-
+   Skalierung aus Phase 20); eine dezente Strichmarkierung am
+   Neutralwert (zeigt, wohin ein Doppelklick zurücksetzt). Nur
+   `-webkit-*`-Pseudoelemente ausführlich gepflegt (nicht zusätzlich
+   `-moz-*`): Tauris drei Ziel-WebViews (WebView2/WKWebView/WebKitGTK)
+   sind alle WebKit-/Blink-Abkömmlinge, Firefox ist kein realer
+   Auslieferungspfad dieser App (siehe ADR-0010).
+4. **Fünf neue eingebaute Farbprofile** (`builtin_luts.rs`):
+   Vintage-Film, Kino-Blau, Goldene Stunde, Film Noir, Pastell —
+   dieselbe original-parametrische Herangehensweise wie die
+   bestehenden fünf, macht zehn insgesamt. `e2e/tauri-mock.ts`s
+   Mock-Liste entsprechend erweitert.
+
+**Bewusst außerhalb dieses Umfangs belassen:** eine tiefere Rust-
+seitige Profiling-Untersuchung der Bearbeitungs-Zeiten über die
+Masken-Ziehgriffe hinaus (Phase 20 hat die grundsätzliche
+Live-Auflösungs-Architektur bereits etabliert und dokumentiert — dieser
+Nachtrag überträgt sie konsequent auf den einen übersehenen Pfad,
+statt eine neue Profiling-Runde zu eröffnen); eine zweite,
+eigenständige "Schnellmenü"-Komponente statt der Wiederverwendung der
+Befehlspalette (die vorhandene Palette ist bereits durchsuchbar,
+kategorisiert und lokalisiert — eine zweite, separate Menü-Oberfläche
+für denselben Zweck wäre Duplikation).
+
+Verifiziert: `cargo fmt --check`/`clippy -p apx-pipeline -p apx-core
+--all-targets` sauber, `cargo test -p apx-pipeline` (251/251, inkl.
+dreier weiterhin grüner `builtin_luts`-Tests mit den fünf neuen
+Einträgen), `tsc -b` sauber, `vitest run` (251/251).
+
+---
+
+## ADR-0051: Phase 23 — echte Bewegung, Runde 2: drei externe
+Komponenten-Prompts analysiert statt blind kopiert
+
+Nutzerwunsch (verbatim): "merge it in main dann mach es besser ist
+noch zu schlecht echte animationen schau dir prompts.md an (Echte
+Prompts-verwende diese". Es folgten drei vollständige
+"shadcn/Next.js-Komponente integrieren"-Aufträge (`DotLoader`,
+`Toolbar`, `SparklesCore`) mit fertigem Code, gedacht für ein anderes
+Ziel-Ökosystem (Next.js + shadcn CLI + `framer-motion`/
+`@tsparticles/*`). Dieses ADR hält fest, warum sie nicht wörtlich
+kopiert wurden, sondern als Referenz für die gewünschte
+Bewegungsqualität dienten.
+
+**Ist-Zustand-Befund (real geprüft, nicht angenommen):**
+
+- Dieses Projekt ist **kein** shadcn-Projekt: keine `components.json`,
+  kein `@/`-Pfad-Alias in `tsconfig.json`/`vite.config.ts`, keine
+  `cn()`-Hilfsfunktion, kein `clsx`/`tailwind-merge` in
+  `package.json`. `frontend/src/components/ui/` existiert zwar bereits
+  (seit Phase 18/21: `Dialog.tsx`, `Sheet.tsx`, `Menu.tsx`, `Tabs.tsx`)
+  — aber als eigene, GSAP-basierte Konvention, nicht als
+  shadcn-CLI-Ausgabe.
+- **Keine Icon-Bibliothek im gesamten Projekt** — Knöpfe verwenden
+  rohe Unicode-Zeichen (`✎`/`↶`/`↷`/`👁`/`🚫`/`⧉`/`×`, siehe
+  `GridView.tsx`/`MasksPanel.tsx`) statt echter Symbole. Das ist ein
+  echter, eigenständiger Beitrag zum "wirkt billig"-Eindruck,
+  unabhängig von Bewegung.
+- `gsap` (seit Phase 19, ADR-0047) ist die bewusst gewählte, einzige
+  Bewegungslaufzeit dieses Projekts — `framer-motion` zusätzlich
+  einzuführen wäre eine zweite, überlappende Animationsbibliothek für
+  denselben Zweck, kein Neuzugang, der eine Lücke schließt.
+- `@tsparticles/*` (Kern + React-Bindung + „slim"-Preset) ist ein
+  vollständiger Partikel-Physik-Motor (mehrere hundert KB) — der
+  Playwright-Build dieser Sitzung markiert das Haupt-Bundle bereits
+  jetzt als über der 500-kB-Warnschwelle (`vite build`-Ausgabe beim
+  letzten vollen Testlauf). Ein Partikel-Hintergrund für eine
+  professionelle Desktop-Bildbearbeitung ist zudem stilistisch nicht
+  das, was "premium" für dieses Produkt bedeutet (kein Marketing-Hero,
+  kein Spiel).
+- **Konkreter, verifizierter Befund zur eigentlichen Beschwerde**
+  ("echte Animationen"): keine der ~35 `*Loading`/`*Running`/
+  `*Downloading`-Zustände im Store (`grep` bestätigt) hat irgendeine
+  visuelle Ladeanimation — jede KI-/Verarbeitungsstelle tauscht
+  lediglich einen Text gegen einen anderen aus (z. B.
+  `DevelopPanel.tsx`: `"Anwenden"` → `"Berechnet…"`, `"Sensorflecken
+  suchen"` → `"Suche…"`), ganz ohne Bewegung. Das ist der eigentliche,
+  systemische Kern der "immer noch zu schlecht"-Rückmeldung, nicht ein
+  Mangel an Spring-Physik in Dialogen (die seit Phase 20 Nachtrag
+  bereits echte GSAP-Tweens haben).
+
+**Entscheidungen:**
+
+1. **`DotLoader`-Komponente nahezu wörtlich portiert** — sie ist
+   dependency-frei (reines React + CSS, referenziert nur `cn()`), passt
+   ohne jede neue Laufzeitabhängigkeit. Neu:
+   `frontend/src/lib/utils.ts` (`cn()`, eine minimale
+   `clsx`-Alternative ohne neue Abhängigkeit) +
+   `frontend/src/components/ui/DotLoader.tsx`.
+2. **Ein einziger, zentraler `GlobalBusyIndicator`** statt 35
+   Einzelstellen manuell nachzuziehen — eine neue abgeleitete Auswahl
+   (`selectAnyBackgroundTaskRunning` in `store/index.ts`) fasst alle
+   Lade-/Verarbeitungs-Flags zu einem Boolean zusammen; eine neue,
+   dezente, unten rechts angedockte Anzeige (`DotLoader` + Label)
+   erscheint automatisch, sobald irgendeine dieser Operationen läuft —
+   höherer Hebel als 15+ Einzeltexte anzufassen (und risikofrei
+   gegenüber den bestehenden Playwright-Selektoren, die exakt auf
+   diese Texte/`title`/`aria-label`-Werte zielen — siehe
+   `masks-flow.spec.ts`s `getByTitle("Umbenennen")`).
+3. **`lucide-react` statt roher Unicode-Zeichen** — echte, minimale
+   Bereicherung (klein, baumschüttelbar), behebt den oben verifizierten
+   Icon-Befund. Eingesetzt zunächst in `MasksPanel.tsx`s Masken-Zeile
+   (Sichtbarkeit/Umbenennen/Duplizieren/Löschen) — `title`/`aria-label`
+   bleiben dabei exakt unverändert (nur das sichtbare Symbol im
+   Inneren wechselt), damit `masks-flow.spec.ts` unverändert grün
+   bleibt.
+4. **Federnder Erfolgs-Funke statt Partikel-Engine** — ein kleiner,
+   selbst gebauter GSAP-Funken-Ausbruch (wenige `<span>`-Punkte,
+   Ease-out-Bahnen) erscheint beim Abschluss eines Exports
+   (`ExportDialog.tsx`s bestehende `filesWritten`-Erfolgsmeldung) —
+   liefert denselben "beschwingten Abschluss-Moment" wie
+   `SparklesCore`, ohne eine 130+-kB-Partikel-Bibliothek für ein
+   einziges Sechs-Punkte-Funkeln zu laden.
+
+**Bewusst außerhalb dieses Umfangs belassen:** nicht alle 35+
+Lade-Stellen einzeln auf `DotLoader` umgestellt (der zentrale
+Indikator deckt den Bedarf ab, ohne jede Stelle einzeln anzufassen und
+damit 35 potenzielle Playwright-Regressionsflächen zu öffnen); die
+lokalen `integrityRunning`/`optimizeRunning`/`backupRunning`-Zustände
+in `CatalogDialog.tsx` (Komponenten-lokaler `useState`, nicht global
+im Store sichtbar, daher nicht Teil von
+`selectAnyBackgroundTaskRunning`); Toolbar-Tooltip-Neubau mit
+eigenem Overlay (die bestehenden `title`-Attribute liefern bereits
+Browser-native Tooltips und werden von Tests direkt angesprochen —
+ein Ersatz wäre ein eigenständiger, riskanter Umbau ohne klaren
+Mehrwert gegenüber Schritt 2's zentralem Indikator).
+
+Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
+Playwright-Suite (142/142 — insbesondere `masks-flow.spec.ts`,
+Symbol-Austausch, und `export-flow.spec.ts`, `SuccessSpark`, beide
+vollständig grün, da `title`/`aria-label` unverändert blieben).
+
+---
+
+## ADR-0051-Nachtrag: "noch nicht gut genug" — mehr Hover, Animation
+bei KI-Bearbeitung, sieben weitere gezielte Ergänzungen
+
+Nutzerwunsch (verbatim): "noch nicht gut genug - mach mehr
+Animationen, hover, animation bei ki bearbeitung und 5 weitere".
+
+**Real geprüfter Ist-Zustand vor dieser Ergänzung:**
+
+- `GridView.tsx`/`Filmstrip.tsx`: Foto-Kacheln hatten `grep`-bestätigt
+  **keine** `hover:scale`/`hover:shadow`/`hover:-translate`-Regel,
+  nur einen Rahmenfarbwechsel — die mit Abstand meistgenutzten
+  Flächen der App reagierten optisch kaum auf Hover.
+  `PresetsPanel.tsx`s Preset-Zeilen und `Sidebar.tsx`s Ordner-/
+  Sammlungszeilen: Hintergrundfarbwechsel ohne `transition`, also ein
+  harter Sprung statt einer Bewegung.
+- `ui/Tabs.tsx` (`DevelopPanel`/`MasksPanel`-Registerkarten):
+  reiner Textfarbwechsel beim Tab-Wechsel, kein gleitender
+  Auswahl-Hintergrund.
+- **KI-Bearbeitung:** jede der ~8 am häufigsten ausgelösten
+  KI-/Verarbeitungsstellen in `DevelopPanel.tsx`/
+  `CanvasExtendDialog.tsx`/`ContentAwareScaleDialog.tsx` tauschte
+  ausschließlich Text ("Anwenden"→"Berechnet…", "Sensorflecken
+  suchen"→"Suche…" usw.) — der in Phase 23 bereits gebaute
+  `GlobalBusyIndicator` sitzt unten rechts in der Ecke, spürbar
+  entkoppelt vom eigentlichen Auslöser-Knopf/Bild.
+
+**Entscheidungen:**
+
+1. **Echte Hover-Bewegung** auf den Foto-Kacheln:
+   `GridView.tsx` (`hover:scale-[1.04] hover:shadow-lg hover:z-10`)
+   und `Filmstrip.tsx` (`hover:scale-[1.05]`, Skalierung so gewählt,
+   dass sie innerhalb des vorhandenen 4-px-Rands bleibt, `overflow-
+   y-hidden` schneidet nichts ab); `PresetsPanel.tsx`-Zeilen und
+   `Sidebar.tsx`-Zeilen bekommen `transition-colors`/`-shadow` statt
+   eines harten Sprungs.
+2. **Gleitender Auswahl-Hintergrund in `ui/Tabs.tsx`** — ein per GSAP
+   auf Basis der echten `getBoundingClientRect()` des aktiven
+   Tab-Knopfs positioniertes Hintergrund-Rechteck (funktioniert auch
+   bei `flex-wrap`, da Position *und* Größe gemessen statt fest
+   verdrahtet werden) statt des reinen Textfarbwechsels. **Bewusst
+   nicht** auf `Header.tsx`s Ansicht-Umschalter übertragen: dort sind
+   `centerView`, `metadataPanelOpen` und `developPanelOpen`
+   unabhängige Zustände, mehrere Knöpfe können gleichzeitig aktiv
+   sein — ein einzelnes gleitendes Rechteck würde bei zwei aktiven
+   Knöpfen sichtbar falsch aussehen.
+3. **`InlineSpinner`** (`ui/DotLoader.tsx`, neu exportiert neben dem
+   bereits vorhandenen `RING_SPINNER_FRAMES`, das `GlobalBusyIndicator`
+   jetzt mitbenutzt statt einer eigenen Kopie) — ein winziger
+   Punkt-Spinner direkt im Knopftext während KI-Bearbeitung,
+   eingesetzt an den acht sichtbarsten Auslösestellen (KI-Ausfüllen
+   anwenden, Sensorflecken suchen, Content-Aware Move, Entrauschen,
+   2×hochskalieren, DNG-Konvertierung, Bildranderweiterung, Content-
+   Aware Scale). Rendert nur `<div>`-Elemente ohne Text, verändert
+   daher den textbasiert berechneten zugänglichen Namen der Knöpfe
+   nicht — risikofrei gegenüber den bestehenden `getByRole`-Selektoren.
+4. **Schimmer-Überzug direkt auf dem bearbeiteten Foto** —
+   `Viewer.tsx` blendet bei `selectCurrentPhotoAiProcessing` (neue,
+   auf die aktuell angezeigte Fotobearbeitung eingeschränkte
+   Teilmenge von `selectAnyBackgroundTaskRunning`) eine wandernde
+   Glanzfläche (`apx-ai-shimmer`, reines CSS `@keyframes`) über dem
+   Bild ein — die unübersehbarste mögliche Antwort auf "Animation bei
+   KI-Bearbeitung", ergänzt (nicht ersetzt) den kleinen Eck-Indikator.
+
+Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
+Playwright-Suite (142/142 — insbesondere `masks-flow.spec.ts`
+[gleitender Tab-Hintergrund], `enhance-flow.spec.ts`/
+`ai-flow.spec.ts` [`InlineSpinner`-Knöpfe], `presets-flow.spec.ts`
+["Hover über einen Preset..."], `viewer-flow.spec.ts`/
+`Filmstreifen-Virtualisierung` — alle vollständig grün, da keine
+`title`/`aria-label`/Text-Selektoren verändert wurden).
+
+---
+
+## ADR-0052: Phase 24 — Mehr Transparenz, echte Karten-Bugfixes, zehn
+weitere neue Animationen, mehr Übersicht
+
+Nutzerwunsch (verbatim): "noch nicht gut genug-ui muss transparenter
+werden, kartenbugs (z.b. fehlerhafte anzeige, keine gute heatmap)
+alles fixen, mehr animationen, mindestens 10 neue, mehr übersicht
+einfacher zu bedienen".
+
+**Karten-Untersuchung (real geprüft, nicht angenommen):**
+
+- **Bestätigter Bug — Heatmap-Farbskala liefert keine Abstufung.**
+  `MapView.tsx`s `readHeatColors()` und `GlobeView.tsx`s Aufruf von
+  `heatScaleColor(...)` übergaben für `cool` **und** `mid` denselben
+  Wert (`--color-accent`) — `heatScaleColor` interpoliert Kühl→Mittel
+  in der unteren Intensitätshälfte, Mittel→Warm in der oberen (siehe
+  `lib/photoHeatmap.ts`). Mit `cool === mid` zeigt die gesamte untere
+  Hälfte (die meisten Rasterzellen — wenige Fotos je Ort sind der
+  Regelfall) **keinerlei** Farbunterschied, nur einen flachen
+  Akzentton; erst die wenigen dichtesten Orte wandern Richtung
+  `--color-danger`. Erklärt sowohl "keine gute Heatmap" als auch
+  "fehlerhafte Anzeige" plausibel (eine Heatmap ohne Abstufung wirkt
+  wie eine kaputte/nicht reagierende Anzeige). Betrifft **beide**
+  Heatmap-Implementierungen (Globus + flache Karte), da beide dieselbe
+  `heatScaleColor`-Funktion mit demselben Farbfehler aufrufen.
+- **Tiefer untersucht und bewusst NICHT geändert:** ein Verdacht, dass
+  `leafletHeatmap.ts`s `redraw()` mit `map.latLngToContainerPoint(...)`
+  statt `map.latLngToLayerPoint(...)` zeichnet und dadurch nach einem
+  Kartenschwenk versetzt wäre — anhand von Leaflets eigenem Quellcode
+  (`node_modules/leaflet/dist/leaflet-src.js`) nachgerechnet:
+  `latLngToContainerPoint(P) = latLngToLayerPoint(P) + _getMapPanePos()`,
+  und `_getMapPanePos()` wird von Leaflets eigenem `_resetView()`
+  (welches bei jedem `moveend`/`zoomend` — genau die Ereignisse, an die
+  `reset()` gebunden ist — vor der Neupositionierung aufgerufen wird)
+  auf `(0, 0)` zurückgesetzt. Zum Zeitpunkt, an dem `redraw()` läuft,
+  sind beide Ausdrücke daher rechnerisch identisch — kein tatsächlicher
+  Versatz-Bug, nur eine unnötig verwirrende Wahl der API (`containerPoint`
+  statt `layerPoint`, wie Leaflets eigene Layer es intern tun). Nicht
+  angefasst, um nicht ohne echten Befund ein funktionierendes
+  Koordinatensystem zu "reparieren".
+
+**Entscheidungen:**
+
+1. **Heatmap-Farbskala repariert** — `mid` liest jetzt `--color-success`
+   (Grün) statt `--color-accent`, ein echter Blau→Grün→Rot-Dreiklang
+   statt zwei identischer Werte. `GlobeView.tsx`s `readThemeColors()`
+   bekommt dafür ein neues `success`-Feld.
+2. **UI transparenter** (`index.css`): `--glass-bg`/`--glass-bg-strong`
+   von 62 %/78 % (dunkel) bzw. 62 %/80 % (hell) auf 44 %/60 % bzw.
+   44 %/62 % gesenkt, `--glass-blur` von 20px auf 26px angehoben (mehr
+   Weichzeichnung kompensiert die geringere Deckkraft, damit Text trotz
+   mehr Durchsicht lesbar bleibt). Kontrastmodus (voll deckend) bleibt
+   unverändert — Barrierefreiheit hat dort weiterhin Vorrang.
+3. **Zehn neue, echte Animationen** (nicht nur Politur bestehender
+   Hover-Zustände, siehe ADR-0051/-Nachtrag für die vorherige Runde):
+   - Bewertungssterne: kurzer "Pop"-Ausschlag beim tatsächlichen
+     Wertwechsel (`RatingFlagColor.tsx`, `apx-star-pop`)
+   - Heatmap-"Atmen" auf der flachen Karte (CSS-`filter`-Puls auf dem
+     dedizierten `apx-photo-heat-layer`-Canvas) **und** auf dem Globus
+     (echter, im rAF-Zeichen-Code berechneter `heatPulse`-Faktor, da
+     dort Kugel/Glüh-Rand/Blobs ein gemeinsames Canvas teilen)
+   - Karten-Infobox: Eintritts-Animation beim Wechsel zur flachen Karte
+   - GPS-Platzierungshinweis: pulsierender Text, solange auf einen
+     Kartenklick gewartet wird
+   - Globus ↔ Karte: sanfter Überblend-Wechsel statt hartem
+     Komponentenaustausch
+   - Befehlspalette: Ergebniszeilen fliegen gestaffelt herein (gedeckelt
+     auf die ersten 12 Zeilen)
+   - Export-Fortschrittsbalken: neuer, echter Balken (vorher nur reiner
+     Text) mit animierter Breite bei jedem Fortschritts-Tick
+   - Einstellungen-Dialog: Reiterinhalt blendet beim Wechsel sanft ein
+   - Kopfzeile: Import-Abschluss-Hinweis blendet ein statt abrupt
+     aufzutauchen
+   - Filmstreifen: scrollt jetzt tatsächlich sanft zur ausgewählten
+     Kachel (`@tanstack/react-virtual`s `scrollToIndex(..., {behavior:
+     "smooth"})`) — vorher scrollte der Streifen bei Auswahl einer
+     außerhalb sichtbaren Kachel überhaupt nicht mit
+   Alle zehn respektieren `prefers-reduced-motion` über den
+   bestehenden globalen Mechanismus bzw. (Bewertungssterne, Globus-Puls,
+   Filmstreifen) über `usePrefersReducedMotion()`/eine explizite
+   Prüfung.
+4. **Mehr Übersicht, einfacher zu bedienen** — der neue Export-
+   Fortschrittsbalken (Punkt 3) macht den Bearbeitungsstand auf einen
+   Blick erfassbar statt nur als Zahlentext; die reparierte Heatmap-
+   Farbskala macht die Kartenübersicht überhaupt erst wieder informativ
+   (Punkt 1); die erhöhte Transparenz (Punkt 2) lässt die App-Chrome
+   weniger blickdicht/schwer wirken.
+
+Verifiziert: `tsc -b` sauber, `vitest run` (251/251), volle
+Playwright-Suite (142/142 — insbesondere `map-flow.spec.ts`
+[Heatmap-Farbfix], `settings-flow.spec.ts` [Reiterwechsel-Neumontage],
+`presets-flow.spec.ts`/`library-flow.spec.ts`, `viewer-flow.spec.ts`/
+`Filmstreifen-Virtualisierung` [Sanftscroll] — alle vollständig grün,
+da keine `title`/`aria-label`/Text-Selektoren verändert wurden).
+
+---
+
+## ADR-0053: Phase 25 Schritt 1 — Bugfix: Filter/`.cube`-LUTs verändern
+das Bild nicht wirklich (+ Performance-Ursache)
+
+Nutzerwunsch (verbatim, Ausschnitt): "fixe außerdem den bug, dass alles
+so lang dauert und dass filter/eigene .cube dateien und sogar die von
+dir gegebenen presets das bild nicht wirklich verändern".
+
+**Untersuchung (real geprüft, nicht angenommen):** Die Bildlogik selbst
+war korrekt — `stages::lut_filter::apply`s trilineare Interpolation,
+`sample_lut`s Tabellen-Indizierung (`r` am schnellsten variierend) und
+die Rasterreihenfolge in `builtin_luts::generate`/`lut_cube::
+parse_cube_bytes` stimmen exakt überein (per Test bestätigt), die
+`StageEnabled`-Gate ist standardmäßig aktiv, `strength` wird beim
+Anwenden korrekt auf `1.0` gesetzt, falls zuvor `0`. Der tatsächliche
+Fehler lag eine Ebene höher, in der **Übertragung**:
+`frontend/src/lib/edl.ts`s `buildEdlEnvelopeJson(payload)` serialisiert
+das komplette EDL — inklusive der vollen `LutFilterData::table` — direkt
+in den URL-Pfad der `develop/...`-Live-Vorschau-Route
+(`crates/apx-app/src/protocol/mod.rs`), und zwar bei **jedem einzelnen**
+Regler-Tick (`useDevelopRender`s `requestAnimationFrame`-Entprellung
+löst pro Frame höchstens eine Anfrage aus, aber jede davon trägt die
+komplette `table` erneut mit, unabhängig davon, welches Feld sich
+gerade änderte). Nachgemessen (echtes `JSON.stringify` +
+`encodeURIComponent` eines realistischen Rasters): ein eingebauter
+17er-Look allein ergibt bereits **~314 KB** JSON-Nutzlast, ein
+importiertes 33er-`.cube` **über eine Megabyte** — pro Vorschau-
+Anfrage, nicht einmalig. Zwei Konsequenzen ergeben sich direkt daraus,
+beide vom Nutzer berichtet:
+
+1. **"alles dauert so lange"**: jede Vorschau-Anfrage bei aktivem
+   Filter musste dieses Vielfache an JSON serialisieren/parsen, als
+   String-Cache-Schlüssel in `apx-app`s `ImageCache` hashen/vergleichen
+   und über den Custom-Protokoll-IPC-Weg transportieren — spürbar
+   langsamer als ohne Filter, bei jedem Regler-Tick erneut.
+2. **"Filter verändern das Bild nicht wirklich"**: bei genügend großer
+   Tabelle (insbesondere importierte `.cube`-Dateien mit größerem
+   Raster) wird die Anfrage groß genug, um beim Parsen/Transport zu
+   scheitern. `hooks/useDevelopRender.ts`s Fehlerpfad reagiert auf
+   einen fehlgeschlagenen `fetch()` nur mit `console.error(...)` — der
+   zuletzt erfolgreich gerenderte (unveränderte) Rahmen bleibt
+   sichtbar. Für den Nutzer sieht das exakt aus wie "der Filter tut
+   nichts", ohne jede sichtbare Fehlermeldung.
+
+**Entscheidung — Inhalts-adressierter Server-Cache statt Neuübertragung
+bei jedem Tick:**
+
+1. `apx_pipeline::edl::LutFilterData` bekommt ein neues Feld `id: String`
+   (`#[serde(default)]`, leer bei alten `edit_history`-Einträgen) — ein
+   FNV-1a-Inhalts-Hash über `size`+`table`
+   (`stages::lut_filter::compute_lut_id`, neu). Sowohl
+   `builtin_luts::generate` als auch die `.cube`-Import-DTO-Konvertierung
+   (`apx-app`s `commands.rs`) berechnen ihn.
+2. Neuer `apx_pipeline::lut_table_cache::LutTableCache` (Muster wie
+   `tile_cache::TileCache`, aber unbegrenzt statt LRU-begrenzt — die
+   Anzahl unterschiedlicher LUTs pro Sitzung bleibt immer klein): hält
+   vollständige Tabellen unter ihrer `id`. `resolve(&mut LutFilterData)`
+   füllt eine leer ankommende `table` aus dem Cache auf, oder frischt
+   den Cache selbstheilend auf, wenn eine volle `table` ankommt (deckt
+   einen App-Neustart ab, ohne dass das Frontend das Timing kennen
+   muss). Als `AppState::lut_table_cache` verdrahtet, in
+   `protocol::mod::compute_develop` vor `render_rgba8` aufgerufen.
+3. `frontend/src/lib/edl.ts`s neue `buildDevelopPreviewEdlJson(payload)`
+   — wie `buildEdlEnvelopeJson`, aber schneidet `lut_filter.lut.table`
+   heraus, sobald `id` gesetzt ist. **Nur** für die Live-Vorschau-
+   Aufrufstellen (`Viewer.tsx`, `PresetThumbnail.tsx`, `ReferenceView.tsx`)
+   verwendet — `applyDevelopEdit`/`createSnapshot` (die persistierte
+   `edit_history`) behalten weiterhin die volle Tabelle über die
+   unveränderte `buildEdlEnvelopeJson`, damit ein Katalog unabhängig vom
+   flüchtigen Server-Cache portabel bleibt.
+4. Neuer Tauri-Befehl `register_lut_filter_table(id, size, table)` wärmt
+   den Cache proaktiv vor — `store/index.ts`s `applyBuiltinLutFilter`/
+   `importLutFilterForCurrentPhoto` rufen ihn direkt nach dem Setzen des
+   Filters auf, `Viewer.tsx` zusätzlich beim Öffnen des Entwickeln-
+   Panels/Fotowechsel (deckt den Fall ab, dass ein bereits gespeicherter
+   Filter geladen wird, ohne dass eine der beiden Aktionen in dieser
+   Sitzung lief). Ein modulweites `Set<string>` in `store/index.ts`
+   verhindert doppelte Registrierungen pro Sitzung, ohne den
+   selbstheilenden Cache-Pfad in Schritt 2 zur Korrektheitsvoraussetzung
+   zu machen — beide Mechanismen zusammen machen den Fix robust gegen
+   Aufruf-Reihenfolge.
+
+Strikt nicht-regressiv: fehlt `id` (alte, vor diesem Feld
+gespeicherte Session-Daten) oder ist `table` bereits leer ohne
+gewählten Filter, verhalten sich beide neuen Funktionen exakt wie die
+alten — kein Sonderfall kann schlechter rendern als vorher.
+
+Verifiziert: `cargo test -p apx-pipeline` (neue Tests in
+`lut_table_cache.rs` + `stages::lut_filter::compute_lut_id`-Abdeckung),
+`cargo test -p apx-app protocol` (neuer Test
+`compute_develop_resolves_lut_table_from_cache_on_second_request` —
+rendert einmal mit voller Tabelle, einmal mit absichtlich leerer
+Tabelle + `id`, beide Ergebnisse müssen byte-identisch sein),
+`cargo fmt`/`cargo clippy -D warnings` sauber für `apx-pipeline`/
+`apx-app`, `tsc -b` sauber.
+
+---
+
+## ADR-0054: Phase 25 — 5-Schritt-Premium-UI-Plan (Typografie,
+Farbtiefe, Z-Tiefe, Hover-Tiers, Bento-Übersicht)
+
+Nutzerwunsch (verbatim, Ausschnitt): "ui sieht immer noch nicht
+premium genug aus arbeite einen 5 schritt plan […] aus, um die ganze
+ui noch durchdachter und premiummäßiger zu machen. präsentiere ihn mir
+und fang direkt mit der Ausführung an".
+
+**Recherche (real, nicht geraten):** über das bereits integrierte
+`.claude/skills/ui-ux-pro-max`-Skill echte, für genau dieses
+Produktgenre (dunkles professionelles Foto-/Kreativ-Werkzeug)
+recherchierte Referenzen gezogen (`--design-system`-Suche + gezielte
+`--domain`-Suchen zu `typography`/`style`/`color`/`gsap`), **kombiniert
+mit** einem echten Befund im eigenen `index.css`: `--font-sans` war
+bislang nur `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`
+(keine eigene Schrift — die App zeigt einfach, was das jeweilige
+Betriebssystem mitbringt) und `--color-bg-base/-raised/-panel` lagen
+alle innerhalb von 16 RGB-Werten (`#1a1a1a`/`#202020`/`#242424`) —
+genau die "Grau-auf-Grau"-Falle, vor der die Skill-Referenztabelle
+warnt. Eine gezogene, für "Photography Studio" recherchierte
+Referenzpalette (`#000000`/`#0C0C0C`/`#18181B`/`#27272A`) und die
+Schriftempfehlung "Modern Dark Cinema (Inter System)" (Inter,
+gewichts-/laufweitenpräzise, explizit für "dark, cinematic, technical,
+precision, premium, developer/high-end utility") passen beide direkt
+auf dieses Produkt.
+
+**Fünf Schritte, jeder gezielt auf einen real verifizierten Befund
+statt einer generischen Politur-Liste:**
+
+1. **Eigene Typografie statt `system-ui`.** `@fontsource/inter`
+   (selbst gehostet, siehe `THIRD_PARTY.md` — bewusst kein
+   `fonts.googleapis.com`-Laufzeit-Download, die App muss offline
+   funktionieren), nur `latin`/`latin-ext` × 400/500/600/700 (~100 KB
+   statt ~500 KB). `--font-sans` zeigt jetzt zuerst `"Inter"`.
+   Zusätzlich `--text-lg/-xl/-2xl--letter-spacing` (Tailwind-v4-
+   Theme-Overrides derselben Art wie die Radius-/Schatten-Skala aus
+   Phase 18) für engere, bewusst gesetzte Laufweite auf Überschriften
+   — ohne eine einzige Klassennamen-Änderung im gesamten Frontend.
+2. **Echte Farbtiefe statt Grau-auf-Grau.** `--color-bg-base/-raised/
+   -panel` von `#1a1a1a`/`#202020`/`#242424` auf `#050505`/`#0e0e0e`/
+   `#17171a` — deutlich näher an Schwarz, deutlich unterscheidbare
+   Stufen. `--color-border` von reinem Grau (`#333333`) auf einen
+   minimal wärmeren Ton (`#3a3733`). Hell-Theme/Kontrastmodus/
+   `--glass-*` unverändert (eigene, unabhängige Kaskaden-Ebenen).
+3. **Z-Tiefe konsequent statt dekorativ.** Neue oberste Schatten-Stufe
+   `--shadow-2xl` (dunkel UND hell) für Elemente, die sich bewusst vor
+   allem anderen befinden sollen — angewendet auf `components/ui/
+   Dialog.tsx`/`Sheet.tsx` (vorher `shadow-xl` wie jede normale Karte,
+   jetzt eine eigene, stärkere Stufe für alle 25+ darauf aufbauenden
+   Dialoge/Sheets in einem Schritt).
+4. **Hover-Bewegung nach Bedeutung, nicht mehr uniform.** Die
+   bestehende globale `[role="button"]:hover`-Regel (Phase 20) und die
+   Karten-Hover-Behandlung in `GridView.tsx`/`Filmstrip.tsx` (Phase
+   23) waren bereits gestuft vorhanden — der real verbliebene
+   Blindfleck war der Import-Knopf in `Header.tsx`: optisch identisch
+   zum direkt danebenliegenden Such-Knopf (`border-border bg-bg-panel`
+   für beide), obwohl Import die häufigste Einstiegsaktion ist.
+   Bekommt jetzt dieselbe Akzent-Tönung, die anderswo in der App schon
+   für "aktiv/ausgewählt" steht (`border-accent bg-accent/10
+   text-accent`, z. B. `ColorHarmonyWheel.tsx`) statt eines neu
+   erfundenen Vollton-Stils — konsistent mit der bestehenden
+   Bildsprache, aber deutlich von den umgebenden neutralen Knöpfen
+   abgesetzt.
+5. **Bento-artige Kacheln statt gleichförmiger Liste.** Bewusst NICHT
+   am virtualisierten Foto-Raster (`GridView.tsx`) angesetzt — echte
+   Asymmetrie in einem `@tanstack/react-virtual`-Raster mit fester
+   Zellgröße wäre ein eigenständiges, riskantes Vorhaben gegen die
+   dokumentierte 50.000-Foto-Performance-Garantie (`PHASE1_PROMPT.md`
+   Abschnitt 9), ohne dass ein Nutzerwunsch danach verlangt hätte.
+   Stattdessen am `StatsCacheDialog.tsx`-Statistik-Dashboard, bisher
+   eine flache `<p>`-Textliste: jetzt ein Kachelraster mit
+   unterschiedlichen Spannweiten (Foto-Gesamtzahl als große
+   "Hero"-Kachel mit großer Zahl, Größe/Zeitraum schmaler, Kamera-/
+   Bewertungslisten wieder breiter), `rounded-xl`, echte Karten statt
+   reinem Text — Textinhalt je Zeile unverändert (`name: count` etc.),
+   reine Neuanordnung.
+
+Reale visuelle Verifikation per Playwright-Screenshot (Kopfzeile,
+Import-Knopf-Hover, Statistik-Dashboard) — nicht nur Kompilieren,
+siehe dieselbe Disziplin wie ADR-0044.
+
+Verifiziert: `tsc -b`, `vite build` (bestätigt, dass die
+`@fontsource/inter`-CSS-`@import`s über Vite auflösen und nur die
+tatsächlich gebrauchten Subset-Dateien bündeln), `vitest run`
+(251/251), volle Playwright-Suite (142/142, insbesondere
+`library-views-flow.spec.ts` "Statistik-Dashboard zeigt die
+Foto-Gesamtzahl" weiterhin grün trotz der Kachel-Umstellung).
+
+---
+
+## ADR-0055: Phase 25 Nachtrag — echtes "Liquid Glass" (Bugfix:
+`backdrop-filter` fehlte im Produktions-Build; Verzerrungsfilter,
+Kanten-Lichtkante, "Liquid"-Knopf-Mechanik)
+
+Nutzerurteil (verbatim, Ausschnitt): die Schritt-0-Screenshots seien
+"nicht wirklich das Liquid Glass" — dazu zwei vom Nutzer bereitgestellte
+21st.dev-Referenz-Prompts (siehe `PROMPTS.md`) mit der Anweisung, das
+dort gezeigte Design 1:1 zu erreichen und auf die ganze App,
+insbesondere Hauptmenü-Knöpfe/-Paletten, anzuwenden.
+
+**Real gefundener Bug, nicht nur "zu subtil" (siehe DECISIONS.md-
+Disziplin "real geprüft, nicht angenommen"):** `getComputedStyle(header,
+"::before").backdropFilter` ergab in einem frisch per `vite build`
+gebauten Produktions-Bundle `"none"` — der Weichzeichner war seit Phase
+21 nie tatsächlich aktiv, unabhängig von jeder Opazitäts-/Blur-Wert-
+Feinjustierung in den bisherigen Phasen. Ursache: `vite.config.ts`s
+`build.target` steht für nicht-Windows-Builds auf `"safari13"`; Lightning
+CSS (Tailwind v4s Build-Minifizierer) erkennt ein direkt
+nebeneinanderstehendes `-webkit-backdrop-filter`+`backdrop-filter`-Paar
+mit identischem Wert als "ein Duplikat für unterschiedliche Ziel-
+Browser" und behält bei diesem Ziel gezielt nur die für Safari 13
+nötige, präfigierte Form — die Standard-Eigenschaft verschwand komplett
+aus dem ausgelieferten CSS. In einem realen Chromium-basierten Webview
+(z. B. Windows/WebView2, aber auch jeder Chromium-basierte Test-/
+Vorschau-Browser) versteht der Browser aber nur die unpräfigierte Form
+— dort blieb `backdrop-filter` dadurch vollständig wirkungslos.
+
+**Fix:** die zweite (Standard-)Deklaration steht jetzt in einem
+`@supports (backdrop-filter: blur(1px)) { ... }`-Block statt direkt
+daneben — Lightning CSS erkennt einen `@supports`-umschlossenen Block
+nicht als simples Ziel-Browser-Duplikat und lässt ihn unabhängig vom
+`build.target` unangetastet (per gebautem CSS nachgeprüft: beide
+Eigenschaften bleiben jetzt erhalten, `@supports` bekommt zusätzlich
+automatisch eine Lightning-CSS-generierte `-webkit`-Alternativbedingung).
+Per `getComputedStyle` nach dem Fix bestätigt:
+`backdropFilter: "blur(26px) saturate(1.65)"`.
+
+**Echtes Glas statt reinem Weichzeichner** (adaptiert aus `PROMPTS.md`
+Prompt 1s `GlassFilter`, auf für dauerhaft sichtbare App-Chrome
+verträgliche, deutlich schwächere Werte reduziert): neue
+`GlassDistortionFilter.tsx` — eine einmalig in `App.tsx` gemountete,
+unsichtbare SVG-`<filter>`-Definition (`feTurbulence`+`feGaussianBlur`+
+`feDisplacementMap`), per `filter: var(--glass-distortion)` auf allen
+`.apx-glass`/`.apx-glass-strong`-Flächen referenziert — echte, wenn auch
+dezente Brechung statt eines rein flachen Weichzeichners. `none` im
+Kontrastmodus (Lesbarkeit hat dort Vorrang). Dazu `--glass-edge-shadow`
+(ebenfalls aus Prompt 1: "Licht fängt sich an der Kante") als `inset`-
+Lichtkante auf derselben Tönungs-Ebene.
+
+**Architektur-Umbau nötig, um Text nicht mitzuverzerren:** `filter`
+distorted die GESAMTE Box, in der es steht, inklusive Inhalt — auf der
+`.apx-glass`-Fläche selbst gesetzt, hätte es also auch den Text/die
+Knöpfe in der Kopfzeile selbst verzerrt. Löst das über zwei
+`::before`/`::after`-Pseudo-Elemente statt der bisherigen einzelnen
+`background`-Ebene: `::before` trägt ausschließlich `backdrop-filter`+
+die SVG-Verzerrung (eine leere Ebene, die nur das dahinterliegende Bild
+sampelt/verzerrt), `::after` die Tönung/den Schleier/die Kantenlicht-
+Kante, der echte Inhalt bleibt scharf im normalen Fluss darüber.
+
+**Zwei reale Regressionen dabei gefunden und behoben, bevor sie in den
+Commit gingen (nicht nur vermutet — je per `getComputedStyle`/
+`getBoundingClientRect()` nachgewiesen):**
+1. Ein zunächst gesetztes `z-index: 0` auf `.apx-glass`/`-strong` (um
+   den negativen Pseudo-Element-`z-index` einen eigenen Stapelkontext
+   zu geben) überschrieb an mehreren Aufrufstellen (u. a. `ui/Menu.tsx`s
+   Dropdown) deren eigenes `z-40`/`z-50` aus einer Tailwind-Utility-
+   Klasse auf demselben Element — das Überlauf-Menü verschwand hinter
+   dem Hauptinhalt. Durch `isolation: isolate` ersetzt (derselbe lokale
+   Stapelkontext, ohne den `z-index`-Wert des Elements selbst zu
+   berühren) — dann aber real geprüft, dass `isolation: isolate` für
+   diesen Zweck gar nicht nötig war (siehe Punkt 2).
+2. Beim Nachprüfen mit einem eigenen Debug-Test wurde `.apx-glass-
+   strong`s `position: relative` fälschlich als NEUE Regression
+   verdächtigt (Dropdown landete bei `top: -209px`, weit außerhalb des
+   Bildschirms) — durch einen Vergleichslauf gegen den unveränderten
+   Stand (`git stash`) widerlegt: **derselbe** Versatz trat bereits vor
+   jeder heutigen Änderung auf. Die tatsächliche Ursache war eine
+   Abweichung im eigenen Test-Skript (zusätzlicher Ordner-Auswahl-Klick
+   vor dem Öffnen des Überlauf-Menüs, den der echte, seit Phasen
+   zuverlässig grüne `library-views-flow.spec.ts`-Test nicht macht) —
+   eine bereits bestehende, fragile, aber in der echten Testabdeckung
+   nicht auftretende Eigenheit, keine neue Regression. Nicht "repariert"
+   (kein realer Befund, der das rechtfertigt), stattdessen dokumentiert.
+
+**"Liquid"-Knopf-Mechanik** (adaptiert aus `PROMPTS.md` Prompt 2s
+`LiquidButton`, ohne Radix/`class-variance-authority` — dieses Projekt
+nutzt bewusst keine davon, siehe `lib/utils.ts`s `cn()`-Begründung):
+neue `.apx-btn-liquid`/`.apx-btn-liquid-active`-Klassen (elastisches
+Überschwingen beim Hover, `cubic-bezier(0.175, 0.885, 0.32, 2.2)`,
+dieselbe Kurve wie im Referenz-Prompt; `.apx-btn-liquid-active` ergänzt
+die bestehende `bg-accent/10 text-accent`-Tönung um dieselbe Kanten-
+Lichtkante wie die Glasflächen) — angewendet auf `Header.tsx`s sechs
+Ansicht-Segmentknöpfe und den Import-Knopf: bewusst NUR auf diese
+wenigen, dauerhaft sichtbaren Hauptmenü-Knöpfe beschränkt (nicht
+flächendeckend, sonst verliert die Geste ihre Bedeutung als "das hier
+ist der Hauptweg durch die App") — der Rest der App bleibt auf der
+bereits bestehenden, gestuften "Subtil"/"Standard"-Hover-Mechanik aus
+ADR-0053/-0054.
+
+Verifiziert: `tsc -b`, `vite build` (direkt am gebauten CSS geprüft,
+dass `backdrop-filter` jetzt tatsächlich enthalten ist), `vitest run`
+(251/251), volle Playwright-Suite (142/142) — inklusive eines
+gezielten Vergleichslaufs gegen den unveränderten Stand zur
+Unterscheidung "echte Regression" vs. "bereits bestehende
+Eigenheit" (siehe oben). Reale visuelle Verifikation per Playwright-
+Screenshot (Kopfzeile, Statistik-Dialog mit sichtbarer Schatten-/
+Kantenwirkung) sowie direkte Pixel-/`getComputedStyle`-Messung statt
+reinem Screenshot-Eyeballing.
+
+---
+
+## ADR-0055-Nachtrag: Werte deutlich verstärkt + strukturelle Grenze
+real nachgewiesen (Kopfzeile kann architektonisch nicht wie iOS
+Control Center aussehen)
+
+Nutzerkritik (ein reales iOS-Control-Center-Referenzfoto beigefügt):
+das bisherige Ergebnis sei "nicht ansatzweise" das gezeigte Liquid
+Glass. Berechtigt — zwei getrennte, real untersuchte Ursachen:
+
+1. **Werte zu zurückhaltend.** `--glass-bg`/`-bg-strong` waren dunkle,
+   recht deckende Grautöne (`rgb(32 32 32 / 44%)`) mit nur `165%`
+   Sättigung — das dämpft durchscheinende Farbe stark, statt sie wie im
+   Referenzfoto vivide durchscheinen zu lassen. Verstärkt auf hellere,
+   durchsichtigere Töne (`rgb(70 70 78 / 30%)` bzw. `rgb(60 60 70 /
+   40%)`), `--glass-saturate` von `165%` auf `220%`, `--glass-blur` von
+   `26px` auf `18px` (weniger Weichzeichnung, mehr Sättigung ergibt
+   sichtbar mehr Farbe statt eines matschigen Grau-Verlaufs),
+   `--glass-sheen`/`-edge-shadow`-Deckkraft ebenfalls angehoben.
+2. **Strukturelle Grenze für Kopfzeile/angedockte Paletten, real per
+   Test nachgewiesen (nicht nur vermutet):** ein Playwright-Test mit
+   einem knallbunten Test-Hintergrund auf `body` zeigte in der
+   Kopfzeile GAR KEINE Farbe — Ursache: `App.tsx`s Wurzel-`<div
+   className="... bg-bg-base">` überdeckt `body` vollständig und
+   deckend; `body`s eigener Hintergrund ist dadurch nirgends sichtbar.
+   Ein zweiter Test mit demselben bunten Verlauf auf dem zentralen
+   Inhaltsbereich (`<main>`, dort wo im echten Betrieb Fotos liegen)
+   bestätigte: der **Dialog** (der als echtes Overlay ÜBER diesem
+   Bereich liegt) zeigt danach deutlich sichtbare, durchscheinende
+   Farbe — die **Kopfzeile** dagegen weiterhin nicht, weil sie in
+   `App.tsx`s Flexbox-Layout eine eigene, mit dem Fotobereich nicht
+   überlappende Zeile ist (anders als iOS Control Center, das als
+   Overlay ÜBER dem Homescreen-Hintergrund schwebt). Kein CSS-
+   Wertetuning kann daran etwas ändern, solange die Kopfzeile
+   strukturell nie denselben Bildschirmbereich wie ein Foto belegt —
+   das ist eine Layout-Frage, keine Farb-/Blur-Frage. Nicht angetastet
+   (ein Umbau der Kopfzeile zu einem über den Inhalt schwebenden
+   Overlay wäre ein eigenständiger, für ein Profi-Fotowerkzeug
+   fragwürdiger Eingriff, den der Nutzer nicht verlangt hat) — aber
+   hier dokumentiert, damit klar ist, wo die Grenze liegt und warum.
+
+Verifiziert an einem eigens gebauten Vergleichstest (bunter Farbverlauf
+hinter `<main>`, Dialog geöffnet) — deutlich sichtbarer Sättigungs-/
+Farbdurchschein-Sprung gegenüber dem Vorher-Screenshot, per Playwright-
+Screenshot bestätigt. `tsc -b`, `vite build`, `vitest run` (251/251),
+volle Playwright-Suite (142/142) weiterhin grün.
+
+### ADR-0055-Nachtrag III: Kopfzeile als echtes Overlay über den Fotos
+
+Auf explizite Nutzerentscheidung (`AskUserQuestion`: "Ja, Kopfzeile als
+Overlay über den Fotos") die oben unter Nachtrag II dokumentierte
+strukturelle Grenze tatsächlich aufgehoben — nicht nur beschrieben.
+Kern: `Header.tsx` ist keine normale Flex-Zeile im Dokumentfluss mehr,
+sondern `position: fixed; inset-x-0; top-0; z-30` — dieselbe
+Technik wie iOS Control Center, das über dem Homescreen-Hintergrund
+schwebt statt eine eigene Zeile daneben zu sein.
+
+**Kaskaden-Falle (zweites Mal in dieser Phase, gleiche Ursache wie
+`z-index` bei Nachtrag/ADR-0055):** `.apx-glass` setzt unlayered
+`position: relative` (für die `::before`/`::after`-Ebenen nötig) —
+das schlägt die `fixed`-Tailwind-Utility-Klasse auf demselben Element
+IMMER, unabhängig von der Reihenfolge im Quelltext (Tailwind v4s
+`@layer utilities` ist gegenüber unlayered CSS strukturell
+nachrangig). Real gemessen: `getComputedStyle(header).position` ergab
+trotz der `fixed`-Klasse weiterhin `"relative"`. Diesmal nicht über
+`isolation` umgangen (der Wert MUSS wirklich `fixed` sein), sondern
+über eine gezielte, spezifischere Gegenregel `header.apx-glass {
+position: fixed; }` in `index.css` — Element+Klasse-Selektor schlägt
+die reine Klasse `.apx-glass` unabhängig von der Ebenenfrage.
+
+**Wer die freiwerdende 48px-Lücke zurückgewinnt und wer nicht (bewusst
+selektiv, nicht pauschal):**
+- `ErrorBanner.tsx`/`FilterBar.tsx`: eigenes `pt-12`/`pt-16` direkt am
+  jeweils selbst gerenderten Element (beide rendern bedingt — kein
+  Geisterabstand, wenn inaktiv).
+- `PaletteFrame.tsx` (gemeinsame Basis von Sidebar/Presets/Metadaten/
+  Entwickeln/Masken-Panel): `pt-12` an der Wurzel, aber NUR wenn
+  `centerView` NICHT `grid`/`overview` ist — in diesen zwei Ansichten
+  hat `FilterBar.tsx` die Lücke bereits durch ihre eigene Position vor
+  der Zeile zurückgewonnen; ein zusätzliches `pt-12` an den Paletten
+  wäre eine doppelte, zu große Lücke gewesen (Ursache/Wirkung real per
+  Screenshot verglichen, bevor die Bedingung eingebaut wurde).
+- Der zentrale Inhaltsbereich (`App.tsx`s `key={centerView}`-Wrapper um
+  GridView/Viewer/MapView/PeopleView/VideoPlayer) bekommt **bewusst
+  keine** Kompensation — er reicht jetzt bis `y=0`, das ist der ganze
+  Sinn der Änderung: echte Fotofarbe soll durch die Kopfzeile
+  scheinen. Für `grid`/`overview` bleibt der sichtbare Effekt dadurch
+  unverändert null (FilterBar blockiert strukturell weiterhin den
+  Weg dorthin — akzeptierter, bewusster Kompromiss, s. u.), für
+  `viewer`/`map`/`people`/`video` (keine FilterBar) ist der Effekt ab
+  sofort real vorhanden.
+
+**Gefundene und behobene Regression (volle Playwright-Suite, nicht nur
+Kompilieren, hat sie real gefangen):** `tat-flow.spec.ts` schlug fehl
+— "header intercepts pointer events" beim Klick auf den TAT-Knopf.
+Ursache: mehrere absolut positionierte Overlay-Kontrollen in
+`Viewer.tsx` (Offline-Badge, Zielgerichtetes-Anpassungswerkzeug-
+Leiste), `MapView.tsx` (Kartensteuerung) und `GlobeView.tsx`
+(Fotoanzahl-Hinweis) waren mit `top-3` relativ zum jeweiligen
+Container positioniert — dieser Container reicht jetzt bis `y=0`,
+die Overlays lagen dadurch buchstäblich unter der neuen, schwebenden
+Kopfzeile und wurden von deren Klickfläche blockiert. Auf `top-16`
+angehoben (48px Kopfzeile + Luft). `PeopleView.tsx`s eigenes
+`<main>` (in-Fluss-Inhalt, kein absolutes Overlay) bekam statt `p-4`
+ein asymmetrisches `pt-16`/`px-4`/`pb-4` — die zusätzliche Innenhöhe
+gehört zum scrollbaren Bereich, verschwindet beim Herunterscrollen
+also wieder (dasselbe Prinzip wie bei `FilterBar.tsx`).
+
+**Bewusst nicht angetastet:** Raster-/Übersichtsansicht (`FilterBar`
+bleibt eine normale, nicht schwebende Zeile) — ein Umbau auch dieser
+Leiste zu einem schwebenden Overlay hätte ihre Höhe variabel gemacht
+(`flex-wrap`, bricht bei schmalem Fenster auf mehrere Zeilen um), eine
+verlässliche Kompensationshöhe für die Paletten darunter wäre damit
+nicht mehr statisch berechenbar gewesen — außerhalb des vom Nutzer
+konkret verlangten Umfangs ("Kopfzeile als Overlay über den Fotos"),
+deshalb hier bewusst begrenzt statt spekulativ mit ausgebaut.
+
+**Reale visuelle Verifikation** (nicht nur Kompilieren/Tests, siehe
+ADR-0044-Disziplin): eigens gebauter Playwright-Test mit echten
+Katalog-Fixtures (Ordner+Foto über `installTauriMock`), `boundingBox`/
+`getComputedStyle` bestätigen `position: fixed`; Screenshot mit einem
+knallbunten Testverlauf hinter `<main>` in der Einzelbild-Ansicht
+(keine `FilterBar`) zeigt deutlich sichtbare, durch die Kopfzeile
+gebrochene Farbe — Screenshot derselben Aktion in der Rasteransicht
+(mit `FilterBar`) zeigt bewusst KEINE Veränderung gegenüber vorher
+(Sidebar/FilterBar/Raster exakt an ihrer alten Position). Beide
+Screenshots dem Nutzer geschickt.
+
+`tsc -b`: sauber. `vitest run`: 251/251. Volle Playwright-Suite:
+142/142 (inklusive der zunächst gefundenen und behobenen
+`tat-flow.spec.ts`-Regression).
+
+---
+
+## ADR-0056: Phase 26 — drei Ansichts-Funktionen, die erst durch die schwebende Kopfzeile möglich wurden
+
+Nutzerwunsch nach dem Layout-Umbau: "Noch mehr Funktionen". Statt
+beliebiger Zusätze bewusst genau die drei Funktionen gebaut, die aus
+der neuen Struktur (Kopfzeile als Overlay, ADR-0055-Nachtrag III)
+folgerichtig entstehen — die Chrome liegt jetzt ÜBER dem Bild, also
+ist "Chrome wegnehmen" plötzlich eine sinnvolle, sichtbare Geste.
+
+1. **Fokus-Modus** (`t`, Store: `focusMode`): blendet Sidebar, Presets-,
+   Metadaten-, Entwickeln- und Masken-Palette sowie den Filmstreifen
+   aus — übrig bleiben Foto und schwebende Kopfzeile. Die Paletten
+   werden nicht per CSS versteckt, sondern **gar nicht gerendert**:
+   sonst liefen ihre Effekte (Vorschau-Nachladen, Histogramm-Zeichnen)
+   unsichtbar weiter. Der je Palette gespeicherte Ein-/Ausklappzustand
+   (`useWorkspacePanel`, localStorage) bleibt unberührt und kommt beim
+   Verlassen unverändert zurück — der Modus legt sich nur temporär
+   darüber.
+2. **Lichter aus** (`l`, Store: `lightsOut`, Ringtausch
+   `off` → `dim` → `black`): dimmt die Umgebung, das Foto bleibt hell.
+   Umgesetzt über eine `fixed inset-0`-Sichtebene auf `z-20`; der
+   zentrale Bildbereich hebt sich bei aktivem Modus auf `z-[25]` und
+   liegt damit darüber. Die Kopfzeile (`z-30`) bleibt oberhalb beider
+   Ebenen — ihr `backdrop-filter` tastet dadurch die bereits
+   abgedunkelte Umgebung ab und wird selbst dunkel, was genau der
+   gewünschte Effekt ist. `pointer-events-none` auf der Dimm-Ebene:
+   der Modus verdunkelt nur, er sperrt die Bedienung nicht (sonst wäre
+   er ohne Tastatur nicht mehr verlassbar). Ohne aktiven Modus bekommt
+   der Bildbereich bewusst KEINE Stapelkontext-Klasse — ein unnötig
+   gesetzter `z-index` hat in ADR-0055 schon einmal das Overflow-Menü
+   verdeckt.
+3. **Schwebende Zoom-Steuerung** im Viewer (unten links, zwischen
+   TAT-Leiste oben rechts und Info-Overlay unten rechts): die
+   Zoomstufe war bis hier ausschließlich über Tastatur (`0`/`1`/`+`/
+   `-`) und Mausrad erreichbar und nur als Prozentzahl im
+   Info-Overlay ablesbar — ohne Tastatur gab es keinen Weg, gezielt
+   auf 100 % zu gehen. Nutzt dieselben Store-Aktionen wie die
+   Tastenkürzel, keine eigene Zoom-Logik.
+
+**Tastenbelegung — bewusste Abweichung von Lightroom.** Lightroom legt
+diese beiden Modi auf `Tab` bzw. `L`. `l` ist übernommen, `tab`
+bewusst NICHT: Tab ist die Tastatur-Navigationstaste schlechthin, sie
+global abzufangen würde die Bedienung ohne Maus app-weit brechen —
+dieselbe Barrierefreiheits-Linie wie `reduced_motion`/Kontrastmodus/
+Fokus-Fallen an anderer Stelle. Stattdessen `t`; wer `Tab` trotzdem
+will, kann es im Cheatsheet selbst umbelegen (beide Kürzel laufen über
+`KEYBINDING_ACTIONS`/`matchesBinding`, sind also umbelegbar und durch
+den bestehenden `isEditable`-Wächter automatisch aus Eingabefeldern
+und `role="slider"`-Widgets herausgehalten).
+
+**Auffindbarkeit.** Beide Modi stehen zusätzlich im Kommando-Register
+(`commandRegistry.ts`, Kategorie `navigation`) mit zustandsabhängiger
+Beschriftung ("Lichter aus: Umgebung dimmen" → "… ganz abdunkeln" →
+"Lichter an: Umgebung zurückholen"), erscheinen also in der
+Befehlspalette und sind in `de.ts`/`en.ts` übersetzt. Genau das war
+ADR-0046s Befund: eine Funktion, die es nur auf einer Taste gibt, ist
+für die meisten Nutzer nicht vorhanden.
+
+**Lesbarkeitsschutz als eigener Punkt.** Beim Durchsehen der eigenen
+Screenshots der vorherigen Runde real aufgefallen (nicht vermutet):
+der Platzhaltertext der Befehlspalette stand vor einem hellen
+Sonnenuntergang-Foto und war kaum noch lesbar — eine direkte Folge
+davon, dass Glasflächen seit Nachtrag III echte Fotofarbe durchlassen.
+Zwei Maßnahmen: neuer Token `--glass-text-shadow` auf `.apx-glass`/
+`.apx-glass-strong` (dunkler Schlagschatten im Dunkel-Theme, heller im
+Hell-Theme, `none` im Kontrastmodus, wo Zeichenschärfe Vorrang hat)
+und der Platzhalter selbst von `text-text-muted` auf
+`text-text-secondary`.
+
+**Real gefundene Regression — dieselbe Kaskaden-Falle zum dritten
+Mal.** Die volle Playwright-Suite meldete nach dem ersten Durchgang
+**8 Fehlschläge** (nicht "alles grün"): sechs Tests, die in das Bild
+klicken (KI-Maske, Weißabgleich-Pipette, Farbmischer, Farbbereich-
+Maske, TAT, Virtuelle Blende), plus zwei Selektor-Kollisionen.
+Ursache der sechs, per `document.elementFromPoint` am echten
+Klickpunkt gemessen statt geraten: die Zoom-Steuerung trug
+`apx-glass` UND `absolute bottom-3 left-3` auf demselben Element —
+`.apx-glass` setzt aber unlayered `position: relative`, was Tailwinds
+`absolute`-Utility (`@layer utilities`) grundsätzlich schlägt. Die
+Leiste war dadurch ein normales Flex-Kind von `<main>` (`items-center
+justify-center`) und saß **mittig im Bild**, genau auf dem Klickpunkt
+(gemessen: Box bei y=274 statt y≈578, 248px breit in einem 224px
+breiten Bereich). Behoben durch einen äußeren, ungestylten
+Positionierungs-Rahmen um die Glasfläche (`pointer-events-none`
+außen, `pointer-events-auto` innen) statt eines weiteren
+Spezifitäts-Patches — und `.apx-glass` in `index.css` trägt jetzt
+eine ausdrückliche Warnung für künftige Aufrufer, weil dieselbe Falle
+in dieser Sitzung bereits dreimal zugeschlagen hat (`z-index` beim
+Überlauf-Menü, `fixed` bei der Kopfzeile, jetzt `absolute` hier).
+
+Die zwei übrigen Fehlschläge waren echte Selektor-Kollisionen, keine
+Funktionsfehler: `print-flow`s `getByLabel("Zoom")` traf jetzt auch
+die neue Viewer-Steuerung (auf den Druck-Dialog eingegrenzt), und
+`viewer-flow`s `getByText(/100 %/)` traf drei Elemente (prüft jetzt
+gezielt die neue, eindeutige Zoomanzeige — genauer als vorher, die
+Aussage des Tests bleibt dieselbe).
+
+**Methodischer Nachtrag zur Verifikation selbst:** der erste
+Suite-Lauf lief als `npx playwright test | tail -6` — dadurch war der
+gemeldete Exit-Code der von `tail` (immer 0), und die Zusammenfassung
+"135 passed" wurde beinahe als Erfolg gelesen, obwohl 143 Tests
+existieren. Aufgefallen ist es nur, weil die Zahl nicht zur erwarteten
+143 passte. Konsequenz: Suite-Läufe ab hier in eine Logdatei
+schreiben und den echten Exit-Code prüfen, nicht durch `tail` pipen.
+
+Verifiziert: neuer e2e-Test `focus-lights-zoom-flow.spec.ts` prüft
+alle drei Funktionen real (Paletten verschwinden/kommen zurück,
+Dimm-Ebene durchläuft beide Stufen mit gemessener
+`background-color`, Zoom springt über die Knöpfe auf 100 % und
+zurück auf Einpassen). `tsc -b` sauber, `vitest run` 251/251, volle
+Playwright-Suite nach den Korrekturen 143/143 (Exit-Code real
+geprüft).
+
+---
+
+## ADR-0057: Phase 27 — zehn Kreativ-Werkzeuge mit großem Bildeffekt + Retro-Fuji-Thailand-Filter
+
+Nutzerwunsch: zehn weitere Funktionen, die "wirklich bei der Bearbeitung
+von Fotos helfen, anspruchsvoll, teilweise mit KI, wirklich sichtbare
+Erfolge erzielend", dazu ein `.cube`-Template im Retro-Fujifilm-
+Thailand-Look und eine Liquid-Glass-UI dafür.
+
+### Eine Stufe statt zehn
+
+Zehn einzelne Pipeline-Stufen wären zehnmal dasselbe Gerüst (EDL-Feld,
+`StageEnabled`-Flag, `develop.rs`-Zweig, Modul, Tests) für dieselbe
+Mathematik. Stattdessen EIN Feld `creative: CreativeAdjustments` mit
+zehn Unterstrukturen, EIN Modul `stages/creative.rs`, EIN Flag,
+EIN Pipeline-Zweig. Position: nach `lut_filter`, vor `liquify` — der
+LUT-Look ist die Grundgradation, die Kreativ-Stufe legt sich darüber.
+
+Die Reihenfolge **innerhalb** der Stufe ist fest und begründet
+(Korrektur → Atmosphäre → Optik → Licht → Gradation → Auflage): der
+Farbabgleich korrigiert die Grundfarbigkeit und muss deshalb vor allem
+Gestalterischen laufen; Nebel liegt „in der Luft" vor dem Motiv;
+Freistellung und Tilt-Shift sind optische Trennung; Sonnenstrahlen und
+Orton sind additives Licht; Filmlabor und Verlaufsabbildung graduieren
+das Gesamtbild inklusive dieses Lichts; die Farbisolierung arbeitet auf
+dem fertigen Farbergebnis; das Lichtleck liegt zum Schluss obenauf, wie
+im echten Labor.
+
+### Die zehn
+
+1. **Farbabgleich zu Referenzfoto** — Reinhard-Statistiktransfer
+   (Mittelwert + Streuung je Achse) in einem Gegenfarbenraum statt in
+   exaktem CIELAB: für einen Statistiktransfer zählt nur, dass die drei
+   Achsen weitgehend entkoppelt sind, nicht ihre exakte Normierung. Ein
+   Test prüft, dass Hin- und Rückrechnung die Ausgangsfarbe
+   rekonstruiert. Neuer Befehl `compute_reference_color_stats` liefert
+   sechs Zahlen — kein zweites Bild im EDL.
+2. **Atmosphärischer Tiefennebel** — nutzt die bereits vorhandene
+   MiDaS-Tiefenkarte (`estimate_photo_depth`, bisher nur Virtuelle
+   Blende). Einmal berechnen reicht für beide Werkzeuge.
+3. **KI-Motiv-Freistellung** — neuer Befehl `segment_photo_subject` auf
+   Basis der klassischen Center-Surround-Saliency
+   (`apx_ai::segmentation::subject_alpha`). Bewusst **kein**
+   Modell-Download: anders als Tiefenkarte/Stiltransfer läuft die
+   Funktion damit sofort, ohne Einstellungs-Umweg.
+4. **Tilt-Shift**, 5. **Sonnenstrahlen**, 6. **Orton-Glanz**,
+   7. **Filmlabor** (Bleach Bypass + Cross-Processing),
+   8. **Verlaufsabbildung**, 9. **Farbisolierung**, 10. **Lichtlecks** —
+   alle als geschlossene Formeln auf dem fertig entwickelten
+   sRGB-Bild, keine externen Daten.
+
+### Realer Bug dabei gefunden: die Tiefenkarte kam nie in Rust an
+
+Beim Bau von Punkt 2 und 3 stellte sich die Frage, wie eine Bytekarte
+überhaupt über die Tauri-Grenze kommt. Statt es anzunehmen, empirisch
+geprüft (Wegwerf-Test mit beiden Kandidaten-Formaten):
+
+    STRING -> Err("invalid type: string \"AAEC\", expected a sequence")
+    ARRAY  -> Ok(4)
+
+Die Rust-Seite ist ein schlichtes `Vec<u8>` ohne base64-Deserialisierer.
+`estimateDepthForCurrentPhoto` legte aber seit Phase 14 den **rohen
+base64-String** in `virtual_aperture.depth_map.depth` ab (alle anderen
+Patches im Projekt nutzen korrekt `base64ToByteArray`). Folge: sobald
+eine Tiefenkarte berechnet war, scheiterte das Parsen des gesamten EDL —
+und weil `useDevelopRender`s Fehlerpfad den Fehler nur still
+protokolliert, blieb einfach der zuletzt erfolgreiche Rahmen stehen.
+**Exakt dieselbe Fehlerklasse wie der LUT-Bug aus Phase 25**, und aus
+demselben Grund unentdeckt: die e2e-Tests laufen gegen den Mock, der
+das EDL nie durch Rust parst. Behoben (TS-Typ jetzt `number[]`, Store
+konvertiert), der neue e2e-Test prüft für die Motivmaske ausdrücklich,
+dass ein Zahlen-Array ankommt.
+
+Nachtrag zur Testlage: ein **bestehender** Test hat den kaputten Vertrag
+ausdrücklich festgeschrieben — `virtual-aperture-flow.spec.ts` prüfte
+`expect(...depth_map.depth).toBe("gICAgICAgICAgICAgICAgA==")`, also genau
+den base64-String, den Rust nie lesen konnte. Ein grüner Test war hier
+also kein Nachweis, sondern die Konservierung des Fehlers. Korrigiert auf
+den Vertrag, den die Rust-Seite tatsächlich deserialisiert (16 dekodierte
+Bytes mit Wert 128), mit Kommentar im Test, damit die Zusicherung nicht
+irgendwann „vereinfacht" zurückgedreht wird. Lehre, dieselbe wie aus dem
+LUT-Bug: eine Zusicherung, die nur den Mock gegen sich selbst prüft,
+kostet Vertrauen statt welches zu schaffen — Wire-Formate gehören gegen
+die echte Rust-Deserialisierung geprüft.
+
+### Retro Fuji Thailand
+
+Als echte `.cube`-Datei (`assets/luts/`, 33er Raster) **und** als elfter
+eingebauter Filter. Vier Merkmale, jedes als eigener Term: angehobener
+Schwarzpunkt mit Grünstich (Negativfilm hat kein echtes Schwarz, Fuji
+kippt unten ins Grüne), gedämpfte, nach Gelb-Orange gekippte Lichter,
+gezielte Türkis-Anhebung **nur dort, wo Blau ohnehin dominiert** (Wasser
+und Himmel, nicht pauschal), flachere Mitten. Original erstellt, kein
+fremdes Werk enthalten. Ein Test parst die ausgelieferte Datei und
+vergleicht sie Rasterpunkt für Rasterpunkt gegen die eingebaute Formel —
+beide können nicht auseinanderlaufen.
+
+### UI
+
+Ein Kreativ-Panel ganz oben in der Registerkarte „Kreativ" (nicht hinter
+acht Aufklapp-Abschnitten): je Werkzeug eine Glaskachel mit Titel, EINEM
+Halbsatz Wirkung und den Reglern, Hover hebt Rand und Schatten an, eine
+aktive Kachel bekommt Akzentrand und ein „aktiv"-Zeichen. Die beiden
+Ein-Klick-Vorbereitungen stehen in der Kachel, zu der sie gehören, nicht
+in einem separaten KI-Bereich. Reihenfolge = Verarbeitungsreihenfolge.
+
+### Bewusst nicht gemacht
+
+`creative` ist **keine** Preset-Sektion (anders als `lut_filter`): zwei
+der zehn tragen fotospezifisch berechnete Karten (Tiefenkarte,
+Motivmaske). Die in ein Preset zu übernehmen hieße, die Tiefe EINES
+Fotos auf ein anderes anzuwenden — ein stiller, schwer zu findender
+Fehler. Die übrigen acht wären für sich preset-fähig; sie erst
+aufzunehmen, wenn die beiden Karten beim Speichern gezielt
+herausgeschnitten werden, ist der saubere Weg (offener Nachtrag).
+
+Verifiziert: 15 neue Rust-Unit-Tests (darunter einer, der für jede der
+zehn Funktionen einzeln nachweist, dass sie das Bild real verändert),
+ein Test für die `.cube`-Datei gegen den eingebauten Filter, ein neuer
+e2e-Test für Panel/Regler/Ein-Klick-Knöpfe. `cargo fmt`/`clippy
+--workspace --all-targets` sauber, `cargo test -p apx-pipeline`
+271/271 und `cargo test --workspace` komplett grün, `tsc -b`,
+`vitest run` 251/251, volle Playwright-Suite 144/144 mit real geprüftem
+Exit-Code (`PLAYWRIGHT_EXIT=0`, in eine Logdatei umgeleitet statt durch
+`tail` gepipet — siehe ADR-0056).
+
+---
+
+## ADR-0058: Phase 28 — „Licht & Optik": zwölf Werkzeuge, echtes Bokeh, drei neue .cube-Filter
+
+Nutzerwunsch nach Phase 27: „Noch nicht gut genug mach noch mehr
+Funktionen mehr alles". Phase 27 hat *Looks* geliefert (Filmlabor,
+Verlaufsabbildung, Lichtlecks) — was fehlt, sind die Werkzeuge, mit
+denen man **Licht, Tiefe und Optik** eines Fotos wirklich umbaut. Genau
+das ist der Gegenstand dieser Phase.
+
+### Wieder eine Stufe, aber an anderer Pipeline-Stelle
+
+Dieselbe Gerüst-Entscheidung wie in ADR-0057 (ein EDL-Feld, ein Modul,
+ein Flag, ein `develop.rs`-Zweig) — aber bewusst **vor** `lut_filter`
+statt danach: Korrekturen (Tonwert, Zonen, Detail) und optische
+Phänomene (Bokeh, Blendenstern, Diffusion, Bewegungsunschärfe) sind
+Dinge, die an der *Kamera* passieren und deshalb der Gradation
+vorausgehen. Die Phase-27-Looks liegen weiterhin danach, wie im Labor.
+Die vollständige Kette lautet damit:
+
+    … → sky_replace → light_optics (neu) → lut_filter → creative → liquify
+
+### Feste Reihenfolge innerhalb der Stufe
+
+Korrektur → Tiefe → Licht → Optik → Stil:
+
+1. Tonwert-Angleich an ein Referenzfoto (globale Tonwertkorrektur)
+2. Zonensystem (lokale Tonwertkorrektur)
+3. Detail-Pyramide (Detailkorrektur auf drei Größenordnungen)
+4. Tiefenselektive Dunstentfernung
+5. Tiefenselektive Schärfe
+6. KI-Neubeleuchtung
+7. Himmel dramatisieren
+8. Bewegungsunschärfe
+9. Blendenstern
+10. Diffusionsfilter („Pro Mist")
+11. Kanalmatrix / Infrarot
+12. Poster-/Comic-Look (quantisiert alles davor, muss deshalb zuletzt)
+
+### Die zwölf im Einzelnen
+
+1. **Tonwert-Angleich** — neun Luminanz-Dezile des Referenzfotos werden
+   zu einer monoton steigenden, stückweise linearen Abbildung
+   verrechnet. Bewusst nur die Luminanz: die Farbigkeit macht bereits
+   der Farbabgleich aus Phase 27, beides zusammen ergibt einen
+   vollständigen Serien-Angleich, ohne dass eines das andere doppelt.
+   Neuer Befehl `compute_reference_tone_stats` liefert die neun Zahlen —
+   kein zweites Bild im EDL, dasselbe Muster wie bei den Farbkennzahlen.
+2. **Zonensystem** — zehn Luminanzzonen nach Ansel Adams, je ±1 EV.
+   Der entscheidende Punkt ist nicht die Zoneneinteilung, sondern dass
+   die daraus entstehende Verstärkungskarte durch einen **echten
+   Guided Filter** (Box-Mittel von Führungsbild und Karte, Kovarianz →
+   `a`/`b`) geglättet wird. Ein simpler Weichzeichner erzeugt an harten
+   Kanten genau die Lichtsäume, für die Zonenwerkzeuge berüchtigt sind;
+   der Guided Filter folgt den Kanten des Führungsbilds und vermeidet
+   sie. Das ist der anspruchsvollste Teil dieser Phase und der Grund,
+   warum das Werkzeug überhaupt brauchbar ist.
+3. **Detail-Pyramide** — drei Frequenzbänder (fein/mittel/grob) aus
+   gestaffelten Tiefpässen, je einzeln verstärkbar. Anders als
+   „Klarheit" (ein Band) trennt das Struktur von Volumen.
+4. **Tiefenselektive Dunstentfernung** — die Umkehrung des
+   Phase-27-Tiefennebels: Kontrast- und Sättigungsrückgewinnung, aber
+   **nur in der Ferne**, gewichtet über dieselbe MiDaS-Tiefenkarte.
+   Der globale „Dunst"-Regler der Grundeinstellungen kann das nicht:
+   er trifft Vordergrund und Hintergrund gleichermaßen.
+5. **Tiefenselektive Schärfe** — Unschärfemaske, deren Wirkung mit dem
+   Abstand von einer wählbaren Fokusebene abfällt. Schärft das Motiv,
+   ohne Hintergrundrauschen mitzuschärfen.
+6. **KI-Neubeleuchtung** — aus der Tiefenkarte wird per Gradient eine
+   Normalenkarte gewonnen, darauf laufen Lambert-Diffus und
+   Blinn-Phong-Glanzlicht mit frei setzbarer Lichtrichtung, -farbe und
+   Umgebungshelligkeit. Der sichtbarste Effekt der ganzen Phase.
+   **Ehrliche Grenze:** eine aus einer *relativen* Tiefenkarte
+   gewonnene Normale ist keine gemessene Oberflächennormale — das
+   Ergebnis ist plausible Lichtführung, keine physikalisch korrekte
+   Neubeleuchtung. Deshalb ist der Glanzlicht-Anteil standardmäßig
+   klein.
+7. **Himmel dramatisieren** — nutzt `apx_ai::segmentation::sky_alpha`
+   (neuer Befehl `segment_photo_sky`, kein Modell-Download).
+   Bewusst **kein** Austausch: Kontrast, Sättigung, Abdunklung und
+   Wärme nur innerhalb der Himmelsmaske. Der bestehende
+   Himmelsaustausch bleibt für den Fall, dass der Himmel wirklich weg
+   soll.
+8. **Bewegungsunschärfe** — gerichtet, radial (Drehung) und Zoom, je
+   als echte Liniensammlung entlang der jeweiligen Bahn. Optional
+   schützt die Motivmaske das Motiv, sodass ein „Mitzieher" entsteht,
+   statt das ganze Bild zu verwischen.
+9. **Blendenstern** — Lichtschleppen auf Spitzlichtern, `n` Strahlen,
+   Winkel, Länge, Schwelle, plus optionaler Regenbogen-Anteil über die
+   Strahllänge (Beugung an den Blendenlamellen).
+10. **Diffusionsfilter** — der „Pro Mist"-Effekt: Weichzeichnung, die
+    **nur aus den Lichtern** gespeist wird und über
+    `black_retention` verhindert, dass die Schwarzwerte milchig
+    werden. Genau dieser zweite Teil unterscheidet ihn vom
+    Orton-Glanz aus Phase 27, der global aufhellt.
+11. **Kanalmatrix** — freie 3×3-Matrix mit vier Ein-Klick-Vorgaben
+    (neutral, Falschfarben-Infrarot, Rot/Blau-Tausch, Cyanotypie).
+12. **Poster-/Comic-Look** — Quantisierung auf `n` Stufen plus
+    Konturzeichnung aus dem Sobel-Betrag.
+
+### Bokeh-Formen statt eines dreizehnten Werkzeugs
+
+Ein eigenes „Bokeh"-Werkzeug hätte ein zweites Mal weichgezeichnet, was
+die Virtuelle Blende schon weichzeichnet — doppelte Rechenzeit für ein
+schlechteres Ergebnis. Stattdessen ist die **bestehende** Stufe
+`stages::virtual_aperture` erweitert worden: polygonale Blendenöffnung
+(`blades`, `rotation`), anamorphe Streckung, Wirbel (`swirl`) und
+Spitzlicht-Anhebung (`highlight_boost`/`highlight_threshold`). Ohne
+gesetzte Werte bleibt der bisherige Kreis-Kern Bit-für-Bit erhalten —
+ein Test hält das fest, damit bestehende Bearbeitungen sich nicht
+stillschweigend ändern.
+
+### Drei neue .cube-Vorlagen
+
+„Nordic Winter", „Tokyo Neon Night" und „Sahara Gold" — dasselbe
+Verfahren wie bei Retro Fuji Thailand (33er Raster, aus derselben Formel
+erzeugt wie der eingebaute Filter, ein Test vergleicht Datei und Formel
+Rasterpunkt für Rasterpunkt). Eigene Namen statt Filmmarken, eigene
+Formeln, kein fremdes Werk enthalten.
+
+### UI: Suchen statt Scrollen
+
+Mit Phase 28 stehen 22 Kachel-Werkzeuge in zwei Panels. Ohne Hilfe wäre
+das genau die Scroll-Wüste, die Phase 18 abgeschafft hat. Deshalb
+bekommen **beide** Panels (Kreativ und Licht & Optik) denselben Kopf:
+ein Suchfeld über Titel und Wirkung, ein „Nur aktive"-Schalter und je
+Kachel einen Zurücksetzen-Knopf, der erst bei Hover/Fokus erscheint.
+Neue sechste Registerkarte „Licht & Optik" im Entwickeln-Panel — die
+zwölf in die bestehende „Licht"-Karte zu stopfen hätte sie verdoppelt.
+
+### Bewusst nicht gemacht
+
+Wie `creative` ist auch `light_optics` **keine** Preset-Sektion: vier
+der zwölf tragen fotospezifisch berechnete Karten (Tiefe, Himmel,
+Motiv). Derselbe offene Nachtrag wie in ADR-0057 — erst wenn beim
+Speichern eines Presets die Karten gezielt herausgeschnitten werden,
+können die übrigen acht preset-fähig werden.
+
+### Zwei selbstverschuldete Namenskollisionen (real gemessen)
+
+Der erste volle Playwright-Lauf nach der UI-Arbeit meldete sechs
+Fehlschläge, beide Ursachen aus dieser Phase:
+
+1. `getByRole("tab", { name: "Licht" })` traf plötzlich zwei Karten —
+   Playwrights Standard-Namensvergleich ist ein **Teilstring**-Treffer,
+   und „Licht" steckt in „Licht & Optik".
+2. `getByRole("button", { name: "Motiv freistellen" })` traf zwei
+   Knöpfe — den Aktionsknopf und den neuen Zurücksetzen-Knopf der
+   Kachel, dessen zugänglicher Name „Motiv freistellen zurücksetzen"
+   lautet.
+
+Beide sind in den **Tests** korrigiert (`exact: true`), nicht in der
+Oberfläche: „Licht & Optik" ist der richtige Kartenname, und
+„<Werkzeug> zurücksetzen" ist für Screenreader-Nutzer die richtige
+Beschriftung. Den Namen zu verstümmeln, um einen ungenauen Locator zu
+retten, wäre die falsche Richtung.
+
+Verifiziert: 16 neue Rust-Unit-Tests in `stages::light_optics` (darunter
+einer, der für jedes der zwölf Werkzeuge einzeln nachweist, dass es das
+Bild real verändert, und einer, der den Guided Filter gegen das
+Kastenmittel an einer harten Kante misst), 4 neue Bokeh-Tests (darunter
+der Bit-für-Bit-Vergleich gegen das Verfahren vor dieser Phase), der
+`.cube`-gegen-Formel-Test über alle vier Dateien, ein neuer e2e-Test mit
+vier Fällen. `cargo fmt`/`clippy --workspace --all-targets` sauber,
+`cargo test --workspace` komplett grün (apx-pipeline 290/290), `tsc -b`,
+`vitest run` 251/251, volle Playwright-Suite **148/148** mit real
+geprüftem Exit-Code (`PLAYWRIGHT_EXIT=0`).
+
+---
+
+## ADR-0059: Phase 29 — Kreativ- und Licht-&-Optik-Werkzeuge preset-fähig machen
+
+ADR-0057 und ADR-0058 haben beide dieselbe Einschränkung offengelassen:
+die zweiundzwanzig Werkzeuge der Phasen 27 und 28 sind **keine**
+Preset-Sektionen, weil sechs von ihnen fotospezifisch berechnete Karten
+tragen (MiDaS-Tiefenkarte bei Tiefennebel, Dunstentfernung,
+Tiefenschärfe und Neubeleuchtung; Motivmaske bei Freistellung und
+Bewegungsunschärfe; Himmelsmaske beim Dramatisieren). Die Tiefe EINES
+Fotos auf ein anderes anzuwenden wäre ein stiller, schwer zu findender
+Fehler. Dieser Nachtrag löst das.
+
+### Trennen statt ausschließen
+
+Eine Sektion ist nicht deshalb unübertragbar, weil sie *irgendetwas*
+Fotospezifisches enthält — sondern nur, soweit sie es enthält. Die
+Regler („60 % Nebel ab Entfernung 0,3", „Himmel kontrastreicher und
+dunkler") sind ein Look wie jeder andere; allein die Bytekarten sind es
+nicht. Eine einzige Liste `PHOTO_SPECIFIC_MAP_FIELDS` (Sektion →
+`werkzeug.feld`) benennt die sechs Stellen, und zwei kleine Funktionen
+tun den Rest:
+
+- `stripPhotoSpecificMaps` setzt sie beim **Speichern** auf `null` —
+  auf einer Kopie, damit das Speichern eines Presets dem Nutzer nicht
+  die gerade berechnete Karte aus der laufenden Bearbeitung löscht. Ein
+  Test hält genau das fest.
+- `restorePhotoSpecificMaps` setzt beim **Anwenden** die Karten des
+  ZIELFOTOS wieder ein. Ohne diesen zweiten Schritt wäre die Sache
+  schlimmer als vorher: jedes angewendete Preset würde eine bereits
+  berechnete Tiefenkarte mit `null` überschreiben.
+
+### Der ehrliche Rest: „aktiv, aber wirkungslos"
+
+Ein Preset bringt `sky_drama.amount = 0.7` mit, aber keine Maske. Das
+Werkzeug stünde dann auf „aktiv" und täte still nichts — genau die
+Sorte Fehler, die zu vermeiden der ganze Zweck der Übung ist, nur an
+eine andere Stelle verschoben. Beide Panels sagen es deshalb jetzt in
+der Kachel: „Ohne Himmelsmaske wirkungslos", „Ohne Tiefenkarte
+wirkungslos", „Ohne Referenzfoto wirkungslos". Ein Halbsatz, dieselbe
+Zeile wie der Ein-Klick-Knopf, der ihn auflöst.
+
+Die Bewegungsunschärfe ist bewusst **nicht** dabei: sie arbeitet auch
+ohne Maske, nur eben aufs ganze Bild. Ein Hinweis wäre dort schlicht
+falsch.
+
+### Was mit den Referenzwerten passiert
+
+Farbabgleich (sechs Farbkennzahlen) und Tonwert-Angleich (neun Dezile)
+bleiben **im** Preset. Sie sind zwar aus einem Referenzfoto gewonnen,
+aber genau das ist ihr Zweck: „mach diese Serie so wie jenes Foto" ist
+der Anwendungsfall, und ein Preset ist der richtige Transportweg dafür.
+Anders als eine Tiefenkarte beziehen sie sich nicht auf den Bildinhalt
+des bearbeiteten Fotos.
+
+### Ein Fehler, den erst der e2e-Test fand
+
+Die erste Fassung von `stripPhotoSpecificMaps` hat mit
+`structuredClone` kopiert. Alle sechs Vitest-Fälle liefen grün — sie
+arbeiten mit gewöhnlichen Objekten. In der App wird die Funktion aber
+auch aus einem Zustand/Immer-Erzeuger heraus aufgerufen, und
+`structuredClone` scheitert an einem Immer-Draft (das ist ein Proxy)
+mit `DataCloneError`: „Kopieren" im Entwickeln-Panel warf, der
+„Einfügen"-Knopf blieb deaktiviert. Der volle Playwright-Lauf hat das
+gefunden, nicht die Einheitentests.
+
+Zwei Konsequenzen, beide umgesetzt: die Helfer kopieren jetzt per
+Spread statt per `structuredClone` (zwei Ebenen reichen, tiefer greifen
+sie ohnehin nicht), und die drei Aufrufe, die bisher *innerhalb* eines
+Erzeugers rechneten, rechnen jetzt davor auf dem fertigen Zustand aus
+`get()` und weisen drinnen nur noch zu. Das ist auch unabhängig vom
+Fehler die klarere Aufteilung.
+
+Verifiziert: sechs neue Vitest-Fälle in `presets.test.ts` (Schneiden,
+Nicht-Anfassen der laufenden Bearbeitung, Zielfoto-Karten beim
+Zusammenführen, fehlende Karten als `null`, Stärke-Skalierung, keine
+Fremdsektion mitgenommen) und ein neuer e2e-Test, der den ganzen Weg
+geht: Maske auf Foto A berechnen, Preset speichern, auf Foto B anwenden,
+prüfen dass die Regler ankommen und die Maske ausdrücklich nicht.
+`tsc -b`, `vitest run` 257/257, `clippy --workspace --all-targets`
+sauber, volle Playwright-Suite **149/149** mit real geprüftem Exit-Code
+(`PLAYWRIGHT_EXIT=0`).
+
+---
+
+## ADR-0060: Phase 30 — „Direkt am Bild": zehn Werkzeuge mit eigenen Bedienelementen
+
+Nutzerwunsch: zehn weitere Funktionen, „die wirklich visuell sichtbare
+Änderungen am Foto produzieren **und neue UI-Elemente beinhalten**",
+ausdrücklich aufwändig.
+
+Das ist die entscheidende Abgrenzung zu Phase 27 und 28: die lieferten
+zweiundzwanzig Werkzeuge, aber alle mit derselben Bedienung — eine
+Glaskachel mit Reglern. Diese Phase dreht das um. Sieben der zehn
+Werkzeuge werden **im Bild selbst** bedient (Lichter ziehen, eine
+Horizontlinie legen, einen Lichtkegel aufziehen, Punkte setzen, Farben
+mit der Pipette greifen), die übrigen drei bekommen Bedienelemente, die
+es im Projekt bisher nicht gab (ein Verlaufsband mit frei
+verschiebbaren Stützstellen, ein 3×3-Matrix-Gitter, eine
+Falschfarben-Überlagerung mit klickbarem Zonenstreifen).
+
+### Eine neue Stufe, dieselbe bewährte Bauform
+
+`stages/interactive.rs`, ein EDL-Feld `interactive`, ein
+`StageEnabled`-Flag, ein `develop.rs`-Zweig — wie in Phase 27/28.
+Position: nach `light_optics`, vor `lut_filter`. Alles hier ist
+gesetztes Licht und gesetzte Farbe, gehört also in dieselbe Familie wie
+Licht & Optik und ebenfalls vor die Gradation.
+
+Reihenfolge innerhalb der Stufe (Licht → Farbe → Verlauf → Auflage):
+Lichtquellen → Lichtkegel → Abwedeln/Nachbelichten → Split-Lighting →
+Farbe ersetzen → Verlaufsband → Horizont-Verlaufsfilter.
+
+### Die sieben mit eigener Bildmathematik
+
+1. **Lichtquellen** — beliebig viele Punktlichter, je mit Ort, Radius,
+   Farbe, Stärke und Abfall. Additiv mit quadratischem Abfall.
+   Bedienung: Pins im Bild, die man zieht; eine Liste daneben zum
+   Hinzufügen, Auswählen und Löschen.
+2. **Lichtkegel** — eine frei aufziehbare, drehbare Ellipse mit
+   weichem Rand, die innen aufhellt und außen abdunkelt. Das
+   Bühnenlicht-Werkzeug, das eine Radialmaske nur umständlich
+   nachbaut.
+3. **Abwedeln/Nachbelichten** — frei gesetzte Punkte, je mit Radius und
+   Vorzeichen (aufhellen/abdunkeln). Die Dunkelkammer-Technik, direkt
+   am Bild statt über Masken.
+4. **Split-Lighting** — zwei Bildpunkte mit je einer Lichtfarbe; das
+   Bild wird entlang der Achse dazwischen eingefärbt. Erzeugt die
+   zweifarbige Lichtstimmung, für die man sonst zwei Verlaufsmasken
+   bräuchte.
+5. **Farbe ersetzen** — Quellfarbe per Pipette aus dem Bild, Zielfarbe
+   aus dem Farbwähler, dazu Toleranz und Weichheit. Der Abstand wird im
+   Gegenfarbenraum gemessen, nicht in RGB: ein RGB-Abstand hält
+   Helligkeit und Farbton nicht auseinander und greift deshalb
+   entweder zu viel oder zu wenig.
+6. **Verlaufsband** — bildet die Luminanz auf einen Verlauf mit
+   **beliebig vielen** Stützstellen ab. Die Verlaufsabbildung aus
+   Phase 27 kann genau drei; hier legt der Nutzer sie selbst fest.
+7. **Horizont-Verlaufsfilter** — ein Grauverlaufsfilter, dessen Kante
+   einer frei gezogenen Linie folgt statt dem Bildrand. Genau das
+   unterscheidet ihn von einer Verlaufsmaske mit fester Achse.
+
+### Die drei, die bestehende Funktionen erst bedienbar machen
+
+8. **3×3-Kanalmatrix-Gitter** — Phase 28 hat die Matrix eingeführt,
+   aber nur vier Ein-Klick-Vorgaben dafür gebaut; die neun Zahlen waren
+   überhaupt nicht erreichbar. Jetzt ein beschriftetes Gitter mit
+   Zeilen- und Spaltenköpfen und einem Farbstreifen, der die Wirkung
+   sofort zeigt.
+9. **Blendenform-Vorschau** — ein kleines Canvas, das den tatsächlich
+   verwendeten Bokeh-Kern zeichnet (Lamellenzahl, Drehung, anamorphe
+   Streckung). Die Phase-28-Regler waren ohne diese Rückmeldung
+   Blindflug.
+10. **Zonen-Überlagerung** — legt die zehn Luminanzzonen als
+    Falschfarben über das Foto und macht den Zonenstreifen klickbar.
+    Erst damit ist zu sehen, welcher Regler welchen Bildteil trifft.
+
+### Ein gemeinsames Bild-Overlay statt sieben Einzellösungen
+
+Alle Bild-Bedienelemente laufen über **eine** neue Komponente
+`ImageToolOverlay`. Sie kennt die Umrechnung Bild ↔ Bildschirm
+(Zoom, Pan, Ausrichtung) genau einmal und bietet drei Formen an: Punkt,
+Linie, Ellipse. Sieben eigene Overlays mit je eigener Koordinatenlogik
+wären sieben Gelegenheiten, dieselbe Umrechnung leicht unterschiedlich
+falsch zu machen — und beim Zoomen fällt so etwas sofort auf.
+
+Die Komponente liegt bewusst **im Viewer**, nicht im Panel: nur dort
+sind Zoom, Pan und die tatsächliche Bildfläche bekannt.
+
+### Bewusst nicht gemacht
+
+Keine Perspektiv-/Fluchtpunktkorrektur. Sie wäre das naheliegende achte
+Bild-Werkzeug, braucht aber einen Homographie-Eingriff in die
+Geometriestufe (die die Bildgröße ändert) statt einer Farbrechnung auf
+fester Größe — ein eigener, deutlich riskanterer Umbau. Lieber
+ausgelassen als halb gebaut.
+
+### Der Fehler, den die eigene Abstraktion trotzdem nicht verhindert hat
+
+Das gemeinsame Overlay sollte genau verhindern, dass dieselbe
+Umrechnung mehrfach leicht unterschiedlich falsch gemacht wird. Beim
+ersten e2e-Lauf landete ein Klick in die untere Bildhälfte trotzdem bei
+`y = 0`.
+
+Ursache: `screenToNormalized` erwartet **Container**-Koordinaten und
+zieht den Bildursprung selbst ab — das Overlay reichte ihm aber bereits
+**bild**-relative Koordinaten aus seinem eigenen
+`getBoundingClientRect()`. Der Ursprung wurde also zweimal abgezogen.
+In x fiel das gar nicht auf, weil das Testbild seitlich anliegt und
+`origin.x` dort schlicht 0 ist; nur die vertikale Letterbox machte den
+Fehler sichtbar.
+
+Zwei Lehren, beide festgehalten: eine Umrechnung an einer Stelle zu
+bündeln hilft nur, wenn auch ihr **Bezugssystem** dokumentiert ist —
+das steht jetzt im Kommentar an der Aufrufstelle. Und eine
+Koordinatenrechnung braucht einen Test mit einem Bild, das **nicht**
+bündig anliegt: bei `origin = (0, 0)` sind erstaunlich viele falsche
+Formeln zufällig richtig.
+
+Verifiziert: 10 neue Rust-Unit-Tests in `stages::interactive` (darunter
+einer, der dieselbe Lichtsetzung in 32 und 128 Pixeln rendert und
+vergleicht, und einer, der die byte-genaue Unversehrtheit des nicht
+getroffenen Bildteils bei „Farbe ersetzen" prüft), 12 neue Vitest-Fälle
+für Overlay-Mathematik und Zoneneinteilung, ein neuer e2e-Test mit sechs
+Fällen. `cargo fmt`/`clippy --workspace --all-targets` ohne Warnung,
+`cargo test --workspace` grün (apx-pipeline 300/300), `tsc -b`,
+`vitest run` 269/269, volle Playwright-Suite **155/155** mit real
+geprüftem Exit-Code (`PLAYWRIGHT_EXIT=0`).

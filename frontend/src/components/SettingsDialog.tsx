@@ -118,9 +118,28 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                 onChange={(event) => update({ theme: event.target.value as UiSettingsDto["theme"] })}
                 className="rounded border border-border bg-bg-panel px-2 py-1"
               >
+                <option value="birthday">{t("settings.themeBirthday")}</option>
                 <option value="dark">{t("settings.themeDark")}</option>
                 <option value="light">{t("settings.themeLight")}</option>
               </select>
+            </label>
+
+            {/* Geburtstags-Deko (ADR-0071) — bewusst unabhängig vom
+                Theme: die Farben sind eine Geschmacksfrage, fliegendes
+                Konfetti eine Konzentrationsfrage. Wer am Abend noch
+                zwei Stunden sortiert, soll die festliche Palette
+                behalten und die Bewegung abschalten können. */}
+            <label className="flex items-start justify-between gap-2">
+              <span className="text-text-secondary">
+                {t("settings.birthdayDecorations")}
+                <span className="block text-[11px] text-text-muted">{t("settings.birthdayDecorationsHint")}</span>
+              </span>
+              <input
+                type="checkbox"
+                checked={uiSettings.birthday_decorations}
+                onChange={(event) => update({ birthday_decorations: event.target.checked })}
+                aria-label={t("settings.birthdayDecorations")}
+              />
             </label>
 
             <label className="flex items-center justify-between gap-2">

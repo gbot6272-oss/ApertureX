@@ -205,6 +205,60 @@ export function useCommandRegistry(): CommandEntry[] {
         run: () => requestCommand("sharpness"),
       },
       {
+        id: "fn:camera-defaults",
+        label: t("header.cameraDefaults"),
+        category: "templates",
+        run: () => requestCommand("camera-defaults"),
+      },
+      {
+        // Gehoert in "Analyse": der Dialog misst den Katalog, er
+        // veraendert ihn nicht — er legt nur eine Auswahl an.
+        id: "fn:catalog-health",
+        label: t("header.catalogHealth"),
+        category: "analysis",
+        run: () => requestCommand("catalog-health"),
+      },
+      {
+        // Phase 34 F8 — "Fortgeschritten", nicht "Analyse": das hier
+        // verschiebt echte Dateien auf der Platte.
+        id: "fn:date-sort",
+        label: t("header.dateSort"),
+        category: "advanced",
+        run: () => requestCommand("date-sort"),
+      },
+      {
+        // Phase 34 F9 — "Fortgeschritten": der Assistent schlaegt nicht
+        // nur vor, er legt auf Wunsch Fotos in den Papierkorb.
+        id: "fn:duplicate-cleanup",
+        label: t("header.duplicateCleanup"),
+        category: "advanced",
+        run: () => requestCommand("duplicate-cleanup"),
+      },
+      {
+        // Phase 34 F10 — "Fortgeschritten": rechnet lange und im
+        // Hintergrund, auch wenn es nur den Cache fuellt.
+        id: "fn:preview-warm",
+        label: t("header.previewWarm"),
+        category: "advanced",
+        run: () => requestCommand("preview-warm"),
+      },
+      {
+        id: "fn:gpx-geotag",
+        label: t("header.gpxGeotag"),
+        category: "advanced",
+        disabled: exportPhotoIds.length === 0,
+        run: () => requestCommand("gpx-geotag"),
+      },
+      {
+        // Phase 34 F2 — sitzt in "Fortgeschritten", nicht in "Analyse":
+        // das hier misst nicht nur, es SCHREIBT ins EDL der Zielfotos.
+        id: "fn:exposure-match",
+        label: t("header.exposureMatch"),
+        category: "advanced",
+        disabled: multiSelectedIds.length < 2,
+        run: () => requestCommand("exposure-match"),
+      },
+      {
         id: "fn:trash-selection",
         label: t("commands.trashSelection"),
         category: "advanced",

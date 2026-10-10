@@ -49,6 +49,7 @@ pub use models::{
     TagRule, TechnicalMetadata, Template, TrashEntry, TrashReason, SAME_PERSON_EMBEDDING_THRESHOLD,
 };
 pub use repository::batch::BatchAction;
+pub use repository::health::HealthKind;
 pub use repository::share::ShareDiff;
 
 pub struct Catalog {
@@ -213,6 +214,23 @@ impl Catalog {
         repository::photos::set_technical_metadata(&conn, id, meta)
     }
 
+    /// Zähler aller Gesundheits-Kategorien (Phase 34 F5, siehe
+    /// [`repository::health`]).
+    pub fn catalog_health(&self) -> Result<Vec<(repository::health::HealthKind, u64)>> {
+        let conn = self.lock()?;
+        repository::health::summary(&conn)
+    }
+
+    /// Die Fotos einer Gesundheits-Kategorie, höchstens `limit` Stück.
+    pub fn list_health_photos(
+        &self,
+        kind: repository::health::HealthKind,
+        limit: usize,
+    ) -> Result<Vec<Photo>> {
+        let conn = self.lock()?;
+        repository::health::list(&conn, kind, limit)
+    }
+
     pub fn get_photo(&self, id: PhotoId) -> Result<Photo> {
         let conn = self.lock()?;
         repository::photos::get(&conn, id)
@@ -348,6 +366,14 @@ impl Catalog {
     pub fn set_photo_filename(&self, id: PhotoId, filename: &str) -> Result<()> {
         let conn = self.lock()?;
         repository::photos::set_filename(&conn, id, filename)
+    }
+
+    /// Hängt ein Foto in einen anderen Ordner um (Phase 34 F8) — siehe
+    /// `repository::photos::set_folder`. Die Datei verschiebt der
+    /// Aufrufer, und zwar vorher.
+    pub fn set_photo_folder(&self, id: PhotoId, folder_id: FolderId) -> Result<()> {
+        let conn = self.lock()?;
+        repository::photos::set_folder(&conn, id, folder_id)
     }
 
     // ---- Papierkorb (Phase 33 F1) ----------------------------------------
@@ -1305,6 +1331,50 @@ mod tests {
             })
             .expect("Transaktion darf nicht scheitern");
         assert_eq!(catalog.list_folders().expect("ok").len(), 2);
+    }
+
+    /// Phase 34 F8: das Einsortieren nach Aufnahmedatum hängt Fotos in
+    /// neue Ordner um. Der Zielordner muss sie danach auch auflisten —
+    /// sonst wäre das Foto aus jeder Ansicht verschwunden, obwohl die
+    /// Datei da ist.
+    #[test]
+    fn set_photo_folder_moves_the_row_to_the_target_folder() {
+        let catalog = Catalog::open_in_memory().expect("sollte öffnen");
+        let quelle = catalog
+            .find_or_create_folder(Path::new("/fotos/Karte"), None)
+            .expect("ok");
+        let ziel = catalog
+            .find_or_create_folder(Path::new("/fotos/2024/2024-05-07"), None)
+            .expect("ok");
+        let (photo_id, _) = catalog.upsert_photo(&sample_photo(quelle)).expect("ok");
+
+        catalog.set_photo_folder(photo_id, ziel).expect("ok");
+
+        assert_eq!(catalog.count_photos_in_folder(quelle).expect("ok"), 0);
+        assert_eq!(catalog.count_photos_in_folder(ziel).expect("ok"), 1);
+        assert_eq!(catalog.get_photo(photo_id).expect("ok").folder_id, ziel);
+    }
+
+    /// `UNIQUE(folder_id, filename)` muss zuschlagen, statt die
+    /// bestehende Zeile stillschweigend zu verdrängen.
+    #[test]
+    fn set_photo_folder_refuses_a_target_that_already_holds_that_filename() {
+        let catalog = Catalog::open_in_memory().expect("sollte öffnen");
+        let quelle = catalog
+            .find_or_create_folder(Path::new("/fotos/KarteA"), None)
+            .expect("ok");
+        let ziel = catalog
+            .find_or_create_folder(Path::new("/fotos/KarteB"), None)
+            .expect("ok");
+        let (photo_id, _) = catalog.upsert_photo(&sample_photo(quelle)).expect("ok");
+        catalog.upsert_photo(&sample_photo(ziel)).expect("ok");
+
+        catalog
+            .set_photo_folder(photo_id, ziel)
+            .expect_err("gleicher Dateiname im Zielordner darf nicht durchgehen");
+
+        assert_eq!(catalog.count_photos_in_folder(quelle).expect("ok"), 1);
+        assert_eq!(catalog.count_photos_in_folder(ziel).expect("ok"), 1);
     }
 
     #[test]

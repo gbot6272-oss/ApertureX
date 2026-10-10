@@ -478,6 +478,32 @@ pub(crate) fn set_filename(conn: &Connection, id: PhotoId, filename: &str) -> Re
     Ok(())
 }
 
+/// Hängt ein Foto in einen anderen Katalog-Ordner um (Phase 34 F8, das
+/// Einsortieren nach Aufnahmedatum).
+///
+/// Nur die Katalogzeile; die Datei verschiebt der Aufrufer — und zwar
+/// vorher, aus demselben Grund wie bei [`set_filename`]: bricht es
+/// dazwischen ab, zeigt der Katalog auf einen Pfad ohne Datei, und das
+/// meldet der `missing`-Abgleich. Andersherum läge die Datei am neuen
+/// Ort, der Katalog zeigte weiter auf den alten, und der nächste
+/// Ordner-Abgleich importierte sie als zweites, unabhängiges Foto.
+///
+/// `UNIQUE(folder_id, filename)` fängt ab, wenn im Zielordner schon ein
+/// Foto dieses Namens steht — der Fehler kommt als Constraint-Verletzung
+/// zurück statt als stille Überschreibung.
+pub(crate) fn set_folder(conn: &Connection, id: PhotoId, folder_id: FolderId) -> Result<()> {
+    let changed = conn
+        .execute(
+            "UPDATE photos SET folder_id = ?2 WHERE id = ?1",
+            params![id.to_string(), folder_id.to_string()],
+        )
+        .map_err(map_sqlite_err)?;
+    if changed == 0 {
+        return Err(AppError::not_found("Foto", id.to_string()));
+    }
+    Ok(())
+}
+
 pub(crate) fn set_rating(conn: &Connection, id: PhotoId, rating: u8) -> Result<()> {
     if rating > 5 {
         return Err(AppError::validation(format!(

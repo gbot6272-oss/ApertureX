@@ -19,7 +19,7 @@ test.describe("Vorlagen (Phase 8 Schritt 8)", () => {
     await page.goto("/");
     await openOverflowMenu(page);
     await page.getByRole("menuitem", { name: "Vorlagen…" }).click();
-    await page.getByLabel("Art").selectOption("export");
+    await page.getByRole("dialog", { name: "Vorlagen" }).getByLabel("Art").selectOption("export");
     await expect(page.getByText("Keine gespeicherten Vorlagen")).toBeVisible();
 
     await page.getByLabel("Name").fill("Web-Export Standard");
@@ -45,7 +45,7 @@ test.describe("Vorlagen (Phase 8 Schritt 8)", () => {
     await page.getByRole("img", { name: PHOTO.filename }).click();
     await openOverflowMenu(page);
     await page.getByRole("menuitem", { name: "Vorlagen…" }).click();
-    await page.getByLabel("Art").selectOption("workflow");
+    await page.getByRole("dialog", { name: "Vorlagen" }).getByLabel("Art").selectOption("workflow");
 
     await page.getByLabel("Name").fill("Urlaub-Export");
     await page.getByLabel("Preset").selectOption(PRESET_ID);

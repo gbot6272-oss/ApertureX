@@ -1790,3 +1790,66 @@ Oberflächensprache gesucht worden war.
 
 Die Entwurfsentscheidungen samt Begründung stehen in `DECISIONS.md`
 ADR-0066, inklusive der vier bewusst offen gelassenen Lücken.
+
+## Phase 34 — Zehn Funktionen, die Angefangenes zu Ende bringen
+
+Siehe `DECISIONS.md` ADR-0070 für die Begründungen, insbesondere die
+beiden Befunde, die beim Bauen herauskamen (die nie geschriebene
+zweite Vorschau-Stufe und die zweite, abweichende Duplikat-Heuristik
+im Frontend).
+
+- **F1 — Suche über alles.** Migration 15 baut die FTS5-Tabelle neu
+  (Spalten lassen sich bei externem Inhalt nicht ergänzen); Schlagworte
+  und Notizen kommen als zweiter `UNION ALL`-Zweig dazu.
+  ✔ erledigt
+- **F2 — Belichtung angleichen.** `exposure_match.rs`, Messung in Rust,
+  Schreiben über `apply_develop_edit`. ✔ erledigt
+- **F3 — Differenzbild.** `differenceImage.ts` + `DifferenceCanvas`,
+  festes 512er-Raster. ✔ erledigt
+- **F4 — GPX-Geotagging.** `gpx_match.rs` (Zuordnung und Interpolation);
+  geparst wird mit dem vorhandenen `apx_export::map::parse_gpx`.
+  ✔ erledigt
+- **F5 — Katalog-Gesundheit.** `repository/health.rs`, sechs Lücken in
+  fester Dringlichkeitsreihenfolge. ✔ erledigt
+- **F6 — Verlaufs-Vergleich über das ganze EDL.** `edlDiff.ts` mit
+  `deepEqual` statt `JSON.stringify`. ✔ erledigt
+- **F7 — Standardentwicklung je Kamera.** `camera_default.rs` + Haken im
+  Import (`ImportRun`). ✔ erledigt
+- **F8 — Nach Aufnahmedatum einsortieren.** `date_sort.rs` (reine
+  Planung inklusive Kollisionsprüfung), Verschieben und Umhängen in
+  `commands.rs`. ✔ erledigt
+- **F9 — Duplikat-Assistent.** `duplicate_keeper.rs`, geordnete
+  Kriterien mit Begründung; die alte Frontend-Heuristik
+  (`lib/duplicates.ts`) ist dabei gelöscht worden. ✔ erledigt
+- **F10 — Vorschauen vorbereiten.** `preview_warm.rs` füllt die
+  2048px-Stufe des vorhandenen Caches, im Hintergrund mit Fortschritt
+  und Abbruch. ✔ erledigt
+
+## Geburtstagsausgabe — personalisierte Fassung
+
+Siehe `DECISIONS.md` ADR-0071 für die Begründungen, insbesondere die
+zwei Altfehler, die beim Messen herauskamen (der Scheinwerfer der
+Einführungstour hat seit Phase 21 nicht funktioniert; die Kopfzeile
+lief bei 1280 Pixeln über und machte „Einstellungen" und das
+Überlauf-Menü unerreichbar).
+
+- **B1 — Theme-Fundament.** `Theme::Birthday` als Vorgabe, vom Theme
+  getrennter Schalter `birthday_decorations`, Token-Block in
+  `index.css` mit farbneutral gehaltener Urteilsfläche. ✔ erledigt
+- **B2 — Konfetti + Begrüßung.** `lib/confetti.ts` (reine Physik),
+  `ConfettiLayer.tsx` (eine Leinwand, eine Schleife),
+  `BirthdayWelcome.tsx`. ✔ erledigt
+- **B3 — Luftballons, Sounds, Feiern.** `BalloonLayer.tsx` (reines
+  CSS), `lib/celebrate.ts` als Kanal für Store und Hooks.
+  ✔ erledigt
+- **B4 — Canon EOS als Standard.** Seed in `birthday.rs`,
+  `CameraIllustration.tsx` als Inline-SVG. ✔ erledigt
+- **B5 — Drei Looks mit Render-Nachweis.** `birthday.rs`s Tests
+  schicken ein synthetisches Bild durch `render_rgba8` und messen die
+  Pixelwirkung. ✔ erledigt
+- **B6 — Einführung auf 15 Schritte.** Dem Arbeitsweg nach geordnet;
+  dabei den Scheinwerfer-Altfehler gefunden und behoben
+  (`.apx-spotlight`). ✔ erledigt
+- **B7 — Abschleifen.** Gemessen: Start mit/ohne Deko, Bedienbarkeit
+  bei fliegendem Konfetti, Rechenbudget, Abräumen beim Umschalten.
+  Dabei den Kopfzeilen-Überlauf gefunden und behoben. ✔ erledigt

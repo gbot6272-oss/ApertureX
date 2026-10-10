@@ -1637,7 +1637,9 @@ export function prepareCompositeLayerSource(photoId: string | null, texturePath:
 
 // ---- UI-Einstellungen (Phase 10 Schritt 1) --------------------------------
 
-export type Theme = "dark" | "light";
+/** `"birthday"` ist die Vorgabe dieser Fassung (siehe `DECISIONS.md`
+ * ADR-0071); `"dark"`/`"light"` bleiben unverändert wählbar. */
+export type Theme = "birthday" | "dark" | "light";
 
 export interface UiSettingsDto {
   theme: Theme;
@@ -1653,6 +1655,9 @@ export interface UiSettingsDto {
   sound_volume_percent: number;
   /** `uisfx`-Klangwelt, siehe `lib/sound.ts`s `SOUND_PACKS`. */
   sound_pack: string;
+  /** Geburtstags-Deko (Konfetti, Luftballons, Begrüßung) an/aus —
+   * unabhängig vom Theme, siehe `DECISIONS.md` ADR-0071. */
+  birthday_decorations: boolean;
 }
 
 export function getUiSettings(): Promise<UiSettingsDto> {
@@ -2117,6 +2122,49 @@ export function importGpxTrack(path: string): Promise<GpxTrackPointDto[]> {
   return invoke<GpxTrackPointDto[]>("import_gpx_track", { path });
 }
 
+// ---- Geotagging aus einem GPX-Track (Phase 34 F4) --------------------------
+
+/** Ein Foto und die aus dem Track ermittelte Position. */
+export interface GpxMatchDto {
+  photo_id: string;
+  filename: string;
+  captured_at: string | null;
+  lat: number | null;
+  lon: number | null;
+  /** Warum es keinen Treffer gab — `null` bei Erfolg. */
+  reason: string | null;
+  /** Hatte das Foto schon eine Position? Die würde überschrieben. */
+  had_position: boolean;
+}
+
+/**
+ * Ordnet Fotos einem GPX-Track zu, ohne etwas zu schreiben.
+ *
+ * `offsetSeconds` wird auf die Aufnahmezeit addiert und gleicht damit
+ * eine falsch gehende Kamerauhr aus — bei Zeitzonen der Normalfall,
+ * nicht der Randfall.
+ */
+export function previewGpxGeotag(
+  gpxPath: string,
+  photoIds: string[],
+  offsetSeconds: number,
+  toleranceSeconds: number,
+): Promise<GpxMatchDto[]> {
+  return invoke<GpxMatchDto[]>("preview_gpx_geotag", {
+    gpxPath,
+    photoIds,
+    offsetSeconds,
+    toleranceSeconds,
+  });
+}
+
+/** Schreibt genau die Positionen, die die Vorschau gezeigt hat. */
+export function applyGpxGeotag(
+  positions: { photo_id: string; lat: number; lon: number }[],
+): Promise<number> {
+  return invoke<number>("apply_gpx_geotag", { positions });
+}
+
 /** Setzt oder löscht (beide `null`) die GPS-Koordinaten eines Fotos von
  * Hand — z. B. per Klick auf die Kartenansicht platziert. */
 export function setPhotoGps(photoId: string, lat: number | null, lon: number | null): Promise<void> {
@@ -2564,6 +2612,133 @@ export function applyFolderSync(
   return invoke<FolderSyncResultDto>("apply_folder_sync", { folderId, importNew, trashVanished });
 }
 
+// ---- Vorschauen vorbereiten (Phase 34 F10) ---------------------------------
+
+export interface PreviewWarmPlanDto {
+  pending: number;
+  already: number;
+}
+
+export interface PreviewWarmProgressEvent {
+  done: number;
+  total: number;
+  current_file: string | null;
+}
+
+export interface PreviewWarmFinishedEvent {
+  prepared: number;
+  failed: number;
+  cancelled: boolean;
+}
+
+export function previewWarmPlan(folderId: string | null, force: boolean): Promise<PreviewWarmPlanDto> {
+  return invoke<PreviewWarmPlanDto>("preview_warm_plan", { folderId, force });
+}
+
+/** Gibt zurück, wie viele Fotos vorbereitet werden — der Fortschritt
+ * kommt danach über `preview-warm:progress`/`:finished`. */
+export function startPreviewWarm(folderId: string | null, force: boolean): Promise<number> {
+  return invoke<number>("start_preview_warm", { folderId, force });
+}
+
+export function cancelPreviewWarm(): Promise<void> {
+  return invoke<void>("cancel_preview_warm");
+}
+
+// ---- Duplikat-Assistent (Phase 34 F9) --------------------------------------
+
+/** Welches Kriterium den Vorschlag entschieden hat. Schlüssel statt
+ * Text — die Beschriftung bleibt im Frontend. */
+export type KeeperReason =
+  | "picked"
+  | "higher_rating"
+  | "has_edits"
+  | "raw"
+  | "higher_resolution"
+  | "larger_file"
+  | "indistinguishable";
+
+export interface DuplicateCandidateDto {
+  photo: PhotoDto;
+  has_edits: boolean;
+}
+
+export interface DuplicateGroupDto {
+  photos: DuplicateCandidateDto[];
+  keeper_id: string;
+  reason: KeeperReason;
+}
+
+export interface DuplicateCleanupPlanDto {
+  groups: DuplicateGroupDto[];
+  discard_count: number;
+}
+
+/** `"exact"` = byte-identisch, sonst ähnlich per Wahrnehmungs-Hash. */
+export type DuplicateMode = "exact" | "similar";
+
+export function planDuplicateCleanup(mode: DuplicateMode, maxDistance: number): Promise<DuplicateCleanupPlanDto> {
+  return invoke<DuplicateCleanupPlanDto>("plan_duplicate_cleanup", { mode, maxDistance });
+}
+
+export function applyDuplicateCleanup(
+  mode: DuplicateMode,
+  maxDistance: number,
+  discardIds: string[],
+): Promise<number> {
+  return invoke<number>("apply_duplicate_cleanup", { mode, maxDistance, discardIds });
+}
+
+// ---- Nach Aufnahmedatum einsortieren (Phase 34 F8) -------------------------
+
+/** Was mit einem Foto passieren würde. Schlüssel statt Text, wie beim
+ * Ordner-Abgleich — die Beschriftung bleibt im Frontend. */
+export type DateSortOutcome = "move" | "already" | "no_date" | "collision";
+
+export interface DateSortEntryDto {
+  photo_id: string;
+  filename: string;
+  current_dir: string;
+  /** Leer bei `no_date`. */
+  target_dir: string;
+  outcome: DateSortOutcome;
+  /** Das Datum kam aus der Dateizeit, nicht aus EXIF. */
+  used_mtime: boolean;
+}
+
+export interface DateSortPlanDto {
+  entries: DateSortEntryDto[];
+  move_count: number;
+  already_count: number;
+  no_date_count: number;
+  collision_count: number;
+}
+
+export interface DateSortResultDto {
+  moved: number;
+  folders_created: number;
+  failures: string[];
+}
+
+export interface DateSortOptions {
+  /** `null` = der ganze Katalog; dann ist `root` Pflicht. */
+  folderId: string | null;
+  /** Zielwurzel; leer = der gewählte Ordner selbst. */
+  root: string | null;
+  /** Ordnermuster, leer = `{year}/{year}-{month}-{day}`. */
+  pattern: string | null;
+  /** Fotos ohne EXIF-Datum nach der Dateizeit einsortieren. */
+  useMtimeFallback: boolean;
+}
+
+export function previewDateSort(options: DateSortOptions): Promise<DateSortPlanDto> {
+  return invoke<DateSortPlanDto>("preview_date_sort", { ...options });
+}
+
+export function applyDateSort(options: DateSortOptions): Promise<DateSortResultDto> {
+  return invoke<DateSortResultDto>("apply_date_sort", { ...options });
+}
+
 // ---- Schärfe-Bewertung (Phase 33 F3) ---------------------------------------
 
 export interface SharpnessResultDto {
@@ -2579,6 +2754,89 @@ export interface SharpnessResultDto {
 
 export function scorePhotoSharpness(photoIds: string[]): Promise<SharpnessResultDto[]> {
   return invoke<SharpnessResultDto[]>("score_photo_sharpness", { photoIds });
+}
+
+// ---- Standardentwicklung je Kamera (Phase 34 F7) ---------------------------
+
+export interface CameraDefaultDto {
+  camera_model: string;
+  edl_json: string;
+}
+
+export function listCameraDefaults(): Promise<CameraDefaultDto[]> {
+  return invoke<CameraDefaultDto[]>("list_camera_defaults");
+}
+
+/**
+ * Legt die Standardentwicklung für ein Kameramodell fest — neu
+ * importierte Fotos dieser Kamera starten damit statt neutral.
+ *
+ * Das EDL wird im Backend geprüft, bevor es gespeichert wird: eine
+ * kaputte Nutzlast fiele sonst erst beim nächsten Import auf, wo sie
+ * stillschweigend übersprungen würde.
+ */
+export function setCameraDefault(cameraModel: string, edlJson: string): Promise<void> {
+  return invoke<void>("set_camera_default", { cameraModel, edlJson });
+}
+
+export function deleteCameraDefault(cameraModel: string): Promise<void> {
+  return invoke<void>("delete_camera_default", { cameraModel });
+}
+
+// ---- Katalog-Gesundheit (Phase 34 F5) --------------------------------------
+
+/** Bezeichner der Kategorien — dieselben Zeichenketten wie
+ * `apx-catalog`s `HealthKind::as_str`. */
+export type CatalogHealthKind =
+  | "missing"
+  | "with_open_notes"
+  | "without_capture_date"
+  | "without_keywords"
+  | "without_rating"
+  | "without_position";
+
+export interface CatalogHealthEntryDto {
+  kind: CatalogHealthKind;
+  count: number;
+}
+
+/** Zähler aller Kategorien, in der Dringlichkeitsreihenfolge des
+ * Katalogs. */
+export function catalogHealth(): Promise<CatalogHealthEntryDto[]> {
+  return invoke<CatalogHealthEntryDto[]>("catalog_health");
+}
+
+/** Die Fotos einer Kategorie, höchstens `limit` Stück. */
+export function listHealthPhotos(kind: CatalogHealthKind, limit: number): Promise<PhotoDto[]> {
+  return invoke<PhotoDto[]>("list_health_photos", { kind, limit });
+}
+
+// ---- Belichtung angleichen (Phase 34 F2) -----------------------------------
+
+/** Ein Zielfoto und die für den Abgleich nötige Belichtungskorrektur. */
+export interface ExposureMatchDto {
+  photo_id: string;
+  filename: string;
+  /** Um wie viele EV die Belichtung verschoben werden müsste. */
+  delta_ev: number;
+  /** `false` = keine Vorschau oder vollständig beschnitten; das Foto
+   * wird dann nicht angefasst. */
+  measurable: boolean;
+}
+
+/**
+ * Misst, wie weit jedes Foto aus `photoIds` vom Referenzfoto abweicht
+ * (siehe `DECISIONS.md` ADR-0070).
+ *
+ * Rust misst nur; geschrieben wird die Korrektur vom Store über den
+ * bestehenden {@link applyDevelopEdit}-Weg, damit Validierung und
+ * Verlaufseintrag durch genau eine Stelle laufen.
+ */
+export function measureExposureMatch(
+  referencePhotoId: string,
+  photoIds: string[],
+): Promise<ExposureMatchDto[]> {
+  return invoke<ExposureMatchDto[]>("measure_exposure_match", { referencePhotoId, photoIds });
 }
 
 // ---- Metadaten-Vorgaben (Phase 33 F4) --------------------------------------

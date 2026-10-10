@@ -8,10 +8,17 @@
 #![deny(clippy::unwrap_used)]
 
 mod batch_rename;
+mod birthday;
+mod camera_default;
 mod commands;
+mod date_sort;
+mod duplicate_keeper;
+mod exposure_match;
 mod folder_sync;
+mod gpx_match;
 mod import;
 mod metadata_preset;
+mod preview_warm;
 mod protocol;
 mod reconcile;
 mod similarity;
@@ -246,6 +253,25 @@ fn main() {
         }
     });
 
+    // Geschenk-Inhalte der Geburtstagsausgabe (siehe `DECISIONS.md`
+    // ADR-0071): drei Presets und die Standardentwicklung für die
+    // Kamera, einmalig und idempotent in den gerade geöffneten Katalog
+    // gelegt. Bewusst KEIN `expect()` und kein Abbruch — ein fehlendes
+    // Geschenk-Preset ist ärgerlich, ein nicht startender Fotoeditor
+    // ein Ausfall. Läuft hier und nicht im Frontend, weil die Presets
+    // im Katalog liegen müssen, damit das Panel sie findet.
+    match birthday::seed(&catalog) {
+        Ok(report) if report.presets_created > 0 || report.camera_default_created => {
+            tracing::info!(
+                presets = report.presets_created,
+                camera_default = report.camera_default_created,
+                "Geburtstags-Inhalte angelegt"
+            );
+        }
+        Ok(_) => tracing::debug!("Geburtstags-Inhalte waren bereits vorhanden"),
+        Err(err) => tracing::warn!(%err, "Geburtstags-Inhalte konnten nicht angelegt werden"),
+    }
+
     // Siehe DECISIONS.md ADR-0012: schlägt sowohl der bevorzugte
     // Hardware- als auch der Software-Fallback-Adapter fehl, gibt es
     // buchstäblich keine wgpu-Ausführungsumgebung — an dieser Stelle (vor
@@ -303,6 +329,7 @@ fn main() {
             lut_table_cache: Arc::new(apx_pipeline::lut_table_cache::LutTableCache::new()),
             export_queue,
             tether: Arc::new(Mutex::new(None)),
+            active_preview_warm: Arc::new(Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
             commands::select_folder,
@@ -374,6 +401,11 @@ fn main() {
             commands::create_new_catalog,
             commands::switch_active_catalog,
             commands::run_catalog_integrity_check,
+            commands::catalog_health,
+            commands::list_camera_defaults,
+            commands::set_camera_default,
+            commands::delete_camera_default,
+            commands::list_health_photos,
             commands::run_catalog_optimize,
             commands::rescan_photo_metadata,
             commands::run_catalog_backup,
@@ -426,7 +458,15 @@ fn main() {
             commands::empty_trash,
             commands::preview_folder_sync,
             commands::apply_folder_sync,
+            commands::preview_date_sort,
+            commands::apply_date_sort,
+            commands::plan_duplicate_cleanup,
+            commands::apply_duplicate_cleanup,
+            commands::preview_warm_plan,
+            commands::start_preview_warm,
+            commands::cancel_preview_warm,
             commands::score_photo_sharpness,
+            commands::measure_exposure_match,
             commands::apply_metadata_preset,
             commands::reorder_collection_photo,
             commands::find_similar_photos,
@@ -531,6 +571,8 @@ fn main() {
             commands::reverse_geocode_location,
             commands::import_gpx_track,
             commands::set_photo_gps,
+            commands::preview_gpx_geotag,
+            commands::apply_gpx_geotag,
             commands::save_template,
             commands::list_templates,
             commands::delete_template,

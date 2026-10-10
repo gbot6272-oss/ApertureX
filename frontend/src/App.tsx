@@ -25,6 +25,9 @@ import { PresetsPanel } from "./components/PresetsPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { StartupSplash } from "./components/StartupSplash";
+import { BalloonLayer } from "./components/BalloonLayer";
+import { BirthdayWelcome } from "./components/BirthdayWelcome";
+import { ConfettiLayer } from "./components/ConfettiLayer";
 import { VideoPlayer } from "./components/VideoPlayer";
 import { Viewer } from "./components/Viewer";
 import { ShutdownOverlay } from "./components/ShutdownOverlay";
@@ -383,6 +386,18 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col bg-bg-base text-text-primary">
       <GlassDistortionFilter />
+      {/* Geburtstagsausgabe (siehe `DECISIONS.md` ADR-0071) — drei
+          Schichten, alle rein dekorativ und alle ohne
+          Zeigerereignisse: Luftballons hinter dem Inhalt
+          (`z-index: 0`), Konfetti darüber (`z-index: 150`), die
+          Begrüßung dazwischen (`z-[160]`, aber `pointer-events-none`).
+          Der Start-Ladeschirm bleibt mit `z-[200]` über allem. Jede
+          Schicht prüft `birthday_decorations` und `reduced_motion`
+          selbst und rendert sonst `null` — kein Element, keine
+          Animation, keine Schleife. */}
+      <BalloonLayer />
+      <ConfettiLayer />
+      <BirthdayWelcome ready={appReady} />
       <StartupSplash ready={appReady} />
       <ShutdownOverlay visible={shuttingDown} />
       <Header onOpenPalette={() => setPaletteOpen(true)} />

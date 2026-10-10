@@ -138,7 +138,10 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     // e2e-Test ungefragt aufpoppt — ein Test, der das Onboarding gezielt
     // prüfen will, überschreibt das per `setMockFixtures`.
     uiSettings: {
-      theme: "dark" as "dark" | "light",
+      // Geburtstagsausgabe (ADR-0071): dieselbe Vorgabe wie das echte
+      // Backend, damit die Palette in der ganzen e2e-Suite mitlaeuft
+      // und nicht nur in den dafuer geschriebenen Tests.
+      theme: "birthday" as "birthday" | "dark" | "light",
       accent_color: null as string | null,
       locale: "de",
       ui_scale_percent: 100,
@@ -152,6 +155,12 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       sound_enabled: false,
       sound_volume_percent: 70,
       sound_pack: "glass",
+      // Deko in Tests standardmaessig AUS — aus demselben Grund wie
+      // `sound_enabled: false`: 240 Tests sollen keine Partikel-
+      // Animation starten. Die Geburtstags-Tests schalten sie gezielt
+      // ein, darunter einer, der genau prueft, dass die Bedienung bei
+      // laufender Deko nicht blockiert ist.
+      birthday_decorations: false,
     },
     // Beobachteter Ordner (Phase 12 Schritt 7) — derselbe Aus-Default wie
     // im echten Backend (`apx_core::settings::WatchedFolderSettings`).
@@ -335,6 +344,13 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
   const collections: MockCollection[] = [];
   const collectionPhotoIds: Record<string, string[]> = {};
 
+  // Nach Aufnahmedatum einsortieren (Phase 34 F8): wohin ein Foto durch
+  // ein früheres `apply_date_sort` gewandert ist. Eigener Zustand statt
+  // einer Änderung an `fixtures.photosByFolder`, weil die Fixtures nicht
+  // erweiterbar sind — und weil das Einsortieren im Raster nichts
+  // verändern soll: die Fotos bleiben dieselben, nur ihr Ordner nicht.
+  const dateSortCurrentDir: Record<string, string> = {};
+
   // Bibliotheks-Backlog (Phase 9 Schritt 1) — einfache In-Memory-
   // Nachbildung von Sammlungssätzen/Stapeln/virtuellen Kopien/
   // Farbmarkierungs-Definitionen.
@@ -378,7 +394,13 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     { name: "blue", display_name: "Blau", hex: "#3182ce", position: 3 },
     { name: "purple", display_name: "Lila", hex: "#805ad5", position: 4 },
   ];
-  const photoKeywords: Record<string, { id: string; name: string }[]> = {};
+  // Ueber die Fixtures vorbelegbar (`keywordsByPhoto`), damit ein Test
+  // die Schlagwortsuche (Phase 34 F1) pruefen kann, ohne die Schlagworte
+  // erst ueber die Oberflaeche zu vergeben.
+  const photoKeywords: Record<string, { id: string; name: string }[]> = {
+    ...((w.__mockFixtures as { keywordsByPhoto?: Record<string, { id: string; name: string }[]> })
+      .keywordsByPhoto ?? {}),
+  };
   let nextCollectionId = 1;
   let nextKeywordId = 1;
   let nextFaceId = 1;
@@ -610,6 +632,37 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     return { ...photo };
   }
 
+  /** Fotos, deren 2048px-Vorschau in diesem Lauf vorbereitet wurde
+   * (Phase 34 F10). Eigener Zustand statt einer Aenderung an den
+   * Fixtures, weil die nicht erweiterbar sind. */
+  const warmedPreviews = new Set<string>();
+
+  /** Kameraoriginal, nicht Ableger — siehe `duplicate_keeper`s eigene
+   * Liste, die bewusst enger ist als "kann die App das lesen". */
+  function isRawFilename(filename: string): boolean {
+    const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+    return ["cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "raf", "orf", "rw2", "pef", "dng", "3fr", "iiq", "erf", "mos", "mrw", "x3f"].includes(ext);
+  }
+
+  /** Die Gruppen, auf denen der Duplikat-Assistent (Phase 34 F9)
+   * arbeitet: exakt über `content_hash`, ähnlich über die vorbelegten
+   * `perceptualDuplicateGroups`. */
+  function duplicateGroupsForMode(mode: string): MockPhoto[][] {
+    if (mode !== "exact") {
+      const seeded = (w.__mockFixtures as { perceptualDuplicateGroups?: MockPhoto[][] }).perceptualDuplicateGroups;
+      return seeded ?? [];
+    }
+    const byHash = new Map<string, MockPhoto[]>();
+    for (const photo of allPhotos()) {
+      const hash = photo.content_hash as string | null | undefined;
+      if (!hash) continue;
+      const group = byHash.get(hash) ?? [];
+      group.push(photo);
+      byHash.set(hash, group);
+    }
+    return [...byHash.values()].filter((group) => group.length > 1);
+  }
+
   // Simuliertes `edit_history`/`edit_current` fürs Entwickeln-Panel (ab
   // Phase 2, siehe `crates/apx-catalog`s `repository::edits` und
   // `crates/apx-app/src/commands.rs`) — dieselbe lineare
@@ -630,6 +683,15 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
     updated_at: string;
   }
   const photoNotes: MockPhotoNote[] = [];
+  // Standardentwicklung je Kamera (Phase 34 F7).
+  // Geburtstagsausgabe (ADR-0071): dieselbe Vorgabe, die
+  // `apx-app`s `birthday::seed` beim ersten Start in den echten
+  // Katalog legt — sonst zeigte die e2e-Suite einen leeren Dialog, wo
+  // die App einen gefuellten hat. Das EDL ist hier nur ein Platzhalter;
+  // seinen Inhalt prueft `birthday.rs`s Rust-Test am echten Rendern.
+  const cameraDefaults: { camera_model: string; edl_json: string }[] = [
+    { camera_model: "Canon EOS", edl_json: '{"schema_version":4,"payload":{}}' },
+  ];
   let nextNoteId = 1;
 
   // `editHistories` laesst sich ueber die Fixtures vorbelegen
@@ -744,7 +806,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         rect_bottom: number;
       }>;
       uiSettings: {
-        theme: "dark" | "light";
+        theme: "birthday" | "dark" | "light";
         accent_color: string | null;
         locale: string;
         ui_scale_percent: number;
@@ -754,6 +816,7 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         sound_enabled: boolean;
         sound_volume_percent: number;
         sound_pack: string;
+        birthday_decorations: boolean;
       };
       watchedFolderSettings: {
         path: string | null;
@@ -1090,6 +1153,68 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "run_catalog_optimize":
       case "run_catalog_backup":
         return null;
+      // Katalog-Gesundheit (Phase 34 F5). Der Mock rechnet dieselben
+      // Bedingungen nach wie `repository::health` — Papierkorb und
+      // virtuelle Kopien bleiben aussen vor.
+      case "catalog_health":
+      case "list_health_photos": {
+        const relevant = (kind: string) =>
+          allPhotos().filter((p) => {
+            if (p.source_photo_id) return false;
+            switch (kind) {
+              case "missing":
+                return p.missing === true;
+              case "with_open_notes":
+                return photoNotes.some((n) => n.photo_id === p.id && !n.done);
+              case "without_capture_date":
+                return !p.captured_at;
+              case "without_keywords":
+                return (photoKeywords[p.id] ?? []).length === 0;
+              case "without_rating":
+                return (p.rating ?? 0) === 0;
+              case "without_position":
+                return p.gps_lat === null || p.gps_lat === undefined;
+              default:
+                return false;
+            }
+          });
+        const kinds = [
+          "missing",
+          "with_open_notes",
+          "without_capture_date",
+          "without_keywords",
+          "without_rating",
+          "without_position",
+        ];
+        if (cmd === "catalog_health") {
+          return kinds.map((kind) => ({ kind, count: relevant(kind).length }));
+        }
+        const kind = args.kind as string;
+        if (!kinds.includes(kind)) throw new Error(`Unbekannte Kategorie: ${kind}`);
+        return relevant(kind)
+          .slice(0, args.limit as number)
+          .map(clonePhoto);
+      }
+      // Standardentwicklung je Kamera (Phase 34 F7). Verglichen wird
+      // wie im Backend ueber den normalisierten Modellnamen.
+      case "list_camera_defaults":
+        return cameraDefaults.map((entry) => ({ ...entry }));
+      case "set_camera_default": {
+        const model = (args.cameraModel as string).trim();
+        if (!model) throw new Error("Ohne Kameramodell lässt sich keine Vorgabe zuordnen");
+        const key = model.toLowerCase();
+        const index = cameraDefaults.findIndex((e) => e.camera_model.trim().toLowerCase() === key);
+        const entry = { camera_model: model, edl_json: args.edlJson as string };
+        if (index >= 0) cameraDefaults[index] = entry;
+        else cameraDefaults.push(entry);
+        return null;
+      }
+      case "delete_camera_default": {
+        const key = (args.cameraModel as string).trim().toLowerCase();
+        const index = cameraDefaults.findIndex((e) => e.camera_model.trim().toLowerCase() === key);
+        if (index >= 0) cameraDefaults.splice(index, 1);
+        return null;
+      }
       case "run_catalog_integrity_check":
         return [];
       // Metadaten-Abgleich (ADR-0068): traegt im Mock das Aufnahmedatum
@@ -1321,8 +1446,34 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       case "search_and_filter_photos": {
         const query = (args.query as string | null)?.trim().toLowerCase();
         const criteria = args.criteria as MockFilterCriteria;
+        // Seit Phase 34 F1 (ADR-0070) durchsucht das Backend alle
+        // Textfelder plus Schlagworte und Bildnotizen — der Mock bildet
+        // denselben Umfang nach, sonst pruefte der e2e-Test eine engere
+        // Suche als die echte.
+        const matchesQuery = (p: MockPhoto): boolean => {
+          if (!query) return true;
+          const fields = [
+            p.filename,
+            p.camera_make,
+            p.camera_model,
+            p.lens,
+            p.title,
+            p.caption,
+            p.creator,
+            p.copyright,
+          ];
+          if (fields.some((v) => typeof v === "string" && v.toLowerCase().includes(query))) {
+            return true;
+          }
+          if ((photoKeywords[p.id] ?? []).some((k) => k.name.toLowerCase().includes(query))) {
+            return true;
+          }
+          return photoNotes.some(
+            (n) => n.photo_id === p.id && n.body.toLowerCase().includes(query),
+          );
+        };
         return allPhotos()
-          .filter((p) => (!query ? true : p.filename.toLowerCase().includes(query)))
+          .filter(matchesQuery)
           .filter((p) => matchesFilterCriteria(p, criteria))
           .map(clonePhoto);
       }
@@ -1396,16 +1547,98 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       }
 
       // ---- Bibliothek: Duplikaterkennung (ab Phase 3, Schritt 8.2) ---------
-      case "list_duplicate_photo_groups": {
-        const byHash = new Map<string, MockPhoto[]>();
-        for (const p of allPhotos()) {
-          const hash = p.content_hash as string | null | undefined;
-          if (!hash) continue;
-          const group = byHash.get(hash) ?? [];
-          group.push(p);
-          byHash.set(hash, group);
+      case "list_duplicate_photo_groups":
+        return duplicateGroupsForMode("exact").map((group) => group.map(clonePhoto));
+
+      // ---- Vorschauen vorbereiten (Phase 34 F10) ---------------------------
+      // Der Mock dekodiert nichts — er zaehlt nur, welche Fotos eine
+      // vorbereitete Vorschau haetten. Welche das sind, sagt die
+      // Fixture `warmedPreviewIds`; was der Lauf danach vorbereitet
+      // hat, merkt sich der Mock selbst.
+      case "preview_warm_plan":
+      case "start_preview_warm": {
+        const fixtures = w.__mockFixtures as {
+          folders: { id: string; path: string }[];
+          photosByFolder: Record<string, MockPhoto[]>;
+          warmedPreviewIds?: string[];
+        };
+        const onlyFolder = args.folderId as string | null;
+        const force = Boolean(args.force);
+        const pending: string[] = [];
+        let already = 0;
+        for (const folder of fixtures.folders) {
+          if (onlyFolder && folder.id !== onlyFolder) continue;
+          for (const photo of fixtures.photosByFolder[folder.id] ?? []) {
+            const warmed = warmedPreviews.has(photo.id) || (fixtures.warmedPreviewIds ?? []).includes(photo.id);
+            if (warmed && !force) already += 1;
+            else pending.push(photo.id);
+          }
         }
-        return [...byHash.values()].filter((group) => group.length > 1).map((group) => group.map(clonePhoto));
+        if (cmd === "preview_warm_plan") return { pending: pending.length, already };
+        for (const id of pending) warmedPreviews.add(id);
+        return pending.length;
+      }
+      case "cancel_preview_warm":
+        return null;
+
+      // ---- Duplikat-Assistent (Phase 34 F9) --------------------------------
+      // Derselbe Auswahlweg wie `apx-app`s `duplicate_keeper`: geordnete
+      // Kriterien, das erste mit eindeutigem Spitzenreiter entscheidet,
+      // und ein Gleichstand verkleinert nur das Feld.
+      case "plan_duplicate_cleanup": {
+        const groups = duplicateGroupsForMode(args.mode as string);
+        const planned = groups
+          .filter((group) => group.length >= 2)
+          .map((group) => {
+            const pool = group.some((photo) => (photo.flag ?? 0) !== -1)
+              ? group.filter((photo) => (photo.flag ?? 0) !== -1)
+              : group;
+            const criteria: { score: (photo: MockPhoto) => number; reason: string }[] = [
+              { score: (photo) => ((photo.flag ?? 0) === 1 ? 1 : 0), reason: "picked" },
+              { score: (photo) => photo.rating ?? 0, reason: "higher_rating" },
+              { score: (photo) => (editHistories[photo.id]?.entries.length ? 1 : 0), reason: "has_edits" },
+              { score: (photo) => (isRawFilename(photo.filename) ? 1 : 0), reason: "raw" },
+              { score: (photo) => (photo.width ?? 0) * (photo.height ?? 0), reason: "higher_resolution" },
+              { score: (photo) => Number(photo.file_size ?? 0), reason: "larger_file" },
+            ];
+            let remaining = pool;
+            let keeper = pool[0];
+            let reason = "indistinguishable";
+            for (const criterion of criteria) {
+              const best = Math.max(...remaining.map(criterion.score));
+              const leaders = remaining.filter((photo) => criterion.score(photo) === best);
+              if (leaders.length === 1) {
+                keeper = leaders[0];
+                reason = criterion.reason;
+                break;
+              }
+              remaining = leaders;
+            }
+            if (reason === "indistinguishable") keeper = remaining[0];
+            return {
+              photos: group.map((photo) => ({
+                photo: clonePhoto(photo),
+                has_edits: Boolean(editHistories[photo.id]?.entries.length),
+              })),
+              keeper_id: keeper.id,
+              reason,
+            };
+          });
+        return {
+          groups: planned,
+          discard_count: planned.reduce((sum, group) => sum + group.photos.length - 1, 0),
+        };
+      }
+      case "apply_duplicate_cleanup": {
+        const ids = args.discardIds as string[];
+        // Dieselbe harte Grenze wie im Backend: aus keiner Gruppe darf
+        // jede Version verschwinden.
+        for (const group of duplicateGroupsForMode(args.mode as string)) {
+          if (group.length >= 2 && group.every((photo) => ids.includes(photo.id))) {
+            throw new Error("Aus einer Duplikatgruppe würde jede Version verschwinden — nichts verändert.");
+          }
+        }
+        return ids.filter((id) => trashPhoto(id, "duplicate")).length;
       }
 
       // ---- Presets (ab Phase 5) ---------------------------------------------
@@ -2155,6 +2388,64 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       // Perzentil) ist in `apx-stacking`s Rust-Tests abgedeckt. Hier
       // liefert die Fixture die Rangfolge, die der Dialog darstellen
       // soll — ein Browser-Mock hat keine Vorschaubilder zum Messen.
+      // Belichtung angleichen (Phase 34 F2): die Fixtures geben die
+      // mittlere Helligkeit je Foto vor, der Mock rechnet daraus dieselbe
+      // EV-Differenz wie `exposure_match.rs` — log2 des Verhaeltnisses.
+      case "measure_exposure_match": {
+        const referenceId = args.referencePhotoId as string;
+        const ids = args.photoIds as string[];
+        const levels = (fixtures.exposureLevels ?? {}) as Record<string, number>;
+        const referenceLevel = levels[referenceId];
+        if (referenceLevel === undefined) {
+          throw new Error("Für das Referenzfoto gibt es noch keine Vorschau");
+        }
+        return ids
+          .filter((id) => id !== referenceId)
+          .map((id) => {
+            const level = levels[id];
+            return {
+              photo_id: id,
+              filename: findPhoto(id)?.filename ?? "unbekannt",
+              delta_ev: level === undefined ? 0 : Math.log2(referenceLevel / level),
+              measurable: level !== undefined,
+            };
+          });
+      }
+      // Geotagging aus GPX-Track (Phase 34 F4). Der Mock rechnet die
+      // Zuordnung nicht nach — das tun `gpx_match.rs`s neun Tests —,
+      // sondern liefert vorgegebene Treffer. Geprueft wird hier der Weg
+      // durch die Oberflaeche inklusive Versatz: der Fixture-Schluessel
+      // enthaelt den uebergebenen Versatz, ein falscher Versatz liefert
+      // also keinen Treffer.
+      case "preview_gpx_geotag": {
+        const ids = args.photoIds as string[];
+        const offset = args.offsetSeconds as number;
+        const hits = (fixtures.gpxHits ?? {}) as Record<string, { lat: number; lon: number }>;
+        return ids.map((id) => {
+          const photo = findPhoto(id);
+          const hit = hits[`${id}@${offset}`];
+          return {
+            photo_id: id,
+            filename: photo?.filename ?? "unbekannt",
+            captured_at: (photo?.captured_at as string | null) ?? null,
+            lat: hit?.lat ?? null,
+            lon: hit?.lon ?? null,
+            reason: hit ? null : "Keine Trackposition in der Zeitspanne",
+            had_position: photo?.gps_lat !== null && photo?.gps_lat !== undefined,
+          };
+        });
+      }
+      case "apply_gpx_geotag": {
+        const positions = args.positions as { photo_id: string; lat: number; lon: number }[];
+        for (const entry of positions) {
+          const photo = findPhoto(entry.photo_id);
+          if (photo) {
+            photo.gps_lat = entry.lat;
+            photo.gps_lon = entry.lon;
+          }
+        }
+        return positions.length;
+      }
       case "score_photo_sharpness": {
         const ids = args.photoIds as string[];
         const scores = (fixtures.sharpnessScores ?? {}) as Record<string, number>;
@@ -2200,6 +2491,104 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         // dieselben Abweichungen noch einmal.
         fixtures.folderSyncPlan = [];
         return { returned, handled_vanished: vanished.length, import_started: importStarted };
+      }
+
+      // ---- Nach Aufnahmedatum einsortieren (Phase 34 F8) ---------------
+      // Hier rechnet der Mock wirklich — dieselbe Regel wie
+      // `apx-app`s `date_sort::plan_date_sort`: Datumsordner aus dem
+      // Muster, erster Anspruch auf einen Zielpfad gewinnt, jeder
+      // weitere ist ein Namenskonflikt. Ein Dateisystem hat der Mock
+      // nicht, das Anwenden hängt deshalb nur die Fotos um.
+      case "preview_date_sort":
+      case "apply_date_sort": {
+        const fixtures = w.__mockFixtures as {
+          folders: { id: string; path: string }[];
+          photosByFolder: Record<string, MockPhoto[]>;
+        };
+        const pattern = (args.pattern as string | null) ?? "{year}/{year}-{month}-{day}";
+        const useMtime = Boolean(args.useMtimeFallback);
+        const onlyFolder = args.folderId as string | null;
+        const root =
+          (args.root as string | null) ??
+          fixtures.folders.find((folder) => folder.id === onlyFolder)?.path ??
+          "";
+
+        const claimed = new Set<string>();
+        const entries: {
+          photo_id: string;
+          filename: string;
+          current_dir: string;
+          target_dir: string;
+          outcome: string;
+          used_mtime: boolean;
+        }[] = [];
+
+        for (const folder of fixtures.folders) {
+          if (onlyFolder && folder.id !== onlyFolder) continue;
+          for (const photo of fixtures.photosByFolder[folder.id] ?? []) {
+            const currentDir = dateSortCurrentDir[photo.id] ?? folder.path;
+            const raw = photo.captured_at ?? (useMtime ? "2030-01-01T12:00:00Z" : null);
+            if (!raw) {
+              entries.push({
+                photo_id: photo.id,
+                filename: photo.filename,
+                current_dir: currentDir,
+                target_dir: "",
+                outcome: "no_date",
+                used_mtime: false,
+              });
+              continue;
+            }
+            const date = new Date(raw);
+            const segments = pattern
+              .split("/")
+              .map((segment) =>
+                segment
+                  .replace("{year}", String(date.getFullYear()))
+                  .replace("{month}", String(date.getMonth() + 1).padStart(2, "0"))
+                  .replace("{day}", String(date.getDate()).padStart(2, "0")),
+              )
+              .filter((segment) => segment !== "");
+            const targetDir = [root, ...segments].join("/");
+            const targetPath = `${targetDir}/${photo.filename}`;
+            const outcome = claimed.has(targetPath)
+              ? "collision"
+              : targetDir === currentDir
+                ? "already"
+                : "move";
+            if (outcome !== "collision") claimed.add(targetPath);
+            entries.push({
+              photo_id: photo.id,
+              filename: photo.filename,
+              current_dir: currentDir,
+              target_dir: targetDir,
+              outcome,
+              used_mtime: !photo.captured_at,
+            });
+          }
+        }
+
+        const count = (outcome: string) => entries.filter((entry) => entry.outcome === outcome).length;
+        if (cmd === "preview_date_sort") {
+          return {
+            entries,
+            move_count: count("move"),
+            already_count: count("already"),
+            no_date_count: count("no_date"),
+            collision_count: count("collision"),
+          };
+        }
+
+        // Anwenden: die Fotos merken sich ihren neuen Ordner. Danach
+        // meldet eine zweite Vorschau sie folgerichtig als „liegt schon
+        // richtig".
+        const created = new Set<string>();
+        for (const entry of entries) {
+          if (entry.outcome !== "move") continue;
+          if (!fixtures.folders.some((folder) => folder.path === entry.target_dir)) created.add(entry.target_dir);
+          dateSortCurrentDir[entry.photo_id] = entry.target_dir;
+        }
+        return { moved: count("move"), folders_created: created.size, failures: [] };
       }
 
       // ---- Papierkorb (Phase 33 F1) -----------------------------------

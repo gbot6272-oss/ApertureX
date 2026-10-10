@@ -42,7 +42,15 @@ test.describe("Bibliothek organisieren (Phase 9 Schritt 1)", () => {
     await expect(page.getByText("Stapel — 2 Fotos")).toBeVisible();
   });
 
-  test("Duplikat-Assistent zeigt Gruppen mit einer Vorschlags-Markierung", async ({ page }) => {
+  /**
+   * Seit Phase 34 F9 findet diese Registerkarte die Gruppen und weist
+   * zum Duplikat-Assistenten weiter, statt selbst einen Vorschlag zu
+   * markieren: die frühere Markierung stammte aus einer eigenen
+   * Frontend-Heuristik (`lib/duplicates.ts`), die anders entschied als
+   * die im Backend. Zwei Antworten auf dieselbe Frage sind schlimmer
+   * als eine unvollständige.
+   */
+  test("Duplikat-Suche zeigt Gruppen und weist zum Assistenten weiter", async ({ page }) => {
     const small = { ...PHOTO_A, width: 1000, height: 800, file_size: 500 };
     const large = { ...PHOTO_B, width: 6000, height: 4000, file_size: 9000 };
     await installTauriMock(page, {
@@ -57,7 +65,6 @@ test.describe("Bibliothek organisieren (Phase 9 Schritt 1)", () => {
     await page.getByRole("button", { name: "Duplikate suchen" }).click();
 
     await expect(page.getByText("Gruppe 1 (2 Fotos)")).toBeVisible();
-    const largeRow = page.locator("div").filter({ hasText: new RegExp(`^${large.filename}`) }).last();
-    await expect(largeRow.getByText("Vorschlag")).toBeVisible();
+    await expect(page.getByText(/Duplikat-Assistent vor/)).toBeVisible();
   });
 });

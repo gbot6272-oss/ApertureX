@@ -100,15 +100,49 @@ export function OnboardingTour({ open, onClose }: OnboardingTourProps) {
 
   useFocusTrap(cardRef, open);
 
+  /**
+   * Die Schritte der Tour.
+   *
+   * **In Phase „Geburtstagsausgabe" von 7 auf 15 erweitert** (siehe
+   * `DECISIONS.md` ADR-0071): die alte Tour zeigte die Chrome
+   * (Seitenleiste, Import, Ansichten, Entwickeln, Suche,
+   * Filmstreifen) und hörte dort auf, wo die eigentliche Arbeit
+   * beginnt. Wer danach wissen wollte, wie man exportiert, ein Foto
+   * zurückholt oder einen Look anwendet, musste suchen.
+   *
+   * **Reihenfolge nach dem Arbeitsweg, nicht nach der Oberfläche:**
+   * erst hereinbekommen (Import), dann ansehen (Ansichten,
+   * Filmstreifen), dann auswählen (Bewerten, Suche), dann bearbeiten
+   * (Presets, Entwickeln, Masken), dann herausgeben (Export, Drucken),
+   * dann aufräumen (Papierkorb, Katalog-Gesundheit). So steht jeder
+   * Schritt an der Stelle, an der man ihn das erste Mal braucht.
+   *
+   * **Schritte ohne Hervorhebung sind Absicht**, nicht Faulheit: Export,
+   * Papierkorb und die Aufräum-Werkzeuge liegen im Überlauf-Menü und
+   * haben kein dauerhaft sichtbares Bedienelement. Einen Scheinwerfer
+   * auf einen zugeklappten Menüeintrag zu setzen hieße, das Menü
+   * während der Tour offen zu halten — stattdessen eine zentrierte
+   * Karte, die sagt, wo es liegt.
+   */
   const steps = useMemo<TourStep[]>(
     () => [
       { titleKey: "onboarding.tour.welcome.title", bodyKey: "onboarding.tour.welcome.body", target: () => null, showSamplePhoto: true },
       { titleKey: "onboarding.tour.sidebar.title", bodyKey: "onboarding.tour.sidebar.body", target: () => document.querySelector<HTMLElement>(`aside[aria-label="${t("sidebar.heading")}"]`) },
       { titleKey: "onboarding.tour.import.title", bodyKey: "onboarding.tour.import.body", target: () => byDataTour("import") },
       { titleKey: "onboarding.tour.views.title", bodyKey: "onboarding.tour.views.body", target: () => byDataTour("views") },
-      { titleKey: "onboarding.tour.develop.title", bodyKey: "onboarding.tour.develop.body", target: () => byDataTour("develop") },
-      { titleKey: "onboarding.tour.search.title", bodyKey: "onboarding.tour.search.body", target: () => byDataTour("search") },
       { titleKey: "onboarding.tour.filmstrip.title", bodyKey: "onboarding.tour.filmstrip.body", target: () => byDataTour("filmstrip") },
+      { titleKey: "onboarding.tour.rating.title", bodyKey: "onboarding.tour.rating.body", target: () => null },
+      { titleKey: "onboarding.tour.search.title", bodyKey: "onboarding.tour.search.body", target: () => byDataTour("search") },
+      // Das Geschenk dieser Fassung: die drei Looks liegen im
+      // Presets-Panel, und das ist der Schritt, der sie zeigt.
+      { titleKey: "onboarding.tour.presets.title", bodyKey: "onboarding.tour.presets.body", target: () => document.querySelector<HTMLElement>(`aside[aria-label="${t("presets.heading")}"]`) },
+      { titleKey: "onboarding.tour.develop.title", bodyKey: "onboarding.tour.develop.body", target: () => byDataTour("develop") },
+      { titleKey: "onboarding.tour.masks.title", bodyKey: "onboarding.tour.masks.body", target: () => null },
+      { titleKey: "onboarding.tour.export.title", bodyKey: "onboarding.tour.export.body", target: () => document.querySelector<HTMLElement>(`button[aria-label="${t("header.overflowMenu")}"]`) },
+      { titleKey: "onboarding.tour.trash.title", bodyKey: "onboarding.tour.trash.body", target: () => null },
+      { titleKey: "onboarding.tour.health.title", bodyKey: "onboarding.tour.health.body", target: () => null },
+      { titleKey: "onboarding.tour.settings.title", bodyKey: "onboarding.tour.settings.body", target: () => byDataTour("settings") },
+      { titleKey: "onboarding.tour.done.title", bodyKey: "onboarding.tour.done.body", target: () => null, showSamplePhoto: true },
     ],
     [t],
   );
@@ -229,17 +263,23 @@ export function OnboardingTour({ open, onClose }: OnboardingTourProps) {
 
   return (
     <div aria-hidden={false} className="pointer-events-none fixed inset-0 z-[150]">
-      <div ref={topRef} className="apx-glass-strong pointer-events-auto fixed" onClick={onClose} />
-      <div ref={bottomRef} className="apx-glass-strong pointer-events-auto fixed" onClick={onClose} />
-      <div ref={leftRef} className="apx-glass-strong pointer-events-auto fixed" onClick={onClose} />
-      <div ref={rightRef} className="apx-glass-strong pointer-events-auto fixed" onClick={onClose} />
+      {/* `apx-spotlight` ist kein Stil, sondern die Gegenregel zur
+          Kaskaden-Falle: `.apx-glass-strong` setzt unlayered
+          `position: relative`, und Tailwinds `fixed`-Utility ist in
+          Tailwind v4 nachrangig. Ohne diese Marker-Klasse lagen diese
+          vier Rechtecke im Textfluss statt über dem Bildschirm — siehe
+          `index.css`s Kommentar dazu. */}
+      <div ref={topRef} className="apx-glass-strong apx-spotlight pointer-events-auto" onClick={onClose} />
+      <div ref={bottomRef} className="apx-glass-strong apx-spotlight pointer-events-auto" onClick={onClose} />
+      <div ref={leftRef} className="apx-glass-strong apx-spotlight pointer-events-auto" onClick={onClose} />
+      <div ref={rightRef} className="apx-glass-strong apx-spotlight pointer-events-auto" onClick={onClose} />
 
       <div
         ref={cardRef}
         role="dialog"
         aria-modal="true"
         aria-label={t(step.titleKey)}
-        className="apx-glass-strong pointer-events-auto fixed flex w-80 flex-col gap-3 rounded-xl border border-[var(--glass-border)] p-4 shadow-xl"
+        className="apx-glass-strong apx-spotlight pointer-events-auto flex w-80 flex-col gap-3 rounded-xl border border-[var(--glass-border)] p-4 shadow-xl"
       >
         {step.showSamplePhoto && (
           <div className="overflow-hidden rounded-lg">
@@ -249,7 +289,7 @@ export function OnboardingTour({ open, onClose }: OnboardingTourProps) {
         <div>
           <p className="text-xs text-text-muted">{t("onboarding.tour.stepLabel", { current: stepIndex + 1, total: steps.length })}</p>
           <h2 className="text-sm font-semibold text-text-primary">{t(step.titleKey)}</h2>
-          <p className="mt-1 text-xs text-text-secondary">{t(step.bodyKey)}</p>
+          <p data-testid="onboarding-tour-body" className="mt-1 text-xs text-text-secondary">{t(step.bodyKey)}</p>
         </div>
 
         <div className="flex items-center justify-center gap-1.5" aria-hidden="true">

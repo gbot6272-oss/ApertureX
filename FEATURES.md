@@ -567,3 +567,52 @@ vergrößert die Bildfläche nicht, sondern wird hineingezeichnet.
 | Manuelle Reihenfolge | Fotos einer Sammlung per Ziehen umordnen | Sortierung „Manuell (Sammlung)" |
 | Ähnliche Fotos | Treffer zu einem Referenzfoto, Regler zwischen Motiv und Farbe | Menü „Ähnliche Fotos finden…" |
 | Stapel im Raster | Stapel als eine Kachel mit Zähler, einzeln oder gesammelt aufklappbar | Abzeichen auf der Kachel, Schalter in der Filterleiste |
+
+## Phase 34 — Zehn Funktionen, die Angefangenes zu Ende bringen
+
+| Funktion | Was sie kann | Wo |
+| --- | --- | --- |
+| Suche über alles | Findet auch über Schlagworte, Notizen, Titel und Beschreibung, nicht nur über Dateiname und Kamera | Suchfeld in der Filterleiste |
+| Belichtung angleichen | Misst, um wie viele EV ein Foto von einer Referenz abweicht, und schreibt die Korrektur | Menü „Belichtung angleichen…" (zwei oder mehr Fotos ausgewählt) |
+| Differenzbild | Zwei Fotos Pixel gegen Pixel, Unterschiede eingefärbt | Vergleichsraster, Schalter „Differenz" bei genau zwei Fotos |
+| GPX-Geotagging | Ordnet Fotos Positionen aus einer GPX-Aufzeichnung zu, mit Zeitversatz und Toleranz | Menü „GPX-Geotagging…" |
+| Katalog-Gesundheit | Sechs Lücken auf einen Blick, jede Zeile legt die betroffenen Fotos in die Auswahl | Menü „Katalog-Gesundheit…" |
+| Verlaufs-Vergleich | Zeigt jedes geänderte Feld zwischen zwei Bearbeitungsschritten, lesbar beschriftet | Entwickeln → „Verlauf" |
+| Standardentwicklung je Kamera | Hinterlegte Entwicklung, die beim Import automatisch auf Fotos dieses Modells kommt | Menü „Standardentwicklung je Kamera…" |
+| Nach Aufnahmedatum einsortieren | Baut aus einem vollen Ordner einen Datumsbaum, mit Vorschau und Konfliktmeldung | Menü „Nach Aufnahmedatum einsortieren…" |
+| Duplikate aufräumen | Schlägt je Gruppe mit Begründung vor, was bleibt, und legt den Rest in den Papierkorb | Menü „Duplikate aufräumen…" |
+| Vorschauen vorbereiten | Rechnet die großen Vorschauen eines Ordners vorab, damit das Durchblättern flüssig ist | Menü „Vorschauen vorbereiten…" |
+
+**Ehrliche Grenzen:** Die Suche über Schlagworte und Notizen läuft über
+`LIKE`, nicht über den Volltextindex — sie findet Teilwörter, ist aber
+bei sehr großen Katalogen langsamer als die Suche über Dateiname und
+Kamera. Das Differenzbild rechnet auf einem festen Raster, nicht in
+voller Auflösung. GPX-Positionen werden über Lücken im Track hinweg
+nicht interpoliert; für diese Fotos bleibt der Ort leer. Beim
+Einsortieren nach Datum bleiben Fotos liegen, deren Zielname schon
+belegt ist — sie werden gemeldet, nicht umbenannt. Der Duplikat-Vorschlag
+ist eine Regel über Metadaten, keine Bildanalyse.
+
+## Geburtstagsausgabe — personalisierte Fassung
+
+| Funktion | Was sie kann | Wo |
+| --- | --- | --- |
+| Begrüßung beim Öffnen | Konfettikanonen, große Gratulation, geblurrter Hintergrund; schließt sich nach fünf Sekunden oder auf Klick | bei jedem Start |
+| Geburtstags-Thema | Warme, festliche Palette mit Gold-Akzent; die Fläche um das Foto bleibt farbneutral | Vorgabe, umschaltbar in den Einstellungen |
+| Luftballons & Konfetti | Sechs langsam steigende Ballons im Hintergrund, Konfetti bei fertigem Import und Export | app-weit, abschaltbar |
+| Drei Looks | „Goldene Stunde", „Familienfoto", „Erinnerung" — veränderbar und löschbar | Presets-Panel, Ordner „Geburtstag" |
+| Kamera schon eingestellt | Standardentwicklung für „Canon EOS", mit Abbildung in der Liste | Menü „Standardentwicklung je Kamera…" |
+| Ausführliche Einführung | Fünfzehn Schritte entlang des Arbeitswegs, von der Speicherkarte bis zum Aufräumen | beim ersten Start, danach über die Befehlspalette |
+
+**Ehrliche Grenzen:** Die Begrüßung erscheint bei jedem Start, nicht
+nur am Geburtstag — ein Datumsabgleich wäre ein zusätzlicher,
+überraschend fehleranfälliger Mechanismus (Zeitzonen, Jahreswechsel)
+für wenig Gewinn; wer sie nicht will, schaltet die Deko ab. Konfetti
+und Luftballons sind bei reduzierter Bewegung und im Kontrastmodus
+vollständig aus, nicht nur langsamer. Die drei Looks sind auf warme,
+sentimentale Wirkung ausgelegt und ersetzen keine Einzelbearbeitung;
+„Familienfoto" senkt bewusst den lokalen Kontrast und ist deshalb für
+Landschaften die falsche Wahl. Die Kamera-Vorgabe greift nur bei
+Fotos, deren EXIF-Modell genau „Canon EOS" lautet — „Canon EOS R5"
+ist ein anderes Gehäuse und bekommt sie nicht (siehe
+`DECISIONS.md` ADR-0071).

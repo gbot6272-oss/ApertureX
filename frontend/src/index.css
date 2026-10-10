@@ -337,6 +337,33 @@ header.apx-glass {
   position: fixed;
 }
 
+/* **Vierter Fall derselben Kaskaden-Falle** (ADR-0071; die drei
+   vorherigen stehen im Kommentar oben: `z-index` beim Überlauf-Menü,
+   `fixed` bei der Kopfzeile, `absolute` bei der Zoom-Steuerung).
+   Gefunden beim Ausbau der Einführungstour, und zwar nur, weil die
+   längeren Texte die Karte hoch genug machten, dass ihr
+   „Weiter"-Knopf aus dem Fenster rutschte — gemessen:
+   `getComputedStyle(card).position` ergab `"relative"` statt
+   `"fixed"`.
+
+   Die Folge war größer als der sichtbare Anlass: die vier
+   Abdunkel-Rechtecke des Scheinwerfers sind ebenfalls `.apx-glass-strong
+   fixed` und lagen damit seit Phase 21 **im Textfluss** statt über dem
+   Bildschirm. Der Scheinwerfer hat nie einen Ausschnitt gezeigt; er
+   hat vier graue Blöcke untereinander gestapelt und die Karte um
+   deren Gesamthöhe nach unten geschoben. Aufgefallen ist es nicht,
+   weil kein Test die Geometrie gemessen hat — nur Textsichtbarkeit,
+   und die stimmte.
+
+   Lösung wie bei `header.apx-glass`: über Spezifität statt über
+   Reihenfolge. Zwei Klassen schlagen eine. Bewusst eine eigene
+   Marker-Klasse und nicht `div.apx-glass-strong` — das würde jede
+   andere Glasfläche treffen, die zu Recht `relative` sein will. */
+.apx-glass-strong.apx-spotlight,
+.apx-glass.apx-spotlight {
+  position: fixed;
+}
+
 /* "Liquid"-Knopf-Mechanik (Phase 25 Nachtrag, siehe DECISIONS.md,
    aktuelles ADR + PROMPTS.md Prompt 2s `LiquidButton`) — für die
    Hauptmenü-Fläche (Kopfzeile: Ansicht-Segmentgruppe, Import-Knopf):
@@ -497,6 +524,183 @@ body {
   --glow-accent: transparent;
   --glow-secondary: transparent;
   --glow-tertiary: transparent;
+}
+
+/* ============================================================
+   Geburtstagsausgabe (siehe `DECISIONS.md` ADR-0071)
+   ============================================================
+
+   Festliche Palette, geschaltet über `data-theme="birthday"` auf
+   `<html>` — dieselbe Mechanik wie das helle Theme oben, nur andere
+   Werte. In dieser Fassung ist es die Vorgabe (`apx_core::settings::
+   Theme::Birthday`), `dark`/`light` bleiben unverändert wählbar.
+
+   **Die wichtigste Entscheidung steht in `--color-bg-base`.** Das ist
+   die Fläche direkt um das Foto (siehe `Viewer.tsx`s
+   `bg-bg-base`-Container). Sie bleibt nahezu neutral und sehr dunkel,
+   obwohl der Rest der Oberfläche warm wird: ein warmer Farbstich
+   unmittelbar neben dem Bild verschiebt die Farbwahrnehmung des
+   Betrachters (simultaner Farbkontrast) — man korrigiert dann gegen
+   die Oberfläche an und wundert sich später über kühle Fotos. Die
+   Festlichkeit sitzt deshalb in Paletten, Rahmen, Akzent und Deko,
+   nicht auf der Urteilsfläche. Das ist derselbe Grund, aus dem
+   Lightroom und Capture One einen neutralen Arbeitshintergrund haben.
+
+   Kontrast: `--color-text-muted` ist bewusst heller als die
+   naheliegende Wahl (ein gedämpftes Altrosa lag bei 4,37:1 gegen
+   `--color-bg-panel` und damit unter AA für normalen Text) — mit dem
+   gewählten Wert sind es 5,2:1. Akzent und Primärtext liegen bei
+   8,8:1 bzw. deutlich darüber. */
+:root[data-theme="birthday"] {
+  /* Urteilsfläche: neutral-dunkel, nur eine Spur warm (siehe oben). */
+  --color-bg-base: #0a0809;
+  --color-bg-raised: #17111c;
+  --color-bg-panel: #1f1726;
+  --color-border: #58445f;
+  --color-text-primary: #f7eee2;
+  --color-text-secondary: #bfa9b8;
+  --color-text-muted: #9a8796;
+  /* Warmes Gold statt des kühlen Blaus — der Akzent trägt in dieser
+     Oberfläche fast jede Hervorhebung, und Gold auf dem dunklen Plum
+     ist der festlichste Ton, der gleichzeitig 8,8:1 Kontrast hält. */
+  --color-accent: #f0a93c;
+  --color-danger: #e7766b;
+  --color-success: #8ec98a;
+  --color-bg-overlay: rgb(14 8 17 / 62%);
+
+  /* Glüh-Farbwasch (siehe `body`s Moduldoku): Gold/Rosé/Violett statt
+     Blau/Terrakotta/Grün — dieselbe Aufgabe, `.apx-glass`s
+     `saturate()` etwas Farbvielfalt zu geben. */
+  --glow-accent: rgb(240 169 60 / 22%);
+  --glow-secondary: rgb(232 118 160 / 16%);
+  --glow-tertiary: rgb(150 108 214 / 16%);
+
+  /* Schatten minimal warm getönt statt neutral schwarz — auf einem
+     Plum-Grund wirkt reines Schwarz wie ein Loch, ein warmer Schatten
+     wie Tiefe. Gleiche Stärken wie im Dunkel-Theme. */
+  --shadow-md: 0 6px 16px -4px rgb(12 4 14 / 48%), 0 2px 6px -2px rgb(12 4 14 / 38%);
+  --shadow-lg: 0 12px 28px -6px rgb(12 4 14 / 52%), 0 4px 10px -4px rgb(12 4 14 / 38%);
+  --shadow-xl: 0 24px 48px -10px rgb(12 4 14 / 56%), 0 8px 16px -6px rgb(12 4 14 / 42%);
+  --shadow-2xl: 0 32px 64px -12px rgb(12 4 14 / 62%), 0 12px 24px -8px rgb(12 4 14 / 48%);
+
+  /* Farben der Deko-Schichten (Luftballons, Konfetti) — als Tokens,
+     damit `lib/confetti.ts` sie über `getComputedStyle` lesen kann
+     statt eine zweite, irgendwann abweichende Palette im JS zu
+     führen. */
+  --party-1: #f0a93c;
+  --party-2: #e876a0;
+  --party-3: #966cd6;
+  --party-4: #6ec2d6;
+  --party-5: #8ec98a;
+  --party-6: #f2e6c8;
+}
+
+/* Luftballon-Schicht (ADR-0071) — rein dekorativ, liegt hinter allem
+   Bedienbaren und nimmt keine Zeigerereignisse an. Sechs Ballons statt
+   eines Dauerregens: genug, dass es festlich wirkt, wenig genug, dass
+   es nach zwei Minuten nicht nervt und keinen messbaren Rahmenaufwand
+   kostet (sechs zusammengesetzte Transformationen, die der Compositor
+   ohne Layout-Durchlauf bewegt — `transform`/`opacity`, nichts
+   anderes). */
+.apx-balloon-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.apx-balloon {
+  position: absolute;
+  bottom: -14vh;
+  width: 2.6rem;
+  height: 3.3rem;
+  border-radius: 50% 50% 48% 48%;
+  opacity: 0.22;
+  /* Die Schnur: ein schmales Pseudoelement, kein zweites DOM-Element. */
+  animation: apx-balloon-rise linear infinite;
+  will-change: transform;
+}
+
+.apx-balloon::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 1px;
+  height: 2.2rem;
+  background: currentColor;
+  opacity: 0.5;
+}
+
+@keyframes apx-balloon-rise {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(-4deg);
+  }
+  50% {
+    transform: translate3d(1.6rem, -60vh, 0) rotate(4deg);
+  }
+  100% {
+    transform: translate3d(0, -124vh, 0) rotate(-4deg);
+  }
+}
+
+/* Reduzierte Bewegung UND Kontrastmodus blenden die Deko vollständig
+   aus — nicht nur ihre Animation. Die globale Regel oben kappt zwar
+   jede `animation-duration`, aber ein zum Endbild gesprungener Ballon
+   wäre entweder ein unmotivierter Fleck oder (hier) außerhalb des
+   Bildschirms: besser ehrlich nicht vorhanden als zufällig
+   unsichtbar. Im Kontrastmodus gilt dasselbe aus dem Grund, der dort
+   schon den Glüh-Farbwasch abschaltet. */
+@media (prefers-reduced-motion: reduce) {
+  .apx-balloon-layer,
+  .apx-confetti-layer {
+    display: none;
+  }
+}
+
+.apx-reduce-motion .apx-balloon-layer,
+.apx-reduce-motion .apx-confetti-layer,
+:root[data-contrast="high"] .apx-balloon-layer,
+:root[data-contrast="high"] .apx-confetti-layer {
+  display: none;
+}
+
+/* Konfetti-Leinwand (ADR-0071) — eine einzige `<canvas>` für die ganze
+   App, ohne Zeigerereignisse.
+   
+   **Die Stapelreihenfolge ist durchgerechnet, nicht geschätzt:**
+   Dialoge liegen bei `z-50`, die Einführungstour bei `z-150`, die
+   Geburtstags-Begrüßung bei `z-160`, der Start-Ladeschirm bei `z-200`.
+   Konfetti steht mit `149` bewusst ÜBER den Dialogen (es soll auch
+   über einem offenen Export-Dialog fliegen) und UNTER der Tour — die
+   lag im ersten Versuch bei derselben Zahl, und damit entschied die
+   DOM-Reihenfolge über die Überdeckung statt der Absicht. */
+.apx-confetti-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 149;
+  pointer-events: none;
+}
+
+/* Die große Gratulation (ADR-0071). `background-clip: text` auf einem
+   Verlauf statt einer flachen Farbe — bei dieser Schriftgröße ist der
+   Verlauf der Unterschied zwischen "groß" und "feierlich".
+   `-webkit-`-Präfix mitgeführt: die App läuft in WebKitGTK (Linux) und
+   WebView2 (Windows), erstere braucht ihn weiterhin. */
+.apx-birthday-title {
+  background-image: linear-gradient(
+    102deg,
+    var(--party-6) 0%,
+    var(--party-1) 34%,
+    var(--party-2) 68%,
+    var(--party-3) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 60px rgb(240 169 60 / 18%);
 }
 
 /* Reduzierte Bewegung: sowohl die Betriebssystem-Einstellung

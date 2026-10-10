@@ -7,6 +7,7 @@ pub(crate) mod collections;
 pub(crate) mod color_labels;
 pub(crate) mod edits;
 pub(crate) mod folders;
+pub(crate) mod health;
 pub(crate) mod keywords;
 pub(crate) mod notes;
 pub(crate) mod people;

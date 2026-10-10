@@ -68,7 +68,7 @@ use route::ImageRequest;
 use crate::state::AppState;
 
 const THUMBNAIL_EDGE: u32 = 256;
-const STANDARD_EDGE: u32 = 2048;
+pub(crate) const STANDARD_EDGE: u32 = 2048;
 /// Obergrenze je Video-Antwort (Phase 16 Schritt 5) — auch bei einer
 /// offenen oder fehlenden `Range`-Anfrage wird nie mehr als das hier auf
 /// einmal in den Speicher gelesen; der Browser holt den Rest selbst über

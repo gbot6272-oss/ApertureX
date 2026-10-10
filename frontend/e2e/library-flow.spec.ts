@@ -143,7 +143,7 @@ test.describe("Bibliothek: Raster, Bewertung, Sammlungen, Filter", () => {
     await page.getByRole("button", { name: "Raster" }).click();
     const grid = page.locator("main");
 
-    const searchInput = page.getByPlaceholder("Suche (Dateiname, Kamera, Objektiv)…");
+    const searchInput = page.getByPlaceholder("Suche (Dateiname, Kamera, Titel, Schlagwort, Notiz…)");
     await searchInput.fill("Strand");
     await searchInput.press("Enter");
     await expect(grid.getByRole("img", { name: strandHigh.filename })).toBeVisible();
@@ -158,6 +158,40 @@ test.describe("Bibliothek: Raster, Bewertung, Sammlungen, Filter", () => {
     await expect(grid.getByRole("img", { name: strandLow.filename })).not.toBeVisible();
     await expect(grid.getByRole("img", { name: bergHigh.filename })).not.toBeVisible();
     await expect(searchInput).toHaveValue("Strand");
+  });
+
+  /**
+   * Phase 34 F1 (`DECISIONS.md` ADR-0070): die Suche deckte bis dahin nur
+   * Dateiname, Kamera und Objektiv ab — ausgerechnet die selbst
+   * gepflegten Felder (Titel, Beschriftung) und die Schlagworte waren
+   * nicht auffindbar.
+   */
+  test("findet Fotos ueber Titel, Beschriftung und Schlagwort", async ({ page }) => {
+    const mitTitel = samplePhoto("01977f4a-0000-7000-8000-000000000601", "a.CR3");
+    const mitBeschriftung = samplePhoto("01977f4a-0000-7000-8000-000000000602", "b.CR3");
+    const mitSchlagwort = samplePhoto("01977f4a-0000-7000-8000-000000000603", "c.CR3");
+    const ohne = samplePhoto("01977f4a-0000-7000-8000-000000000604", "d.CR3");
+    (mitTitel as Record<string, unknown>).title = "Hafenpanorama";
+    (mitBeschriftung as Record<string, unknown>).caption = "Abendrot über dem Hafen";
+
+    await installTauriMock(page, {
+      folders: [{ id: FOLDER_ID, path: FOLDER_PATH, photo_count: 4 }],
+      photosByFolder: { [FOLDER_ID]: [mitTitel, mitBeschriftung, mitSchlagwort, ohne] },
+      keywordsByPhoto: { [mitSchlagwort.id]: [{ id: "kw-1", name: "Hafenfest" }] },
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Bibliothek/ }).click();
+    await page.getByRole("button", { name: "Raster" }).click();
+    const grid = page.locator("main");
+
+    const searchInput = page.getByPlaceholder("Suche (Dateiname, Kamera, Titel, Schlagwort, Notiz…)");
+    await searchInput.fill("Hafen");
+    await searchInput.press("Enter");
+
+    await expect(grid.getByRole("img", { name: mitTitel.filename })).toBeVisible();
+    await expect(grid.getByRole("img", { name: mitBeschriftung.filename })).toBeVisible();
+    await expect(grid.getByRole("img", { name: mitSchlagwort.filename })).toBeVisible();
+    await expect(grid.getByRole("img", { name: ohne.filename })).not.toBeVisible();
   });
 
   /** Belegt Schritt 8.2 (`DECISIONS.md` ADR-0027): Fotos mit identischem

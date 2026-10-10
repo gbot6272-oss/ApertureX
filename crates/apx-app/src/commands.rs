@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::state::AppState;
@@ -4632,6 +4632,20 @@ pub fn list_perceptual_duplicate_groups(
     state: State<'_, AppState>,
     max_distance: u32,
 ) -> Result<Vec<Vec<PhotoDto>>, String> {
+    Ok(perceptual_duplicate_groups(&state, max_distance)?
+        .into_iter()
+        .map(|group| group.into_iter().map(PhotoDto::from).collect())
+        .collect())
+}
+
+/// Die Gruppierung hinter [`list_perceptual_duplicate_groups`], mit den
+/// Katalogzeilen statt der DTOs — der Duplikat-Assistent (Phase 34 F9)
+/// braucht mehr Felder als das DTO trägt, und zwei Wege zu denselben
+/// Gruppen wären zwei Stellen, an denen sie auseinanderlaufen können.
+fn perceptual_duplicate_groups(
+    state: &State<'_, AppState>,
+    max_distance: u32,
+) -> Result<Vec<Vec<apx_catalog::Photo>>, String> {
     let photos = state
         .catalog
         .search_and_filter_photos(None, &apx_catalog::FilterCriteria::default())
@@ -4671,13 +4685,387 @@ pub fn list_perceptual_duplicate_groups(
     Ok(groups
         .into_iter()
         .filter(|group| group.len() >= 2)
-        .map(|group| {
-            group
-                .into_iter()
-                .map(|i| PhotoDto::from(hashed[i].0.clone()))
-                .collect()
-        })
+        .map(|group| group.into_iter().map(|i| hashed[i].0.clone()).collect())
         .collect())
+}
+
+// ---- Vorschauen vorbereiten (Phase 34 F10) ---------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PreviewWarmPlanDto {
+    /// Fotos, für die noch gerechnet werden müsste.
+    pub pending: usize,
+    /// Fotos, deren Vorschau schon im Cache liegt.
+    pub already: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PreviewWarmProgressPayload {
+    pub done: usize,
+    pub total: usize,
+    pub current_file: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PreviewWarmFinishedPayload {
+    pub prepared: usize,
+    pub failed: usize,
+    pub cancelled: bool,
+}
+
+/// Sammelt die Fotos eines Ordners (oder des ganzen Katalogs) und
+/// trennt, was schon vorbereitet ist.
+///
+/// Übersprungen werden virtuelle Kopien (teilen sich die Datei mit dem
+/// Quellfoto, dessen Vorschau also schon gilt), fehlende Dateien und
+/// Videos (deren Vorschau ist ein extrahiertes Frame, kein dekodiertes
+/// RAW — dafür ist `import::thumbnails` zuständig).
+fn collect_warm_candidates(
+    state: &State<'_, AppState>,
+    folder_id: Option<apx_core::FolderId>,
+) -> Result<Vec<crate::preview_warm::WarmCandidate>, String> {
+    let folders = state
+        .catalog
+        .list_folders()
+        .map_err(|err| err.to_string())?;
+    let mut out = Vec::new();
+    for folder in folders {
+        if let Some(only) = folder_id {
+            if folder.id != only {
+                continue;
+            }
+        }
+        for photo in state
+            .catalog
+            .list_photos_by_folder(folder.id)
+            .map_err(|err| err.to_string())?
+        {
+            if photo.source_photo_id.is_some() || photo.missing {
+                continue;
+            }
+            let source_path = folder.path.join(&photo.filename);
+            if crate::import::video::is_video_extension(&source_path) {
+                continue;
+            }
+            let cached = state
+                .catalog
+                .get_preview(photo.id, apx_catalog::PreviewLevel::Standard)
+                .map_err(|err| err.to_string())?
+                .is_some_and(|preview| preview.path.exists());
+            out.push(crate::preview_warm::WarmCandidate {
+                photo_id: photo.id,
+                source_path,
+                cached,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Sagt, wie viel Arbeit das Vorbereiten machen würde — ohne sie zu tun.
+#[tauri::command]
+pub fn preview_warm_plan(
+    state: State<'_, AppState>,
+    folder_id: Option<String>,
+    force: bool,
+) -> Result<PreviewWarmPlanDto, String> {
+    let parsed = folder_id
+        .map(|id| id.parse::<apx_core::FolderId>())
+        .transpose()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    let plan = crate::preview_warm::plan_warm(collect_warm_candidates(&state, parsed)?, force);
+    Ok(PreviewWarmPlanDto {
+        pending: plan.pending.len(),
+        already: plan.already,
+    })
+}
+
+/// Bereitet die Vorschauen vor.
+///
+/// Läuft im Hintergrund (derselbe `spawn_blocking`-Aufbau wie der
+/// Import) und meldet sich über `preview-warm:progress` und
+/// `preview-warm:finished` — ein Ordner mit tausend RAWs beschäftigt die
+/// Maschine minutenlang, und eine Oberfläche, die dabei einfriert, wäre
+/// schlimmer als gar keine Vorbereitung.
+///
+/// Ein Fehler betrifft nur ein Foto: die übrigen laufen weiter, und die
+/// Zahl steht am Ende in `failed`. Eine einzelne kaputte Datei darf
+/// nicht die Vorbereitung eines ganzen Ordners abbrechen.
+#[tauri::command]
+pub fn start_preview_warm(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    folder_id: Option<String>,
+    force: bool,
+) -> Result<usize, String> {
+    let parsed = folder_id
+        .map(|id| id.parse::<apx_core::FolderId>())
+        .transpose()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+    let plan = crate::preview_warm::plan_warm(collect_warm_candidates(&state, parsed)?, force);
+    if plan.pending.is_empty() {
+        return Ok(0);
+    }
+
+    let cancel = {
+        let mut guard = state
+            .active_preview_warm
+            .lock()
+            .map_err(|_| "Vorschau-Status ist blockiert (vergiftete Sperre)".to_string())?;
+        if guard.is_some() {
+            return Err("Es werden bereits Vorschauen vorbereitet".to_string());
+        }
+        let token = tokio_util::sync::CancellationToken::new();
+        *guard = Some(token.clone());
+        token
+    };
+
+    let total = plan.pending.len();
+    let targets = plan.pending;
+    let catalog = state.catalog.clone();
+    let cache_root = state.paths.preview_cache_dir();
+    let active = state.active_preview_warm.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let app_for_blocking = app.clone();
+        let cancel_for_blocking = cancel.clone();
+        let join_result = tokio::task::spawn_blocking(move || {
+            use rayon::prelude::*;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+
+            // Derselbe Zuschnitt wie bei den Import-Thumbnails: ein Kern
+            // bleibt frei, damit die Oberfläche bedienbar bleibt,
+            // während im Hintergrund dekodiert wird.
+            let workers = num_cpus::get_physical().saturating_sub(1).max(1);
+            let pool = match rayon::ThreadPoolBuilder::new().num_threads(workers).build() {
+                Ok(pool) => pool,
+                Err(err) => {
+                    tracing::error!(%err, "Worker-Pool für das Vorschau-Vorwärmen nicht erstellbar");
+                    return (0usize, total);
+                }
+            };
+
+            let done = AtomicUsize::new(0);
+            let failed = AtomicUsize::new(0);
+            pool.install(|| {
+                targets.par_iter().for_each(|(photo_id, source_path)| {
+                    if cancel_for_blocking.is_cancelled() {
+                        return;
+                    }
+                    let current = done.fetch_add(1, Ordering::SeqCst) + 1;
+                    let _ = app_for_blocking.emit(
+                        "preview-warm:progress",
+                        PreviewWarmProgressPayload {
+                            done: current,
+                            total,
+                            current_file: Some(source_path.to_string_lossy().to_string()),
+                        },
+                    );
+                    if let Err(err) =
+                        crate::preview_warm::warm_one(&catalog, &cache_root, *photo_id, source_path)
+                    {
+                        tracing::warn!(path = %source_path.display(), %err, "Vorschau nicht vorbereitbar");
+                        failed.fetch_add(1, Ordering::SeqCst);
+                    }
+                });
+            });
+            (done.into_inner() - failed.load(Ordering::SeqCst), failed.into_inner())
+        })
+        .await;
+
+        if let Ok(mut guard) = active.lock() {
+            *guard = None;
+        }
+
+        let (prepared, failed) = match join_result {
+            Ok(counts) => counts,
+            Err(join_err) => {
+                tracing::error!(error = %join_err, "Vorschau-Vorwärmen ist abgestürzt");
+                (0, total)
+            }
+        };
+        let _ = app.emit(
+            "preview-warm:finished",
+            PreviewWarmFinishedPayload {
+                prepared,
+                failed,
+                cancelled: cancel.is_cancelled(),
+            },
+        );
+    });
+
+    Ok(total)
+}
+
+/// Bricht das Vorbereiten ab. Kein Fehler, wenn gerade keines läuft —
+/// derselbe harmlose Wettlauf wie bei [`cancel_import`].
+#[tauri::command]
+pub fn cancel_preview_warm(state: State<'_, AppState>) -> Result<(), String> {
+    let guard = state
+        .active_preview_warm
+        .lock()
+        .map_err(|_| "Vorschau-Status ist blockiert (vergiftete Sperre)".to_string())?;
+    if let Some(token) = guard.as_ref() {
+        token.cancel();
+    }
+    Ok(())
+}
+
+// ---- Duplikat-Assistent (Phase 34 F9) --------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DuplicateCandidateDto {
+    pub photo: PhotoDto,
+    /// Ob an diesem Foto schon gearbeitet wurde — der teuerste Grund,
+    /// eine Version nicht wegzuwerfen, und einer, den man dem
+    /// Dateinamen nicht ansieht.
+    pub has_edits: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DuplicateGroupDto {
+    pub photos: Vec<DuplicateCandidateDto>,
+    /// Vorschlag, welches Foto bleibt.
+    pub keeper_id: String,
+    /// Warum dieses — Schlüssel, die Beschriftung bleibt im Frontend.
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DuplicateCleanupPlanDto {
+    pub groups: Vec<DuplicateGroupDto>,
+    /// Wie viele Fotos der Vorschlag wegwerfen würde.
+    pub discard_count: usize,
+}
+
+/// Sammelt die Duplikatgruppen und schlägt je Gruppe vor, was bleibt.
+///
+/// `mode`: `"exact"` nimmt die byte-identischen Gruppen (Inhalts-Hash),
+/// alles andere die ähnlichen (Wahrnehmungs-Hash, `max_distance`). Beide
+/// Wege sind die vorhandenen — dieser Command gruppiert nicht selbst,
+/// er beantwortet nur die Frage danach.
+///
+/// Rein lesend. Der Papierkorb kommt erst in [`apply_duplicate_cleanup`].
+#[tauri::command]
+pub fn plan_duplicate_cleanup(
+    state: State<'_, AppState>,
+    mode: String,
+    max_distance: u32,
+) -> Result<DuplicateCleanupPlanDto, String> {
+    let groups = if mode == "exact" {
+        state
+            .catalog
+            .list_duplicate_photo_groups()
+            .map_err(|err| err.to_string())?
+    } else {
+        perceptual_duplicate_groups(&state, max_distance)?
+    };
+
+    let mut out = Vec::new();
+    let mut discard_count = 0usize;
+    for group in groups {
+        if group.len() < 2 {
+            continue;
+        }
+        let mut candidates = Vec::with_capacity(group.len());
+        let mut dtos = Vec::with_capacity(group.len());
+        for photo in group {
+            let has_edits = !state
+                .catalog
+                .list_edit_history(photo.id)
+                .map_err(|err| err.to_string())?
+                .is_empty();
+            candidates.push(crate::duplicate_keeper::KeeperCandidate {
+                photo_id: photo.id,
+                filename: photo.filename.clone(),
+                width: photo.width,
+                height: photo.height,
+                file_size: photo.file_size,
+                rating: photo.rating,
+                flag: photo.flag,
+                has_edits,
+            });
+            dtos.push(DuplicateCandidateDto {
+                photo: PhotoDto::from(photo),
+                has_edits,
+            });
+        }
+
+        let Some(choice) = crate::duplicate_keeper::choose_keeper(&candidates) else {
+            continue;
+        };
+        discard_count += dtos.len() - 1;
+        out.push(DuplicateGroupDto {
+            photos: dtos,
+            keeper_id: choice.keeper.to_string(),
+            reason: choice.reason.as_str().to_string(),
+        });
+    }
+
+    Ok(DuplicateCleanupPlanDto {
+        groups: out,
+        discard_count,
+    })
+}
+
+/// Wirft die ausgewählten Duplikate in den Papierkorb.
+///
+/// Der Aufrufer sagt, was weg soll — nicht der Command: der Vorschlag
+/// ist ein Vorschlag, und wer in einer Gruppe eine andere Version
+/// behalten will, muss das dürfen.
+///
+/// **Eine Grenze bleibt aber hart:** aus keiner Duplikatgruppe darf
+/// alles verschwinden. Ein Klickfehler in einer Liste mit hundert
+/// Gruppen ist zu leicht gemacht, und „alle Versionen dieses Motivs weg"
+/// ist nie das, was jemand wollte. Dafür wird der Plan hier neu
+/// gerechnet und geprüft, statt der Auswahl zu glauben.
+///
+/// Papierkorb statt Löschen: umkehrbar (Phase 33 F1), mit dem Grund
+/// `Duplicate`, damit im Papierkorb nachvollziehbar bleibt, warum.
+#[tauri::command]
+pub fn apply_duplicate_cleanup(
+    state: State<'_, AppState>,
+    mode: String,
+    max_distance: u32,
+    discard_ids: Vec<String>,
+) -> Result<usize, String> {
+    let discard: std::collections::HashSet<apx_core::PhotoId> = discard_ids
+        .iter()
+        .map(|id| id.parse::<apx_core::PhotoId>())
+        .collect::<Result<_, apx_core::AppError>>()
+        .map_err(|err| err.to_string())?;
+    if discard.is_empty() {
+        return Ok(0);
+    }
+
+    let plan = plan_duplicate_cleanup(state.clone(), mode, max_distance)?;
+    for group in &plan.groups {
+        let survives = group.photos.iter().any(|candidate| {
+            candidate
+                .photo
+                .id
+                .parse::<apx_core::PhotoId>()
+                .map(|id| !discard.contains(&id))
+                .unwrap_or(true)
+        });
+        if !survives {
+            return Err(
+                "Aus einer Duplikatgruppe würde jede Version verschwinden — nichts verändert."
+                    .into(),
+            );
+        }
+    }
+
+    let ids: Vec<apx_core::PhotoId> = discard.into_iter().collect();
+    state
+        .catalog
+        .trash_photos(
+            &ids,
+            apx_catalog::TrashReason::Duplicate,
+            time::OffsetDateTime::now_utc(),
+        )
+        .map_err(|err| err.to_string())?;
+    Ok(ids.len())
 }
 
 /// Ähnliche Videos finden (Phase 16 Schritt 10, siehe `DECISIONS.md`
@@ -6760,6 +7148,8 @@ pub struct UiSettingsDto {
     pub sound_enabled: bool,
     pub sound_volume_percent: u16,
     pub sound_pack: String,
+    /// Geburtstags-Deko an/aus (siehe `DECISIONS.md` ADR-0071).
+    pub birthday_decorations: bool,
 }
 
 impl From<apx_core::UiSettings> for UiSettingsDto {
@@ -6775,6 +7165,7 @@ impl From<apx_core::UiSettings> for UiSettingsDto {
             sound_enabled: ui.sound_enabled,
             sound_volume_percent: ui.sound_volume_percent,
             sound_pack: ui.sound_pack,
+            birthday_decorations: ui.birthday_decorations,
         }
     }
 }
@@ -6809,6 +7200,7 @@ pub fn set_ui_settings(state: State<'_, AppState>, settings: UiSettingsDto) -> R
         } else {
             settings.sound_pack
         },
+        birthday_decorations: settings.birthday_decorations,
     };
     all.save(&path).map_err(|err| err.to_string())
 }
@@ -8328,6 +8720,127 @@ pub fn import_gpx_track(path: String) -> Result<Vec<GpxTrackPointDto>, String> {
         .collect())
 }
 
+/// Ein Foto und die aus dem Track ermittelte Position (siehe
+/// [`preview_gpx_geotag`]).
+#[derive(Debug, Clone, Serialize)]
+pub struct GpxMatchDto {
+    pub photo_id: String,
+    pub filename: String,
+    /// RFC-3339-Aufnahmezeit, oder `null` wenn das Foto keine hat.
+    pub captured_at: Option<String>,
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
+    /// Warum es keinen Treffer gab — leer bei Erfolg.
+    pub reason: Option<String>,
+    /// Hatte das Foto schon eine Position? Die würde überschrieben.
+    pub had_position: bool,
+}
+
+/// Ordnet Fotos einem GPX-Track zu, ohne etwas zu schreiben (Phase 34
+/// F4, siehe `gpx_match.rs` und `DECISIONS.md` ADR-0070).
+///
+/// **Erst zeigen, dann schreiben** — dieselbe Trennung wie beim
+/// Ordner-Abgleich (Phase 33 F2): der Nutzer sieht, welches Foto wo
+/// landen würde, bevor irgendetwas am Katalog geändert wird. Gerade
+/// beim Kamerauhr-Versatz ist der erste Versuch fast nie der richtige.
+///
+/// `offset_seconds` wird auf die AUFNAHMEZEIT addiert: geht die
+/// Kamerauhr eine Stunde nach, gleicht `+3600` das aus.
+#[tauri::command]
+pub fn preview_gpx_geotag(
+    state: State<'_, AppState>,
+    gpx_path: String,
+    photo_ids: Vec<String>,
+    offset_seconds: i64,
+    tolerance_seconds: i64,
+) -> Result<Vec<GpxMatchDto>, String> {
+    let ids = parse_photo_ids(photo_ids)?;
+    let xml = std::fs::read_to_string(&gpx_path)
+        .map_err(|err| format!("GPX-Datei nicht lesbar: {err}"))?;
+    // Gelesen wird mit demselben Parser wie fuer die Reiserouten-Anzeige
+    // der Kartenansicht (`import_gpx_track` oben) — ein zweiter Leser
+    // daneben waere Doppelpflege.
+    let raw = apx_export::map::parse_gpx(&xml).map_err(|err| err.to_string())?;
+    let points = crate::gpx_match::timed_points(&raw);
+    if points.is_empty() {
+        return Err(
+            "Der Track enthält keinen Punkt mit Zeitangabe — ohne Zeit lässt sich nichts zuordnen"
+                .to_string(),
+        );
+    }
+
+    let tolerance = crate::gpx_match::effective_tolerance(tolerance_seconds);
+    let mut results = Vec::new();
+    for id in ids {
+        let Ok(photo) = state.catalog.get_photo(id) else {
+            continue;
+        };
+        let had_position = photo.gps_lat.is_some() && photo.gps_lon.is_some();
+        let Some(captured) = photo.captured_at else {
+            results.push(GpxMatchDto {
+                photo_id: id.to_string(),
+                filename: photo.filename,
+                captured_at: None,
+                lat: None,
+                lon: None,
+                reason: Some("Kein Aufnahmedatum".to_string()),
+                had_position,
+            });
+            continue;
+        };
+        let shifted = captured + time::Duration::seconds(offset_seconds);
+        let hit = crate::gpx_match::match_position(&points, shifted, tolerance);
+        results.push(GpxMatchDto {
+            photo_id: id.to_string(),
+            filename: photo.filename,
+            captured_at: captured
+                .format(&time::format_description::well_known::Rfc3339)
+                .ok(),
+            lat: hit.map(|(lat, _)| lat),
+            lon: hit.map(|(_, lon)| lon),
+            reason: hit
+                .is_none()
+                .then(|| "Keine Trackposition in der Zeitspanne".to_string()),
+            had_position,
+        });
+    }
+    Ok(results)
+}
+
+/// Schreibt die Positionen aus [`preview_gpx_geotag`] in den Katalog.
+///
+/// Übergeben wird genau das, was die Vorschau gezeigt hat — der Befehl
+/// rechnet NICHT neu. Andernfalls könnte zwischen Ansehen und Anwenden
+/// etwas anderes herauskommen als das, was der Nutzer bestätigt hat.
+///
+/// Fotos mit bereits vorhandener Position können ausgenommen werden;
+/// eine von Hand gesetzte Koordinate ist eine Entscheidung und soll
+/// nicht stillschweigend von einem Track überschrieben werden.
+#[tauri::command]
+pub fn apply_gpx_geotag(
+    state: State<'_, AppState>,
+    positions: Vec<GpxPositionInput>,
+) -> Result<u32, String> {
+    let mut written = 0_u32;
+    for entry in positions {
+        let id = parse_photo_id(entry.photo_id)?;
+        state
+            .catalog
+            .set_photo_gps(id, Some((entry.lat, entry.lon)))
+            .map_err(|err| err.to_string())?;
+        written += 1;
+    }
+    Ok(written)
+}
+
+/// Eine zu schreibende Position (siehe [`apply_gpx_geotag`]).
+#[derive(Debug, Clone, Deserialize)]
+pub struct GpxPositionInput {
+    pub photo_id: String,
+    pub lat: f64,
+    pub lon: f64,
+}
+
 /// Setzt oder löscht (`lat`/`lon` beide `None`) die GPS-Koordinaten eines
 /// Fotos von Hand — z. B. per Klick auf die Kartenansicht platziert, weil
 /// das Foto keine EXIF-GPS-Daten trug.
@@ -8754,6 +9267,143 @@ pub fn switch_active_catalog(
     path: String,
 ) -> Result<(), String> {
     persist_catalog_choice_and_restart(&app, &state, &path)
+}
+
+/// Eine Gesundheits-Kategorie mit ihrer Anzahl (siehe
+/// [`catalog_health`]).
+#[derive(Debug, Clone, Serialize)]
+pub struct CatalogHealthEntryDto {
+    /// Bezeichner der Kategorie, z. B. `"without_rating"`.
+    pub kind: String,
+    pub count: u64,
+}
+
+/// Eine Standardentwicklung je Kamera (Phase 34 F7).
+#[derive(Debug, Clone, Serialize)]
+pub struct CameraDefaultDto {
+    /// Kameramodell, wie es im EXIF steht.
+    pub camera_model: String,
+    /// Das hinterlegte EDL als Umschlag-JSON.
+    pub edl_json: String,
+}
+
+/// Alle hinterlegten Standardentwicklungen.
+#[tauri::command]
+pub fn list_camera_defaults(state: State<'_, AppState>) -> Result<Vec<CameraDefaultDto>, String> {
+    let rows = state
+        .catalog
+        .list_templates(crate::camera_default::CAMERA_DEFAULT_KIND)
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|t| CameraDefaultDto {
+            camera_model: t.name,
+            edl_json: t.payload_json,
+        })
+        .collect())
+}
+
+/// Legt die Standardentwicklung für ein Kameramodell fest.
+///
+/// Ein bereits vorhandener Eintrag für dasselbe Modell wird ersetzt —
+/// zwei Vorgaben für dieselbe Kamera wären nicht auflösbar, und welche
+/// gälte, könnte der Nutzer nicht sehen. Verglichen wird dabei über
+/// `camera_default::model_key`, damit „Canon EOS R5" und
+/// „canon eos r5 " nicht als zwei Kameras durchgehen.
+///
+/// Das EDL wird vor dem Speichern geprüft: eine kaputte Nutzlast würde
+/// sonst erst beim nächsten Import auffallen, wo sie stillschweigend
+/// übersprungen wird und der Nutzer nie erführe, warum seine Vorgabe
+/// nicht greift.
+#[tauri::command]
+pub fn set_camera_default(
+    state: State<'_, AppState>,
+    camera_model: String,
+    edl_json: String,
+) -> Result<(), String> {
+    let model = camera_model.trim().to_string();
+    if model.is_empty() {
+        return Err("Ohne Kameramodell lässt sich keine Vorgabe zuordnen".to_string());
+    }
+    let envelope =
+        apx_core::EdlEnvelope::from_json_str(&edl_json).map_err(|err| err.to_string())?;
+    apx_pipeline::edl::from_envelope(&envelope).map_err(|err| err.to_string())?;
+
+    delete_camera_default_rows(&state, &model)?;
+    state
+        .catalog
+        .create_template(
+            crate::camera_default::CAMERA_DEFAULT_KIND,
+            &model,
+            &edl_json,
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Entfernt die Standardentwicklung eines Kameramodells.
+#[tauri::command]
+pub fn delete_camera_default(
+    state: State<'_, AppState>,
+    camera_model: String,
+) -> Result<(), String> {
+    delete_camera_default_rows(&state, camera_model.trim())
+}
+
+/// Löscht alle Vorlagenzeilen, deren Name auf dasselbe Modell zeigt.
+fn delete_camera_default_rows(state: &State<'_, AppState>, model: &str) -> Result<(), String> {
+    let key = crate::camera_default::model_key(model);
+    let rows = state
+        .catalog
+        .list_templates(crate::camera_default::CAMERA_DEFAULT_KIND)
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        if crate::camera_default::model_key(&row.name) == key {
+            state
+                .catalog
+                .delete_template(row.id)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Was im Bestand noch Arbeit braucht (Phase 34 F5, siehe
+/// `apx-catalog`s `repository::health` und `DECISIONS.md` ADR-0070).
+///
+/// Die Reihenfolge ist die Anzeigereihenfolge und kommt aus dem Katalog
+/// (`HealthKind::ALL`), nicht aus dem Frontend: sie ist eine Aussage
+/// über die Dringlichkeit, keine Darstellungsfrage.
+#[tauri::command]
+pub fn catalog_health(state: State<'_, AppState>) -> Result<Vec<CatalogHealthEntryDto>, String> {
+    let rows = state.catalog.catalog_health().map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|(kind, count)| CatalogHealthEntryDto {
+            kind: kind.as_str().to_string(),
+            count,
+        })
+        .collect())
+}
+
+/// Die Fotos einer Gesundheits-Kategorie.
+///
+/// Ein unbekannter `kind` ist ein Fehler, keine leere Liste: eine leere
+/// Liste sähe aus wie „hier ist alles in Ordnung" und würde einen
+/// Tippfehler im Aufrufer als gute Nachricht ausgeben.
+#[tauri::command]
+pub fn list_health_photos(
+    state: State<'_, AppState>,
+    kind: String,
+    limit: usize,
+) -> Result<Vec<PhotoDto>, String> {
+    let parsed = apx_catalog::HealthKind::from_str_opt(&kind)
+        .ok_or_else(|| format!("Unbekannte Kategorie: {kind}"))?;
+    let photos = state
+        .catalog
+        .list_health_photos(parsed, limit)
+        .map_err(|e| e.to_string())?;
+    Ok(photos.into_iter().map(PhotoDto::from).collect())
 }
 
 /// Führt `PRAGMA integrity_check` auf dem aktuell geöffneten Katalog aus
@@ -10152,6 +10802,45 @@ mod tests {
     // die private Umwandlungsfunktion getestet, die diese Datei selbst
     // beisteuert.
 
+    /// Phase 34 F8: der Verschiebeschritt selbst ist keine reine
+    /// Funktion und gehört deshalb nicht nach `date_sort.rs` — getestet
+    /// wird er trotzdem, denn hier geht es um Dateien, die es danach
+    /// noch geben muss.
+    mod date_sort_moving {
+        use super::*;
+
+        #[test]
+        fn verschiebt_die_datei_und_laesst_die_quelle_nicht_stehen() {
+            let dir = tempfile::tempdir().expect("Temp-Ordner");
+            let source = dir.path().join("IMG_0001.CR3");
+            let target_dir = dir.path().join("2024/2024-05-07");
+            std::fs::write(&source, b"RAW").expect("Quelle schreibbar");
+            std::fs::create_dir_all(&target_dir).expect("Zielordner anlegbar");
+            let target = target_dir.join("IMG_0001.CR3");
+
+            move_file_across_devices(&source, &target).expect("sollte gelingen");
+
+            assert!(!source.exists(), "die Quelle darf nicht liegen bleiben");
+            assert_eq!(
+                std::fs::read(&target).expect("Ziel lesbar"),
+                b"RAW".to_vec()
+            );
+        }
+
+        #[test]
+        fn meldet_einen_fehler_statt_stillschweigend_nichts_zu_tun() {
+            let dir = tempfile::tempdir().expect("Temp-Ordner");
+            let source = dir.path().join("gibt-es-nicht.CR3");
+            let target = dir.path().join("ziel.CR3");
+
+            let err = move_file_across_devices(&source, &target)
+                .expect_err("eine fehlende Quelle darf nicht als Erfolg durchgehen");
+
+            assert!(err.contains("kopierbar"), "unerwartete Meldung: {err}");
+            assert!(!target.exists(), "es darf keine leere Zieldatei entstehen");
+        }
+    }
+
     fn sample_envelope(marker: f32) -> apx_core::EdlEnvelope {
         let edl = apx_pipeline::edl::EdlV4 {
             basic: apx_pipeline::edl::BasicAdjustments {
@@ -10958,6 +11647,331 @@ pub async fn apply_folder_sync(
     })
 }
 
+// ---- Nach Aufnahmedatum einsortieren (Phase 34 F8) -------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DateSortEntryDto {
+    pub photo_id: String,
+    pub filename: String,
+    pub current_dir: String,
+    pub target_dir: String,
+    /// `"move"`, `"already"`, `"no_date"` oder `"collision"`.
+    pub outcome: String,
+    pub used_mtime: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DateSortPlanDto {
+    pub entries: Vec<DateSortEntryDto>,
+    pub move_count: usize,
+    pub already_count: usize,
+    pub no_date_count: usize,
+    pub collision_count: usize,
+}
+
+fn date_sort_outcome_key(outcome: crate::date_sort::SortOutcome) -> &'static str {
+    use crate::date_sort::SortOutcome;
+    match outcome {
+        SortOutcome::Move => "move",
+        SortOutcome::AlreadyInPlace => "already",
+        SortOutcome::NoDate => "no_date",
+        SortOutcome::Collision => "collision",
+    }
+}
+
+/// Sammelt die Kandidaten und rechnet den Plan.
+///
+/// `folder_id = None` nimmt den ganzen Katalog. Virtuelle Kopien bleiben
+/// außen vor: sie haben keine eigene Datei, es gäbe also nichts zu
+/// verschieben — und der Katalogeintrag muss beim Quellfoto bleiben.
+/// Fehlende Dateien ebenfalls: was nicht da ist, kann man nicht umlegen.
+fn build_date_sort_plan(
+    state: &State<'_, AppState>,
+    folder_id: Option<apx_core::FolderId>,
+    root: &std::path::Path,
+    pattern: &str,
+    use_mtime_fallback: bool,
+) -> Result<crate::date_sort::DateSortPlan, String> {
+    let folders = state
+        .catalog
+        .list_folders()
+        .map_err(|err| err.to_string())?;
+    let mut candidates: Vec<crate::date_sort::SortCandidate> = Vec::new();
+
+    for folder in folders {
+        if let Some(only) = folder_id {
+            if folder.id != only {
+                continue;
+            }
+        }
+        let photos = state
+            .catalog
+            .list_photos_by_folder(folder.id)
+            .map_err(|err| err.to_string())?;
+        for photo in photos {
+            if photo.source_photo_id.is_some() || photo.missing {
+                continue;
+            }
+            candidates.push(crate::date_sort::SortCandidate {
+                photo_id: photo.id,
+                filename: photo.filename,
+                current_dir: folder.path.clone(),
+                captured_at: photo.captured_at,
+                file_mtime: photo.file_mtime,
+            });
+        }
+    }
+
+    Ok(crate::date_sort::plan_date_sort(
+        root,
+        pattern,
+        &candidates,
+        use_mtime_fallback,
+    ))
+}
+
+fn parse_date_sort_args(
+    state: &State<'_, AppState>,
+    folder_id: Option<String>,
+    root: Option<String>,
+) -> Result<(Option<apx_core::FolderId>, std::path::PathBuf), String> {
+    let parsed = folder_id
+        .map(|id| id.parse::<apx_core::FolderId>())
+        .transpose()
+        .map_err(|err: apx_core::AppError| err.to_string())?;
+
+    // Ohne ausdrückliches Ziel ist der gewählte Ordner selbst die Wurzel
+    // — der übliche Fall: ein voller Kartenordner soll in sich selbst
+    // aufgeräumt werden. Für den ganzen Katalog gibt es kein sinnvolles
+    // Ziel zu raten, das muss der Aufrufer sagen.
+    let root = match (root, parsed) {
+        (Some(path), _) if !path.trim().is_empty() => std::path::PathBuf::from(path.trim()),
+        (_, Some(id)) => {
+            state
+                .catalog
+                .get_folder(id)
+                .map_err(|err| err.to_string())?
+                .path
+        }
+        (_, None) => {
+            return Err("Ohne Zielordner lässt sich der ganze Katalog nicht einsortieren.".into())
+        }
+    };
+    Ok((parsed, root))
+}
+
+/// Zeigt, was das Einsortieren täte — ohne eine Datei anzufassen.
+#[tauri::command]
+pub fn preview_date_sort(
+    state: State<'_, AppState>,
+    folder_id: Option<String>,
+    root: Option<String>,
+    pattern: Option<String>,
+    use_mtime_fallback: bool,
+) -> Result<DateSortPlanDto, String> {
+    use crate::date_sort::SortOutcome;
+    let (parsed, root) = parse_date_sort_args(&state, folder_id, root)?;
+    let pattern = pattern.unwrap_or_else(|| crate::date_sort::DEFAULT_DATE_PATTERN.to_string());
+    let plan = build_date_sort_plan(&state, parsed, &root, &pattern, use_mtime_fallback)?;
+
+    Ok(DateSortPlanDto {
+        move_count: plan.count(SortOutcome::Move),
+        already_count: plan.count(SortOutcome::AlreadyInPlace),
+        no_date_count: plan.count(SortOutcome::NoDate),
+        collision_count: plan.count(SortOutcome::Collision),
+        entries: plan
+            .entries
+            .iter()
+            .map(|entry| DateSortEntryDto {
+                photo_id: entry.photo_id.to_string(),
+                filename: entry.filename.clone(),
+                current_dir: entry.current_dir.to_string_lossy().to_string(),
+                target_dir: entry.target_dir.to_string_lossy().to_string(),
+                outcome: date_sort_outcome_key(entry.outcome).to_string(),
+                used_mtime: entry.used_mtime,
+            })
+            .collect(),
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DateSortResultDto {
+    /// Tatsächlich verschobene Fotos.
+    pub moved: usize,
+    /// Neu angelegte Zielordner.
+    pub folders_created: usize,
+    /// Einträge, die liegen blieben — samt Grund, einer je Zeile.
+    pub failures: Vec<String>,
+}
+
+/// Verschiebt die Dateien und hängt die Katalogzeilen um.
+///
+/// Der Plan wird hier **neu gerechnet**, nicht vom Aufrufer
+/// entgegengenommen: sonst gäbe es zwei Stellen, an denen ein Zielpfad
+/// entsteht, und die Oberfläche könnte einen Plan anwenden, den die
+/// Kollisionsprüfung nie gesehen hat.
+///
+/// Je Foto: Zielordner anlegen, prüfen ob dort schon etwas liegt,
+/// Datei verschieben (samt `.xmp`-Sidecar), dann die Katalogzeile.
+/// Reihenfolge Datei-vor-Katalog wie bei der Stapel-Umbenennung, siehe
+/// `apx_catalog::repository::photos::set_folder`. Ein Fehler betrifft
+/// nur dieses eine Foto — die übrigen laufen weiter, und was schiefging,
+/// steht am Ende in `failures`.
+#[tauri::command]
+pub fn apply_date_sort(
+    state: State<'_, AppState>,
+    folder_id: Option<String>,
+    root: Option<String>,
+    pattern: Option<String>,
+    use_mtime_fallback: bool,
+) -> Result<DateSortResultDto, String> {
+    use crate::date_sort::SortOutcome;
+    let (parsed, root) = parse_date_sort_args(&state, folder_id, root)?;
+    let pattern = pattern.unwrap_or_else(|| crate::date_sort::DEFAULT_DATE_PATTERN.to_string());
+    let plan = build_date_sort_plan(&state, parsed, &root, &pattern, use_mtime_fallback)?;
+    if plan.is_clean() {
+        // Nichts zu verschieben — und vor allem kein leerer Datumsbaum,
+        // der nur aus angelegten Ordnern besteht.
+        return Ok(DateSortResultDto {
+            moved: 0,
+            folders_created: 0,
+            failures: Vec::new(),
+        });
+    }
+
+    let mut moved = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+    let mut folder_cache: std::collections::HashMap<std::path::PathBuf, apx_core::FolderId> =
+        std::collections::HashMap::new();
+    let mut created_dirs: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
+
+    for entry in &plan.entries {
+        if entry.outcome != SortOutcome::Move {
+            continue;
+        }
+        let source = entry.current_dir.join(&entry.filename);
+        let target = entry.target_dir.join(&entry.filename);
+
+        if target.exists() {
+            failures.push(format!(
+                "{}: im Zielordner liegt bereits eine Datei dieses Namens",
+                entry.filename
+            ));
+            continue;
+        }
+        if !entry.target_dir.exists() {
+            if let Err(err) = std::fs::create_dir_all(&entry.target_dir) {
+                failures.push(format!(
+                    "{}: Zielordner {} nicht anlegbar ({err})",
+                    entry.filename,
+                    entry.target_dir.display()
+                ));
+                continue;
+            }
+            created_dirs.insert(entry.target_dir.clone());
+        }
+
+        if let Err(err) = move_file_across_devices(&source, &target) {
+            failures.push(format!("{}: {err}", entry.filename));
+            continue;
+        }
+        crate::batch_rename::move_sidecar(&source, &target);
+
+        let target_folder = match ensure_date_sort_folder(
+            &state,
+            &entry.target_dir,
+            &root,
+            &mut folder_cache,
+        ) {
+            Ok(id) => id,
+            Err(err) => {
+                // Die Datei liegt schon am neuen Ort. Zurückschieben
+                // wäre der sauberste Ausgang, aber ein zweiter
+                // Dateisystem-Schritt, der ebenfalls scheitern kann;
+                // stattdessen bleibt der Katalog auf dem alten Pfad
+                // stehen und der `missing`-Abgleich meldet es.
+                failures.push(format!(
+                        "{}: verschoben, aber Katalog-Ordner nicht anlegbar ({err}) — der Abgleich meldet die Datei als fehlend",
+                        entry.filename
+                    ));
+                continue;
+            }
+        };
+        if let Err(err) = state
+            .catalog
+            .set_photo_folder(entry.photo_id, target_folder)
+        {
+            failures.push(format!(
+                "{}: verschoben, aber Katalogzeile nicht umgehängt ({err})",
+                entry.filename
+            ));
+            continue;
+        }
+        moved += 1;
+    }
+
+    Ok(DateSortResultDto {
+        moved,
+        folders_created: created_dirs.len(),
+        failures,
+    })
+}
+
+/// Legt den Katalog-Ordnereintrag für `dir` an, samt Elternkette bis
+/// `root` — dieselbe Regel wie `import::ensure_folder`, nur gegen die
+/// Katalog-Fassade statt gegen die Import-interne Signatur.
+fn ensure_date_sort_folder(
+    state: &State<'_, AppState>,
+    dir: &std::path::Path,
+    root: &std::path::Path,
+    cache: &mut std::collections::HashMap<std::path::PathBuf, apx_core::FolderId>,
+) -> Result<apx_core::FolderId, String> {
+    if let Some(id) = cache.get(dir) {
+        return Ok(*id);
+    }
+    let parent_id = if dir != root && dir.starts_with(root) {
+        dir.parent()
+            .map(|parent| ensure_date_sort_folder(state, parent, root, cache))
+            .transpose()?
+    } else {
+        None
+    };
+    let id = state
+        .catalog
+        .find_or_create_folder(dir, parent_id)
+        .map_err(|err| err.to_string())?;
+    cache.insert(dir.to_path_buf(), id);
+    Ok(id)
+}
+
+/// Verschiebt eine Datei, auch über Dateisystemgrenzen hinweg.
+///
+/// `std::fs::rename` ist der schnelle Weg und scheitert, wenn Quelle und
+/// Ziel auf verschiedenen Laufwerken liegen — ein Datumsbaum auf einer
+/// externen Platte, gefüttert aus einem Ordner auf der internen, ist
+/// genau dieser Fall. Dann wird kopiert und das Original erst gelöscht,
+/// wenn die Kopie steht.
+fn move_file_across_devices(
+    source: &std::path::Path,
+    target: &std::path::Path,
+) -> Result<(), String> {
+    if std::fs::rename(source, target).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(source, target).map_err(|err| format!("nicht kopierbar ({err})"))?;
+    if let Err(err) = std::fs::remove_file(source) {
+        // Die Kopie steht — das Original zu behalten ist ärgerlich, aber
+        // kein Verlust. Trotzdem gemeldet, sonst wundert man sich über
+        // die doppelte Datei.
+        let _ = std::fs::remove_file(target);
+        return Err(format!(
+            "kopiert, aber Original nicht entfernbar ({err}) — nichts verändert"
+        ));
+    }
+    Ok(())
+}
+
 // ---- Schärfe-Bewertung (Phase 33 F3) ---------------------------------------
 
 #[derive(Debug, Clone, Serialize)]
@@ -10975,6 +11989,83 @@ pub struct SharpnessResultDto {
     pub relative: f32,
     /// Platz in der Rangfolge, 1 = schärfste Aufnahme.
     pub rank: usize,
+}
+
+/// Ergebnis je Zielfoto (siehe [`measure_exposure_match`]).
+#[derive(Debug, Clone, Serialize)]
+pub struct ExposureMatchDto {
+    pub photo_id: String,
+    pub filename: String,
+    /// Um wie viele EV die Belichtung verschoben werden müsste.
+    pub delta_ev: f32,
+    /// `false`, wenn das Foto keine verwertbaren Pixel hat (vollständig
+    /// beschnittene Vorschau) oder keine Vorschau existiert — dann ist
+    /// `delta_ev` 0 und das Foto wird nicht angefasst.
+    pub measurable: bool,
+}
+
+/// Misst, um wie viele EV die Belichtung jedes Fotos aus `photo_ids`
+/// verschoben werden müsste, damit seine mittlere Helligkeit der des
+/// Referenzfotos entspricht (Phase 34 F2, siehe `DECISIONS.md`
+/// ADR-0070 und `exposure_match.rs` für die Mathematik).
+///
+/// **Nur messen, nicht schreiben.** Dieselbe Aufteilung wie bei der
+/// Schärfe-Bewertung (Phase 33 F3): Rust liefert die Zahl, das Frontend
+/// entscheidet und schreibt sie über den bestehenden
+/// `apply_develop_edit`-Weg ins EDL. Damit laufen Validierung,
+/// Verlaufseintrag und Beschriftung durch genau eine Stelle, statt hier
+/// ein zweites Mal nachgebaut zu werden.
+///
+/// Gemessen wird auf `PreviewLevel::Standard` — dieselbe Stufe wie bei
+/// der Schärfe. Die Vorschau trägt bereits den aktuellen
+/// Bearbeitungsstand, das Ergebnis ist also die Differenz der
+/// ANGEZEIGTEN Bilder, nicht die der Rohdaten. Genau das ist gemeint:
+/// angeglichen werden soll, was man sieht.
+#[tauri::command]
+pub fn measure_exposure_match(
+    state: State<'_, AppState>,
+    reference_photo_id: String,
+    photo_ids: Vec<String>,
+) -> Result<Vec<ExposureMatchDto>, String> {
+    let reference_id = parse_photo_id(reference_photo_id)?;
+    let ids = parse_photo_ids(photo_ids)?;
+
+    let pixels_of = |id: apx_core::PhotoId| -> Option<Vec<u8>> {
+        let preview = state
+            .catalog
+            .get_preview(id, apx_catalog::PreviewLevel::Standard)
+            .ok()??;
+        let img = image::open(&preview.path).ok()?;
+        Some(img.to_rgba8().into_raw())
+    };
+
+    let reference = pixels_of(reference_id)
+        .ok_or_else(|| "Für das Referenzfoto gibt es noch keine Vorschau".to_string())?;
+    if crate::exposure_match::mean_log_luminance(&reference).is_none() {
+        return Err(
+            "Das Referenzfoto ist vollständig über- oder unterbelichtet — daran lässt sich nichts messen"
+                .to_string(),
+        );
+    }
+
+    let mut results = Vec::new();
+    for id in ids {
+        if id == reference_id {
+            continue;
+        }
+        let Ok(photo) = state.catalog.get_photo(id) else {
+            continue;
+        };
+        let delta = pixels_of(id)
+            .and_then(|target| crate::exposure_match::exposure_delta_ev(&reference, &target));
+        results.push(ExposureMatchDto {
+            photo_id: id.to_string(),
+            filename: photo.filename,
+            delta_ev: delta.unwrap_or(0.0),
+            measurable: delta.is_some(),
+        });
+    }
+    Ok(results)
 }
 
 /// Bewertet die Schärfe mehrerer Fotos und gibt sie sortiert zurück

@@ -20,6 +20,7 @@ import {
   type GradientStop,
   BASIC_SLIDER_SPECS,
   buildEdlEnvelopeJson,
+  clampExposureEv,
   clampSliderValue,
   defaultBlurDepthApproxGeometry,
   defaultColorRangeGeometry,
@@ -58,6 +59,7 @@ import type { PresetCondition, PresetConditionPhotoMeta, PresetEdlSubset, Preset
 import { sortPhotos } from "../lib/sortPhotos";
 import type { SortDirection, SortField } from "../lib/sortPhotos";
 import type { SoftProofIntent, SoftProofProfile } from "../lib/softProof";
+import { celebrate } from "../lib/celebrate";
 import { playCue } from "../lib/sound";
 import * as api from "../lib/tauri";
 import type {
@@ -68,6 +70,7 @@ import type {
   CatalogStatusDto,
   CollectionDto,
   ExportOutcomeDto,
+  ExposureMatchDto,
   ExportPhotoOptions,
   MetadataRescanResultDto,
   FaceDetectionDto,
@@ -1019,6 +1022,21 @@ interface LibrarySlice {
    * mit dem Grund „unscharf", damit im Papierkorb später erkennbar
    * bleibt, warum. */
   trashAllButSharpest: (keepPhotoId: string) => Promise<void>;
+
+  /**
+   * Belichtung angleichen (Phase 34 F2, siehe `ExposureMatchDialog.tsx`
+   * und `DECISIONS.md` ADR-0070). Gemessen wird in Rust auf der
+   * Standardvorschau; das Schreiben läuft hier über denselben
+   * `applyDevelopEdit`-Weg wie jeder Reglerzug.
+   */
+  exposureMatchResults: ExposureMatchDto[];
+  exposureMatchRunning: boolean;
+  exposureMatchApplied: number | null;
+  exposureMatchError: string | null;
+  /** Misst die Auswahl gegen das aktuell gewählte Foto. */
+  measureExposureMatch: () => Promise<void>;
+  /** Schreibt die gemessenen Korrekturen ins EDL der Zielfotos. */
+  applyExposureMatch: () => Promise<void>;
 
   /** Ordner-Abgleich (Phase 33 F2, siehe `FolderSyncDialog.tsx`).
    * Die Planung läuft in Rust (`folder_sync::plan_folder_sync`) — hier
@@ -2716,6 +2734,11 @@ export const useAppStore = create<AppStore>()(
 
     finishImport: (result) => {
       playCue(result.errorCount > 0 ? "error" : "success");
+      // Geburtstagsausgabe (ADR-0071): ein fertiger Import ist einer
+      // der wenigen Momente, die ein Fest verdienen — er dauert
+      // Minuten und kommt ein paar Mal am Tag vor. Bei Fehlern wird
+      // nicht gefeiert. Ohne Deko/montierte Leinwand ein No-op.
+      if (result.errorCount === 0) celebrate();
       set((state) => {
         state.importRunning = false;
         state.importResult = result;
@@ -4320,6 +4343,84 @@ export const useAppStore = create<AppStore>()(
         set((state) => {
           state.sharpnessRunning = false;
           state.sharpnessError = String(err);
+        });
+      }
+    },
+
+    exposureMatchResults: [],
+    exposureMatchRunning: false,
+    exposureMatchApplied: null,
+    exposureMatchError: null,
+
+    measureExposureMatch: async () => {
+      const { multiSelectedIds, selectedPhotoId } = get();
+      if (!selectedPhotoId) return;
+      // Das aktuell gewählte Foto ist die Referenz; gemessen wird alles
+      // andere aus der Mehrfachauswahl. Rust überspringt die Referenz
+      // selbst, hier muss sie deshalb nicht herausgefiltert werden.
+      const targets = multiSelectedIds.length > 0 ? multiSelectedIds : [];
+      set((state) => {
+        state.exposureMatchRunning = true;
+        state.exposureMatchError = null;
+        state.exposureMatchApplied = null;
+        state.exposureMatchResults = [];
+      });
+      try {
+        const results = await api.measureExposureMatch(selectedPhotoId, targets);
+        set((state) => {
+          state.exposureMatchResults = results;
+          state.exposureMatchRunning = false;
+        });
+      } catch (err) {
+        set((state) => {
+          state.exposureMatchRunning = false;
+          state.exposureMatchError = String(err);
+        });
+      }
+    },
+
+    applyExposureMatch: async () => {
+      const results = get().exposureMatchResults.filter((entry) => entry.measurable);
+      if (results.length === 0) return;
+      set((state) => {
+        state.exposureMatchRunning = true;
+        state.exposureMatchError = null;
+      });
+      let applied = 0;
+      try {
+        for (const entry of results) {
+          // Der Stand jedes Zielfotos wird einzeln gelesen und
+          // fortgeschrieben: die Korrektur ist eine RELATIVE Verschiebung
+          // seiner bisherigen Belichtung, kein absoluter Wert. Ein Foto,
+          // an dem schon +0,3 EV standen, bekommt sonst dessen
+          // Bearbeitung weggenommen.
+          const position = await api.currentDevelopEdit(entry.photo_id);
+          const payload = edlFromHistoryPosition(position);
+          const next: EdlPayload = {
+            ...payload,
+            basic: {
+              ...payload.basic,
+              exposure_ev: clampExposureEv(payload.basic.exposure_ev + entry.delta_ev),
+            },
+          };
+          await api.applyDevelopEdit(
+            entry.photo_id,
+            buildEdlEnvelopeJson(next),
+            "Belichtung angeglichen",
+          );
+          applied += 1;
+        }
+        set((state) => {
+          state.exposureMatchRunning = false;
+          state.exposureMatchApplied = applied;
+        });
+      } catch (err) {
+        set((state) => {
+          state.exposureMatchRunning = false;
+          state.exposureMatchError = String(err);
+          // Bereits geschriebene Fotos bleiben geschrieben — das ehrlich
+          // melden, statt einen Teilerfolg als Fehlschlag auszugeben.
+          state.exposureMatchApplied = applied;
         });
       }
     },
@@ -6488,7 +6589,10 @@ export const useAppStore = create<AppStore>()(
         state.exportRunning = false;
         state.exportError = firstError;
       });
-      playCue(firstError || progress.failed > 0 ? "error" : "success");
+      const exportFailed = Boolean(firstError) || progress.failed > 0;
+      playCue(exportFailed ? "error" : "success");
+      // Siehe `finishImport` oben — dieselbe Zurückhaltung.
+      if (!exportFailed) celebrate();
       await api.clearFinishedExportJobs();
     },
 

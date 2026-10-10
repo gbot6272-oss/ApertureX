@@ -189,16 +189,18 @@ fn handle_inner<R: Runtime>(
     // Nur Entwickeln-Anfragen gehen durch die Schranke: Miniaturbilder
     // und Vorschauen sind viele unabhängige Anfragen, die einander
     // nicht überholen (siehe `gate`s Moduldoku).
-    let _turn = if let ImageRequest::Develop { photo_id, .. } = &parsed {
+    //
+    // Geprüft wird, OHNE zu warten. Der erste Entwurf (ADR-0077) liess
+    // die Läufe hier der Reihe nach durch; das hat die Wartezeit der
+    // neuesten Anfrage verdoppelt, weil eine Reihenfolge den laufenden
+    // Lauf nicht abbricht (ADR-0080).
+    if let ImageRequest::Develop { photo_id, .. } = &parsed {
         let photo_id = *photo_id;
         let ticket = gate.claim(photo_id);
-        match gate.wait_turn(photo_id, ticket) {
-            Some(turn) => Some(turn),
-            None => return Ok(superseded_response()),
+        if gate.is_superseded(photo_id, ticket) {
+            return Ok(superseded_response());
         }
-    } else {
-        None
-    };
+    }
 
     let (content_type, cache_key) = response_meta(&parsed);
     let bytes = cache

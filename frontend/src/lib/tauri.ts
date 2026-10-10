@@ -1658,7 +1658,7 @@ export interface UiSettingsDto {
   sound_volume_percent: number;
   /** `uisfx`-Klangwelt, siehe `lib/sound.ts`s `SOUND_PACKS`. */
   sound_pack: string;
-  /** Geburtstags-Deko (Konfetti, Luftballons, Begrüßung) an/aus —
+  /** Geburtstags-Deko (Konfetti, Begrüßung) an/aus —
    * unabhängig vom Theme, siehe `DECISIONS.md` ADR-0071. */
   birthday_decorations: boolean;
   /** Aufwand der Oberflächen-Effekte, siehe `lib/effects.ts` und

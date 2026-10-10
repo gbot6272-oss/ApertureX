@@ -127,7 +127,7 @@ export const de = {
   "settings.theme": "Theme",
   "settings.themeBirthday": "Geburtstag",
   "settings.birthdayDecorations": "Geburtstags-Deko",
-  "settings.birthdayDecorationsHint": "Konfetti, Luftballons und die Begrüßung beim Öffnen",
+  "settings.birthdayDecorationsHint": "Konfetti und die Begrüßung beim Öffnen",
   "settings.effectLevel": "Oberflächen-Effekte",
   "settings.effectLevelHint":
     "Glas, Weichzeichner und Verzerrung kosten Rechenzeit. „Automatisch“ beginnt bei „Reduziert“ und stuft weiter herunter, wenn dieses Gerät auch das nicht trägt.",
@@ -192,7 +192,7 @@ export const de = {
   "onboarding.tour.health.title": "Aufräumen, wenn es viel wird",
   "onboarding.tour.health.body": "Im Überlauf-Menü findest du die Aufräum-Werkzeuge: Katalog-Gesundheit zeigt, wo Angaben fehlen; „Duplikate aufräumen“ schlägt vor, welche Version bleibt; „Nach Aufnahmedatum einsortieren“ baut aus einem vollen Ordner einen Datumsbaum.",
   "onboarding.tour.settings.title": "Alles nach deinem Geschmack",
-  "onboarding.tour.settings.body": "In den Einstellungen kannst du das Geburtstags-Thema behalten oder auf das normale dunkle umschalten, Konfetti und Luftballons abschalten, Sounds leiser stellen und die Oberfläche größer machen. Nichts davon ist festgelegt.",
+  "onboarding.tour.settings.body": "In den Einstellungen kannst du das Geburtstags-Thema behalten oder auf das normale dunkle umschalten, Konfetti abschalten, Sounds leiser stellen und die Oberfläche größer machen. Nichts davon ist festgelegt.",
   "onboarding.tour.done.title": "Fertig — viel Freude damit",
   "onboarding.tour.done.body": "Das war die Tour. Wenn du sie noch einmal sehen willst: Strg+K und nach „Einführung“ suchen. Und wenn etwas fehlt oder stört, sag es — das ist der Sinn einer eigenen Fassung.",
   "onboarding.tour.back": "Zurück",

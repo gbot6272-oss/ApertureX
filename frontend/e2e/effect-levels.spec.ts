@@ -38,10 +38,6 @@ async function glassCost(page: import("@playwright/test").Page) {
         (style) =>
           (style.backdropFilter || (style as unknown as Record<string, string>).webkitBackdropFilter) !== "none",
       ).length,
-      ballons: document.querySelectorAll(".apx-balloon-layer").length,
-      sichtbareBallons: Array.from(document.querySelectorAll<HTMLElement>(".apx-balloon-layer")).filter(
-        (element) => getComputedStyle(element).display !== "none",
-      ).length,
     };
   });
 }
@@ -119,12 +115,6 @@ test("Stufe „automatisch“ lässt nie die teuerste Stufe stehen", async ({ pa
   // stünde nur ein anderes Wort im Attribut.
   const cost = await glassCost(page);
   expect(cost.mitVerzerrung).toBe(0);
-  // Die Ballons bleiben hier bewusst: seit ADR-0078 liegen sie VOR der
-  // Kopfzeile und stoßen deren Weichzeichner nicht mehr an. Sie waren
-  // der Grund, sie in dieser Stufe zu verstecken — der Grund ist weg,
-  // und die Geburtstagsdeko soll nicht an einer Tempo-Vorgabe
-  // scheitern, die sie gar nicht mehr kostet.
-  expect(cost.sichtbareBallons).toBe(1);
 });
 
 test("Stufe „voll“: alle Glasflächen tragen Weichzeichner und Verzerrung", async ({ page }) => {
@@ -136,10 +126,9 @@ test("Stufe „voll“: alle Glasflächen tragen Weichzeichner und Verzerrung", 
   expect(cost.surfaces).toBeGreaterThanOrEqual(5);
   expect(cost.mitVerzerrung).toBe(cost.surfaces);
   expect(cost.mitWeichzeichner).toBe(cost.surfaces);
-  expect(cost.sichtbareBallons).toBe(1);
 });
 
-test("Stufe „reduziert“: keine Verzerrung, aber Weichzeichner und Deko bleiben", async ({ page }) => {
+test("Stufe „reduziert“: keine Verzerrung, aber der Weichzeichner bleibt", async ({ page }) => {
   await boot(page, "reduced");
   const cost = await glassCost(page);
   expect(cost.mitVerzerrung).toBe(0);
@@ -147,13 +136,6 @@ test("Stufe „reduziert“: keine Verzerrung, aber Weichzeichner und Deko bleib
   // Effekte und trägt den optischen Charakter. Fiele er hier schon weg,
   // gäbe es zwischen „reduziert“ und „schlicht“ keinen Unterschied mehr.
   expect(cost.mitWeichzeichner).toBe(cost.surfaces);
-  // Bis ADR-0078 stand hier `toBe(0)` mit der Begründung, die Ballons
-  // seien der Grund, aus dem die Verzerrung dauernd neu gerechnet
-  // werde. Das war überzogen: sie lagen hinter der KOPFZEILE, nicht
-  // hinter allen acht Glasflächen, und waren zu vier Fünfteln von
-  // deckenden Flächen verdeckt. Seit sie vor der Kopfzeile liegen,
-  // kosten sie dort gar nichts mehr und dürfen bleiben.
-  expect(cost.sichtbareBallons).toBe(1);
 });
 
 test("Stufe „schlicht“: kein Hintergrundeffekt, aber lesbarer Grund", async ({ page }) => {
@@ -161,7 +143,6 @@ test("Stufe „schlicht“: kein Hintergrundeffekt, aber lesbarer Grund", async 
   const cost = await glassCost(page);
   expect(cost.mitVerzerrung).toBe(0);
   expect(cost.mitWeichzeichner).toBe(0);
-  expect(cost.sichtbareBallons).toBe(0);
 
   // Ohne Durchsicht wäre die halbdurchsichtige Glas-Tönung allein zu
   // dünn, um Text davor lesbar zu halten. „Schlicht“ heißt nicht

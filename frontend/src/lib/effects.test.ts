@@ -66,7 +66,7 @@ describe("decideLevel", () => {
 
   it("stuft nie wieder hinauf", () => {
     // Eine Automatik, die bei jeder ruhigen Sekunde zurückschaltet und
-    // beim nächsten Ballon wieder herunter, flackert — und ein
+    // bei der nächsten Bewegung wieder herunter, flackert — und ein
     // flackerndes Fenster ist schlimmer als ein schlichtes.
     expect(decideLevel(flat(5), "plain")).toBe("plain");
     expect(decideLevel(flat(5), "reduced")).toBe("reduced");

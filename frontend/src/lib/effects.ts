@@ -21,13 +21,13 @@
  * **Warum es überhaupt auffällt.** Solange hinter einer Glasfläche
  * nichts passiert, ist das Ergebnis zwischenspeicherbar und die Kosten
  * fallen einmal an. Bewegt sich dahinter etwas, ist der
- * Zwischenspeicher bei jedem einzelnen Bild ungültig. Die
- * Geburtstags-Luftballons bewegen sich **dauerhaft** und liegen
- * **hinter allem** — sie sind damit, ohne selbst teuer zu sein, der
- * Auslöser dafür, dass acht Verzerrungsfilter sechzig Mal pro Sekunde
- * neu gerechnet werden. Auf einer nicht hardwarebeschleunigten
- * Webansicht (WebKitGTK unter Linux, der Regelfall für Tauri dort) macht
- * das die ganze Oberfläche zäh.
+ * Zwischenspeicher bei jedem einzelnen Bild ungültig. Bewegte Deko
+ * hinter den Glasflächen — fliegendes Konfetti, eine laufende
+ * Vorschau — sorgt damit, ohne selbst teuer zu sein, dafür, dass acht
+ * Verzerrungsfilter sechzig Mal pro Sekunde neu gerechnet werden. Auf
+ * einer nicht hardwarebeschleunigten Webansicht (WebKitGTK unter
+ * Linux, der Regelfall für Tauri dort) macht das die ganze Oberfläche
+ * zäh.
  *
  * **Warum gemessen und nicht geraten wird.** Ob ein Gerät das trägt,
  * hängt an Treiber, Compositor und Webansicht und lässt sich aus keiner
@@ -89,9 +89,9 @@ export function median(values: readonly number[]): number {
  * nur im laufenden Betrieb zu wirken.
  *
  * Es wird **nur herunter**gestuft, nie hinauf. Eine Automatik, die bei
- * jeder ruhigen Sekunde wieder hochschaltet und beim nächsten Ballon
- * zurückfällt, flackert — und ein flackerndes Fenster ist schlimmer als
- * ein dauerhaft schlichtes. Wer wieder mehr will, wählt die Stufe von
+ * jeder ruhigen Sekunde wieder hochschaltet und bei der nächsten
+ * Bewegung zurückfällt, flackert — und ein flackerndes Fenster ist
+ * schlimmer als ein dauerhaft schlichtes. Wer wieder mehr will, wählt die Stufe von
  * Hand; genau dafür gibt es die drei festen Werte.
  */
 export function decideLevel(
@@ -129,7 +129,7 @@ interface ProbeDeps {
 /**
  * Hängt ein bewegtes, unsichtbares Element hinter die Glasflächen.
  *
- * Genau das tun die Luftballons dauerhaft, und genau das macht die
+ * Genau das tut bewegte Deko, und genau das macht die
  * Verzerrungsfilter teuer. Ohne diese Last misst die Messung den
  * Ruhezustand und meldet jedes Gerät als schnell.
  *

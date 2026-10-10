@@ -8604,3 +8604,123 @@ verwies, zeigt jetzt auf die neue.
 **Verifiziert**, nicht angenommen: `rm -rf node_modules` gefolgt von
 `pnpm install --frozen-lockfile` läuft durch, die esbuild-Binärdatei
 liegt danach an ihrem Platz, und `vite build` baut.
+
+## ADR-0080: Die Schranke aus ADR-0077 hat es verdoppelt
+
+**Anlass.** Nutzer nach dem Einspielen von ADR-0077: „warte mal, DU
+HAST ES LANGSAMER GEMACHT! Letztes Rendering: 8879 ms." Vorher waren es
+4216 ms.
+
+**Was falsch war.** ADR-0077 liess die Entwickeln-Läufe der Reihe nach
+durch, mit der Begründung, es gebe ohnehin nur eine Grafikkarte und
+parallele Läufe bremsten sich dort gegenseitig aus. Das klang
+vernünftig und war es nicht:
+
+> **Eine Reihenfolge bricht den laufenden Lauf nicht ab.**
+
+Die neueste Anfrage wartete also erst darauf, dass ein längst
+veralteter Lauf zu Ende rechnet, und rechnete danach selbst. Aus „so
+lange wie ein Rendern" wurde „so lange wie zwei". Parallel war für die
+Anfrage, auf die der Nutzer wartet, schneller — auch wenn dabei
+Rechenzeit verschwendet wurde.
+
+Die Ticketprüfung war richtig. Das Schloss davor war der Fehler.
+
+**Die Korrektur.** Die Schranke prüft, **ohne zu warten**. Wer beim
+Start schon überholt ist, steigt sofort aus; wer es nicht ist, fängt
+sofort an. Kein Schloss, keine Reihenfolge.
+
+Das genügt, weil die Zahlen dafür sprechen: beim Ziehen kommen rund
+sechzig Anfragen je Sekunde, ein Rendern dauert hunderte
+Millisekunden. Bis ein Lauf überhaupt beginnt, haben also längst
+mehrere neuere Anfragen gezogen — er steigt aus, bevor er etwas tut.
+Übrig bleibt die jeweils neueste, und die läuft, ohne etwas vor sich in
+der Schlange zu haben.
+
+**Was das festhält.** `the_check_never_blocks_a_caller` lässt einen
+Aufrufer so tun, als rechne er lange, und verlangt, dass ein zweiter
+trotzdem in unter 100 Millisekunden durchkommt. Gegenkontrolliert: mit
+250 Millisekunden Verzögerung in der Prüfung schlägt er fehl und nennt
+die gemessene Wartezeit.
+
+Der Test aus ADR-0077, der die *Ausschliesslichkeit* festhielt
+(`the_turn_is_exclusive`), ist ersatzlos entfallen — er hielt genau das
+fest, was der Fehler war.
+
+**Selbstkritik.** Das ist in dieser Sitzung die dritte Korrektur an
+einer eigenen Schlussfolgerung, und die teuerste: ADR-0075 optimierte
+am falschen Problem vorbei, ADR-0078 korrigierte eine überzogene
+Ursachenbehauptung, und hier war die Änderung nicht nur unvollständig,
+sondern **schädlich**. Gemeinsam ist allen dreien, dass ich eine
+plausible Begründung für eine Messung gehalten habe. „Es gibt nur eine
+Grafikkarte, also schadet Parallelität" ist eine Begründung. Was die
+Wartezeit der neuesten Anfrage tut, wäre eine Messung gewesen — und
+die hätte vor dem Ausliefern passieren müssen, nicht beim Nutzer.
+
+**Was weiterhin offen ist.** Ein einzelner Renderlauf bleibt
+langsam; daran ändert diese Korrektur nichts, sie stellt nur den
+Zustand vor ADR-0077 wieder her und spart die Arbeit für Anfragen, die
+schon beim Start veraltet sind. Der eigentliche Hebel bleibt ADR-0075s
+offener Punkt: das Bild zwischen den Stufen auf der GPU lassen.
+
+## ADR-0081 — Die Luftballons sind ersatzlos entfallen
+
+**Status:** entschieden. **Ersetzt** ADR-0071s Ballon-Schicht und
+beendet die Korrekturreihe aus ADR-0073, ADR-0076 und ADR-0078.
+
+**Die Rückmeldung.** „Mach die verdammten Luftballons weg, man sieht
+sie eh immer noch nicht." Nach ADR-0078, also nach einer gemessenen
+Korrektur, die 2.462 geänderte Bildpunkte auf 8.909 hob und mit einem
+gegenkontrollierten Test festgehalten war.
+
+**Was das heisst.** Der Test war nicht falsch — 8.909 Bildpunkte
+ändern sich nachweislich, und ohne die Korrektur schlägt er mit 2.461
+fehl. Er misst nur die falsche Sache. 8.909 von 1.440.000 sind 0,62 %
+des Fensters, verteilt auf sechs Formen bei 22 % Deckkraft über einem
+Hintergrund, der farblich in derselben Familie liegt. Das ist ein
+messbarer Unterschied und kein **sichtbarer**. „Ein Pixelzähler sagt
+ja" und „ein Mensch sieht es" sind zwei verschiedene Aussagen, und ich
+habe die erste als Beleg für die zweite genommen.
+
+**Die Entscheidung.** Die Schicht ist weg, nicht noch einmal
+reparierbar gemacht:
+
+- `frontend/src/components/BalloonLayer.tsx` gelöscht,
+- `.apx-balloon-layer`, `.apx-balloon`, `.apx-balloon::after` und
+  `@keyframes apx-balloon-rise` aus `index.css` entfernt,
+- die Einbindung in `App.tsx` entfernt,
+- der Pixelzähl-Test aus `e2e/birthday-flow.spec.ts` und das Feld
+  `sichtbareBallons` samt vier Zusicherungen aus
+  `e2e/effect-levels.spec.ts` entfernt,
+- die Oberflächentexte in `de.ts`/`en.ts` nennen jetzt nur noch
+  Konfetti und die Begrüßung.
+
+**Warum ersatzlos und nicht noch ein Versuch.** Zwei Anläufe
+(`z-index: 0` → `z-index: 35`, dazu Freigabe für die Stufe
+„reduziert") haben an der Wahrnehmung des Nutzers nichts geändert. Ein
+dritter hätte die Ballons deutlich grösser, deckender oder schneller
+machen müssen — und damit genau das, was ADR-0071 bewusst nicht wollte:
+Deko, die den Blick vom Foto wegzieht. Eine Dekoration, die
+unsichtbar sein muss, um nicht zu stören, hat keinen Zustand, in dem
+sie ihren Zweck erfüllt.
+
+Konfetti und Begrüßung bleiben unverändert. Die sieht der Nutzer; sie
+waren nie Teil der Beschwerde.
+
+**Was dabei auch wegfällt.** Die Begründungskette „bewegte Deko hinter
+den Glasflächen macht die Verzerrungsfilter teuer" stützte sich auf die
+Ballons als Dauerbewegung. Mit ihnen fällt die einzige **dauerhafte**
+Bewegung hinter den Glasflächen weg; Konfetti fliegt nur bei fertigem
+Import und Export. An den Effektstufen ändert das nichts: die Messung
+in `probeFrameTimes` hängt ihre eigene Last ein (ADR-0073) und hat die
+Ballons nie gebraucht. Die Moduldoku in `effects.ts` nennt die Kosten
+jetzt allgemein, ohne sie an die Ballons zu binden.
+
+**Selbstkritik.** Vierte Korrektur an einer eigenen Schlussfolgerung in
+dieser Sitzung, und die lehrreichste: diesmal war die Messung sauber,
+gegenkontrolliert und vollständig dokumentiert — und trotzdem war der
+Schluss falsch, weil die Messgrösse nicht die Frage beantwortet hat.
+Die Frage war „sieht der Nutzer das?". Der Test hat „ändert sich etwas
+im Bild?" beantwortet. Wenn eine Beschwerde über Wahrnehmung mit einer
+Zahl beantwortet wird, muss die Zahl zur Wahrnehmung passen, nicht nur
+zum Code.

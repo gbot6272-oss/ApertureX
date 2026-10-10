@@ -8553,3 +8553,54 @@ Fehler grün war. Beide Male hätte eine Gegenkontrolle das sofort
 gezeigt — und beide Male habe ich sie erst gemacht, nachdem der Nutzer
 widersprochen hat. Die Gegenkontrolle gehört vor die Schlussfolgerung,
 nicht hinter den Einspruch.
+
+## ADR-0079: `pnpm install` scheiterte auf jedem frischen Rechner
+
+**Anlass.** Nutzer folgte der Bauanleitung aus dem README und kam nicht
+über den ersten Befehl hinaus:
+
+```
+Error: ERR_PNPM_IGNORED_BUILDS
+  × installing dependencies
+  ╰─▶ Ignored build scripts: esbuild@0.25.12
+```
+
+davor, als Warnung:
+
+```
+The "pnpm" field in package.json is no longer read by pnpm.
+The following keys were ignored: "pnpm.onlyBuiltDependencies".
+```
+
+**Die Ursache.** pnpm 10 führt Installationsskripte standardmäßig nicht
+mehr aus und bricht ab, wenn eines übersprungen wurde. `esbuild`
+braucht seines — es verknüpft die plattformeigene Binärdatei, und ohne
+die scheitert jeder Vite-Build.
+
+Die Freigabe dafür war korrekt hinterlegt, nur an der Stelle, die pnpm
+10 nicht mehr liest: unter `"pnpm"` in `frontend/package.json`. pnpm
+meldet das als Warnung und bricht trotzdem ab. Die Absicht war da, die
+Wirkung nicht.
+
+**Warum es niemandem auffiel.** Auf einem Rechner mit bereits
+installierten `node_modules` tritt der Fehler nicht auf — nur bei einer
+frischen Installation. In dieser Entwicklungsumgebung lagen sie vor;
+der Fehler liess sich hier erst nach `rm -rf node_modules`
+reproduzieren. Die CI pinnt `PNPM_VERSION: "10"`, also dieselbe
+Hauptversion — sie war ebenso betroffen, sobald ihr Zwischenspeicher
+kalt lief.
+
+Das ist dieselbe Fehlerklasse wie der Rest dieser Sitzung: eine
+Einstellung, die dasteht, aussieht als wirke sie, und nichts tut.
+
+**Die Entscheidung.** Die Liste steht jetzt in
+`frontend/pnpm-workspace.yaml` unter `onlyBuiltDependencies` — der
+Stelle, die pnpm 10 liest. Der Eintrag in `package.json` ist entfernt,
+nicht zusätzlich belassen: zwei Orte für dieselbe Aussage, von denen
+einer stillschweigend ignoriert wird, sind genau das Problem, das hier
+behoben wird. Der Kommentar in `ci.yml`, der auf die alte Stelle
+verwies, zeigt jetzt auf die neue.
+
+**Verifiziert**, nicht angenommen: `rm -rf node_modules` gefolgt von
+`pnpm install --frozen-lockfile` läuft durch, die esbuild-Binärdatei
+liegt danach an ihrem Platz, und `vite build` baut.

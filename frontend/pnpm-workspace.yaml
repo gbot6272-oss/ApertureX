@@ -1,0 +1,16 @@
+# Welche Abhängigkeiten ihre Installationsskripte ausführen dürfen.
+#
+# pnpm 10 führt Build-Skripte standardmäßig NICHT mehr aus und bricht
+# die Installation ab, wenn eines übersprungen wurde
+# (`ERR_PNPM_IGNORED_BUILDS`). `esbuild` braucht seines: es verknüpft
+# die plattformeigene Binärdatei, und ohne die scheitert jeder
+# Vite-Build.
+#
+# Die Liste stand bis hierher unter `"pnpm"` in `package.json`. Das ist
+# seit pnpm 10 nicht mehr die gelesene Stelle — pnpm meldet dort nur
+# noch „The pnpm field in package.json is no longer read" und bricht
+# trotzdem ab. Für dieses Repository hiess das: ein frisches
+# `pnpm install --frozen-lockfile` scheiterte, auf jedem Rechner und in
+# der CI gleichermassen, obwohl die Absicht korrekt hinterlegt war.
+onlyBuiltDependencies:
+  - esbuild

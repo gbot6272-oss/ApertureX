@@ -50,9 +50,12 @@ Build-Profil als ersten Befund (siehe `DECISIONS.md` ADR-0073).
 
 ### Systemabhängigkeiten
 
-Node 20+ mit `pnpm` und die in `rust-toolchain.toml` gepinnte
+Node 20+ mit `pnpm` 10 und die in `rust-toolchain.toml` gepinnte
 Rust-Fassung (rustup holt sie selbst, sobald ein `cargo`-Befehl im
 Repo-Verzeichnis läuft).
+
+Alle Befehle unten laufen im **Wurzelverzeichnis** des Repositorys,
+nicht in `crates/apx-app`.
 
 Unter Linux zusätzlich — dieselbe Liste, die die CI verwendet
 (`.github/workflows/ci.yml`), also die einzige, die nachweislich
@@ -79,6 +82,10 @@ Alle Befehle vom Wurzelverzeichnis des Repositorys aus.
 pnpm --dir frontend install --frozen-lockfile
 npx --prefix frontend tauri build
 ```
+
+`--no-bundle` an `tauri build` angehängt baut nur die ausführbare
+Datei und überspringt den Installer — schneller, wenn die App nur
+benutzt und nicht weitergegeben werden soll.
 
 Die Tauri-Kommandozeile ist eine npm-Abhängigkeit des Frontends
 (`@tauri-apps/cli`), **kein** `cargo`-Unterbefehl — `cargo tauri build`

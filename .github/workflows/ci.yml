@@ -15,8 +15,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Muss zu `frontend/package.json`s "pnpm.onlyBuiltDependencies" passen
-  # und ist die Version, mit der Phase 1 lokal entwickelt wurde.
+  # Muss zu `frontend/pnpm-workspace.yaml`s `onlyBuiltDependencies`
+  # passen (bis ADR-0079 stand die Liste in `package.json`, wo pnpm 10
+  # sie nicht mehr liest) und ist die Version, mit der Phase 1 lokal
+  # entwickelt wurde.
   PNPM_VERSION: "10"
   NODE_VERSION: "22"
 

@@ -137,10 +137,20 @@ export default function App() {
   const clearPendingCommand = useAppStore((s) => s.clearPendingCommand);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const onboardingAutoShown = useRef(false);
-  /** Ergebnis der Bildzeit-Messung (ADR-0073). Zählt nur bei
-   * `effect_level === "auto"`; die drei festen Stufen gehen vor. */
-  const [measuredLevel, setMeasuredLevel] = useState<AppliedEffectLevel>("full");
+  /** Ergebnis der Bildzeit-Messung (ADR-0073, Anfangswert nach
+   * ADR-0076). Zählt nur bei `effect_level === "auto"`; die drei
+   * festen Stufen gehen vor.
+   *
+   * Startwert `"reduced"` und nicht `"full"`: die volle Stufe ist
+   * gemessen die mit Abstand teuerste Konfiguration (SVG-Verzerrung auf
+   * acht Glasflächen, dahinter dauerhaft steigende Ballons), und sie
+   * sieht der reduzierten fast gleich. Bei `auto` darf das niemand
+   * ungefragt bezahlen — wer die Verzerrung will, wählt „Voll". */
+  const [measuredLevel, setMeasuredLevel] = useState<AppliedEffectLevel>("reduced");
   const effectProbeDone = useRef(false);
+  /** Nur die Effektstufe, nicht das ganze Einstellungsobjekt — siehe
+   * die Abhängigkeitsliste der Messung unten (ADR-0076). */
+  const effectSetting = useAppStore((s) => s.uiSettings?.effect_level);
   const stepSelection = useAppStore((s) => s.stepSelection);
   const centerView = useAppStore((s) => s.centerView);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
@@ -269,13 +279,22 @@ export default function App() {
   // weil von „voll" aus höchstens zwei Stufen nach unten gehen.
   useEffect(() => {
     if (effectProbeDone.current) return;
-    if (!uiSettings || uiSettings.effect_level !== "auto") return;
-    effectProbeDone.current = true;
+    if (effectSetting !== "auto") return;
 
     let cancelled = false;
     const timer = window.setTimeout(() => {
+      // Das Flag erst HIER setzen, nicht beim Planen.
+      //
+      // Vorher stand es oben, direkt hinter der Abfrage — und damit
+      // lief die Messung in der Praxis nie: ändert sich `uiSettings`
+      // innerhalb der 2,5 Sekunden (beim Start der Regelfall), räumt
+      // die Aufräumfunktion den Timer ab, der Effekt läuft erneut und
+      // steigt in der ersten Zeile sofort wieder aus. Die Automatik war
+      // dann für den Rest der Sitzung tot, und die App blieb auf der
+      // teuersten Stufe stehen (ADR-0076).
+      effectProbeDone.current = true;
       void (async () => {
-        let level: AppliedEffectLevel = "full";
+        let level: AppliedEffectLevel = "reduced";
         for (let round = 0; round < 2; round += 1) {
           const times = await probeFrameTimes(40);
           if (cancelled) return;
@@ -296,7 +315,10 @@ export default function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [uiSettings]);
+    // Nur das eine Feld, das hier zählt — nicht das ganze
+    // Einstellungsobjekt. Jede unbeteiligte Änderung daran hätte den
+    // Timer sonst erneut abgeräumt.
+  }, [effectSetting]);
 
   function closeOnboarding() {
     setOnboardingOpen(false);

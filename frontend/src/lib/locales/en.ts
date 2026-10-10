@@ -118,9 +118,9 @@ export const en: Record<keyof typeof de, string> = {
   "settings.birthdayDecorationsHint": "Confetti, balloons and the greeting on open",
   "settings.effectLevel": "Interface effects",
   "settings.effectLevelHint":
-    "Glass, blur and distortion cost rendering time. “Automatic” measures at startup what this device can sustain.",
-  "settings.effectLevelAuto": "Automatic (recommended)",
-  "settings.effectLevelFull": "Full — all effects",
+    "Glass, blur and distortion cost rendering time. “Automatic” starts at “Reduced” and steps down further if this device cannot sustain even that.",
+  "settings.effectLevelAuto": "Automatic — starts reduced (recommended)",
+  "settings.effectLevelFull": "Full — all effects (most expensive)",
   "settings.effectLevelReduced": "Reduced — no distortion or decoration",
   "settings.effectLevelPlain": "Plain — no glass effect, fastest",
   "settings.themeDark": "Dark",

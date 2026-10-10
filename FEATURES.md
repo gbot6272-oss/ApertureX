@@ -626,6 +626,8 @@ ist ein anderes Gehäuse und bekommt sie nicht (siehe
 | Leistung prüfen | Misst Bildzeit der Oberfläche, eine vollständige Entwicklung über zwölf Megapixel und meldet das Build-Profil | Menü „Weitere Funktionen" → „Leistung prüfen…" |
 | Debug-Build-Warnung | Sagt im Klartext, wenn eine nicht optimierte Binärdatei läuft, und nennt den Befehl für einen optimierten Build | im selben Dialog, als erster Befund |
 | GPU-Pfad-Prüfung | Misst dieselbe Entwicklung auf der Grafikkarte und meldet, wenn sie gar nicht benutzt wird — samt Grund | im selben Dialog, als zweiter Befund |
+| Wiederverwendete GPU-Pipelines und -Puffer | Pipelines, Bind-Groups und Arbeitspuffer überleben den einzelnen Stufenaufruf; gemessen 136,6 → 80,9 ms je Vorschau | wirkt überall, keine Einstellung |
+| Überholte Renderläufe brechen ab | Beim Reglerziehen rechnet von sechzig Anfragen je Sekunde genau die neueste; die übrigen steigen aus, bevor sie anfangen | wirkt überall, keine Einstellung |
 
 **Ehrliche Grenzen:** Die Effektstufen ändern nichts an der
 Bildberechnung — sie betreffen ausschließlich, wie aufwendig die

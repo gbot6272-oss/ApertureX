@@ -1919,3 +1919,58 @@ Validierungsfehler.
 - **G6 — Der Fallback ist nicht mehr still.** Die Leistungs-Diagnose
   meldet einen ungenutzten GPU-Pfad als eigenen Befund mit Grund.
   ✔ erledigt
+
+## Phase 37 — Warum die GPU trotzdem langsam blieb
+
+Die Leistungs-Diagnose auf dem Gerät des Nutzers meldete nach
+ADR-0074: GPU 784 ms gegen CPU 939 ms — also 1,2× statt des
+Erwartbaren. Aufgeschlüsselt statt geraten.
+
+- **W1 — Aufschlüsselung gemessen.** Ein einzelner Stufenaufruf bei
+  11,2 MP: Puffer anlegen und hochladen kostet 1,5–2,8 s, also 88 %
+  der Gesamtzeit. ✔ erledigt (ADR-0075)
+- **W2 — Drei Varianten gegeneinander gemessen.** 228 ms (heute) gegen
+  33 ms (Pipeline + Puffer wiederverwendet) gegen 13 ms (zusätzlich
+  GPU-resident), bei 2 MP und einer Stufe. ✔ erledigt
+- **W3 — Arbeitsbereich gebaut.** `gpu/workspace.rs` hält Pipelines,
+  Bind-Groups und Puffer über den Aufruf hinaus; Puffer wachsen und
+  schrumpfen nie. Keine Änderung an den vierzehn Stufen oder am
+  Renderpfad. ✔ erledigt
+- **W4 — Am echten Renderpfad nachgemessen.** GPU neutral 136,6 →
+  80,9 ms, mit Reglern 366,0 → 256,2 ms; CPU als Kontrolle
+  unverändert. ✔ erledigt
+- **W5 — Dauerhaft festgehalten.** Nicht über eine Zeitmessung, die
+  an der Maschine hängt, sondern über die Tatsache dahinter: fünf
+  Aufrufe derselben Stufe erzeugen genau eine Pipeline und genau eine
+  Pufferbelegung. Gegenkontrolliert. ✔ erledigt
+- **W6 — Offen: Zwischenergebnisse auf der GPU lassen.** Einmal
+  hochladen, alle Stufen dort rechnen, einmal herunterladen — und
+  zwischen den Regler-Ticks oben lassen. Braucht einen `GpuChain`-Typ,
+  eine Buffer-Variante je Stufe und einen Paritätstest gegen die CPU.
+
+## Phase 38 — Warum es sich trotzdem langsam anfühlte
+
+Nutzer-Rückmeldung, unmissverständlich: „DAS KANN NICHT DER HAUPTGRUND
+SEIN." Sie war berechtigt: ADR-0075 hatte den Durchsatz der
+Bildrechnung verbessert, während die Beschwerde die Reaktionszeit
+betraf.
+
+- **R1 — Die rote Zahl im Screenshot ernst genommen.** 83 ms Bildzeit
+  der Oberfläche, also 12 Bilder je Sekunde. Das IST „Klicks werden
+  spät registriert" und hat mit der Bildrechnung nichts zu tun.
+  ✔ erledigt (ADR-0076)
+- **R2 — Die Effekt-Automatik lief nie.** Das „schon gemessen"-Flag
+  stand vor dem Timer; jede Änderung an den Einstellungen in den 2,5
+  Sekunden davor machte die Messung für die ganze Sitzung tot.
+  ✔ erledigt
+- **R3 — Die Vorgabe war die teuerste Stufe.** `auto` startete bei
+  `full`: SVG-Verzerrung auf acht Glasflächen, dahinter dauerhaft
+  steigende Ballons. Beginnt jetzt bei `reduced`. ✔ erledigt
+- **R4 — Überholte Renderläufe rechneten zu Ende.** Ein
+  Betriebssystem-Thread je Anfrage, unbegrenzt, ohne Abbruch; beim
+  Ziehen dutzende gleichzeitig. Ein Ticket je Foto plus
+  Serialisierung: aus sechzig Anfragen rechnet genau eine.
+  ✔ erledigt (ADR-0077)
+- **R5 — Offen: die Dauer eines EINZELNEN Laufs.** Dafür steht
+  ADR-0075s offener Punkt (Bild zwischen den Stufen auf der GPU
+  lassen) und der Release-Build.

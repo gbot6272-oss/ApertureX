@@ -13,6 +13,7 @@
 //! CPU-Fallback nutzen" trifft der jeweilige Regler-Aufrufer.
 
 pub mod dispatch;
+mod workspace;
 
 use crate::error::{PipelineError, Result};
 
@@ -25,6 +26,11 @@ pub struct GpuContext {
     pub(crate) queue: wgpu::Queue,
     /// Nur zu Diagnosezwecken (Logging, welcher Adapter tatsächlich läuft).
     pub adapter_info: wgpu::AdapterInfo,
+    /// Pipelines und Puffer, die den einzelnen Stufenaufruf überleben
+    /// (ADR-0075). Hinter einem Mutex, weil zwei gleichzeitige
+    /// Renderläufe sich sonst dieselben Puffer teilen würden — das
+    /// wäre ein Datenfehler, kein Tempoproblem.
+    pub(crate) workspace: std::sync::Mutex<workspace::Workspace>,
 }
 
 impl GpuContext {
@@ -125,6 +131,7 @@ impl GpuContext {
             device,
             queue,
             adapter_info,
+            workspace: std::sync::Mutex::new(workspace::Workspace::default()),
         })
     }
 }

@@ -51,6 +51,7 @@
 //! Zugangsdaten trägt und nichts anderes als lokale Katalogdaten liefert.
 
 mod cache;
+mod gate;
 mod route;
 
 use std::io::{Read, Seek, SeekFrom};
@@ -81,11 +82,15 @@ const MAX_VIDEO_CHUNK: u64 = 8 * 1024 * 1024;
 /// blockiert (bekannter Fallstrick, siehe `PHASE1_PROMPT.md` Abschnitt 10).
 pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     let cache = std::sync::Arc::new(ImageCache::default());
+    // Siehe `gate`s Moduldoku: ohne diese Schranke rechnen beim
+    // Reglerziehen dutzende überholte Renderläufe gleichzeitig zu Ende.
+    let gate = std::sync::Arc::new(gate::DevelopGate::default());
     builder.register_asynchronous_uri_scheme_protocol("apx", move |ctx, request, responder| {
         let cache = cache.clone();
+        let gate = gate.clone();
         let app_handle = ctx.app_handle().clone();
         std::thread::spawn(move || {
-            let response = handle(&app_handle, &request, &cache);
+            let response = handle(&app_handle, &request, &cache, &gate);
             responder.respond(response);
         });
     })
@@ -95,8 +100,9 @@ fn handle<R: Runtime>(
     app: &AppHandle<R>,
     request: &Request<Vec<u8>>,
     cache: &ImageCache,
+    gate: &gate::DevelopGate,
 ) -> Response<Vec<u8>> {
-    match handle_inner(app, request, cache) {
+    match handle_inner(app, request, cache, gate) {
         Ok(response) => response,
         Err(err) => error_response(&err),
     }
@@ -140,10 +146,26 @@ impl From<apx_core::AppError> for HandlerError {
     }
 }
 
+/// Antwort für einen Lauf, den eine neuere Anfrage überholt hat.
+///
+/// `409 Conflict` und kein Fehler: fachlich ist nichts schiefgegangen,
+/// das Ergebnis ist nur nicht mehr gefragt. Das Frontend hat seine
+/// `fetch` in aller Regel ohnehin schon abgebrochen; kommt die Antwort
+/// doch an, soll sie still verworfen werden und nicht als
+/// Rendering-Fehler in der Konsole landen.
+fn superseded_response() -> Response<Vec<u8>> {
+    Response::builder()
+        .status(StatusCode::CONFLICT)
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .body(Vec::new())
+        .unwrap_or_else(|_| Response::new(Vec::new()))
+}
+
 fn handle_inner<R: Runtime>(
     app: &AppHandle<R>,
     request: &Request<Vec<u8>>,
     cache: &ImageCache,
+    gate: &gate::DevelopGate,
 ) -> Result<Response<Vec<u8>>, HandlerError> {
     let parsed =
         route::parse(request.uri().path()).map_err(|err| HandlerError::bad_request(err.0))?;
@@ -163,6 +185,20 @@ fn handle_inner<R: Runtime>(
     let tile_cache = state.tile_cache.clone();
     let lut_table_cache = state.lut_table_cache.clone();
     let paths = state.paths.clone();
+
+    // Nur Entwickeln-Anfragen gehen durch die Schranke: Miniaturbilder
+    // und Vorschauen sind viele unabhängige Anfragen, die einander
+    // nicht überholen (siehe `gate`s Moduldoku).
+    let _turn = if let ImageRequest::Develop { photo_id, .. } = &parsed {
+        let photo_id = *photo_id;
+        let ticket = gate.claim(photo_id);
+        match gate.wait_turn(photo_id, ticket) {
+            Some(turn) => Some(turn),
+            None => return Ok(superseded_response()),
+        }
+    } else {
+        None
+    };
 
     let (content_type, cache_key) = response_meta(&parsed);
     let bytes = cache

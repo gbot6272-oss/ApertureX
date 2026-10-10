@@ -1974,3 +1974,25 @@ betraf.
 - **R5 — Offen: die Dauer eines EINZELNEN Laufs.** Dafür steht
   ADR-0075s offener Punkt (Bild zwischen den Stufen auf der GPU
   lassen) und der Release-Build.
+
+## Phase 39 — „Die Luftballons sehe ich gar nicht"
+
+Nutzer-Einspruch gegen meine eigene Erklärung, und er war berechtigt.
+
+- **B1 — Gemessen statt wegerklärt.** Allein die Ballonschicht
+  unsichtbar schalten und die geänderten Bildpunkte zählen: 2.462 von
+  1.440.000, also 0,17 % bei 22 % Deckkraft. ✔ erledigt (ADR-0078)
+- **B2 — Zwei untaugliche Prüfungen verworfen.**
+  `document.elementFromPoint` greift wegen `pointer-events: none`
+  durch die Ballons hindurch; „zwei Aufnahmen unterscheiden sich"
+  bestand auch mit dem Fehler. ✔ erledigt
+- **B3 — Ursache.** `z-index: 0` hiess „hinter dem Inhalt", und der
+  Inhalt ist deckend. Jetzt `z-index: 35`: über Inhalt und Kopfzeile,
+  unter Menüs und Dialogen. ✔ erledigt
+- **B4 — Nebenwirkung, die passt.** Vor der Kopfzeile stoßen sie
+  deren Weichzeichner nicht mehr an und dürfen deshalb in der Stufe
+  „reduziert" bleiben — mit der Vorgabe aus ADR-0076 sieht der Nutzer
+  die Deko damit zum ersten Mal. ✔ erledigt
+- **B5 — Frühere Aussage korrigiert.** Dass die Ballons DER Auslöser
+  der 83 Millisekunden waren, ist nicht belegt; belegt ist der Fehler
+  in der Automatik. ✔ erledigt

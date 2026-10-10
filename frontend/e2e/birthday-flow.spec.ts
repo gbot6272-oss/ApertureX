@@ -388,3 +388,95 @@ test.describe("Geburtstags-Deko: Tempo und Sauberkeit", () => {
     expect(with_).toBeLessThan(without + 300);
   });
 });
+
+/**
+ * **Die Ballons waren nie zu sehen** (ADR-0078).
+ *
+ * Nutzer-Rückmeldung: „ehrlich gesagt sehe ich die Luftballons gar
+ * nicht — habe ich auch nie."
+ *
+ * **Zwei Prüfungen, die nicht taugen, und warum.**
+ *
+ * 1. `document.elementFromPoint` auf der Mitte eines Ballons liefert
+ *    `MAIN`, `FOOTER` oder einen `BUTTON`. Das sieht nach einem Beweis
+ *    aus und ist keiner: die Schicht trägt `pointer-events: none`, der
+ *    Strahl geht also IMMER hindurch — unabhängig davon, was man
+ *    sieht.
+ * 2. „Zwei Aufnahmen unterscheiden sich" ist zu schwach. Bei
+ *    `z-index: 0` unterschieden sie sich auch, nämlich in 2.462 von
+ *    1.440.000 Bildpunkten — 0,17 % des Fensters, bei 22 % Deckkraft.
+ *    Also genau das, was der Nutzer als „sehe ich nicht" beschreibt.
+ *
+ * Gezählt werden deshalb die Bildpunkte, die sich ändern, wenn man
+ * ALLEIN die Ballonschicht unsichtbar schaltet — derselbe Zustand,
+ * dieselbe Begrüßung, dieselbe Animationsphase, eine Variable.
+ *
+ * Gemessen bei 1600×900: `z-index: 0` ergab 2.462 Bildpunkte,
+ * `z-index: 35` ergibt 8.909. Sechs Ballons hätten als volle Fläche
+ * rund 12.000 — vorher waren also gut vier Fünftel jedes Ballons
+ * verdeckt.
+ */
+test("Luftballons sind nicht nur vorhanden, sondern wirklich zu sehen", async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await installTauriMock(page, WITH_DECORATIONS);
+  await page.goto("/");
+  await expect(page.getByTestId("balloon-layer")).toBeAttached();
+  // Die Begrüßung blendet sich nach gut fünf Sekunden aus; vorher
+  // deckt ihr geblurrter Hintergrund das halbe Bild ab. Danach stehen
+  // auch die Ballons nicht mehr alle unter dem unteren Rand.
+  await page.waitForTimeout(6000);
+  await page.evaluate(() => {
+    document.querySelectorAll<HTMLElement>(".apx-balloon").forEach((balloon) => {
+      balloon.style.animationPlayState = "paused";
+    });
+  });
+
+  async function aufnahme(sichtbar: boolean): Promise<string> {
+    await page.evaluate((zeigen) => {
+      const layer = document.querySelector<HTMLElement>(".apx-balloon-layer");
+      if (layer) layer.style.visibility = zeigen ? "visible" : "hidden";
+    }, sichtbar);
+    return (await page.screenshot()).toString("base64");
+  }
+
+  const mit = await aufnahme(true);
+  const ohne = await aufnahme(false);
+
+  const sichtbarePixel = await page.evaluate(
+    async ([a, b]) => {
+      const laden = async (daten: string) => {
+        const bild = new Image();
+        bild.src = `data:image/png;base64,${daten}`;
+        await bild.decode();
+        const leinwand = document.createElement("canvas");
+        leinwand.width = bild.width;
+        leinwand.height = bild.height;
+        const ctx = leinwand.getContext("2d");
+        if (!ctx) throw new Error("kein 2D-Kontext");
+        ctx.drawImage(bild, 0, 0);
+        return ctx.getImageData(0, 0, leinwand.width, leinwand.height).data;
+      };
+      const x = await laden(a ?? "");
+      const y = await laden(b ?? "");
+      let anders = 0;
+      for (let i = 0; i < x.length; i += 4) {
+        const delta =
+          Math.abs(x[i]! - y[i]!) + Math.abs(x[i + 1]! - y[i + 1]!) + Math.abs(x[i + 2]! - y[i + 2]!);
+        // Schwelle 2 statt 0: JPEG-freie PNGs sind zwar exakt, aber
+        // Unterpixel-Glättung an den Kanten soll nicht mitzählen.
+        if (delta > 2) anders += 1;
+      }
+      return anders;
+    },
+    [mit, ohne],
+  );
+
+  // 4.000 liegt sauber zwischen den beiden gemessenen Werten (2.462
+  // verdeckt, 8.909 frei) und ist damit eine Schwelle, die den
+  // Unterschied wirklich trennt, statt ihn nur zu streifen.
+  expect(
+    sichtbarePixel,
+    "die Luftballons sind größtenteils von deckenden Flächen verdeckt",
+  ).toBeGreaterThan(4000);
+});

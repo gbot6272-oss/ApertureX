@@ -8476,3 +8476,80 @@ nicht schneller. Was wegfällt, ist die Schlange davor — und die war der
 Unterschied zwischen „das Bild kommt gleich" und „4216 ms". Die Dauer
 eines einzelnen Laufs bleibt die Sache von ADR-0075s offenem Punkt (das
 Bild zwischen den Stufen auf der GPU lassen) und des Release-Builds.
+
+## ADR-0078: Die Luftballons waren so gut wie nie zu sehen
+
+**Anlass.** Nutzer-Rückmeldung: „ehrlich gesagt sehe ich die
+Luftballons gar nicht — habe ich auch nie, obwohl ich zweimal gepullt
+habe."
+
+Das widersprach direkt meiner Erklärung aus ADR-0073 und ADR-0076, in
+der die dauerhaft steigenden Ballons als Auslöser für die zähe
+Oberfläche figurierten. Wenn sie nie zu sehen waren, stimmt diese
+Erklärung so nicht.
+
+**Zwei Prüfungen, die nicht taugten — beide meine.**
+
+1. `document.elementFromPoint` auf der Mitte jedes Ballons lieferte
+   `MAIN`, `FOOTER`, einen `BUTTON`. Das sah nach einem Beweis aus und
+   war keiner: die Schicht trägt `pointer-events: none`, der Strahl
+   geht also **immer** hindurch und liefert, was darunter liegt —
+   unabhängig davon, was man sieht.
+2. „Zwei Aufnahmen unterscheiden sich" bestand auch **mit** dem Fehler.
+   Ein Test, der mit und ohne Korrektur grün ist, behauptet nichts.
+
+**Die Messung, die etwas sagt.** Allein die Ballonschicht unsichtbar
+schalten — derselbe Zustand, dieselbe Begrüßung, dieselbe
+Animationsphase, eine Variable — und die geänderten Bildpunkte zählen:
+
+| | sichtbare Ballon-Bildpunkte | Anteil bei 1600×900 |
+| --- | --- | --- |
+| vorher (`z-index: 0`) | 2.462 | **0,17 %** |
+| jetzt (`z-index: 35`) | 8.909 | **0,62 %** |
+
+Sechs Ballons hätten als volle Fläche rund 12.000 Bildpunkte. Vorher
+waren also gut vier Fünftel jedes Ballons von deckenden Flächen
+verdeckt, und der Rest lag bei 22 % Deckkraft. Das ist genau das, was
+der Nutzer als „sehe ich nicht" beschreibt.
+
+**Die Ursache.** Im CSS stand `z-index: 0` mit der Begründung „hinter
+dem Inhalt, damit kein Ballon über einem Foto schwebt". Die Absicht war
+richtig, die Umsetzung konnte nicht aufgehen: der Inhalt dieser App ist
+**deckend** (`bg-bg-base`, `bg-bg-panel`). „Hinter dem Inhalt" heisst
+dann nicht „dezent im Hintergrund", sondern „nicht vorhanden". Beides
+zugleich gibt es nicht.
+
+**Die Entscheidung.** `z-index: 35` löst drei Dinge auf einmal:
+
+- über dem Inhalt und über der Kopfzeile (`z-30`), also wirklich zu
+  sehen;
+- unter Menüs (`z-40`) und Dialogen (`z-50`), also nie im Weg;
+- und — der Punkt, der für das Tempo zählt — **vor** der Kopfzeile statt
+  dahinter. Ein bewegtes Element hinter einer `backdrop-filter`-Fläche
+  macht deren Zwischenspeicher bei jedem Bild ungültig; davor kostet es
+  nichts.
+
+Sie schweben jetzt tatsächlich über dem Foto. Bei 22 % Deckkraft ist
+das der Preis dafür, dass es die Deko überhaupt gibt; wem das beim
+Beurteilen im Weg ist, schaltet sie in den Einstellungen ab.
+
+Weil sie der Kopfzeile nicht mehr in den Weg kommen, dürfen sie in der
+Stufe „reduziert" bleiben — sie waren der Grund, sie dort zu
+verstecken, und der Grund ist weg. Mit der neuen Vorgabe aus ADR-0076
+sieht der Nutzer die Deko damit zum ersten Mal.
+
+**Korrektur an ADR-0073 und ADR-0076.** Dort steht, die Ballons machten
+„den Zwischenspeicher dieser acht Filter bei jedem Bild ungültig". Das
+war überzogen: sie lagen hinter der Kopfzeile, nicht hinter allen acht
+Glasflächen, und die meisten von ihnen waren ohnehin verdeckt. Dass sie
+Kosten verursachten, bleibt richtig; dass sie *der* Auslöser der 83
+Millisekunden waren, ist nicht belegt. Belegt ist der Fehler in der
+Automatik (ADR-0076) — die lief nachweislich nie.
+
+**Selbstkritik.** Ich habe in dieser Frage zweimal hintereinander eine
+Messung für einen Beweis gehalten, die keiner war: einmal eine, die
+durch das geprüfte Element hindurchgriff, einmal eine, die mit und ohne
+Fehler grün war. Beide Male hätte eine Gegenkontrolle das sofort
+gezeigt — und beide Male habe ich sie erst gemacht, nachdem der Nutzer
+widersprochen hat. Die Gegenkontrolle gehört vor die Schlussfolgerung,
+nicht hinter den Einspruch.

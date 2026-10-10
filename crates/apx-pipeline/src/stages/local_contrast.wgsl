@@ -42,8 +42,14 @@ fn box_blur3(x: i32, y: i32, channel: u32) -> f32 {
 }
 
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
+fn main(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(num_workgroups) groups: vec3<u32>,
+) {
+    // Zweidimensionaler Dispatch (ADR-0074): `gid.x` allein deckte
+    // nur die erste Zeile ab. `gid.y` zaehlt die Zeilen,
+    // `groups.x * 64u` ist die Zeilenbreite in Elementen.
+    let i = gid.x + gid.y * groups.x * 64u;
     if (i >= arrayLength(&input_buf)) {
         return;
     }

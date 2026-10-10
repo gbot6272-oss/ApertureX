@@ -28,6 +28,20 @@ pub struct GpuContext {
 }
 
 impl GpuContext {
+    /// Wie viele Byte ein einzelner Storage-Puffer auf diesem Gerät
+    /// fassen darf.
+    ///
+    /// Öffentlich, damit Aufrufer außerhalb dieser Kiste vorher
+    /// prüfen können, statt in einen Validierungsfehler zu laufen
+    /// (ADR-0074) — `device` selbst bleibt privat, weil der Rest der
+    /// App nichts direkt an der wgpu-Schnittstelle zu suchen hat.
+    ///
+    /// Bei drei `f32` je Pixel entspricht der Wert
+    /// `max_storage_buffer_bytes() / 12` Pixeln.
+    pub fn max_storage_buffer_bytes(&self) -> u64 {
+        u64::from(self.device.limits().max_storage_buffer_binding_size)
+    }
+
     /// Blockierende Variante von [`GpuContext::new`] für Aufrufer ohne
     /// eigene Async-Runtime (z. B. `main()` beim App-Start, Tests).
     pub fn new_blocking() -> Result<Self> {
@@ -80,7 +94,24 @@ impl GpuContext {
                 &wgpu::DeviceDescriptor {
                     label: Some("apx-pipeline-device"),
                     required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
+                    // Die Grenzen des ADAPTERS anfordern, nicht die
+                    // konservativen Vorgabewerte (ADR-0074).
+                    //
+                    // `Limits::default()` deckelt
+                    // `max_storage_buffer_binding_size` auf 128 MiB.
+                    // Bei drei `f32` je Pixel sind das
+                    //
+                    //     134.217.728 / 12 = 11.184.810 Pixel,
+                    //
+                    // also gut **11 Megapixel** — jedes größere Foto
+                    // hätte den GPU-Pfad erneut verfehlt, diesmal an
+                    // der Puffergröße statt am Gruppenlimit. Die
+                    // Vorgabewerte sind auf den kleinsten gemeinsamen
+                    // Nenner inklusive Mobilgeräten ausgelegt; ein
+                    // Adapter meldet mit `adapter.limits()`, was er
+                    // wirklich kann, und mehr als das kann hier per
+                    // Definition nicht angefordert werden.
+                    required_limits: adapter.limits(),
                     memory_hints: wgpu::MemoryHints::default(),
                 },
                 None,
@@ -117,5 +148,37 @@ mod tests {
             Err(PipelineError::GpuUnavailable { .. }) => {}
             Err(other) => panic!("unerwarteter Fehler: {other}"),
         }
+    }
+
+    /// Der Kontext darf sich nicht unter die Fähigkeiten des Adapters
+    /// deckeln (ADR-0074).
+    ///
+    /// `wgpu::Limits::default()` begrenzt einen Storage-Puffer auf 128
+    /// MiB. Bei drei `f32` je Pixel sind das gut 11 Megapixel — jedes
+    /// größere Foto wäre am GPU-Pfad vorbeigelaufen, direkt nachdem
+    /// das Gruppenlimit behoben wurde. Dieser Test hält fest, dass
+    /// angefordert wird, was der Adapter kann.
+    #[test]
+    fn the_context_requests_what_the_adapter_can_do() {
+        let ctx = match GpuContext::new_blocking() {
+            Ok(ctx) => ctx,
+            Err(_) => {
+                eprintln!("übersprungen: kein GPU-Adapter in dieser Umgebung verfügbar");
+                return;
+            }
+        };
+
+        let limits = ctx.device.limits();
+        let fallback = wgpu::Limits::default();
+        assert!(
+            limits.max_storage_buffer_binding_size >= fallback.max_storage_buffer_binding_size,
+            "der Kontext meldet {} Byte je Storage-Puffer und liegt damit unter den              Vorgabewerten ({} Byte)",
+            limits.max_storage_buffer_binding_size,
+            fallback.max_storage_buffer_binding_size
+        );
+        assert!(
+            limits.max_compute_workgroups_per_dimension
+                >= fallback.max_compute_workgroups_per_dimension
+        );
     }
 }

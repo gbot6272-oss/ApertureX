@@ -7182,9 +7182,13 @@ impl From<apx_core::UiSettings> for UiSettingsDto {
 /// echte Rechenarbeit leistet: auf dem Hauptthread würde sie genau das
 /// Einfrieren verursachen, das sie diagnostizieren soll.
 #[tauri::command]
-pub async fn run_performance_benchmark() -> Result<crate::diagnostics::PerformanceReportDto, String>
-{
-    tokio::task::spawn_blocking(crate::diagnostics::run_benchmark)
+pub async fn run_performance_benchmark(
+    state: State<'_, AppState>,
+) -> Result<crate::diagnostics::PerformanceReportDto, String> {
+    // Der GPU-Kontext der App, nicht ein frisch aufgebauter: gemessen
+    // werden soll der Pfad, den das Rendern wirklich nimmt (ADR-0074).
+    let gpu = state.pipeline.clone();
+    tokio::task::spawn_blocking(move || crate::diagnostics::run_benchmark(Some(gpu.as_ref())))
         .await
         .map_err(|err| format!("Messung abgebrochen: {err}"))?
 }

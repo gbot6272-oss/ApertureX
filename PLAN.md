@@ -1889,3 +1889,33 @@ gar nix" samt leerem Globus.
 - **P8 — Karte: Leerzustand statt leerem Globus.** Dabei die
   Testlücke geschlossen, dass die GPS-Auslesung aus Kamera-JPEGs nie
   geprüft war. ✔ erledigt
+
+## Phase 36 — Die GPU, die nie gerechnet hat
+
+Auslöser war ein Nutzer-Log aus einem echten Lauf, nicht eine
+Vermutung. Darin stand bei jedem einzelnen Rendern derselbe
+Validierungsfehler.
+
+- **G1 — Ursache gefunden.** Alle Workgroups gingen in die
+  X-Dimension; WebGPU erlaubt dort 65535. Bei 64 Elementen je Gruppe
+  und drei Kanälen je Pixel scheitert damit jedes Bild über rund
+  **1,4 Megapixel** — also jedes realistische Foto und sogar jede
+  Live-Vorschau. ✔ erledigt (ADR-0074)
+- **G2 — Zweidimensionaler Dispatch.** X bis zum vom Gerät
+  gemeldeten Limit, der Rest in Y; alle 14 Shader bilden den Index
+  über `@builtin(num_workgroups)`. ✔ erledigt
+- **G3 — Vier Ebenen Absicherung.** Arithmetik-Tests mit den echten
+  Gruppenzahlen aus dem Log, ein GPU-Lauf über der alten Grenze
+  (gegenkontrolliert), ein maschinell geprüfter Shader-Vertrag, und
+  die Diagnose misst beide Pfade. ✔ erledigt
+- **G4 — Fehlermeldung getrennt.** `GpuExecution` statt
+  `ShaderCompile` für abgelehnte Aufrufe; die alte Zuordnung hat die
+  Suche in die Shader-Quelltexte geschickt, wo nichts war.
+  ✔ erledigt
+- **G5 — Die zweite Decke mitgenommen.** Direkt hinter dem
+  Gruppenlimit deckelt `Limits::default()` einen Storage-Puffer auf
+  128 MiB, also gut 11 Megapixel. Der Kontext fordert jetzt
+  `adapter.limits()` an. ✔ erledigt
+- **G6 — Der Fallback ist nicht mehr still.** Die Leistungs-Diagnose
+  meldet einen ungenutzten GPU-Pfad als eigenen Befund mit Grund.
+  ✔ erledigt

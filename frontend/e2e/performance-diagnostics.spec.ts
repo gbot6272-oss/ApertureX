@@ -23,7 +23,7 @@ const PHOTO = {
 
 async function openDialog(
   page: import("@playwright/test").Page,
-  report?: Record<string, number | boolean>,
+  report?: Record<string, number | boolean | string | null>,
 ) {
   await installTauriMock(page, {
     folders: [{ id: FOLDER_ID, path: "/home/user/Fotos/Urlaub", photo_count: 1 }],
@@ -65,6 +65,45 @@ test("benennt einen Debug-Build als wahrscheinlichste Ursache", async ({ page })
   // Ohne den konkreten Befehl wäre es eine Diagnose ohne Therapie.
   await expect(warning).toContainText("cargo tauri build");
   await expect(page.getByTestId("performance-build")).toHaveText("Debug (nicht optimiert)");
+});
+
+/**
+ * Der Befund aus dem Nutzer-Log (ADR-0074): ein Dispatch-Fehler ließ
+ * jeden GPU-Aufruf scheitern, das Rendern fiel still auf die CPU
+ * zurück, und nach außen war die App nur „irgendwie langsam". Genau
+ * das muss die Diagnose benennen — sonst verfehlt sie denselben
+ * Befund ein zweites Mal.
+ */
+test("benennt einen nicht benutzten GPU-Pfad als eigenen Befund", async ({ page }) => {
+  await openDialog(page, {
+    debug_build: false,
+    threads: 8,
+    bench_megapixels: 12,
+    develop_neutral_ms: 900,
+    develop_loaded_ms: 1100,
+    megapixels_per_second: 13.3,
+    develop_gpu_ms: null,
+    gpu_fallback_reason: "dispatch group size 107337 > 65535",
+  });
+  await page.getByTestId("performance-run").click();
+  const warning = page.getByTestId("performance-gpu-warning");
+  await expect(warning).toBeVisible({ timeout: 20_000 });
+  await expect(warning).toContainText("Grafikkarte wird nicht benutzt");
+  // Der Grund gehört dazu: ohne ihn wäre es nur eine andere Art, den
+  // Nutzer mit dem Problem allein zu lassen.
+  await expect(warning).toContainText("65535");
+  await expect(page.getByTestId("performance-gpu")).toContainText("Hauptprozessor");
+});
+
+test("meldet einen funktionierenden GPU-Pfad mit dem Vorsprung zur CPU", async ({ page }) => {
+  // Gegenkontrolle: ohne sie könnte die Warnung immer erscheinen und
+  // der Test oben trotzdem grün sein.
+  await openDialog(page);
+  await page.getByTestId("performance-run").click();
+  await expect(page.getByTestId("performance-report")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("performance-gpu-warning")).toHaveCount(0);
+  // 180 ms CPU gegen 22 ms GPU aus der Vorgabe des Mocks ≈ 8,2×.
+  await expect(page.getByTestId("performance-gpu")).toContainText("schneller als die CPU");
 });
 
 test("misst die Bildzeit der Oberfläche wirklich", async ({ page }) => {

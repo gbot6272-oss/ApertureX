@@ -625,6 +625,7 @@ ist ein anderes Gehäuse und bekommt sie nicht (siehe
 | Automatische Erkennung | Misst beim Start die echte Bildzeit — mit bewegter Last hinter den Glasflächen, nicht im Leerlauf — und stuft herunter, wenn das Gerät das Budget nicht hält | Vorgabe |
 | Leistung prüfen | Misst Bildzeit der Oberfläche, eine vollständige Entwicklung über zwölf Megapixel und meldet das Build-Profil | Menü „Weitere Funktionen" → „Leistung prüfen…" |
 | Debug-Build-Warnung | Sagt im Klartext, wenn eine nicht optimierte Binärdatei läuft, und nennt den Befehl für einen optimierten Build | im selben Dialog, als erster Befund |
+| GPU-Pfad-Prüfung | Misst dieselbe Entwicklung auf der Grafikkarte und meldet, wenn sie gar nicht benutzt wird — samt Grund | im selben Dialog, als zweiter Befund |
 
 **Ehrliche Grenzen:** Die Effektstufen ändern nichts an der
 Bildberechnung — sie betreffen ausschließlich, wie aufwendig die
@@ -635,3 +636,11 @@ flackern würde. Die gemessene Entwicklungsdauer gilt für ein
 synthetisches Zwölf-Megapixel-Bild und ist zwischen Geräten
 vergleichbar — sie sagt nicht voraus, wie lange ein konkretes RAW
 braucht. Siehe `DECISIONS.md` ADR-0073.
+
+Die GPU-Prüfung führt bewusst eine Stufe **direkt** auf der
+Grafikkarte aus, bevor sie misst: das normale Rendern fängt einen
+gescheiterten GPU-Aufruf selbst ab und rechnet auf dem Hauptprozessor
+weiter — eine Diagnose, die das nicht umgeht, meldete CPU-Zeiten als
+GPU-Zeiten. Genau dieser stille Fallback hat dazu geführt, dass die
+GPU-Beschleunigung lange für kein einziges realistisches Foto
+funktioniert hat, ohne dass es jemandem auffiel (ADR-0074).

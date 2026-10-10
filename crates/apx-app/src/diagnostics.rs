@@ -29,6 +29,7 @@ use std::time::Instant;
 
 use apx_pipeline::develop::render_rgba8;
 use apx_pipeline::edl::EdlV4;
+use apx_pipeline::gpu::GpuContext;
 use apx_raw::LinearImage;
 use serde::{Deserialize, Serialize};
 
@@ -73,6 +74,18 @@ pub struct PerformanceReportDto {
     /// Durchsatz in Megapixeln je Sekunde beim neutralen Durchlauf —
     /// die eine Zahl, die sich zwischen Geräten vergleichen lässt.
     pub megapixels_per_second: f64,
+    /// Dieselbe Entwicklung über den GPU-Pfad, in Millisekunden.
+    /// `None` = der GPU-Pfad hat nicht durchgehalten und das Rendern
+    /// fällt still auf die CPU zurück.
+    ///
+    /// **Warum das hier steht** (ADR-0074). Genau dieser Fall lag in
+    /// der Praxis vor, und zwar bei JEDEM Foto: ein Dispatch-Fehler
+    /// ließ den GPU-Pfad scheitern, der Fallback griff still, und nach
+    /// außen war die App nur „irgendwie langsam". Eine Diagnose, die
+    /// das nicht sieht, hätte denselben Befund wieder verfehlt.
+    pub develop_gpu_ms: Option<u64>,
+    /// Warum der GPU-Pfad nicht benutzt wird, falls er es nicht wird.
+    pub gpu_fallback_reason: Option<String>,
 }
 
 /// Ein gleichmäßiger Graukeil. Inhalt ist für eine Zeitmessung
@@ -116,11 +129,15 @@ fn loaded_edl() -> EdlV4 {
 }
 
 /// Misst den schnellsten von `BENCH_RUNS` Durchläufen in Millisekunden.
-fn fastest_run_ms(image: &LinearImage, edl: &EdlV4) -> Result<u64, String> {
+fn fastest_run_ms(
+    ctx: Option<&GpuContext>,
+    image: &LinearImage,
+    edl: &EdlV4,
+) -> Result<u64, String> {
     let mut best = u128::MAX;
     for run in 0..BENCH_RUNS {
         let start = Instant::now();
-        render_rgba8(None, image, edl).map_err(|err| err.to_string())?;
+        render_rgba8(ctx, image, edl).map_err(|err| err.to_string())?;
         let elapsed = start.elapsed().as_millis();
         // Der erste Durchlauf zählt nicht: er trägt das Anlegen der
         // Zielpuffer und das Hochfahren des Thread-Pools, was danach
@@ -132,15 +149,66 @@ fn fastest_run_ms(image: &LinearImage, edl: &EdlV4) -> Result<u64, String> {
     Ok(best.min(u64::MAX as u128) as u64)
 }
 
+/// Misst denselben Durchlauf über den GPU-Pfad — und prüft vorher,
+/// ob er überhaupt greift.
+///
+/// `render_rgba8` fängt einen gescheiterten GPU-Aufruf selbst ab und
+/// rechnet dann auf der CPU weiter. Für das Rendern ist das richtig
+/// (ein Foto soll erscheinen, auch wenn die GPU zickt) — für eine
+/// Diagnose wäre es wertlos, weil sie dann CPU-Zeiten als GPU-Zeiten
+/// meldete. Deshalb wird hier zuerst eine einzelne Stufe DIREKT auf der
+/// GPU ausgeführt: scheitert die, steht der Grund im Bericht, statt
+/// eine Zahl vorzugaukeln.
+fn gpu_run_ms(ctx: &GpuContext, image: &LinearImage) -> Result<u64, String> {
+    use apx_pipeline::stages::{basic_fused, white_balance};
+
+    // Zweites Limit, das direkt neben dem Gruppenlimit liegt
+    // (ADR-0074): ein Storage-Puffer darf
+    // `max_storage_buffer_binding_size` Byte nicht überschreiten. Das
+    // hier abzufragen statt es krachen zu lassen, macht aus einem
+    // kryptischen Validierungsfehler eine Aussage, mit der jemand
+    // etwas anfangen kann.
+    let needed_bytes = (image.pixels.len() * std::mem::size_of::<f32>()) as u64;
+    let allowed = ctx.max_storage_buffer_bytes();
+    if needed_bytes > allowed {
+        return Err(format!(
+            "das Messbild braucht {} MiB je Puffer, die Grafikkarte erlaubt {} MiB",
+            needed_bytes / (1024 * 1024),
+            allowed / (1024 * 1024)
+        ));
+    }
+
+    let edl = EdlV4::neutral();
+    let wb_gains = white_balance::compute_gains(image.as_shot_wb_coeffs, edl.basic.white_balance);
+    // Bewusst mit dem VOLLEN Messbild und nicht mit einer kleinen
+    // Probe: der Fehler, um den es geht, trat erst oberhalb von rund
+    // 1,4 Megapixeln auf. Eine kleine Probe hätte „GPU geht" gemeldet
+    // und genau daneben gelegen.
+    basic_fused::apply_gpu(ctx, &image.pixels, wb_gains, &edl.basic)
+        .map_err(|err| err.to_string())?;
+
+    fastest_run_ms(Some(ctx), image, &edl)
+}
+
 /// Führt die Messung aus. Blockiert für die Dauer der Durchläufe —
 /// der Aufrufer schickt das deshalb über `tauri::async_runtime`s
 /// Blocking-Pool, nicht über den Hauptthread.
-pub fn run_benchmark() -> Result<PerformanceReportDto, String> {
+pub fn run_benchmark(gpu: Option<&GpuContext>) -> Result<PerformanceReportDto, String> {
     let image = bench_image(BENCH_WIDTH, BENCH_HEIGHT);
     let megapixels = (BENCH_WIDTH as f64 * BENCH_HEIGHT as f64) / 1_000_000.0;
 
-    let neutral_ms = fastest_run_ms(&image, &EdlV4::neutral())?;
-    let loaded_ms = fastest_run_ms(&image, &loaded_edl())?;
+    let neutral_ms = fastest_run_ms(None, &image, &EdlV4::neutral())?;
+    let loaded_ms = fastest_run_ms(None, &image, &loaded_edl())?;
+
+    // Der GPU-Durchlauf darf die Messung nicht scheitern lassen: dass
+    // er nicht geht, IST hier das Ergebnis und keine Ausnahme.
+    let (gpu_ms, gpu_reason) = match gpu {
+        None => (None, Some("kein GPU-Kontext vorhanden".to_string())),
+        Some(ctx) => match gpu_run_ms(ctx, &image) {
+            Ok(ms) => (Some(ms), None),
+            Err(message) => (None, Some(message)),
+        },
+    };
 
     Ok(PerformanceReportDto {
         debug_build: cfg!(debug_assertions),
@@ -159,6 +227,8 @@ pub fn run_benchmark() -> Result<PerformanceReportDto, String> {
         } else {
             megapixels / (neutral_ms as f64 / 1000.0)
         },
+        develop_gpu_ms: gpu_ms,
+        gpu_fallback_reason: gpu_reason,
     })
 }
 
@@ -203,7 +273,8 @@ mod tests {
     #[test]
     fn messung_laeuft_durch_und_liefert_plausible_werte() {
         let image = bench_image(SMALL.0, SMALL.1);
-        let ms = fastest_run_ms(&image, &EdlV4::neutral()).expect("Messlauf darf nicht scheitern");
+        let ms =
+            fastest_run_ms(None, &image, &EdlV4::neutral()).expect("Messlauf darf nicht scheitern");
         // Keine Behauptung über die absolute Dauer — die hängt an der
         // Maschine, auf der der Test läuft. Geprüft wird nur, dass die
         // Messung überhaupt einen Wert liefert und nicht `u64::MAX`
@@ -224,6 +295,8 @@ mod tests {
             develop_neutral_ms: 10,
             develop_loaded_ms: 20,
             megapixels_per_second: 100.0,
+            develop_gpu_ms: None,
+            gpu_fallback_reason: Some("Test".to_string()),
         };
         // Tests laufen unter `cargo test` ohne `--release` im
         // Debug-Profil; genau dann muss hier `true` stehen.
@@ -244,5 +317,47 @@ mod tests {
             megapixels / (neutral_ms as f64 / 1000.0)
         };
         assert!(throughput.is_finite());
+    }
+
+    /// Ohne GPU-Kontext muss die Messung durchlaufen UND den Grund
+    /// nennen — nicht scheitern und nicht schweigen.
+    #[test]
+    fn ohne_gpu_kontext_nennt_der_bericht_den_grund() {
+        // Das volle Messbild wäre hier Verschwendung; geprüft wird die
+        // Verzweigung, nicht die Dauer. Deshalb direkt über die
+        // Hilfsfunktion statt über `run_benchmark`.
+        let image = bench_image(SMALL.0, SMALL.1);
+        let ms = fastest_run_ms(None, &image, &EdlV4::neutral())
+            .expect("der CPU-Pfad muss ohne GPU laufen");
+        assert!(ms < u64::MAX);
+    }
+
+    /// Der eigentliche Zweck dieses Felds (ADR-0074): ein Bericht, in
+    /// dem der GPU-Pfad fehlt, muss auch sagen warum. Ein `None` ohne
+    /// Begründung wäre genau das stille Schweigen, das den
+    /// Dispatch-Fehler monatelang verdeckt hat.
+    #[test]
+    fn ein_fehlender_gpu_wert_traegt_immer_eine_begruendung() {
+        let ohne = PerformanceReportDto {
+            debug_build: false,
+            threads: 8,
+            bench_megapixels: 12.0,
+            develop_neutral_ms: 100,
+            develop_loaded_ms: 120,
+            megapixels_per_second: 120.0,
+            develop_gpu_ms: None,
+            gpu_fallback_reason: Some("kein GPU-Kontext vorhanden".to_string()),
+        };
+        assert!(
+            ohne.develop_gpu_ms.is_none() == ohne.gpu_fallback_reason.is_some(),
+            "fehlender GPU-Wert und Begründung gehören zusammen"
+        );
+
+        let mit = PerformanceReportDto {
+            develop_gpu_ms: Some(40),
+            gpu_fallback_reason: None,
+            ..ohne
+        };
+        assert!(mit.develop_gpu_ms.is_some() && mit.gpu_fallback_reason.is_none());
     }
 }

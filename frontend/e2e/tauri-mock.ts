@@ -178,6 +178,10 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       develop_neutral_ms: 180,
       develop_loaded_ms: 240,
       megapixels_per_second: 66.7,
+      // Standardmaessig ein funktionierender GPU-Pfad; der Ausfall ist
+      // der interessante Fall und wird vom Test gesetzt, der ihn prueft.
+      develop_gpu_ms: 22 as number | null,
+      gpu_fallback_reason: null as string | null,
     },
     // Beobachteter Ordner (Phase 12 Schritt 7) — derselbe Aus-Default wie
     // im echten Backend (`apx_core::settings::WatchedFolderSettings`).
@@ -843,6 +847,8 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         develop_neutral_ms: number;
         develop_loaded_ms: number;
         megapixels_per_second: number;
+        develop_gpu_ms: number | null;
+        gpu_fallback_reason: string | null;
       };
       watchedFolderSettings: {
         path: string | null;

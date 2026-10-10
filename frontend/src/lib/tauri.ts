@@ -1678,6 +1678,11 @@ export interface PerformanceReportDto {
   develop_neutral_ms: number;
   develop_loaded_ms: number;
   megapixels_per_second: number;
+  /** Dieselbe Entwicklung ueber den GPU-Pfad. `null` = der Pfad greift
+   * nicht und das Rendern faellt auf die CPU zurueck (ADR-0074). */
+  develop_gpu_ms: number | null;
+  /** Warum der GPU-Pfad nicht greift, falls er es nicht tut. */
+  gpu_fallback_reason: string | null;
 }
 
 /** Misst die Bildberechnung auf diesem Geraet. Dauert bewusst mehrere

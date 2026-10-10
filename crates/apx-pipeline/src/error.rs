@@ -24,6 +24,24 @@ pub enum PipelineError {
         message: String,
     },
 
+    /// Ein GPU-Aufruf wurde von der Validierung beanstandet, obwohl der
+    /// Shader selbst in Ordnung ist — etwa ein Dispatch, der ein
+    /// Gerätelimit überschreitet, oder eine unpassende Puffergröße.
+    ///
+    /// **Warum das eine eigene Variante ist** (ADR-0074). Bis hierher
+    /// wurde jeder Validierungsfehler als [`Self::ShaderCompile`]
+    /// gemeldet. Das Log sagte dann „Shader konnte nicht kompiliert
+    /// werden", während der Shader tadellos übersetzt war und erst der
+    /// Aufruf am Gruppenlimit scheiterte. Diese eine falsche Zuordnung
+    /// hat die Suche nach dem Fehler lange in die Shader-Quelltexte
+    /// geschickt, wo nichts zu finden war. Eine Fehlermeldung, die in
+    /// die falsche Richtung zeigt, ist schlechter als eine vage.
+    #[error("GPU-Aufruf in Stufe '{stage}' abgelehnt: {message}")]
+    GpuExecution {
+        stage: &'static str,
+        message: String,
+    },
+
     /// Ein GPU-Puffer hat nicht die erwartete Byte-Größe — deutet auf
     /// einen Layout-Fehler zwischen Rust-Struct und WGSL-Uniform-Block hin.
     #[error("Puffergröße stimmt nicht: erwartet {expected} Byte, erhalten {actual} Byte")]
@@ -66,6 +84,28 @@ mod tests {
             err.to_string(),
             "Keine GPU verfügbar: kein Adapter gefunden"
         );
+    }
+
+    /// Die beiden GPU-Fehler müssen sich im Text unterscheiden lassen.
+    /// Genau daran ist die Diagnose des Dispatch-Fehlers gescheitert
+    /// (ADR-0074): ein Ausführungsfehler trug den Wortlaut eines
+    /// Übersetzungsfehlers.
+    #[test]
+    fn execution_errors_do_not_read_like_compile_errors() {
+        let compile = PipelineError::ShaderCompile {
+            stage: "basic_fused",
+            message: "Zeile 12: unbekannter Bezeichner".to_string(),
+        };
+        let execution = PipelineError::GpuExecution {
+            stage: "basic_fused",
+            message: "dispatch group size 107337 > 65535".to_string(),
+        };
+        assert!(compile.to_string().contains("kompiliert"));
+        assert!(
+            !execution.to_string().contains("kompiliert"),
+            "ein Ausführungsfehler darf nicht nach einem Übersetzungsfehler klingen: {execution}"
+        );
+        assert!(execution.to_string().contains("basic_fused"));
     }
 
     #[test]

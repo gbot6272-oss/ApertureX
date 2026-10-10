@@ -592,3 +592,27 @@ nicht interpoliert; für diese Fotos bleibt der Ort leer. Beim
 Einsortieren nach Datum bleiben Fotos liegen, deren Zielname schon
 belegt ist — sie werden gemeldet, nicht umbenannt. Der Duplikat-Vorschlag
 ist eine Regel über Metadaten, keine Bildanalyse.
+
+## Geburtstagsausgabe — personalisierte Fassung
+
+| Funktion | Was sie kann | Wo |
+| --- | --- | --- |
+| Begrüßung beim Öffnen | Konfettikanonen, große Gratulation, geblurrter Hintergrund; schließt sich nach fünf Sekunden oder auf Klick | bei jedem Start |
+| Geburtstags-Thema | Warme, festliche Palette mit Gold-Akzent; die Fläche um das Foto bleibt farbneutral | Vorgabe, umschaltbar in den Einstellungen |
+| Luftballons & Konfetti | Sechs langsam steigende Ballons im Hintergrund, Konfetti bei fertigem Import und Export | app-weit, abschaltbar |
+| Drei Looks | „Goldene Stunde", „Familienfoto", „Erinnerung" — veränderbar und löschbar | Presets-Panel, Ordner „Geburtstag" |
+| Kamera schon eingestellt | Standardentwicklung für „Canon EOS", mit Abbildung in der Liste | Menü „Standardentwicklung je Kamera…" |
+| Ausführliche Einführung | Fünfzehn Schritte entlang des Arbeitswegs, von der Speicherkarte bis zum Aufräumen | beim ersten Start, danach über die Befehlspalette |
+
+**Ehrliche Grenzen:** Die Begrüßung erscheint bei jedem Start, nicht
+nur am Geburtstag — ein Datumsabgleich wäre ein zusätzlicher,
+überraschend fehleranfälliger Mechanismus (Zeitzonen, Jahreswechsel)
+für wenig Gewinn; wer sie nicht will, schaltet die Deko ab. Konfetti
+und Luftballons sind bei reduzierter Bewegung und im Kontrastmodus
+vollständig aus, nicht nur langsamer. Die drei Looks sind auf warme,
+sentimentale Wirkung ausgelegt und ersetzen keine Einzelbearbeitung;
+„Familienfoto" senkt bewusst den lokalen Kontrast und ist deshalb für
+Landschaften die falsche Wahl. Die Kamera-Vorgabe greift nur bei
+Fotos, deren EXIF-Modell genau „Canon EOS" lautet — „Canon EOS R5"
+ist ein anderes Gehäuse und bekommt sie nicht (siehe
+`DECISIONS.md` ADR-0071).

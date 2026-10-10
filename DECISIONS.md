@@ -7736,3 +7736,174 @@ zu behaupten. Zwei Fehler in dieser Phase wurden von den eigenen Tests
 gefunden, nicht vom Nutzer: das fehlende Deduplizieren in F1 und die
 gemeinsam genutzten Referenzen in `neutralEdlPayload`, die zwei
 „unabhängige" Neutral-EDLs aneinander koppelten.
+
+---
+
+## ADR-0071: Geburtstagsausgabe — eine personalisierte Fassung, und zwei Altfehler, die sie aufgedeckt hat
+
+**Kontext.** Diese Fassung ist ein Geschenk: eine Begrüßung beim
+Öffnen, ein festliches Thema, drei Looks, eine eingestellte Kamera und
+eine ausführliche Einführung. Die Anforderung dazu war ausdrücklich,
+dass alles davon wirklich funktioniert und nichts das Arbeiten
+behindert — und genau dieser zweite Teil hat während der Umsetzung mehr
+gekostet als der erste.
+
+### Die Entscheidungen
+
+**Die Deko ist vom Thema getrennt.** `theme: Birthday` färbt,
+`birthday_decorations` bewegt. Zwei Schalter, weil es zwei Fragen sind:
+Farben sind Geschmack, fliegendes Konfetti ist Konzentration. Wer am
+Abend des Geburtstags noch zwei Stunden Fotos sortiert, soll die
+festliche Palette behalten und die Bewegung abschalten können, ohne
+das Thema zu verlieren. `reduced_motion` schlägt beides unabhängig —
+Zugänglichkeit geht vor Schmuck.
+
+**Die Fläche direkt um das Foto bleibt farbneutral.** Das ist die
+wichtigste Entscheidung im ganzen Theme-Block. `--color-bg-base` ist
+der Hintergrund des Viewers; ein warmer Stich unmittelbar neben dem
+Bild verschiebt die Farbwahrnehmung des Betrachters (simultaner
+Farbkontrast). Man korrigiert dann gegen die Oberfläche an und wundert
+sich später über kühle Fotos. Die Festlichkeit sitzt deshalb in
+Paletten, Rahmen, Akzent und Deko — nicht auf der Urteilsfläche. Aus
+demselben Grund schwebt kein Luftballon über dem Bild: die
+Ballonschicht liegt mit `z-index: 0` hinter dem Inhalt.
+
+**Kontrast nachgerechnet, nicht geschätzt.** Der naheliegende
+gedämpfte Altrosa-Ton für `--color-text-muted` lag bei 4,37:1 gegen
+`--color-bg-panel` und damit unter AA für normalen Text. Der gewählte
+Wert liegt bei 5,2:1, der Akzent bei 8,8:1.
+
+**Eine eigene Konfetti-Physik statt einer Bibliothek.** Für Konfetti
+gibt es fertige npm-Pakete; sie bringen eigenes Canvas-Management,
+eigene rAF-Schleife und eine weitere Lizenzzeile mit — für etwa
+sechzig Zeilen Euler-Integration. Dieselbe Linie wie `lib/i18n.ts`s
+eigene Begründung: keine Abhängigkeit für etwas, das kleiner ist als
+ihre Anbindung. Die Physik steht rein in `lib/confetti.ts` (kein DOM),
+die Zeichenschicht in `ConfettiLayer.tsx`, der Kanal dazwischen in
+`lib/celebrate.ts` — Letzteres, weil die Aufrufstellen zum Teil im
+Store sitzen und der Store keine React-Komponente importieren darf.
+
+**Drei Werte machen den Unterschied zwischen Konfetti und
+Kieselsteinen:** Luftwiderstand (sonst wächst die Geschwindigkeit
+unbegrenzt), Eigendrehung mit `cos`-Stauchung (macht aus einem Punkt
+ein flatterndes Plättchen) und Lebensdauer (räumt jeden Ausbruch von
+selbst ab, sodass die rAF-Schleife endet). Dazu ein app-weites Budget
+von 220 Teilchen, gegen das jeder Ausbruch gekappt wird — damit
+schnelle Klicks sich nicht aufaddieren.
+
+**Gefeiert wird sparsam.** Bei Import- und Export-Ende, und nur ohne
+Fehler. Nicht bei jedem angewendeten Preset: Konfetti, das bei jedem
+Klick fliegt, ist nach zehn Minuten kein Fest mehr, sondern ein
+Flackern, das man abschalten will.
+
+**Die Begrüßung fängt keine Klicks ab.** Sie erscheint bei *jedem*
+Start und liegt über allem; würde sie Zeigerereignisse annehmen, wäre
+die App in den ersten fünf Sekunden unbenutzbar. Dieselbe Bauweise wie
+`StartupSplash.tsx`: `pointer-events-none` auf der Fläche, nur der
+Schließen-Knopf nimmt Klicks an.
+
+**Die drei Looks sind gegen die echten Vorzeichen-Konventionen der
+Pipeline geschrieben**, alle vier vorher im Code nachgesehen statt
+geraten: `+temp_shift_kelvin` = wärmer, `+blacks` = Schwarzpunkt
+angehoben, `post_vignette_amount` **negativ** = dunkle Ränder (die
+Stufe addiert ihr Delta), Grading-Rad in Grad mit Sättigung 0..100.
+Jeder Look hat genau einen Kerngedanken: „Goldene Stunde" warme
+Lichter bei *kühlen* Schatten (ein reiner Kelvin-Schub wärmt die
+Schatten mit und wirkt dann wie ein Farbstich); „Familienfoto"
+lokalen Kontrast nach *unten* (genau der holt Poren und Fältchen
+hervor — ein schöner Look für Menschen geht in die Gegenrichtung von
+allem, was Landschaftspresets tun); „Erinnerung" den angehobenen
+Schwarzpunkt, der einen alten Abzug ausmacht.
+
+**Nachgewiesen wird am Pixel, nicht am JSON.** Jeder Preset-Test
+schickt ein synthetisches Bild durch
+`apx_pipeline::develop::render_rgba8` und misst die Wirkung: mindestens
+zwei 8-Bit-Stufen Veränderung, messbar größerer Rot-Blau-Abstand,
+angehobener Schwarzpunkt, dunklere Ränder. Ein Preset, das gültiges
+JSON ist und nichts tut, hätte den alten Prüfweg bestanden.
+
+**Die Geschenke sind löschbar und veränderbar.** Der Seed legt nur an,
+was fehlt, und fasst Vorhandenes nicht an. Etwas, das sich nicht
+wegräumen lässt, ist kein Geschenk, sondern eine Zumutung.
+
+**Die Kamera-Vorgabe ist absichtlich zurückhaltender als die Looks.**
+Sie ist ein Startpunkt für *jedes* importierte Foto; so stark
+einzugreifen wie ein Look würde alles vorgefärbt importieren. Ein Test
+prüft genau dieses Verhältnis.
+
+**Die Kamera-Abbildung ist gezeichnet, nicht fotografiert.** Die
+Netzwerk-Policy dieser Umgebung blockiert jede externe Bildquelle
+(ADR-0047), und ein mitgeliefertes Produktfoto wäre ein fremdes
+Lichtbildwerk im Paket. Gezeichnet ist die Bauform, die jede DSLR
+teilt — kein Herstellerlogo; das Modell steht als Text daneben, wo es
+hingehört.
+
+### Die zwei Altfehler, die dabei herauskamen
+
+Beide waren vorher da, beide hat erst das Messen gefunden, und beide
+sind genau die Art Fehler, die eine Oberfläche „billig" wirken lässt.
+
+**1. Der Scheinwerfer der Einführungstour hat nie funktioniert.**
+`.apx-glass-strong` setzt unlayered `position: relative`, und
+Tailwinds `fixed`-Utility ist in Tailwind v4 gegenüber unlayered CSS
+nachrangig. Die vier Abdunkel-Rechtecke und die Karte lagen deshalb
+seit Phase 21 **im Textfluss** statt über dem Bildschirm: der
+Scheinwerfer zeigte keinen Ausschnitt, sondern stapelte vier graue
+Blöcke untereinander und schob die Karte um deren Gesamthöhe nach
+unten (gemessen: `position` war `"relative"`, die Karte lag bei y=878
+in einem 720 Pixel hohen Fenster). Aufgefallen ist es nie, weil kein
+Test die Geometrie gemessen hat, sondern nur Textsichtbarkeit — und
+die stimmte. Aufgedeckt haben es erst die längeren Texte der neuen
+Tour, die die Karte hoch genug machten, dass ihr „Weiter"-Knopf aus
+dem Fenster rutschte.
+
+Genau diese Kaskaden-Falle ist im Code bereits dreimal dokumentiert
+(ADR-0055 `z-index` beim Überlauf-Menü, ADR-0055-Nachtrag III `fixed`
+bei der Kopfzeile, ADR-0056 `absolute` bei der Zoom-Steuerung). Dies
+ist der vierte Fall. Behoben wie der zweite: über Spezifität statt
+Reihenfolge, mit einer eigenen Marker-Klasse `.apx-spotlight` — ein
+`div.apx-glass-strong` hätte jede andere Glasfläche getroffen, die zu
+Recht relativ ist.
+
+**2. Die Kopfzeile lief bei 1280 Pixeln über.** Die Ansicht-Leiste war
+686 Pixel breit und `shrink-0`; `header.scrollWidth` war 1342 bei
+`clientWidth` 1280. „Einstellungen" war rechts angeschnitten, und nach
+einem Import schob die (nicht schrumpfbare, unbegrenzte)
+Ergebniszeile das Überlauf-Menü vollständig aus dem Fenster — beide
+waren danach unerreichbar. Bei 1280 Pixeln, einer der häufigsten
+Laptop-Breiten.
+
+Behoben an beiden Stellen: die Ergebniszeile gibt ihren Platz jetzt
+als Erste auf (`min-w-0 shrink`), und die Beschriftungen der sieben
+Ansicht-Knöpfe erscheinen erst ab 1400 Pixeln. Damit sie dabei nicht
+*namenlos* werden — die Symbole sind `aria-hidden`, ohne den Text
+hätten die Knöpfe überhaupt keinen zugänglichen Namen mehr —, trägt
+jeder Knopf nun ein `aria-label`. Sonst wären Screenreader und die
+bestehenden `getByRole`-Tests gleichzeitig blind geworden.
+
+### Ein Test, der nichts bewies
+
+Die erste Fassung des „die Begrüßung blockiert nichts"-Tests klickte
+einfach und prüfte das Ergebnis — und war wertlos: Playwrights Klick
+wartet auf Klickbarkeit, also wartete er stillschweigend die 5,2
+Sekunden ab, bis sich die Begrüßung selbst schließt, und klickte dann.
+Mit abgeschaltetem `pointer-events-none` lief er genauso grün durch;
+die Gegenprobe hat das gezeigt. Jetzt mit kurzer Frist plus der
+Prüfung, dass die Begrüßung beim Klick noch dalag — und zusätzlich ein
+von Zeit unabhängiger Test auf die berechneten `pointer-events`-Werte.
+Derselbe Fehler steckte im Vignetten-Test der Presets: er verglich
+Bildmitte gegen Rand, wo im Testbild aber ein dunkler Hautblock gegen
+einen hellen Graukeil stand — gemessen wurden Motivhelligkeiten, nicht
+die Vignette.
+
+### Was diese Fassung ausdrücklich nicht leistet
+
+Die Anforderung nannte „schnell und zuverlässig wie Lightroom". Dass
+die Deko nichts kostet, ist gemessen (Start bis bedienbar: 459 ms mit,
+480 ms ohne — innerhalb des Rauschens; ein voller Ausbruch über 600
+Bilder bleibt unter 150 ms Rechenzeit). Dass die **Entwickeln- und
+Import-Wege** insgesamt Lightroom-Niveau erreichen, ist damit nicht
+behauptet: daran ändert diese Fassung nichts, und eine solche Aussage
+bräuchte Messungen gegen echte RAW-Bestände, die dieses Projekt
+bewusst nicht hat (ADR-0007). Verbessert wurde, was messbar im Weg
+stand — die beiden Altfehler oben.

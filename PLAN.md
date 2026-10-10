@@ -1824,3 +1824,32 @@ im Frontend).
 - **F10 — Vorschauen vorbereiten.** `preview_warm.rs` füllt die
   2048px-Stufe des vorhandenen Caches, im Hintergrund mit Fortschritt
   und Abbruch. ✔ erledigt
+
+## Geburtstagsausgabe — personalisierte Fassung
+
+Siehe `DECISIONS.md` ADR-0071 für die Begründungen, insbesondere die
+zwei Altfehler, die beim Messen herauskamen (der Scheinwerfer der
+Einführungstour hat seit Phase 21 nicht funktioniert; die Kopfzeile
+lief bei 1280 Pixeln über und machte „Einstellungen" und das
+Überlauf-Menü unerreichbar).
+
+- **B1 — Theme-Fundament.** `Theme::Birthday` als Vorgabe, vom Theme
+  getrennter Schalter `birthday_decorations`, Token-Block in
+  `index.css` mit farbneutral gehaltener Urteilsfläche. ✔ erledigt
+- **B2 — Konfetti + Begrüßung.** `lib/confetti.ts` (reine Physik),
+  `ConfettiLayer.tsx` (eine Leinwand, eine Schleife),
+  `BirthdayWelcome.tsx`. ✔ erledigt
+- **B3 — Luftballons, Sounds, Feiern.** `BalloonLayer.tsx` (reines
+  CSS), `lib/celebrate.ts` als Kanal für Store und Hooks.
+  ✔ erledigt
+- **B4 — Canon EOS als Standard.** Seed in `birthday.rs`,
+  `CameraIllustration.tsx` als Inline-SVG. ✔ erledigt
+- **B5 — Drei Looks mit Render-Nachweis.** `birthday.rs`s Tests
+  schicken ein synthetisches Bild durch `render_rgba8` und messen die
+  Pixelwirkung. ✔ erledigt
+- **B6 — Einführung auf 15 Schritte.** Dem Arbeitsweg nach geordnet;
+  dabei den Scheinwerfer-Altfehler gefunden und behoben
+  (`.apx-spotlight`). ✔ erledigt
+- **B7 — Abschleifen.** Gemessen: Start mit/ohne Deko, Bedienbarkeit
+  bei fliegendem Konfetti, Rechenbudget, Abräumen beim Umschalten.
+  Dabei den Kopfzeilen-Überlauf gefunden und behoben. ✔ erledigt

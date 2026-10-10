@@ -179,3 +179,38 @@ describe("partyColors", () => {
     for (const color of colors) expect(color).toMatch(/^#[0-9a-f]{6}$/i);
   });
 });
+
+/**
+ * Ein Rechen-Budget, nicht ein Schönheitstest.
+ *
+ * Die Deko läuft in einer App, die gleichzeitig RAW-Dateien
+ * dekodiert. Ein voller Ausbruch (`MAX_PARTICLES`) muss deshalb pro
+ * Bild so wenig kosten, dass er im 16-ms-Budget (SPEC.md §2.4) nicht
+ * auffällt. Gemessen wird bewusst sehr großzügig — die Schranke soll
+ * eine Größenordnung fangen (eine versehentlich quadratische
+ * Schleife), nicht Mikrosekunden auf einem geteilten CI-Rechner.
+ */
+describe("Rechenaufwand", () => {
+  it("rechnet 600 Bilder mit dem vollen Teilchenbudget in unter 150 ms", () => {
+    let particles = spawnBurst({
+      x: 500,
+      y: 500,
+      angle: -Math.PI / 2,
+      spread: 1,
+      velocity: 800,
+      count: MAX_PARTICLES,
+      colors: COLORS,
+      life: 1000,
+    });
+    expect(particles).toHaveLength(MAX_PARTICLES);
+
+    const started = performance.now();
+    for (let frame = 0; frame < 600; frame += 1) {
+      particles = stepParticles(particles, 1 / 60);
+    }
+    const elapsed = performance.now() - started;
+
+    expect(particles).toHaveLength(MAX_PARTICLES);
+    expect(elapsed).toBeLessThan(150);
+  });
+});

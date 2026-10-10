@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installTauriMock, openOverflowMenu } from "./tauri-mock";
+import { emitMockEvent, installTauriMock, openOverflowMenu } from "./tauri-mock";
 
 const FOLDER_ID = "01977f4a-0000-7000-8000-000000000001";
 const FOLDER_PATH = "/home/user/Fotos/Urlaub";
@@ -282,5 +282,105 @@ test.describe("Einführungstour der Geburtstagsausgabe", () => {
     await expect(body).toContainText("Goldene Stunde");
     await expect(body).toContainText("Familienfoto");
     await expect(body).toContainText("Erinnerung");
+  });
+});
+
+/**
+ * Abschleifen (ADR-0071 B7). Die Deko läuft in einer App, die
+ * gleichzeitig RAW-Dateien dekodiert — sie darf nichts blockieren und
+ * nichts liegen lassen. Diese Tests messen das, statt es zu behaupten.
+ */
+test.describe("Geburtstags-Deko: Tempo und Sauberkeit", () => {
+  test("ein Konfetti-Ausbruch blockiert die Bedienung nicht", async ({ page }) => {
+    await installTauriMock(page, WITH_DECORATIONS);
+    await page.goto("/");
+    await page.getByTestId("birthday-welcome-dismiss").click();
+    await page.getByRole("button", { name: /Urlaub/ }).click();
+
+    // Ein fertiger Import löst das Fest aus (`store.finishImport`).
+    await emitMockEvent(page, "import:finished", {
+      imported: 12,
+      skipped: 0,
+      error_count: 0,
+      cancelled: false,
+      duplicate_count: 0,
+    });
+    await expect(page.getByTestId("confetti-layer")).toBeAttached();
+
+    /**
+     * **Hier ist ein zweiter Altfehler aufgefallen** (siehe
+     * `Header.tsx`s Kommentar dazu): die Import-Ergebniszeile war
+     * `shrink-0` ohne Breitenbegrenzung und schob das Überlauf-Menü
+     * und „Einstellungen" bei 1280 Pixel rechts aus dem Fenster.
+     * Beide waren nach jedem Import unerreichbar. Deshalb wird die
+     * Erreichbarkeit hier zuerst gemessen, bevor geklickt wird.
+     */
+    const viewport = await page.evaluate(() => window.innerWidth);
+    for (const name of ["Weitere Funktionen", "Einstellungen…"]) {
+      const box = await page.getByRole("button", { name }).boundingBox();
+      expect(box, `${name}: keine Fläche`).not.toBeNull();
+      expect(box!.x + box!.width, `${name} liegt nach dem Import außerhalb des Fensters`).toBeLessThanOrEqual(
+        viewport,
+      );
+    }
+
+    // Mitten im fliegenden Konfetti: ein Dialog muss sich in unter
+    // einer Sekunde öffnen lassen. Kein `force` — Playwright prüft
+    // echte Klickbarkeit, die Leinwand liegt über allem.
+    await openOverflowMenu(page);
+    await page.getByRole("menuitem", { name: /Katalog-Gesundheit/ }).click({ timeout: 1000 });
+    await expect(page.getByRole("dialog", { name: "Katalog-Gesundheit" })).toBeVisible({ timeout: 1000 });
+  });
+
+  /** Abschalten muss wirklich abschalten: kein Element, keine
+   * Leinwand, keine laufende Schleife. Und wiederholtes Umschalten
+   * darf keine zweite Leinwand hinterlassen. */
+  test("Deko abschalten räumt die Leinwand ab, mehrfaches Umschalten hinterlässt nur eine", async ({ page }) => {
+    await installTauriMock(page, WITH_DECORATIONS);
+    await page.goto("/");
+    await page.getByTestId("birthday-welcome-dismiss").click();
+
+    const toggle = () => page.getByRole("checkbox", { name: "Geburtstags-Deko" });
+    await page.getByRole("button", { name: "Einstellungen…" }).click();
+
+    for (let round = 0; round < 3; round += 1) {
+      await toggle().uncheck();
+      await expect(page.getByTestId("confetti-layer")).toHaveCount(0);
+      await expect(page.getByTestId("balloon-layer")).toHaveCount(0);
+      await toggle().check();
+      await expect(page.getByTestId("confetti-layer")).toHaveCount(1);
+      await expect(page.getByTestId("balloon-layer")).toHaveCount(1);
+    }
+  });
+
+  /**
+   * Der Start darf durch die Deko nicht langsamer werden. Gemessen
+   * wird die Zeit bis zum ersten bedienbaren Zustand (der Ordner in
+   * der Seitenleiste ist klickbar), einmal mit und einmal ohne Deko.
+   *
+   * Die Schranke ist bewusst großzügig (300 ms Unterschied): in CI
+   * schwanken solche Messungen, und ein knapper Grenzwert wäre ein
+   * flackernder Test. Was er fangen soll, ist eine Größenordnung —
+   * eine Deko, die den Start um Sekunden verzögert, nicht zwanzig
+   * Millisekunden Rauschen.
+   */
+  test("die Deko verzögert den Start nicht messbar", async ({ page }) => {
+    async function timeToInteractive(decorations: boolean): Promise<number> {
+      await installTauriMock(page, {
+        ...WITH_DECORATIONS,
+        uiSettings: { ...WITH_DECORATIONS.uiSettings, birthday_decorations: decorations },
+      });
+      const started = Date.now();
+      await page.goto("/");
+      await page.getByRole("button", { name: /Urlaub/ }).waitFor({ state: "visible" });
+      return Date.now() - started;
+    }
+
+    const without = await timeToInteractive(false);
+    const with_ = await timeToInteractive(true);
+    // Für das Protokoll im Testlauf — eine Zahl, die man lesen kann,
+    // ist mehr wert als ein grünes Häkchen allein.
+    console.log(`Start bis bedienbar: ohne Deko ${without} ms, mit Deko ${with_} ms`);
+    expect(with_).toBeLessThan(without + 300);
   });
 });

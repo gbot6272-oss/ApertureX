@@ -334,8 +334,20 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
         </>
       )}
 
+      {/* `min-w-0 shrink` statt `shrink-0` (ADR-0071): diese Zeile war
+          nicht schrumpfbar und ohne Breitenbegrenzung — anders als die
+          Fortschrittszeile darüber, die `max-w-xs` hat. Nach einem
+          Import (der häufigsten Einstiegsaktion) schob sie damit das
+          Überlauf-Menü und „Einstellungen" bei 1280 Pixel Fensterbreite
+          rechts aus dem Fenster: beide waren danach unerreichbar, bis
+          man das Fenster vergrößerte. Gefunden beim Messen, nicht beim
+          Lesen — ein Playwright-Klick meldete „element is outside of
+          the viewport". Jetzt gibt diese rein informative Zeile ihren
+          Platz als Erste auf, was die richtige Rangfolge ist: ein
+          Knopf, den man braucht, geht vor einer Zahl, die man schon
+          gelesen hat. */}
       {!importRunning && importResult && (
-        <span className="apx-notice-in hidden shrink-0 truncate text-xs text-text-secondary lg:inline">
+        <span className="apx-notice-in hidden min-w-0 shrink truncate text-xs text-text-secondary lg:inline">
           {importResult.cancelled ? "Import abgebrochen: " : "Import abgeschlossen: "}
           {importResult.imported} importiert · {importResult.skipped} übersprungen
           {importResult.errorCount > 0 ? ` · ${importResult.errorCount} Fehler` : ""}
@@ -343,9 +355,23 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
         </span>
       )}
 
+      {/* Die Beschriftungen der sieben Ansicht-Knoepfe erscheinen erst ab
+          1400 Pixel Fensterbreite (ADR-0071). Vorher war die Leiste
+          686 Pixel breit und `shrink-0`: die Kopfzeile lief damit bei
+          1280 Pixel — einer der haeufigsten Laptop-Breiten — um 62
+          Pixel ueber, und „Einstellungen" war rechts angeschnitten.
+          Gemessen, nicht geschaetzt: `header.scrollWidth` war 1342 bei
+          `clientWidth` 1280.
+
+          Die Knoepfe behalten ihren Namen: jeder traegt jetzt ein
+          `aria-label`. Ohne das haetten sie bei verstecktem Text
+          ueberhaupt keinen zugaenglichen Namen mehr (die Symbole sind
+          `aria-hidden`) — Screenreader und die bestehenden
+          `getByRole`-Tests waeren gleichzeitig blind geworden. */}
       <nav aria-label="Ansicht" data-tour="views" className="ml-auto flex shrink-0 items-center gap-0.5 rounded border border-border bg-bg-panel p-0.5">
         <button
           type="button"
+          aria-label={t("header.viewGrid")}
           onClick={toggleCenterView}
           aria-pressed={centerView === "grid"}
           className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
@@ -353,11 +379,12 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           }`}
         >
           <Grid2x2 aria-hidden="true" className="size-3.5" />
-          {t("header.viewGrid")}
+          <span className="hidden min-[1400px]:inline">{t("header.viewGrid")}</span>
         </button>
 
         <button
           type="button"
+          aria-label={t("header.viewOverview")}
           onClick={() => setCenterView(centerView === "overview" ? "viewer" : "overview")}
           aria-pressed={centerView === "overview"}
           className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
@@ -365,11 +392,12 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           }`}
         >
           <Scan aria-hidden="true" className="size-3.5" />
-          {t("header.viewOverview")}
+          <span className="hidden min-[1400px]:inline">{t("header.viewOverview")}</span>
         </button>
 
         <button
           type="button"
+          aria-label={t("header.viewMap")}
           onClick={() => setCenterView(centerView === "map" ? "viewer" : "map")}
           aria-pressed={centerView === "map"}
           className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
@@ -377,11 +405,12 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           }`}
         >
           <Map aria-hidden="true" className="size-3.5" />
-          {t("header.viewMap")}
+          <span className="hidden min-[1400px]:inline">{t("header.viewMap")}</span>
         </button>
 
         <button
           type="button"
+          aria-label={t("header.viewPeople")}
           onClick={() => setCenterView(centerView === "people" ? "viewer" : "people")}
           aria-pressed={centerView === "people"}
           className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
@@ -389,11 +418,12 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           }`}
         >
           <Users aria-hidden="true" className="size-3.5" />
-          {t("header.viewPeople")}
+          <span className="hidden min-[1400px]:inline">{t("header.viewPeople")}</span>
         </button>
 
         <button
           type="button"
+          aria-label={t("header.viewCalendar")}
           onClick={() => setCenterView(centerView === "calendar" ? "viewer" : "calendar")}
           aria-pressed={centerView === "calendar"}
           className={`apx-btn-liquid flex items-center gap-1.5 rounded px-3 py-1 text-sm transition-colors duration-[var(--duration-fast)] ${
@@ -401,11 +431,12 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           }`}
         >
           <CalendarDays aria-hidden="true" className="size-3.5" />
-          {t("header.viewCalendar")}
+          <span className="hidden min-[1400px]:inline">{t("header.viewCalendar")}</span>
         </button>
 
         <button
           type="button"
+          aria-label={t("header.viewInfo")}
           onClick={toggleMetadataPanel}
           disabled={!selectedPhotoId && !metadataPanelOpen}
           aria-pressed={metadataPanelOpen}
@@ -414,11 +445,12 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           }`}
         >
           <Info aria-hidden="true" className="size-3.5" />
-          {t("header.viewInfo")}
+          <span className="hidden min-[1400px]:inline">{t("header.viewInfo")}</span>
         </button>
 
         <button
           type="button"
+          aria-label={t("header.viewDevelop")}
           data-tour="develop"
           onClick={toggleDevelopPanel}
           disabled={!selectedPhotoId && !developPanelOpen}
@@ -428,7 +460,7 @@ export function Header({ onOpenPalette }: { onOpenPalette: () => void }) {
           }`}
         >
           <SlidersHorizontal aria-hidden="true" className="size-3.5" />
-          {t("header.viewDevelop")}
+          <span className="hidden min-[1400px]:inline">{t("header.viewDevelop")}</span>
         </button>
       </nav>
 

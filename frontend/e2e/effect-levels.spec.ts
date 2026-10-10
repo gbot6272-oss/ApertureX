@@ -119,7 +119,12 @@ test("Stufe „automatisch“ lässt nie die teuerste Stufe stehen", async ({ pa
   // stünde nur ein anderes Wort im Attribut.
   const cost = await glassCost(page);
   expect(cost.mitVerzerrung).toBe(0);
-  expect(cost.sichtbareBallons).toBe(0);
+  // Die Ballons bleiben hier bewusst: seit ADR-0078 liegen sie VOR der
+  // Kopfzeile und stoßen deren Weichzeichner nicht mehr an. Sie waren
+  // der Grund, sie in dieser Stufe zu verstecken — der Grund ist weg,
+  // und die Geburtstagsdeko soll nicht an einer Tempo-Vorgabe
+  // scheitern, die sie gar nicht mehr kostet.
+  expect(cost.sichtbareBallons).toBe(1);
 });
 
 test("Stufe „voll“: alle Glasflächen tragen Weichzeichner und Verzerrung", async ({ page }) => {
@@ -134,7 +139,7 @@ test("Stufe „voll“: alle Glasflächen tragen Weichzeichner und Verzerrung", 
   expect(cost.sichtbareBallons).toBe(1);
 });
 
-test("Stufe „reduziert“: keine Verzerrung, keine Dauerbewegung, Weichzeichner bleibt", async ({ page }) => {
+test("Stufe „reduziert“: keine Verzerrung, aber Weichzeichner und Deko bleiben", async ({ page }) => {
   await boot(page, "reduced");
   const cost = await glassCost(page);
   expect(cost.mitVerzerrung).toBe(0);
@@ -142,10 +147,13 @@ test("Stufe „reduziert“: keine Verzerrung, keine Dauerbewegung, Weichzeichne
   // Effekte und trägt den optischen Charakter. Fiele er hier schon weg,
   // gäbe es zwischen „reduziert“ und „schlicht“ keinen Unterschied mehr.
   expect(cost.mitWeichzeichner).toBe(cost.surfaces);
-  // Die Ballons sind der Grund, aus dem die Verzerrung überhaupt
-  // dauernd neu gerechnet wird — ohne sie bringt das Abschalten der
-  // Verzerrung nur einen Bruchteil.
-  expect(cost.sichtbareBallons).toBe(0);
+  // Bis ADR-0078 stand hier `toBe(0)` mit der Begründung, die Ballons
+  // seien der Grund, aus dem die Verzerrung dauernd neu gerechnet
+  // werde. Das war überzogen: sie lagen hinter der KOPFZEILE, nicht
+  // hinter allen acht Glasflächen, und waren zu vier Fünfteln von
+  // deckenden Flächen verdeckt. Seit sie vor der Kopfzeile liegen,
+  // kosten sie dort gar nichts mehr und dürfen bleiben.
+  expect(cost.sichtbareBallons).toBe(1);
 });
 
 test("Stufe „schlicht“: kein Hintergrundeffekt, aber lesbarer Grund", async ({ page }) => {

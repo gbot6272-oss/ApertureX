@@ -630,10 +630,32 @@ body {
    kostet (sechs zusammengesetzte Transformationen, die der Compositor
    ohne Layout-Durchlauf bewegt — `transform`/`opacity`, nichts
    anderes). */
+/* **Die Ballons waren nie zu sehen** (ADR-0078).
+ *
+ * Bis hierher stand hier `z-index: 0` mit der Begruendung „hinter dem
+ * Inhalt, damit kein Ballon ueber einem Foto schwebt". Die Absicht war
+ * richtig, die Umsetzung konnte nicht aufgehen: der Inhalt dieser App
+ * ist DECKEND (`bg-bg-base`, `bg-bg-panel`). „Hinter dem Inhalt" heisst
+ * damit nicht „dezent im Hintergrund", sondern „gar nicht sichtbar".
+ * Gemessen mit `document.elementFromPoint` auf der Mitte jedes Ballons:
+ * zurueck kam `MAIN`, `FOOTER`, ein `BUTTON` — nie der Ballon selbst.
+ *
+ * `z-index: 35` loest beides auf einmal:
+ * • ueber dem Inhalt und ueber der Kopfzeile (`z-30`), also wirklich
+ *   zu sehen;
+ * • unter Menues (`z-40`) und Dialogen (`z-50`), also nie im Weg;
+ * • und — der Punkt, der zaehlt — VOR der Kopfzeile statt dahinter.
+ *   Ein bewegtes Element HINTER einer `backdrop-filter`-Flaeche macht
+ *   deren Zwischenspeicher bei jedem Bild ungueltig; davor kostet es
+ *   nichts. Die Ballons sind damit sichtbar UND billiger als vorher.
+ *
+ * Sie schweben jetzt tatsaechlich ueber dem Foto. Bei 22 % Deckkraft
+ * ist das der Preis dafuer, dass es die Deko ueberhaupt gibt — wem das
+ * beim Beurteilen im Weg ist, schaltet sie in den Einstellungen ab. */
 .apx-balloon-layer {
   position: fixed;
   inset: 0;
-  z-index: 0;
+  z-index: 35;
   overflow: hidden;
   pointer-events: none;
 }
@@ -715,13 +737,12 @@ body {
    Dauerbewegung, lässt aber den Weichzeichner — die Oberfläche sieht
    fast gleich aus und kostet einen Bruchteil. */
 
-/* Reduziert: keine SVG-Verzerrung, keine dauerhaft laufende Deko. */
+/* Reduziert: keine SVG-Verzerrung. Die Ballons bleiben hier — seit
+   ADR-0078 liegen sie VOR der Kopfzeile und stossen deren
+   Weichzeichner nicht mehr an. Sie waren der Grund, sie in dieser
+   Stufe zu verstecken; der Grund ist weg, die Deko darf bleiben. */
 :root[data-effects="reduced"] {
   --glass-distortion: none;
-}
-
-:root[data-effects="reduced"] .apx-balloon-layer {
-  display: none;
 }
 
 /* Schlicht: zusätzlich kein `backdrop-filter`. Damit fällt die

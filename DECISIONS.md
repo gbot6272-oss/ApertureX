@@ -7907,3 +7907,189 @@ behauptet: daran ändert diese Fassung nichts, und eine solche Aussage
 bräuchte Messungen gegen echte RAW-Bestände, die dieses Projekt
 bewusst nicht hat (ADR-0007). Verbessert wurde, was messbar im Weg
 stand — die beiden Altfehler oben.
+
+## ADR-0072: Die Kaskaden-Falle an der Ursache behoben — und 47 Menüeinträge einzeln angeklickt
+
+**Anlass.** Nutzer-Rückfrage nach der Geburtstagsausgabe: „aber was ist
+mit den anderen bugs die vorher ggf. vorhanden waren bzw. einfach
+elemente die nicht funktioniert haben". Also keine neue Funktion,
+sondern eine Bestandsaufnahme — und zwar eine, die misst statt liest.
+
+**Der Fund, der alles erklärt.** Bei geöffnetem Überlaufmenü errechnete
+sich die Aufklappliste als `position: relative` statt `absolute` und lag
+damit bei y = −210, also 210 Pixel **über** dem Fensterrand. Die ersten
+sechs Einträge — der gesamte KI-Abschnitt — waren per Maus unerreichbar.
+Das deckt sich exakt mit der früheren Nutzermeldung, „KI-Ausfüllen" sei
+unauffindbar.
+
+Die Ursache ist dieselbe wie in ADR-0055 (`z-index`), ADR-0055 Nachtrag
+III (`fixed` bei der Kopfzeile), ADR-0056 (`absolute` bei der
+Zoom-Steuerung) und ADR-0071 (`fixed` beim Einführungs-Scheinwerfer):
+ungeschichtetes CSS schlägt Tailwind v4s `@layer utilities`
+grundsätzlich, unabhängig von der Spezifität. `.apx-glass` setzte
+`position: relative` ungeschichtet — und damit verlor **jede**
+Positionierungs-Utility auf einer Glasfläche, still und ohne Fehler.
+
+**Fünf Vorfälle, fünf Einzelflicken.** Jedes Mal wurde der konkrete Fall
+per Spezifitäts-Gegenregel repariert (`header.apx-glass`,
+`.apx-spotlight`, ein äußerer Positionierungs-Rahmen). Jede dieser
+Reparaturen war für sich richtig und keine verhinderte die nächste.
+
+**Die Entscheidung.** Genau diese eine Eigenschaft steht jetzt in
+`@layer components`. Tailwind v4 deklariert die Ebenenfolge
+`theme, base, components, utilities`; `components` verliert damit gegen
+jede Utility, und `relative` wirkt nur noch dort, wo die Aufrufstelle
+nichts anderes sagt. Alle übrigen Glas-Eigenschaften bleiben
+ungeschichtet — sie kollidieren mit keiner Utility, und ein
+Ebenenwechsel für sie wäre Risiko ohne Gegenwert. Die alten
+Gegenregeln bleiben stehen: sie schaden nicht und ein Rückbau wäre eine
+weitere Änderung ohne Nutzen.
+
+**Was das Audit sonst fand.** Alle 47 Einträge wurden einzeln aus einem
+frischen Start heraus angeklickt und die Wirkung gemessen (Dialoge,
+Vollbild-Überlagerungen, Reiterwechsel, Hauptbereich, Meldungen, und —
+für die beiden Einträge, die bewusst nichts am DOM ändern — der
+IPC-Mitschnitt).
+
+- `KI-Ausfüllen` öffnete einen Dialog, der nur **innerhalb** des
+  Entwickeln-Panels gerendert wird (`if (!open) return null`). Ein von
+  außen gesetztes Store-Flag tat deshalb nichts. Das Panel wird jetzt
+  mitgeöffnet.
+- `Hintergrund entfernen` ist eine reine Video-Funktion und tat bei
+  Fotos still nichts. Jetzt gesperrt.
+- `Untertitel` und `Personen-Erkennung` trugen das Abzeichen „Nicht
+  verfügbar" und blieben trotzdem klickbar. Jetzt gesperrt.
+- `Hautglätten`, `Himmel ersetzen`, `Stilübertragung` und `Tiefenkarte`
+  öffneten das Entwickeln-Panel im Reiter „Licht" statt bei ihrem
+  Werkzeug. Neue Brücke `requestDevelopTab` (dasselbe Muster wie
+  `pendingCommand`).
+- `Versionen vergleichen` öffnete bei einem Foto ohne virtuelle Kopien
+  eine Vergleichsansicht mit genau einem Foto. Der Eintrag sperrt sich
+  jetzt, sobald der Kopien-Stand bekannt ist; beim allerersten Klick ist
+  er das noch nicht, und dann sagt die Ansicht es selbst.
+- Der zugängliche Name der KI-Einträge lief zusammen
+  („HautglättenBereit"), weil Beschriftung und Statusabzeichen in zwei
+  Geschwister-`<span>`s stehen. Jetzt ein `aria-label` mit Trennung.
+
+`Import mit Vorlage…` und `Zweites Display…` sind **nachweislich in
+Ordnung**: der IPC-Mitschnitt zeigt den Ordnerdialog bzw.
+`plugin:webview|create_webview_window`. Nur der Test-Mock kann weder ein
+Betriebssystem-Fenster noch ein zweites Tauri-Fenster zeigen.
+
+**Was daraus bleibt.** `frontend/e2e/ui-invariants.spec.ts` hält beide
+Invarianten dauerhaft fest: keine Glasfläche, deren errechnete Position
+ihrer Utility widerspricht, und jeder Menüeintrag wirkt messbar oder ist
+gesperrt. Der Kaskaden-Test wurde gegenkontrolliert — mit
+zurückgedrehter Ursache schlägt er fehl und nennt die Aufklappliste.
+
+**Selbstkritik.** Mein erster Audit-Durchlauf meldete acht angeblich
+tote Einträge. Vier davon waren Messfehler meines eigenen Skripts
+(geschluckte Klickfehler plus Namensvergleiche, die wegen des
+zusammengelaufenen Namens nie trafen). Das steht hier, weil die
+Verlockung groß war, die acht als Produktfehler zu melden und dann
+„vier behoben" zu schreiben.
+
+## ADR-0073: Warum die App zäh war — gemessen, nicht geraten
+
+**Anlass.** Nutzer-Rückmeldung mitten in der Arbeit: „APERTURE X LÄUFT
+HOLYYYYY SLOW — da geht fast gar nix", zusammen mit einem Screenshot
+eines leeren Globus und „keine gefundenen gps daten".
+
+**Die Versuchung war, zu raten.** Die Umgebung, in der das Problem
+auftritt (WebKitGTK unter Linux, über Tauri), lässt sich hier nicht
+nachbilden; Chromium im Headless-Betrieb erreicht unabhängig von den
+Effekten 60 Bilder je Sekunde. Eine Messung, die nicht misst, worum es
+geht, ist aber schlimmer als keine — sie gibt falsche Sicherheit.
+Deshalb wurde hier nur das gemessen, was sich hier messen lässt, und für
+alles Übrige die Messung dorthin verlegt, wo das Problem auftritt: auf
+das Gerät des Nutzers.
+
+**Was sich hier messen ließ, und was dabei herauskam.** Im
+Entwickeln-Modus bei 1600×900 tragen **acht Glasflächen** gleichzeitig
+einen `backdrop-filter` (Weichzeichnen plus Sättigung) **und** einen
+SVG-Verzerrungsfilter aus `feTurbulence` + `feGaussianBlur` +
+`feDisplacementMap`, zusammen über **1,08 Millionen Bildpunkte** — rund
+drei Viertel des Fensters.
+
+Die Moduldoku von `ui/GlassDistortionFilter.tsx` behauptete, ein
+geteiltes `<filter id>` genüge für beliebig viele Flächen und es gebe
+„keine Vervielfachung der teuren SVG-Filterberechnung pro Aufrufstelle".
+Das ist falsch: geteilt wird die *Definition*, die *Auswertung*
+geschieht pro Element über dessen eigene Fläche.
+
+**Der Auslöser kam aus der Geburtstagsausgabe.** Solange hinter einer
+Glasfläche nichts passiert, ist das Ergebnis zwischenspeicherbar und die
+Kosten fallen einmal an. Die Luftballons (ADR-0071) bewegen sich
+**dauerhaft** und liegen **hinter allem**. Ihre eigene Moduldoku
+versichert, der Compositor bewege sie ohne Layout- oder
+Zeichendurchlauf — das stimmt für die Ballons selbst und übersieht die
+Folge: ein bewegtes Element hinter einer `backdrop-filter`-Fläche macht
+deren Zwischenspeicher bei **jedem Bild** ungültig. Acht
+Verzerrungsfilter werden damit sechzig Mal je Sekunde neu gerechnet, für
+immer. Auf einer nicht hardwarebeschleunigten Webansicht reicht das.
+
+**Entscheidung 1: Effektstufen, und `auto` misst wirklich.** Neue
+Einstellung `effect_level` mit `auto` (Vorgabe), `full`, `reduced`,
+`plain`. `reduced` nimmt die SVG-Verzerrung und die Dauerbewegung und
+lässt den Weichzeichner — das ist der größte Gewinn bei kleinstem
+optischen Verlust. `plain` nimmt auch den Weichzeichner und ersetzt die
+Glas-Tönung durch deckende Flächen; schlicht heißt nicht unlesbar.
+
+`auto` misst die tatsächliche Bildzeit auf dem Gerät. Die Messung hängt
+sich dafür **selbst eine bewegte Last hinter die Glasflächen** — genau
+das, was die Ballons dauerhaft tun. Ohne diese Last misst man den
+Ruhezustand, und dann sieht jedes Gerät schnell aus, auch das, auf dem
+es ruckelt.
+
+Heruntergestuft wird, nie hinauf. Eine Automatik, die bei jeder ruhigen
+Sekunde zurückschaltet und beim nächsten Ballon wieder herunter,
+flackert — und ein flackerndes Fenster ist schlimmer als ein dauerhaft
+schlichtes. Wer wieder mehr will, wählt die Stufe von Hand.
+
+**Entscheidung 2: die App sagt selbst, ob sie optimiert läuft.** Der
+häufigste und am schlechtesten sichtbare Grund für „alles ist zäh" ist
+ein Debug-Build: wer mit `cargo tauri dev` startet, bekommt einen, und
+die Bildberechnung dieser App besteht aus Rechnerei über Megapixel-
+Arrays — genau die Art Code, die ohne Optimierung ein Vielfaches
+verliert. Der neue Dialog „Leistung prüfen…" meldet das Build-Profil
+(`cfg!(debug_assertions)`) als ersten und einzigen als Warnung
+gestalteten Befund, mit dem konkreten Gegenmittel. Daneben misst er eine
+vollständige Entwicklung über zwölf Megapixel und die Bildzeit der
+Oberfläche, und stellt bei zäher Oberfläche die Effektstufe direkt um —
+wer gerade erfahren hat, dass sein Fenster 15 Bilder je Sekunde schafft,
+soll nicht erst den Einstellungsdialog suchen müssen.
+
+**Entscheidung 3: Abhängigkeiten auch im Entwicklungsbuild voll
+optimieren.** `[profile.dev] opt-level = 1` galt nur für den eigenen
+Code. Die eigentliche Rechenarbeit steckt in fremden Kisten (`rawler`,
+`image`, `zune-jpeg`, `rustfft`, `ndarray`) und lief damit ebenfalls auf
+Stufe 1. Neu: `[profile.dev.package."*"] opt-level = 3`. Abhängigkeiten
+werden einmal übersetzt und danach zwischengespeichert; die
+Übersetzungszeit des eigenen Codes ändert sich nicht, nur der erste
+Build dauert länger und das Zielverzeichnis wächst.
+
+**Die Karte.** Der gemeldete leere Globus ist kein Fehler der Karte,
+sondern ein fehlender Leerzustand. Die wenigsten Kameras haben einen
+GPS-Empfänger — die Canon EOS, die diese Fassung als Standardmodell
+führt, hat keinen. Die Anzeige „0 Fotos mit GPS" bestätigte den
+Eindruck eines Defekts, ohne den Grund zu nennen oder den Weg zur
+Abhilfe zu zeigen, obwohl beides vorhanden ist (GPX-Track, Standort von
+Hand setzen).
+
+Dabei fiel eine echte Testlücke auf: die Zusage, Aperture X lese
+vorhandene Koordinaten auch aus Kamera-JPEGs, war für den RAW-Weg
+geprüft, für den JPEG/TIFF-Weg nicht — `fallback.rs` hatte zu GPS kein
+einziges Testfoto hinter sich. Drei neue Tests mit von Hand gebauten
+APP1/EXIF-Blöcken decken das jetzt ab, einschließlich der Vorzeichen für
+Süd und West (ohne sie landet ein Foto aus Buenos Aires in Russland) und
+des Regelfalls ohne GPS-Block, der `None` ergeben muss und nicht (0, 0)
+— sonst säße jedes Foto ohne Empfänger im Golf von Guinea.
+
+**Was hier ausdrücklich NICHT behauptet wird.** Dass diese Änderungen
+die vom Nutzer erlebte Zähigkeit beheben, ist nicht bewiesen — das kann
+nur eine Messung auf seinem Gerät, und genau dafür ist der
+Diagnose-Dialog da. Belegt ist, was belegt werden konnte: die Last der
+Glasflächen in Zahlen, dass die Stufen sie nachweislich entfernen
+(`e2e/effect-levels.spec.ts` misst die errechneten Eigenschaften, mit
+der vollen Stufe als Gegenkontrolle), und dass der Diagnose-Dialog einen
+Debug-Build als solchen benennt.

@@ -1641,6 +1641,9 @@ export function prepareCompositeLayerSource(photoId: string | null, texturePath:
  * ADR-0071); `"dark"`/`"light"` bleiben unverändert wählbar. */
 export type Theme = "birthday" | "dark" | "light";
 
+/** Siehe `lib/effects.ts` — dort steht auch, warum es diese Stufe gibt. */
+export type EffectSetting = "auto" | "full" | "reduced" | "plain";
+
 export interface UiSettingsDto {
   theme: Theme;
   accent_color: string | null;
@@ -1658,6 +1661,29 @@ export interface UiSettingsDto {
   /** Geburtstags-Deko (Konfetti, Luftballons, Begrüßung) an/aus —
    * unabhängig vom Theme, siehe `DECISIONS.md` ADR-0071. */
   birthday_decorations: boolean;
+  /** Aufwand der Oberflächen-Effekte, siehe `lib/effects.ts` und
+   * `DECISIONS.md` ADR-0073. `"auto"` misst die echte Bildzeit auf dem
+   * Gerät und stuft bei Bedarf herunter. */
+  effect_level: EffectSetting;
+}
+
+/** Ergebnis der Leistungs-Diagnose (siehe `DECISIONS.md` ADR-0073 und
+ * `crates/apx-app/src/diagnostics.rs`). */
+export interface PerformanceReportDto {
+  /** `true` = die laufende Binaerdatei ist ein Debug-Build. Meist die
+   * Antwort auf „warum ist das so langsam". */
+  debug_build: boolean;
+  threads: number;
+  bench_megapixels: number;
+  develop_neutral_ms: number;
+  develop_loaded_ms: number;
+  megapixels_per_second: number;
+}
+
+/** Misst die Bildberechnung auf diesem Geraet. Dauert bewusst mehrere
+ * Sekunden — das ist echte Rechenarbeit, kein Schaetzwert. */
+export function runPerformanceBenchmark(): Promise<PerformanceReportDto> {
+  return invoke<PerformanceReportDto>("run_performance_benchmark");
 }
 
 export function getUiSettings(): Promise<UiSettingsDto> {

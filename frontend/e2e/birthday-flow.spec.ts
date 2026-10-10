@@ -30,6 +30,10 @@ const WITH_DECORATIONS = {
     sound_volume_percent: 70,
     sound_pack: "cinematic",
     birthday_decorations: true,
+    // Fest auf "full" (ADR-0073): "auto" startet eine Bildzeit-Messung,
+    // deren Ergebnis von der Last der Testmaschine abhaengt — die Deko
+    // waere dann je nach Tagesform da oder nicht.
+    effect_level: "full" as const,
   },
 };
 

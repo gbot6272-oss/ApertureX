@@ -452,3 +452,191 @@ mod exif_orientation_tests {
         );
     }
 }
+
+// GPS aus Kamera-JPEGs (ADR-0073).
+//
+// Die Karte dieser App sagt dem Nutzer, Aperture X lese vorhandene
+// Koordinaten beim Import automatisch aus — aus RAWs ebenso wie aus
+// Kamera-JPEGs. Fuer den RAW-Weg war das geprueft (`metadata.rs`s
+// `gps_south_and_west_are_negative`), fuer den JPEG-Weg nicht: dieser
+// Zweig hatte kein einziges GPS-Testfoto hinter sich. Eine Zusage in
+// der Oberflaeche, die kein Test deckt, ist eine Behauptung — und
+// ausgerechnet hier waere sie teuer, weil ein leerer Globus wie ein
+// Fehler aussieht und der Nutzer dann an der falschen Stelle sucht.
+#[cfg(test)]
+mod exif_gps_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    /// Baut ein minimales, gueltiges JPEG mit einem echten APP1/EXIF-Block,
+    /// dessen IFD0 ausschliesslich auf ein GPS-IFD zeigt (Tag 0x8825).
+    ///
+    /// Von Hand zusammengesetzt statt ueber eine Schreib-Bibliothek: der
+    /// ganze Zweck dieses Tests ist, den Weg durch `kamadak-exif`s
+    /// Parser zu gehen, und eine Bibliothek, die genau dieselben
+    /// Annahmen ueber die Byte-Anordnung macht wie der Leser, wuerde
+    /// einen Fehler in diesen Annahmen auf beiden Seiten gleichzeitig
+    /// haben und damit verdecken.
+    fn build_jpeg_with_gps(
+        lat_dms: [(u32, u32); 3],
+        lat_ref: &str,
+        lon_dms: [(u32, u32); 3],
+        lon_ref: &str,
+    ) -> Vec<u8> {
+        let img = image::RgbImage::from_pixel(4, 2, image::Rgb([10, 20, 30]));
+        let dynamic = image::DynamicImage::ImageRgb8(img);
+        let mut jpeg_bytes = Vec::new();
+        dynamic
+            .write_to(&mut Cursor::new(&mut jpeg_bytes), image::ImageFormat::Jpeg)
+            .expect("jpeg-Kodierung sollte klappen");
+
+        // Aufbau, alle Offsets ab Anfang des TIFF-Headers:
+        //   8 .. 26   IFD0        (1 Eintrag: GPSInfoIFDPointer)
+        //  26 .. 80   GPS-IFD     (4 Eintraege)
+        //  80 ..      Daten       (2 x 3 RATIONAL = 2 x 24 Byte)
+        const IFD0_OFFSET: u32 = 8;
+        const IFD0_SIZE: u32 = 2 + 12 + 4;
+        const GPS_IFD_OFFSET: u32 = IFD0_OFFSET + IFD0_SIZE;
+        const GPS_ENTRIES: u16 = 4;
+        const GPS_IFD_SIZE: u32 = 2 + 12 * GPS_ENTRIES as u32 + 4;
+        const DATA_OFFSET: u32 = GPS_IFD_OFFSET + GPS_IFD_SIZE;
+        /// Drei RATIONAL sind 3 x (4 Byte Zaehler + 4 Byte Nenner).
+        const DMS_BYTES: u32 = 24;
+
+        let rationals = |dms: [(u32, u32); 3]| {
+            let mut out = Vec::with_capacity(DMS_BYTES as usize);
+            for (numerator, denominator) in dms {
+                out.extend_from_slice(&numerator.to_le_bytes());
+                out.extend_from_slice(&denominator.to_le_bytes());
+            }
+            out
+        };
+
+        // Ein ASCII-Wert wird nullterminiert gespeichert, `count` zaehlt
+        // das Nullbyte mit. "N\0" sind zwei Byte und liegen damit
+        // inline im Wertfeld statt ausgelagert.
+        let ascii_inline = |text: &str| {
+            let mut field = [0u8; 4];
+            let bytes = text.as_bytes();
+            assert!(
+                bytes.len() < 4,
+                "laengere Werte muessten ausgelagert werden"
+            );
+            field[..bytes.len()].copy_from_slice(bytes);
+            field
+        };
+
+        let mut tiff = Vec::new();
+        tiff.extend_from_slice(b"II");
+        tiff.extend_from_slice(&0x002Au16.to_le_bytes());
+        tiff.extend_from_slice(&IFD0_OFFSET.to_le_bytes());
+
+        // IFD0: nur der Zeiger auf das GPS-IFD.
+        tiff.extend_from_slice(&1u16.to_le_bytes());
+        tiff.extend_from_slice(&0x8825u16.to_le_bytes()); // GPSInfoIFDPointer
+        tiff.extend_from_slice(&4u16.to_le_bytes()); // Typ: LONG
+        tiff.extend_from_slice(&1u32.to_le_bytes());
+        tiff.extend_from_slice(&GPS_IFD_OFFSET.to_le_bytes());
+        tiff.extend_from_slice(&0u32.to_le_bytes()); // kein weiteres IFD
+
+        // GPS-IFD.
+        tiff.extend_from_slice(&GPS_ENTRIES.to_le_bytes());
+
+        tiff.extend_from_slice(&0x0001u16.to_le_bytes()); // GPSLatitudeRef
+        tiff.extend_from_slice(&2u16.to_le_bytes()); // Typ: ASCII
+        tiff.extend_from_slice(&2u32.to_le_bytes()); // "N" + Nullbyte
+        tiff.extend_from_slice(&ascii_inline(lat_ref));
+
+        tiff.extend_from_slice(&0x0002u16.to_le_bytes()); // GPSLatitude
+        tiff.extend_from_slice(&5u16.to_le_bytes()); // Typ: RATIONAL
+        tiff.extend_from_slice(&3u32.to_le_bytes());
+        tiff.extend_from_slice(&DATA_OFFSET.to_le_bytes());
+
+        tiff.extend_from_slice(&0x0003u16.to_le_bytes()); // GPSLongitudeRef
+        tiff.extend_from_slice(&2u16.to_le_bytes());
+        tiff.extend_from_slice(&2u32.to_le_bytes());
+        tiff.extend_from_slice(&ascii_inline(lon_ref));
+
+        tiff.extend_from_slice(&0x0004u16.to_le_bytes()); // GPSLongitude
+        tiff.extend_from_slice(&5u16.to_le_bytes());
+        tiff.extend_from_slice(&3u32.to_le_bytes());
+        tiff.extend_from_slice(&(DATA_OFFSET + DMS_BYTES).to_le_bytes());
+
+        tiff.extend_from_slice(&0u32.to_le_bytes()); // kein weiteres IFD
+
+        assert_eq!(
+            tiff.len() as u32,
+            DATA_OFFSET,
+            "die Offsets oben muessen zur tatsaechlich geschriebenen Laenge passen"
+        );
+        tiff.extend_from_slice(&rationals(lat_dms));
+        tiff.extend_from_slice(&rationals(lon_dms));
+
+        let mut app1 = Vec::new();
+        app1.extend_from_slice(b"Exif\0\0");
+        app1.extend_from_slice(&tiff);
+        let length = (app1.len() + 2) as u16;
+
+        let mut out = Vec::new();
+        out.extend_from_slice(&jpeg_bytes[0..2]); // SOI
+        out.extend_from_slice(&[0xFF, 0xE1]);
+        out.extend_from_slice(&length.to_be_bytes());
+        out.extend_from_slice(&app1);
+        out.extend_from_slice(&jpeg_bytes[2..]);
+        out
+    }
+
+    fn gps_of(name: &str, bytes: &[u8]) -> Option<(f64, f64)> {
+        let path = std::env::temp_dir().join(name);
+        std::fs::write(&path, bytes).expect("Test-JPEG sollte sich schreiben lassen");
+        let meta = read_metadata(&path).expect("read_metadata sollte klappen");
+        let _ = std::fs::remove_file(&path);
+        meta.gps
+    }
+
+    #[test]
+    fn read_metadata_reads_coordinates_from_a_real_camera_jpeg() {
+        // Muenchen, 48 Grad 8 Minuten 30 Sekunden Nord / 11 Grad 34
+        // Minuten 30 Sekunden Ost.
+        let bytes = build_jpeg_with_gps(
+            [(48, 1), (8, 1), (30, 1)],
+            "N",
+            [(11, 1), (34, 1), (30, 1)],
+            "E",
+        );
+        let (lat, lon) = gps_of("apx_fallback_gps_north_east.jpg", &bytes)
+            .expect("Koordinaten sollten gelesen werden");
+        assert!((lat - 48.141_666_7).abs() < 1e-5, "Breite war {lat}");
+        assert!((lon - 11.575).abs() < 1e-5, "Laenge war {lon}");
+    }
+
+    /// Das Vorzeichen ist der Teil, den man still falsch machen kann:
+    /// ein Foto aus Buenos Aires landete dann in Russland, und auf
+    /// einer Weltkarte faellt das erst auf, wenn man hinsieht.
+    #[test]
+    fn south_and_west_become_negative() {
+        let bytes = build_jpeg_with_gps(
+            [(34, 1), (36, 1), (0, 1)],
+            "S",
+            [(58, 1), (22, 1), (0, 1)],
+            "W",
+        );
+        let (lat, lon) = gps_of("apx_fallback_gps_south_west.jpg", &bytes)
+            .expect("Koordinaten sollten gelesen werden");
+        assert!((lat + 34.6).abs() < 1e-5, "Breite war {lat}");
+        assert!((lon + 58.366_666_7).abs() < 1e-5, "Laenge war {lon}");
+    }
+
+    /// Der Regelfall bei Spiegelreflex- und Systemkameras: gar kein
+    /// GPS-Block. Das muss `None` ergeben und nicht etwa (0, 0) —
+    /// sonst saesse jedes Foto ohne Empfaenger im Golf von Guinea.
+    #[test]
+    fn a_jpeg_without_a_gps_block_yields_none() {
+        let img = image::RgbImage::from_pixel(4, 2, image::Rgb([10, 20, 30]));
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Jpeg)
+            .expect("jpeg-Kodierung sollte klappen");
+        assert_eq!(gps_of("apx_fallback_gps_absent.jpg", &bytes), None);
+    }
+}

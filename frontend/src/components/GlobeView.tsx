@@ -320,11 +320,49 @@ export function GlobeView({ photos, onEnterMap }: GlobeViewProps) {
       {/* Phase 25 Nachtrag III: `top-16` statt `top-3` — dieselbe
           Kopfzeilen-Überlagerung wie in `Viewer.tsx`s aktuellem
           Kommentar, der Globus reicht jetzt bis an den oberen Rand. */}
-      <div className="pointer-events-none absolute inset-x-0 top-16 flex justify-center">
-        <span className="rounded border border-border bg-bg-raised/80 px-3 py-1 text-xs text-text-secondary backdrop-blur-sm">
-          {geotaggedCount} Foto{geotaggedCount === 1 ? "" : "s"} mit GPS · ziehen zum Drehen
-        </span>
-      </div>
+      {/* Leerzustand (ADR-0073). Ein Globus ohne einen einzigen Punkt
+          sieht aus wie ein Fehler — und die Anzeige „0 Fotos mit GPS"
+          bestätigte das nur, ohne den Grund zu nennen. Der Grund ist
+          meist kein Fehler: Spiegelreflex- und Systemkameras haben
+          überwiegend keinen GPS-Empfänger, Kamera-JPEGs und RAWs kommen
+          also ohne Koordinaten herein. Die App liest sie sehr wohl aus,
+          wenn welche da sind (`apx-raw`s `extract_gps` für RAW,
+          `fallback.rs` für JPEG/TIFF) — nur ist meist nichts da.
+          Beides gehört gesagt, zusammen mit dem Weg, auf dem Fotos
+          trotzdem auf die Karte kommen. */}
+      {geotaggedCount === 0 ? (
+        <div className="pointer-events-none absolute inset-x-0 top-16 flex justify-center px-4">
+          <div
+            className="pointer-events-auto max-w-md rounded border border-border bg-bg-raised/90 px-4 py-3 text-xs text-text-secondary shadow backdrop-blur-sm"
+            role="status"
+            data-testid="globe-empty"
+          >
+            <strong className="block text-sm text-text-primary">Keine Fotos mit Koordinaten</strong>
+            <p className="mt-1">
+              Das ist meist kein Fehler: die wenigsten Kameras haben einen GPS-Empfänger, die Canon EOS
+              etwa nicht. Vorhandene Koordinaten liest Aperture X beim Import automatisch aus — aus RAWs
+              ebenso wie aus Kamera-JPEGs.
+            </p>
+            <p className="mt-1">
+              Nachtragen geht auf der Karte: über einen GPX-Track vom Handy oder Logger, oder indem der
+              Standort für ein ausgewähltes Foto von Hand gesetzt wird.
+            </p>
+            <button
+              type="button"
+              onClick={onEnterMap}
+              className="mt-2 rounded border border-accent px-2 py-1 text-accent hover:bg-accent/10"
+            >
+              Zur Karte — dort Orte nachtragen
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="pointer-events-none absolute inset-x-0 top-16 flex justify-center">
+          <span className="rounded border border-border bg-bg-raised/80 px-3 py-1 text-xs text-text-secondary backdrop-blur-sm">
+            {geotaggedCount} Foto{geotaggedCount === 1 ? "" : "s"} mit GPS · ziehen zum Drehen
+          </span>
+        </div>
+      )}
       <div className="absolute bottom-3 right-3">
         <button
           type="button"

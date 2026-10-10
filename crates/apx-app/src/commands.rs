@@ -7150,6 +7150,8 @@ pub struct UiSettingsDto {
     pub sound_pack: String,
     /// Geburtstags-Deko an/aus (siehe `DECISIONS.md` ADR-0071).
     pub birthday_decorations: bool,
+    /// Aufwand der Oberflächen-Effekte (siehe `DECISIONS.md` ADR-0073).
+    pub effect_level: apx_core::EffectLevel,
 }
 
 impl From<apx_core::UiSettings> for UiSettingsDto {
@@ -7166,8 +7168,25 @@ impl From<apx_core::UiSettings> for UiSettingsDto {
             sound_volume_percent: ui.sound_volume_percent,
             sound_pack: ui.sound_pack,
             birthday_decorations: ui.birthday_decorations,
+            effect_level: ui.effect_level,
         }
     }
+}
+
+// ---- Leistungs-Diagnose (ADR-0073) ---------------------------------------
+
+/// Misst auf diesem Gerät, wie schnell die Bildberechnung läuft — und
+/// ob überhaupt ein optimierter Build läuft.
+///
+/// Über `spawn_blocking`, weil die Messung bewusst mehrere Sekunden
+/// echte Rechenarbeit leistet: auf dem Hauptthread würde sie genau das
+/// Einfrieren verursachen, das sie diagnostizieren soll.
+#[tauri::command]
+pub async fn run_performance_benchmark() -> Result<crate::diagnostics::PerformanceReportDto, String>
+{
+    tokio::task::spawn_blocking(crate::diagnostics::run_benchmark)
+        .await
+        .map_err(|err| format!("Messung abgebrochen: {err}"))?
 }
 
 #[tauri::command]
@@ -7201,6 +7220,7 @@ pub fn set_ui_settings(state: State<'_, AppState>, settings: UiSettingsDto) -> R
             settings.sound_pack
         },
         birthday_decorations: settings.birthday_decorations,
+        effect_level: settings.effect_level,
     };
     all.save(&path).map_err(|err| err.to_string())
 }

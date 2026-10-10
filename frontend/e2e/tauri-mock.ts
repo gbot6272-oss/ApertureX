@@ -161,6 +161,23 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       // ein, darunter einer, der genau prueft, dass die Bedienung bei
       // laufender Deko nicht blockiert ist.
       birthday_decorations: false,
+      // Effektstufe in Tests fest auf "full" (ADR-0073): "auto" wuerde
+      // eine Bildzeit-Messung starten, deren Ergebnis von der Last der
+      // Testmaschine abhaengt — und damit das `data-effects`-Attribut
+      // zu einem Wackelkandidaten machen, von dem andere Tests
+      // abhaengen. Ein eigener Test misst die Automatik gezielt.
+      effect_level: "full" as "auto" | "full" | "reduced" | "plain",
+    },
+    // Standardmaessig ein optimierter Build ohne Befund — der
+    // Debug-Build-Fall ist der interessante und wird von dem Test
+    // gezielt gesetzt, der ihn prueft.
+    performanceReport: {
+      debug_build: false,
+      threads: 8,
+      bench_megapixels: 12,
+      develop_neutral_ms: 180,
+      develop_loaded_ms: 240,
+      megapixels_per_second: 66.7,
     },
     // Beobachteter Ordner (Phase 12 Schritt 7) — derselbe Aus-Default wie
     // im echten Backend (`apx_core::settings::WatchedFolderSettings`).
@@ -817,6 +834,15 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
         sound_volume_percent: number;
         sound_pack: string;
         birthday_decorations: boolean;
+        effect_level: "auto" | "full" | "reduced" | "plain";
+      };
+      performanceReport: {
+        debug_build: boolean;
+        threads: number;
+        bench_megapixels: number;
+        develop_neutral_ms: number;
+        develop_loaded_ms: number;
+        megapixels_per_second: number;
       };
       watchedFolderSettings: {
         path: string | null;
@@ -871,6 +897,13 @@ function installBridge(initialFixtures: Record<string, unknown>): void {
       }
       case "select_folder":
         return fixtures.selectFolderResult;
+      // Leistungs-Diagnose (ADR-0073): der Mock liefert feste Werte —
+      // eine echte Messung im Test waere von der Last der Testmaschine
+      // abhaengig und damit wertlos. Geprueft wird hier die Anbindung
+      // und die Darstellung, die Messung selbst steht in
+      // `apx-app`s `diagnostics.rs`-Tests.
+      case "run_performance_benchmark":
+        return fixtures.performanceReport;
       case "catalog_status":
         return fixtures.catalogStatus;
       case "list_folders":

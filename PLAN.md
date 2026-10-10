@@ -1853,3 +1853,39 @@ lief bei 1280 Pixeln über und machte „Einstellungen" und das
 - **B7 — Abschleifen.** Gemessen: Start mit/ohne Deko, Bedienbarkeit
   bei fliegendem Konfetti, Rechenbudget, Abräumen beim Umschalten.
   Dabei den Kopfzeilen-Überlauf gefunden und behoben. ✔ erledigt
+
+## Phase 35 — Bestandsaufnahme und Tempo
+
+Zwei Nutzer-Rückmeldungen, keine neuen Funktionen: „was ist mit den
+anderen bugs … bzw. einfach elemente die nicht funktioniert haben" und,
+mitten in der Arbeit, „APERTURE X LÄUFT HOLYYYYY SLOW — da geht fast
+gar nix" samt leerem Globus.
+
+- **P1 — Alle 47 Menüeinträge einzeln angeklickt.** Gemessen statt
+  gelesen: Dialoge, Vollbild-Überlagerungen, Reiterwechsel,
+  Hauptbereich, Meldungen, IPC-Mitschnitt. Schwerster Fund: die ersten
+  sechs Einträge lagen 210 Pixel über dem Fensterrand und waren per
+  Maus unerreichbar. ✔ erledigt (ADR-0072)
+- **P2 — Die Kaskaden-Falle an der Ursache behoben.** Fünfter Vorfall
+  derselben Ursache; `position: relative` steht jetzt in
+  `@layer components` statt ungeschichtet. Gegenkontrolliert.
+  ✔ erledigt
+- **P3 — Invarianten als Dauertests.** `e2e/ui-invariants.spec.ts`:
+  keine Glasfläche, deren errechnete Position ihrer Utility
+  widerspricht; jeder Menüeintrag wirkt messbar oder ist gesperrt.
+  ✔ erledigt
+- **P4 — Die Last der Oberfläche gemessen.** Acht Glasflächen tragen
+  Weichzeichner und SVG-Verzerrung gleichzeitig über 1,08 Millionen
+  Bildpunkten; die dauerhaft steigenden Luftballons machen den
+  Zwischenspeicher bei jedem Bild ungültig. ✔ erledigt (ADR-0073)
+- **P5 — Effektstufen mit echter Messung.** `auto` (Vorgabe), `full`,
+  `reduced`, `plain`; die Messung hängt sich selbst eine bewegte Last
+  hinter die Glasflächen, sonst misst sie den Leerlauf. ✔ erledigt
+- **P6 — Leistungs-Diagnose.** Misst auf dem Gerät des Nutzers und
+  benennt den häufigsten Befund zuerst: einen Debug-Build.
+  ✔ erledigt
+- **P7 — Abhängigkeiten im Entwicklungsbuild voll optimieren.**
+  `[profile.dev.package."*"] opt-level = 3`. ✔ erledigt
+- **P8 — Karte: Leerzustand statt leerem Globus.** Dabei die
+  Testlücke geschlossen, dass die GPS-Auslesung aus Kamera-JPEGs nie
+  geprüft war. ✔ erledigt

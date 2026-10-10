@@ -142,6 +142,30 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
               />
             </label>
 
+            {/* Effektstufe (ADR-0073). Die Glasflächen dieser App
+                tragen Weichzeichner und SVG-Verzerrung gleichzeitig —
+                acht Flächen über drei Vierteln des Fensters im
+                Entwickeln-Modus. Ob ein Gerät das trägt, hängt an
+                Treiber und Webansicht und lässt sich nicht vorhersagen;
+                „Automatisch“ misst es deshalb beim Start wirklich. */}
+            <label className="flex items-start justify-between gap-2">
+              <span className="text-text-secondary">
+                {t("settings.effectLevel")}
+                <span className="block text-[11px] text-text-muted">{t("settings.effectLevelHint")}</span>
+              </span>
+              <select
+                className="rounded border border-border bg-bg-panel px-2 py-1"
+                value={uiSettings.effect_level}
+                onChange={(event) => update({ effect_level: event.target.value as UiSettingsDto["effect_level"] })}
+                aria-label={t("settings.effectLevel")}
+              >
+                <option value="auto">{t("settings.effectLevelAuto")}</option>
+                <option value="full">{t("settings.effectLevelFull")}</option>
+                <option value="reduced">{t("settings.effectLevelReduced")}</option>
+                <option value="plain">{t("settings.effectLevelPlain")}</option>
+              </select>
+            </label>
+
             <label className="flex items-center justify-between gap-2">
               <span className="text-text-secondary">{t("settings.accentColor")}</span>
               <div className="flex items-center gap-2">

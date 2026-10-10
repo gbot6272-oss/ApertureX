@@ -28,6 +28,51 @@ pub enum Theme {
     Light,
 }
 
+/// Wie aufwendig die Oberfläche gezeichnet werden darf (ADR-0073).
+///
+/// **Warum es diese Stufe gibt.** Die Glasflächen dieser App tragen
+/// zwei der teuersten Dinge, die eine Webansicht kennt, und zwar
+/// gleichzeitig und auf derselben Ebene: einen `backdrop-filter`
+/// (Weichzeichnen plus Sättigung von allem, was durchscheint) und
+/// einen SVG-Verzerrungsfilter aus `feTurbulence` +
+/// `feDisplacementMap`. Im Entwickeln-Modus sind das acht Flächen mit
+/// zusammen gut einer Million Bildpunkten, also rund drei Viertel des
+/// Fensters — und ein geteiltes `<filter id>` spart dabei nichts: die
+/// Definition wird geteilt, die Auswertung geschieht pro Element.
+///
+/// Solange nichts dahinter passiert, ist das verkraftbar, weil das
+/// Ergebnis zwischengespeichert werden kann. Sobald sich hinter einer
+/// solchen Fläche etwas bewegt — ein aufsteigender Luftballon genügt
+/// — ist der Zwischenspeicher bei jedem Bild ungültig und alles wird
+/// neu gerechnet. Auf einer schwachen oder nicht hardwarebeschleunigten
+/// Webansicht (WebKitGTK unter Linux ist der Regelfall) reicht das, um
+/// die ganze Oberfläche zäh zu machen.
+///
+/// **Warum `Auto` die Vorgabe ist.** Welche Stufe ein Gerät trägt,
+/// lässt sich nicht aus der Ferne entscheiden und auch nicht aus
+/// Kennzahlen ableiten — nur messen. `Auto` misst beim Start die
+/// tatsächliche Bildzeit und stuft herunter, wenn das Budget nicht
+/// gehalten wird. Die drei festen Stufen sind daneben die ehrliche
+/// Antwort für alle, die lieber selbst entscheiden.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EffectLevel {
+    /// Misst die echte Bildzeit und stuft selbsttätig herunter.
+    #[default]
+    Auto,
+    /// Alles an: Verzerrung, Weichzeichner, Deko.
+    Full,
+    /// Ohne SVG-Verzerrung und ohne dauerhaft laufende Deko; der
+    /// Weichzeichner bleibt. Das ist die Stufe, die auf den meisten
+    /// Geräten den größten Unterschied macht, ohne dass die Oberfläche
+    /// ihren Charakter verliert.
+    Reduced,
+    /// Ohne jeden Hintergrundeffekt: deckende Flächen statt Glas. Die
+    /// schnellste Stufe und die einzige, die auch auf sehr schwacher
+    /// Hardware sicher flüssig bleibt.
+    Plain,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UiSettings {
@@ -76,6 +121,8 @@ pub struct UiSettings {
     /// ab (Barrierefreiheit geht vor Deko) — dieser Schalter ist die
     /// Geschmacks-, jener die Zugänglichkeitsentscheidung.
     pub birthday_decorations: bool,
+    /// Aufwand der Oberflächen-Effekte — siehe `EffectLevel`.
+    pub effect_level: EffectLevel,
 }
 
 impl Default for UiSettings {
@@ -101,6 +148,7 @@ impl Default for UiSettings {
             // ("satte Wirkung, gut für Start-/Export-Momente").
             sound_pack: "cinematic".to_string(),
             birthday_decorations: true,
+            effect_level: EffectLevel::default(),
         }
     }
 }

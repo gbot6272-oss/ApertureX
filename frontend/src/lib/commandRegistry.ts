@@ -61,6 +61,9 @@ export function useCommandRegistry(): CommandEntry[] {
   const developPanelOpen = useAppStore((s) => s.developPanelOpen);
   const setRepairDraftMode = useAppStore((s) => s.setRepairDraftMode);
   const setCanvasExtendDialogOpen = useAppStore((s) => s.setCanvasExtendDialogOpen);
+  const requestDevelopTab = useAppStore((s) => s.requestDevelopTab);
+  const photosInFolder = useAppStore((s) => (s.selectedFolderId ? s.photosByFolder[s.selectedFolderId] : undefined));
+  const virtualCopiesByPhotoId = useAppStore((s) => s.virtualCopiesByPhotoId);
   const openExportDialog = useAppStore((s) => s.openExportDialog);
   const openPrintDialog = useAppStore((s) => s.openPrintDialog);
   const openSlideshowDialog = useAppStore((s) => s.openSlideshowDialog);
@@ -89,6 +92,24 @@ export function useCommandRegistry(): CommandEntry[] {
   function openDevelopPanel() {
     if (!developPanelOpen) toggleDevelopPanel();
   }
+
+  /** Öffnet das Entwickeln-Panel UND springt zum Reiter, in dem das
+   * Werkzeug liegt (ADR-0072). Ein Eintrag, der nur das Panel öffnet,
+   * lässt den Nutzer im Reiter „Licht" stehen und das Werkzeug suchen
+   * — genau der Befund, der diese Änderung ausgelöst hat. */
+  function openDevelopTool(tab: string) {
+    openDevelopPanel();
+    requestDevelopTab(tab);
+  }
+
+  const selectedPhoto = selectedPhotoId ? photosInFolder?.find((photo) => photo.id === selectedPhotoId) : undefined;
+  const selectedIsVideo = selectedPhoto?.media_kind === "video";
+  // „Versionen vergleichen" braucht mindestens eine virtuelle Kopie —
+  // mit nur einer Fassung gibt es nichts zu vergleichen, und der
+  // Eintrag tat vorher stillschweigend nichts (ADR-0072).
+  const versionsCompareRoot = selectedPhoto?.source_photo_id ?? selectedPhotoId;
+  const hasOtherVersions =
+    !!versionsCompareRoot && (virtualCopiesByPhotoId[versionsCompareRoot]?.length ?? 0) > 0;
 
   return useMemo<CommandEntry[]>(() => {
     const entries: CommandEntry[] = [
@@ -172,7 +193,15 @@ export function useCommandRegistry(): CommandEntry[] {
         id: "fn:versions-compare",
         label: t("header.versionsCompare"),
         category: "analysis",
-        disabled: !selectedPhotoId,
+        // Ohne mindestens eine virtuelle Kopie gibt es nichts zu
+        // vergleichen: der Eintrag öffnete dann eine Vergleichsansicht
+        // mit einem einzigen Foto, was wie „nichts passiert“ aussieht
+        // (ADR-0072). `virtualCopiesByPhotoId` ist erst nach einem
+        // `refreshVirtualCopies` gefüllt — ist der Stand noch unbekannt,
+        // bleibt der Eintrag bedienbar, statt fälschlich zu sperren.
+        disabled:
+          !selectedPhotoId ||
+          (!!versionsCompareRoot && versionsCompareRoot in virtualCopiesByPhotoId && !hasOtherVersions),
         run: () => void openVersionsCompareView(),
       },
       {
@@ -209,6 +238,13 @@ export function useCommandRegistry(): CommandEntry[] {
         label: t("header.cameraDefaults"),
         category: "templates",
         run: () => requestCommand("camera-defaults"),
+      },
+      {
+        // "Analyse": misst, veraendert nichts (ADR-0073).
+        id: "fn:performance",
+        label: t("header.performance"),
+        category: "analysis",
+        run: () => requestCommand("performance"),
       },
       {
         // Gehoert in "Analyse": der Dialog misst den Katalog, er
@@ -290,41 +326,56 @@ export function useCommandRegistry(): CommandEntry[] {
         label: t("commands.ai.outpaint"),
         category: "ai",
         aiStatus: aiSettings?.inpainting_model_path ? "ready" : "download-needed",
-        run: () => setCanvasExtendDialogOpen(true),
+        // Das Panel MUSS zuerst auf: `CanvasExtendDialog` wird von
+        // `DevelopPanel.tsx` gerendert, und das gibt bei geschlossenem
+        // Panel `null` zurück (`if (!open) return null`). Der Eintrag
+        // setzte vorher nur das Store-Flag und tat damit nichts
+        // Sichtbares — gemessen, siehe ADR-0072.
+        run: () => {
+          openDevelopPanel();
+          setCanvasExtendDialogOpen(true);
+        },
       },
       {
         id: "ai:skin-smoothing",
         label: t("commands.ai.skinSmoothing"),
         category: "ai",
         aiStatus: "ready",
-        run: openDevelopPanel,
+        run: () => openDevelopTool("creative"),
       },
       {
         id: "ai:sky-replace",
         label: t("commands.ai.skyReplace"),
         category: "ai",
         aiStatus: "ready",
-        run: openDevelopPanel,
+        run: () => openDevelopTool("creative"),
       },
       {
         id: "ai:style-transfer",
         label: t("commands.ai.styleTransfer"),
         category: "ai",
         aiStatus: Object.keys(aiSettings?.style_transfer_model_paths ?? {}).length > 0 ? "ready" : "download-needed",
-        run: openDevelopPanel,
+        run: () => openDevelopTool("creative"),
       },
       {
         id: "ai:depth",
         label: t("commands.ai.depth"),
         category: "ai",
         aiStatus: aiSettings?.depth_model_path ? "ready" : "download-needed",
-        run: openDevelopPanel,
+        run: () => openDevelopTool("creative"),
       },
       {
         id: "ai:remove-background",
         label: t("commands.ai.removeBackground"),
         category: "ai",
         aiStatus: aiSettings?.selfie_segmentation_model_path ? "ready" : "download-needed",
+        // Das ist eine VIDEO-Funktion (`VideoPlayer.tsx`), keine
+        // Foto-Funktion. Vorher wechselte der Eintrag zum Foto-Viewer
+        // und tat damit bei einem Foto gar nichts (ADR-0072). Jetzt
+        // gesperrt, solange kein Video gewählt ist — ein gesperrter
+        // Eintrag mit Grund ist ehrlicher als ein klickbarer ohne
+        // Wirkung.
+        disabled: !selectedIsVideo,
         run: () => setCenterView("viewer"),
       },
       {
@@ -332,6 +383,10 @@ export function useCommandRegistry(): CommandEntry[] {
         label: t("commands.ai.subtitles"),
         category: "ai",
         aiStatus: !aiSettings?.subtitles_feature_compiled ? "not-available" : aiSettings.whisper_model_path ? "ready" : "download-needed",
+        // „Nicht verfügbar" heißt: das Feature ist nicht
+        // mitkompiliert. Ein Eintrag, der das anzeigt und sich
+        // trotzdem anklicken lässt, führt ins Leere (ADR-0072).
+        disabled: !aiSettings?.subtitles_feature_compiled,
         run: openVideoTimelineDialog,
       },
       {
@@ -343,6 +398,7 @@ export function useCommandRegistry(): CommandEntry[] {
           : aiSettings.people_landmark_model_path && aiSettings.people_encoder_model_path
             ? "ready"
             : "download-needed",
+        disabled: !aiSettings?.people_feature_compiled,
         run: () => setCenterView("people"),
       },
     ];

@@ -616,3 +616,22 @@ Landschaften die falsche Wahl. Die Kamera-Vorgabe greift nur bei
 Fotos, deren EXIF-Modell genau „Canon EOS" lautet — „Canon EOS R5"
 ist ein anderes Gehäuse und bekommt sie nicht (siehe
 `DECISIONS.md` ADR-0071).
+
+## Tempo und Diagnose
+
+| Was | Wie | Wo |
+| --- | --- | --- |
+| Effektstufen | Glas, Weichzeichner und Verzerrung kosten Rechenzeit; vier Stufen von „Voll" bis „Schlicht" | Einstellungen → „Oberflächen-Effekte" |
+| Automatische Erkennung | Misst beim Start die echte Bildzeit — mit bewegter Last hinter den Glasflächen, nicht im Leerlauf — und stuft herunter, wenn das Gerät das Budget nicht hält | Vorgabe |
+| Leistung prüfen | Misst Bildzeit der Oberfläche, eine vollständige Entwicklung über zwölf Megapixel und meldet das Build-Profil | Menü „Weitere Funktionen" → „Leistung prüfen…" |
+| Debug-Build-Warnung | Sagt im Klartext, wenn eine nicht optimierte Binärdatei läuft, und nennt den Befehl für einen optimierten Build | im selben Dialog, als erster Befund |
+
+**Ehrliche Grenzen:** Die Effektstufen ändern nichts an der
+Bildberechnung — sie betreffen ausschließlich, wie aufwendig die
+Oberfläche gezeichnet wird. Wer eine feste Stufe wählt, wird von der
+Automatik nicht überstimmt; die Automatik stuft nur herunter, nie
+hinauf, weil eine Stufe, die bei jeder ruhigen Sekunde zurückspringt,
+flackern würde. Die gemessene Entwicklungsdauer gilt für ein
+synthetisches Zwölf-Megapixel-Bild und ist zwischen Geräten
+vergleichbar — sie sagt nicht voraus, wie lange ein konkretes RAW
+braucht. Siehe `DECISIONS.md` ADR-0073.

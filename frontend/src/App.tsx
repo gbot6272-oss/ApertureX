@@ -33,6 +33,13 @@ import { Viewer } from "./components/Viewer";
 import { ShutdownOverlay } from "./components/ShutdownOverlay";
 import { useImportEvents } from "./hooks/useImportEvents";
 import { matchesBinding } from "./lib/keybindings";
+import {
+  applyEffectLevel,
+  decideLevel,
+  probeFrameTimes,
+  resolveLevel,
+  type AppliedEffectLevel,
+} from "./lib/effects";
 import { usePrefersReducedMotion } from "./lib/motion";
 import { applySoundSettings, playCue, useAccordionSounds, useButtonPressSounds, useUnlockSoundOnFirstInteraction } from "./lib/sound";
 import { useAppStore } from "./store";
@@ -130,6 +137,10 @@ export default function App() {
   const clearPendingCommand = useAppStore((s) => s.clearPendingCommand);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const onboardingAutoShown = useRef(false);
+  /** Ergebnis der Bildzeit-Messung (ADR-0073). Zählt nur bei
+   * `effect_level === "auto"`; die drei festen Stufen gehen vor. */
+  const [measuredLevel, setMeasuredLevel] = useState<AppliedEffectLevel>("full");
+  const effectProbeDone = useRef(false);
   const stepSelection = useAppStore((s) => s.stepSelection);
   const centerView = useAppStore((s) => s.centerView);
   const selectedPhotoId = useAppStore((s) => s.selectedPhotoId);
@@ -196,6 +207,9 @@ export default function App() {
 
     // Theme + benutzerdefinierte Akzentfarbe (Phase 10 Schritt 7).
     root.setAttribute("data-theme", uiSettings?.theme ?? "dark");
+    // Effektstufe (ADR-0073) — `measuredLevel` ist das Ergebnis der
+    // Messung unten und zählt nur, wenn die Einstellung `auto` ist.
+    applyEffectLevel(resolveLevel(uiSettings?.effect_level ?? "auto", measuredLevel), root);
     if (uiSettings?.accent_color) {
       root.style.setProperty("--color-accent", uiSettings.accent_color);
     } else {
@@ -207,7 +221,10 @@ export default function App() {
     if (uiSettings) {
       applySoundSettings(uiSettings);
     }
-  }, [uiSettings]);
+    // `measuredLevel` gehört in die Liste: sonst bliebe das Ergebnis
+    // der Messung bis zur nächsten Änderung an den Einstellungen
+    // liegen — also genau in dem Fall nutzlos, für den es gedacht ist.
+  }, [uiSettings, measuredLevel]);
 
   // Web-Audio darf laut Browser-Autoplay-Policy erst nach einer echten
   // Zeiger-/Tastatur-Interaktion starten (siehe `lib/sound.ts`).
@@ -229,6 +246,56 @@ export default function App() {
       onboardingAutoShown.current = true;
       setOnboardingOpen(true);
     }
+  }, [uiSettings]);
+
+  // Bildzeit-Messung für die Effektstufe (ADR-0073).
+  //
+  // Läuft genau einmal je Sitzung und erst, wenn die Oberfläche steht
+  // — während des Starts wäre jede Messung von Layout, Schriftladen
+  // und dem ersten Katalogzugriff verfälscht. `probeFrameTimes` hängt
+  // sich dafür selbst eine bewegte Last hinter die Glasflächen: ohne
+  // die wäre alles zwischengespeichert und jedes Gerät sähe schnell
+  // aus, auch das, auf dem es dann ruckelt.
+  //
+  // Nur bei `auto`: wer eine feste Stufe gewählt hat, soll nicht
+  // heimlich überstimmt werden — und die Messung selbst kostet kurz
+  // Rechenzeit, die ohne Zweck niemand zahlen muss.
+  //
+  // Gemessen wird in bis zu zwei Runden. Ein einziger Durchgang stuft
+  // bei maessiger Überschreitung nur um eine Stufe herunter — reicht
+  // die nicht, bliebe das Gerät ohne Nachmessung dauerhaft zu langsam,
+  // und der Nutzer saesse wieder vor einer zähen App, die ihm gerade
+  // erst versichert hat, sie habe sich angepasst. Zwei Runden genügen,
+  // weil von „voll" aus höchstens zwei Stufen nach unten gehen.
+  useEffect(() => {
+    if (effectProbeDone.current) return;
+    if (!uiSettings || uiSettings.effect_level !== "auto") return;
+    effectProbeDone.current = true;
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        let level: AppliedEffectLevel = "full";
+        for (let round = 0; round < 2; round += 1) {
+          const times = await probeFrameTimes(40);
+          if (cancelled) return;
+          const next = decideLevel(times, level);
+          if (next === level) break;
+          level = next;
+          setMeasuredLevel(level);
+          // Die zweite Runde muss gegen die NEUE Stufe messen. React
+          // hat das Attribut nach `setMeasuredLevel` noch nicht
+          // geschrieben; ein Bild Pause reicht, damit der Browser die
+          // geänderten Regeln angewendet hat.
+          await new Promise((resolve) => window.requestAnimationFrame(resolve));
+        }
+      })();
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [uiSettings]);
 
   function closeOnboarding() {

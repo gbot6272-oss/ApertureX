@@ -710,6 +710,19 @@ interface DevelopSlice {
   /** Öffnet/schließt den Leinwand-Erweiterungs-Dialog (Phase 14 Schritt 1). */
   canvasExtendDialogOpen: boolean;
   setCanvasExtendDialogOpen: (open: boolean) => void;
+  /** Angeforderter Reiter des Entwickeln-Panels, oder `null` (ADR-0072).
+   *
+   * Dieselbe Brücke wie `pendingCommand`: das Kommando-Register kann
+   * von außen nicht in `DevelopPanel.tsx`s lokalen `activeTab`-Zustand
+   * greifen, und ihn deswegen in den Store zu heben würde den Reiter
+   * zu geteiltem Zustand machen, den jede Komponente versehentlich
+   * verändern kann. Stattdessen eine Bitte, die das Panel beim
+   * Verarbeiten selbst abräumt — nötig, weil Einträge wie
+   * „Hautglätten" sonst nur das Panel öffnen und den Nutzer im
+   * falschen Reiter stehen lassen (ADR-0072s Befund). */
+  developRequestedTab: string | null;
+  requestDevelopTab: (tab: string) => void;
+  clearDevelopRequestedTab: () => void;
   /** Öffnet/schließt den Inhaltssensitives-Skalieren-Dialog (Phase 15
    * Schritt 4, siehe `DECISIONS.md` ADR-0042). */
   contentAwareScaleDialogOpen: boolean;
@@ -3326,6 +3339,18 @@ export const useAppStore = create<AppStore>()(
     setCanvasExtendDialogOpen: (open) => {
       set((state) => {
         state.canvasExtendDialogOpen = open;
+      });
+    },
+
+    developRequestedTab: null,
+    requestDevelopTab: (tab) => {
+      set((state) => {
+        state.developRequestedTab = tab;
+      });
+    },
+    clearDevelopRequestedTab: () => {
+      set((state) => {
+        state.developRequestedTab = null;
       });
     },
 

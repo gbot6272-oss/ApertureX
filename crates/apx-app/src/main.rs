@@ -12,6 +12,7 @@ mod birthday;
 mod camera_default;
 mod commands;
 mod date_sort;
+mod diagnostics;
 mod duplicate_keeper;
 mod exposure_match;
 mod folder_sync;
@@ -541,6 +542,7 @@ fn main() {
             commands::assign_face_to_person,
             commands::unassign_face,
             commands::get_ui_settings,
+            commands::run_performance_benchmark,
             commands::set_ui_settings,
             commands::get_watched_folder_settings,
             commands::set_watched_folder_settings,

@@ -1996,3 +1996,39 @@ Nutzer-Einspruch gegen meine eigene Erklärung, und er war berechtigt.
 - **B5 — Frühere Aussage korrigiert.** Dass die Ballons DER Auslöser
   der 83 Millisekunden waren, ist nicht belegt; belegt ist der Fehler
   in der Automatik. ✔ erledigt
+
+## Phase 40 — Die eigene Korrektur zurücknehmen
+
+Nutzer-Messung nach ADR-0077: 4216 → 8879 ms. Die Schranke hat es
+verdoppelt.
+
+- **S1 — Ursache.** Eine Reihenfolge bricht den laufenden Lauf nicht
+  ab. Die neueste Anfrage wartete erst auf einen veralteten Lauf und
+  rechnete dann selbst. ✔ erledigt (ADR-0080)
+- **S2 — Schloss entfernt, Ticketprüfung behalten.** Wer beim Start
+  überholt ist, steigt sofort aus; wer nicht, fängt sofort an.
+  ✔ erledigt
+- **S3 — Festgehalten.** `the_check_never_blocks_a_caller`,
+  gegenkontrolliert. Der Test, der die Ausschliesslichkeit festhielt,
+  ist entfallen — er hielt fest, was der Fehler war. ✔ erledigt
+- **S4 — Offen, unverändert:** die Dauer eines EINZELNEN Laufs. Das
+  ist ADR-0075s offener Punkt.
+
+## Phase 41 — Luftballons entfernt
+
+Nutzer, nach der gemessenen Korrektur aus ADR-0078: „man sieht sie eh
+immer noch nicht".
+
+- **L1 — Messgrösse war die falsche.** 8.909 von 1.440.000 Bildpunkten
+  sind 0,62 % des Fensters bei 22 % Deckkraft: messbar, nicht sichtbar.
+  ✔ erledigt (ADR-0081)
+- **L2 — Schicht entfernt.** Komponente gelöscht, CSS entfernt,
+  Einbindung aus `App.tsx` entfernt. ✔ erledigt
+- **L3 — Tests mit entfernt.** Der Pixelzähl-Test und das Feld
+  `sichtbareBallons` samt vier Zusicherungen sind weg — ein Test für
+  eine Funktion, die es nicht mehr gibt, hält nichts fest. ✔ erledigt
+- **L4 — Texte und Doku.** `de.ts`/`en.ts`, `FEATURES.md`,
+  `settings.rs`, `effects.ts` nennen die Ballons nicht mehr.
+  ✔ erledigt
+- **L5 — Konfetti und Begrüßung bleiben.** Sie waren nie Teil der
+  Beschwerde. ✔ erledigt

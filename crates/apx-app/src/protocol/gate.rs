@@ -1,39 +1,41 @@
-//! **Überholte Entwickeln-Anfragen abbrechen** (siehe `DECISIONS.md`
-//! ADR-0077).
+//! **Überholte Entwickeln-Anfragen gar nicht erst rechnen** (siehe
+//! `DECISIONS.md` ADR-0077 und die Korrektur in ADR-0080).
 //!
-//! **Was vorher passierte.** Der `apx://`-Handler startet pro Anfrage
-//! einen eigenen Betriebssystem-Thread — unbegrenzt viele, ohne
-//! Warteschlange und ohne Abbruch. Beim Ziehen an einem Regler schickt
-//! das Frontend je Bild eine Anfrage los und bricht die vorige per
-//! `AbortController` ab. Das beendet aber nur die `fetch` im Webview:
-//! **der Thread in Rust rechnet weiter bis zum Ende.**
+//! **Das Problem.** Der `apx://`-Handler startet pro Anfrage einen
+//! eigenen Betriebssystem-Thread — unbegrenzt viele, ohne Abbruch. Beim
+//! Ziehen an einem Regler schickt das Frontend je Bild eine Anfrage los
+//! und bricht die vorige per `AbortController` ab. Das beendet aber nur
+//! die `fetch` im Webview: **der Thread in Rust rechnet weiter bis zum
+//! Ende.** Nach einer Sekunde Ziehen laufen dutzende vollständige
+//! Renderläufe gleichzeitig.
 //!
-//! Nach einer Sekunde Ziehen laufen also dutzende vollständige
-//! Renderläufe gleichzeitig, kämpfen um dieselben Kerne und dieselbe
-//! einzelne Grafikkarte, und das Ergebnis, auf das der Nutzer wartet,
-//! steht hinter allen anderen in der Schlange. Genau das meldete die
-//! Oberfläche mit „letztes Rendering 4216 ms".
+//! **Was hier NICHT hilft: serialisieren.** Der erste Entwurf
+//! (ADR-0077) liess die Läufe der Reihe nach durch, damit sie sich
+//! nicht gegenseitig ausbremsen. Das hat die Lage verschlechtert, und
+//! zwar messbar: 4216 → 8879 Millisekunden für die zuletzt gemeldete
+//! Antwort. Der Grund ist einfach und hätte vorher auffallen müssen —
+//! eine Reihenfolge bricht den LAUFENDEN Lauf nicht ab. Die neueste
+//! Anfrage wartete also erst darauf, dass ein längst veralteter Lauf
+//! fertig rechnet, und rechnete dann selbst. Parallel war für sie
+//! schneller, auch wenn dabei Rechenzeit verschwendet wurde.
 //!
-//! `PipelineError::Cancelled` trägt seit jeher den Kommentar „weil eine
-//! neuere Anfrage für dasselbe Foto sie überholt hat" — der Mechanismus
-//! war entworfen und nie gebaut; die Variante wird nirgends erzeugt.
-//!
-//! **Wie es jetzt läuft.** Jede Entwickeln-Anfrage zieht eine
-//! Ticketnummer für ihr Foto. Die eigentliche Rechenarbeit ist
-//! serialisiert — es gibt ohnehin nur eine Grafikkarte, und parallele
-//! Läufe haben sich dort bisher nur gegenseitig ausgebremst. Wer
-//! drankommt, prüft zuerst, ob inzwischen eine neuere Anfrage für
-//! dasselbe Foto gezogen hat; wenn ja, steigt er aus, ohne ein einziges
-//! Pixel gerechnet zu haben.
+//! **Was hilft: früh und ohne Warten aussteigen.** Jede Anfrage zieht
+//! eine Ticketnummer für ihr Foto und prüft, bevor sie irgendetwas
+//! Teures anfängt, ob inzwischen eine neuere gezogen hat. Beim Ziehen
+//! mit rund sechzig Anfragen je Sekunde und Renderzeiten im
+//! Hundert-Millisekunden-Bereich ist fast jede Anfrage schon beim
+//! Start überholt — sie steigt sofort aus, ohne Schloss, ohne
+//! Wartezeit. Übrig bleibt die jeweils neueste, und die läuft ohne
+//! etwas vor sich in der Schlange.
 //!
 //! **Warum je Foto und nicht global.** Der Filmstreifen fordert
 //! Vorschauen für mehrere Fotos gleichzeitig an. Ein globales Ticket
 //! würde die alle gegenseitig verhungern lassen; je Foto bleibt jede
-//! dieser Anfragen die neueste für ihr eigenes Foto und läuft durch.
+//! dieser Anfragen die neueste für ihr eigenes Foto.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::Mutex;
 
 use apx_core::PhotoId;
 
@@ -42,15 +44,6 @@ pub(super) struct DevelopGate {
     next_ticket: AtomicU64,
     /// Die zuletzt gezogene Ticketnummer je Foto.
     latest: Mutex<HashMap<PhotoId, u64>>,
-    /// Serialisiert die eigentliche Rechenarbeit.
-    worker: Mutex<()>,
-}
-
-/// Der Platz in der Reihe. Solange dieser Wert lebt, rechnet niemand
-/// sonst — er wird deshalb genau so lange gehalten wie die Berechnung
-/// dauert und nicht länger.
-pub(super) struct Turn<'a> {
-    _guard: MutexGuard<'a, ()>,
 }
 
 impl DevelopGate {
@@ -64,31 +57,20 @@ impl DevelopGate {
         ticket
     }
 
-    /// Wartet, bis die Reihe an `ticket` ist.
-    ///
-    /// `None` heisst: in der Wartezeit hat eine neuere Anfrage für
-    /// dasselbe Foto gezogen — dieser Lauf ist überholt und soll gar
-    /// nicht erst anfangen.
-    pub(super) fn wait_turn(&self, photo: PhotoId, ticket: u64) -> Option<Turn<'_>> {
-        // Ein vergifteter Mutex darf hier nicht das ganze Rendern
-        // lahmlegen: im schlimmsten Fall wird eben nicht serialisiert,
-        // und das ist immer noch besser als gar kein Bild.
-        let guard = match self.worker.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        if self.is_superseded(photo, ticket) {
-            return None;
-        }
-        Some(Turn { _guard: guard })
-    }
-
     /// Ob inzwischen eine neuere Anfrage für dasselbe Foto gezogen hat.
+    ///
+    /// Bewusst ohne jede Wartezeit: wer hier `true` bekommt, steigt
+    /// sofort aus, und wer `false` bekommt, fängt sofort an. Ein
+    /// Schloss an dieser Stelle hat die Wartezeit der neuesten Anfrage
+    /// verdoppelt (ADR-0080).
     pub(super) fn is_superseded(&self, photo: PhotoId, ticket: u64) -> bool {
         match self.latest.lock() {
             // Kein Eintrag heisst: noch nie etwas gezogen. Dann ist
             // dieser Lauf per Definition nicht überholt.
             Ok(latest) => latest.get(&photo).is_some_and(|newest| *newest > ticket),
+            // Ein vergifteter Mutex darf das Rendern nicht lahmlegen:
+            // im schlimmsten Fall wird eben nichts mehr aussortiert,
+            // und das ist immer noch besser als kein Bild.
             Err(_) => false,
         }
     }
@@ -104,7 +86,6 @@ mod tests {
         let photo = PhotoId::new();
         let ticket = gate.claim(photo);
         assert!(!gate.is_superseded(photo, ticket));
-        assert!(gate.wait_turn(photo, ticket).is_some());
     }
 
     #[test]
@@ -143,49 +124,6 @@ mod tests {
     }
 
     #[test]
-    fn the_turn_is_exclusive() {
-        // Zwei gleichzeitige Läufe würden sich auf einer einzigen
-        // Grafikkarte nur gegenseitig ausbremsen — und seit ADR-0075
-        // teilen sie sich dort sogar dieselben Puffer.
-        use std::sync::atomic::AtomicBool;
-        use std::sync::Arc;
-
-        let gate = Arc::new(DevelopGate::default());
-        let photo_a = PhotoId::new();
-        let photo_b = PhotoId::new();
-        let inside = Arc::new(AtomicBool::new(false));
-        let overlapped = Arc::new(AtomicBool::new(false));
-
-        let mut handles = Vec::new();
-        for photo in [photo_a, photo_b] {
-            let gate = gate.clone();
-            let inside = inside.clone();
-            let overlapped = overlapped.clone();
-            handles.push(std::thread::spawn(move || {
-                for _ in 0..50 {
-                    let ticket = gate.claim(photo);
-                    let Some(turn) = gate.wait_turn(photo, ticket) else {
-                        continue;
-                    };
-                    if inside.swap(true, Ordering::SeqCst) {
-                        overlapped.store(true, Ordering::SeqCst);
-                    }
-                    std::thread::yield_now();
-                    inside.store(false, Ordering::SeqCst);
-                    drop(turn);
-                }
-            }));
-        }
-        for handle in handles {
-            handle.join().expect("Thread darf nicht panischen");
-        }
-        assert!(
-            !overlapped.load(Ordering::SeqCst),
-            "zwei Läufe waren gleichzeitig in der Rechenphase"
-        );
-    }
-
-    #[test]
     fn a_burst_lets_only_the_newest_through() {
         // Die eigentliche Zusage, in Zahlen: aus einem Schwall von
         // Anfragen für dasselbe Foto darf genau eine rechnen.
@@ -199,6 +137,57 @@ mod tests {
         assert_eq!(
             durchgelassen, 1,
             "von 60 Anfragen während eines Ziehvorgangs darf genau die letzte rechnen"
+        );
+    }
+
+    /// Der Fehler aus ADR-0077, maschinell ausgeschlossen.
+    ///
+    /// Dort hielt die Schranke ein Schloss, solange gerechnet wurde.
+    /// Das klang vernünftig — es gibt schliesslich nur eine
+    /// Grafikkarte — und war es nicht: eine Reihenfolge bricht den
+    /// laufenden Lauf nicht ab, also wartete die neueste Anfrage erst
+    /// auf einen längst veralteten und rechnete dann selbst. Gemessen
+    /// 4216 → 8879 Millisekunden.
+    ///
+    /// Dieser Test hält fest, dass die Prüfung niemandem den Weg
+    /// versperrt: zwei Threads, die gleichzeitig fragen, kommen beide
+    /// sofort durch.
+    #[test]
+    fn the_check_never_blocks_a_caller() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        let gate = Arc::new(DevelopGate::default());
+        let photo_a = PhotoId::new();
+        let photo_b = PhotoId::new();
+
+        // Der erste Aufrufer tut so, als rechne er lange — ohne dabei
+        // irgendetwas zu halten.
+        let haelt = Arc::new(AtomicBool::new(true));
+        let gate_a = gate.clone();
+        let haelt_a = haelt.clone();
+        let langlaeufer = std::thread::spawn(move || {
+            let ticket = gate_a.claim(photo_a);
+            assert!(!gate_a.is_superseded(photo_a, ticket));
+            while haelt_a.load(Ordering::SeqCst) {
+                std::thread::yield_now();
+            }
+        });
+
+        // Der zweite muss sofort drankommen, obwohl der erste „rechnet".
+        let start = Instant::now();
+        let ticket_b = gate.claim(photo_b);
+        let superseded = gate.is_superseded(photo_b, ticket_b);
+        let gebraucht = start.elapsed();
+
+        haelt.store(false, Ordering::SeqCst);
+        langlaeufer.join().expect("Thread darf nicht panischen");
+
+        assert!(!superseded);
+        assert!(
+            gebraucht < Duration::from_millis(100),
+            "die Prüfung hat {gebraucht:?} gewartet — sie darf gar nicht warten"
         );
     }
 }

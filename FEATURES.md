@@ -599,7 +599,7 @@ ist eine Regel über Metadaten, keine Bildanalyse.
 | --- | --- | --- |
 | Begrüßung beim Öffnen | Konfettikanonen, große Gratulation, geblurrter Hintergrund; schließt sich nach fünf Sekunden oder auf Klick | bei jedem Start |
 | Geburtstags-Thema | Warme, festliche Palette mit Gold-Akzent; die Fläche um das Foto bleibt farbneutral | Vorgabe, umschaltbar in den Einstellungen |
-| Luftballons & Konfetti | Sechs langsam steigende Ballons im Hintergrund, Konfetti bei fertigem Import und Export | app-weit, abschaltbar |
+| Konfetti | Konfetti bei fertigem Import und Export | app-weit, abschaltbar |
 | Drei Looks | „Goldene Stunde", „Familienfoto", „Erinnerung" — veränderbar und löschbar | Presets-Panel, Ordner „Geburtstag" |
 | Kamera schon eingestellt | Standardentwicklung für „Canon EOS", mit Abbildung in der Liste | Menü „Standardentwicklung je Kamera…" |
 | Ausführliche Einführung | Fünfzehn Schritte entlang des Arbeitswegs, von der Speicherkarte bis zum Aufräumen | beim ersten Start, danach über die Befehlspalette |
@@ -608,8 +608,10 @@ ist eine Regel über Metadaten, keine Bildanalyse.
 nur am Geburtstag — ein Datumsabgleich wäre ein zusätzlicher,
 überraschend fehleranfälliger Mechanismus (Zeitzonen, Jahreswechsel)
 für wenig Gewinn; wer sie nicht will, schaltet die Deko ab. Konfetti
-und Luftballons sind bei reduzierter Bewegung und im Kontrastmodus
-vollständig aus, nicht nur langsamer. Die drei Looks sind auf warme,
+ist bei reduzierter Bewegung und im Kontrastmodus vollständig aus,
+nicht nur langsamer. Eine Schicht mit aufsteigenden Luftballons gab es
+bis ADR-0081; sie ist ersatzlos entfallen, weil sie in der Praxis nicht
+zu sehen war. Die drei Looks sind auf warme,
 sentimentale Wirkung ausgelegt und ersetzen keine Einzelbearbeitung;
 „Familienfoto" senkt bewusst den lokalen Kontrast und ist deshalb für
 Landschaften die falsche Wahl. Die Kamera-Vorgabe greift nur bei
@@ -627,7 +629,7 @@ ist ein anderes Gehäuse und bekommt sie nicht (siehe
 | Debug-Build-Warnung | Sagt im Klartext, wenn eine nicht optimierte Binärdatei läuft, und nennt den Befehl für einen optimierten Build | im selben Dialog, als erster Befund |
 | GPU-Pfad-Prüfung | Misst dieselbe Entwicklung auf der Grafikkarte und meldet, wenn sie gar nicht benutzt wird — samt Grund | im selben Dialog, als zweiter Befund |
 | Wiederverwendete GPU-Pipelines und -Puffer | Pipelines, Bind-Groups und Arbeitspuffer überleben den einzelnen Stufenaufruf; gemessen 136,6 → 80,9 ms je Vorschau | wirkt überall, keine Einstellung |
-| Überholte Renderläufe brechen ab | Beim Reglerziehen rechnet von sechzig Anfragen je Sekunde genau die neueste; die übrigen steigen aus, bevor sie anfangen | wirkt überall, keine Einstellung |
+| Überholte Renderläufe brechen ab | Beim Reglerziehen rechnet von sechzig Anfragen je Sekunde genau die neueste; die übrigen steigen aus, bevor sie anfangen — ohne dass irgendjemand dabei wartet | wirkt überall, keine Einstellung |
 
 **Ehrliche Grenzen:** Die Effektstufen ändern nichts an der
 Bildberechnung — sie betreffen ausschließlich, wie aufwendig die

@@ -115,7 +115,7 @@ export const en: Record<keyof typeof de, string> = {
   "settings.theme": "Theme",
   "settings.themeBirthday": "Birthday",
   "settings.birthdayDecorations": "Birthday decorations",
-  "settings.birthdayDecorationsHint": "Confetti, balloons and the greeting on open",
+  "settings.birthdayDecorationsHint": "Confetti and the greeting on open",
   "settings.effectLevel": "Interface effects",
   "settings.effectLevelHint":
     "Glass, blur and distortion cost rendering time. “Automatic” starts at “Reduced” and steps down further if this device cannot sustain even that.",
@@ -177,7 +177,7 @@ export const en: Record<keyof typeof de, string> = {
   "onboarding.tour.health.title": "Tidying up when it grows",
   "onboarding.tour.health.body": "The overflow menu holds the tidying tools: catalog health shows where data is missing, \"clean up duplicates\" suggests which version to keep, \"sort into date folders\" turns a full folder into a date tree.",
   "onboarding.tour.settings.title": "All to your taste",
-  "onboarding.tour.settings.body": "In settings you can keep the birthday theme or switch to the normal dark one, turn off confetti and balloons, turn sounds down and make the interface bigger. None of it is fixed.",
+  "onboarding.tour.settings.body": "In settings you can keep the birthday theme or switch to the normal dark one, turn off confetti, turn sounds down and make the interface bigger. None of it is fixed.",
   "onboarding.tour.done.title": "Done — enjoy it",
   "onboarding.tour.done.body": "That was the tour. To see it again: Ctrl+K and search for \"tour\". And if something is missing or in the way, say so — that's the point of having your own edition.",
   "onboarding.tour.back": "Back",

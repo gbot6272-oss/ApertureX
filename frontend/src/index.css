@@ -611,7 +611,7 @@ body {
   --shadow-xl: 0 24px 48px -10px rgb(12 4 14 / 56%), 0 8px 16px -6px rgb(12 4 14 / 42%);
   --shadow-2xl: 0 32px 64px -12px rgb(12 4 14 / 62%), 0 12px 24px -8px rgb(12 4 14 / 48%);
 
-  /* Farben der Deko-Schichten (Luftballons, Konfetti) — als Tokens,
+  /* Farben der Konfetti-Schicht — als Tokens,
      damit `lib/confetti.ts` sie über `getComputedStyle` lesen kann
      statt eine zweite, irgendwann abweichende Palette im JS zu
      führen. */
@@ -623,95 +623,20 @@ body {
   --party-6: #f2e6c8;
 }
 
-/* Luftballon-Schicht (ADR-0071) — rein dekorativ, liegt hinter allem
-   Bedienbaren und nimmt keine Zeigerereignisse an. Sechs Ballons statt
-   eines Dauerregens: genug, dass es festlich wirkt, wenig genug, dass
-   es nach zwei Minuten nicht nervt und keinen messbaren Rahmenaufwand
-   kostet (sechs zusammengesetzte Transformationen, die der Compositor
-   ohne Layout-Durchlauf bewegt — `transform`/`opacity`, nichts
-   anderes). */
-/* **Die Ballons waren nie zu sehen** (ADR-0078).
- *
- * Bis hierher stand hier `z-index: 0` mit der Begruendung „hinter dem
- * Inhalt, damit kein Ballon ueber einem Foto schwebt". Die Absicht war
- * richtig, die Umsetzung konnte nicht aufgehen: der Inhalt dieser App
- * ist DECKEND (`bg-bg-base`, `bg-bg-panel`). „Hinter dem Inhalt" heisst
- * damit nicht „dezent im Hintergrund", sondern „gar nicht sichtbar".
- * Gemessen mit `document.elementFromPoint` auf der Mitte jedes Ballons:
- * zurueck kam `MAIN`, `FOOTER`, ein `BUTTON` — nie der Ballon selbst.
- *
- * `z-index: 35` loest beides auf einmal:
- * • ueber dem Inhalt und ueber der Kopfzeile (`z-30`), also wirklich
- *   zu sehen;
- * • unter Menues (`z-40`) und Dialogen (`z-50`), also nie im Weg;
- * • und — der Punkt, der zaehlt — VOR der Kopfzeile statt dahinter.
- *   Ein bewegtes Element HINTER einer `backdrop-filter`-Flaeche macht
- *   deren Zwischenspeicher bei jedem Bild ungueltig; davor kostet es
- *   nichts. Die Ballons sind damit sichtbar UND billiger als vorher.
- *
- * Sie schweben jetzt tatsaechlich ueber dem Foto. Bei 22 % Deckkraft
- * ist das der Preis dafuer, dass es die Deko ueberhaupt gibt — wem das
- * beim Beurteilen im Weg ist, schaltet sie in den Einstellungen ab. */
-.apx-balloon-layer {
-  position: fixed;
-  inset: 0;
-  z-index: 35;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.apx-balloon {
-  position: absolute;
-  bottom: -14vh;
-  width: 2.6rem;
-  height: 3.3rem;
-  border-radius: 50% 50% 48% 48%;
-  opacity: 0.22;
-  /* Die Schnur: ein schmales Pseudoelement, kein zweites DOM-Element. */
-  animation: apx-balloon-rise linear infinite;
-  will-change: transform;
-}
-
-.apx-balloon::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 100%;
-  width: 1px;
-  height: 2.2rem;
-  background: currentColor;
-  opacity: 0.5;
-}
-
-@keyframes apx-balloon-rise {
-  0% {
-    transform: translate3d(0, 0, 0) rotate(-4deg);
-  }
-  50% {
-    transform: translate3d(1.6rem, -60vh, 0) rotate(4deg);
-  }
-  100% {
-    transform: translate3d(0, -124vh, 0) rotate(-4deg);
-  }
-}
-
 /* Reduzierte Bewegung UND Kontrastmodus blenden die Deko vollständig
    aus — nicht nur ihre Animation. Die globale Regel oben kappt zwar
-   jede `animation-duration`, aber ein zum Endbild gesprungener Ballon
-   wäre entweder ein unmotivierter Fleck oder (hier) außerhalb des
+   jede `animation-duration`, aber zum Endbild gesprungenes Konfetti
+   wäre entweder ein unmotivierter Fleck oder außerhalb des
    Bildschirms: besser ehrlich nicht vorhanden als zufällig
    unsichtbar. Im Kontrastmodus gilt dasselbe aus dem Grund, der dort
    schon den Glüh-Farbwasch abschaltet. */
 @media (prefers-reduced-motion: reduce) {
-  .apx-balloon-layer,
   .apx-confetti-layer {
     display: none;
   }
 }
 
-.apx-reduce-motion .apx-balloon-layer,
 .apx-reduce-motion .apx-confetti-layer,
-:root[data-contrast="high"] .apx-balloon-layer,
 :root[data-contrast="high"] .apx-confetti-layer {
   display: none;
 }
@@ -725,22 +650,18 @@ body {
    gerechnet wird pro Element.
 
    Solange dahinter nichts passiert, ist das Ergebnis
-   zwischenspeicherbar. Die Luftballons bewegen sich aber dauerhaft und
-   liegen hinter allem — damit ist der Zwischenspeicher bei jedem Bild
-   ungültig und acht Verzerrungsfilter werden sechzig Mal je Sekunde
-   neu gerechnet. Auf WebKitGTK ohne Hardwarebeschleunigung (Tauri unter
-   Linux, der Regelfall) reicht das, um die ganze App zäh zu machen.
+   zwischenspeicherbar; bewegt sich etwas dahinter, wird es bei jedem
+   Bild neu gerechnet. Auf WebKitGTK ohne Hardwarebeschleunigung
+   (Tauri unter Linux, der Regelfall) reicht das, um die ganze App
+   zäh zu machen.
 
    `lib/effects.ts` misst beim Start die echte Bildzeit und setzt
    `data-effects`. Die Stufen sind so geschnitten, dass die erste schon
-   fast alles bringt: `reduced` nimmt nur die Verzerrung und die
-   Dauerbewegung, lässt aber den Weichzeichner — die Oberfläche sieht
-   fast gleich aus und kostet einen Bruchteil. */
+   fast alles bringt: `reduced` nimmt die Verzerrung, lässt aber den
+   Weichzeichner — die Oberfläche sieht fast gleich aus und kostet
+   einen Bruchteil. */
 
-/* Reduziert: keine SVG-Verzerrung. Die Ballons bleiben hier — seit
-   ADR-0078 liegen sie VOR der Kopfzeile und stossen deren
-   Weichzeichner nicht mehr an. Sie waren der Grund, sie in dieser
-   Stufe zu verstecken; der Grund ist weg, die Deko darf bleiben. */
+/* Reduziert: keine SVG-Verzerrung. */
 :root[data-effects="reduced"] {
   --glass-distortion: none;
 }
@@ -752,10 +673,6 @@ body {
    Schlicht heißt nicht unlesbar. */
 :root[data-effects="plain"] {
   --glass-distortion: none;
-}
-
-:root[data-effects="plain"] .apx-balloon-layer {
-  display: none;
 }
 
 :root[data-effects="plain"] .apx-glass::before,

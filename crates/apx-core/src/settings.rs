@@ -42,9 +42,9 @@ pub enum Theme {
 ///
 /// Solange nichts dahinter passiert, ist das verkraftbar, weil das
 /// Ergebnis zwischengespeichert werden kann. Sobald sich hinter einer
-/// solchen Fläche etwas bewegt — ein aufsteigender Luftballon genügt
-/// — ist der Zwischenspeicher bei jedem Bild ungültig und alles wird
-/// neu gerechnet. Auf einer schwachen oder nicht hardwarebeschleunigten
+/// solchen Fläche etwas bewegt — fliegendes Konfetti genügt — ist
+/// der Zwischenspeicher bei jedem Bild ungültig und alles wird neu
+/// gerechnet. Auf einer schwachen oder nicht hardwarebeschleunigten
 /// Webansicht (WebKitGTK unter Linux ist der Regelfall) reicht das, um
 /// die ganze Oberfläche zäh zu machen.
 ///
@@ -107,8 +107,8 @@ pub struct UiSettings {
     /// Rust-seitige Änderung nutzbar ist; ungültige Werte fängt das
     /// Frontend beim Aufbau des Players ab (Fallback auf "glass").
     pub sound_pack: String,
-    /// Geburtstags-Deko (Konfetti, Luftballons, Begrüßung beim Öffnen)
-    /// an/aus — siehe `DECISIONS.md` ADR-0071.
+    /// Geburtstags-Deko (Konfetti, Begrüßung beim Öffnen) an/aus —
+    /// siehe `DECISIONS.md` ADR-0071 und ADR-0081.
     ///
     /// Bewusst ein eigener Schalter und nicht an `theme == Birthday`
     /// gekoppelt: die Farben sind eine Geschmacksfrage, fliegendes

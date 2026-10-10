@@ -22,7 +22,7 @@ import type { BurstOptions } from "./confetti";
  * vorkommen. Nicht bei jedem angewendeten Preset: Konfetti, das bei
  * jedem Klick fliegt, ist nach zehn Minuten kein Fest mehr, sondern
  * ein Flackern, das man abschalten will. Wer mehr will, hat die
- * Luftballons und die Begrüßung.
+ * Begrüßung beim Öffnen.
  */
 
 /** Was die Zeichenschicht entgegennimmt. Eine leere Liste bedeutet

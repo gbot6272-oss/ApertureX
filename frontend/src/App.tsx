@@ -25,7 +25,6 @@ import { PresetsPanel } from "./components/PresetsPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { StartupSplash } from "./components/StartupSplash";
-import { BalloonLayer } from "./components/BalloonLayer";
 import { BirthdayWelcome } from "./components/BirthdayWelcome";
 import { ConfettiLayer } from "./components/ConfettiLayer";
 import { VideoPlayer } from "./components/VideoPlayer";
@@ -143,9 +142,9 @@ export default function App() {
    *
    * Startwert `"reduced"` und nicht `"full"`: die volle Stufe ist
    * gemessen die mit Abstand teuerste Konfiguration (SVG-Verzerrung auf
-   * acht Glasflächen, dahinter dauerhaft steigende Ballons), und sie
-   * sieht der reduzierten fast gleich. Bei `auto` darf das niemand
-   * ungefragt bezahlen — wer die Verzerrung will, wählt „Voll". */
+   * acht Glasflächen), und sie sieht der reduzierten fast gleich. Bei
+   * `auto` darf das niemand ungefragt bezahlen — wer die Verzerrung
+   * will, wählt „Voll". */
   const [measuredLevel, setMeasuredLevel] = useState<AppliedEffectLevel>("reduced");
   const effectProbeDone = useRef(false);
   /** Nur die Effektstufe, nicht das ganze Einstellungsobjekt — siehe
@@ -475,16 +474,19 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col bg-bg-base text-text-primary">
       <GlassDistortionFilter />
-      {/* Geburtstagsausgabe (siehe `DECISIONS.md` ADR-0071) — drei
-          Schichten, alle rein dekorativ und alle ohne
-          Zeigerereignisse: Luftballons hinter dem Inhalt
-          (`z-index: 0`), Konfetti darüber (`z-index: 150`), die
-          Begrüßung dazwischen (`z-[160]`, aber `pointer-events-none`).
+      {/* Geburtstagsausgabe (siehe `DECISIONS.md` ADR-0071, ADR-0081)
+          — zwei Schichten, beide rein dekorativ und ohne
+          Zeigerereignisse: Konfetti (`z-index: 149`) und die
+          Begrüßung darüber (`z-[160]`, aber `pointer-events-none`).
           Der Start-Ladeschirm bleibt mit `z-[200]` über allem. Jede
           Schicht prüft `birthday_decorations` und `reduced_motion`
           selbst und rendert sonst `null` — kein Element, keine
-          Animation, keine Schleife. */}
-      <BalloonLayer />
+          Animation, keine Schleife.
+
+          Eine dritte Schicht mit aufsteigenden Luftballons gab es bis
+          ADR-0081. Sie ist ersatzlos entfallen: sie war in der Praxis
+          nicht zu sehen, und zwei Versuche, das zu reparieren, haben
+          daran nichts geändert. */}
       <ConfettiLayer />
       <BirthdayWelcome ready={appReady} />
       <StartupSplash ready={appReady} />

@@ -1,22 +1,21 @@
 # Globale Arbeitsregeln (Vorlage für `~/.claude/CLAUDE.md`)
 
 Diese Datei gilt **projektübergreifend**. Sie liegt hier im Repository,
-damit sie versioniert ist und nicht verloren geht; wirksam wird sie erst,
-wenn sie nach `~/.claude/CLAUDE.md` kopiert wird:
-
-```powershell
-# Windows
-Copy-Item docs\CLAUDE.global.md $HOME\.claude\CLAUDE.md
-```
+damit sie versioniert ist und nicht verloren geht; wirksam wird sie erst
+als `~/.claude/CLAUDE.md`. Ein Befehl, im Wurzelverzeichnis:
 
 ```sh
-# Linux/macOS
-cp docs/CLAUDE.global.md ~/.claude/CLAUDE.md
+node tools/setup-claude-global.mjs
 ```
+
+Er überschreibt nichts: gibt es dort schon eine Datei, legt er die neue
+Fassung als `CLAUDE.md.neu` daneben und meldet es.
 
 Alles, was nur für Aperture X gilt, steht in der projekteigenen
 `CLAUDE.md` und **nicht** hier — eine globale Datei wird in jedem Projekt
-bei jedem Turn mitgelesen und bleibt deshalb kurz.
+bei jedem Turn mitgelesen und bleibt deshalb kurz. Und alles, was ohne
+Kopieren wirken kann, steht in `.claude/settings.json` und kommt mit dem
+Klon mit (ADR-0084).
 
 ---
 

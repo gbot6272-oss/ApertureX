@@ -1,5 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "autoCompactEnabled": true,
+  "autoCompactWindow": 200000,
+  "precomputeCompactionEnabled": true,
   "bashOutputMaxChars": 15000,
   "permissions": {
     "deny": [

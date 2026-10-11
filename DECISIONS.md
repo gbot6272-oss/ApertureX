@@ -114,6 +114,7 @@ er liegt, damit jede ADR-Nummer auffindbar bleibt.
 - **ADR-0081 — Die Luftballons sind ersatzlos entfallen** — unten
 - **ADR-0082: Token-Audit — verbindliche Arbeitsregeln, Projekt-Einstellungen, geteilte Entscheidungsdatei** — unten
 - **ADR-0083: Der Token-Audit laeuft automatisch beim Kompaktieren** — unten
+- **ADR-0084: Einstellungen gehoeren dorthin, wo sie ohne Kopieren wirken** — unten
 
 ---
 
@@ -2318,3 +2319,56 @@ eine neue Sitzung. Auto-Kompaktierung ist der eingebaute Mechanismus,
 `/clear` bleibt manuell — und das ist der ehrlichere Weg: Kompaktieren
 fasst zusammen und verliert dabei, `/clear` verliert nichts, solange der
 Stand in `PLAN.md` steht.
+
+
+---
+
+## ADR-0084: Einstellungen gehoeren dorthin, wo sie ohne Kopieren wirken
+
+**Status:** entschieden. **Korrigiert** ADR-0083s letzten Abschnitt.
+
+**Der Einspruch.** Nutzer, mit Bildschirmfoto von
+`docs/settings.global.json`: „settings ist im falschen Ordner".
+
+**Er hat recht, und es war nicht nur der Ordner.** ADR-0083 hat das
+Kontext-Limit (`autoCompactWindow`) in eine Vorlagendatei gelegt, die
+von Hand nach `~/.claude/settings.json` kopiert werden muss. Begruendung
+damals: der Wert sei eine persoenliche Vorliebe und gehoere nicht in die
+geteilten Projekt-Einstellungen.
+
+Das Argument ist nicht falsch, aber es hat die wichtigere Eigenschaft
+uebersehen: **eine Einstellung, die erst nach einem Handgriff wirkt,
+wirkt meistens nicht.** Genau diese Fehlerklasse hat in ADR-0079 schon
+einmal zugeschlagen — `onlyBuiltDependencies` stand an einer Stelle, die
+aussah als wirke sie, und tat nichts. Eine Vorlage, die kopiert werden
+muss, ist dieselbe Falle mit mehr Schritten.
+
+**Die Korrektur.** `autoCompactEnabled`, `autoCompactWindow` (200.000)
+und `precomputeCompactionEnabled` stehen jetzt in
+`.claude/settings.json`, also dort, wo sie mit dem Klon mitkommen und
+ohne Zutun wirken. Das Schema markiert diese Schluessel nicht als
+eingeschraenkt — anders als etwa `spellcheck` oder `footerLinksRegexes`,
+die ausdruecklich sagen, dass Projekt-Einstellungen ignoriert werden.
+`docs/settings.global.json` ist geloescht: zwei Orte fuer dieselbe
+Aussage, von denen einer stillschweigend nichts tut, sind genau das
+Problem.
+
+**Was global bleiben muss.** `docs/CLAUDE.global.md` — sie gilt fuer
+ANDERE Projekte und kann deshalb nicht im Projekt liegen. Damit sie
+nicht am Pfad-Gefummel scheitert, gibt es
+`tools/setup-claude-global.mjs`: ein Befehl, plattformunabhaengig,
+**ueberschreibt nichts**. Gibt es dort schon eine Datei, legt er die neue
+Fassung als `CLAUDE.md.neu` daneben und meldet den Unterschied. Eine
+Einrichtungshilfe, die vorhandene Regeln wegwirft, waere schlimmer als
+gar keine.
+
+**Geprueft, alle vier Zweige.** Datei fehlt → angelegt (3.023 Zeichen in
+einem frischen HOME). Datei identisch → „Schon aktuell". Datei
+abweichend → Original nachweislich unveraendert (`MEINE EIGENEN REGELN`
+stand danach noch da), Vorlage als `.neu` daneben. Falsches
+Verzeichnis → Fehlermeldung, Exit 1. `jq` bestaetigt die neuen
+Schluessel in `.claude/settings.json` und die unveraenderten alten.
+
+**Die Lehre, schon wieder dieselbe.** Ein Entwurf ist nicht fertig,
+wenn er richtig ist, sondern wenn er von selbst wirkt. „Der Nutzer muss
+nur noch kurz" ist die Stelle, an der es nicht passiert.

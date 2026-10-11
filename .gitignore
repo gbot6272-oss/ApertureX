@@ -48,3 +48,6 @@ __pycache__/
 frontend/test-results/
 frontend/playwright-report/
 frontend/blob-report/
+
+# Persoenliche Claude-Code-Einstellungen (die geteilten liegen in .claude/settings.json)
+.claude/settings.local.json

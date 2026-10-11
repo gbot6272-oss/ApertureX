@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+
+  "bashOutputMaxChars": 15000,
+
+  "permissions": {
+    "deny": [
+      "Read(./node_modules/**)",
+      "Read(./frontend/node_modules/**)",
+      "Read(./target/**)",
+      "Read(./frontend/dist/**)",
+      "Read(./frontend/test-results/**)",
+      "Read(./frontend/playwright-report/**)",
+      "Read(./Cargo.lock)",
+      "Read(./frontend/pnpm-lock.yaml)",
+      "Read(./assets/luts/**)",
+      "Read(./.claude/skills/ui-ux-pro-max/data/**)",
+      "Read(./licenses/**)",
+      "Read(./**/*.env)",
+      "Read(./**/*.env.*)",
+      "Read(./**/*.min.js)",
+      "Read(./**/*.min.css)",
+      "Read(./**/*.map)"
+    ]
+  },
+
+  "skillOverrides": {
+    "anthropic-skills:algorithmic-art": "name-only",
+    "anthropic-skills:brand-guidelines": "name-only",
+    "anthropic-skills:built-in-browser": "name-only",
+    "anthropic-skills:canvas-design": "name-only",
+    "anthropic-skills:chrome-browser": "name-only",
+    "anthropic-skills:computer-use": "name-only",
+    "anthropic-skills:deep-research": "name-only",
+    "anthropic-skills:doc-coauthoring": "name-only",
+    "anthropic-skills:docs": "name-only",
+    "anthropic-skills:docx": "name-only",
+    "anthropic-skills:google-workspace": "name-only",
+    "anthropic-skills:humanizer": "name-only",
+    "anthropic-skills:import-memory": "name-only",
+    "anthropic-skills:internal-comms": "name-only",
+    "anthropic-skills:lz": "name-only",
+    "anthropic-skills:mcp-builder": "name-only",
+    "anthropic-skills:morning": "name-only",
+    "anthropic-skills:pdf": "name-only",
+    "anthropic-skills:pptx": "name-only",
+    "anthropic-skills:roadtrip": "name-only",
+    "anthropic-skills:skill-creator": "name-only",
+    "anthropic-skills:slack-gif-creator": "name-only",
+    "anthropic-skills:theme-factory": "name-only",
+    "anthropic-skills:web-artifacts-builder": "name-only",
+    "anthropic-skills:xlsx": "name-only",
+    "dataviz": "name-only",
+    "artifact-capabilities": "name-only",
+    "artifact-diagramming": "name-only",
+    "keybindings-help": "name-only",
+    "plugin-authoring": "name-only",
+    "loop": "name-only",
+    "session-start-hook": "name-only"
+  }
+}

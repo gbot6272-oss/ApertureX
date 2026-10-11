@@ -2032,3 +2032,36 @@ immer noch nicht".
   ✔ erledigt
 - **L5 — Konfetti und Begrüßung bleiben.** Sie waren nie Teil der
   Beschwerde. ✔ erledigt
+
+
+## Phase 42 — Token-Audit umgesetzt
+
+Gemessen: eine Sitzung, 1.649 Turns, 674.751.012 Tokens
+Kontext-Neulesung (Ø 409.188/Turn). Fixkosten davon nur 58.600 (5,9 %).
+
+- **T1 — Gemessen statt geraten.** Transkript-Auswertung mit einem
+  Skript, das nur Statistik ausgibt: Turns, Tokens je Turn, größte
+  Werkzeugergebnisse, Mehrfachlesungen, Kompaktierungen. ✔ erledigt
+- **T2 — Falsche Fährte ausgeschlossen.** Die „422k deferred
+  MCP-Werkzeuge" zählen nicht mit (173,2k = 58,6k Fix + 114,6k
+  Verlauf). Abschalten spart 23k, nicht 422k. ✔ erledigt (ADR-0082)
+- **T3 — `CLAUDE.md` angelegt.** Es gab keine. Verbindlich, < 150
+  Zeilen, mit den Verifikationsregeln aus ADR-0078/0080/0081.
+  ✔ erledigt
+- **T4 — Drei Begleitdokumente.** `docs/ARBEITSWEISE.md`,
+  `docs/BEFEHLE.md`, `docs/UMGEBUNG.md`, dazu
+  `docs/CLAUDE.global.md` als versionierte Vorlage für die globale
+  Datei. ✔ erledigt
+- **T5 — `.claude/settings.json`.** 16 Leseregeln,
+  `bashOutputMaxChars: 15000`, 32 Skills auf `"name-only"` (bleiben
+  aufrufbar). ✔ erledigt
+- **T6 — `DECISIONS.md` geteilt.** 519.214 → 113.375 Zeichen (−78 %),
+  mit vollständigem Index. Gegenkontrolliert: keine Zeile verloren.
+  ✔ erledigt
+- **T7 — `typecheck`-Skript.** 64 Aufrufe ohne Namen. ✔ erledigt
+- **T8 — Offen, bewusst nicht gemacht:** `commands.rs` (461.618
+  Zeichen) und `store/index.ts` (338.892) aufteilen. Großes Diff an
+  zentralem Code, Entscheidung des Nutzers.
+- **T9 — Offen:** die Abnahme. Gleiche Referenzaufgabe vorher/nachher,
+  Kriterium `Turns × Ø-Kontext` halbiert **und** Nacharbeit nicht
+  gestiegen.

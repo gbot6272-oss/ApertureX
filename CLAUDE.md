@@ -11,6 +11,11 @@ bei Bedarf gelesen:
 - `docs/BEFEHLE.md` — alle Prüf- und Baubefehle mit Ausgabelängen
 - `docs/UMGEBUNG.md` — Plattenquote, pnpm, Tauri-CLI, Playwright, Windows
 
+Einmalig je Rechner: `node tools/setup-claude-global.mjs` legt die
+projektübergreifenden Regeln unter `~/.claude/CLAUDE.md` ab. Alles
+andere — Kontext-Limit, Leseregeln, der automatische Token-Audit —
+steht in `.claude/settings.json` und wirkt ohne Zutun.
+
 ## Sprache
 
 Commit-Nachrichten, PR-Texte, ADRs, Code-Kommentare, `PLAN.md`,

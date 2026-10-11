@@ -2065,3 +2065,42 @@ Kontext-Neulesung (Ø 409.188/Turn). Fixkosten davon nur 58.600 (5,9 %).
 - **T9 — Offen:** die Abnahme. Gleiche Referenzaufgabe vorher/nachher,
   Kriterium `Turns × Ø-Kontext` halbiert **und** Nacharbeit nicht
   gestiegen.
+
+
+## Phase 43 — Audit automatisiert
+
+- **A1 — Grenzen des Hook-Schemas geklaert.** `PreCompact` nimmt nur
+  `command`-Hooks (kein `prompt`/`agent`), und ein Hook kann keine
+  Massnahme ausloesen. Daraus folgt die Arbeitsteilung: Skript misst,
+  Modell beurteilt, Nutzer bestaetigt. ✔ erledigt (ADR-0083)
+- **A2 — `tools/token-audit.mjs`.** Node ohne Abhaengigkeiten, damit er
+  unter Windows-PowerShell laeuft. Gibt nur Statistik aus, keine
+  Inhalte. ✔ erledigt
+- **A3 — Als `PreCompact` und `SessionEnd` eingetragen.** Bericht nach
+  `.claude/token-audit/` (nicht versioniert), `systemMessage` ins
+  Terminal, `additionalContext` ins Modell. ✔ erledigt
+- **A4 — Rohtest bestanden.** EXIT 0, leerer stderr, Bericht 1.418
+  Zeichen, Zahlen reproduzieren ADR-0082. `jq -e` auf beide Hook-Pfade.
+  ✔ erledigt
+- **A5 — `docs/settings.global.json`.** Vorlage mit
+  `autoCompactWindow: 200000`. ✔ erledigt
+- **A6 — Offen, nicht pruefbar in dieser Sitzung:** dass der Hook
+  feuert. `PreCompact`/`SessionEnd` treten ausserhalb eines Turns ein;
+  der Einstellungs-Beobachter braucht `/hooks` oder einen Neustart.
+
+
+## Phase 44 — Einstellungen an die wirksame Stelle
+
+Nutzer-Einspruch zu Phase 43: „settings ist im falschen Ordner".
+
+- **E1 — Er hatte recht, und zwar grundsaetzlicher.** Eine Einstellung,
+  die erst nach einem Handgriff wirkt, wirkt meistens nicht — dieselbe
+  Fehlerklasse wie ADR-0079. ✔ erledigt (ADR-0084)
+- **E2 — Kontext-Limit in die Projekt-Einstellungen.**
+  `autoCompactWindow: 200000` und die beiden Begleiter stehen in
+  `.claude/settings.json` und kommen mit dem Klon mit. ✔ erledigt
+- **E3 — `docs/settings.global.json` geloescht.** Zwei Orte fuer
+  dieselbe Aussage, einer davon wirkungslos. ✔ erledigt
+- **E4 — `tools/setup-claude-global.mjs`.** Fuer das eine, das global
+  bleiben muss. Ueberschreibt nichts; alle vier Zweige geprueft.
+  ✔ erledigt

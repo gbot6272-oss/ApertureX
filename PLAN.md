@@ -2065,3 +2065,25 @@ Kontext-Neulesung (Ø 409.188/Turn). Fixkosten davon nur 58.600 (5,9 %).
 - **T9 — Offen:** die Abnahme. Gleiche Referenzaufgabe vorher/nachher,
   Kriterium `Turns × Ø-Kontext` halbiert **und** Nacharbeit nicht
   gestiegen.
+
+
+## Phase 43 — Audit automatisiert
+
+- **A1 — Grenzen des Hook-Schemas geklaert.** `PreCompact` nimmt nur
+  `command`-Hooks (kein `prompt`/`agent`), und ein Hook kann keine
+  Massnahme ausloesen. Daraus folgt die Arbeitsteilung: Skript misst,
+  Modell beurteilt, Nutzer bestaetigt. ✔ erledigt (ADR-0083)
+- **A2 — `tools/token-audit.mjs`.** Node ohne Abhaengigkeiten, damit er
+  unter Windows-PowerShell laeuft. Gibt nur Statistik aus, keine
+  Inhalte. ✔ erledigt
+- **A3 — Als `PreCompact` und `SessionEnd` eingetragen.** Bericht nach
+  `.claude/token-audit/` (nicht versioniert), `systemMessage` ins
+  Terminal, `additionalContext` ins Modell. ✔ erledigt
+- **A4 — Rohtest bestanden.** EXIT 0, leerer stderr, Bericht 1.418
+  Zeichen, Zahlen reproduzieren ADR-0082. `jq -e` auf beide Hook-Pfade.
+  ✔ erledigt
+- **A5 — `docs/settings.global.json`.** Vorlage mit
+  `autoCompactWindow: 200000`. ✔ erledigt
+- **A6 — Offen, nicht pruefbar in dieser Sitzung:** dass der Hook
+  feuert. `PreCompact`/`SessionEnd` treten ausserhalb eines Turns ein;
+  der Einstellungs-Beobachter braucht `/hooks` oder einen Neustart.

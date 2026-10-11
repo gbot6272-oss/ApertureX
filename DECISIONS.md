@@ -113,6 +113,7 @@ er liegt, damit jede ADR-Nummer auffindbar bleibt.
 - **ADR-0080: Die Schranke aus ADR-0077 hat es verdoppelt** — unten
 - **ADR-0081 — Die Luftballons sind ersatzlos entfallen** — unten
 - **ADR-0082: Token-Audit — verbindliche Arbeitsregeln, Projekt-Einstellungen, geteilte Entscheidungsdatei** — unten
+- **ADR-0083: Der Token-Audit laeuft automatisch beim Kompaktieren** — unten
 
 ---
 
@@ -2230,3 +2231,90 @@ Werkzeugaufrufe bündeln. Modellrechnung: zehn Sitzungen à 165 Turns bei
 Drittel. Nachgewiesen ist das erst, wenn dieselbe Referenzaufgabe
 vorher und nachher gemessen wurde; die Abnahme steht in
 `docs/ARBEITSWEISE.md`.
+
+
+---
+
+## ADR-0083: Der Token-Audit laeuft automatisch beim Kompaktieren
+
+**Status:** entschieden. Baut auf ADR-0082 auf.
+
+**Der Wunsch.** „Kann ich Claude automatisch im Terminal einen Audit
+machen lassen, immer beim Erreichen des Limits, das in eine Datei
+festhalten, mir sagen wie es aussieht, und dann nach Bestaetigung
+Massnahmen ergreifen?"
+
+**Was das Hook-Schema zulaesst — und was nicht.** Zwei Grenzen, die die
+Loesung bestimmt haben:
+
+1. **`PreCompact` nimmt nur `command`-Hooks.** Die Typen `prompt` und
+   `agent`, die ein Sprachmodell einbinden wuerden, gibt es laut Schema
+   nur bei Werkzeug-Ereignissen (`PreToolUse`, `PostToolUse`,
+   `PermissionRequest`). Der Audit muss also ein Skript sein: es liefert
+   **Zahlen, kein Urteil**. Das Urteil kommt im naechsten Turn vom
+   Modell, das den Bericht ueber `additionalContext` bekommt.
+2. **Ein Hook kann keine Massnahme ausloesen.** Er kann melden und
+   Kontext einspeisen, nicht handeln. Das ist hier kein Mangel, sondern
+   der richtige Ablauf: Hook misst, Modell schlaegt vor, Nutzer
+   bestaetigt, dann wird gehandelt.
+
+**Die Umsetzung.** `tools/token-audit.mjs`, als `PreCompact`- und
+`SessionEnd`-Hook in `.claude/settings.json` eingetragen. Er liest das
+Sitzungstranskript, schreibt einen kurzen Bericht nach
+`.claude/token-audit/` (zeitgestempelt plus `latest.md`, nicht
+versioniert) und gibt Hook-JSON aus: `systemMessage` ist die eine Zeile
+im Terminal, `additionalContext` traegt den Bericht ins Modell.
+
+**Warum Node und nicht Python.** Node ist harte Voraussetzung dieses
+Projekts; `python3` gibt es auf einem Windows-Rechner oft nicht, und
+Hooks laufen dort ohne Git Bash durch PowerShell. Ein Hook, der still
+scheitert, ist schlimmer als keiner. Das Skript hat keine
+Abhaengigkeiten.
+
+**Warum nur Statistik.** Der Bericht landet im
+Repository-Verzeichnis. Er enthaelt deshalb ausschliesslich Zahlen,
+Werkzeugnamen und Dateipfade — keine Nachrichtentexte, keine Befehle,
+keine Dateiinhalte.
+
+**Das Transkript finden.** Drei Wege, weil nicht jedes Hook-Ereignis
+dieselben Felder mitbringt: der mitgelieferte `transcript_path`, der aus
+`session_id` gebildete Pfad, und als letzter Ausweg die neueste
+`.jsonl` im Projektverzeichnis. Ohne Transkript meldet der Hook das und
+endet mit 0 — er blockiert nie das Kompaktieren.
+
+**Was der Bericht nennt.** Turns, Ø Kontext je Turn, groesster Turn,
+cache_read, Kompaktierungen, Werkzeugausgaben in Zeichen, laengster
+Bash-Befehl, Aufrufe je Werkzeug, Ergebnisse ueber 10.000 Zeichen,
+Zaehler fuer teure Befehle, mehrfach gelesene Dateien — und daraus einen
+Befund mit konkreter Massnahme je Auffaelligkeit. Schwelle fuer den
+Rat zu schneiden: 200.000 Ø Kontext.
+
+**Geprueft, nicht angenommen.** Rohtest nach Hook-Anleitung: Eingabe-JSON
+in das Skript gepipet, EXIT 0, leerer stderr, Bericht geschrieben (1.418
+Zeichen), `systemMessage` lesbar. Die Zahlen reproduzieren die
+Handmessung aus ADR-0082 (Ø 410.871 gegen 409.188 — die Sitzung ist
+seitdem gewachsen). Schema-Pruefung mit `jq -e` auf beide Hook-Pfade
+bestanden, die uebrigen Schluessel der Datei unveraendert (16 Leseregeln,
+32 Skill-Ueberschreibungen, bashOutputMaxChars).
+
+**Was NICHT geprueft ist.** Dass der Hook tatsaechlich feuert.
+`PreCompact` und `SessionEnd` treten ausserhalb eines Turns ein und
+lassen sich innerhalb einer Sitzung nicht ausloesen. Dazu kommt: der
+Einstellungs-Beobachter ueberwacht nur Verzeichnisse, die beim
+Sitzungsstart schon eine Einstellungsdatei hatten. In einer Sitzung, die
+vor dieser Datei begonnen hat, greifen die Hooks also erst nach
+`/hooks` oder einem Neustart.
+
+**Das Kontext-Limit selbst.** `autoCompactWindow` (100.000 bis
+1.000.000) ist der Wert, der entscheidet, wann kompaktiert wird; im
+Terminal auch per `/autocompact`. Er gehoert in die persoenlichen
+Einstellungen, nicht in die geteilten des Projekts — Vorlage in
+`docs/settings.global.json` mit der Empfehlung 200.000. Gemessen waere
+das statt Ø 409.188 grob Ø 130.000 bis 150.000, also etwa ein Drittel,
+ohne Verhaltensaenderung.
+
+**Was es weiterhin nicht gibt.** Keine Einstellung startet automatisch
+eine neue Sitzung. Auto-Kompaktierung ist der eingebaute Mechanismus,
+`/clear` bleibt manuell — und das ist der ehrlichere Weg: Kompaktieren
+fasst zusammen und verliert dabei, `/clear` verliert nichts, solange der
+Stand in `PLAN.md` steht.

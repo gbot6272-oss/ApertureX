@@ -1,8 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-
   "bashOutputMaxChars": 15000,
-
   "permissions": {
     "deny": [
       "Read(./node_modules/**)",
@@ -23,7 +21,6 @@
       "Read(./**/*.map)"
     ]
   },
-
   "skillOverrides": {
     "anthropic-skills:algorithmic-art": "name-only",
     "anthropic-skills:brand-guidelines": "name-only",
@@ -57,5 +54,31 @@
     "plugin-authoring": "name-only",
     "loop": "name-only",
     "session-start-hook": "name-only"
+  },
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node tools/token-audit.mjs",
+            "timeout": 60,
+            "statusMessage": "Token-Audit…"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node tools/token-audit.mjs",
+            "timeout": 60,
+            "statusMessage": "Token-Audit…"
+          }
+        ]
+      }
+    ]
   }
 }
